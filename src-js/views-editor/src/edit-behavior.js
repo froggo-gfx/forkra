@@ -26,6 +26,13 @@ import {
   findPointMatch,
 } from "./edit-behavior-support.js";
 
+//// grid
+let magneticSnapEnabled = false;
+export function toggleMagneticSnap() {
+      magneticSnapEnabled = !magneticSnapEnabled;
+      console.log("Magnetic snap", magneticSnapEnabled ? "ON" : "OFF");
+    }
+
 export class EditBehaviorFactory {
   constructor(instance, selection, enableScalingEdit = false) {
     const {
@@ -108,7 +115,28 @@ class EditBehavior {
     doFullTransform
   ) {
     this.doFullTransform = doFullTransform;
-    this.roundFunc = Math.round;
+    //// grid
+    this.roundFunc = (value, isArrowKey = false) => {
+      const coarseUnit = window.coarseGridSpacing || 1;
+
+      // 1.  Ctrl / Cmd  ⇒ always coarse grid
+      if (window.event?.ctrlKey || window.event?.metaKey) {
+        return Math.round(value / coarseUnit) * coarseUnit;
+      }
+
+      // 2.  Arrow keys  ⇒ ignore magnetic & coarse, use 1-unit steps
+      if (isArrowKey) {
+        return Math.round(value);
+      }
+
+      // 3.  Magnetic snap only when explicitly enabled
+      if (!magneticSnapEnabled || coarseUnit <= 1) {
+        return Math.round(value);
+      }
+
+      const coarse = Math.round(value / coarseUnit) * coarseUnit;
+      return Math.abs(value - coarse) <= coarseUnit * 0.35 ? coarse : Math.round(value);
+    };
     this.constrainDelta = behavior.constrainDelta || ((v) => v);
     const [pointEditFuncs, participatingPointIndices] = makePointEditFuncs(
       contours,
@@ -1105,16 +1133,66 @@ const actionFactories = {
     };
   },
 
+   
+  //// equalize
   Interpolate: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
-    const lenPrevNext = vector.distance(next, prev);
-    const lenPrev = vector.distance(thePoint, prev);
-    let t = lenPrevNext > 0.0001 ? lenPrev / lenPrevNext : 0;
-    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
-      const prevNext = vector.subVectors(next, prev);
-      return vector.addVectors(prev, vector.mulVectorScalar(prevNext, t));
-    };
-  },
+      const handle = vector.subVectors(thePoint, prev);
+      const handleLength = Math.hypot(handle.x, handle.y);
+      return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+        const delta = vector.subVectors(prev, prevPrev);
+        if (!delta.x && !delta.y) {
+          // The angle is undefined, atan2 will return 0, let's just not touch the point
+          return thePoint;
+        }
+        const angle = Math.atan2(delta.y, delta.x);
+        const handlePoint = {
+          x: prev.x + handleLength * Math.cos(angle),
+          y: prev.y + handleLength * Math.sin(angle),
+        };
+        return handlePoint;
+      };
+    },
 
+  //// equalize
+  RotateNextEqualLength: (
+  prevPrevPrev,
+  prevPrev,
+  prev,
+  thePoint,
+  next,
+  nextNext
+) => {
+  // original positions
+  const originDragged = prevPrev;   // the off-curve point that is being moved
+  const originOpposite = thePoint;  // the opposite off-curve point
+  const anchor = prev;              // the on-curve (smooth) point between them
+
+  return (
+    transform,
+    /* unused */ prevPrevPrev,
+    newDragged,
+    /* unused */ newPrev,
+    /* unused */ newOpposite,
+    /* unused */ next,
+    /* unused */ nextNext
+  ) => {
+    // vector from anchor to the NEW dragged handle
+    const vec = { x: newDragged.x - anchor.x, y: newDragged.y - anchor.y };
+
+    if (vec.x === 0 && vec.y === 0) {
+      return originOpposite;        // avoid division by zero
+    }
+
+    // same distance, opposite direction
+    const len = Math.hypot(vec.x, vec.y);
+    const angle = Math.atan2(vec.y, vec.x);
+
+    return {
+      x: anchor.x - len * Math.cos(angle),
+      y: anchor.y - len * Math.sin(angle),
+    };
+  };
+},
   InterpolatePrevPrevNext: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
     const lenPrevPrevNext = vector.distance(next, prevPrev);
     const lenPrevPrev = vector.distance(thePoint, prevPrev);
@@ -1124,6 +1202,8 @@ const actionFactories = {
       return vector.addVectors(prevPrev, vector.mulVectorScalar(prevPrevNext, t));
     };
   },
+
+
 
   ConstrainAroundPrevPrev: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
     return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
@@ -1237,8 +1317,13 @@ const alternateRules = [
   [    ANY|NIL,    ANY|NIL,    ANY|SEL,    SMO|SEL,    OFF|SEL,    ANY|NIL,    false,      "ConstrainMiddle"],
 
   // Unselected smooth between sharp and off-curve, one of them selected
-  [    ANY|NIL,    ANY|NIL,    SHA|OFF|UNS,SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "Interpolate"],
-  [    ANY|NIL,    ANY|NIL,    SHA|OFF|SEL,SMO|UNS,    OFF|UNS,    ANY|NIL,    true,       "Interpolate"],
+  //[    ANY|NIL,    ANY|NIL,    SHA|OFF|UNS,SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "Interpolate"],
+  //[    ANY|NIL,    ANY|NIL,    SHA|OFF|SEL,SMO|UNS,    OFF|UNS,    ANY|NIL,    true,       "Interpolate"],
+    [    ANY|NIL,    ANY|SEL,    SMO|UNS,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    true,       "Interpolate"],
+  
+    // Selected tangent point: its neighboring off-curve point should move
+    [    ANY|NIL,    SHA|SMO|UNS,SMO|SEL,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    true,       "Interpolate"],
+    [    ANY|NIL,    OFF|SEL,    SMO|UNS,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    true,       "RotateNextEqualLength"],
 
   // Two unselected smooth points between two off-curves, one of them selected
   [    ANY|NIL,    OFF|UNS,    SMO|UNS,    SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "InterpolatePrevPrevNext"],

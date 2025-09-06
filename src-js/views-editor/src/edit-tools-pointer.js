@@ -531,7 +531,8 @@ export class PointerTool extends BaseTool {
         const deepEditChanges = [];
         for (const layer of layerInfo) {
           const layerGlyph = layer.layerGlyphController.instance;
-          const pinPoint = event.altKey ? layer.altPinPoint : layer.regularPinPoint;
+          //// equalize
+          const pinPoint = layer.regularPinPoint;
           let transformation;
           if (rotation) {
             // Rotate (based on pinPoint of selected layer)

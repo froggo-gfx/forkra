@@ -3133,15 +3133,7 @@ export class EditorController extends ViewController {
   }
 
   keyUpHandler(event) {
-    if (
-      this._matchingKeyUpHandler &&
-      // At least on macOS, in Chrome and Safari, if _while the space key is
-      // pressed_ we additionally press the command key ("Meta"), we will never
-      // receive a keyup event for the space key. So let's also respond to any
-      // keyup for the Meta key.
-      // Oddly, event.metaKey is false at keyup, so we check event.key instead.
-      (this._matchingKeyUpHandler.code == event.code || event.key == "Meta")
-    ) {
+    if (this._matchingKeyUpHandler && this._matchingKeyUpHandler.code == event.code) {
       this._matchingKeyUpHandler.callback(event);
       delete this._matchingKeyUpHandler;
     }

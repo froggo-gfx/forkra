@@ -16,6 +16,16 @@ import {
 } from "@fontra/core/utils.js";
 import { subVectors } from "@fontra/core/vector.js";
 
+//// speedpunk
+import {
+  calculateCurvatureForSegment,
+  findCurvatureRange,
+  curvatureToColor,
+  solveCubicBezier
+} from "@fontra/core/curvature.js"; 
+
+import { VarPackedPath } from "@fontra/core/var-path.js";
+
 export const visualizationLayerDefinitions = [];
 
 export function registerVisualizationLayerDefinition(newLayerDef) {
@@ -65,6 +75,48 @@ registerVisualizationLayerDefinition({
     for (let y = Math.floor(yMin); y < Math.ceil(yMax); y++) {
       strokeLine(context, xMin, y, xMax, y);
     }
+  },
+});
+//// grid
+registerVisualizationLayerDefinition({
+  identifier: "fontra.grid",
+  name: "Grid",
+  zIndex: 1 ,
+  selectionFunc: glyphSelector("editing"),
+  screenParameters: {
+    strokeWidth: 0.25,
+    strokeColor: "#00000020",
+    coarseStrokeWidth: 0.5,
+    coarseStrokeColor: "#00000040",
+  },
+  draw: (ctx, positionedGlyph, params, model, controller) => {
+    const { strokeWidth, strokeColor, coarseStrokeWidth, coarseStrokeColor } = params;
+    const coarseSpacing = model.sceneSettings.coarseGridSpacing;
+    let { xMin, yMin, xMax, yMax } = controller.getViewBox();
+
+    // convert view-box to glyph-local coordinates
+    xMin -= positionedGlyph.x;
+    xMax -= positionedGlyph.x;
+    yMin -= positionedGlyph.y;
+    yMax -= positionedGlyph.y;
+
+    // dotted coarse grid
+    //ctx.setLineDash([2, 2]);
+    ctx.lineWidth = coarseStrokeWidth;
+    ctx.strokeStyle = coarseStrokeColor;
+
+    for (let x = Math.floor(xMin / coarseSpacing) * coarseSpacing;
+         x <= Math.ceil(xMax / coarseSpacing) * coarseSpacing;
+         x += coarseSpacing) {
+      strokeLine(ctx, x, yMin, x, yMax);
+    }
+    for (let y = Math.floor(yMin / coarseSpacing) * coarseSpacing;
+         y <= Math.ceil(yMax / coarseSpacing) * coarseSpacing;
+         y += coarseSpacing) {
+      strokeLine(ctx, xMin, y, xMax, y);
+    }
+
+    ctx.setLineDash([]);
   },
 });
 
@@ -1648,6 +1700,233 @@ registerVisualizationLayerDefinition({
   },
 });
 
+//// speedpunk 
+registerVisualizationLayerDefinition({
+
+ identifier: "fontra.curvature",
+  name: "SpeedPunk",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: false,
+  zIndex: 490, // Draw on top
+  screenParameters: {
+    // Matches Speed Punk's concept
+    drawfactor: 0.01,
+    // Speed Punk uses curveGain * unitsPerEm^2. We'll use a base UPM or make it adjustable.
+    // Let's define a base UPM for scaling, or derive it if possible.
+    baseUnitsPerEm: 1000, // Approximation, could be dynamic
+    curveGain: 1.0, // User adjustable gain, default to 1.0 for direct mapping
+    stepsPerSegment: 81,
+    colorStops: ["#8b939c", "#f29400", "#e3004f"], // Speed Punk cubic colors
+    // New parameter for illustration style
+    illustrationPosition: "outsideOfGlyph", // or "outsideOfCurve" (Speed Punk term)
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    const path = positionedGlyph.glyph?.instance?.path;
+    if (!path) return;
+
+    // --- 1. Gather Cubic Segments and Calculate Curvature ---
+    const allCurvatureData = []; // Store curvature data for all segments
+    const cubicSegments = []; // Store segment point coordinates
+
+    for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+        const contour = path.getContour(contourIndex);
+        const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
+        const numPoints = contour.pointTypes.length;
+
+        for (let i = 0; i < numPoints; i++) {
+            const pointIndex = startPoint + i;
+            const pointType = path.pointTypes[pointIndex];
+            if ((pointType & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE) {
+                const nextIndex1 = path.getAbsolutePointIndex(contourIndex, (i + 1) % numPoints);
+                const nextIndex2 = path.getAbsolutePointIndex(contourIndex, (i + 2) % numPoints);
+                const nextType1 = path.pointTypes[nextIndex1];
+                const nextType2 = path.pointTypes[nextIndex2];
+
+                const isNext1Off = (nextType1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC;
+                const isNext2Off = (nextType2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC;
+
+                const nextOnIndex = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
+                const isNextOn = (path.pointTypes[nextOnIndex] & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
+
+                if (isNext1Off && isNext2Off) {
+                    const p1 = path.getPoint(pointIndex);
+                    const p2 = path.getPoint(nextIndex1);
+                    const p3 = path.getPoint(nextIndex2);
+                    const p4 = path.getPoint(nextOnIndex);
+
+                    cubicSegments.push([p1, p2, p3, p4]);
+                    const segmentCurvatureData = calculateCurvatureForSegment(
+                        [p1.x, p1.y],
+                        [p2.x, p2.y],
+                        [p3.x, p3.y],
+                        [p4.x, p4.y],
+                        parameters.stepsPerSegment
+                    );
+                    allCurvatureData.push(segmentCurvatureData);
+                }
+            }
+        }
+    }
+
+    if (cubicSegments.length === 0 || allCurvatureData.length === 0) {
+        return;
+    }
+
+    // --- 2. Determine Global Min/Max Curvature for Color Mapping (if needed for consistent coloring) ---
+    // Speed Punk maps color based on local curvature value, not global min/max.
+    // But for consistent coloring across the glyph, we might still use global.
+    // Let's keep it for potential use, but Speed Punk's color mapping is direct.
+    const { min: minCurvature, max: maxCurvature } = findCurvatureRange(allCurvatureData);
+
+    // --- 3. Draw Ribbon Visualization ---
+    context.lineCap = "round";
+    context.lineJoin = "round";
+
+    // Combined scaling factor from Speed Punk: drawfactor * curveGain * unitsPerEm^2
+    // We'll use baseUnitsPerEm as an approximation for now.
+    // Adjust curveGain via parameters.
+    //const scaleFactor = parameters.drawfactor * parameters.curveGain * Math.pow(parameters.baseUnitsPerEm, 2);
+    context.globalAlpha = 0.3;
+    const rawScale = parameters.drawfactor * parameters.curveGain * Math.pow(parameters.baseUnitsPerEm, 2);
+
+
+    const zoom = controller.magnification;
+
+    let zoomFactor;
+
+    if (zoom < 0.1) {
+  // below 10 % – keep full height
+  zoomFactor = 1.0;
+    } else if (zoom <= 1.0) {
+    // 10 % → 100 % – ramp down to 1/3
+    const norm = zoom / 0.1;                 // 1 … 10
+    zoomFactor = 0.1 + 0.1 * Math.pow(norm, -1.2);
+    } else {
+    // above 100 % – asymptotically approach 20 %
+    //zoomFactor = 0.20 + 0.13 * Math.pow(zoom, -0.5);
+    zoomFactor = 7;// + 0.1 / Math.sqrt(zoom);
+    }
+
+    const scaleFactor = rawScale * zoomFactor;
+
+
+
+
+    /*
+    // New zoom scaling implementation based on requirements
+    const zoom = controller.magnification;
+    // Two brackets based on 100% zoom (zoom = 1.0)
+    // Below 10% zoom: Ribbon height remains constant
+    // At and above 10% zoom: Ribbon height decreases with zoom level
+    let zoomFactor;
+    if (zoom < 0.1) {
+      // Below 10% zoom: Ribbon height remains constant
+      zoomFactor = 1.0;
+    } else {
+      // At and above 10% zoom: Ribbon height decreases with zoom level
+      // At exactly 100% zoom: Ribbon height should be 3 times less than current implementation
+      // For zoom levels above 100%: Height should fall slower than current implementation
+      if (zoom <= 1.0) {
+        // For zoom between 10% and 100%, use a power function that gives 1/3 at zoom=1.0
+        zoomFactor = Math.pow(zoom, 0.3) / 3.0;
+      } else {
+        // For zoom above 10%, fall slower than current implementation
+        // Using a smaller exponent to make it fall slower
+        zoomFactor = Math.pow(zoom, 0.1) / 3.0;
+      }
+    }
+    const scaleFactor = rawScale * zoomFactor;
+    */        
+
+    // Draw ribbon for each cubic segment
+    for (let s = 0; s < cubicSegments.length; s++) {
+        const [p1, p2, p3, p4] = cubicSegments[s];
+        const segmentCurvatureData = allCurvatureData[s];
+
+        if (!segmentCurvatureData || segmentCurvatureData.length < 2) continue;
+
+        // Create paths for the ribbon edges
+        const originalPath = [];
+        const curvaturePath = [];
+
+        // Collect points for both paths
+        for (let i = 0; i < segmentCurvatureData.length; i++) {
+            const data = segmentCurvatureData[i];
+            const t = data.t;
+            const curvature = data.curvature;
+
+            // Get point and derivatives at t
+            const { r, r1 } = solveCubicBezier([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y], t);
+
+            const x = r[0];
+            const y = r[1];
+            const dx_dt = r1[0];
+            const dy_dt = r1[1];
+
+            // Store original curve point
+            originalPath.push({ x, y });
+
+            // Calculate normal vector
+            let normalX, normalY;
+            if (parameters.illustrationPosition === "outsideOfCurve") {
+                normalX = dy_dt;
+                normalY = -dx_dt;
+            } else {
+                normalX = -dy_dt;
+                normalY = dx_dt;
+            }
+
+            // Normalize the normal vector
+            const magTangent = Math.sqrt(dx_dt * dx_dt + dy_dt * dy_dt);
+            if (magTangent === 0) continue;
+
+            const unitNormalX = normalX / magTangent;
+            const unitNormalY = normalY / magTangent;
+
+            // Scale normal vector by curvature
+            // New ribbon height calculation with updated zoom scaling
+            // --- after you compute the raw ribbon length --------------------
+            let baseLength = curvature * scaleFactor;
+
+            // absolute upper bound in **user-space** units, independent of zoom
+            const MAX_RIBBON_HEIGHT = 1;      // adjust this value to taste
+            baseLength = Math.max(-MAX_RIBBON_HEIGHT, Math.min(MAX_RIBBON_HEIGHT, baseLength));
+
+            // keep your original sign if you still need it
+            const scaledLength = baseLength * -20;
+
+            // Calculate the end point of the visualization line (ribbon edge)
+            const endX = x + unitNormalX * scaledLength;
+            const endY = y + unitNormalY * scaledLength;
+            curvaturePath.push({ x: endX, y: endY });
+        }
+
+        // Draw ribbon segments with individual colors based on local curvature
+        if (originalPath.length >= 2 && curvaturePath.length >= 2) {
+            for (let i = 0; i < originalPath.length - 1; i++) {
+                const segmentPath = new Path2D();
+                
+                // Create a segment of the ribbon
+                segmentPath.moveTo(originalPath[i].x, originalPath[i].y);
+                segmentPath.lineTo(originalPath[i+1].x, originalPath[i+1].y);
+                segmentPath.lineTo(curvaturePath[i+1].x, curvaturePath[i+1].y);
+                segmentPath.lineTo(curvaturePath[i].x, curvaturePath[i].y);
+                segmentPath.closePath();
+                
+                // Fill the segment with a color based on local curvature
+                const localCurvature = segmentCurvatureData[i].curvature;
+                const color = curvatureToColor(localCurvature, minCurvature, maxCurvature, parameters.colorStops);
+                context.fillStyle = color;
+                context.fill(segmentPath);
+            }
+        }
+    }
+    context.lineCap = "butt";
+    context.lineJoin = "miter";
+
+  }});
+
 //
 // allGlyphsCleanVisualizationLayerDefinition is not registered, but used
 // separately for the "clean" display.
@@ -1814,19 +2093,6 @@ function* iterComponentOriginsByIndex(components, componentIndices) {
     }
   }
 }
-
-// {
-//   identifier: "fontra.baseline",
-//   name: "Baseline",
-//   selectionFunc: glyphSelector("hovered")  // choice from all, unselected, hovered, selected, editing
-//   selectionFilter: (positionedGlyph) => ...some condition...,  // OPTIONAL
-//   zIndex: 50
-//   screenParameters: {},  // in screen/pixel units
-//   glyphParameters: {},  // in glyph units
-//   colors: {},
-//   colorsDarkMode: {},
-//   draw: (context, positionedGlyph, parameters, model, controller) => { /* ... */ },
-// }
 
 function drawRoundRect(context, x, y, width, height, radii) {
   // older versions of Safari don't support roundRect,

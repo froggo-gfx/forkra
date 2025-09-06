@@ -391,7 +391,8 @@ class PenToolBehavior {
 
   drag(path, event) {
     const point = this.getPointFromEvent(event);
-    this.behaviorFuncs.drag?.(this.context, path, point, event.shiftKey);
+    //// equalize
+    this.behaviorFuncs.drag?.(this.context, path, point, event.shiftKey, event.altKey);
   }
 
   noDrag(path) {
@@ -437,14 +438,15 @@ function insertAnchorPoint(context, path, point, shiftKey) {
   );
 }
 
-function insertHandleOut(context, path, point, shiftKey) {
+//// equalize
+function insertHandleOut(context, path, point, shiftKey, altKey) {
   point = vector.roundVector(point);
   _insertHandleOut(context, path, point);
   _setHandleOutAbsIndex(context, path);
   context.selection = getPointSelectionAbs(context.handleOutAbsIndex);
 }
 
-function insertHandleIn(context, path, point, shiftKey) {
+function insertHandleIn(context, path, point, shiftKey, altKey) {
   point = vector.roundVector(point);
   _insertHandleIn(context, path, point);
   _setHandleInAbsIndex(context, path);
@@ -530,6 +532,25 @@ function dragHandle(context, path, point, shiftKey) {
     const oppositePoint = oppositeHandle(context.anchorPoint, point);
     path.setPointPosition(context.handleInAbsIndex, oppositePoint.x, oppositePoint.y);
   }
+}
+//// equalize
+function equalizeHandleLength(anchorPoint, draggedHandle, oppositeHandle) {
+  // Calculate dragged handle vector and length
+  const draggedVector = vector.subVectors(draggedHandle, anchorPoint);
+  const draggedLength = Math.hypot(draggedVector.x, draggedVector.y);
+  
+  // Calculate opposite handle vector and length
+  const oppositeVector = vector.subVectors(oppositeHandle, anchorPoint);
+  const oppositeLength = Math.hypot(oppositeVector.x, oppositeVector.y);
+  
+  // If opposite handle has zero length, mirror the dragged handle
+  if (oppositeLength === 0) {
+    return vector.addVectors(anchorPoint, vector.mulVectorScalar(draggedVector, -1));
+  }
+  
+  // Normalize opposite vector and scale to dragged length
+  const normalizedOpposite = vector.mulVectorScalar(oppositeVector, 1 / oppositeLength);
+  return vector.addVectors(anchorPoint, vector.mulVectorScalar(normalizedOpposite, draggedLength));
 }
 
 function connectToContour(context, path, point, shiftKey) {
