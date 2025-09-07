@@ -174,21 +174,39 @@ function bezierSplitMultiple(bezier, ts) {
   return splitBeziers;
 }
 
-export function insertHandles(path, segmentPoints, insertIndex, type = "cubic") {
+export function insertHandles(path, segmentPoints, insertIndex, type = "cubic", createTwoQuadHandles = false) {
   let [contourIndex, contourPointIndex] = path.getContourAndPointIndex(insertIndex);
   if (!contourPointIndex) {
     contourPointIndex = path.getNumPointsOfContour(contourIndex);
   }
   insertIndex = path.getAbsolutePointIndex(contourIndex, contourPointIndex, true);
-  const handlePoints = [
-    vector.interpolateVectors(...segmentPoints, 1 / 3),
-    vector.interpolateVectors(...segmentPoints, 2 / 3),
-  ].map((pt) => {
-    return { ...vector.roundVector(pt), type: type };
-  });
-  path.insertPoint(contourIndex, contourPointIndex, handlePoints[1]);
-  path.insertPoint(contourIndex, contourPointIndex, handlePoints[0]);
-  return new Set([`point/${insertIndex}`, `point/${insertIndex + 1}`]);
+  
+  let handlePoints;
+  let pointIndices;
+  
+  if (type === "quad" && !createTwoQuadHandles) {
+    // For quadratic curves, create only one handle at the midpoint
+    handlePoints = [
+      vector.interpolateVectors(...segmentPoints, 0.5),
+    ].map((pt) => {
+      return { ...vector.roundVector(pt), type: type };
+    });
+    path.insertPoint(contourIndex, contourPointIndex, handlePoints[0]);
+    pointIndices = new Set([`point/${insertIndex}`]);
+  } else {
+    // For cubic curves or quadratic curves with createTwoQuadHandles flag, create two handles at 1/3 and 2/3
+    handlePoints = [
+      vector.interpolateVectors(...segmentPoints, 1 / 3),
+      vector.interpolateVectors(...segmentPoints, 2 / 3),
+    ].map((pt) => {
+      return { ...vector.roundVector(pt), type: type };
+    });
+    path.insertPoint(contourIndex, contourPointIndex, handlePoints[1]);
+    path.insertPoint(contourIndex, contourPointIndex, handlePoints[0]);
+    pointIndices = new Set([`point/${insertIndex}`, `point/${insertIndex + 1}`]);
+  }
+  
+  return pointIndices;
 }
 
 export function filterPathByPointIndices(path, pointIndices, doCut = false) {
