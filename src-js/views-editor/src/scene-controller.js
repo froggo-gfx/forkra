@@ -18,6 +18,7 @@ import {
   connectContours,
   scalePoint,
   splitPathAtPointIndices,
+  checkFourPointConfiguration,
 } from "@fontra/core/path-functions.js";
 import {
   equalRect,
@@ -550,6 +551,17 @@ export class SceneController {
         this.visualizationLayersSettings.model["fontra.background-image"] = true;
       }
     });
+
+    registerAction(
+      "action.check-four-point-configuration",
+      {
+        topic,
+        titleKey: "action.check-four-point-configuration",
+        defaultShortCuts: [{ baseKey: "e", commandKey: true, altKey: true }],
+      },
+      () => this.doCheckFourPointConfiguration(),
+      () => this.sceneSettings.selectedGlyph?.isEditing
+    );
   }
 
   setAutoViewBox() {
@@ -1503,6 +1515,38 @@ export class SceneController {
       this.selection = new Set();
       return translatePlural("action.decompose-component", componentSelection?.length);
     });
+  }
+
+  async doCheckFourPointConfiguration() {
+    // Get the current selection
+    const selection = this.selection;
+    
+    // Parse the point selection
+    const { point: pointSelection } = parseSelection(selection);
+    
+    // Check if exactly four points are selected
+    if (!pointSelection || pointSelection.length !== 4) {
+      return;
+    }
+    
+    // Get the current glyph's path
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph || !positionedGlyph.glyph) {
+      return;
+    }
+    
+    const path = positionedGlyph.glyph.path;
+    
+    // Call checkFourPointConfiguration with the path and selected point indices
+    const isEligible = checkFourPointConfiguration(path, pointSelection);
+    
+    // Log "Eligible" to the console if the configuration matches
+    if (isEligible) {
+      console.log("Eligible");
+    } else {
+      // Log ineligible message when exactly four points are selected but don't meet criteria
+      console.log("Ineligible: Selected points do not meet the required geometric configuration");
+    }
   }
 
   getPathConnectDetector(path) {
