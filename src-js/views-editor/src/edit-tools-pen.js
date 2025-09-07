@@ -190,7 +190,8 @@ export class PenToolCubic extends BaseTool {
           path,
           segmentPointIndices.map((i) => path.getPoint(i)),
           segmentPointIndices[1],
-          this.curveType
+          this.curveType,
+          this.sceneModel.pathInsertHandles.shiftKey
         );
       }
       delete this.sceneModel.pathInsertHandles;
@@ -301,11 +302,11 @@ export class PenToolQuad extends PenToolCubic {
           // For quadratic curves with alt+shift, create two handles like cubic
           const handle1 = vector.roundVector(vector.interpolateVectors(pt1, pt2, 1 / 3));
           const handle2 = vector.roundVector(vector.interpolateVectors(pt1, pt2, 2 / 3));
-          return { insertHandles: { points: [handle1, handle2], hit: hit } };
+          return { insertHandles: { points: [handle1, handle2], hit: hit, shiftKey: event.shiftKey } };
         } else {
           // For quadratic curves with alt, create one handle at the midpoint
           const handle = vector.roundVector(vector.interpolateVectors(pt1, pt2, 0.5));
-          return { insertHandles: { points: [handle], hit: hit } };
+          return { insertHandles: { points: [handle], hit: hit, shiftKey: event.shiftKey } };
         }
       } else {
         const targetPoint = { ...hit };

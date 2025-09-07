@@ -174,7 +174,7 @@ function bezierSplitMultiple(bezier, ts) {
   return splitBeziers;
 }
 
-export function insertHandles(path, segmentPoints, insertIndex, type = "cubic", createTwoQuadHandles = false) {
+export function insertHandles(path, segmentPoints, insertIndex, type = "cubic", shiftKey = false) {
   let [contourIndex, contourPointIndex] = path.getContourAndPointIndex(insertIndex);
   if (!contourPointIndex) {
     contourPointIndex = path.getNumPointsOfContour(contourIndex);
@@ -184,8 +184,8 @@ export function insertHandles(path, segmentPoints, insertIndex, type = "cubic", 
   let handlePoints;
   let pointIndices;
   
-  if (type === "quad" && !createTwoQuadHandles) {
-    // For quadratic curves, create only one handle at the midpoint
+  if (type === "quad" && !shiftKey) {
+    // For quadratic curves without shift key, create only one handle at the midpoint
     handlePoints = [
       vector.interpolateVectors(...segmentPoints, 0.5),
     ].map((pt) => {
@@ -194,7 +194,7 @@ export function insertHandles(path, segmentPoints, insertIndex, type = "cubic", 
     path.insertPoint(contourIndex, contourPointIndex, handlePoints[0]);
     pointIndices = new Set([`point/${insertIndex}`]);
   } else {
-    // For cubic curves or quadratic curves with createTwoQuadHandles flag, create two handles at 1/3 and 2/3
+    // For cubic curves or quadratic curves with shift key, create two handles at 1/3 and 2/3
     handlePoints = [
       vector.interpolateVectors(...segmentPoints, 1 / 3),
       vector.interpolateVectors(...segmentPoints, 2 / 3),
