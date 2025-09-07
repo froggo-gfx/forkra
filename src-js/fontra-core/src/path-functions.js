@@ -174,6 +174,7 @@ function bezierSplitMultiple(bezier, ts) {
   return splitBeziers;
 }
 
+//// quad handles
 export function insertHandles(path, segmentPoints, insertIndex, type = "cubic", shiftKey = false) {
   let [contourIndex, contourPointIndex] = path.getContourAndPointIndex(insertIndex);
   if (!contourPointIndex) {
@@ -181,6 +182,7 @@ export function insertHandles(path, segmentPoints, insertIndex, type = "cubic", 
   }
   insertIndex = path.getAbsolutePointIndex(contourIndex, contourPointIndex, true);
   
+  //// quad handles
   let handlePoints;
   let pointIndices;
   

@@ -190,6 +190,7 @@ export class PenToolCubic extends BaseTool {
           path,
           segmentPointIndices.map((i) => path.getPoint(i)),
           segmentPointIndices[1],
+          //// quad handles
           this.curveType,
           this.sceneModel.pathInsertHandles.shiftKey
         );
@@ -270,6 +271,7 @@ export class PenToolQuad extends PenToolCubic {
     return "quad";
   }
 
+  ////quad handles
   _getPathConnectTargetPoint(event) {
     // Requirements:
     // - we must have an edited glyph at an editable location
