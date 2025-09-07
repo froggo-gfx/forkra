@@ -1967,10 +1967,10 @@ registerVisualizationLayerDefinition({
     const virtualPoints = model.sceneSettings.virtualPoints;
     // Check if virtualPoints exists and is an array before trying to iterate over it
     // DEBUG: Log the virtual points to see how many we're trying to render
-    console.log("virtual points visualization - virtualPoints:", virtualPoints);
+    /*console.log("virtual points visualization - virtualPoints:", virtualPoints);
     if (!virtualPoints || !Array.isArray(virtualPoints) || !virtualPoints.length) {
       return;
-    }
+    } */
 
     const cornerSize = parameters.cornerSize;
     const smoothSize = parameters.smoothSize;

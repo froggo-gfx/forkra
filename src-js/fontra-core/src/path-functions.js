@@ -1449,5 +1449,78 @@ export function computeChordIntersections(selection, path) {
     result.push(virtualPoint);
   }
   
+  // !!!!!!!!!! Now handle the second intersection with the outgoing curve from point D
+  // Get the next point from D (for the outgoing curve)
+  let nextIndexD;
+  if (isClosed) {
+    nextIndexD = indexD === numPointsInContour - 1 ? 0 : indexD + 1;
+  } else {
+    nextIndexD = indexD < numPointsInContour - 1 ? indexD + 1 : null;
+  }
+  
+  // If there's a next point, find the outgoing segment from point D
+  if (nextIndexD !== null) {
+    let outgoingSegment = null;
+    for (const segment of path.iterContourSegmentPointIndices(contourIndex)) {
+      if (segment.pointIndices[0] === path.getAbsolutePointIndex(contourIndex, indexD)) {
+        outgoingSegment = segment;
+        break;
+      }
+    }
+    
+    // If we found the outgoing segment and it's a curve, compute intersections
+    if (outgoingSegment && outgoingSegment.pointIndices.length >= 3) {
+      // Get the points of the outgoing segment
+      const outgoingPoints = outgoingSegment.pointIndices.map(i => path.getPoint(i));
+      
+      // Create Bezier curve for the outgoing segment
+      const outgoingBezier = new Bezier(...outgoingPoints);
+      
+      // Compute intersections between the outgoing Bezier curve and the line segment B-C
+      const outgoingIntersections = outgoingBezier.intersects({ p1: lineStart, p2: lineEnd });
+      
+      // Convert intersection parameters to actual points and create virtual point objects
+      for (const t of outgoingIntersections) {
+        // Get the intersection point on the Bezier curve
+        const intersectionPoint = outgoingBezier.compute(t);
+        
+        // Calculate suggested handles based on local geometry
+        // We'll create handles that are perpendicular to the curve's tangent at the intersection point
+        const tangent = outgoingBezier.derivative(t);
+        
+        // Create perpendicular vector for handle directions
+        const perpVector = vector.normalizeVector({
+          x: -tangent.y,
+          y: tangent.x
+        });
+        
+        // Scale the perpendicular vector to a reasonable handle length (30% of tangent length)
+        const handleLength = vector.vectorLength(tangent) * 0.3;
+        const handleVector = vector.mulVectorScalar(perpVector, handleLength);
+        
+        // Create the virtual point object
+        const virtualPoint = {
+          x: intersectionPoint.x,
+          y: intersectionPoint.y,
+          suggestedHandles: {
+            in: vector.roundVector({
+              x: intersectionPoint.x - handleVector.x,
+              y: intersectionPoint.y - handleVector.y
+            }),
+            out: vector.roundVector({
+              x: intersectionPoint.x + handleVector.x,
+              y: intersectionPoint.y + handleVector.y
+            })
+          },
+          contourIndex: contourIndex,
+          segmentIndex: outgoingSegment.segmentIndex,
+          t: t
+        };
+        
+        result.push(virtualPoint);
+      }
+    }
+  }
+  
   return result;
 }

@@ -1267,6 +1267,9 @@ export class SceneController {
       this.selection = initialSelection;
       editContext.editCancel();
     }
+    
+    // Update virtual points after any edit operation
+    await this.updateVirtualPointsIfNeeded();
   }
 
   _insertGlyphSourceIfAtFontSource(varGlyph, glyphController) {
@@ -1561,6 +1564,53 @@ export class SceneController {
       // Log ineligible message when exactly four points are selected but don't meet criteria
       console.log("Ineligible: Selected points do not meet the required geometric configuration");
       
+      // Clear virtual points if not eligible
+      this.sceneModel.virtualPoints = [];
+      
+      // Trigger canvas update
+      this.canvasController.requestUpdate();
+    }
+  }
+
+  async updateVirtualPointsIfNeeded() {
+    // Get the current selection
+    const selection = this.selection;
+    
+    // Parse the point selection
+    const { point: pointSelection } = parseSelection(selection);
+    
+    // Check if exactly four points are selected
+    if (!pointSelection || pointSelection.length !== 4) {
+      // If not exactly four points are selected, clear virtual points
+      this.sceneModel.virtualPoints = [];
+      this.canvasController.requestUpdate();
+      return;
+    }
+    
+    // Get the current glyph's path
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph || !positionedGlyph.glyph) {
+      // If there's no glyph, clear virtual points
+      this.sceneModel.virtualPoints = [];
+      this.canvasController.requestUpdate();
+      return;
+    }
+    
+    const path = positionedGlyph.glyph.path;
+    
+    // Call checkFourPointConfiguration with the path and selected point indices
+    const isEligible = checkFourPointConfiguration(path, pointSelection);
+    
+    if (isEligible) {
+      // Compute chord intersections
+      const virtualPoints = computeChordIntersections(pointSelection, path);
+      
+      // Store the results in sceneModel.virtualPoints
+      this.sceneModel.virtualPoints = virtualPoints;
+      
+      // Trigger canvas update
+      this.canvasController.requestUpdate();
+    } else {
       // Clear virtual points if not eligible
       this.sceneModel.virtualPoints = [];
       
