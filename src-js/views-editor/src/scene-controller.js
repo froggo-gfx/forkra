@@ -19,6 +19,7 @@ import {
   scalePoint,
   splitPathAtPointIndices,
   checkFourPointConfiguration,
+  computeChordIntersections,
 } from "@fontra/core/path-functions.js";
 import {
   equalRect,
@@ -117,6 +118,7 @@ export class SceneController {
       backgroundImagesAreLocked: true,
       backgroundLayers: {},
       editingLayers: {},
+      virtualPoints: [],
     });
     this.sceneSettings = this.sceneSettingsController.model;
 
@@ -1543,9 +1545,24 @@ export class SceneController {
     // Log "Eligible" to the console if the configuration matches
     if (isEligible) {
       console.log("Eligible");
+      
+      // Compute chord intersections
+      const virtualPoints = computeChordIntersections(pointSelection, path);
+      
+      // Store the results in sceneModel.virtualPoints
+      this.sceneModel.virtualPoints = virtualPoints;
+      
+      // Trigger canvas update
+      this.canvasController.requestUpdate();
     } else {
       // Log ineligible message when exactly four points are selected but don't meet criteria
       console.log("Ineligible: Selected points do not meet the required geometric configuration");
+      
+      // Clear virtual points if not eligible
+      this.sceneModel.virtualPoints = [];
+      
+      // Trigger canvas update
+      this.canvasController.requestUpdate();
     }
   }
 

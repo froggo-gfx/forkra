@@ -77,6 +77,10 @@ export class SceneModel {
       },
       true
     );
+
+    this.sceneSettingsController.addKeyListener("virtualPoints", (event) => {
+      this.updateScene();
+    });
   }
 
   get glyphLines() {
@@ -101,6 +105,14 @@ export class SceneModel {
 
   get hoverSelection() {
     return this.sceneSettings.hoverSelection;
+  }
+
+  get virtualPoints() {
+    return this.sceneSettings.virtualPoints;
+  }
+
+  set virtualPoints(points) {
+    this.sceneSettings.virtualPoints = points;
   }
 
   set hoverSelection(hoverSelection) {

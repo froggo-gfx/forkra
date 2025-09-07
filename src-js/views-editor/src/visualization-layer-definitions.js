@@ -1944,6 +1944,62 @@ export const allGlyphsCleanVisualizationLayerDefinition = {
   },
 };
 
+registerVisualizationLayerDefinition({
+  identifier: "fontra.virtual.points",
+  name: "Virtual points",
+  selectionFunc: glyphSelector("editing"),
+  zIndex: 50,
+  screenParameters: { 
+    cornerSize: 8, 
+    smoothSize: 8, 
+    handleSize: 6.5,
+    strokeWidth: 2,
+    dashLength: 2
+  },
+  colors: { color: "#8888FF80" },
+  colorsDarkMode: { color: "#888FF60" },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    // Check if sceneSettings exists before accessing virtualPoints
+    if (!model.sceneSettings) {
+      return;
+    }
+    
+    const virtualPoints = model.sceneSettings.virtualPoints;
+    // Check if virtualPoints exists and is an array before trying to iterate over it
+    // DEBUG: Log the virtual points to see how many we're trying to render
+    console.log("virtual points visualization - virtualPoints:", virtualPoints);
+    if (!virtualPoints || !Array.isArray(virtualPoints) || !virtualPoints.length) {
+      return;
+    }
+
+    const cornerSize = parameters.cornerSize;
+    const smoothSize = parameters.smoothSize;
+    const handleSize = parameters.handleSize;
+
+    context.fillStyle = parameters.color;
+    context.strokeStyle = parameters.color;
+    context.lineWidth = parameters.strokeWidth;
+    context.setLineDash([parameters.dashLength, parameters.dashLength]);
+
+    for (const virtualPoint of virtualPoints) {
+      // Draw the virtual point with a dashed outline to distinguish it from real points
+      const point = {
+        x: virtualPoint.x,
+        y: virtualPoint.y,
+        type: undefined, // No type to use default round node
+        smooth: true   // Make it smooth to distinguish it visually
+      };
+      
+      // Fill the point with a semi-transparent color
+      fillRoundNode(context, point, smoothSize);
+      
+      // Draw dashed stroke around the point
+      strokeRoundNode(context, point, smoothSize + parameters.strokeWidth);
+    }
+    
+    context.setLineDash([]);
+  },
+});
 // Drawing helpers
 
 function fillNode(context, pt, cornerNodeSize, smoothNodeSize, handleNodeSize) {
