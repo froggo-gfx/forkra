@@ -16,6 +16,7 @@ import { MouseTracker } from "@fontra/core/mouse-tracker.js";
 import { ObservableController } from "@fontra/core/observable-object.js";
 import {
   connectContours,
+  expandTerminals,
   scalePoint,
   splitPathAtPointIndices,
 } from "@fontra/core/path-functions.js";
@@ -550,6 +551,36 @@ export class SceneController {
         this.visualizationLayersSettings.model["fontra.background-image"] = true;
       }
     });
+
+    registerAction(
+      "action.expand-terminals",
+      {
+        topic,
+        titleKey: "action.expand-terminals",
+        defaultShortCuts: [{ baseKey: "e", ctrlKey: true, altKey: true }]
+      },
+      async () => {
+        const parsed = parseSelection(this.selection); // exists in utils; gives point indices
+        const pointIndices = parsed.point; // This is already an array of numbers
+        if (!pointIndices || pointIndices.length !== 2) {
+          message("Select exactly 2 points");
+          return;
+        }
+        
+        // pointIndices is already an array of numbers, no need to parse further
+        const absIndices = pointIndices;
+        
+        await this.editGlyph(async (sendIncrementalChange, glyph) => {
+          const layerInfo = this.getEditingLayerFromGlyphLayers(glyph.layers);
+          for (const [layerName, layerGlyph] of Object.entries(layerInfo)) {
+            const ret = expandTerminals(layerGlyph.path, absIndices, { offsetFactor: 1.5 });
+            // apply changes are done in expandTerminals directly via path mutators
+          }
+          // return change description & new selection set
+        });
+      },
+      () => this.selection.size === 2 // Eligibility check - only enable when exactly 2 points are selected
+    );
   }
 
   setAutoViewBox() {

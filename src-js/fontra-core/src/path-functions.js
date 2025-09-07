@@ -1194,3 +1194,239 @@ function cleanupPointAttributes(path) {
     path.pointAttributes = null;
   }
 }
+
+// Helper function to determine the handle direction for a given point
+export function getPrimaryHandleDirection(path, pointIndex) {
+  const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
+  const numPointsInContour = path.getNumPointsOfContour(contourIndex);
+  const isClosed = path.contourInfo[contourIndex].isClosed;
+
+  // Get the point
+  const point = path.getPoint(pointIndex);
+
+  // Check if point is on-curve
+  if (point.type) {
+    // Point is off-curve, no handle direction
+    return null;
+  }
+
+  // Get previous and next points
+  let prevIndex, nextIndex;
+  if (isClosed) {
+    prevIndex = (contourPointIndex - 1 + numPointsInContour) % numPointsInContour;
+    nextIndex = (contourPointIndex + 1) % numPointsInContour;
+  } else {
+    prevIndex = contourPointIndex - 1;
+    nextIndex = contourPointIndex + 1;
+  }
+
+  // Convert to absolute indices
+  const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
+  if (prevIndex >= 0) {
+    prevIndex += startPoint;
+  }
+  if (nextIndex < numPointsInContour) {
+    nextIndex += startPoint;
+  } else {
+    nextIndex = -1; // Invalid index for open contour
+  }
+
+  // Get the actual points
+  const prevPoint = prevIndex >= 0 ? path.getPoint(prevIndex) : null;
+  const nextPoint = nextIndex >= 0 ? path.getPoint(nextIndex) : null;
+
+  // Check for handles in the direction of neighboring nodes
+  if (prevPoint && prevPoint.type) {
+    // There's a handle in the previous direction
+    return "previous";
+  } else if (nextPoint && nextPoint.type) {
+    // There's a handle in the next direction
+    return "next";
+  }
+
+  // No handles found
+  return null;
+}
+
+// Helper function to compute the new position of an expanded point
+export function computeExpansionPoint(anchor, handleVec, fallbackDistance) {
+  // Calculate the vector from anchor to handle
+  const vector = {
+    x: handleVec.x - anchor.x,
+    y: handleVec.y - anchor.y
+  };
+
+  // Normalize the vector
+  const length = Math.hypot(vector.x, vector.y);
+  if (length < 1e-10) {
+    // If vector is too small, use fallback distance in x direction
+    return {
+      x: anchor.x + fallbackDistance,
+      y: anchor.y
+    };
+  }
+
+  const normalized = {
+    x: vector.x / length,
+    y: vector.y / length
+  };
+
+  // Scale by fallback distance and add to anchor
+  return {
+    x: anchor.x + normalized.x * fallbackDistance,
+    y: anchor.y + normalized.y * fallbackDistance
+  };
+}
+
+// Optional utility to label expanded points
+export function tagPointAttr(path, pointIndex, key, value) {
+  const point = path.getPoint(pointIndex);
+  const attrs = point.attrs || {};
+  attrs[key] = value;
+  path.setPointAttrs(pointIndex, attrs);
+}
+
+// Main function to expand terminals with eligibility checks
+export function expandTerminals(path, selectedPointAbsoluteIndices, options = {}) {
+  // Validate exactly two points are selected
+  if (selectedPointAbsoluteIndices.length !== 2) {
+    console.log("Not eligible: exactly two points must be selected");
+    return null;
+  }
+
+  const [pointIndex1, pointIndex2] = selectedPointAbsoluteIndices;
+
+  // Ensure both points are on-curve
+  const point1 = path.getPoint(pointIndex1);
+  const point2 = path.getPoint(pointIndex2);
+
+  if (point1.type || point2.type) {
+    console.log("Not eligible: both points must be on-curve");
+    return null;
+  }
+
+  // Get contour information for both points
+  const [contourIndex1, contourPointIndex1] = path.getContourAndPointIndex(pointIndex1);
+  const [contourIndex2, contourPointIndex2] = path.getContourAndPointIndex(pointIndex2);
+
+  // Confirm both points are on the same contour
+  if (contourIndex1 !== contourIndex2) {
+    console.log("Not eligible: both points must be on the same contour");
+    return null;
+  }
+
+  const contourIndex = contourIndex1;
+  const isClosed = path.contourInfo[contourIndex].isClosed;
+  const numPointsInContour = path.getNumPointsOfContour(contourIndex);
+
+  // Ensure each has exactly one handle on the stalk side
+  const direction1 = getPrimaryHandleDirection(path, pointIndex1);
+  const direction2 = getPrimaryHandleDirection(path, pointIndex2);
+
+  if (!direction1 || !direction2) {
+    console.log("Not eligible: each point must have exactly one handle");
+    return null;
+  }
+
+  // Check that there are no off-curve points between them
+  const minIndex = Math.min(contourPointIndex1, contourPointIndex2);
+  const maxIndex = Math.max(contourPointIndex1, contourPointIndex2);
+  const hasOffCurveBetween = checkForOffCurvePointsBetween(
+    path,
+    contourIndex,
+    minIndex,
+    maxIndex,
+    isClosed,
+    numPointsInContour
+  );
+
+  if (hasOffCurveBetween) {
+    console.log("Not eligible: there are off-curve points between the selected points");
+    return null;
+  }
+
+  // Verify each point has one handle that is NOT in the direction of the other neighboring nodes
+  // This is the opposite of the previous check - handles should NOT point toward each other
+  const isInvalidDirection1 = (direction1 === "next" && contourPointIndex1 < contourPointIndex2) ||
+                             (direction1 === "previous" && contourPointIndex1 > contourPointIndex2) ||
+                             (isClosed && Math.abs(contourPointIndex1 - contourPointIndex2) > 1 &&
+                              ((direction1 === "next" && contourPointIndex1 === maxIndex) ||
+                               (direction1 === "previous" && contourPointIndex1 === minIndex)));
+                              
+  const isInvalidDirection2 = (direction2 === "next" && contourPointIndex2 < contourPointIndex1) ||
+                             (direction2 === "previous" && contourPointIndex2 > contourPointIndex1) ||
+                             (isClosed && Math.abs(contourPointIndex1 - contourPointIndex2) > 1 &&
+                              ((direction2 === "next" && contourPointIndex2 === maxIndex) ||
+                               (direction2 === "previous" && contourPointIndex2 === minIndex)));
+
+  if (isInvalidDirection1 || isInvalidDirection2) {
+    console.log("Not eligible: handle directions are pointing toward each other");
+    return null;
+  }
+
+  // If validation passes, output "Eligible" to the console
+  console.log("Eligible");
+
+  // For now, return a placeholder result since the actual expansion will be implemented in later steps
+  return {
+    newPointIndices: [],
+    createdAttrsInfo: []
+  };
+}
+
+// Helper function to check for off-curve points between two points on a contour
+function checkForOffCurvePointsBetween(path, contourIndex, minIndex, maxIndex, isClosed, numPointsInContour) {
+  const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
+  
+  // For an open contour, check the direct path between points
+  if (!isClosed) {
+    for (let i = minIndex + 1; i < maxIndex; i++) {
+      const absoluteIndex = startPoint + i;
+      const point = path.getPoint(absoluteIndex);
+      if (point.type) {
+        return true; // Found an off-curve point
+      }
+    }
+  } else {
+    // For a closed contour, check both directions
+    // First direction (minIndex to maxIndex)
+    let hasOffCurve1 = false;
+    for (let i = minIndex + 1; i < maxIndex; i++) {
+      const absoluteIndex = startPoint + i;
+      const point = path.getPoint(absoluteIndex);
+      if (point.type) {
+        hasOffCurve1 = true;
+        break;
+      }
+    }
+    
+    // Second direction (wrapping around)
+    let hasOffCurve2 = false;
+    for (let i = maxIndex + 1; i < numPointsInContour + minIndex; i++) {
+      const wrappedIndex = i % numPointsInContour;
+      const absoluteIndex = startPoint + wrappedIndex;
+      const point = path.getPoint(absoluteIndex);
+      if (point.type) {
+        hasOffCurve2 = true;
+        break;
+      }
+    }
+    
+    // If both directions have off-curve points, then there are off-curve points between
+    // Otherwise, if one direction is clear, it's still valid
+    // But if we're checking "between" points on a closed contour, we need to determine
+    // which is the shorter path
+    const directDistance = maxIndex - minIndex - 1;
+    const wraparoundDistance = numPointsInContour - maxIndex + minIndex - 1;
+    
+    if (directDistance <= wraparoundDistance) {
+      // Direct path is shorter
+      return hasOffCurve1;
+    } else {
+      // Wraparound path is shorter
+      return hasOffCurve2;
+    }
+  }
+  
+  return false; // No off-curve points found between
+}
