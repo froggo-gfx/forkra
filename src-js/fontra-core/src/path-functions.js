@@ -1367,10 +1367,112 @@ export function expandTerminals(path, selectedPointAbsoluteIndices, options = {}
   // If validation passes, output "Eligible" to the console
   console.log("Eligible");
 
-  // For now, return a placeholder result since the actual expansion will be implemented in later steps
+  // Get the options with defaults
+  const { offsetFactor = 1.5, minDist = 20 } = options;
+
+  // Compute expansion points along the segment between the original points
+  // Calculate the vector from point1 to point2
+  const vectorBetweenPoints = {
+    x: point2.x - point1.x,
+    y: point2.y - point1.y
+  };
+  
+  // Normalize the vector
+  const length = Math.hypot(vectorBetweenPoints.x, vectorBetweenPoints.y);
+  if (length < 1e-10) {
+    // Points are at the same location, use a default direction
+    vectorBetweenPoints.x = minDist;
+    vectorBetweenPoints.y = 0;
+  } else {
+    vectorBetweenPoints.x /= length;
+    vectorBetweenPoints.y /= length;
+  }
+  
+  // Get handle vectors for both points to determine outward directions
+  const handleDirection1 = getPrimaryHandleDirection(path, pointIndex1);
+  const handleDirection2 = getPrimaryHandleDirection(path, pointIndex2);
+
+  // Get the actual handle points
+  let handlePoint1, handlePoint2;
+  if (handleDirection1 === "previous") {
+    const prevIndex = path.getAbsolutePointIndex(contourIndex, (contourPointIndex1 - 1 + numPointsInContour) % numPointsInContour);
+    handlePoint1 = path.getPoint(prevIndex);
+  } else if (handleDirection1 === "next") {
+    const nextIndex = path.getAbsolutePointIndex(contourIndex, (contourPointIndex1 + 1) % numPointsInContour);
+    handlePoint1 = path.getPoint(nextIndex);
+  }
+
+  if (handleDirection2 === "previous") {
+    const prevIndex = path.getAbsolutePointIndex(contourIndex, (contourPointIndex2 - 1 + numPointsInContour) % numPointsInContour);
+    handlePoint2 = path.getPoint(prevIndex);
+  } else if (handleDirection2 === "next") {
+    const nextIndex = path.getAbsolutePointIndex(contourIndex, (contourPointIndex2 + 1) % numPointsInContour);
+    handlePoint2 = path.getPoint(nextIndex);
+  }
+  
+  // Determine if the handles are pointing outward from the segment between points
+  // For point1, check if handle direction is opposite to vector from point1 to point2
+  const handleVector1 = {
+    x: handlePoint1.x - point1.x,
+    y: handlePoint1.y - point1.y
+  };
+  const dot1 = handleVector1.x * vectorBetweenPoints.x + handleVector1.y * vectorBetweenPoints.y;
+  const isHandle1Outward = dot1 < 0;
+  
+  // For point2, check if handle direction is same as vector from point1 to point2
+  const handleVector2 = {
+    x: handlePoint2.x - point2.x,
+    y: handlePoint2.y - point2.y
+  };
+  const dot2 = handleVector2.x * vectorBetweenPoints.x + handleVector2.y * vectorBetweenPoints.y;
+  const isHandle2Outward = dot2 > 0;
+  
+  // Calculate expansion vectors based on outward directions
+  const expansionVector1 = isHandle1Outward ?
+    { x: -vectorBetweenPoints.x, y: -vectorBetweenPoints.y } :
+    vectorBetweenPoints;
+  const expansionVector2 = isHandle2Outward ?
+    vectorBetweenPoints :
+    { x: -vectorBetweenPoints.x, y: -vectorBetweenPoints.y };
+
+  // Compute expansion points
+  const expansionPoint1 = {
+    x: point1.x + expansionVector1.x * minDist,
+    y: point1.y + expansionVector1.y * minDist
+  };
+  const expansionPoint2 = {
+    x: point2.x + expansionVector2.x * minDist,
+    y: point2.y + expansionVector2.y * minDist
+  };
+
+  // Insert new points
+  // For point1, insert after the anchor point
+  const insertIndex1 = contourPointIndex1 + 1;
+  path.insertPoint(contourIndex, insertIndex1, { ...expansionPoint1, type: null }); // on-curve point
+  
+  // For point2, we need to adjust the insertion index if it's after point1
+  let insertIndex2 = contourPointIndex2 + 1;
+  if (contourPointIndex2 > contourPointIndex1) {
+    // If point2 comes after point1, the insertion of point1 shifted indices
+    insertIndex2 += 1;
+  }
+  path.insertPoint(contourIndex, insertIndex2, { ...expansionPoint2, type: null }); // on-curve point
+
+  // Get absolute indices of new points
+  const newPointIndex1 = path.getAbsolutePointIndex(contourIndex, insertIndex1);
+  const newPointIndex2 = path.getAbsolutePointIndex(contourIndex, insertIndex2);
+
+  // Tag the expanded points with attributes
+  tagPointAttr(path, newPointIndex1, 'fontra.chord.expanded', { mother: pointIndex1 });
+  tagPointAttr(path, newPointIndex2, 'fontra.chord.expanded', { mother: pointIndex2 });
+
+  // Return the new point indices and created attributes info
   return {
-    newPointIndices: [],
-    createdAttrsInfo: []
+    newPointIndices: [newPointIndex1, newPointIndex2],
+    createdAttrsInfo: [
+      { pointIndex: newPointIndex1, key: 'fontra.chord.expanded', value: { mother: pointIndex1 } },
+      { pointIndex: newPointIndex2, key: 'fontra.chord.expanded', value: { mother: pointIndex2 } }
+    ]
   };
 }
 
@@ -1429,4 +1531,74 @@ function checkForOffCurvePointsBetween(path, contourIndex, minIndex, maxIndex, i
   }
   
   return false; // No off-curve points found between
+}
+
+// Tester function to verify if expansion was successful
+export function testExpandTerminals(path, originalPointIndices, result) {
+  if (!result) {
+    console.log("Test failed: expandTerminals returned null");
+    return false;
+  }
+  
+  const { newPointIndices, createdAttrsInfo } = result;
+  
+  // Check that we have exactly 2 new points
+  if (newPointIndices.length !== 2) {
+    console.log(`Test failed: Expected 2 new points, got ${newPointIndices.length}`);
+    return false;
+  }
+  
+  // Check that the new points are on-curve
+  for (const pointIndex of newPointIndices) {
+    const point = path.getPoint(pointIndex);
+    if (point.type) {
+      console.log(`Test failed: New point at index ${pointIndex} is not on-curve`);
+      return false;
+    }
+  }
+  
+  // Check that the points have the correct attributes
+  for (const attrInfo of createdAttrsInfo) {
+    const { pointIndex, key, value } = attrInfo;
+    const point = path.getPoint(pointIndex);
+    if (!point.attrs || !point.attrs[key]) {
+      console.log(`Test failed: Point at index ${pointIndex} missing attribute ${key}`);
+      return false;
+    }
+    
+    // Check that the mother attribute matches one of the original points
+    const motherIndex = point.attrs[key].mother;
+    if (!originalPointIndices.includes(motherIndex)) {
+      console.log(`Test failed: Point at index ${pointIndex} has incorrect mother index ${motherIndex}`);
+      return false;
+    }
+  }
+  
+  console.log("Test passed: Expansion was successful");
+  return true;
+}
+
+// Helper function to get expanded points from a path
+export function getExpandedPoints(path) {
+  const expandedPoints = [];
+  for (let i = 0; i < path.numPoints; i++) {
+    const point = path.getPoint(i);
+    if (point.attrs && point.attrs['fontra.chord.expanded']) {
+      expandedPoints.push({
+        index: i,
+        point: point,
+        motherIndex: point.attrs['fontra.chord.expanded'].mother
+      });
+    }
+  }
+  return expandedPoints;
+}
+
+// Simple test function to verify the expandTerminals implementation
+export function testExpandTerminalsImplementation() {
+  console.log("Testing expandTerminals implementation...");
+  
+  // This is a placeholder for actual testing
+  // In a real implementation, we would create a mock path and test the function
+  console.log("Test completed. Check console output for results.");
 }

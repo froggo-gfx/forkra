@@ -572,11 +572,30 @@ export class SceneController {
         
         await this.editGlyph(async (sendIncrementalChange, glyph) => {
           const layerInfo = this.getEditingLayerFromGlyphLayers(glyph.layers);
+          let newSelection = new Set();
           for (const [layerName, layerGlyph] of Object.entries(layerInfo)) {
             const ret = expandTerminals(layerGlyph.path, absIndices, { offsetFactor: 1.5 });
             // apply changes are done in expandTerminals directly via path mutators
+            
+            // Update selection to the new points if expansion was successful
+            if (ret && ret.newPointIndices) {
+              for (const pointIndex of ret.newPointIndices) {
+                newSelection.add(`point/${pointIndex}`);
+              }
+            }
           }
+          
+          // Update the selection to the new points
+          if (newSelection.size > 0) {
+            this.selection = newSelection;
+          }
+          
           // return change description & new selection set
+          return {
+            changes: {}, // Changes are applied directly in expandTerminals
+            undoLabel: "Expand terminals",
+            broadcast: true
+          };
         });
       },
       () => this.selection.size === 2 // Eligibility check - only enable when exactly 2 points are selected

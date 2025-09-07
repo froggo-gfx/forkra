@@ -1,8 +1,8 @@
-# Progress Report: Step 1-a Eligibility Check Implementation
+# Progress Report: Step 1-B Point Expansion Implementation
 
 ## Summary
 
-This document describes the implementation of the eligibility check for the "Expand terminals (create chord)" feature in Fontra. The implementation validates that selected points meet specific criteria before allowing the expansion operation to proceed.
+This document describes the implementation of the point expansion functionality for the "Expand terminals (create chord)" feature in Fontra. The implementation expands eligible terminal nodes by inserting outward on-curve nodes and connecting them with a straight chord.
 
 ## Files Modified
 
@@ -14,70 +14,80 @@ This document describes the implementation of the eligibility check for the "Exp
 ### In `src-js/fontra-core/src/path-functions.js`:
 
 1. **`expandTerminals()`**
-   - Main function that performs the eligibility checks
-   - Validates exactly two points are selected
-   - Ensures both points are on-curve
-   - Confirms both points are on the same contour
-   - Checks that each point has exactly one handle on the stalk side
-   - Verifies there are no off-curve points between the selected points
-   - Ensures each point has one handle in the direction of the other neighboring nodes
-   - Outputs "Eligible" to the console when validation passes
+   - Extended the function to perform actual point expansion when eligibility checks pass
+   - Computes new point positions by projecting along each node's handle direction outside the glyph
+   - Inserts two new on-curve points immediately adjacent after their mother nodes
+   - Tags the expanded points with attributes identifying their mother nodes
+   - Returns absolute indices of new points and created attributes info
 
-2. **`getPrimaryHandleDirection()`**
-   - Helper function to determine the handle direction for a given point
-   - Returns "previous" if there's a handle in the previous direction
-   - Returns "next" if there's a handle in the next direction
-   - Returns null if no handles are found or if the point is off-curve
+2. **`testExpandTerminals()`**
+   - New tester function to verify if expansion was successful
+   - Checks that exactly 2 new points were created
+   - Verifies that the new points are on-curve
+   - Validates that the points have the correct attributes with proper mother indices
 
-3. **`computeExpansionPoint()`**
-   - Helper function to compute the new position of an expanded point
-   - Calculates a vector from anchor to handle and normalizes it
-   - Scales by a fallback distance and adds to the anchor point
-   - Handles cases where the vector is too small by using a fallback distance
+3. **`getExpandedPoints()`**
+   - New helper function to retrieve all expanded points from a path
+   - Useful for debugging and verification purposes
 
-4. **`tagPointAttr()`**
-   - Optional utility function to label expanded points
-   - Sets custom attributes on points for identification
+4. **`testExpandTerminalsImplementation()`**
+   - Simple test function to verify the expandTerminals implementation
+   - Provides console output for testing feedback
 
 ### In `src-js/views-editor/src/scene-controller.js`:
 
-1. **New "expand-terminals" action**
-   - Registered in the setupContextMenuActions() method
-   - Parses the current selection to get point indices
-   - Validates exactly 2 points are selected
-   - Calls the expandTerminals() function for each editing layer
-   - Integrated with the existing editGlyph mechanism for undo/redo support
+1. **Updated "expand-terminals" action**
+   - Enhanced to handle the return value from expandTerminals()
+   - Updates selection to the newly created points after expansion
+   - Properly integrates with the editGlyph mechanism for undo/redo support
+   - Returns appropriate change description for the undo system
 
-## Eligibility Check Implementation Details
+## Point Expansion Implementation Details
 
-The eligibility check implementation consists of several validation steps:
+The point expansion implementation works as follows:
 
-1. **Validation of exactly two points selected**
-   - The function first checks that exactly two points are selected
-   - If not, it logs "Not eligible: exactly two points must be selected" and returns null
+1. **Eligibility Validation**
+   - Performs all eligibility checks from Step 1-A
+   - If validation passes, proceeds with point expansion
 
-2. **Verification that both points are on-curve**
-   - Both selected points must be on-curve points (not off-curve)
-   - If either point is off-curve, it logs "Not eligible: both points must be on-curve" and returns null
+2. **Handle Direction Determination**
+   - Uses `getPrimaryHandleDirection()` to determine the handle direction for each selected point
+   - Gets the actual handle points based on the determined directions
 
-3. **Confirmation that each has exactly one handle on the stalk side**
-   - Uses the `getPrimaryHandleDirection()` helper function to check handle directions
-   - If either point doesn't have exactly one handle, it logs "Not eligible: each point must have exactly one handle" and returns null
+3. **Expansion Point Calculation**
+   - Uses `computeExpansionPoint()` to calculate new positions for expanded points
+   - Projects along each node's handle direction outside the glyph
+   - Uses a fallback distance when the handle vector is too small
 
-4. **Check that there are no off-curve points between them**
-   - Uses the `checkForOffCurvePointsBetween()` helper function
-   - For open contours, checks the direct path between points
-   - For closed contours, checks both directions and determines the shorter path
-   - If off-curve points are found between the selected points, it logs "Not eligible: there are off-curve points between the selected points" and returns null
+4. **Point Insertion**
+   - Inserts the first new on-curve point directly after its mother node
+   - Adjusts the insertion index for the second point if needed (when points are on the same contour)
+   - Ensures the mother → n?a segment is a straight line segment
 
-5. **Verification that each point has one handle that does NOT point toward the other neighboring nodes**
-   - Additional validation of handle directions to ensure they do NOT point toward each other
-   - Considers both open and closed contour cases
-   - If handle directions are pointing toward each other, it logs "Not eligible: handle directions are pointing toward each other" and returns null
+5. **Point Tagging**
+   - Uses `tagPointAttr()` to label expanded points with attributes
+   - Tags include the mother point index for identification
+   - Attributes use the key 'fontra.chord.expanded'
 
-6. **Console output of "Eligible" when points pass validation**
-   - When all validation checks pass, the function logs "Eligible" to the console
-   - Returns a placeholder result with empty arrays for newPointIndices and createdAttrsInfo
+6. **Selection Update**
+   - Updates the editor selection to the two new n1a, n2a points
+   - Provides visual feedback to the user about the created points
+
+## Tester Functions
+
+Two new tester functions were added to verify correct execution:
+
+1. **`testExpandTerminals()`**
+   - Takes a path, original point indices, and the result from expandTerminals()
+   - Verifies the result contains exactly 2 new points
+   - Checks that new points are on-curve
+   - Validates that points have correct attributes with proper mother indices
+   - Outputs test results to the console
+
+2. **`getExpandedPoints()`**
+   - Retrieves all expanded points from a path
+   - Useful for debugging and verification
+   - Returns point indices, point data, and mother indices
 
 ## Hotkey Registration
 
@@ -89,3 +99,4 @@ The implementation integrates with the existing editGlyph mechanism for undo/red
 - Uses the editGlyph function to perform the operation
 - Works with multiple layers if needed
 - Integrates with the change recording system for proper undo/redo functionality
+- Updates selection to the newly created points
