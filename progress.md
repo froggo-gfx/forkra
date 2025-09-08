@@ -1,228 +1,191 @@
-<<<<<<< HEAD
-# Four-Point Configuration Validation Feature
+# Virtual Points Implementation Analysis
 
-## 1. Overview of the Feature
+This document provides a detailed analysis of how the virtual points functionality is implemented in Fontra, specifically focusing on the detection of four-point configurations and computation of intersection points.
 
-This feature implements a validation mechanism for checking if four selected points in a glyph contour meet a specific geometric configuration. When triggered, it evaluates whether the selected points form a valid configuration as defined by the following criteria:
+## Overview
 
-1. The four points must be consecutive on-curve points along a single contour
-2. The first and last points (A and D) must each have exactly one off-curve handle
-3. The segments connecting A-B, B-C, and C-D must be straight lines (no off-curve points)
-4. Handle both open and closed contours correctly
+The virtual points feature detects specific geometric configurations of four consecutive on-curve points and computes intersection points where the middle segment intersects with the curves connected to the outer points. These intersection points are then visualized as virtual points in the editor.
 
-If the selected points meet these criteria, the system logs "Eligible" to the console. If exactly four points are selected but they don't meet the criteria, the system logs an "Ineligible" message with details about why the selection doesn't meet the required configuration.
+## Core Implementation Files
 
-This feature is useful for font designers who need to validate specific point configurations in their glyphs, possibly as part of a larger workflow or as a quality control mechanism.
+The functionality is implemented across four main files:
 
-## 2. Technical Implementation Details
+1. `src-js/fontra-core/src/path-functions.js` - Core geometric algorithms
+2. `src-js/views-editor/src/scene-model.js` - Data model and storage
+3. `src-js/views-editor/src/scene-controller.js` - UI interactions and actions
+4. `src-js/views-editor/src/visualization-layer-definitions.js` - Rendering
 
-### Core Logic Function in path-functions.js
+## Detailed Implementation Analysis
 
-The core validation logic is implemented in the `checkFourPointConfiguration` function in [`src-js/fontra-core/src/path-functions.js`](src-js/fontra-core/src/path-functions.js:1198-1326). This function:
+### 1. Path Functions (src-js/fontra-core/src/path-functions.js)
 
-1. Verifies exactly four points are selected
-2. Ensures all points belong to the same contour
-3. Checks that the points are consecutive on the contour
-4. Validates that all four points are on-curve points
-5. Confirms that the first and last points each have exactly one off-curve handle
-6. Ensures segments between consecutive points are straight lines
+#### checkFourPointConfiguration Function
 
-### Hotkey Registration in scene-controller.js
+This function validates if four selected points meet the specific geometric criteria:
 
-The feature is registered as an action in [`src-js/views-editor/src/scene-controller.js`](src-js/views-editor/src/scene-controller.js:555-565):
+1. All four points must be consecutive on-curve points along a single contour
+2. The first point (A) and last point (D) each have exactly one off-curve handle
+3. The segments connecting A-B, B-C, and C-D are straight lines (no off-curve points between them)
+4. Handles both open and closed contours correctly
 
-```javascript
-registerAction(
-  "action.check-four-point-configuration",
-  {
-    topic,
-    titleKey: "action.check-four-point-configuration",
-    defaultShortCuts: [{ baseKey: "e", commandKey: true, altKey: true }],
-  },
-  () => this.doCheckFourPointConfiguration(),
-  () => this.sceneSettings.selectedGlyph?.isEditing
-);
-```
+Implementation details:
+- Verifies exactly four points are selected
+- Ensures all points belong to the same contour
+- Checks that points are consecutive on the contour (with special handling for closed contours)
+- Confirms all four points are on-curve (no type attribute)
+- Validates that A and D each have exactly one off-curve handle
+- Ensures segments A-B, B-C, and C-D are straight lines
 
-The default hotkey is Cmd+Alt+E (or Ctrl+Alt+E on Windows).
+#### computeChordIntersections Function
 
-### Handler Function Implementation
+When a valid four-point configuration is detected, this function computes the intersection points:
 
-The handler function `doCheckFourPointConfiguration` in [`src-js/views-editor/src/scene-controller.js`](src-js/views-editor/src/scene-controller.js:1520-1550) implements the user-facing functionality:
+1. Identifies the incoming curve to point A (prev→A)
+2. Identifies the outgoing curve from point D
+3. Creates a line segment B-C (the middle segment)
+4. Computes intersections between the incoming curve and line B-C
+5. Computes intersections between the outgoing curve and line B-C
+6. For each intersection, creates a virtual point with suggested handle positions
 
-1. Retrieves the current selection
-2. Parses the point selection
-3. Validates that exactly four points are selected
-4. Gets the current glyph's path
-5. Calls the core validation function
-6. Logs "Eligible" to the console if the configuration matches
-7. Logs an "Ineligible" message with details to the console when exactly four points are selected but don't meet the criteria
+Implementation details:
+- Uses Bezier.js library for curve intersection calculations
+- Calculates perpendicular vectors for suggested handle directions
+- Creates virtual point objects with position, suggested handles, and reference information
+- Returns an array of virtual point objects
 
-## 3. Files Modified with Specific Line References
+### 2. Scene Model (src-js/fontra-core/src/scene-model.js)
 
-1. **src-js/fontra-core/src/path-functions.js**
-   - Added `checkFourPointConfiguration` function: lines [1198-1326](src-js/fontra-core/src/path-functions.js:1198-1326)
+The SceneModel class manages the virtual points data:
 
-2. **src-js/views-editor/src/scene-controller.js**
-   - Registered the action: lines [555-565](src-js/views-editor/src/scene-controller.js:555-565)
-   - Implemented the handler function: lines [1520-1550](src-js/views-editor/src/scene-controller.js:1520-1550)
+1. Stores virtual points in the scene settings:
+   ```javascript
+   virtualPoints: [],
+   ```
 
-## 4. How the Feature Works from User Perspective
+2. Provides getter/setter methods for virtual points:
+   ```javascript
+   get virtualPoints() {
+     return this.sceneSettings.virtualPoints;
+   }
+   
+   set virtualPoints(points) {
+     this.sceneSettings.virtualPoints = points;
+   }
+   ```
 
-1. User opens a glyph for editing in Fontra
-2. User selects exactly four consecutive on-curve points on a single contour
-3. User presses Cmd+Alt+E (or Ctrl+Alt+E on Windows) to trigger the validation
-4. If the selected points meet the required configuration:
-   - The word "Eligible" is logged to the browser's console
-5. If the selected points don't meet the configuration:
-   - An "Ineligible" message with details is logged to the browser's console
+### 3. Scene Controller (src-js/views-editor/src/scene-controller.js)
 
-## 5. Detailed Testing Instructions
+The SceneController handles UI interactions and triggers the virtual points computation:
 
-To test this feature:
+#### doCheckFourPointConfiguration Method
 
-1. Open Fontra and load a font project
-2. Open a glyph for editing that contains contours with multiple on-curve points
-3. Select exactly four consecutive on-curve points on a single contour:
-   - Click the first point
-   - Hold Shift and click the next three points in sequence
-4. Press Cmd+Alt+E (or Ctrl+Alt+E on Windows)
-5. Open the browser's developer console (F12 in most browsers)
-6. Verify that "Eligible" is logged to the console when:
-   - All four points are consecutive on-curve points
-   - The first and last points each have exactly one off-curve handle
-   - The segments between consecutive points are straight lines
-7. Verify that an "Ineligible" message is logged when exactly four points are selected but they don't meet the criteria
+This method is triggered by a keyboard shortcut (Cmd+Alt+E) and performs:
 
-## 6. Edge Cases Handled
+1. Gets the current selection
+2. Parses point selection (must be exactly 4 points)
+3. Retrieves the current glyph's path
+4. Calls `checkFourPointConfiguration` to validate the selection
+5. If valid:
+   - Calls `computeChordIntersections` to calculate intersections
+   - Stores results in `sceneModel.virtualPoints`
+   - Triggers canvas update
+6. If invalid:
+   - Clears virtual points
+   - Triggers canvas update
 
-1. **Incorrect number of points**: The function returns false immediately if not exactly four points are selected
-2. **Points on different contours**: The function returns false if the selected points don't all belong to the same contour
-3. **Non-consecutive points**: The function returns false if the selected points are not consecutive on the contour
-4. **Off-curve points**: The function returns false if any of the selected points are off-curve points
-5. **Invalid handle configuration**: The function returns false if the first or last points don't each have exactly one off-curve handle
-6. **Open vs. closed contours**: The function correctly handles both open and closed contours, including wraparound cases in closed contours
-7. **Invalid glyph state**: The function gracefully handles cases where there's no active glyph or path
+#### updateVirtualPointsIfNeeded Method
 
-## 7. Future Considerations or Improvements
+This method automatically updates virtual points based on current selection:
 
-1. **User feedback**: The feature now provides enhanced feedback by logging "Ineligible" messages with details when four points are selected but don't meet the criteria. A more user-friendly notification system could still be implemented, such as:
-   - A status bar message
-   - A temporary overlay notification
-   - An audible cue
+1. Gets current selection
+2. Checks if exactly four points are selected
+3. If not, clears virtual points and updates canvas
+4. If four points are selected:
+   - Retrieves glyph path
+   - Calls `checkFourPointConfiguration`
+   - If valid:
+     * Calls `computeChordIntersections`
+     * Stores results in `sceneModel.virtualPoints`
+     * Triggers canvas update
+   - If invalid:
+     * Clears virtual points
+     * Triggers canvas update
 
-2. **Configuration flexibility**: The validation criteria could be made configurable rather than hardcoded, allowing users to define their own point configuration rules.
+### 4. Visualization Layer Definitions (src-js/views-editor/src/visualization-layer-definitions.js)
 
-3. **Extended validation**: The feature could be extended to validate other common point configurations that font designers frequently need to check.
+The visualization layer renders the virtual points:
 
-4. **Visual indication**: Instead of just logging "Eligible," the feature could visually highlight the matching points or segments in the glyph view.
+#### Virtual Points Layer Definition
 
-5. **Batch processing**: The feature could be extended to check multiple sets of four points at once, or to automatically scan a glyph for all valid four-point configurations.
+Identifier: "fontra.virtual.points"
+Name: "Virtual points"
+Z-index: 50 (drawn behind most other elements)
 
-6. **Integration with other tools**: This validation could be integrated with other Fontra tools, such as contour manipulation or quality assurance features.
+Rendering characteristics:
+- Corner size: 8
+- Smooth size: 8
+- Handle size: 6.5
+- Stroke width: 2
+- Dash length: 2
+- Color: #8888FF80 (semi-transparent blue) in light mode, #888FF60 in dark mode
 
-7. **Performance optimization**: For very complex glyphs, the validation algorithm could be optimized to handle large numbers of points more efficiently.
-=======
-# Progress Report: Step 1-B Point Expansion Implementation
+Drawing process:
+1. Checks if virtualPoints exist in sceneSettings
+2. Sets fill and stroke styles with dashed lines
+3. Iterates through each virtual point:
+   - Draws a filled round node (smooth appearance)
+   - Draws a dashed stroke around the point to distinguish from real points
+4. Clears line dash pattern after drawing
 
-## Summary
+## Data Flow
 
-This document describes the implementation of the point expansion functionality for the "Expand terminals (create chord)" feature in Fontra. The implementation expands eligible terminal nodes by inserting outward on-curve nodes and connecting them with a straight chord.
+1. **User selects four points** in the editor
+2. **Selection triggers update** via `updateVirtualPointsIfNeeded`
+3. **Configuration check** performed by `checkFourPointConfiguration`
+4. **Intersection computation** done by `computeChordIntersections` if valid
+5. **Results stored** in `sceneModel.virtualPoints`
+6. **Canvas update requested**
+7. **Visualization layer** renders virtual points from stored data
 
-## Files Modified
+## Key Features
 
-1. `src-js/fontra-core/src/path-functions.js`
-2. `src-js/views-editor/src/scene-controller.js`
+1. **Automatic Detection**: Virtual points are automatically computed when four points are selected
+2. **Visual Distinction**: Virtual points are rendered with dashed outlines to distinguish them from real points
+3. **Geometric Validation**: Strict validation ensures only valid configurations produce virtual points
+4. **Interactive Action**: Manual trigger available via keyboard shortcut for explicit checking
+5. **Real-time Updates**: Virtual points update as selection changes
 
-## Functions Added/Modified
+## Technical Details
 
-### In `src-js/fontra-core/src/path-functions.js`:
+### Mathematical Computations
 
-1. **`expandTerminals()`**
-   - Extended the function to perform actual point expansion when eligibility checks pass
-   - Computes new point positions by projecting along each node's handle direction outside the glyph
-   - Inserts two new on-curve points immediately adjacent after their mother nodes
-   - Tags the expanded points with attributes identifying their mother nodes
-   - Returns absolute indices of new points and created attributes info
+1. **Bezier Intersections**: Uses Bezier.js library for accurate curve/line intersection calculations
+2. **Handle Suggestions**: Calculates perpendicular vectors to the curve's tangent at intersection points
+3. **Vector Operations**: Extensive use of vector math for geometric calculations
 
-2. **`testExpandTerminals()`**
-   - New tester function to verify if expansion was successful
-   - Checks that exactly 2 new points were created
-   - Verifies that the new points are on-curve
-   - Validates that the points have the correct attributes with proper mother indices
+### Performance Considerations
 
-3. **`getExpandedPoints()`**
-   - New helper function to retrieve all expanded points from a path
-   - Useful for debugging and verification purposes
+1. **Selective Computation**: Only computes intersections when exactly four points are selected
+2. **Early Validation**: Quick rejection of invalid configurations before expensive computations
+3. **Efficient Rendering**: Direct access to stored virtual points for visualization
 
-4. **`testExpandTerminalsImplementation()`**
-   - Simple test function to verify the expandTerminals implementation
-   - Provides console output for testing feedback
+### Error Handling
 
-### In `src-js/views-editor/src/scene-controller.js`:
+1. **Configuration Validation**: Comprehensive checks ensure only valid geometric configurations are processed
+2. **Boundary Conditions**: Proper handling of open vs. closed contours
+3. **Edge Cases**: Handles cases where points don't meet criteria gracefully
 
-1. **Updated "expand-terminals" action**
-   - Enhanced to handle the return value from expandTerminals()
-   - Updates selection to the newly created points after expansion
-   - Properly integrates with the editGlyph mechanism for undo/redo support
-   - Returns appropriate change description for the undo system
+## Integration Points
 
-## Point Expansion Implementation Details
+1. **Scene Model**: Central storage of virtual points data
+2. **Scene Controller**: Logic for computing and updating virtual points
+3. **Path Functions**: Core geometric algorithms
+4. **Visualization**: Rendering of virtual points in the editor
+5. **UI Actions**: Keyboard shortcut for manual triggering
 
-The point expansion implementation works as follows:
+## Future Considerations
 
-1. **Eligibility Validation**
-   - Performs all eligibility checks from Step 1-A
-   - If validation passes, proceeds with point expansion
-
-2. **Handle Direction Determination**
-   - Uses `getPrimaryHandleDirection()` to determine the handle direction for each selected point
-   - Gets the actual handle points based on the determined directions
-
-3. **Expansion Point Calculation**
-   - Uses `computeExpansionPoint()` to calculate new positions for expanded points
-   - Projects along each node's handle direction outside the glyph
-   - Uses a fallback distance when the handle vector is too small
-
-4. **Point Insertion**
-   - Inserts the first new on-curve point directly after its mother node
-   - Adjusts the insertion index for the second point if needed (when points are on the same contour)
-   - Ensures the mother → n?a segment is a straight line segment
-
-5. **Point Tagging**
-   - Uses `tagPointAttr()` to label expanded points with attributes
-   - Tags include the mother point index for identification
-   - Attributes use the key 'fontra.chord.expanded'
-
-6. **Selection Update**
-   - Updates the editor selection to the two new n1a, n2a points
-   - Provides visual feedback to the user about the created points
-
-## Tester Functions
-
-Two new tester functions were added to verify correct execution:
-
-1. **`testExpandTerminals()`**
-   - Takes a path, original point indices, and the result from expandTerminals()
-   - Verifies the result contains exactly 2 new points
-   - Checks that new points are on-curve
-   - Validates that points have correct attributes with proper mother indices
-   - Outputs test results to the console
-
-2. **`getExpandedPoints()`**
-   - Retrieves all expanded points from a path
-   - Useful for debugging and verification
-   - Returns point indices, point data, and mother indices
-
-## Hotkey Registration
-
-The "Expand terminals (create chord)" action is registered with the hotkey **Ctrl+Alt+E** in the scene controller.
-
-## Integration with Existing Mechanisms
-
-The implementation integrates with the existing editGlyph mechanism for undo/redo support. The expand-terminals action:
-- Uses the editGlyph function to perform the operation
-- Works with multiple layers if needed
-- Integrates with the change recording system for proper undo/redo functionality
-- Updates selection to the newly created points
->>>>>>> 83d1dc1edaf0c144b0aeb22384db3e5ed60209d2
+1. **Performance Optimization**: For complex glyphs with many potential intersections
+2. **Extended Configurations**: Support for other geometric patterns
+3. **User Customization**: Options for visualization appearance
+4. **Interaction Models**: Direct manipulation of virtual points
