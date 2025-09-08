@@ -1194,3 +1194,24 @@ function cleanupPointAttributes(path) {
     path.pointAttributes = null;
   }
 }
+
+export function deleteSingleOffCurvePoint(path, pointIndex) {
+  // Validate that the point exists
+  if (pointIndex < 0 || pointIndex >= path.numPoints) {
+    return false;
+  }
+
+  // Get the point and check if it's an off-curve point
+  const point = path.getPoint(pointIndex);
+  if (!point.type || (point.type !== POINT_TYPE_OFF_CURVE_QUAD && point.type !== POINT_TYPE_OFF_CURVE_CUBIC)) {
+    return false;
+  }
+
+  // Get the contour index and contour point index
+  const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
+
+  // Delete the point directly from the contour
+  path.deletePoint(contourIndex, contourPointIndex);
+
+  return true;
+}

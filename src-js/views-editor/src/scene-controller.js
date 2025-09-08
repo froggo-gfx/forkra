@@ -542,6 +542,13 @@ export class SceneController {
       () => !!this.contextMenuState?.componentSelection?.length
     );
 
+    registerAction(
+      "action.delete-single-off-curve",
+      { topic },
+      () => this.doDeleteSingleOffCurvePoint(),
+      () => this.contextMenuState.singleOffCurvePointSelection?.length
+    );
+
     registerAction("action.lock-background-images", { topic }, () => {
       this.sceneSettings.backgroundImagesAreLocked =
         !this.sceneSettings.backgroundImagesAreLocked;
@@ -849,6 +856,10 @@ export class SceneController {
           pointSelection
         )
       : [];
+    // Check for single off-curve point selection
+    this.contextMenuState.singleOffCurvePointSelection = glyphController.canEdit
+      ? getSelectedSingleOffCurvePoints(glyphController.instance.path, pointSelection)
+      : [];
   }
 
   getContextMenuItems(event) {
@@ -866,6 +877,7 @@ export class SceneController {
       { actionIdentifier: "action.break-contour" },
       { actionIdentifier: "action.reverse-contour" },
       { actionIdentifier: "action.set-contour-start" },
+      { actionIdentifier: "action.delete-single-off-curve" },
       {
         title: () =>
           translatePlural(
@@ -1505,6 +1517,27 @@ export class SceneController {
     });
   }
 
+  async doDeleteSingleOffCurvePoint() {
+    const { point: pointSelection } = parseSelection(this.selection);
+    if (!pointSelection?.length) {
+      return;
+    }
+
+    await this.editLayersAndRecordChanges((layerGlyphs) => {
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        const path = layerGlyph.path;
+        // Delete each selected off-curve point
+        for (const pointIndex of pointSelection) {
+          // Use the new function from path-functions.js
+          deleteSingleOffCurvePoint(path, pointIndex);
+        }
+      }
+      // Clear selection after deletion
+      this.selection = new Set();
+      return translate("action.delete-single-off-curve");
+    });
+  }
+
   getPathConnectDetector(path) {
     if (!path) {
       const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
@@ -1801,4 +1834,20 @@ export function joinContours(path, firstPointIndex, secondPointIndex) {
   );
 
   return selectedPointIndices;
+}
+
+function getSelectedSingleOffCurvePoints(path, pointSelection) {
+  if (!path || !pointSelection || pointSelection.length !== 1) {
+    return [];
+  }
+  
+  const pointIndex = pointSelection[0];
+  const point = path.getPoint(pointIndex);
+  
+ // Check if the point is an off-curve point (quad or cubic)
+  if (point && point.type && (point.type === "quad" || point.type === "cubic")) {
+    return [pointIndex];
+  }
+  
+  return [];
 }

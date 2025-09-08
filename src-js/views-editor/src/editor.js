@@ -17,6 +17,7 @@ import { loaderSpinner } from "@fontra/core/loader-spinner.js";
 import { ObservableController } from "@fontra/core/observable-object.js";
 import {
   deleteSelectedPoints,
+  deleteSingleOffCurvePoint,
   filterPathByPointIndices,
 } from "@fontra/core/path-functions.js";
 import {
@@ -334,6 +335,17 @@ export class EditorController extends ViewController {
         (event) => this.callDelegateMethod("doDelete", event),
         () => this.callDelegateMethod("canDelete"),
         () => this.callDelegateMethod("getDeleteLabel")
+      );
+
+      registerAction(
+        "action.delete-single-off-curve",
+        {
+          topic: "0030-action-topics.menu.edit",
+          titleKey: "action.delete-single-off-curve",
+          defaultShortCuts: [{ baseKey: "Backspace", commandKey: true }],
+        },
+        () => this.doDeleteSingleOffCurvePoint(),
+        () => this.canDeleteSingleOffCurvePoint()
       );
 
       registerActionCallbacks(
@@ -2215,6 +2227,39 @@ export class EditorController extends ViewController {
     );
   }
 
+  canDeleteSingleOffCurvePoint() {
+    // Check if exactly one point is selected and it's an off-curve point
+    if (this.fontController.readOnly || this.sceneModel.isSelectedGlyphLocked()) {
+      return false;
+    }
+    
+    if (!this.sceneSettings.selectedGlyph?.isEditing) {
+      return false;
+    }
+    
+    const { point: pointSelection } = parseSelection(this.sceneController.selection);
+    
+    if (!pointSelection || pointSelection.length !== 1) {
+      return false;
+    }
+    
+    // Check if the selected point is an off-curve point
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) {
+      return false;
+    }
+    
+    const pointIndex = pointSelection[0];
+    const point = positionedGlyph.glyph.path.getPoint(pointIndex);
+    
+    if (!point || !point.type) {
+      return false;
+    }
+    
+    // Check if it's an off-curve point (either quad or cubic)
+    return point.type === POINT_TYPE_OFF_CURVE_QUAD || point.type === POINT_TYPE_OFF_CURVE_CUBIC;
+  }
+
   async doDelete(event) {
     if (
       this.sceneSettings.selectedGlyph &&
@@ -2299,6 +2344,25 @@ export class EditorController extends ViewController {
       }
       this.sceneController.selection = new Set();
       return translate("action.delete-selection");
+    });
+  }
+
+  async doDeleteSingleOffCurvePoint() {
+    if (!this.canDeleteSingleOffCurvePoint()) {
+      return;
+    }
+
+    const { point: pointSelection } = parseSelection(this.sceneController.selection);
+    const pointIndex = pointSelection[0];
+
+    await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        // Call the deleteSingleOffCurvePoint function for each layer
+        deleteSingleOffCurvePoint(layerGlyph.path, pointIndex);
+      }
+      // Clear the selection after deletion
+      this.sceneController.selection = new Set();
+      return translate("action.delete-single-off-curve");
     });
   }
 
