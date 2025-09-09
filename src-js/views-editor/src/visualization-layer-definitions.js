@@ -22,9 +22,10 @@ import {
   findCurvatureRange,
   curvatureToColor,
   solveCubicBezier
-} from "@fontra/core/curvature.js"; 
+} from "@fontra/core/curvature.js";
 
 import { VarPackedPath } from "@fontra/core/var-path.js";
+import { registerTunniVisualizationLayer } from "./visualization-layer-tunni.js";
 
 export const visualizationLayerDefinitions = [];
 
@@ -1926,6 +1927,9 @@ registerVisualizationLayerDefinition({
     context.lineJoin = "miter";
 
   }});
+
+// Register the Tunni visualization layer
+registerTunniVisualizationLayer();
 
 //
 // allGlyphsCleanVisualizationLayerDefinition is not registered, but used
