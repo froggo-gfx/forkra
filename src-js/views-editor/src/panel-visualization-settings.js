@@ -60,7 +60,65 @@ export default class VisualizationSettingsPanel extends Panel {
         return nameA.localeCompare(nameB);
       });
 
-    // Add a toggle for each user-switchable layer
+    // Separate the "fontra.edit.path.stroke" layer
+    const editPathStrokeLayer = userSwitchableLayers.find(
+      (layer) => layer.identifier === "fontra.edit.path.stroke"
+    );
+    
+    // Get all other user-switchable layers
+    const otherLayers = userSwitchableLayers.filter(
+      (layer) => layer.identifier !== "fontra.edit.path.stroke"
+    );
+
+    // Section 1: Glyph Appearance (only the outline thickness slider for "fontra.edit.path.stroke")
+    if (editPathStrokeLayer) {
+      formContents.push({
+        type: "header",
+        label: "Glyph Appearance",
+        style: "margin-top: 24px; margin-bottom: 12px;",
+      });
+      
+      // Add slider for line thickness for the "fontra.edit.path.stroke" layer
+      if (editPathStrokeLayer.screenParameters && editPathStrokeLayer.screenParameters.strokeWidth !== undefined) {
+        const sliderID = `visualization-layer-${editPathStrokeLayer.identifier}-strokeWidth`;
+        const sliderElement = html.createDomElement("input", {
+          type: "range",
+          id: sliderID,
+          min: "0.1",
+          max: "5",
+          step: "0.1",
+          value: editPathStrokeLayer.screenParameters.strokeWidth,
+          style: "width: 100%; margin: 0.5em 0;",
+          oninput: (event) => this._changeStrokeWidth(editPathStrokeLayer.identifier, event.target.value)
+        });
+        
+        const sliderLabelElement = html.div(
+          {
+            style: "margin-left: 0; font-size: 0.9em; color: #888;"
+          },
+          [translate("sidebar.visualization-settings.line-thickness")]
+        );
+        
+        formContents.push({
+          type: "single-icon",
+          element: sliderElement
+        });
+        
+        formContents.push({
+          type: "single-icon",
+          element: sliderLabelElement
+        });
+      }
+    }
+
+    // Section 2: Layers (all toggles for user-switchable layers)
+    formContents.push({
+      type: "header",
+      label: "Layers",
+      style: "margin-top: 24px; margin-bottom: 12px;",
+    });
+
+    // Add a toggle for each user-switchable layer (including "fontra.edit.path.stroke")
     for (const layerDef of userSwitchableLayers) {
       const checkboxID = `visualization-layer-${layerDef.identifier}`;
       const checkboxElement = html.createDomElement("input", {
@@ -90,7 +148,17 @@ export default class VisualizationSettingsPanel extends Panel {
         type: "single-icon",
         element: containerElement
       });
-      
+    }
+
+    // Section 3: Layer Appearance (all other sliders)
+    formContents.push({
+      type: "header",
+      label: "Layer Appearance",
+      style: "margin-top: 24px; margin-bottom: 12px;",
+    });
+
+    // Add sliders for line thickness for all other layers (excluding "fontra.edit.path.stroke")
+    for (const layerDef of otherLayers) {
       // Add slider for line thickness if the layer has strokeWidth parameter
       if (layerDef.screenParameters && layerDef.screenParameters.strokeWidth !== undefined) {
         const sliderID = `visualization-layer-${layerDef.identifier}-strokeWidth`;
@@ -107,10 +175,23 @@ export default class VisualizationSettingsPanel extends Panel {
         
         const sliderLabelElement = html.div(
           {
-            style: "margin-left: 1.5em; font-size: 0.9em; color: #888;"
+            style: "margin-left: 0; font-size: 0.9em; color: #888;"
           },
           [translate("sidebar.visualization-settings.line-thickness")]
         );
+        
+        // Add layer name as a label before the slider
+        const layerNameElement = html.div(
+          {
+            style: "margin-top: 1em; font-weight: 500;"
+          },
+          [layerDef.dontTranslate ? layerDef.name : translate(layerDef.name)]
+        );
+        
+        formContents.push({
+          type: "single-icon",
+          element: layerNameElement
+        });
         
         formContents.push({
           type: "single-icon",
