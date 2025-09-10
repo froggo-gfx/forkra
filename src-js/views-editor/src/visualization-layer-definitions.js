@@ -89,7 +89,7 @@ registerVisualizationLayerDefinition({
     strokeWidth: 0.25,
     strokeColor: "#00000020",
     coarseStrokeWidth: 0.5,
-    coarseStrokeColor: "#00000040",
+    coarseStrokeColor: "#0000040",
   },
   draw: (ctx, positionedGlyph, params, model, controller) => {
     const { strokeWidth, strokeColor, coarseStrokeWidth, coarseStrokeColor } = params;
@@ -183,8 +183,8 @@ registerVisualizationLayerDefinition({
   selectionFilter: (positionedGlyph) => positionedGlyph.isUndefined,
   zIndex: 500,
   colors: {
-    fillColor: "#0006",
-  },
+    fillColor: "#006",
+ },
   colorsDarkMode: {
     fillColor: "#FFF6",
   },
@@ -231,7 +231,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: false,
-  zIndex: 500,
+ zIndex: 500,
   screenParameters: { strokeWidth: 1 },
   colors: { strokeColor: "#0004" },
   colorsDarkMode: { strokeColor: "#FFF6" },
@@ -317,8 +317,8 @@ registerVisualizationLayerDefinition({
 
 // the following icon SVG path code is from https://tabler.io/icons/icon/lock
 const lockIconPath2D = new Path2D(
-  `M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-6z
-  M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0 M8 11v-4a4 4 0 1 1 8 0v4`
+  `M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 0 0 1 -2 -2v-6z
+  M11 16a1 1 0 2 0a1 1 0 0 0 -2 0 M8 11v-4a4 0 1 1 8 0v4`
 );
 
 registerVisualizationLayerDefinition({
@@ -370,7 +370,7 @@ registerVisualizationLayerDefinition({
     strokeWidth: 1,
     originMarkerRadius: 4,
   },
-  colors: { strokeColor: "#0006" },
+  colors: { strokeColor: "#006" },
   colorsDarkMode: { strokeColor: "#FFF8" },
 
   draw: (context, positionedGlyph, parameters, model, controller) => {
@@ -802,7 +802,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: false,
-  zIndex: 500,
+ zIndex: 500,
   screenParameters: { strokeWidth: 1, lineDash: [4, 4] },
   colors: { strokeColor: "#8888" },
   colorsDarkMode: { strokeColor: "#AAA8" },
@@ -863,7 +863,7 @@ registerVisualizationLayerDefinition({
   name: "Selected glyph",
   selectionFunc: glyphSelector("selected"),
   selectionFilter: (positionedGlyph) => !positionedGlyph.isEmpty,
-  zIndex: 200,
+ zIndex: 200,
   screenParameters: { outerStrokeWidth: 10, innerStrokeWidth: 3 },
   colors: { fillColor: "#000", strokeColor: "#7778", errorColor: "#AAA" },
   colorsDarkMode: { fillColor: "#FFF", strokeColor: "#FFF8", errorColor: "#999" },
@@ -1124,7 +1124,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: false,
-  zIndex: 600,
+ zIndex: 600,
   screenParameters: { fontSize: 11 },
   colors: { boxColor: "#FFFB", color: "#000" },
   colorsDarkMode: { boxColor: "#1118", color: "#FFF" },
@@ -1231,7 +1231,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: false,
-  zIndex: 450,
+ zIndex: 450,
   screenParameters: {
     cornerSize: 8,
     smoothSize: 8,
@@ -1357,11 +1357,11 @@ registerVisualizationLayerDefinition({
 
 registerVisualizationLayerDefinition({
   identifier: "fontra.coordinates",
-  name: "sidebar.user-settings.glyph.coordinates",
+ name: "sidebar.user-settings.glyph.coordinates",
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: false,
-  zIndex: 600,
+ zIndex: 600,
   screenParameters: { fontSize: 10 },
   colors: { boxColor: "#FFFB", color: "#000" },
   colorsDarkMode: { boxColor: "#1118", color: "#FFF" },
@@ -1660,7 +1660,7 @@ registerVisualizationLayerDefinition({
 registerVisualizationLayerDefinition({
   identifier: "fontra.edit.path.stroke",
   name: "Edit path stroke",
-  selectionFunc: glyphSelector("editing"),
+ selectionFunc: glyphSelector("editing"),
   zIndex: 500,
   screenParameters: {
     strokeWidth: 1,
@@ -1768,20 +1768,104 @@ registerVisualizationLayerDefinition({
                         parameters.stepsPerSegment
                     );
                     allCurvatureData.push(segmentCurvatureData);
-                } else if (isNext1OffQuad && isNextOn) {
-                    // Quadratic segment: ON-OFF-ON
-                    const p1 = path.getPoint(pointIndex);
-                    const p2 = path.getPoint(nextIndex1);
-                    const p3 = path.getPoint(nextOnIndex);
-
-                    quadraticSegments.push([p1, p2, p3]);
-                    const segmentCurvatureData = calculateCurvatureForQuadraticSegment(
-                        [p1.x, p1.y],
-                        [p2.x, p2.y],
-                        [p3.x, p3.y],
-                        parameters.stepsPerSegment
-                    );
-                    allCurvatureData.push(segmentCurvatureData);
+                } else {
+                    // Check for quadratic segments with possibly multiple off-curve points
+                    // Handle sequences of quadratic segments: ON-OFF*-ON
+                    let currentIndex = i;
+                    let currentPointIndex = pointIndex;
+                    let nextIndex = path.getAbsolutePointIndex(contourIndex, (currentIndex + 1) % numPoints);
+                    let nextType = path.pointTypes[nextIndex];
+                    
+                    // Collect consecutive quadratic off-curve points
+                    const quadOffCurvePoints = [];
+                    while ((nextType & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD) {
+                        quadOffCurvePoints.push(nextIndex);
+                        currentIndex++;
+                        nextIndex = path.getAbsolutePointIndex(contourIndex, (currentIndex + 1) % numPoints);
+                        nextType = path.pointTypes[nextIndex];
+                    }
+                    
+                    // If we found quadratic off-curve points and the next point is on-curve
+                    if (quadOffCurvePoints.length > 0 && (nextType & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE) {
+                        // Create quadratic segments for each off-curve point
+                        const startPoint = path.getPoint(currentPointIndex);
+                        const endPoint = path.getPoint(nextIndex);
+                        
+                        // For multiple consecutive off-curve points, we create segments between midpoints
+                        if (quadOffCurvePoints.length === 1) {
+                            // Single quadratic segment: ON-OFF-ON
+                            const offPoint = path.getPoint(quadOffCurvePoints[0]);
+                            quadraticSegments.push([startPoint, offPoint, endPoint]);
+                            const segmentCurvatureData = calculateCurvatureForQuadraticSegment(
+                                [startPoint.x, startPoint.y],
+                                [offPoint.x, offPoint.y],
+                                [endPoint.x, endPoint.y],
+                                parameters.stepsPerSegment
+                            );
+                            allCurvatureData.push(segmentCurvatureData);
+                        } else {
+                            // Multiple consecutive quadratic off-curve points
+                            // Create segments between midpoints as per the VarPackedPath quad decomposition logic
+                            const offCurvePoints = quadOffCurvePoints.map(idx => path.getPoint(idx));
+                            
+                            // First segment: start to first off-curve to midpoint between first and second
+                            const firstOff = offCurvePoints[0];
+                            const secondOff = offCurvePoints[1];
+                            const firstMid = {
+                                x: (firstOff.x + secondOff.x) / 2,
+                                y: (firstOff.y + secondOff.y) / 2
+                            };
+                            quadraticSegments.push([startPoint, firstOff, firstMid]);
+                            const firstSegmentCurvatureData = calculateCurvatureForQuadraticSegment(
+                                [startPoint.x, startPoint.y],
+                                [firstOff.x, firstOff.y],
+                                [firstMid.x, firstMid.y],
+                                parameters.stepsPerSegment
+                            );
+                            allCurvatureData.push(firstSegmentCurvatureData);
+                            
+                            // Middle segments: midpoint to off-curve to next midpoint
+                            for (let j = 1; j < offCurvePoints.length - 1; j++) {
+                                const prevOff = offCurvePoints[j - 1];
+                                const currentOff = offCurvePoints[j];
+                                const nextOff = offCurvePoints[j + 1];
+                                
+                                const prevMid = {
+                                    x: (prevOff.x + currentOff.x) / 2,
+                                    y: (prevOff.y + currentOff.y) / 2
+                                };
+                                const nextMid = {
+                                    x: (currentOff.x + nextOff.x) / 2,
+                                    y: (currentOff.y + nextOff.y) / 2
+                                };
+                                
+                                quadraticSegments.push([prevMid, currentOff, nextMid]);
+                                const middleSegmentCurvatureData = calculateCurvatureForQuadraticSegment(
+                                    [prevMid.x, prevMid.y],
+                                    [currentOff.x, currentOff.y],
+                                    [nextMid.x, nextMid.y],
+                                    parameters.stepsPerSegment
+                                );
+                                allCurvatureData.push(middleSegmentCurvatureData);
+                            }
+                            
+                            // Last segment: midpoint between last two to last off-curve to end
+                            const lastOff = offCurvePoints[offCurvePoints.length - 1];
+                            const prevLastOff = offCurvePoints[offCurvePoints.length - 2];
+                            const lastMid = {
+                                x: (prevLastOff.x + lastOff.x) / 2,
+                                y: (prevLastOff.y + lastOff.y) / 2
+                            };
+                            quadraticSegments.push([lastMid, lastOff, endPoint]);
+                            const lastSegmentCurvatureData = calculateCurvatureForQuadraticSegment(
+                                [lastMid.x, lastMid.y],
+                                [lastOff.x, lastOff.y],
+                                [endPoint.x, endPoint.y],
+                                parameters.stepsPerSegment
+                            );
+                            allCurvatureData.push(lastSegmentCurvatureData);
+                        }
+                    }
                 }
             }
         }
@@ -1827,7 +1911,6 @@ registerVisualizationLayerDefinition({
     }
 
     const scaleFactor = rawScale * zoomFactor;
-
 
 
 
@@ -2029,7 +2112,6 @@ registerVisualizationLayerDefinition({
     context.lineJoin = "miter";
 
   }});
-
 //// speedpunk debug
 registerVisualizationLayerDefinition({
   identifier: "fontra.curvature.debug",
@@ -2104,7 +2186,7 @@ registerVisualizationLayerDefinition({
                 console.log(`    isNextOn: ${isNextOn}`);
 
                 if (isNext1Off && isNext2Off && isNextOn) {
-                    // Cubic segment: ON-OFF-OFF-ON
+                    // Cubic segment: ON-OFF-ON
                     console.log("    Identified CUBIC segment");
                     const p1 = path.getPoint(pointIndex);
                     const p2 = path.getPoint(nextIndex1);
@@ -2124,27 +2206,111 @@ registerVisualizationLayerDefinition({
                     );
                     console.log(`      Curvature data calculated, ${segmentCurvatureData.length} points`);
                     allCurvatureData.push(segmentCurvatureData);
-                } else if (isNext1Quad && isNextOn) {
-                    // Quadratic segment: ON-OFF-ON
-                    console.log("    Identified QUADRATIC segment");
-                    const p1 = path.getPoint(pointIndex);
-                    const p2 = path.getPoint(nextIndex1);
-                    const p3 = path.getPoint(nextOnIndex);
-
-                    console.log(`      Points: p1(${p1.x},${p1.y}) p2(${p2.x},${p2.y}) p3(${p3.x},${p3.y})`);
-                    quadraticSegments.push([p1, p2, p3]);
-                    
-                    console.log("      Calculating curvature for quadratic segment...");
-                    const segmentCurvatureData = calculateCurvatureForQuadraticSegment(
-                        [p1.x, p1.y],
-                        [p2.x, p2.y],
-                        [p3.x, p3.y],
-                        parameters.stepsPerSegment
-                    );
-                    console.log(`      Curvature data calculated, ${segmentCurvatureData.length} points`);
-                    allCurvatureData.push(segmentCurvatureData);
                 } else {
-                    console.log("    Segment type not recognized");
+                    // Check for quadratic segments with possibly multiple off-curve points
+                    // Handle sequences of quadratic segments: ON-OFF*-ON
+                    let currentIndex = i;
+                    let currentPointIndex = pointIndex;
+                    let nextIndex = path.getAbsolutePointIndex(contourIndex, (currentIndex + 1) % numPoints);
+                    let nextType = path.pointTypes[nextIndex];
+                    
+                    // Collect consecutive quadratic off-curve points
+                    const quadOffCurvePoints = [];
+                    while ((nextType & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD) {
+                        quadOffCurvePoints.push(nextIndex);
+                        currentIndex++;
+                        nextIndex = path.getAbsolutePointIndex(contourIndex, (currentIndex + 1) % numPoints);
+                        nextType = path.pointTypes[nextIndex];
+                    }
+                    
+                    // If we found quadratic off-curve points and the next point is on-curve
+                    if (quadOffCurvePoints.length > 0 && (nextType & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE) {
+                        // Create quadratic segments for each off-curve point
+                        const startPoint = path.getPoint(currentPointIndex);
+                        const endPoint = path.getPoint(nextIndex);
+                        
+                        // For multiple consecutive off-curve points, we create segments between midpoints
+                        if (quadOffCurvePoints.length === 1) {
+                            // Single quadratic segment: ON-OFF-ON
+                            const offPoint = path.getPoint(quadOffCurvePoints[0]);
+                            quadraticSegments.push([startPoint, offPoint, endPoint]);
+                            
+                            console.log("    Identified QUADRATIC segment");
+                            console.log(`      Points: p1(${startPoint.x},${startPoint.y}) p2(${offPoint.x},${offPoint.y}) p3(${endPoint.x},${endPoint.y})`);
+                            
+                            const segmentCurvatureData = calculateCurvatureForQuadraticSegment(
+                                [startPoint.x, startPoint.y],
+                                [offPoint.x, offPoint.y],
+                                [endPoint.x, endPoint.y],
+                                parameters.stepsPerSegment
+                            );
+                            console.log(`      Curvature data calculated, ${segmentCurvatureData.length} points`);
+                            allCurvatureData.push(segmentCurvatureData);
+                        } else {
+                            // Multiple consecutive quadratic off-curve points
+                            // Create segments between midpoints as per the VarPackedPath quad decomposition logic
+                            const offCurvePoints = quadOffCurvePoints.map(idx => path.getPoint(idx));
+                            
+                            // First segment: start to first off-curve to midpoint between first and second
+                            const firstOff = offCurvePoints[0];
+                            const secondOff = offCurvePoints[1];
+                            const firstMid = {
+                                x: (firstOff.x + secondOff.x) / 2,
+                                y: (firstOff.y + secondOff.y) / 2
+                            };
+                            quadraticSegments.push([startPoint, firstOff, firstMid]);
+                            const firstSegmentCurvatureData = calculateCurvatureForQuadraticSegment(
+                                [startPoint.x, startPoint.y],
+                                [firstOff.x, firstOff.y],
+                                [firstMid.x, firstMid.y],
+                                parameters.stepsPerSegment
+                            );
+                            allCurvatureData.push(firstSegmentCurvatureData);
+                            
+                            // Middle segments: midpoint to off-curve to next midpoint
+                            for (let j = 1; j < offCurvePoints.length - 1; j++) {
+                                const prevOff = offCurvePoints[j - 1];
+                                const currentOff = offCurvePoints[j];
+                                const nextOff = offCurvePoints[j + 1];
+                                
+                                const prevMid = {
+                                    x: (prevOff.x + currentOff.x) / 2,
+                                    y: (prevOff.y + currentOff.y) / 2
+                                };
+                                const nextMid = {
+                                    x: (currentOff.x + nextOff.x) / 2,
+                                    y: (currentOff.y + nextOff.y) / 2
+                                };
+                                
+                                quadraticSegments.push([prevMid, currentOff, nextMid]);
+                                const middleSegmentCurvatureData = calculateCurvatureForQuadraticSegment(
+                                    [prevMid.x, prevMid.y],
+                                    [currentOff.x, currentOff.y],
+                                    [nextMid.x, nextMid.y],
+                                    parameters.stepsPerSegment
+                                );
+                                allCurvatureData.push(middleSegmentCurvatureData);
+                            }
+                            
+                            // Last segment: midpoint between last two to last off-curve to end
+                            const lastOff = offCurvePoints[offCurvePoints.length - 1];
+                            const prevLastOff = offCurvePoints[offCurvePoints.length - 2];
+                            const lastMid = {
+                                x: (prevLastOff.x + lastOff.x) / 2,
+                                y: (prevLastOff.y + lastOff.y) / 2
+                            };
+                            quadraticSegments.push([lastMid, lastOff, endPoint]);
+                            const lastSegmentCurvatureData = calculateCurvatureForQuadraticSegment(
+                                [lastMid.x, lastMid.y],
+                                [lastOff.x, lastOff.y],
+                                [endPoint.x, endPoint.y],
+                                parameters.stepsPerSegment
+                            );
+                            allCurvatureData.push(lastSegmentCurvatureData);
+                        }
+                    } else {
+                        console.log("    Segment type not recognized");
+                    }
                 }
             }
         }
@@ -2412,7 +2578,7 @@ export const allGlyphsCleanVisualizationLayerDefinition = {
   selectionFunc: glyphSelector("all"),
   zIndex: 500,
   colors: { fillColor: "#000" },
-  colorsDarkMode: { fillColor: "#FFF" },
+ colorsDarkMode: { fillColor: "#FFF" },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     context.fillStyle = parameters.fillColor;
     context.fill(positionedGlyph.glyph.flattenedPath2d);
@@ -2479,13 +2645,13 @@ function strokeLineDashed(context, x1, y1, x2, y2, pattern = [5, 5]) {
 function strokeCircle(context, cx, cy, radius) {
   context.beginPath();
   context.arc(cx, cy, radius, 0, 2 * Math.PI, false);
-  context.stroke();
+ context.stroke();
 }
 
 function strokePolygon(context, points) {
   context.beginPath();
   context.moveTo(points[0].x, points[0].y);
-  for (const pt of points.slice(1)) {
+ for (const pt of points.slice(1)) {
     context.lineTo(pt.x, pt.y);
   }
   context.closePath();
@@ -2493,7 +2659,7 @@ function strokePolygon(context, points) {
 }
 
 function drawWithDoubleStroke(
-  context,
+ context,
   path,
   outerLineWidth,
   innerLineWidth,
