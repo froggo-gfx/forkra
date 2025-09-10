@@ -666,7 +666,7 @@ export class VarPackedPath {
   }
 
   copy() {
-    return new this.constructor(
+    return new VarPackedPath(
       this.coordinates.copy(),
       this.pointTypes.slice(),
       this.contourInfo.map((item) => {
