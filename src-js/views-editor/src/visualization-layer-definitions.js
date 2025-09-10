@@ -1659,6 +1659,8 @@ registerVisualizationLayerDefinition({
   identifier: "fontra.edit.path.stroke",
   name: "Edit path stroke",
   selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
   zIndex: 500,
   screenParameters: {
     strokeWidth: 1,

@@ -7,6 +7,7 @@ export class VisualizationLayers {
     this.definitions = definitions;
     this._darkTheme = darkTheme;
     this._scaleFactor = 1;
+    this._parameterOverrides = {};
     this._visibleLayerIds = new Set(
       this.definitions
         .filter((layer) => !layer.userSwitchable || layer.defaultOn)
@@ -53,17 +54,29 @@ export class VisualizationLayers {
     this.requestUpdate();
   }
 
+  setParameterOverride(layerID, parameterName, value) {
+    if (!this._parameterOverrides[layerID]) {
+      this._parameterOverrides[layerID] = {};
+    }
+    this._parameterOverrides[layerID][parameterName] = value;
+    this.requestUpdate();
+  }
+
   buildLayers() {
     const layers = [];
     for (const layerDef of this.definitions) {
       if (!this.visibleLayerIds.has(layerDef.identifier)) {
         continue;
       }
-      const parameters = {
+      const baseParameters = {
         ...mulScalar(layerDef.screenParameters || {}, this.scaleFactor),
         ...(layerDef.glyphParameters || {}),
         ...(layerDef.colors || {}),
         ...(this.darkTheme && layerDef.colorsDarkMode ? layerDef.colorsDarkMode : {}),
+      };
+      const parameters = {
+        ...baseParameters,
+        ...this._parameterOverrides[layerDef.identifier],
       };
       const layer = {
         selectionFunc: layerDef.selectionFunc,
