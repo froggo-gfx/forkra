@@ -65,3 +65,8 @@ Inserted point (index 2) type: on-curve - PASS
 ## Conclusion
 
 The fix successfully resolves the issue by ensuring that the `addOverlap` function creates two on-curve points as intended, rather than one on-curve and one off-curve point. This maintains the correct path structure and ensures proper behavior in Fontra's path operations.
+
+
+
+======================
+error: the function works only once then needs page refresh which makes undo functionality unusable
