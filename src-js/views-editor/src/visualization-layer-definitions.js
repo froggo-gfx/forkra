@@ -19,10 +19,12 @@ import { subVectors } from "@fontra/core/vector.js";
 //// speedpunk
 import {
   calculateCurvatureForSegment,
+  calculateCurvatureForQuadraticSegment,
   findCurvatureRange,
   curvatureToColor,
-  solveCubicBezier
-} from "@fontra/core/curvature.js"; 
+  solveCubicBezier,
+  solveQuadraticBezier
+} from "@fontra/core/curvature.js";
 
 import { VarPackedPath } from "@fontra/core/var-path.js";
 
@@ -1725,9 +1727,10 @@ registerVisualizationLayerDefinition({
     const path = positionedGlyph.glyph?.instance?.path;
     if (!path) return;
 
-    // --- 1. Gather Cubic Segments and Calculate Curvature ---
+    // --- 1. Gather Cubic and Quadratic Segments and Calculate Curvature ---
     const allCurvatureData = []; // Store curvature data for all segments
-    const cubicSegments = []; // Store segment point coordinates
+    const cubicSegments = []; // Store cubic segment point coordinates
+    const quadraticSegments = []; // Store quadratic segment point coordinates
 
     for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
         const contour = path.getContour(contourIndex);
@@ -1743,13 +1746,14 @@ registerVisualizationLayerDefinition({
                 const nextType1 = path.pointTypes[nextIndex1];
                 const nextType2 = path.pointTypes[nextIndex2];
 
-                const isNext1Off = (nextType1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC;
-                const isNext2Off = (nextType2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC;
-
+                const isNext1OffCubic = (nextType1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC;
+                const isNext2OffCubic = (nextType2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC;
+                const isNext1OffQuad = (nextType1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD;
                 const nextOnIndex = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
                 const isNextOn = (path.pointTypes[nextOnIndex] & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
 
-                if (isNext1Off && isNext2Off) {
+                if (isNext1OffCubic && isNext2OffCubic && isNextOn) {
+                    // Cubic segment: ON-OFF-OFF-ON
                     const p1 = path.getPoint(pointIndex);
                     const p2 = path.getPoint(nextIndex1);
                     const p3 = path.getPoint(nextIndex2);
@@ -1761,6 +1765,20 @@ registerVisualizationLayerDefinition({
                         [p2.x, p2.y],
                         [p3.x, p3.y],
                         [p4.x, p4.y],
+                        parameters.stepsPerSegment
+                    );
+                    allCurvatureData.push(segmentCurvatureData);
+                } else if (isNext1OffQuad && isNextOn) {
+                    // Quadratic segment: ON-OFF-ON
+                    const p1 = path.getPoint(pointIndex);
+                    const p2 = path.getPoint(nextIndex1);
+                    const p3 = path.getPoint(nextOnIndex);
+
+                    quadraticSegments.push([p1, p2, p3]);
+                    const segmentCurvatureData = calculateCurvatureForQuadraticSegment(
+                        [p1.x, p1.y],
+                        [p2.x, p2.y],
+                        [p3.x, p3.y],
                         parameters.stepsPerSegment
                     );
                     allCurvatureData.push(segmentCurvatureData);
@@ -1840,9 +1858,10 @@ registerVisualizationLayerDefinition({
     */        
 
     // Draw ribbon for each cubic segment
+    let segmentIndex = 0;
     for (let s = 0; s < cubicSegments.length; s++) {
         const [p1, p2, p3, p4] = cubicSegments[s];
-        const segmentCurvatureData = allCurvatureData[s];
+        const segmentCurvatureData = allCurvatureData[segmentIndex++];
 
         if (!segmentCurvatureData || segmentCurvatureData.length < 2) continue;
 
@@ -1922,10 +1941,466 @@ registerVisualizationLayerDefinition({
             }
         }
     }
+    
+    // Draw ribbon for each quadratic segment
+    for (let s = 0; s < quadraticSegments.length; s++) {
+        const [p1, p2, p3] = quadraticSegments[s];
+        const segmentCurvatureData = allCurvatureData[segmentIndex++];
+
+        if (!segmentCurvatureData || segmentCurvatureData.length < 2) continue;
+
+        // Create paths for the ribbon edges
+        const originalPath = [];
+        const curvaturePath = [];
+
+        // Collect points for both paths
+        for (let i = 0; i < segmentCurvatureData.length; i++) {
+            const data = segmentCurvatureData[i];
+            const t = data.t;
+            const curvature = data.curvature;
+
+            // Get point and derivatives at t
+            const { r, r1 } = solveQuadraticBezier([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], t);
+
+            const x = r[0];
+            const y = r[1];
+            const dx_dt = r1[0];
+            const dy_dt = r1[1];
+
+            // Store original curve point
+            originalPath.push({ x, y });
+
+            // Calculate normal vector
+            let normalX, normalY;
+            if (parameters.illustrationPosition === "outsideOfCurve") {
+                normalX = dy_dt;
+                normalY = -dx_dt;
+            } else {
+                normalX = -dy_dt;
+                normalY = dx_dt;
+            }
+
+            // Normalize the normal vector
+            const magTangent = Math.sqrt(dx_dt * dx_dt + dy_dt * dy_dt);
+            if (magTangent === 0) continue;
+
+            const unitNormalX = normalX / magTangent;
+            const unitNormalY = normalY / magTangent;
+
+            // Scale normal vector by curvature
+            // New ribbon height calculation with updated zoom scaling
+            // --- after you compute the raw ribbon length --------------------
+            let baseLength = curvature * scaleFactor;
+
+            // absolute upper bound in **user-space** units, independent of zoom
+            const MAX_RIBBON_HEIGHT = 1;      // adjust this value to taste
+            baseLength = Math.max(-MAX_RIBBON_HEIGHT, Math.min(MAX_RIBBON_HEIGHT, baseLength));
+
+            // keep your original sign if you still need it
+            const scaledLength = baseLength * -20;
+
+            // Calculate the end point of the visualization line (ribbon edge)
+            const endX = x + unitNormalX * scaledLength;
+            const endY = y + unitNormalY * scaledLength;
+            curvaturePath.push({ x: endX, y: endY });
+        }
+
+        // Draw ribbon segments with individual colors based on local curvature
+        if (originalPath.length >= 2 && curvaturePath.length >= 2) {
+            for (let i = 0; i < originalPath.length - 1; i++) {
+                const segmentPath = new Path2D();
+                
+                // Create a segment of the ribbon
+                segmentPath.moveTo(originalPath[i].x, originalPath[i].y);
+                segmentPath.lineTo(originalPath[i+1].x, originalPath[i+1].y);
+                segmentPath.lineTo(curvaturePath[i+1].x, curvaturePath[i+1].y);
+                segmentPath.lineTo(curvaturePath[i].x, curvaturePath[i].y);
+                segmentPath.closePath();
+                
+                // Fill the segment with a color based on local curvature
+                const localCurvature = segmentCurvatureData[i].curvature;
+                const color = curvatureToColor(localCurvature, minCurvature, maxCurvature, parameters.colorStops);
+                context.fillStyle = color;
+                context.fill(segmentPath);
+            }
+        }
+    }
     context.lineCap = "butt";
     context.lineJoin = "miter";
 
   }});
+
+//// speedpunk debug
+registerVisualizationLayerDefinition({
+  identifier: "fontra.curvature.debug",
+  name: "SpeedPunk Debug",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: false,
+  zIndex: 490, // Draw on top
+  screenParameters: {
+    // Matches Speed Punk's concept
+    drawfactor: 0.01,
+    // Speed Punk uses curveGain * unitsPerEm^2. We'll use a base UPM or make it adjustable.
+    // Let's define a base UPM for scaling, or derive it if possible.
+    baseUnitsPerEm: 100, // Approximation, could be dynamic
+    curveGain: 1.0, // User adjustable gain, default to 1.0 for direct mapping
+    stepsPerSegment: 81,
+    colorStops: ["#8b939c", "#f29400", "#e3004f"], // Speed Punk cubic colors
+    // New parameter for illustration style
+    illustrationPosition: "outsideOfGlyph", // or "outsideOfCurve" (Speed Punk term)
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    console.log("=== SpeedPunk Debug Visualization Called ===");
+    const path = positionedGlyph.glyph?.instance?.path;
+    if (!path) {
+      console.log("No path found in glyph");
+      return;
+    }
+    console.log("Path found:", path);
+
+    // --- 1. Gather Cubic and Quadratic Segments and Calculate Curvature ---
+    const allCurvatureData = []; // Store curvature data for all segments
+    const cubicSegments = []; // Store cubic segment point coordinates
+    const quadraticSegments = []; // Store quadratic segment point coordinates
+
+    console.log(`Processing ${path.numContours} contours`);
+    
+    for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+        const contour = path.getContour(contourIndex);
+        const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
+        const numPoints = contour.pointTypes.length;
+        
+        console.log(`Processing contour ${contourIndex} with ${numPoints} points, starting at index ${startPoint}`);
+
+        for (let i = 0; i < numPoints; i++) {
+            const pointIndex = startPoint + i;
+            const pointType = path.pointTypes[pointIndex];
+            console.log(`  Point ${i} (index ${pointIndex}): type ${pointType}`);
+            
+            if ((pointType & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE) {
+                const nextIndex1 = path.getAbsolutePointIndex(contourIndex, (i + 1) % numPoints);
+                const nextIndex2 = path.getAbsolutePointIndex(contourIndex, (i + 2) % numPoints);
+                const nextIndex3 = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
+                const nextType1 = path.pointTypes[nextIndex1];
+                const nextType2 = path.pointTypes[nextIndex2];
+                const nextType3 = path.pointTypes[nextIndex3];
+
+                console.log(`    Checking sequence: ${pointIndex} -> ${nextIndex1} -> ${nextIndex2} -> ${nextIndex3}`);
+                console.log(`    Types: ${pointType} -> ${nextType1} -> ${nextType2} -> ${nextType3}`);
+
+                const isNext1Off = (nextType1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC;
+                const isNext2Off = (nextType2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC;
+                const isNext3Off = (nextType3 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC;
+                const isNext1Quad = (nextType1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD;
+                const isNext2Quad = (nextType2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD;
+                const isNext3Quad = (nextType3 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD;
+
+                const nextOnIndex = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
+                const isNextOn = (path.pointTypes[nextOnIndex] & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
+
+                console.log(`    isNext1Off: ${isNext1Off}, isNext2Off: ${isNext2Off}, isNext3Off: ${isNext3Off}`);
+                console.log(`    isNext1Quad: ${isNext1Quad}, isNext2Quad: ${isNext2Quad}, isNext3Quad: ${isNext3Quad}`);
+                console.log(`    isNextOn: ${isNextOn}`);
+
+                if (isNext1Off && isNext2Off && isNextOn) {
+                    // Cubic segment: ON-OFF-OFF-ON
+                    console.log("    Identified CUBIC segment");
+                    const p1 = path.getPoint(pointIndex);
+                    const p2 = path.getPoint(nextIndex1);
+                    const p3 = path.getPoint(nextIndex2);
+                    const p4 = path.getPoint(nextOnIndex);
+
+                    console.log(`      Points: p1(${p1.x},${p1.y}) p2(${p2.x},${p2.y}) p3(${p3.x},${p3.y}) p4(${p4.x},${p4.y})`);
+                    cubicSegments.push([p1, p2, p3, p4]);
+                    
+                    console.log("      Calculating curvature for cubic segment...");
+                    const segmentCurvatureData = calculateCurvatureForSegment(
+                        [p1.x, p1.y],
+                        [p2.x, p2.y],
+                        [p3.x, p3.y],
+                        [p4.x, p4.y],
+                        parameters.stepsPerSegment
+                    );
+                    console.log(`      Curvature data calculated, ${segmentCurvatureData.length} points`);
+                    allCurvatureData.push(segmentCurvatureData);
+                } else if (isNext1Quad && isNextOn) {
+                    // Quadratic segment: ON-OFF-ON
+                    console.log("    Identified QUADRATIC segment");
+                    const p1 = path.getPoint(pointIndex);
+                    const p2 = path.getPoint(nextIndex1);
+                    const p3 = path.getPoint(nextOnIndex);
+
+                    console.log(`      Points: p1(${p1.x},${p1.y}) p2(${p2.x},${p2.y}) p3(${p3.x},${p3.y})`);
+                    quadraticSegments.push([p1, p2, p3]);
+                    
+                    console.log("      Calculating curvature for quadratic segment...");
+                    const segmentCurvatureData = calculateCurvatureForQuadraticSegment(
+                        [p1.x, p1.y],
+                        [p2.x, p2.y],
+                        [p3.x, p3.y],
+                        parameters.stepsPerSegment
+                    );
+                    console.log(`      Curvature data calculated, ${segmentCurvatureData.length} points`);
+                    allCurvatureData.push(segmentCurvatureData);
+                } else {
+                    console.log("    Segment type not recognized");
+                }
+            }
+        }
+    }
+    
+    console.log(`Segment identification complete. Cubic: ${cubicSegments.length}, Quadratic: ${quadraticSegments.length}`);
+
+    if (cubicSegments.length === 0 && quadraticSegments.length === 0) {
+        console.log("No segments found, returning early");
+        return;
+    }
+
+    if (allCurvatureData.length === 0) {
+        console.log("No curvature data calculated, returning early");
+        return;
+    }
+
+    // --- 2. Determine Global Min/Max Curvature for Color Mapping (if needed for consistent coloring) ---
+    // Speed Punk maps color based on local curvature value, not global min/max.
+    // But for consistent coloring across the glyph, we might still use global.
+    // Let's keep it for potential use, but Speed Punk's color mapping is direct.
+    console.log("Finding curvature range...");
+    const { min: minCurvature, max: maxCurvature } = findCurvatureRange(allCurvatureData);
+    console.log(`Curvature range: min=${minCurvature}, max=${maxCurvature}`);
+
+    // --- 3. Draw Ribbon Visualization ---
+    context.lineCap = "round";
+    context.lineJoin = "round";
+
+    // Combined scaling factor from Speed Punk: drawfactor * curveGain * unitsPerEm^2
+    // We'll use baseUnitsPerEm as an approximation for now.
+    // Adjust curveGain via parameters.
+    //const scaleFactor = parameters.drawfactor * parameters.curveGain * Math.pow(parameters.baseUnitsPerEm, 2);
+    context.globalAlpha = 0.3;
+    const rawScale = parameters.drawfactor * parameters.curveGain * Math.pow(parameters.baseUnitsPerEm, 2);
+
+
+    const zoom = controller.magnification;
+
+    let zoomFactor;
+
+    if (zoom < 0.1) {
+  // below 10 % – keep full height
+  zoomFactor = 1.0;
+    } else if (zoom <= 1.0) {
+    // 10 % → 100 % – ramp down to 1/3
+    const norm = zoom / 0.1;                 // 1 … 10
+    zoomFactor = 0.1 + 0.1 * Math.pow(norm, -1.2);
+    } else {
+    // above 100 % – asymptotically approach 20 %
+    //zoomFactor = 0.20 + 0.13 * Math.pow(zoom, -0.5);
+    zoomFactor = 7;// + 0.1 / Math.sqrt(zoom);
+    }
+
+    const scaleFactor = rawScale * zoomFactor;
+
+    console.log(`Scale factor: raw=${rawScale}, zoomFactor=${zoomFactor}, final=${scaleFactor}`);
+
+    // Draw ribbon for each cubic segment
+    let segmentIndex = 0;
+    console.log(`Drawing ${cubicSegments.length} cubic segments`);
+    for (let s = 0; s < cubicSegments.length; s++) {
+        const [p1, p2, p3, p4] = cubicSegments[s];
+        const segmentCurvatureData = allCurvatureData[segmentIndex++];
+        
+        console.log(`  Drawing cubic segment ${s}: ${p1.x},${p1.y} -> ${p2.x},${p2.y} -> ${p3.x},${p3.y} -> ${p4.x},${p4.y}`);
+
+        if (!segmentCurvatureData || segmentCurvatureData.length < 2) {
+            console.log("    Skipping segment - insufficient curvature data");
+            continue;
+        }
+
+        // Create paths for the ribbon edges
+        const originalPath = [];
+        const curvaturePath = [];
+
+        // Collect points for both paths
+        for (let i = 0; i < segmentCurvatureData.length; i++) {
+            const data = segmentCurvatureData[i];
+            const t = data.t;
+            const curvature = data.curvature;
+
+            // Get point and derivatives at t
+            const { r, r1 } = solveCubicBezier([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y], t);
+
+            const x = r[0];
+            const y = r[1];
+            const dx_dt = r1[0];
+            const dy_dt = r1[1];
+
+            // Store original curve point
+            originalPath.push({ x, y });
+
+            // Calculate normal vector
+            let normalX, normalY;
+            if (parameters.illustrationPosition === "outsideOfCurve") {
+                normalX = dy_dt;
+                normalY = -dx_dt;
+            } else {
+                normalX = -dy_dt;
+                normalY = dx_dt;
+            }
+
+            // Normalize the normal vector
+            const magTangent = Math.sqrt(dx_dt * dx_dt + dy_dt * dy_dt);
+            if (magTangent === 0) {
+                console.log("    Skipping point - zero tangent magnitude");
+                continue;
+            }
+
+            const unitNormalX = normalX / magTangent;
+            const unitNormalY = normalY / magTangent;
+
+            // Scale normal vector by curvature
+            // New ribbon height calculation with updated zoom scaling
+            // --- after you compute the raw ribbon length --------------------
+            let baseLength = curvature * scaleFactor;
+
+            // absolute upper bound in **user-space** units, independent of zoom
+            const MAX_RIBBON_HEIGHT = 1;      // adjust this value to taste
+            baseLength = Math.max(-MAX_RIBBON_HEIGHT, Math.min(MAX_RIBBON_HEIGHT, baseLength));
+
+            // keep your original sign if you still need it
+            const scaledLength = baseLength * -20;
+
+            // Calculate the end point of the visualization line (ribbon edge)
+            const endX = x + unitNormalX * scaledLength;
+            const endY = y + unitNormalY * scaledLength;
+            curvaturePath.push({ x: endX, y: endY });
+        }
+
+        // Draw ribbon segments with individual colors based on local curvature
+        if (originalPath.length >= 2 && curvaturePath.length >= 2) {
+            console.log(`    Drawing ${originalPath.length - 1} ribbon segments`);
+            for (let i = 0; i < originalPath.length - 1; i++) {
+                const segmentPath = new Path2D();
+                
+                // Create a segment of the ribbon
+                segmentPath.moveTo(originalPath[i].x, originalPath[i].y);
+                segmentPath.lineTo(originalPath[i+1].x, originalPath[i+1].y);
+                segmentPath.lineTo(curvaturePath[i+1].x, curvaturePath[i+1].y);
+                segmentPath.lineTo(curvaturePath[i].x, curvaturePath[i].y);
+                segmentPath.closePath();
+                
+                // Fill the segment with a color based on local curvature
+                const localCurvature = segmentCurvatureData[i].curvature;
+                const color = curvatureToColor(localCurvature, minCurvature, maxCurvature, parameters.colorStops);
+                context.fillStyle = color;
+                context.fill(segmentPath);
+            }
+        } else {
+            console.log("    Skipping segment - insufficient points for ribbon");
+        }
+    }
+    
+    // Draw ribbon for each quadratic segment
+    console.log(`Drawing ${quadraticSegments.length} quadratic segments`);
+    for (let s = 0; s < quadraticSegments.length; s++) {
+        const [p1, p2, p3] = quadraticSegments[s];
+        const segmentCurvatureData = allCurvatureData[segmentIndex++];
+        
+        console.log(`  Drawing quadratic segment ${s}: ${p1.x},${p1.y} -> ${p2.x},${p2.y} -> ${p3.x},${p3.y}`);
+
+        if (!segmentCurvatureData || segmentCurvatureData.length < 2) {
+            console.log("    Skipping segment - insufficient curvature data");
+            continue;
+        }
+
+        // Create paths for the ribbon edges
+        const originalPath = [];
+        const curvaturePath = [];
+
+        // Collect points for both paths
+        for (let i = 0; i < segmentCurvatureData.length; i++) {
+            const data = segmentCurvatureData[i];
+            const t = data.t;
+            const curvature = data.curvature;
+
+            // Get point and derivatives at t
+            const { r, r1 } = solveQuadraticBezier([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], t);
+
+            const x = r[0];
+            const y = r[1];
+            const dx_dt = r1[0];
+            const dy_dt = r1[1];
+
+            // Store original curve point
+            originalPath.push({ x, y });
+
+            // Calculate normal vector
+            let normalX, normalY;
+            if (parameters.illustrationPosition === "outsideOfCurve") {
+                normalX = dy_dt;
+                normalY = -dx_dt;
+            } else {
+                normalX = -dy_dt;
+                normalY = dx_dt;
+            }
+
+            // Normalize the normal vector
+            const magTangent = Math.sqrt(dx_dt * dx_dt + dy_dt * dy_dt);
+            if (magTangent === 0) {
+                console.log("    Skipping point - zero tangent magnitude");
+                continue;
+            }
+
+            const unitNormalX = normalX / magTangent;
+            const unitNormalY = normalY / magTangent;
+
+            // Scale normal vector by curvature
+            // New ribbon height calculation with updated zoom scaling
+            // --- after you compute the raw ribbon length --------------------
+            let baseLength = curvature * scaleFactor;
+
+            // absolute upper bound in **user-space** units, independent of zoom
+            const MAX_RIBBON_HEIGHT = 1;      // adjust this value to taste
+            baseLength = Math.max(-MAX_RIBBON_HEIGHT, Math.min(MAX_RIBBON_HEIGHT, baseLength));
+
+            // keep your original sign if you still need it
+            const scaledLength = baseLength * -20;
+
+            // Calculate the end point of the visualization line (ribbon edge)
+            const endX = x + unitNormalX * scaledLength;
+            const endY = y + unitNormalY * scaledLength;
+            curvaturePath.push({ x: endX, y: endY });
+        }
+
+        // Draw ribbon segments with individual colors based on local curvature
+        if (originalPath.length >= 2 && curvaturePath.length >= 2) {
+            console.log(`    Drawing ${originalPath.length - 1} ribbon segments`);
+            for (let i = 0; i < originalPath.length - 1; i++) {
+                const segmentPath = new Path2D();
+                
+                // Create a segment of the ribbon
+                segmentPath.moveTo(originalPath[i].x, originalPath[i].y);
+                segmentPath.lineTo(originalPath[i+1].x, originalPath[i+1].y);
+                segmentPath.lineTo(curvaturePath[i+1].x, curvaturePath[i+1].y);
+                segmentPath.lineTo(curvaturePath[i].x, curvaturePath[i].y);
+                segmentPath.closePath();
+                
+                // Fill the segment with a color based on local curvature
+                const localCurvature = segmentCurvatureData[i].curvature;
+                const color = curvatureToColor(localCurvature, minCurvature, maxCurvature, parameters.colorStops);
+                context.fillStyle = color;
+                context.fill(segmentPath);
+            }
+        } else {
+            console.log("    Skipping segment - insufficient points for ribbon");
+        }
+    }
+    context.lineCap = "butt";
+    context.lineJoin = "miter";
+    
+    console.log("=== SpeedPunk Debug Visualization Complete ===");
+  }
+});
 
 //
 // allGlyphsCleanVisualizationLayerDefinition is not registered, but used

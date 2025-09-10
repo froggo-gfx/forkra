@@ -1,0 +1,29 @@
+{
+  "name": "test-curvature",
+  "axes": [],
+  "sources": [
+    {
+      "name": "default",
+      "location": {},
+      "layerName": "default"
+    }
+  ],
+  "layers": {
+    "default": {
+      "glyph": {
+        "xAdvance": 500,
+        "path": {
+          "coordinates": [100, 100, 100, 300, 300, 300, 300, 100, 300, 100, 400, 200, 500, 100],
+          "pointTypes": [0, 1, 1, 0, 0, 2, 0],
+          "contourInfo": [
+            {
+              "endPoint": 6,
+              "isClosed": true
+            }
+          ]
+        },
+        "components": []
+      }
+    }
+  }
+}
