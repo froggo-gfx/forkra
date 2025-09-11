@@ -191,34 +191,69 @@ function addOverlapTwoPoints(path, selectedPointIndices) {
   let relativeIndexA = selectedPointIndices[0] - startPoint;
   let relativeIndexB = selectedPointIndices[1] - startPoint;
   
-  // Calculate positions for the two new points on the segment between A and B
-  // We'll place them at 1/3 and 2/3 of the way between A and B
-  // Calculate the direction vector from A to B
-  const deltaX = pointB.x - pointA.x;
-  const deltaY = pointB.y - pointA.y;
+  // Calculate outgoing direction for point A (based on segment from A to next point)
+  const nextIndexA = (relativeIndexA + 1) % numPoints;
+  const nextPointA = path.getPoint(startPoint + nextIndexA);
   
-  // Create new points directly on the line between A and B
-  // Point C is 1/3 of the way from A to B
-  const newPointC = {
-    x: pointA.x + (deltaX / 3),
-    y: pointA.y + (deltaY / 3)
-  };
+  // Calculate incoming direction for point B (based on segment from previous point to B)
+  const prevIndexB = (relativeIndexB - 1 + numPoints) % numPoints;
+  const prevPointB = path.getPoint(startPoint + prevIndexB);
   
-  // Point D is 2/3 of the way from A to B
-  const newPointD = {
-    x: pointA.x + (2 * deltaX / 3),
-    y: pointA.y + (2 * deltaY / 3)
-  };
+  // Calculate combined offsets with fixed offset distance of 30 (same as single-point scenario)
+  // We need to displace in two directions:
+  // 1. Perpendicular to the path (to move outside the outline)
+  // 2. Along the path (negative for point A, positive for point B)
+  let offsetAX, offsetAY;
+  let offsetBX, offsetBY;
   
-  // Handle case where points are at the same location
-  if (deltaX === 0 && deltaY === 0) {
-    // Points are at the same location, just duplicate them
-    newPointC.x = pointA.x;
-    newPointC.y = pointA.y;
-    newPointD.x = pointB.x;
-    newPointD.y = pointB.y;
+  // Calculate direction vector from A to next point
+  const dirAX = nextPointA.x - pointA.x;
+  const dirAY = nextPointA.y - pointA.y;
+  // Calculate unit tangent vector
+  const lengthA = Math.sqrt(dirAX * dirAX + dirAY * dirAY);
+  let tangentAX = 0, tangentAY = 0;
+  if (lengthA !== 0) {
+    tangentAX = dirAX / lengthA;
+    tangentAY = dirAY / lengthA;
   }
+  // Calculate perpendicular vector (rotated 90 degrees counter-clockwise)
+  const perpAX = -tangentAY;
+  const perpAY = tangentAX;
   
+  // Combine perpendicular displacement (outside the outline) with negative tangent displacement
+  offsetAX = (perpAX - tangentAX) * 30;
+  offsetAY = (perpAY - tangentAY) * 30;
+  
+  // Calculate direction vector from previous point to B
+  const dirBX = pointB.x - prevPointB.x;
+  const dirBY = pointB.y - prevPointB.y;
+  // Calculate unit tangent vector
+  const lengthB = Math.sqrt(dirBX * dirBX + dirBY * dirBY);
+  let tangentBX = 0, tangentBY = 0;
+  if (lengthB !== 0) {
+    tangentBX = dirBX / lengthB;
+    tangentBY = dirBY / lengthB;
+  }
+  // Calculate perpendicular vector (rotated 90 degrees counter-clockwise)
+  const perpBX = -tangentBY;
+  const perpBY = tangentBX;
+  
+  // Combine perpendicular displacement (outside the outline) with positive tangent displacement
+  offsetBX = (perpBX + tangentBX) * 30;
+  offsetBY = (perpBY + tangentBY) * 30;
+  
+  // Create new points displaced in these directions from the original points A and B
+  // Point C is displaced from A in both perpendicular and negative tangent directions
+  const newPointC = {
+    x: pointA.x + offsetAX,
+    y: pointA.y + offsetAY
+  };
+  
+  // Point D is displaced from B in both perpendicular and positive tangent directions
+  const newPointD = {
+    x: pointB.x + offsetBX,
+    y: pointB.y + offsetBY
+  };
   
   // Insert new points
   // We want the order to be A, C, D, B

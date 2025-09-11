@@ -1534,6 +1534,8 @@ export class SceneController {
           console.warn('Error stack:', error.stack);
         }
       }
+      // Clear the selection after adding overlap
+      this.selection = new Set();
       return translate("action.add-overlap");
     });
   }
