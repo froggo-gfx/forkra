@@ -666,8 +666,14 @@ export class VarPackedPath {
   }
 
   copy() {
+    // Handle case where this.coordinates might be a Proxy object that doesn't properly
+    // forward the copy() method call to the underlying VarArray object
+    const coordinatesCopy = typeof this.coordinates.copy === 'function'
+      ? this.coordinates.copy()
+      : this.coordinates.slice();
+      
     return new VarPackedPath(
-      this.coordinates.copy(),
+      coordinatesCopy,
       this.pointTypes.slice(),
       this.contourInfo.map((item) => {
         return { ...item };

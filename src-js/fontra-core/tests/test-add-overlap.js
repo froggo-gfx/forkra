@@ -92,4 +92,49 @@ describe("addOverlap function tests", () => {
     expect(insertedPoint.x).to.be.a('number');
     expect(insertedPoint.y).to.be.a('number');
   });
+
+  it("should handle two selected points with new workflow", () => {
+    // Create a simple path with a single contour
+    const path = new VarPackedPath();
+    path.moveTo(0, 0);
+    path.lineTo(100, 0);
+    path.lineTo(100, 100);
+    path.lineTo(0, 100);
+    path.closePath();
+
+    // Select two points to add overlap to
+    const selectedPointIndices = [0, 2]; // First and third points (0,0) and (100,100)
+
+    // Call addOverlap function
+    const newPath = addOverlap(path, selectedPointIndices);
+
+    // Original path had 4 points, after addOverlap with two points selected it should have 6 points (2 points added)
+    // Note: With the new workflow, we don't delete original points and only add 2 new points
+    expect(newPath.numPoints).to.equal(6);
+
+    // Check that all points are on-curve
+    for (let i = 0; i < newPath.numPoints; i++) {
+      const point = newPath.getPoint(i);
+      expect(point.type).to.be.undefined; // All points should be on-curve
+    }
+
+    // Verify that original points are still in place
+    const originalPointA = newPath.getPoint(0);
+    // After inserting points, the indices of existing points may have shifted
+    // We need to find the second original point by its coordinates
+    let originalPointB = null;
+    for (let i = 0; i < newPath.numPoints; i++) {
+      const point = newPath.getPoint(i);
+      if (point.x === 100 && point.y === 100) {
+        originalPointB = point;
+        break;
+      }
+    }
+    
+    expect(originalPointA.x).to.equal(0);
+    expect(originalPointA.y).to.equal(0);
+    expect(originalPointB).to.not.be.null;
+    expect(originalPointB.x).to.equal(100);
+    expect(originalPointB.y).to.equal(100);
+  });
 });

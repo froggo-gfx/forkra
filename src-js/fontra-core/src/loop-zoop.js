@@ -74,13 +74,16 @@ export function addOverlap(path, selectedPointIndices) {
     }
   }
   
-  // Convert selected points to a Set for faster lookup
-  const selectedPointsSet = new Set(selectedPointIndices.map(index => {
-    const point = newPath.getPoint(index);
-    return point ? `${point.x},${point.y}` : null;
-  }).filter(Boolean));
+  // Convert selected point indices to a Set for faster lookup
+  const selectedPointIndicesSet = new Set(selectedPointIndices);
   
-  // Process each contour
+  // Check if we have exactly two points selected for the new workflow
+  if (selectedPointIndices.length === 2) {
+    // New workflow for two selected points
+    return addOverlapTwoPoints(newPath, selectedPointIndices);
+  }
+  
+  // Process each contour (existing workflow for single point selection)
   for (let contourIndex = 0; contourIndex < newPath.numContours; contourIndex++) {
     const startPoint = newPath.getAbsolutePointIndex(contourIndex, 0);
     const numPoints = newPath.getNumPointsOfContour(contourIndex);
@@ -97,7 +100,7 @@ export function addOverlap(path, selectedPointIndices) {
       const point = newPath.getPoint(pointIndex);
       
       // Check if this point is selected and is an on-curve point
-      if (point && !point.type && selectedPointsSet.has(`${point.x},${point.y}`)) {
+      if (point && !point.type && selectedPointIndicesSet.has(pointIndex)) {
         // This is an on-curve point that is selected
         // Calculate offset points based on neighboring segments
         
@@ -158,6 +161,83 @@ export function addOverlap(path, selectedPointIndices) {
   }
   
   return newPath;
+
+function addOverlapTwoPoints(path, selectedPointIndices) {
+  // Get the two selected points
+  const pointA = path.getPoint(selectedPointIndices[0]);
+  const pointB = path.getPoint(selectedPointIndices[1]);
+  
+  // Validate that both points are on-curve points
+  if (pointA.type || pointB.type) {
+    throw new Error('Both selected points must be on-curve points');
+  }
+  
+  // Find which contour each point belongs to
+  const contourIndexA = path.getContourIndex(selectedPointIndices[0]);
+  const contourIndexB = path.getContourIndex(selectedPointIndices[1]);
+  
+  // Both points must be in the same contour
+  if (contourIndexA !== contourIndexB) {
+    throw new Error('Both selected points must be in the same contour');
+  }
+  
+  const contourIndex = contourIndexA;
+  
+  // Get contour information
+  const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
+  const numPoints = path.getNumPointsOfContour(contourIndex);
+  
+  // Get relative indices within the contour
+  let relativeIndexA = selectedPointIndices[0] - startPoint;
+  let relativeIndexB = selectedPointIndices[1] - startPoint;
+  
+  // Calculate positions for the two new points on the segment between A and B
+  // We'll place them at 1/3 and 2/3 of the way between A and B
+  // Calculate the direction vector from A to B
+  const deltaX = pointB.x - pointA.x;
+  const deltaY = pointB.y - pointA.y;
+  
+  // Create new points directly on the line between A and B
+  // Point C is 1/3 of the way from A to B
+  const newPointC = {
+    x: pointA.x + (deltaX / 3),
+    y: pointA.y + (deltaY / 3)
+  };
+  
+  // Point D is 2/3 of the way from A to B
+  const newPointD = {
+    x: pointA.x + (2 * deltaX / 3),
+    y: pointA.y + (2 * deltaY / 3)
+  };
+  
+  // Handle case where points are at the same location
+  if (deltaX === 0 && deltaY === 0) {
+    // Points are at the same location, just duplicate them
+    newPointC.x = pointA.x;
+    newPointC.y = pointA.y;
+    newPointD.x = pointB.x;
+    newPointD.y = pointB.y;
+  }
+  
+  
+  // Insert new points
+  // We want the order to be A, C, D, B
+  // So we insert D first (at the higher index) to avoid affecting the lower index
+  // Then we insert C
+  if (relativeIndexA < relativeIndexB) {
+    // Insert newPointC after pointA
+    path.insertPoint(contourIndex, relativeIndexA + 1, newPointC);
+    // Insert newPointD after newPointC (which is now at relativeIndexA + 2)
+    path.insertPoint(contourIndex, relativeIndexA + 2, newPointD);
+  } else {
+    // Insert newPointD after pointB
+    path.insertPoint(contourIndex, relativeIndexB + 1, newPointD);
+    // Insert newPointC after newPointD (which is now at relativeIndexB + 2, but relativeIndexA has shifted by 1)
+    path.insertPoint(contourIndex, relativeIndexA + 1, newPointC);
+  }
+  
+  return path;
+}
 }
 
 function calculateOffset(pt1, pt2, offsetDistance = 30) {
