@@ -15,10 +15,12 @@ import { translate, translatePlural } from "@fontra/core/localization.js";
 import { MouseTracker } from "@fontra/core/mouse-tracker.js";
 import { ObservableController } from "@fontra/core/observable-object.js";
 import {
-  addOverlapToPath,
   connectContours,
+  expandTerminals,
   scalePoint,
   splitPathAtPointIndices,
+  checkFourPointConfiguration,
+  computeChordIntersections,
 } from "@fontra/core/path-functions.js";
 import {
   equalRect,
@@ -50,6 +52,8 @@ import * as vector from "@fontra/core/vector.js";
 import { dialog, message } from "@fontra/web-components/modal-dialog.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import { SceneModel, getSelectedGlyphName } from "./scene-model.js";
+//// grid
+import { toggleMagneticSnap } from "./edit-behavior.js";
 
 export class SceneController {
   constructor(
@@ -64,6 +68,8 @@ export class SceneController {
     this.autoViewBox = true;
 
     this.setupSceneSettings();
+    //// grid
+    this.sceneSettingsController.setItem("coarseGridSpacing", 10);
     this.sceneSettings = this.sceneSettingsController.model;
     this.visualizationLayersSettings = visualizationLayersSettings;
 
@@ -113,6 +119,7 @@ export class SceneController {
       backgroundImagesAreLocked: true,
       backgroundLayers: {},
       editingLayers: {},
+      virtualPoints: [],
     });
     this.sceneSettings = this.sceneSettingsController.model;
 
@@ -378,6 +385,16 @@ export class SceneController {
   }
 
   setupSettingsListeners() {
+    //// grid
+    this.sceneSettingsController.addKeyListener("coarseGridSpacing", () =>
+    this.canvasController.requestUpdate()
+    );
+
+    window.coarseGridSpacing = this.sceneSettings.coarseGridSpacing || 1;
+    this.sceneSettingsController.addKeyListener("coarseGridSpacing", (event) => {
+    window.coarseGridSpacing = event.newValue;
+    });
+
     this.sceneSettingsController.addKeyListener("selectedGlyph", (event) => {
       this._resetStoredGlyphPosition();
     });
@@ -454,6 +471,31 @@ export class SceneController {
   setupContextMenuActions() {
     const topic = "0030-action-topics.menu.edit";
 
+    //// grid
+    registerAction(
+        "action.decrease-coarse-grid",
+        { titleKey: "action.decrease-coarse-grid", defaultShortCuts: [{ baseKey: "f" }] },
+        () => {
+        const v = this.sceneSettings.coarseGridSpacing;
+        if (v > 5) this.sceneSettingsController.setItem("coarseGridSpacing", v - 5);
+        }
+        );
+    
+        registerAction(
+        "action.increase-coarse-grid",
+        { titleKey: "action.increase-coarse-grid", defaultShortCuts: [{ baseKey: "g" }] },
+        () => {
+        const v = this.sceneSettings.coarseGridSpacing;
+        if (v < 40) this.sceneSettingsController.setItem("coarseGridSpacing", v + 5);
+        }
+        );
+    
+        registerAction(
+      "action.toggle-magnetic-snap",
+      { titleKey: "action.toggle-magnetic-snap", defaultShortCuts: [{ baseKey: "g", shiftKey: true }] },
+      () => toggleMagneticSnap()
+    );
+
     registerAction(
       "action.join-contours",
       {
@@ -514,13 +556,16 @@ export class SceneController {
     });
 
     registerAction(
-      "action.add-overlap",
+
+      "action.check-four-point-configuration",
       {
         topic,
-        defaultShortCuts: [{ baseKey: "o", commandKey: true, shiftKey: true }],
+        titleKey: "action.check-four-point-configuration",
+        defaultShortCuts: [{ baseKey: "e", commandKey: true, altKey: true }],
       },
-      () => this.doAddOverlap(),
-      () => this.contextMenuState.pointSelection?.length
+      () => this.doCheckFourPointConfiguration(),
+      () => this.sceneSettings.selectedGlyph?.isEditing
+
     );
   }
 
@@ -703,6 +748,8 @@ export class SceneController {
       const layerInfo = Object.entries(
         this.getEditingLayerFromGlyphLayers(glyph.layers)
       ).map(([layerName, layerGlyph]) => {
+        //// grid
+        window._sceneController = this;   // <-- add this
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           this.selection,
@@ -1220,6 +1267,9 @@ export class SceneController {
       this.selection = initialSelection;
       editContext.editCancel();
     }
+    
+    // Update virtual points after any edit operation
+    await this.updateVirtualPointsIfNeeded();
   }
 
   _insertGlyphSourceIfAtFontSource(varGlyph, glyphController) {
@@ -1475,81 +1525,98 @@ export class SceneController {
     });
   }
 
-  async doAddOverlap() {
-    const { point: pointSelection } = parseSelection(this.selection);
-    await this.editLayersAndRecordChanges((layerGlyphs) => {
-      for (const layerGlyph of Object.values(layerGlyphs)) {
-        // Debugging: Log what we're working with
-        console.log('Processing layerGlyph:', layerGlyph);
-        console.log('Layer name:', layerGlyph.name);
-        console.log('Path object:', layerGlyph.path);
-        
-        const path = layerGlyph.path;
-        // Validate that path is a VarPackedPath instance with all required methods
-        if (!path || typeof path !== 'object') {
-          console.warn('Invalid path object for addOverlap, skipping - not an object');
-          continue;
-        }
-        if (!(path instanceof VarPackedPath)) {
-          console.warn('Invalid path object for addOverlap, skipping - not a VarPackedPath instance');
-          continue;
-        }
-        
-        const requiredMethods = ['copy', 'getPoint', 'getAbsolutePointIndex', 'getNumPointsOfContour', 'setPointPosition', 'insertPoint'];
-        let hasAllMethods = true;
-        for (const method of requiredMethods) {
-          if (typeof path[method] !== 'function') {
-            console.warn(`Invalid path object for addOverlap, skipping - missing method: ${method}`);
-            hasAllMethods = false;
-            break;
-          }
-        }
-        
-        // Additional check for getPoint method specifically
-        if (typeof path.getPoint !== 'function') {
-          console.warn('Invalid path object for addOverlap, skipping - missing getPoint method');
-          continue;
-        }
-        
-        if (!hasAllMethods) {
-          continue;
-        }
-        
-        if (typeof path.numContours === 'undefined') {
-          console.warn('Invalid path object for addOverlap, skipping - missing numContours property');
-          continue;
-        }
-        
-        try {
-          // Debugging: Log the parameters we're passing to addOverlap
-          console.log('Calling addOverlapToPath with path:', path);
-          console.log('Point selection:', pointSelection);
-          
-          // Create a copy of the path with overlap added
-          // Validate that path is a VarPackedPath instance
-          if (!(path instanceof VarPackedPath)) {
-            console.warn('Invalid path object for addOverlap, skipping - not a VarPackedPath instance in doAddOverlap');
-            continue;
-          }
-          let newPath;
-          try {
-            newPath = addOverlapToPath(path, pointSelection);
-          } catch (error) {
-            console.warn('Error while adding overlap:', error);
-            console.warn('Error stack:', error.stack);
-            continue;
-          }
-          // Replace the path with the new path that has overlap
-          layerGlyph.path = newPath;
-        } catch (error) {
-          console.warn('Error while adding overlap:', error);
-          console.warn('Error stack:', error.stack);
-        }
-      }
-      // Clear the selection after adding overlap
-      this.selection = new Set();
-      return translate("action.add-overlap");
-    });
+  async doCheckFourPointConfiguration() {
+    // Get the current selection
+    const selection = this.selection;
+    
+    // Parse the point selection
+    const { point: pointSelection } = parseSelection(selection);
+    
+    // Check if exactly four points are selected
+    if (!pointSelection || pointSelection.length !== 4) {
+      return;
+    }
+    
+    // Get the current glyph's path
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph || !positionedGlyph.glyph) {
+      return;
+    }
+    
+    const path = positionedGlyph.glyph.path;
+    
+    // Call checkFourPointConfiguration with the path and selected point indices
+    const isEligible = checkFourPointConfiguration(path, pointSelection);
+    
+    // Log "Eligible" to the console if the configuration matches
+    if (isEligible) {
+      console.log("Eligible");
+      
+      // Compute chord intersections
+      const virtualPoints = computeChordIntersections(pointSelection, path);
+      
+      // Store the results in sceneModel.virtualPoints
+      this.sceneModel.virtualPoints = virtualPoints;
+      
+      // Trigger canvas update
+      this.canvasController.requestUpdate();
+    } else {
+      // Log ineligible message when exactly four points are selected but don't meet criteria
+      console.log("Ineligible: Selected points do not meet the required geometric configuration");
+      
+      // Clear virtual points if not eligible
+      this.sceneModel.virtualPoints = [];
+      
+      // Trigger canvas update
+      this.canvasController.requestUpdate();
+    }
+  }
+
+  async updateVirtualPointsIfNeeded() {
+    // Get the current selection
+    const selection = this.selection;
+    
+    // Parse the point selection
+    const { point: pointSelection } = parseSelection(selection);
+    
+    // Check if exactly four points are selected
+    if (!pointSelection || pointSelection.length !== 4) {
+      // If not exactly four points are selected, clear virtual points
+      this.sceneModel.virtualPoints = [];
+      this.canvasController.requestUpdate();
+      return;
+    }
+    
+    // Get the current glyph's path
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph || !positionedGlyph.glyph) {
+      // If there's no glyph, clear virtual points
+      this.sceneModel.virtualPoints = [];
+      this.canvasController.requestUpdate();
+      return;
+    }
+    
+    const path = positionedGlyph.glyph.path;
+    
+    // Call checkFourPointConfiguration with the path and selected point indices
+    const isEligible = checkFourPointConfiguration(path, pointSelection);
+    
+    if (isEligible) {
+      // Compute chord intersections
+      const virtualPoints = computeChordIntersections(pointSelection, path);
+      
+      // Store the results in sceneModel.virtualPoints
+      this.sceneModel.virtualPoints = virtualPoints;
+      
+      // Trigger canvas update
+      this.canvasController.requestUpdate();
+    } else {
+      // Clear virtual points if not eligible
+      this.sceneModel.virtualPoints = [];
+      
+      // Trigger canvas update
+      this.canvasController.requestUpdate();
+    }
   }
 
   getPathConnectDetector(path) {

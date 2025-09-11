@@ -639,12 +639,20 @@ export class SceneModel {
 
     let pointIndex;
     if (parsedCurrentSelection) {
+      // Ensure the path object has the required method
+      if (typeof positionedGlyph.glyph.path.pointIndexNearPointFromPointIndices !== 'function') {
+        return new Set();
+      }
       pointIndex = positionedGlyph.glyph.path.pointIndexNearPointFromPointIndices(
         glyphPoint,
         size,
         parsedCurrentSelection.point || []
       );
     } else {
+      // Ensure the path object has the required method
+      if (typeof positionedGlyph.glyph.path.pointIndexNearPoint !== 'function') {
+        return new Set();
+      }
       pointIndex = positionedGlyph.glyph.path.pointIndexNearPoint(glyphPoint, size);
     }
     if (pointIndex !== undefined) {
