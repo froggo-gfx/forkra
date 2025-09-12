@@ -448,6 +448,9 @@ export class SceneController {
     this.canvasController.canvas.addEventListener("keydown", (event) =>
       this.handleKeyDown(event)
     );
+    this.canvasController.canvas.addEventListener("keyup", (event) =>
+      this.handleKeyUp(event)
+    );
   }
 
   setupContextMenuActions() {
@@ -519,9 +522,10 @@ export class SceneController {
         defaultShortCuts: [{ baseKey: "n", commandKey: true, altKey: true }],
       },
       () => {
-        // Toggle the normal vector visualization layer
-        this.visualizationLayersSettings.model["fontra.normal.vector"] =
-          !this.visualizationLayersSettings.model["fontra.normal.vector"];
+        // Activate the normal vector visualization layer temporarily
+        this.visualizationLayersSettings.model["fontra.normal.vector"] = true;
+        // Set a flag to indicate this was activated by hotkey
+        this._normalVectorActivatedByHotkey = true;
       },
       () => {
         // Only enable when a single point is selected
@@ -529,6 +533,19 @@ export class SceneController {
         return selectedPointIndices?.length === 1;
       }
     );
+  }
+
+  handleKeyUp(event) {
+    // Check if the released key is the normal vector hotkey (Ctrl+Alt+N)
+    if (event.key === "n" && event.ctrlKey && event.altKey) {
+      // Deactivate the normal vector visualization layer if it was activated by hotkey
+      if (this._normalVectorActivatedByHotkey) {
+        this.visualizationLayersSettings.model["fontra.normal.vector"] = false;
+        this._normalVectorActivatedByHotkey = false;
+        // Request update to redraw the scene without the visualization
+        this.canvasController.requestUpdate();
+      }
+    }
   }
 
   setAutoViewBox() {

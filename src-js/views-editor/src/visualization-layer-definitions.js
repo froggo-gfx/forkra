@@ -1857,8 +1857,13 @@ registerVisualizationLayerDefinition({
     arrowSize: 10,
   },
   colors: { strokeColor: "#00F8" },
-  colorsDarkMode: { strokeColor: "#00F8" },
+  colorsDarkMode: { strokeColor: "#0F8" },
   draw: (context, positionedGlyph, parameters, model, controller) => {
+    // Only show when the visualization layer is enabled (hotkey pressed)
+    if (!model.visualizationLayersSettings?.model?.["fontra.normal.vector"]) {
+      return;
+    }
+    
     // Only show when a single point is selected
     const { point: selectedPointIndices } = parseSelection(model.selection);
     if (!selectedPointIndices || selectedPointIndices.length !== 1) {
@@ -1871,15 +1876,14 @@ registerVisualizationLayerDefinition({
       return;
     }
 
-    // Get the contour and segment information for the selected point
-    const [contourIndex, contourPointIndex] = positionedGlyph.glyph.path.getContourAndPointIndex(pointIndex);
-    const contourInfo = positionedGlyph.glyph.path.contourInfo[contourIndex];
-    
     // If it's an off-curve point, we don't show the normal vector
     if (point.type) {
       return;
     }
 
+    // Get the contour index for the selected point
+    const [contourIndex, contourPointIndex] = positionedGlyph.glyph.path.getContourAndPointIndex(pointIndex);
+    
     // Get all segments in the contour
     const segments = [...positionedGlyph.glyph.path.iterContourDecomposedSegments(contourIndex)];
     
@@ -1892,57 +1896,55 @@ registerVisualizationLayerDefinition({
         if (!segment.points || !Array.isArray(segment.points) || segment.points.length < 2) {
           continue;
         }
+        
         // Validate that all points in segment.points have x and y properties
         if (!segment.points.every(p => p && typeof p.x === 'number' && typeof p.y === 'number')) {
           continue;
         }
-        let normal;
+        
         try {
-          const bezier = new Bezier(segment.points);
-          normal = normalAtClosestPoint(bezier, point);
+          // Create a deep copy of the points array to ensure we're not passing
+          // any references that might cause issues
+          const pointsCopy = segment.points.map(p => ({ x: p.x, y: p.y }));
+          
+          const bezier = new Bezier(pointsCopy);
+          const normal = normalAtClosestPoint(bezier, point);
+          
+          // Draw the normal vector as an arrow
+          const arrowLength = parameters.arrowSize * 3;
+          const endPoint = {
+            x: point.x + normal.x * arrowLength,
+            y: point.y + normal.y * arrowLength
+          };
+          
+          context.strokeStyle = parameters.strokeColor;
+          context.lineWidth = parameters.strokeWidth;
+          context.lineCap = "round";
+          context.lineJoin = "round";
+          
+          // Draw the arrow shaft
+          strokeLine(context, point.x, point.y, endPoint.x, endPoint.y);
+          
+          // Draw the arrowhead
+          const angle = Math.atan2(endPoint.y - point.y, endPoint.x - point.x);
+          const arrowHeadSize = parameters.arrowSize;
+          
+          context.beginPath();
+          context.moveTo(endPoint.x, endPoint.y);
+          context.lineTo(
+            endPoint.x - arrowHeadSize * Math.cos(angle - Math.PI / 6),
+            endPoint.y - arrowHeadSize * Math.sin(angle - Math.PI / 6)
+          );
+          context.moveTo(endPoint.x, endPoint.y);
+          context.lineTo(
+            endPoint.x - arrowHeadSize * Math.cos(angle + Math.PI / 6),
+            endPoint.y - arrowHeadSize * Math.sin(angle + Math.PI / 6)
+          );
+          context.stroke();
         } catch (error) {
           // If there's an error creating or using the Bezier object, skip this segment
           console.warn("Error calculating normal vector for segment:", error);
-          continue;
         }
-        
-        // Validate that normal is an object with x and y properties
-        if (!normal || typeof normal.x !== 'number' || typeof normal.y !== 'number') {
-          console.warn("Invalid normal vector calculated for segment");
-          continue;
-        }
-        
-        // Draw the normal vector as an arrow
-        const arrowLength = parameters.arrowSize * 3;
-        const endPoint = {
-          x: point.x + normal.x * arrowLength,
-          y: point.y + normal.y * arrowLength
-        };
-        
-        context.strokeStyle = parameters.strokeColor;
-        context.lineWidth = parameters.strokeWidth;
-        context.lineCap = "round";
-        context.lineJoin = "round";
-        
-        // Draw the arrow shaft
-        strokeLine(context, point.x, point.y, endPoint.x, endPoint.y);
-        
-        // Draw the arrowhead
-        const angle = Math.atan2(endPoint.y - point.y, endPoint.x - point.x);
-        const arrowHeadSize = parameters.arrowSize;
-        
-        context.beginPath();
-        context.moveTo(endPoint.x, endPoint.y);
-        context.lineTo(
-          endPoint.x - arrowHeadSize * Math.cos(angle - Math.PI / 6),
-          endPoint.y - arrowHeadSize * Math.sin(angle - Math.PI / 6)
-        );
-        context.moveTo(endPoint.x, endPoint.y);
-        context.lineTo(
-          endPoint.x - arrowHeadSize * Math.cos(angle + Math.PI / 6),
-          endPoint.y - arrowHeadSize * Math.sin(angle + Math.PI / 6)
-        );
-        context.stroke();
         break;
       }
     }

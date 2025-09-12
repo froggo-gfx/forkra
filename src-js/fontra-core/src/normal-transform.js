@@ -40,6 +40,22 @@ export function findClosestTOnBezier(bezier, point, iterations = 5) {
     throw new Error('Invalid Bezier object: points array is missing or invalid');
   }
   
+  // Additional validation to ensure points array has a valid length property
+  try {
+    // Try to access the length property to ensure it's not undefined
+    const length = bezier.points.length;
+    if (typeof length !== 'number' || isNaN(length)) {
+      throw new Error('Invalid Bezier object: points array length is not a valid number');
+    }
+    
+    // Validate that we have a reasonable number of points for a Bezier curve (2-4 points)
+    if (length < 2 || length > 4) {
+      throw new Error(`Invalid Bezier object: expected 2-4 points, got ${length}`);
+    }
+  } catch (error) {
+    throw new Error('Invalid Bezier object: unable to access points array length');
+  }
+  
   // Validate that all points have x and y properties
   if (!bezier.points.every(p => p && typeof p.x === 'number' && typeof p.y === 'number')) {
     throw new Error('Invalid Bezier object: points are missing x or y properties');
@@ -52,9 +68,31 @@ export function findClosestTOnBezier(bezier, point, iterations = 5) {
   for (let i = 0; i < iterations; i++) {
     let pointOnCurve, derivative, secondDerivative;
     try {
+      // Additional validation before calling Bezier methods
+      if (!bezier || typeof bezier.get !== 'function') {
+        throw new Error('Invalid Bezier object: get method is missing');
+      }
+      if (typeof bezier.derivative !== 'function') {
+        throw new Error('Invalid Bezier object: derivative method is missing');
+      }
+      if (typeof bezier.dderivative !== 'function') {
+        throw new Error('Invalid Bezier object: dderivative method is missing');
+      }
+      
       pointOnCurve = bezier.get(t);
       derivative = bezier.derivative(t);
       secondDerivative = bezier.dderivative(t);
+      
+      // Additional validation of returned values
+      if (!pointOnCurve || typeof pointOnCurve.x !== 'number' || typeof pointOnCurve.y !== 'number') {
+        throw new Error('Invalid point returned by bezier.get()');
+      }
+      if (!derivative || typeof derivative.x !== 'number' || typeof derivative.y !== 'number') {
+        throw new Error('Invalid derivative returned by bezier.derivative()');
+      }
+      if (!secondDerivative || typeof secondDerivative.x !== 'number' || typeof secondDerivative.y !== 'number') {
+        throw new Error('Invalid second derivative returned by bezier.dderivative()');
+      }
     } catch (error) {
       // If there's an error calling the Bezier methods, skip this iteration
       console.warn("Error calling Bezier methods:", error);
@@ -93,6 +131,35 @@ export function findClosestTOnBezier(bezier, point, iterations = 5) {
  * @returns {Object} The normal vector at the closest point on the curve
  */
 export function normalAtClosestPoint(bezier, point) {
+  // Additional validation for the bezier and point parameters
+  if (!bezier) {
+    console.warn("Invalid Bezier object: bezier is null or undefined");
+    return { x: 0, y: 1 }; // Default to pointing up
+  }
+  
+  if (!point || typeof point.x !== 'number' || typeof point.y !== 'number') {
+    console.warn("Invalid point: point is null or has invalid coordinates");
+    return { x: 0, y: 1 }; // Default to pointing up
+  }
+  
+  // Validate that the bezier object has the required structure
+  if (!bezier.points || !Array.isArray(bezier.points)) {
+    console.warn("Invalid Bezier object: missing points array");
+    return { x: 0, y: 1 }; // Default to pointing up
+  }
+  
+  // Validate that we have at least 2 points for a valid Bezier curve
+  if (bezier.points.length < 2) {
+    console.warn("Invalid Bezier object: insufficient points for Bezier curve", bezier.points.length);
+    return { x: 0, y: 1 }; // Default to pointing up
+  }
+  
+  // Validate that all points have x and y properties
+  if (!bezier.points.every(p => p && typeof p.x === 'number' && typeof p.y === 'number')) {
+    console.warn("Invalid Bezier object: points are missing x or y properties");
+    return { x: 0, y: 1 }; // Default to pointing up
+  }
+  
   let t;
   try {
     t = findClosestTOnBezier(bezier, point);
@@ -101,7 +168,28 @@ export function normalAtClosestPoint(bezier, point) {
     console.warn("Error finding closest t on bezier:", error);
     return { x: 0, y: 1 }; // Default to pointing up
   }
-  const tangent = tangentAtT(bezier, t);
-  const normalizedTangent = normalizeVector(tangent);
-  return normalFromTangent(normalizedTangent);
+  
+  try {
+    const tangent = tangentAtT(bezier, t);
+    
+    // Validate the tangent vector
+    if (!tangent || typeof tangent.x !== 'number' || typeof tangent.y !== 'number') {
+      console.warn("Invalid tangent vector returned by tangentAtT");
+      return { x: 0, y: 1 }; // Default to pointing up
+    }
+    
+    const normalizedTangent = normalizeVector(tangent);
+    
+    // Validate the normalized tangent vector
+    if (!normalizedTangent || typeof normalizedTangent.x !== 'number' || typeof normalizedTangent.y !== 'number') {
+      console.warn("Invalid normalized tangent vector");
+      return { x: 0, y: 1 }; // Default to pointing up
+    }
+    
+    return normalFromTangent(normalizedTangent);
+  } catch (error) {
+    // If there's an error calculating the normal vector, return a default
+    console.warn("Error calculating normal vector:", error);
+    return { x: 0, y: 1 }; // Default to pointing up
+  }
 }
