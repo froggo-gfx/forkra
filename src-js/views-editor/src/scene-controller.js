@@ -511,6 +511,24 @@ export class SceneController {
         this.visualizationLayersSettings.model["fontra.background-image"] = true;
       }
     });
+
+    registerAction(
+      "action.show-normal-vector",
+      {
+        topic,
+        defaultShortCuts: [{ baseKey: "n", commandKey: true, altKey: true }],
+      },
+      () => {
+        // Toggle the normal vector visualization layer
+        this.visualizationLayersSettings.model["fontra.normal.vector"] =
+          !this.visualizationLayersSettings.model["fontra.normal.vector"];
+      },
+      () => {
+        // Only enable when a single point is selected
+        const { point: selectedPointIndices } = parseSelection(this.selection);
+        return selectedPointIndices?.length === 1;
+      }
+    );
   }
 
   setAutoViewBox() {
