@@ -77,8 +77,6 @@ export class SceneController {
       isPointInPath,
       visualizationLayersSettings
     );
-    // Add reference to SceneController in SceneModel for visualization layers
-    this.sceneModel.sceneController = this;
 
     this.selectedTool = undefined;
     this._currentGlyphChangeListeners = [];
@@ -527,40 +525,30 @@ export class SceneController {
         defaultShortCuts: [{ baseKey: "n", commandKey: true, altKey: true }],
       },
       () => {
-        // Toggle the normal vector visualization layer
-        const { point: selectedPointIndices } = parseSelection(this.selection);
-        
-        if (!selectedPointIndices || selectedPointIndices.length === 0) {
-          return;
-        }
-        
-        const pointIndex = selectedPointIndices[0];
-        
-        // Toggle the point in our tracking set
-        if (this._normalVectorPoints.has(pointIndex)) {
-          this._normalVectorPoints.delete(pointIndex);
-        } else {
-          this._normalVectorPoints.add(pointIndex);
-        }
-        
-        // Enable the visualization layer if we have any points tracked
-        // Keep it enabled even when no point is selected to maintain persistent visualization
+        // Activate the normal vector visualization layer temporarily
         this.visualizationLayersSettings.model["fontra.normal.vector"] = true;
-        
-        // Force a refresh of the canvas to update the visualization
-        this.canvasController.requestUpdate();
+        // Set a flag to indicate this was activated by hotkey
+        this._normalVectorActivatedByHotkey = true;
       },
       () => {
         // Only enable when a single point is selected
         const { point: selectedPointIndices } = parseSelection(this.selection);
-        return !!selectedPointIndices;
+        return selectedPointIndices?.length === 1;
       }
     );
   }
 
   handleKeyUp(event) {
-    // No special handling needed for normal vector visualization
-    // as it now uses toggle behavior instead of press-and-hold
+    // Check if the released key is the normal vector hotkey (Ctrl+Alt+N)
+    if (event.key === "n" && event.ctrlKey && event.altKey) {
+      // Deactivate the normal vector visualization layer if it was activated by hotkey
+      if (this._normalVectorActivatedByHotkey) {
+        this.visualizationLayersSettings.model["fontra.normal.vector"] = false;
+        this._normalVectorActivatedByHotkey = false;
+        // Request update to redraw the scene without the visualization
+        this.canvasController.requestUpdate();
+      }
+    }
   }
 
   setAutoViewBox() {

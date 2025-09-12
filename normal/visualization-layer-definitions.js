@@ -193,7 +193,7 @@ registerVisualizationLayerDefinition({
 registerVisualizationLayerDefinition({
   identifier: "fontra.lineMetrics",
   name: "sidebar.user-settings.line-metrics",
- selectionFunc: glyphSelector("editing"),
+  selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: true,
   zIndex: 100,
@@ -266,7 +266,7 @@ registerVisualizationLayerDefinition({
 // the following icon SVG path code is from https://tabler.io/icons/icon/lock
 const lockIconPath2D = new Path2D(
   `M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-6z
-  M11 16a1 1 0 2 0a1 1 0 0 0 -2 0 M8 11v-4a4 4 0 1 1 8 0v4`
+  M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0 M8 11v-4a4 4 0 1 1 8 0v4`
 );
 
 registerVisualizationLayerDefinition({
@@ -289,7 +289,7 @@ registerVisualizationLayerDefinition({
   screenParameters: { iconSize: 19 },
   colors: { strokeColor: "#000C" },
   colorsDarkMode: { strokeColor: "#FFFC" },
- selectionFilter: (positionedGlyph) => !positionedGlyph.isUndefined,
+  selectionFilter: (positionedGlyph) => !positionedGlyph.isUndefined,
   draw: _drawGlyphLockIcon,
 });
 
@@ -478,7 +478,7 @@ registerVisualizationLayerDefinition({
       //   // TODO: solve colorizing with backgroundImage.color
       // }
       context.globalAlpha = backgroundImage.opacity;
-      context.drawImage(image, 0, image.width, image.height);
+      context.drawImage(image, 0, 0, image.width, image.height);
     });
 
     const backgroundImageBounds = {
@@ -811,7 +811,7 @@ registerVisualizationLayerDefinition({
   name: "Selected glyph",
   selectionFunc: glyphSelector("selected"),
   selectionFilter: (positionedGlyph) => !positionedGlyph.isEmpty,
- zIndex: 200,
+  zIndex: 200,
   screenParameters: { outerStrokeWidth: 10, innerStrokeWidth: 3 },
   colors: { fillColor: "#000", strokeColor: "#7778", errorColor: "#AAA" },
   colorsDarkMode: { fillColor: "#FFF", strokeColor: "#FFF8", errorColor: "#999" },
@@ -1119,7 +1119,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: false,
- zIndex: 600,
+  zIndex: 600,
   screenParameters: { fontSize: 11 },
   colors: { boxColor: "#FFFB", color: "#000" },
   colorsDarkMode: { boxColor: "#1118", color: "#FFF" },
@@ -1176,8 +1176,8 @@ registerVisualizationLayerDefinition({
 registerVisualizationLayerDefinition({
   identifier: "fontra.component.nodes",
   name: "sidebar.user-settings.component.nodes",
- selectionFunc: glyphSelector("editing"),
- userSwitchable: true,
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
   defaultOn: false,
   zIndex: 450,
   screenParameters: {
@@ -1260,7 +1260,7 @@ registerVisualizationLayerDefinition({
     underlayOffset: 2,
   },
   colors: { hoveredColor: "#BBB", selectedColor: "#000", underColor: "#FFFA" },
- colorsDarkMode: { hoveredColor: "#BBB", selectedColor: "#FFF", underColor: "#0008" },
+  colorsDarkMode: { hoveredColor: "#BBB", selectedColor: "#FFF", underColor: "#0008" },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const glyph = positionedGlyph.glyph;
     const cornerSize = parameters.cornerSize;
@@ -1305,9 +1305,9 @@ registerVisualizationLayerDefinition({
 
 registerVisualizationLayerDefinition({
   identifier: "fontra.coordinates",
- name: "sidebar.user-settings.glyph.coordinates",
+  name: "sidebar.user-settings.glyph.coordinates",
   selectionFunc: glyphSelector("editing"),
- userSwitchable: true,
+  userSwitchable: true,
   defaultOn: false,
   zIndex: 600,
   screenParameters: { fontSize: 10 },
@@ -1415,7 +1415,7 @@ registerVisualizationLayerDefinition({
   identifier: "fontra.connect-insert.point",
   name: "Connect/insert point",
   selectionFunc: glyphSelector("editing"),
- zIndex: 500,
+  zIndex: 500,
   screenParameters: {
     connectRadius: 11,
     insertHandlesRadius: 5,
@@ -1424,7 +1424,7 @@ registerVisualizationLayerDefinition({
     strokeWidth: 2,
   },
   colors: { color: "#3080FF80" },
- colorsDarkMode: { color: "#50A0FF80" },
+  colorsDarkMode: { color: "#50A0FF80" },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const targetPoint = model.pathConnectTargetPoint;
     const insertHandles = model.pathInsertHandles;
@@ -1592,7 +1592,7 @@ registerVisualizationLayerDefinition({
   name: "Underlying edit path stroke",
   selectionFunc: glyphSelector("editing"),
   zIndex: 490,
- screenParameters: {
+  screenParameters: {
     strokeWidth: 3,
   },
   colors: { color: "#FFF6" },
@@ -1608,7 +1608,7 @@ registerVisualizationLayerDefinition({
 registerVisualizationLayerDefinition({
   identifier: "fontra.edit.path.stroke",
   name: "Edit path stroke",
- selectionFunc: glyphSelector("editing"),
+  selectionFunc: glyphSelector("editing"),
   zIndex: 500,
   screenParameters: {
     strokeWidth: 1,
@@ -1864,90 +1864,88 @@ registerVisualizationLayerDefinition({
       return;
     }
     
-    // Get the scene controller to access _normalVectorPoints
-    const sceneController = model.sceneController;
-    if (!sceneController || !sceneController._normalVectorPoints) {
+    // Only show when a single point is selected
+    const { point: selectedPointIndices } = parseSelection(model.selection);
+    if (!selectedPointIndices || selectedPointIndices.length !== 1) {
       return;
     }
+
+    const pointIndex = selectedPointIndices[0];
+    const point = positionedGlyph.glyph.path.getPoint(pointIndex);
+    if (!point) {
+      return;
+    }
+
+    // If it's an off-curve point, we don't show the normal vector
+    if (point.type) {
+      return;
+    }
+
+    // Get the contour index for the selected point
+    const [contourIndex, contourPointIndex] = positionedGlyph.glyph.path.getContourAndPointIndex(pointIndex);
     
-    // Draw normal vectors for all points stored in _normalVectorPoints
-    for (const pointIndex of sceneController._normalVectorPoints) {
-      const point = positionedGlyph.glyph.path.getPoint(pointIndex);
-      if (!point) {
-        continue;
-      }
-
-      // If it's an off-curve point, we don't show the normal vector
-      if (point.type) {
-        continue;
-      }
-
-      // Get the contour index for the selected point
-      const [contourIndex, contourPointIndex] = positionedGlyph.glyph.path.getContourAndPointIndex(pointIndex);
-      
-      // Get all segments in the contour
-      const segments = [...positionedGlyph.glyph.path.iterContourDecomposedSegments(contourIndex)];
-      
-      // Find the segments that contain our point
-      for (const segment of segments) {
-        const pointIndices = segment.parentPointIndices;
-        if (pointIndices.includes(pointIndex)) {
-          // This segment contains our point
-          // Validate that segment.points is an array and has the correct structure
-          if (!segment.points || !Array.isArray(segment.points) || segment.points.length < 2) {
-            continue;
-          }
-          
-          // Validate that all points in segment.points have x and y properties
-          if (!segment.points.every(p => p && typeof p.x === 'number' && typeof p.y === 'number')) {
-            continue;
-          }
-          
-          try {
-            // Create a deep copy of the points array to ensure we're not passing
-            // any references that might cause issues
-            const pointsCopy = segment.points.map(p => ({ x: p.x, y: p.y }));
-            
-            const bezier = new Bezier(pointsCopy);
-            const normal = normalAtClosestPoint(bezier, point);
-            
-            // Draw the normal vector as an arrow
-            const arrowLength = parameters.arrowSize * 3;
-            const endPoint = {
-              x: point.x + normal.x * arrowLength,
-              y: point.y + normal.y * arrowLength
-            };
-            
-            context.strokeStyle = parameters.strokeColor;
-            context.lineWidth = parameters.strokeWidth;
-            context.lineCap = "round";
-            context.lineJoin = "round";
-            
-            // Draw the arrow shaft
-            strokeLine(context, point.x, point.y, endPoint.x, endPoint.y);
-            
-            // Draw the arrowhead
-            const angle = Math.atan2(endPoint.y - point.y, endPoint.x - point.x);
-            const arrowHeadSize = parameters.arrowSize;
-            
-            context.beginPath();
-            context.moveTo(endPoint.x, endPoint.y);
-            context.lineTo(
-              endPoint.x - arrowHeadSize * Math.cos(angle - Math.PI / 6),
-              endPoint.y - arrowHeadSize * Math.sin(angle - Math.PI / 6)
-            );
-            context.moveTo(endPoint.x, endPoint.y);
-            context.lineTo(
-              endPoint.x - arrowHeadSize * Math.cos(angle + Math.PI / 6),
-              endPoint.y - arrowHeadSize * Math.sin(angle + Math.PI / 6)
-            );
-            context.stroke();
-          } catch (error) {
-            // If there's an error creating or using the Bezier object, skip this segment
-            console.warn("Error calculating normal vector for segment:", error);
-          }
-          break;
+    // Get all segments in the contour
+    const segments = [...positionedGlyph.glyph.path.iterContourDecomposedSegments(contourIndex)];
+    
+    // Find the segments that contain our point
+    for (const segment of segments) {
+      const pointIndices = segment.parentPointIndices;
+      if (pointIndices.includes(pointIndex)) {
+        // This segment contains our point
+        // Validate that segment.points is an array and has the correct structure
+        if (!segment.points || !Array.isArray(segment.points) || segment.points.length < 2) {
+          continue;
         }
+        
+        // Validate that all points in segment.points have x and y properties
+        if (!segment.points.every(p => p && typeof p.x === 'number' && typeof p.y === 'number')) {
+          continue;
+        }
+        
+        try {
+          // Create a deep copy of the points array to ensure we're not passing
+          // any references that might cause issues
+          const pointsCopy = segment.points.map(p => ({ x: p.x, y: p.y }));
+          
+          const bezier = new Bezier(pointsCopy);
+          const normal = normalAtClosestPoint(bezier, point);
+          
+          // Draw the normal vector as an arrow
+          const arrowLength = parameters.arrowSize * 3;
+          const endPoint = {
+            x: point.x + normal.x * arrowLength,
+            y: point.y + normal.y * arrowLength
+          };
+          
+          context.strokeStyle = parameters.strokeColor;
+          context.lineWidth = parameters.strokeWidth;
+          context.lineCap = "round";
+          context.lineJoin = "round";
+          
+          // Draw the arrow shaft
+          strokeLine(context, point.x, point.y, endPoint.x, endPoint.y);
+          
+          // Draw the arrowhead
+          const angle = Math.atan2(endPoint.y - point.y, endPoint.x - point.x);
+          const arrowHeadSize = parameters.arrowSize;
+          
+          context.beginPath();
+          context.moveTo(endPoint.x, endPoint.y);
+          context.lineTo(
+            endPoint.x - arrowHeadSize * Math.cos(angle - Math.PI / 6),
+            endPoint.y - arrowHeadSize * Math.sin(angle - Math.PI / 6)
+          );
+          context.moveTo(endPoint.x, endPoint.y);
+          context.lineTo(
+            endPoint.x - arrowHeadSize * Math.cos(angle + Math.PI / 6),
+            endPoint.y - arrowHeadSize * Math.sin(angle + Math.PI / 6)
+          );
+          context.stroke();
+        } catch (error) {
+          // If there's an error creating or using the Bezier object, skip this segment
+          console.warn("Error calculating normal vector for segment:", error);
+        }
+        break;
       }
     }
   },
