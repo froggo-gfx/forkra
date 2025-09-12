@@ -1860,92 +1860,134 @@ registerVisualizationLayerDefinition({
   colorsDarkMode: { strokeColor: "#0F8" },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     // Only show when the visualization layer is enabled (hotkey pressed)
+    console.log("Normal vector draw function called", {
+      visualizationLayerEnabled: model.visualizationLayersSettings?.model?.["fontra.normal.vector"]
+    });
+    
     if (!model.visualizationLayersSettings?.model?.["fontra.normal.vector"]) {
+      console.log("Visualization layer not enabled, returning early");
       return;
     }
     
-    // Only show when a single point is selected
-    const { point: selectedPointIndices } = parseSelection(model.selection);
-    if (!selectedPointIndices || selectedPointIndices.length !== 1) {
-      return;
-    }
-
-    const pointIndex = selectedPointIndices[0];
-    const point = positionedGlyph.glyph.path.getPoint(pointIndex);
-    if (!point) {
-      return;
-    }
-
-    // If it's an off-curve point, we don't show the normal vector
-    if (point.type) {
-      return;
-    }
-
-    // Get the contour index for the selected point
-    const [contourIndex, contourPointIndex] = positionedGlyph.glyph.path.getContourAndPointIndex(pointIndex);
+    // Get the set of points for which we should show normal vectors
+    // This is stored in the scene controller
+    const sceneController = model.sceneController; // Access scene controller through model
+    console.log("Scene controller and _normalVectorPoints", { sceneController, normalVectorPoints: sceneController?._normalVectorPoints });
     
-    // Get all segments in the contour
-    const segments = [...positionedGlyph.glyph.path.iterContourDecomposedSegments(contourIndex)];
+    if (!sceneController || !sceneController._normalVectorPoints) {
+      console.log("No scene controller or _normalVectorPoints, returning early");
+      return;
+    }
     
-    // Find the segments that contain our point
-    for (const segment of segments) {
-      const pointIndices = segment.parentPointIndices;
-      if (pointIndices.includes(pointIndex)) {
-        // This segment contains our point
-        // Validate that segment.points is an array and has the correct structure
-        if (!segment.points || !Array.isArray(segment.points) || segment.points.length < 2) {
-          continue;
-        }
+    const pointIndicesToShow = sceneController._normalVectorPoints;
+    console.log("Point indices to show", { pointIndicesToShow, size: pointIndicesToShow.size });
+    
+    if (pointIndicesToShow.size === 0) {
+      console.log("No points to show, returning early");
+      return;
+    }
+
+    // Draw normal vectors for all tracked points
+    console.log("Starting to draw normal vectors for points", [...pointIndicesToShow]);
+    
+    for (const pointIndex of pointIndicesToShow) {
+      console.log("Processing point index", { pointIndex });
+      
+      const point = positionedGlyph.glyph.path.getPoint(pointIndex);
+      console.log("Point coordinates", { point });
+      
+      if (!point) {
+        console.log("Point not found, continuing");
+        continue;
+      }
+
+      // If it's an off-curve point, we don't show the normal vector
+      if (point.type) {
+        console.log("Point is off-curve (has type), skipping", { pointType: point.type });
+        continue;
+      }
+
+      // Get the contour index for the point
+      const [contourIndex, contourPointIndex] = positionedGlyph.glyph.path.getContourAndPointIndex(pointIndex);
+      console.log("Contour info", { contourIndex, contourPointIndex });
+      
+      // Get all segments in the contour
+      const segments = [...positionedGlyph.glyph.path.iterContourDecomposedSegments(contourIndex)];
+      console.log("Segments in contour", { segmentsCount: segments.length, segments });
+      
+      // Find the segments that contain our point
+      for (const segment of segments) {
+        const segmentPointIndices = segment.parentPointIndices;
+        console.log("Checking segment", { segmentPointIndices, includesPoint: segmentPointIndices.includes(pointIndex) });
         
-        // Validate that all points in segment.points have x and y properties
-        if (!segment.points.every(p => p && typeof p.x === 'number' && typeof p.y === 'number')) {
-          continue;
+        if (segmentPointIndices.includes(pointIndex)) {
+          // This segment contains our point
+          console.log("Found segment containing point", { segment });
+          
+          // Validate that segment.points is an array and has the correct structure
+          if (!segment.points || !Array.isArray(segment.points) || segment.points.length < 2) {
+            console.log("Invalid segment points", { points: segment.points, length: segment.points?.length });
+            continue;
+          }
+          
+          // Validate that all points in segment.points have x and y properties
+          if (!segment.points.every(p => p && typeof p.x === 'number' && typeof p.y === 'number')) {
+            console.log("Segment points missing x/y properties", { points: segment.points });
+            continue;
+          }
+          
+          try {
+            // Create a deep copy of the points array to ensure we're not passing
+            // any references that might cause issues
+            const pointsCopy = segment.points.map(p => ({ x: p.x, y: p.y }));
+            console.log("Points copy for Bezier", { pointsCopy });
+            
+            const bezier = new Bezier(pointsCopy);
+            console.log("Created Bezier object", { bezier });
+            
+            const normal = normalAtClosestPoint(bezier, point);
+            console.log("Calculated normal vector", { normal });
+            
+            // Draw the normal vector as an arrow
+            const arrowLength = parameters.arrowSize * 3;
+            const endPoint = {
+              x: point.x + normal.x * arrowLength,
+              y: point.y + normal.y * arrowLength
+            };
+            console.log("Arrow endpoints", { startPoint: point, endPoint });
+            
+            context.strokeStyle = parameters.strokeColor;
+            context.lineWidth = parameters.strokeWidth;
+            context.lineCap = "round";
+            context.lineJoin = "round";
+            
+            // Draw the arrow shaft
+            console.log("Drawing arrow shaft");
+            strokeLine(context, point.x, point.y, endPoint.x, endPoint.y);
+            
+            // Draw the arrowhead
+            const angle = Math.atan2(endPoint.y - point.y, endPoint.x - point.x);
+            const arrowHeadSize = parameters.arrowSize;
+            
+            context.beginPath();
+            context.moveTo(endPoint.x, endPoint.y);
+            context.lineTo(
+              endPoint.x - arrowHeadSize * Math.cos(angle - Math.PI / 6),
+              endPoint.y - arrowHeadSize * Math.sin(angle - Math.PI / 6)
+            );
+            context.moveTo(endPoint.x, endPoint.y);
+            context.lineTo(
+              endPoint.x - arrowHeadSize * Math.cos(angle + Math.PI / 6),
+              endPoint.y - arrowHeadSize * Math.sin(angle + Math.PI / 6)
+            );
+            console.log("Drawing arrowhead");
+            context.stroke();
+          } catch (error) {
+            // If there's an error creating or using the Bezier object, skip this segment
+            console.warn("Error calculating normal vector for segment:", error);
+          }
+          break;
         }
-        
-        try {
-          // Create a deep copy of the points array to ensure we're not passing
-          // any references that might cause issues
-          const pointsCopy = segment.points.map(p => ({ x: p.x, y: p.y }));
-          
-          const bezier = new Bezier(pointsCopy);
-          const normal = normalAtClosestPoint(bezier, point);
-          
-          // Draw the normal vector as an arrow
-          const arrowLength = parameters.arrowSize * 3;
-          const endPoint = {
-            x: point.x + normal.x * arrowLength,
-            y: point.y + normal.y * arrowLength
-          };
-          
-          context.strokeStyle = parameters.strokeColor;
-          context.lineWidth = parameters.strokeWidth;
-          context.lineCap = "round";
-          context.lineJoin = "round";
-          
-          // Draw the arrow shaft
-          strokeLine(context, point.x, point.y, endPoint.x, endPoint.y);
-          
-          // Draw the arrowhead
-          const angle = Math.atan2(endPoint.y - point.y, endPoint.x - point.x);
-          const arrowHeadSize = parameters.arrowSize;
-          
-          context.beginPath();
-          context.moveTo(endPoint.x, endPoint.y);
-          context.lineTo(
-            endPoint.x - arrowHeadSize * Math.cos(angle - Math.PI / 6),
-            endPoint.y - arrowHeadSize * Math.sin(angle - Math.PI / 6)
-          );
-          context.moveTo(endPoint.x, endPoint.y);
-          context.lineTo(
-            endPoint.x - arrowHeadSize * Math.cos(angle + Math.PI / 6),
-            endPoint.y - arrowHeadSize * Math.sin(angle + Math.PI / 6)
-          );
-          context.stroke();
-        } catch (error) {
-          // If there's an error creating or using the Bezier object, skip this segment
-          console.warn("Error calculating normal vector for segment:", error);
-        }
-        break;
       }
     }
   },

@@ -85,6 +85,9 @@ export class SceneController {
     this.setupSettingsListeners();
     this.setupEventHandling();
     this.setupContextMenuActions();
+    
+    // Initialize normal vector points tracking
+    this._normalVectorPoints = new Set();
   }
 
   setupSceneSettings() {
@@ -522,30 +525,48 @@ export class SceneController {
         defaultShortCuts: [{ baseKey: "n", commandKey: true, altKey: true }],
       },
       () => {
-        // Activate the normal vector visualization layer temporarily
-        this.visualizationLayersSettings.model["fontra.normal.vector"] = true;
-        // Set a flag to indicate this was activated by hotkey
-        this._normalVectorActivatedByHotkey = true;
+        // Toggle the normal vector visualization layer
+        const { point: selectedPointIndices } = parseSelection(this.selection);
+        console.log("Show normal vector action triggered", { selectedPointIndices });
+        
+        if (!selectedPointIndices || selectedPointIndices.length !== 1) {
+          console.log("Invalid selection for normal vector - need exactly one point", { selectedPointIndices });
+          return;
+        }
+        
+        const pointIndex = selectedPointIndices[0];
+        console.log("Selected point index", { pointIndex });
+        
+        
+        // Toggle the point in our tracking set
+        if (this._normalVectorPoints.has(pointIndex)) {
+          this._normalVectorPoints.delete(pointIndex);
+          console.log("Removed point from _normalVectorPoints", { pointIndex });
+        } else {
+          this._normalVectorPoints.add(pointIndex);
+          console.log("Added point to _normalVectorPoints", { pointIndex });
+        }
+        
+        console.log("Current _normalVectorPoints", this._normalVectorPoints);
+        
+        // Enable/disable the visualization layer based on whether we have any points tracked
+        const shouldEnable = this._normalVectorPoints.size > 0;
+        this.visualizationLayersSettings.model["fontra.normal.vector"] = shouldEnable;
+        console.log("Set visualization layer 'fontra.normal.vector' to", shouldEnable);
       },
       () => {
         // Only enable when a single point is selected
         const { point: selectedPointIndices } = parseSelection(this.selection);
-        return selectedPointIndices?.length === 1;
+        const isEnabled = selectedPointIndices?.length === 1;
+        console.log("Normal vector action enabled check", { selectedPointIndices, isEnabled });
+        return isEnabled;
       }
     );
   }
 
   handleKeyUp(event) {
-    // Check if the released key is the normal vector hotkey (Ctrl+Alt+N)
-    if (event.key === "n" && event.ctrlKey && event.altKey) {
-      // Deactivate the normal vector visualization layer if it was activated by hotkey
-      if (this._normalVectorActivatedByHotkey) {
-        this.visualizationLayersSettings.model["fontra.normal.vector"] = false;
-        this._normalVectorActivatedByHotkey = false;
-        // Request update to redraw the scene without the visualization
-        this.canvasController.requestUpdate();
-      }
-    }
+    // No special handling needed for normal vector visualization
+    // as it now uses toggle behavior instead of press-and-hold
   }
 
   setAutoViewBox() {
