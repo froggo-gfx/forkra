@@ -222,22 +222,20 @@ export function interpolateColor(color1, color2, t) {
 }
 
 /**
- * Maps a curvature value to a color based on min/max range.
+* Maps a curvature value to a color based on local normalization.
  * @param {number} curvature - The curvature value.
- * @param {number} minCurvature - Minimum curvature in the path (or global).
- * @param {number} maxCurvature - Maximum curvature in the path (or global).
  * @param {Array<string>} colorStops - Array of hex color strings for the gradient.
  * @returns {string} RGBA color string.
  */
-export function curvatureToColor(curvature, minCurvature, maxCurvature, colorStops) {
-    if (maxCurvature === minCurvature) {
-        // Avoid division by zero if all curvatures are the same
-        return `rgba(128, 128, 128, 1)`; // Default gray
-    }
-    // Normalize curvature to 0-1 range
-    let t = (curvature - minCurvature) / (maxCurvature - minCurvature);
-    // Clamp t between 0 and 1
-    t = Math.max(0, Math.min(1, t));
+export function curvatureToColor(curvature, colorStops) {
+    const kAbs = Math.abs(curvature);
+    const drawFactor = 0.01;          // same constant Speed-Punk uses
+    const curveGain  = 1.0;           // keep configurable later
+    const unitsEm    = 1000;          // UPM – will be passed in step 2
+    const normalised = kAbs * drawFactor * curveGain * unitsEm * unitsEm;
+    
+    // map to 0-1 with a soft clamp exactly like Python
+    const t = Math.max(0, Math.min(1, normalised));   // no global min/max needed
 
     // Simple linear interpolation between stops
     // For N stops, we have N-1 segments
@@ -253,24 +251,3 @@ export function curvatureToColor(curvature, minCurvature, maxCurvature, colorSto
     return interpolateColor(color1, color2, segmentT);
 }
 
-/**
- * Finds the min and max curvature values from an array of curvature data.
- * @param {Array} curvatureData - Array of arrays, where each sub-array contains {t, curvature} objects for a segment.
- * @returns {Object} Object with min and max properties.
- */
-export function findCurvatureRange(curvatureData) {
-    let minCurvature = Infinity;
-    let maxCurvature = -Infinity;
-
-    for (const segmentData of curvatureData) {
-        for (const pointData of segmentData) {
-            if (pointData.curvature < minCurvature) minCurvature = pointData.curvature;
-            if (pointData.curvature > maxCurvature) maxCurvature = pointData.curvature;
-        }
-    }
-    // Handle case where all curvatures are zero or identical
-    if (minCurvature === Infinity) minCurvature = 0;
-    if (maxCurvature === -Infinity || maxCurvature === minCurvature) maxCurvature = minCurvature + 1e-10; // Tiny difference to avoid /0
-
-    return { min: minCurvature, max: maxCurvature };
-}
