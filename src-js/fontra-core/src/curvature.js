@@ -102,6 +102,99 @@ export function calculateCurvatureForSegment(p1, p2, p3, p4, steps = 20) {
 }
 
 /**
+ * Calculates the position, first derivative, and second derivative
+ * of a quadratic Bezier curve at parameter t.
+ * @param {Array} p1 - Start point [x, y]
+ * @param {Array} p2 - Control point [x, y]
+ * @param {Array} p3 - End point [x, y]
+ * @param {number} t - Parameter (0 <= t <= 1)
+ * @returns {Object} Object containing {r: position, r1: 1st derivative, r2: 2nd derivative}
+*/
+export function solveQuadraticBezier(p1, p2, p3, t) {
+  const mt = 1 - t;
+  
+  // Position r(t)
+  const r_x = p1[0] * mt * mt + 2 * p2[0] * mt * t + p3[0] * t * t;
+  const r_y = p1[1] * mt * mt + 2 * p2[1] * mt * t + p3[1] * t * t;
+  
+  // First derivative r'(t) * 2
+  const r1_x = 2 * (p2[0] - p1[0]) * mt + 2 * (p3[0] - p2[0]) * t;
+  const r1_y = 2 * (p2[1] - p1[1]) * mt + 2 * (p3[1] - p2[1]) * t;
+  const r1 = [r1_x * 2, r1_y * 2]; // Speed Punk uses unscaled derivative
+  
+  // Second derivative r''(t) * 2
+  const r2_x = 2 * (p1[0] - 2 * p2[0] + p3[0]);
+  const r2_y = 2 * (p1[1] - 2 * p2[1] + p3[1]);
+  const r2 = [r2_x * 2, r2_y * 2]; // Speed Punk uses unscaled derivative
+  
+  return { r: [r_x, r_y], r1: r1, r2: r2 };
+}
+
+/**
+* Calculates the curvature of a parametric curve given its first and second derivatives.
+ * Handles cases where the first derivative is zero (straight line segment).
+ * @param {Array} r1 - First derivative [dx/dt, dy/dt] (unscaled by Speed Punk)
+ * @param {Array} r2 - Second derivative [d2x/dt2, d2y/dt2] (unscaled by Speed Punk)
+ * @returns {number|null} The curvature, or null if calculation fails (e.g., straight line).
+*/
+export function solveQuadraticBezierCurvature(r1, r2) {
+  // Speed Punk uses unscaled derivatives, so we compensate by multiplying by 2 or 4
+  // and then dividing by 2^3 in the curvature formula.
+  // k = |r' x r''| / |r'|^3
+  // Using unscaled r1 (2 * actual) and r2 (4 * actual):
+  // k = |(r1/2) x (r2/4)| / |r1/2|^3 = (1/8) * |r1 x r2| / (1/8) * |r1|^3
+  // k = (8/8) * (|r1 x r2| / |r1|^3) = |r1 x r2| / |r1|^3
+  
+  const dx_dt = r1[0];
+  const dy_dt = r1[1];
+  const d2x_dt2 = r2[0];
+  const d2y_dt2 = r2[1];
+  
+  const cross = dx_dt * d2y_dt2 - dy_dt * d2x_dt2; // z-component of cross product
+  const mag_r1_sq = dx_dt * dx_dt + dy_dt * dy_dt;
+  
+  if (mag_r1_sq === 0) {
+    // Handle straight line segments or cusps where velocity is zero
+    // Speed Punk likely skips these or assigns zero curvature
+    return 0; // Or return null and handle in calling code
+  }
+  
+  const mag_r1 = Math.sqrt(mag_r1_sq);
+  // k = |r' x r''| / |r'|^3
+  const curvature = Math.abs(cross) / (mag_r1 * mag_r1 * mag_r1);
+  return curvature;
+}
+
+/**
+ * Calculates curvature values along a quadratic Bezier segment.
+ * @param {Array} p1 - Start point [x, y]
+* @param {Array} p2 - Control point [x, y]
+ * @param {Array} p3 - End point [x, y]
+ * @param {number} steps - Number of steps to sample curvature.
+ * @returns {Array} Array of {t, curvature} objects.
+ */
+export function calculateCurvatureForQuadraticSegment(p1, p2, p3, steps = 20) {
+  const curvatures = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const { r1, r2 } = solveQuadraticBezier(p1, p2, p3, t);
+    try {
+      const k = solveQuadraticBezierCurvature(r1, r2);
+      if (k !== null) {
+        curvatures.push({ t: t, curvature: k });
+      } else {
+        // Handle null curvature if necessary (e.g., push a default value)
+        curvatures.push({ t: t, curvature: 0 });
+      }
+    } catch (e) {
+      console.error("Error calculating curvature:", e);
+      curvatures.push({ t: t, curvature: 0 }); // Default on error
+    }
+  }
+  return curvatures;
+}
+
+/**
  * Interpolates between two hex colors.
  * @param {string} color1 - Hex color string (e.g., "#RRGGBB" or "RRGGBB")
  * @param {string} color2 - Hex color string (e.g., "#RRGGBB" or "RRGGBB")
