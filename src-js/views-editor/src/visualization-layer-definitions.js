@@ -315,7 +315,7 @@ registerVisualizationLayerDefinition({
   },
 });
 
-// the following icon SVG path code is from https://tabler.io/icons/icon/lock
+// the following icon SVG path code is from https://tabler.io/icons/icon/lock 
 const lockIconPath2D = new Path2D(
   `M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-6z
   M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0 M8 11v-4a4 4 0 1 1 8 0v4`
@@ -1703,182 +1703,175 @@ registerVisualizationLayerDefinition({
 });
 
 //// speedpunk 
+// --- SpeedPunk / curvature visualization (replace existing fontra.curvature block) ---
 registerVisualizationLayerDefinition({
-
- identifier: "fontra.curvature",
+  identifier: "fontra.curvature",
   name: "SpeedPunk",
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: false,
   zIndex: 490, // Draw on top
   screenParameters: {
-    // Matches Speed Punk's concept
     drawfactor: 0.01,
-    // Speed Punk uses curveGain * unitsPerEm^2. We'll use a base UPM or make it adjustable.
-    // Let's define a base UPM for scaling, or derive it if possible.
-    baseUnitsPerEm: 1000, // Approximation, could be dynamic
-    curveGain: 1, // User adjustable gain, default to 1.0 for direct mapping
+    baseUnitsPerEm: 1000,
+    curveGain: 1.0,
     stepsPerSegment: 81,
-    colorStops: ["#8b939c", "#f29400", "#e3004f"], // Speed Punk cubic colors
-    // New parameter for illustration style
-    illustrationPosition: "outsideOfGlyph", // or "outsideOfCurve" (Speed Punk term)
+    colorStops: ["#8b939c", "#f29400", "#e3004f"],
+    illustrationPosition: "outsideOfCurve",
+    ribbonThickness: 20, // Add ribbonThickness parameter
   },
   draw: (context, positionedGlyph, parameters, model, controller) => {
-    const path = positionedGlyph.glyph?.instance?.path;
+    // Use the path object consistently (other layers use positionedGlyph.glyph.path)
+    const path = positionedGlyph.glyph?.path;
     if (!path) return;
 
     context.save();
     context.lineCap = 'round';
     context.lineJoin = 'round';
-    context.globalAlpha = 0.35;
+    context.globalAlpha = 1.0;
 
-    const zoom = controller.magnification;
-    const zoomFactor = zoom < 0.1 ? 1.0 :
-                       zoom <= 1.0 ? 0.1 + 0.1 * Math.pow(zoom / 0.1, -1.2) :
-                                     0.2;
-    const scale = -0.03 * parameters.curveGain * 1000*1000 * zoomFactor;
+    
+    const heightMultiplier = (parameters.drawfactor || 10.0) * (parameters.curveGain || 1.0);
+    const stepsPerSegment = parameters.stepsPerSegment || 40;
+    const colorStops = parameters.colorStops || ["#8b939c", "#f29400", "#e3004f"];
+    const illustrationPosition = parameters.illustrationPosition || "outsideOfCurve";
 
-    // Process each contour
     for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
       const contour = path.getContour(contourIndex);
       const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
       const numPoints = contour.pointTypes.length;
 
-      // Process each point in the contour to find cubic segments
       for (let i = 0; i < numPoints; i++) {
         const pointIndex = startPoint + i;
         const pointType = path.pointTypes[pointIndex];
-        
-        // Check if this is an on-curve point that starts a cubic segment
-        if ((pointType & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE) {
-          const nextIndex1 = path.getAbsolutePointIndex(contourIndex, (i + 1) % numPoints);
-          const nextIndex2 = path.getAbsolutePointIndex(contourIndex, (i + 2) % numPoints);
-          const nextOnIndex = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
-          
-          const nextType1 = path.pointTypes[nextIndex1];
-          const nextType2 = path.pointTypes[nextIndex2];
-          const nextOnType = path.pointTypes[nextOnIndex];
-          
-          const isNext1OffCubic = (nextType1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC;
-          const isNext2OffCubic = (nextType2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC;
-          const isNextOn = (nextOnType & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
+        if ((pointType & VarPackedPath.POINT_TYPE_MASK) !== VarPackedPath.ON_CURVE) continue;
 
-          // Check for cubic segment: ON-OFF-OFF-ON
-          if (isNext1OffCubic && isNext2OffCubic && isNextOn) {
-            // Extract the four points of the cubic segment
-            const p1 = path.getPoint(pointIndex);
-            const p2 = path.getPoint(nextIndex1);
-            const p3 = path.getPoint(nextIndex2);
-            const p4 = path.getPoint(nextOnIndex);
+        const next1 = path.getAbsolutePointIndex(contourIndex, (i + 1) % numPoints);
+        const next2 = path.getAbsolutePointIndex(contourIndex, (i + 2) % numPoints);
+        const next3 = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
 
-            // 1. Sample curvature locally
-            const samples = calculateCurvatureForSegment(
-              [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y],
-              parameters.stepsPerSegment
-            );
+        const t1 = path.pointTypes[next1];
+        const t2 = path.pointTypes[next2];
+        const t3 = path.pointTypes[next3];
 
-            // 2. Build ribbon geometry
-            const onCurve = [];
-            const offCurve = [];
-            
-            for (const {t, curvature} of samples) {
-              const {r, r1} = solveCubicBezier([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y], t);
-              const [x, y] = r;
-              onCurve.push({x, y});
+        // cubic: ON - OFFc - OFFc - ON
+        const isCubicSeg =
+          (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
+          (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
+          (t3 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
 
-              // Normal vector, direction chosen by illustrationPosition
-              const [nx, ny] = [
-                parameters.illustrationPosition === "outsideOfCurve" ? r1[1] : -r1[1],
-                parameters.illustrationPosition === "outsideOfCurve" ? -r1[0] : r1[0]
-              ];
-              
-              // Normalize the normal vector
-              const mag = Math.sqrt(nx * nx + ny * ny);
-              if (mag === 0) continue;
-              
-              const unitNx = nx / mag;
-              const unitNy = ny / mag;
-              
-              const h = Math.sign(curvature) * Math.abs(curvature) * scale;
-              offCurve.push({ x: x + unitNx * h, y: y + unitNy * h });
-            }
+        if (isCubicSeg) {
+          const p1 = path.getPoint(pointIndex);
+          const p2 = path.getPoint(next1);
+          const p3 = path.getPoint(next2);
+          const p4 = path.getPoint(next3);
 
-            // 3. Draw quadrilateral strips – colour each strip locally
-            for (let i = 0; i < onCurve.length - 1; ++i) {
-              const quad = new Path2D();
-              quad.moveTo(onCurve[i].x, onCurve[i].y);
-              quad.lineTo(onCurve[i+1].x, onCurve[i+1].y);
-              quad.lineTo(offCurve[i+1].x, offCurve[i+1].y);
-              quad.lineTo(offCurve[i].x, offCurve[i].y);
-              quad.closePath();
+          const samples = calculateCurvatureForSegment(
+            [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y],
+            stepsPerSegment
+          );
 
-              // const colour = curvatureToColor(samples[i].curvature, parameters.colorStops);
-              const colour = "rgba(79, 129, 167, 0.60)";
-              context.fillStyle = colour;
-              context.fill(quad);
-            }
+          // NORMALIZE PER SEGMENT (key fix)
+          const absVals = samples.map(s => Math.abs(s.curvature));
+          const minAbs = Math.min(...absVals);
+          const maxAbs = Math.max(...absVals);
+
+          // Build geometry and draw
+          const onCurve = [];
+          const offCurve = [];
+          for (let s = 0; s < samples.length; s++) {
+            const t = samples[s].t;
+            const { r, r1 } = solveCubicBezier([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y], t);
+            const [x, y] = r;
+            onCurve.push({ x, y, r1, k: samples[s].curvature });
+
+            // normal (choose orientation)
+            let nx = illustrationPosition === "outsideOfCurve" ? -r1[1] : r1[1];
+            let ny = illustrationPosition === "outsideOfCurve" ? r1[0] : -r1[0];
+            const mag = Math.hypot(nx, ny) || 1;
+            nx /= mag; ny /= mag;
+
+            // use signed height if desired; curvature in file is absolute, so sign=1.
+            const h = Math.sign(samples[s].curvature) * Math.abs(samples[s].curvature) * heightMultiplier * 150000;
+            offCurve.push({ x: x + nx * h, y: y + ny * h });
           }
-          
-          // Check for quadratic segments
-          const isNext1OffQuad = (nextType1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD;
-          if (isNext1OffQuad && isNextOn) {
-            // Extract the three points of the quadratic segment
-            const p1 = path.getPoint(pointIndex);
-            const p2 = path.getPoint(nextIndex1);
-            const p3 = path.getPoint(nextOnIndex);
 
-            // 1. Sample curvature locally
-            const samples = calculateCurvatureForQuadraticSegment(
-              [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y],
-              parameters.stepsPerSegment
-            );
+          // draw quads and color by per-segment normalization
+          for (let s = 0; s < onCurve.length - 1; s++) {
+            const a = onCurve[s], b = onCurve[s + 1];
+            const quad = new Path2D();
+            quad.moveTo(a.x, a.y);
+            quad.lineTo(b.x, b.y);
+            quad.lineTo(offCurve[s + 1].x, offCurve[s + 1].y);
+            quad.lineTo(offCurve[s].x, offCurve[s].y);
+            quad.closePath();
 
-            // 2. Build ribbon geometry
-            const onCurve = [];
-            const offCurve = [];
-            
-            for (const {t, curvature} of samples) {
-              const {r, r1} = solveQuadraticBezier([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], t);
-              const [x, y] = r;
-              onCurve.push({x, y});
+            // pass per-segment min/max and colorStops (NEW API)
+            const color = curvatureToColor(Math.abs(a.k), minAbs, maxAbs, colorStops);
+            context.fillStyle = color;
+            context.fill(quad);
+          }
 
-              // Normal vector, direction chosen by illustrationPosition
-              const [nx, ny] = [
-                parameters.illustrationPosition === "outsideOfCurve" ? r1[1] : -r1[1],
-                parameters.illustrationPosition === "outsideOfCurve" ? -r1[0] : r1[0]
-              ];
-              
-              // Normalize the normal vector
-              const mag = Math.sqrt(nx * nx + ny * ny);
-              if (mag === 0) continue;
-              
-              const unitNx = nx / mag;
-              const unitNy = ny / mag;
-              
-              const h = Math.sign(curvature) * Math.abs(curvature) * scale;
-              offCurve.push({ x: x + unitNx * h, y: y + unitNy * h });
-            }
+          continue;
+        }
 
-            // 3. Draw quadrilateral strips – colour each strip locally
-            for (let i = 0; i < onCurve.length - 1; ++i) {
-              const quad = new Path2D();
-              quad.moveTo(onCurve[i].x, onCurve[i].y);
-              quad.lineTo(onCurve[i+1].x, onCurve[i+1].y);
-              quad.lineTo(offCurve[i+1].x, offCurve[i+1].y);
-              quad.lineTo(offCurve[i].x, offCurve[i].y);
-              quad.closePath();
+        // quadratic: ON - OFFq - ON
+        const isQuadSeg =
+          (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD &&
+          (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
 
-              // const colour = curvatureToColor(samples[i].curvature, parameters.colorStops);
-              const colour = "rgba(79, 129, 167, 0.60)";
-              context.fillStyle = colour;
-              context.fill(quad);
-            }
+        if (isQuadSeg) {
+          const p1 = path.getPoint(pointIndex);
+          const p2 = path.getPoint(next1);
+          const p3 = path.getPoint(next2);
+
+          const samples = calculateCurvatureForQuadraticSegment(
+            [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y],
+            stepsPerSegment
+          );
+
+          const absVals = samples.map(s => Math.abs(s.curvature));
+          const minAbs = Math.min(...absVals);
+          const maxAbs = Math.max(...absVals);
+
+          const onCurveQ = [];
+          const offCurveQ = [];
+          for (let s = 0; s < samples.length; s++) {
+            const t = samples[s].t;
+            const { r, r1 } = solveQuadraticBezier([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], t);
+            const [x, y] = r;
+            onCurveQ.push({ x, y, r1, k: samples[s].curvature });
+
+            let nx = illustrationPosition === "outsideOfCurve" ? -r1[1] : r1[1];
+            let ny = illustrationPosition === "outsideOfCurve" ? r1[0] : -r1[0];
+            const mag = Math.hypot(nx, ny) || 1;
+            nx /= mag; ny /= mag;
+
+            const h = Math.sign(samples[s].curvature) * Math.abs(samples[s].curvature) * heightMultiplier;
+            offCurveQ.push({ x: x + nx * h, y: y + ny * h });
+          }
+
+          for (let s = 0; s < onCurveQ.length - 1; s++) {
+            const quad = new Path2D();
+            quad.moveTo(onCurveQ[s].x, onCurveQ[s].y);
+            quad.lineTo(onCurveQ[s + 1].x, onCurveQ[s + 1].y);
+            quad.lineTo(offCurveQ[s + 1].x, offCurveQ[s + 1].y);
+            quad.lineTo(offCurveQ[s].x, offCurveQ[s].y);
+            quad.closePath();
+
+            const color = curvatureToColor(Math.abs(onCurveQ[s].k), minAbs, maxAbs, colorStops);
+            context.fillStyle = color;
+            context.fill(quad);
           }
         }
       }
     }
+
     context.restore();
-  }});
+  }
+});
+
+
 
 //
 // allGlyphsCleanVisualizationLayerDefinition is not registered, but used
