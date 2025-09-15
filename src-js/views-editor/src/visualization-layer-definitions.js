@@ -1730,9 +1730,13 @@ registerVisualizationLayerDefinition({
     context.lineJoin = 'round';
     context.globalAlpha = 1.0;
 
-    
-    const heightMultiplier = (parameters.drawfactor || 10.0) * (parameters.curveGain || 1.0);
-    const stepsPerSegment = parameters.stepsPerSegment || 40;
+    const zoomFactor = controller.magnification || 1.0;
+    const dampeningFactor = Math.pow(zoomFactor, +(parameters.zoomDampening || 1.2));
+    const heightMultiplier = (parameters.drawfactor || 5.0) * 
+                             (parameters.curveGain || 1.0) * 
+                             dampeningFactor;
+    //const heightMultiplier = (parameters.drawfactor || 10.0) * (parameters.curveGain || 1.0);
+    const stepsPerSegment = parameters.stepsPerSegment || 64;
     const colorStops = parameters.colorStops || ["#8b939c", "#f29400", "#e3004f"];
     const illustrationPosition = parameters.illustrationPosition || "outsideOfCurve";
 
@@ -1792,7 +1796,7 @@ registerVisualizationLayerDefinition({
             nx /= mag; ny /= mag;
 
             // use signed height if desired; curvature in file is absolute, so sign=1.
-            const h = Math.sign(samples[s].curvature) * Math.abs(samples[s].curvature) * heightMultiplier * 150000;
+            const h = Math.sign(samples[s].curvature) * Math.abs(samples[s].curvature) * heightMultiplier * -180000;
             offCurve.push({ x: x + nx * h, y: y + ny * h });
           }
 
@@ -1847,7 +1851,7 @@ registerVisualizationLayerDefinition({
             const mag = Math.hypot(nx, ny) || 1;
             nx /= mag; ny /= mag;
 
-            const h = Math.sign(samples[s].curvature) * Math.abs(samples[s].curvature) * heightMultiplier;
+            const h = Math.sign(samples[s].curvature) * Math.abs(samples[s].curvature) * heightMultiplier * -480000;
             offCurveQ.push({ x: x + nx * h, y: y + ny * h });
           }
 
