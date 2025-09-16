@@ -1728,7 +1728,7 @@ registerVisualizationLayerDefinition({
     context.save();
     context.lineCap = 'round';
     context.lineJoin = 'round';
-    context.globalAlpha = 1.0;
+    context.globalAlpha = 0.5;
 
     const zoomFactor = controller.magnification || 1.0;
     const dampeningFactor = Math.pow(zoomFactor, +(parameters.zoomDampening || 1.2));
