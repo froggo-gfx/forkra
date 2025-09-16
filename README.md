@@ -1,6 +1,6 @@
 # Fontra
 
-![Fontra Icon](https://github.com/froggo-gfx/forkra/icons/forkra.svg)
+![Fontra Icon](icons/forkra.svg)
 
 Fontra is an in-development browser-based font editor. It consists of two main parts:
 
@@ -228,3 +228,4 @@ We are maintaining various language translations of the UI in a spreadsheet. Ple
 
 - [Translation Documentation](https://docs.google.com/spreadsheets/d/1woTU8dZCHJh7yvdk-N1kgQBUj4Sn3SdRsbKgn6ltJQs/edit?gid=1731105247#gid=1731105247)
 - [Fontra UI Strings spreadsheet](https://docs.google.com/spreadsheets/d/1woTU8dZCHJh7yvdk-N1kgQBUj4Sn3SdRsbKgn6ltJQs/edit?usp=sharing)
+
