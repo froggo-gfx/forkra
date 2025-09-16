@@ -1,4 +1,4 @@
-# Fontra
+# Forkra - a fork of [Fontra](https://github.com/fontra/fontra/)
 
 ![Fontra Icon](icons/forkra.svg)
 
