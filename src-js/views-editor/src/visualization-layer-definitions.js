@@ -38,7 +38,7 @@ import {
   OFFCURVE_DISTANCE_BADGE_PADDING,
   OFFCURVE_DISTANCE_BADGE_RADIUS,
   OFFCURVE_DISTANCE_FONT_SIZE
-} from "../../../distance-angle/distance-angle.js";
+} from "@fontra/core/distance-angle.js";
 
 //// speedpunk
 import {

@@ -206,7 +206,7 @@ This document outlines the plan for porting the "Show Distance and Angle" plugin
 7. Ensure proper UI refresh when toggling angle style
 
 ## Constants
-- `BADGE_COLOR`: RGBA values for badge color (similar to Glyphs plugin)
+- `BADGE_COLOR`: RGBA values for badge color (now greener)
 - `LINE_COLOR`: RGBA values for line color
 - `TEXT_COLOR`: Color for text display
 - `BADGE_PADDING`: Padding around text in badge

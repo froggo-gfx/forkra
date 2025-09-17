@@ -71,8 +71,8 @@ The visualization layer is defined in `visualization-layer-definitions.js`:
 
 ## Customization
 Colors, fonts, and sizes can be adjusted by modifying the constants at the top of `visualization-layer-definitions.js`:
-- `COLOR` - Line and badge color
-- `BADGE_COLOR` - Badge background color
+- `COLOR` - Line color
+- `BADGE_COLOR` - Badge background color (now greener)
 - `TEXT_COLOR` - Text color
 - `BADGE_PADDING` - Padding around text in badge
 - `BADGE_RADIUS` - Corner radius of badge
