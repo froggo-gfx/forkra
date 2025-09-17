@@ -22,7 +22,22 @@ import {
   calculateDistanceAndAngle,
   calculateBadgeDimensions,
   calculateBadgePosition,
-  formatDistanceAndAngle
+  formatDistanceAndAngle,
+  calculateDistancesFromPoint,
+  drawDistanceAngleVisualization,
+  drawOffCurveDistanceVisualization,
+  DISTANCE_ANGLE_COLOR,
+  DISTANCE_ANGLE_BADGE_COLOR,
+  DISTANCE_ANGLE_TEXT_COLOR,
+  DISTANCE_ANGLE_BADGE_PADDING,
+  DISTANCE_ANGLE_BADGE_RADIUS,
+  DISTANCE_ANGLE_FONT_SIZE,
+  OFFCURVE_DISTANCE_COLOR,
+  OFFCURVE_DISTANCE_BADGE_COLOR,
+  OFFCURVE_DISTANCE_TEXT_COLOR,
+  OFFCURVE_DISTANCE_BADGE_PADDING,
+  OFFCURVE_DISTANCE_BADGE_RADIUS,
+  OFFCURVE_DISTANCE_FONT_SIZE
 } from "../../../distance-angle/distance-angle.js";
 
 //// speedpunk
@@ -35,118 +50,7 @@ import {
   solveQuadraticBezier
 } from "@fontra/core/curvature.js";
 
-// Distance and Angle
-const DISTANCE_ANGLE_COLOR = "rgba(0, 153, 255, 0.75)"; // Similar to Glyphs plugin color
-const DISTANCE_ANGLE_BADGE_COLOR = "rgba(0, 153, 255, 0.75)";
-const DISTANCE_ANGLE_TEXT_COLOR = "white";
-const DISTANCE_ANGLE_BADGE_PADDING = 4;
-const DISTANCE_ANGLE_BADGE_RADIUS = 5;
-const DISTANCE_ANGLE_FONT_SIZE = 12;
-
 import { VarPackedPath } from "@fontra/core/var-path.js";
-
-// Distance and Angle helper functions
-function drawDistanceAngleVisualization(context, positionedGlyph, parameters, model, controller) {
-  // Get the selected points
-  const { point: selectedPointIndices } = parseSelection(model.selection);
-  
-  // We need exactly two points to show distance and angle
-  if (!selectedPointIndices || selectedPointIndices.length !== 2) {
-    return;
-  }
-  
-  // Get the actual points from the path
-  const path = positionedGlyph.glyph.path;
-  const point1 = path.getPoint(selectedPointIndices[0]);
-  const point2 = path.getPoint(selectedPointIndices[1]);
-  
-  if (!point1 || !point2) {
-    return;
-  }
-  
-  // Draw line between points
-  drawLine(context, point1, point2, parameters.strokeWidth);
-  
-  // Calculate distance and angle
-  const { distance, angle } = calculateDistanceAndAngle(point1, point2);
-  
-  // Format text for display
-  const text = formatDistanceAndAngle(distance, angle);
-  
-  // Calculate midpoint
-  const midPoint = {
-    x: (point1.x + point2.x) / 2,
-    y: (point1.y + point2.y) / 2
-  };
-  
-  // Calculate badge dimensions
-  const badgeDimensions = calculateBadgeDimensions(text, DISTANCE_ANGLE_FONT_SIZE);
-  
-  // Calculate unit vector perpendicular to the line
-  const unitVector = unitVectorFromTo(point1, point2);
-  
-  // Calculate badge position
-  const badgePosition = calculateBadgePosition(
-    midPoint,
-    { x: -unitVector.y, y: unitVector.x },
-    badgeDimensions.width,
-    badgeDimensions.height
-  );
-  
-  // Draw badge
-  drawBadge(context, badgePosition.x, badgePosition.y, badgeDimensions.width, badgeDimensions.height, DISTANCE_ANGLE_BADGE_RADIUS);
-  
-  // Draw text
-  drawText(context, text, badgePosition.x + badgeDimensions.width / 2, badgePosition.y + badgeDimensions.height / 2, DISTANCE_ANGLE_TEXT_COLOR, DISTANCE_ANGLE_FONT_SIZE);
-}
-
-// Draw a line between two points
-function drawLine(context, point1, point2, strokeWidth) {
-  context.strokeStyle = DISTANCE_ANGLE_COLOR;
-  context.lineWidth = strokeWidth;
-  strokeLine(context, point1.x, point1.y, point2.x, point2.y);
-}
-
-// Draw a rounded rectangle badge
-function drawBadge(context, x, y, width, height, radius) {
-  context.fillStyle = DISTANCE_ANGLE_BADGE_COLOR;
-  
-  // Draw rounded rectangle
-  context.beginPath();
-  context.moveTo(x + radius, y);
-  context.lineTo(x + width - radius, y);
-  context.quadraticCurveTo(x + width, y, x + width, y + radius);
-  context.lineTo(x + width, y + height - radius);
-  context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-  context.lineTo(x + radius, y + height);
-  context.quadraticCurveTo(x, y + height, x, y + height - radius);
-  context.lineTo(x, y + radius);
-  context.quadraticCurveTo(x, y, x + radius, y);
-  context.closePath();
-  context.fill();
-}
-
-// Draw text at specified position
-function drawText(context, text, x, y, color, fontSize) {
-  context.save();
-  context.fillStyle = color;
-  context.font = `${fontSize}px sans-serif`;
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.scale(1, -1);
-  
-  const lines = text.split("\n");
-  const lineHeight = fontSize;
-  const totalHeight = lines.length * lineHeight;
-  
-  // Draw each line centered
-  for (let i = 0; i < lines.length; i++) {
-    const lineY = -y - totalHeight / 2 + (i + 0.5) * lineHeight;
-    context.fillText(lines[i], x, lineY);
-  }
-  
-  context.restore();
-}
 
 export const visualizationLayerDefinitions = [];
 
@@ -301,7 +205,7 @@ registerVisualizationLayerDefinition({
   name: "Undefined glyph",
   selectionFunc: glyphSelector("all"),
   selectionFilter: (positionedGlyph) => positionedGlyph.isUndefined,
-  zIndex: 500,
+ zIndex: 500,
   colors: {
     fillColor: "#0006",
   },
@@ -449,7 +353,7 @@ registerVisualizationLayerDefinition({
   screenParameters: { iconSize: 19 },
   colors: { strokeColor: "#000C" },
   colorsDarkMode: { strokeColor: "#FFFC" },
-  draw: _drawGlyphLockIcon,
+ draw: _drawGlyphLockIcon,
 });
 
 registerVisualizationLayerDefinition({
@@ -461,7 +365,7 @@ registerVisualizationLayerDefinition({
   screenParameters: { iconSize: 19 },
   colors: { strokeColor: "#000C" },
   colorsDarkMode: { strokeColor: "#FFFC" },
-  selectionFilter: (positionedGlyph) => !positionedGlyph.isUndefined,
+ selectionFilter: (positionedGlyph) => !positionedGlyph.isUndefined,
   draw: _drawGlyphLockIcon,
 });
 
@@ -514,7 +418,7 @@ registerVisualizationLayerDefinition({
     underlayOffset: 2,
   },
   colors: { hoveredColor: "#BBB", selectedColor: "#000", underColor: "#FFFA" },
-  colorsDarkMode: { hoveredColor: "#BBB", selectedColor: "#FFF", underColor: "#0008" },
+ colorsDarkMode: { hoveredColor: "#BBB", selectedColor: "#FFF", underColor: "#0008" },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const glyph = positionedGlyph.glyph;
     const smoothSize = parameters.smoothSize;
@@ -983,7 +887,7 @@ registerVisualizationLayerDefinition({
   name: "Selected glyph",
   selectionFunc: glyphSelector("selected"),
   selectionFilter: (positionedGlyph) => !positionedGlyph.isEmpty,
-  zIndex: 200,
+ zIndex: 200,
   screenParameters: { outerStrokeWidth: 10, innerStrokeWidth: 3 },
   colors: { fillColor: "#000", strokeColor: "#7778", errorColor: "#AAA" },
   colorsDarkMode: { fillColor: "#FFF", strokeColor: "#FFF8", errorColor: "#999" },
@@ -997,7 +901,7 @@ registerVisualizationLayerDefinition({
   selectionFilter: (positionedGlyph) => !positionedGlyph.isEmpty,
   zIndex: 200,
   screenParameters: { outerStrokeWidth: 10, innerStrokeWidth: 3 },
-  colors: { fillColor: "#000", strokeColor: "#BBB8", errorColor: "#AAA" },
+ colors: { fillColor: "#000", strokeColor: "#BBB8", errorColor: "#AAA" },
   colorsDarkMode: { fillColor: "#FFF", strokeColor: "#CCC8", errorColor: "#999" },
   draw: _drawSelectedGlyphLayer,
 });
@@ -1291,7 +1195,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: false,
-  zIndex: 600,
+ zIndex: 600,
   screenParameters: { fontSize: 11 },
   colors: { boxColor: "#FFFB", color: "#000" },
   colorsDarkMode: { boxColor: "#1118", color: "#FFF" },
@@ -1597,7 +1501,7 @@ registerVisualizationLayerDefinition({
   },
   colors: { color: "#3080FF80" },
   colorsDarkMode: { color: "#50A0FF80" },
-  draw: (context, positionedGlyph, parameters, model, controller) => {
+ draw: (context, positionedGlyph, parameters, model, controller) => {
     const targetPoint = model.pathConnectTargetPoint;
     const insertHandles = model.pathInsertHandles;
     const danglingOffCurve = model.pathDanglingOffCurve;
@@ -1734,7 +1638,7 @@ registerVisualizationLayerDefinition({
   name: "Editing glyph layers",
   selectionFunc: glyphSelector("editing"),
   zIndex: 490,
-  screenParameters: {
+ screenParameters: {
     strokeWidth: 1,
     anchorRadius: 4,
   },
@@ -1764,12 +1668,12 @@ registerVisualizationLayerDefinition({
   name: "Underlying edit path stroke",
   selectionFunc: glyphSelector("editing"),
   zIndex: 490,
-  screenParameters: {
+ screenParameters: {
     strokeWidth: 3,
   },
   colors: { color: "#FFF6" },
   colorsDarkMode: { color: "#0004" },
-  draw: (context, positionedGlyph, parameters, model, controller) => {
+ draw: (context, positionedGlyph, parameters, model, controller) => {
     context.lineJoin = "round";
     context.lineWidth = parameters.strokeWidth;
     context.strokeStyle = parameters.color;
@@ -2192,7 +2096,23 @@ registerVisualizationLayerDefinition({
   screenParameters: {
     strokeWidth: 1,
   },
-  colors: { strokeColor: DISTANCE_ANGLE_COLOR },
-  colorsDarkMode: { strokeColor: DISTANCE_ANGLE_COLOR },
+  colors: { strokeColor: "rgba(0, 153, 255, 0.75)" },
+  colorsDarkMode: { strokeColor: "rgba(0, 153, 255, 0.75)" },
   draw: drawDistanceAngleVisualization,
+});
+
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.point-offcurve-distance",
+  name: "Point to Off-curve Distance",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: {
+    strokeWidth: 1,
+  },
+  colors: { strokeColor: OFFCURVE_DISTANCE_COLOR },
+  colorsDarkMode: { strokeColor: OFFCURVE_DISTANCE_COLOR },
+  draw: drawOffCurveDistanceVisualization,
 });
