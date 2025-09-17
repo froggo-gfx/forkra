@@ -16,6 +16,15 @@ import {
 } from "@fontra/core/utils.js";
 import { subVectors } from "@fontra/core/vector.js";
 
+// Distance and Angle
+import {
+  unitVectorFromTo,
+  calculateDistanceAndAngle,
+  calculateBadgeDimensions,
+  calculateBadgePosition,
+  formatDistanceAndAngle
+} from "../../../distance-angle/distance-angle.js";
+
 //// speedpunk
 import {
   calculateCurvatureForSegment,
@@ -24,9 +33,120 @@ import {
   curvatureToColor,
   solveCubicBezier,
   solveQuadraticBezier
-} from "@fontra/core/curvature.js"; 
+} from "@fontra/core/curvature.js";
+
+// Distance and Angle
+const DISTANCE_ANGLE_COLOR = "rgba(0, 153, 255, 0.75)"; // Similar to Glyphs plugin color
+const DISTANCE_ANGLE_BADGE_COLOR = "rgba(0, 153, 255, 0.75)";
+const DISTANCE_ANGLE_TEXT_COLOR = "white";
+const DISTANCE_ANGLE_BADGE_PADDING = 4;
+const DISTANCE_ANGLE_BADGE_RADIUS = 5;
+const DISTANCE_ANGLE_FONT_SIZE = 12;
 
 import { VarPackedPath } from "@fontra/core/var-path.js";
+
+// Distance and Angle helper functions
+function drawDistanceAngleVisualization(context, positionedGlyph, parameters, model, controller) {
+  // Get the selected points
+  const { point: selectedPointIndices } = parseSelection(model.selection);
+  
+  // We need exactly two points to show distance and angle
+  if (!selectedPointIndices || selectedPointIndices.length !== 2) {
+    return;
+  }
+  
+  // Get the actual points from the path
+  const path = positionedGlyph.glyph.path;
+  const point1 = path.getPoint(selectedPointIndices[0]);
+  const point2 = path.getPoint(selectedPointIndices[1]);
+  
+  if (!point1 || !point2) {
+    return;
+  }
+  
+  // Draw line between points
+  drawLine(context, point1, point2, parameters.strokeWidth);
+  
+  // Calculate distance and angle
+  const { distance, angle } = calculateDistanceAndAngle(point1, point2);
+  
+  // Format text for display
+  const text = formatDistanceAndAngle(distance, angle);
+  
+  // Calculate midpoint
+  const midPoint = {
+    x: (point1.x + point2.x) / 2,
+    y: (point1.y + point2.y) / 2
+  };
+  
+  // Calculate badge dimensions
+  const badgeDimensions = calculateBadgeDimensions(text, DISTANCE_ANGLE_FONT_SIZE);
+  
+  // Calculate unit vector perpendicular to the line
+  const unitVector = unitVectorFromTo(point1, point2);
+  
+  // Calculate badge position
+  const badgePosition = calculateBadgePosition(
+    midPoint,
+    { x: -unitVector.y, y: unitVector.x },
+    badgeDimensions.width,
+    badgeDimensions.height
+  );
+  
+  // Draw badge
+  drawBadge(context, badgePosition.x, badgePosition.y, badgeDimensions.width, badgeDimensions.height, DISTANCE_ANGLE_BADGE_RADIUS);
+  
+  // Draw text
+  drawText(context, text, badgePosition.x + badgeDimensions.width / 2, badgePosition.y + badgeDimensions.height / 2, DISTANCE_ANGLE_TEXT_COLOR, DISTANCE_ANGLE_FONT_SIZE);
+}
+
+// Draw a line between two points
+function drawLine(context, point1, point2, strokeWidth) {
+  context.strokeStyle = DISTANCE_ANGLE_COLOR;
+  context.lineWidth = strokeWidth;
+  strokeLine(context, point1.x, point1.y, point2.x, point2.y);
+}
+
+// Draw a rounded rectangle badge
+function drawBadge(context, x, y, width, height, radius) {
+  context.fillStyle = DISTANCE_ANGLE_BADGE_COLOR;
+  
+  // Draw rounded rectangle
+  context.beginPath();
+  context.moveTo(x + radius, y);
+  context.lineTo(x + width - radius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + radius);
+  context.lineTo(x + width, y + height - radius);
+  context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  context.lineTo(x + radius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - radius);
+  context.lineTo(x, y + radius);
+  context.quadraticCurveTo(x, y, x + radius, y);
+  context.closePath();
+  context.fill();
+}
+
+// Draw text at specified position
+function drawText(context, text, x, y, color, fontSize) {
+  context.save();
+  context.fillStyle = color;
+  context.font = `${fontSize}px sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.scale(1, -1);
+  
+  const lines = text.split("\n");
+  const lineHeight = fontSize;
+  const totalHeight = lines.length * lineHeight;
+  
+  // Draw each line centered
+  for (let i = 0; i < lines.length; i++) {
+    const lineY = -y - totalHeight / 2 + (i + 0.5) * lineHeight;
+    context.fillText(lines[i], x, lineY);
+  }
+  
+  context.restore();
+}
 
 export const visualizationLayerDefinitions = [];
 
@@ -2060,3 +2180,19 @@ function getTextVerticalCenter(context, text) {
   const metrics = context.measureText(text);
   return (metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
 }
+
+// Register the distance and angle visualization layer
+registerVisualizationLayerDefinition({
+  identifier: "fontra.distance-angle",
+  name: "Distance & Angle",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: {
+    strokeWidth: 1,
+  },
+  colors: { strokeColor: DISTANCE_ANGLE_COLOR },
+  colorsDarkMode: { strokeColor: DISTANCE_ANGLE_COLOR },
+  draw: drawDistanceAngleVisualization,
+});
