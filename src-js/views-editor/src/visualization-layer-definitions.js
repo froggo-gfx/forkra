@@ -25,6 +25,7 @@ import {
   formatDistanceAndAngle,
   calculateDistancesFromPoint,
   drawDistanceAngleVisualization,
+  drawManhattanDistanceVisualization,
   drawOffCurveDistanceVisualization,
   DISTANCE_ANGLE_COLOR,
   DISTANCE_ANGLE_BADGE_COLOR,
@@ -2099,6 +2100,22 @@ registerVisualizationLayerDefinition({
   colors: { strokeColor: "rgba(0, 153, 255, 0.75)" },
   colorsDarkMode: { strokeColor: "rgba(0, 153, 255, 0.75)" },
   draw: drawDistanceAngleVisualization,
+});
+
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.manhattan-distance",
+  name: "Manhattan Distance",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: {
+    strokeWidth: 1,
+  },
+  colors: { strokeColor: "rgba(0, 153, 255, 0.75)" },
+  colorsDarkMode: { strokeColor: "rgba(0, 153, 255, 0.75)" },
+  draw: drawManhattanDistanceVisualization,
 });
 
 

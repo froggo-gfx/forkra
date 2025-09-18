@@ -5,17 +5,17 @@
 export const DISTANCE_ANGLE_COLOR = "rgba(0, 153, 255, 0.75)"; // Similar to Glyphs plugin color
 export const DISTANCE_ANGLE_BADGE_COLOR = "rgba(0, 153, 255, 0.75)"; // Blue color
 export const DISTANCE_ANGLE_TEXT_COLOR = "white";
-export const DISTANCE_ANGLE_BADGE_PADDING = 4;
-export const DISTANCE_ANGLE_BADGE_RADIUS = 5;
-export const DISTANCE_ANGLE_FONT_SIZE = 12;
+export const DISTANCE_ANGLE_BADGE_PADDING = 2;
+export const DISTANCE_ANGLE_BADGE_RADIUS = 3;
+export const DISTANCE_ANGLE_FONT_SIZE = 10;
 
 // Color constants for off-curve distance visualization
 export const OFFCURVE_DISTANCE_COLOR = "rgba(0, 200, 0, 0.75)"; // Green color
 export const OFFCURVE_DISTANCE_BADGE_COLOR = "rgba(0, 200, 0, 0.75)";
 export const OFFCURVE_DISTANCE_TEXT_COLOR = "white";
-export const OFFCURVE_DISTANCE_BADGE_PADDING = 4;
-export const OFFCURVE_DISTANCE_BADGE_RADIUS = 5;
-export const OFFCURVE_DISTANCE_FONT_SIZE = 12;
+export const OFFCURVE_DISTANCE_BADGE_PADDING = 2;
+export const OFFCURVE_DISTANCE_BADGE_RADIUS = 3;
+export const OFFCURVE_DISTANCE_FONT_SIZE = 10;
 
 // Calculate unit vector from point B to point A
 export function unitVectorFromTo(pointB, pointA) {
@@ -63,6 +63,13 @@ export function calculateDistanceAndAngle(point1, point2) {
   };
 }
 
+// Calculate Manhattan distance between two points
+export function calculateManhattanDistance(point1, point2) {
+  const dx = Math.abs(point2.x - point1.x);
+  const dy = Math.abs(point2.y - point1.y);
+  return dx + dy;
+}
+
 // Calculate the dimensions needed for the info badge
 export function calculateBadgeDimensions(text, fontSize) {
   // Create a temporary canvas to measure text
@@ -103,6 +110,11 @@ export function calculateBadgePosition(midPoint, unitVector, badgeWidth, badgeHe
 // Format distance and angle values for display
 export function formatDistanceAndAngle(distance, angle) {
   return `${distance.toFixed(1)}\n${angle.toFixed(1)}°`;
+}
+
+// Format Manhattan distance for display
+export function formatManhattanDistance(distance) {
+  return `${distance.toFixed(1)}`;
 }
 
 // Check if a point is an on-curve point with specific configurations
@@ -397,6 +409,98 @@ export function drawDistanceAngleVisualization(context, positionedGlyph, paramet
   
   // Draw text
   drawText(context, text, badgePosition.x + badgeDimensions.width / 2, badgePosition.y + badgeDimensions.height / 2, DISTANCE_ANGLE_TEXT_COLOR, DISTANCE_ANGLE_FONT_SIZE);
+}
+// Draw Manhattan distance visualization
+export function drawManhattanDistanceVisualization(context, positionedGlyph, parameters, model, controller) {
+  // Get the selected points
+  const { point: selectedPointIndices } = parseSelection(model.selection);
+  
+  // We need exactly two points to show Manhattan distance
+  if (!selectedPointIndices || selectedPointIndices.length !== 2) {
+    return;
+  }
+  
+  // Get the actual points from the path
+  const path = positionedGlyph.glyph.path;
+  const point1 = path.getPoint(selectedPointIndices[0]);
+  const point2 = path.getPoint(selectedPointIndices[1]);
+  
+  if (!point1 || !point2) {
+    return;
+  }
+  
+  // Calculate dx and dy as absolute differences
+  const dx = Math.abs(point2.x - point1.x);
+  const dy = Math.abs(point2.y - point1.y);
+  
+  // Check if either dx or dy is zero (meaning points are aligned)
+  if (dx === 0 || dy === 0) {
+    // Points are aligned, show only the direct line without any measurements
+    drawLine(context, point1, point2, parameters.strokeWidth, parameters.strokeColor);
+    return;
+  }
+  
+  // Points are not aligned, show the Manhattan visualization with separate X and Y measurements
+  // Calculate Manhattan distance
+  const manhattanDistance = calculateManhattanDistance(point1, point2);
+  
+  // Create the corner point for the right angle path (horizontal first, then vertical)
+  const cornerPoint = { x: point2.x, y: point1.y };
+  
+  // Draw the horizontal line from point1 to cornerPoint
+  drawLine(context, point1, cornerPoint, parameters.strokeWidth, parameters.strokeColor);
+  
+  // Draw the vertical line from cornerPoint to point2
+  drawLine(context, cornerPoint, point2, parameters.strokeWidth, parameters.strokeColor);
+  
+  // Format text for separate measurements
+  const dxText = dx.toFixed(1);
+  const dyText = dy.toFixed(1);
+  
+  // Calculate midpoint of horizontal segment for dx badge positioning
+  const hMidPoint = {
+    x: (point1.x + cornerPoint.x) / 2,
+    y: (point1.y + cornerPoint.y) / 2
+  };
+  
+  // Calculate midpoint of vertical segment for dy badge positioning
+  const vMidPoint = {
+    x: (cornerPoint.x + point2.x) / 2,
+    y: (cornerPoint.y + point2.y) / 2
+  };
+  
+  // Calculate badge dimensions for each text
+  const dxBadgeDimensions = calculateBadgeDimensions(dxText, DISTANCE_ANGLE_FONT_SIZE);
+  const dyBadgeDimensions = calculateBadgeDimensions(dyText, DISTANCE_ANGLE_FONT_SIZE);
+  
+  // Calculate unit vectors for badge positioning
+  // For horizontal segment, perpendicular vector points vertically
+  const hUnitVector = { x: 0, y: 1 };
+  // For vertical segment, perpendicular vector points horizontally
+  const vUnitVector = { x: 1, y: 0 };
+  
+  // Calculate badge positions
+  const dxBadgePosition = calculateBadgePosition(
+    hMidPoint,
+    hUnitVector,
+    dxBadgeDimensions.width,
+    dxBadgeDimensions.height
+  );
+  
+  const dyBadgePosition = calculateBadgePosition(
+    vMidPoint,
+    vUnitVector,
+    dyBadgeDimensions.width,
+    dyBadgeDimensions.height
+  );
+  
+  // Draw badges
+  drawBadge(context, dxBadgePosition.x, dxBadgePosition.y, dxBadgeDimensions.width, dxBadgeDimensions.height, DISTANCE_ANGLE_BADGE_RADIUS, DISTANCE_ANGLE_BADGE_COLOR);
+  drawBadge(context, dyBadgePosition.x, dyBadgePosition.y, dyBadgeDimensions.width, dyBadgeDimensions.height, DISTANCE_ANGLE_BADGE_RADIUS, DISTANCE_ANGLE_BADGE_COLOR);
+  
+  // Draw text
+  drawText(context, dxText, dxBadgePosition.x + dxBadgeDimensions.width / 2, dxBadgePosition.y + dxBadgeDimensions.height / 2, DISTANCE_ANGLE_TEXT_COLOR, DISTANCE_ANGLE_FONT_SIZE);
+  drawText(context, dyText, dyBadgePosition.x + dyBadgeDimensions.width / 2, dyBadgePosition.y + dyBadgeDimensions.height / 2, DISTANCE_ANGLE_TEXT_COLOR, DISTANCE_ANGLE_FONT_SIZE);
 }
 
 // Draw off-curve distance visualization
