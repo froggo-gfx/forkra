@@ -5,17 +5,17 @@
 export const DISTANCE_ANGLE_COLOR = "rgba(0, 153, 255, 0.75)"; // Similar to Glyphs plugin color
 export const DISTANCE_ANGLE_BADGE_COLOR = "rgba(0, 153, 255, 0.75)"; // Blue color
 export const DISTANCE_ANGLE_TEXT_COLOR = "white";
-export const DISTANCE_ANGLE_BADGE_PADDING = 2;
-export const DISTANCE_ANGLE_BADGE_RADIUS = 3;
-export const DISTANCE_ANGLE_FONT_SIZE = 10;
+export const DISTANCE_ANGLE_BADGE_PADDING = 4;
+export const DISTANCE_ANGLE_BADGE_RADIUS = 5;
+export const DISTANCE_ANGLE_FONT_SIZE = 12;
 
 // Color constants for off-curve distance visualization
 export const OFFCURVE_DISTANCE_COLOR = "rgba(0, 200, 0, 0.75)"; // Green color
 export const OFFCURVE_DISTANCE_BADGE_COLOR = "rgba(0, 200, 0, 0.75)";
 export const OFFCURVE_DISTANCE_TEXT_COLOR = "white";
-export const OFFCURVE_DISTANCE_BADGE_PADDING = 2;
-export const OFFCURVE_DISTANCE_BADGE_RADIUS = 3;
-export const OFFCURVE_DISTANCE_FONT_SIZE = 10;
+export const OFFCURVE_DISTANCE_BADGE_PADDING = 4;
+export const OFFCURVE_DISTANCE_BADGE_RADIUS = 5;
+export const OFFCURVE_DISTANCE_FONT_SIZE = 12;
 
 // Calculate unit vector from point B to point A
 export function unitVectorFromTo(pointB, pointA) {
@@ -435,8 +435,41 @@ export function drawManhattanDistanceVisualization(context, positionedGlyph, par
   
   // Check if either dx or dy is zero (meaning points are aligned)
   if (dx === 0 || dy === 0) {
-    // Points are aligned, show only the direct line without any measurements
+    // Points are aligned, show only the direct distance
+    const distance = Math.hypot(dx, dy);
+    
+    // Draw line between points
     drawLine(context, point1, point2, parameters.strokeWidth, parameters.strokeColor);
+    
+    // Format text for display
+    const text = formatManhattanDistance(distance);
+    
+    // Calculate midpoint
+    const midPoint = {
+      x: (point1.x + point2.x) / 2,
+      y: (point1.y + point2.y) / 2
+    };
+    
+    // Calculate badge dimensions
+    const badgeDimensions = calculateBadgeDimensions(text, DISTANCE_ANGLE_FONT_SIZE);
+    
+    // Calculate unit vector perpendicular to the line
+    const unitVector = unitVectorFromTo(point1, point2);
+    
+    // Calculate badge position
+    const badgePosition = calculateBadgePosition(
+      midPoint,
+      { x: -unitVector.y, y: unitVector.x },
+      badgeDimensions.width,
+      badgeDimensions.height
+    );
+    
+    // Draw badge
+    drawBadge(context, badgePosition.x, badgePosition.y, badgeDimensions.width, badgeDimensions.height, DISTANCE_ANGLE_BADGE_RADIUS, DISTANCE_ANGLE_BADGE_COLOR);
+    
+    // Draw text
+    drawText(context, text, badgePosition.x + badgeDimensions.width / 2, badgePosition.y + badgeDimensions.height / 2, DISTANCE_ANGLE_TEXT_COLOR, DISTANCE_ANGLE_FONT_SIZE);
+    
     return;
   }
   
