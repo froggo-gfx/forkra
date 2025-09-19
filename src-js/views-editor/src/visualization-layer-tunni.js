@@ -30,10 +30,22 @@ export function registerTunniVisualizationLayer() {
 function drawTunniLines(context, positionedGlyph, parameters, model, controller) {
   const path = positionedGlyph.glyph.path;
   
-  context.strokeStyle = parameters.tunniLineColor;
+  // Check if there's an active Tunni point
+  const isActive = model?.sceneController?.tunniEditingTool?.isActive || false;
+  
+  // Set colors based on active state
+  const tunniLineColor = isActive ?
+    (parameters.tunniLineColor + "80") : // Lighter outline when active (more transparent)
+    parameters.tunniLineColor;
+    
+  const tunniPointColor = isActive ?
+    "#FF0000" : // Red color when active
+    parameters.tunniPointColor;
+  
+  context.strokeStyle = tunniLineColor;
   context.lineWidth = parameters.strokeWidth;
   context.setLineDash(parameters.dashPattern);
-  context.fillStyle = parameters.tunniPointColor;
+  context.fillStyle = tunniPointColor;
   
   // Iterate through all contours
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
