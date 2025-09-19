@@ -18,7 +18,16 @@ export function calculateTunniPoint(segmentPoints) {
   return tunniPoint;
 }
 
-export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equalizeDistances = false) {
+/**
+ * Calculate new control points based on a Tunni point and segment points.
+ *
+ * @param {Object} tunniPoint - The Tunni point that defines the desired curve shape
+ * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
+ * @param {boolean} equalizeDistances - If true, makes additional distances beyond intersection point equal
+ * @param {boolean} useArithmeticMean - If true, makes both control points distances an arithmetic mean of the original distances
+ * @returns {Array} Array of 2 new control points
+ */
+export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equalizeDistances = false, useArithmeticMean = false) {
   const [p1, p2, p3, p4] = segmentPoints;
   
   // Calculate unit vectors for the original directions
@@ -38,6 +47,20 @@ export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equal
   if (!intersection) {
     // Lines are parallel, return original control points
     return [p2, p3];
+  }
+  
+  // Calculate original distances from on-curve points to off-curve points
+  const origDist1 = distance(p1, p2);
+  const origDist2 = distance(p4, p3);
+  
+  // If using arithmetic mean of original distances, calculate the mean
+  let targetDist1 = origDist1;
+  let targetDist2 = origDist2;
+  
+  if (useArithmeticMean) {
+    const arithmeticMean = (origDist1 + origDist2) / 2;
+    targetDist1 = arithmeticMean;
+    targetDist2 = arithmeticMean;
   }
   
   // Calculate distances from on-curve points to the intersection point
@@ -62,14 +85,10 @@ export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equal
     finalAdditionalDist2 = avgAdditionalDist;
   }
   
-  // Calculate original distances from on-curve points to off-curve points
-  const origDist1 = distance(p1, p2);
-  const origDist2 = distance(p4, p3);
-  
   // Calculate new distances along fixed direction vectors
-  // The new distance is the original distance plus the (possibly equalized) additional distance
-  const newDistance1 = origDist1 + finalAdditionalDist1;
-  const newDistance2 = origDist2 + finalAdditionalDist2;
+  // The new distance is the target distance plus the (possibly equalized) additional distance
+  const newDistance1 = targetDist1 + finalAdditionalDist1;
+  const newDistance2 = targetDist2 + finalAdditionalDist2;
   
   // Calculate new control points along fixed direction vectors
   const newP2 = {
@@ -80,6 +99,40 @@ export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equal
   const newP3 = {
     x: p4.x + newDistance2 * dir2.x,
     y: p4.y + newDistance2 * dir2.y
+  };
+  
+  return [newP2, newP3];
+}
+
+/**
+* Calculate new control points with equalized distances using arithmetic mean
+ * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
+* @returns {Array} Array of 2 new control points
+*/
+export function calculateEqualizedControlPoints(segmentPoints) {
+  const [p1, p2, p3, p4] = segmentPoints;
+  
+  // Calculate unit vectors for the original directions
+  const dir1 = normalizeVector(subVectors(p2, p1));
+  const dir2 = normalizeVector(subVectors(p3, p4)); // Note: p3 to p4, not p4 to p3
+  
+  // Calculate original distances from on-curve points to off-curve points
+  const origDist1 = distance(p1, p2);
+  const origDist2 = distance(p4, p3);
+  
+  // Calculate the arithmetic mean of the original distances
+  const arithmeticMean = (origDist1 + origDist2) / 2;
+  
+  // Calculate new control points at the arithmetic mean distance
+  // along the same direction vectors
+  const newP2 = {
+    x: p1.x + arithmeticMean * dir1.x,
+    y: p1.y + arithmeticMean * dir1.y
+  };
+  
+  const newP3 = {
+    x: p4.x + arithmeticMean * dir2.x,
+    y: p4.y + arithmeticMean * dir2.y
   };
   
   return [newP2, newP3];

@@ -1,4 +1,4 @@
-import { calculateTunniPoint, calculateControlPointsFromTunni } from "@fontra/core/tunni-calculations.js";
+import { calculateTunniPoint, calculateControlPointsFromTunni, calculateEqualizedControlPoints } from "@fontra/core/tunni-calculations.js";
 import { distance, subVectors, dotVector, vectorLength } from "@fontra/core/vector.js";
 
 // TunniEditingTool is a helper class for the TunniTool that handles the actual
@@ -25,6 +25,13 @@ export class TunniEditingTool {
       x: point.x - positionedGlyph.x,
       y: point.y - positionedGlyph.y,
     };
+    
+    // Check for Ctrl + Shift + Click to equalize control point distances
+    if (event.ctrlKey && event.shiftKey) {
+      // Handle the Ctrl + Shift + Click functionality
+      this.handleEqualizeDistances(point, size);
+      return;
+    }
     
     // First check if we clicked on an existing Tunni point
     const hit = this.findTunniPointHit(point, size);
@@ -141,13 +148,113 @@ export class TunniEditingTool {
           if (fortyFiveLength > 0) {
             this.fortyFiveVector.x /= fortyFiveLength;
             this.fortyFiveVector.y /= fortyFiveLength;
-          }
+          };
           
           this.selectedSegment = pathHit.segment;
           this.originalSegmentPoints = [...segmentPoints];
           this.isActive = true; // Set active state when Tunni point is selected
         }
       }
+    }
+  }
+
+  /**
+   * Handle Ctrl + Shift + Click to equalize control point distances using arithmetic mean
+   * @param {Object} point - The point where the mouse was clicked
+   * @param {number} size - The click margin size
+   */
+  async handleEqualizeDistances(point, size) {
+    // First check if we clicked on an existing Tunni point
+    const hit = this.findTunniPointHit(point, size);
+    if (hit) {
+      await this.equalizeSegmentDistances(hit.segment, hit.segmentPoints);
+      return;
+    }
+    
+    // If not, check if we clicked near a cubic segment
+    const pathHit = this.sceneModel.pathHitAtPoint(point, size);
+    if (pathHit.segment && pathHit.segment.points.length === 4) {
+      // Check if it's a cubic segment (two off-curve points)
+      const pointTypes = pathHit.segment.parentPointIndices.map(
+        index => this.sceneModel.getSelectedPositionedGlyph().glyph.path.pointTypes[index]
+      );
+      
+      if (pointTypes[1] === 2 && pointTypes[2] === 2) { // Both are cubic control points
+        await this.equalizeSegmentDistances(pathHit.segment, pathHit.segment.points);
+      }
+    }
+  }
+
+  /**
+   * Check if the distances of control points in a segment are already equalized
+   * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
+   * @returns {boolean} - True if distances are already equalized, false otherwise
+   */
+  areDistancesEqualized(segmentPoints) {
+    const [p1, p2, p3, p4] = segmentPoints;
+    
+    // Calculate distances from on-curve points to off-curve points
+    const dist1 = distance(p1, p2);
+    const dist2 = distance(p4, p3);
+    
+    // Check if distances are equal within a small tolerance
+    const tolerance = 0.001; // Small tolerance for floating point comparison
+    return Math.abs(dist1 - dist2) < tolerance;
+  }
+
+  /**
+   * Equalize the distances of control points in a segment using arithmetic mean
+   * @param {Object} segment - The segment to modify
+   * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
+   */
+  async equalizeSegmentDistances(segment, segmentPoints) {
+    // Check if distances are already equalized
+    if (this.areDistancesEqualized(segmentPoints)) {
+      console.log("Distances are already equalized, skipping...");
+      return;
+    }
+    
+    // Calculate new control points with equalized distances using arithmetic mean
+    const newControlPoints = calculateEqualizedControlPoints(segmentPoints);
+    
+    // Update the path with new control points using editLayersAndRecordChanges
+    try {
+      await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+        for (const layerGlyph of Object.values(layerGlyphs)) {
+          const path = layerGlyph.path;
+          
+          // Validate that the path and segment indices exist
+          if (!path || !segment.parentPointIndices) {
+            console.warn("Invalid path or segment indices", {
+              path: !!path,
+              parentPointIndices: segment.parentPointIndices
+            });
+            return "Equalize Control Point Distances"; // Return early but still provide undo label
+          }
+          
+          // Find the indices of the control points within the segment
+          // In a cubic segment, control points are typically at indices 1 and 2
+          const controlPoint1Index = segment.parentPointIndices[1];
+          const controlPoint2Index = segment.parentPointIndices[2];
+          
+          // Validate the control point indices
+          if (controlPoint1Index === undefined || controlPoint2Index === undefined) {
+            console.warn("Invalid control point indices", {
+              controlPoint1Index: controlPoint1Index,
+              controlPoint2Index: controlPoint2Index
+            });
+            return "Equalize Control Point Distances"; // Return early but still provide undo label
+          }
+          
+          // Update the control points in the path
+          path.setPointPosition(controlPoint1Index, newControlPoints[0].x, newControlPoints[0].y);
+          path.setPointPosition(controlPoint2Index, newControlPoints[1].x, newControlPoints[1].y);
+        }
+        return "Equalize Control Point Distances";
+      });
+    } catch (error) {
+      console.error("Error equalizing control point distances:", error);
+      throw error; // Re-throw the error so it can be handled upstream
     }
   }
 
