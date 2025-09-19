@@ -7,7 +7,7 @@ import { distance, subVectors, dotVector, vectorLength } from "@fontra/core/vect
 // the Tunni point (the intersection of the lines connecting the start/end points
 // with their respective control points) to adjust the curve shape.
 export class TunniTool extends BaseTool {
-  iconPath = "/tabler-icons/shape.svg";
+  iconPath = "/images/tunni.svg";
   identifier = "tunni-tool";
 
   activate() {
