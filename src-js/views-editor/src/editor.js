@@ -71,6 +71,7 @@ import { PenTool } from "./edit-tools-pen.js";
 import { PointerTools } from "./edit-tools-pointer.js";
 import { PowerRulerTool } from "./edit-tools-power-ruler.js";
 import { ShapeTool } from "./edit-tools-shape.js";
+import { TunniTool } from "./edit-tools-tunni.js";
 import { SceneController } from "./scene-controller.js";
 import { MIN_SIDEBAR_WIDTH, Sidebar } from "./sidebar.js";
 import {
@@ -924,6 +925,7 @@ export class EditorController extends ViewController {
       ShapeTool,
       MetricsTool,
       PowerRulerTool,
+      TunniTool,
       HandTool,
     ];
 
