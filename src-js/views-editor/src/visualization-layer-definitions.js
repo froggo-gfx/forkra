@@ -55,7 +55,7 @@ import {
 } from "@fontra/core/curvature.js";
 
 import { VarPackedPath } from "@fontra/core/var-path.js";
-import { calculateTunniPoint, calculateControlHandleDistance } from "@fontra/core/tunni-calculations.js";
+import { calculateTunniPoint, calculateControlHandleDistance, drawTunniHandleDistance } from "@fontra/core/tunni-calculations.js";
 import { distance } from "@fontra/core/vector.js";
 
 
@@ -2245,81 +2245,3 @@ registerVisualizationLayerDefinition({
   colorsDarkMode: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
   draw: drawTunniHandleDistance,
 });
-
-// Draw Tunni handle distance visualization
-export function drawTunniHandleDistance(context, positionedGlyph, parameters, model, controller) {
-  const path = positionedGlyph.glyph.path;
-  
-  // Save context state
-  context.save();
-  
-  // Iterate through all contours
-  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
-    // Iterate through all segments in the contour
-    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
-      // Check if it's a cubic segment (4 points)
-      if (segment.points.length === 4) {
-        // Check if it's a cubic segment with two off-curve control points
-        const pointTypes = segment.parentPointIndices.map(
-          index => path.pointTypes[index]
-        );
-        
-        // Both control points must be cubic (type 2)
-        if (pointTypes[1] === 2 && pointTypes[2] === 2) {
-          try {
-            // Calculate the distance between the two control points
-            const distance = calculateControlHandleDistance(segment.points);
-            
-            // Get the control points
-            const controlPoint1 = segment.points[1];
-            const controlPoint2 = segment.points[2];
-            
-            // Draw line between control points
-            context.strokeStyle = parameters.strokeColor;
-            strokeLine(context, controlPoint1.x, controlPoint1.y, controlPoint2.x, controlPoint2.y);
-            
-            // Format text for display
-            const text = distance.toFixed(1);
-            
-            // Calculate midpoint
-            const midPoint = {
-              x: (controlPoint1.x + controlPoint2.x) / 2,
-              y: (controlPoint1.y + controlPoint2.y) / 2
-            };
-            
-            // Calculate badge dimensions
-            const badgeDimensions = calculateBadgeDimensions(text, DISTANCE_ANGLE_FONT_SIZE);
-            
-            // Calculate unit vector perpendicular to the line
-            const unitVector = unitVectorFromTo(controlPoint1, controlPoint2);
-            
-            // Calculate badge position
-            const badgePosition = calculateBadgePosition(
-              midPoint,
-              { x: -unitVector.y, y: unitVector.x },
-              badgeDimensions.width,
-              badgeDimensions.height
-            );
-            
-            // Draw badge
-            context.fillStyle = parameters.badgeColor;
-            drawRoundRect(context, badgePosition.x, badgePosition.y, badgeDimensions.width, badgeDimensions.height, DISTANCE_ANGLE_BADGE_RADIUS);
-            
-            // Draw text
-            context.fillStyle = parameters.textColor;
-            context.font = `${DISTANCE_ANGLE_FONT_SIZE}px fontra-ui-regular, sans-serif`;
-            context.textAlign = "center";
-            context.textBaseline = "middle";
-            context.fillText(text, badgePosition.x + badgeDimensions.width / 2, badgePosition.y + badgeDimensions.height / 2);
-          } catch (error) {
-            // Skip segments where distance calculation fails
-            console.warn("Failed to calculate control handle distance:", error);
-          }
-        }
-      }
-    }
-  }
-  
-  // Restore context state
-  context.restore();
-}
