@@ -7,7 +7,7 @@ export const DISTANCE_ANGLE_BADGE_COLOR = "rgba(0, 153, 255, 0.75)"; // Blue col
 export const DISTANCE_ANGLE_TEXT_COLOR = "white";
 export const DISTANCE_ANGLE_BADGE_PADDING = 4;
 export const DISTANCE_ANGLE_BADGE_RADIUS = 5;
-export const DISTANCE_ANGLE_FONT_SIZE = 12;
+export const DISTANCE_ANGLE_FONT_SIZE = 7;
 
 // Color constants for off-curve distance visualization
 export const OFFCURVE_DISTANCE_COLOR = "rgba(0, 200, 0, 0.75)"; // Green color
@@ -15,7 +15,7 @@ export const OFFCURVE_DISTANCE_BADGE_COLOR = "rgba(0, 200, 0, 0.75)";
 export const OFFCURVE_DISTANCE_TEXT_COLOR = "white";
 export const OFFCURVE_DISTANCE_BADGE_PADDING = 4;
 export const OFFCURVE_DISTANCE_BADGE_RADIUS = 5;
-export const OFFCURVE_DISTANCE_FONT_SIZE = 12;
+export const OFFCURVE_DISTANCE_FONT_SIZE = 7;
 
 // Calculate unit vector from point B to point A
 export function unitVectorFromTo(pointB, pointA) {
@@ -290,11 +290,9 @@ export function calculateOffCurveAngle(offCurvePoint, onCurvePoint) {
   return degs;
 }
 
-// Format distance, tension, and angle values for display
-export function formatDistanceTensionAngle(distance, tension, angle) {
-  // Convert tension to percentage, round to integer, and add percentage sign
-  const tensionPercentage = Math.round(tension * 100);
-  return `${distance.toFixed(1)} / ${tensionPercentage}% / ${angle.toFixed(1)}°`;
+// Format distance and angle values for display
+export function formatDistanceAngle(distance, angle) {
+  return `${distance.toFixed(1)} / ${angle.toFixed(1)}°`;
 }
 
 // Select the correct off-curve point for Tunni tension calculation
@@ -927,23 +925,10 @@ export function drawOffCurveDistanceVisualization(context, positionedGlyph, para
       const dy = offCurvePoint.y - onCurvePoint.y;
       const distance = Math.hypot(dx, dy);
       
-      // Calculate tension and angle for the current off-curve point
-      let tension = 0;
+      // Calculate angle for the off-curve point
       let angle = 0;
       
       if (nextPoint && nextPointIndex !== null) {
-        // Check if the next on-curve point has off-curve points
-        const nextPointConfig = checkPointConfiguration(path, nextPointIndex);
-        
-        // Calculate tension based on the configuration
-        if (nextPointConfig && nextPointConfig.offCurvePoints.length > 0) {
-          // Select the correct off-curve point for Tunni tension calculation
-          const offCurvePointB = selectCorrectOffCurvePoint(path, nextPointIndex, nextPointConfig, onCurvePointIndex);
-          // Check if the current off-curve point is selected
-          const isCurrentOffCurveSelected = selectedPointIndices.includes(offCurvePointIndex);
-          tension = calculateTension(offCurvePoint, onCurvePoint, offCurvePointB, nextPoint, isCurrentOffCurveSelected);
-        }
-        
         // Calculate angle for the off-curve point
         angle = calculateOffCurveAngle(offCurvePoint, onCurvePoint);
       }
@@ -951,8 +936,8 @@ export function drawOffCurveDistanceVisualization(context, positionedGlyph, para
       // Draw line between points
       drawLine(context, onCurvePoint, offCurvePoint, parameters.strokeWidth, parameters.strokeColor);
       
-      // Format text for display with distance, tension, and angle
-      const text = formatDistanceTensionAngle(distance, tension, angle);
+      // Format text for display with distance and angle
+      const text = formatDistanceAngle(distance, angle);
       
       // Calculate midpoint
       const midPoint = {
@@ -983,7 +968,7 @@ export function drawOffCurveDistanceVisualization(context, positionedGlyph, para
       // Draw text without badge
       context.save();
       context.fillStyle = "rgba(26, 82, 26, 1)";
-      context.font = `8px sans-serif`;
+      context.font = `${OFFCURVE_DISTANCE_FONT_SIZE}px sans-serif`;
       context.textAlign = "center";
       context.textBaseline = "alphabetic"; // Align baseline with the line
       context.scale(1, -1);
