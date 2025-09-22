@@ -2241,7 +2241,7 @@ registerVisualizationLayerDefinition({
   screenParameters: {
     strokeWidth: 1,
   },
-  colors: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
+  colors: { strokeColor: "rgba(44, 28, 44, 1)", badgeColor: "#FF00FF", textColor: "white" },
   colorsDarkMode: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
   draw: drawTunniLabels,
 });

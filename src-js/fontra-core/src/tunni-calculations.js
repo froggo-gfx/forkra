@@ -292,7 +292,7 @@ export function calculateControlHandleDistance(segmentPoints) {
  * @param {CanvasRenderingContext2D} context - The canvas context
  * @param {Object} positionedGlyph - The positioned glyph
  * @param {Object} parameters - Visualization parameters
-* @param {Object} model - The model
+ * @param {Object} model - The model
  * @param {Object} controller - The controller
  */
 export function drawTunniLabels(context, positionedGlyph, parameters, model, controller) {
@@ -321,20 +321,25 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
             const p3 = segment.points[2];  // off-curve control point 2
             const p4 = segment.points[3];  // on-curve end point
             
-            // Calculate Tunni point
-            const pt = calculateTunniPoint(segment.points);
-            
-            // Calculate tensions
-            const tension1 = distance(p1, p2) / distance(p1, pt);  // tension for p2
-            const tension2 = distance(p4, p3) / distance(p4, pt);  // tension for p3
+            // Calculate Tunni point for visualization (keep midpoint)
+            const visualPt = calculateTunniPoint(segment.points);
+
+            // Calculate true Tunni point for tension calculations
+            const truePt = calculateTrueTunniPoint(segment.points);
+
+            // Calculate tensions using the true intersection point (with fallback to midpoint)
+            const tensionPt1 = truePt || visualPt;
+            const tensionPt2 = truePt || visualPt;
+            const tension1 = distance(p1, p2) / distance(p1, tensionPt1);  // tension for p2
+            const tension2 = distance(p4, p3) / distance(p4, tensionPt2);  // tension for p3
             
             // Format text for display
             const text1 = tension1.toFixed(2);
             const text2 = tension2.toFixed(2);
             
             // Calculate badge dimensions for both labels
-            const badgeDimensions1 = calculateBadgeDimensions(text1, DISTANCE_ANGLE_FONT_SIZE);
-            const badgeDimensions2 = calculateBadgeDimensions(text2, DISTANCE_ANGLE_FONT_SIZE);
+            const badgeDimensions1 = calculateBadgeDimensions(text1, 7); // 7pt font
+            const badgeDimensions2 = calculateBadgeDimensions(text2, 7); // 7pt font
             
             // Calculate unit vector from p1 to p2 for p2 label positioning
             const unitVector1 = unitVectorFromTo(p1, p2);
@@ -342,43 +347,35 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
             // Calculate unit vector from p4 to p3 for p3 label positioning
             const unitVector2 = unitVectorFromTo(p4, p3);
             
-            // Calculate badge positions for both labels
+            // Calculate badge positions for both labels and shift up by 4px
             const badgePosition1 = calculateBadgePosition(
-              p2,
+              { x: p2.x, y: p2.y + 6 }, // Shift up by 4px
               { x: -unitVector1.y, y: unitVector1.x },
               badgeDimensions1.width,
               badgeDimensions1.height
             );
             
             const badgePosition2 = calculateBadgePosition(
-              p3,
+              { x: p3.x, y: p3.y + 6 }, // Shift up by 4px
               { x: -unitVector2.y, y: unitVector2.x },
               badgeDimensions2.width,
               badgeDimensions2.height
             );
             
-            // Draw badge for p2 tension
-            context.fillStyle = parameters.badgeColor;
-            drawRoundRect(context, badgePosition1.x, badgePosition1.y, badgeDimensions1.width, badgeDimensions1.height, DISTANCE_ANGLE_BADGE_RADIUS);
-            
-            // Draw text for p2 tension
+            // Draw text for p2 tension with new styling
             context.save();
-            context.fillStyle = parameters.textColor;
-            context.font = `${DISTANCE_ANGLE_FONT_SIZE}px fontra-ui-regular, sans-serif`;
+            context.fillStyle = "rgba(44, 28, 44, 1)"; // New text color
+            context.font = `7px fontra-ui-regular, sans-serif`; // 7pt font, medium weight
             context.textAlign = "center";
             context.textBaseline = "middle";
             context.scale(1, -1);
             context.fillText(text1, badgePosition1.x + badgeDimensions1.width / 2, -(badgePosition1.y + badgeDimensions1.height / 2));
             context.restore();
             
-            // Draw badge for p3 tension
-            context.fillStyle = parameters.badgeColor;
-            drawRoundRect(context, badgePosition2.x, badgePosition2.y, badgeDimensions2.width, badgeDimensions2.height, DISTANCE_ANGLE_BADGE_RADIUS);
-            
-            // Draw text for p3 tension
+            // Draw text for p3 tension with new styling
             context.save();
-            context.fillStyle = parameters.textColor;
-            context.font = `${DISTANCE_ANGLE_FONT_SIZE}px fontra-ui-regular, sans-serif`;
+            context.fillStyle = "rgba(44, 28, 44, 1)"; // New text color
+            context.font = `7px fontra-ui-regular, sans-serif`; // 7pt font, medium weight
             context.textAlign = "center";
             context.textBaseline = "middle";
             context.scale(1, -1);
@@ -391,7 +388,7 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
         }
       }
     }
- }
+  }
   
   // Restore context state
   context.restore();
