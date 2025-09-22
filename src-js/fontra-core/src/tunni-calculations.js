@@ -134,34 +134,58 @@ export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equal
 }
 
 /**
-* Calculate new control points with equalized distances using arithmetic mean
- * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
+* Calculate new control points with equalized tensions using arithmetic mean
+* @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
 * @returns {Array} Array of 2 new control points
 */
 export function calculateEqualizedControlPoints(segmentPoints) {
   const [p1, p2, p3, p4] = segmentPoints;
   
-  // Calculate unit vectors for the original directions
-  const dir1 = normalizeVector(subVectors(p2, p1));
-  const dir2 = normalizeVector(subVectors(p3, p4)); // Note: p3 to p4, not p4 to p3
+  // Calculate the Tunni point (midpoint between control points)
+  const pt = {
+    x: (p2.x + p3.x) / 2,
+    y: (p2.y + p3.y) / 2
+  };
   
-  // Calculate original distances from on-curve points to off-curve points
-  const origDist1 = distance(p1, p2);
-  const origDist2 = distance(p4, p3);
+  // Calculate distances from on-curve points to Tunni point
+  const dist1ToPt = distance(p1, pt);
+  const dist4ToPt = distance(p4, pt);
   
-  // Calculate the arithmetic mean of the original distances
-  const arithmeticMean = (origDist1 + origDist2) / 2;
+  // If either distance is zero, we can't calculate tensions
+  if (dist1ToPt <= 0 || dist4ToPt <= 0) {
+    return [p2, p3];
+  }
   
-  // Calculate new control points at the arithmetic mean distance
-  // along the same direction vectors
+  // Calculate original tensions
+  const t1 = distance(p1, p2) / dist1ToPt;
+  const t2 = distance(p4, p3) / dist4ToPt;
+  
+  // Check if tensions are already equalized (idempotency)
+  const tensionTolerance = 0.01;
+  if (Math.abs(t1 - t2) < tensionTolerance) {
+    return [p2, p3]; // No changes needed
+  }
+  
+  // Calculate target tension as arithmetic mean
+  const targetTension = (t1 + t2) / 2;
+  
+  // Calculate unit vectors for the initial directions from on-curve points to control points
+  const dir1 = normalizeVector(subVectors(p2, p1));  // Initial vector from p1 to p2
+  const dir2 = normalizeVector(subVectors(p3, p4));  // Initial vector from p4 to p3
+  
+  // Calculate new distances to achieve target tension
+  const newDist1 = targetTension * dist1ToPt;
+  const newDist2 = targetTension * dist4ToPt;
+  
+  // Calculate new control points along the initial direction vectors
   const newP2 = {
-    x: p1.x + arithmeticMean * dir1.x,
-    y: p1.y + arithmeticMean * dir1.y
+    x: p1.x + newDist1 * dir1.x,
+    y: p1.y + newDist1 * dir1.y
   };
   
   const newP3 = {
-    x: p4.x + arithmeticMean * dir2.x,
-    y: p4.y + arithmeticMean * dir2.y
+    x: p4.x + newDist2 * dir2.x,
+    y: p4.y + newDist2 * dir2.y
   };
   
   return [newP2, newP3];
@@ -249,14 +273,14 @@ export function calculateControlHandleDistance(segmentPoints) {
 }
 
 /**
- * Draw Tunni handle distance visualization
+ * Draw Tunni handle tension visualization
  * @param {CanvasRenderingContext2D} context - The canvas context
  * @param {Object} positionedGlyph - The positioned glyph
  * @param {Object} parameters - Visualization parameters
- * @param {Object} model - The model
+* @param {Object} model - The model
  * @param {Object} controller - The controller
  */
-export function drawTunniHandleDistance(context, positionedGlyph, parameters, model, controller) {
+export function drawTunniLabels(context, positionedGlyph, parameters, model, controller) {
   const path = positionedGlyph.glyph.path;
   
   // Save context state
@@ -276,56 +300,78 @@ export function drawTunniHandleDistance(context, positionedGlyph, parameters, mo
         // Both control points must be cubic (type 2)
         if (pointTypes[1] === 2 && pointTypes[2] === 2) {
           try {
-            // Calculate the distance between the two control points
-            const distance = calculateControlHandleDistance(segment.points);
+            // Get all points
+            const p1 = segment.points[0];  // on-curve start point
+            const p2 = segment.points[1];  // off-curve control point 1
+            const p3 = segment.points[2];  // off-curve control point 2
+            const p4 = segment.points[3];  // on-curve end point
             
-            // Get the control points
-            const controlPoint1 = segment.points[1];
-            const controlPoint2 = segment.points[2];
+            // Calculate Tunni point
+            const pt = calculateTunniPoint(segment.points);
             
-            // Draw line between control points
-            context.strokeStyle = parameters.strokeColor;
-            strokeLine(context, controlPoint1.x, controlPoint1.y, controlPoint2.x, controlPoint2.y);
+            // Calculate tensions
+            const tension1 = distance(p1, p2) / distance(p1, pt);  // tension for p2
+            const tension2 = distance(p4, p3) / distance(p4, pt);  // tension for p3
             
             // Format text for display
-            const text = distance.toFixed(1);
+            const text1 = tension1.toFixed(2);
+            const text2 = tension2.toFixed(2);
             
-            // Calculate midpoint
-            const midPoint = {
-              x: (controlPoint1.x + controlPoint2.x) / 2,
-              y: (controlPoint1.y + controlPoint2.y) / 2
-            };
+            // Calculate badge dimensions for both labels
+            const badgeDimensions1 = calculateBadgeDimensions(text1, DISTANCE_ANGLE_FONT_SIZE);
+            const badgeDimensions2 = calculateBadgeDimensions(text2, DISTANCE_ANGLE_FONT_SIZE);
             
-            // Calculate badge dimensions
-            const badgeDimensions = calculateBadgeDimensions(text, DISTANCE_ANGLE_FONT_SIZE);
+            // Calculate unit vector from p1 to p2 for p2 label positioning
+            const unitVector1 = unitVectorFromTo(p1, p2);
             
-            // Calculate unit vector perpendicular to the line
-            const unitVector = unitVectorFromTo(controlPoint1, controlPoint2);
+            // Calculate unit vector from p4 to p3 for p3 label positioning
+            const unitVector2 = unitVectorFromTo(p4, p3);
             
-            // Calculate badge position
-            const badgePosition = calculateBadgePosition(
-              midPoint,
-              { x: -unitVector.y, y: unitVector.x },
-              badgeDimensions.width,
-              badgeDimensions.height
+            // Calculate badge positions for both labels
+            const badgePosition1 = calculateBadgePosition(
+              p2,
+              { x: -unitVector1.y, y: unitVector1.x },
+              badgeDimensions1.width,
+              badgeDimensions1.height
             );
             
-            // Draw badge
-            context.fillStyle = parameters.badgeColor;
-            drawRoundRect(context, badgePosition.x, badgePosition.y, badgeDimensions.width, badgeDimensions.height, DISTANCE_ANGLE_BADGE_RADIUS);
+            const badgePosition2 = calculateBadgePosition(
+              p3,
+              { x: -unitVector2.y, y: unitVector2.x },
+              badgeDimensions2.width,
+              badgeDimensions2.height
+            );
             
-            // Draw text with proper orientation for each label individually
+            // Draw badge for p2 tension
+            context.fillStyle = parameters.badgeColor;
+            drawRoundRect(context, badgePosition1.x, badgePosition1.y, badgeDimensions1.width, badgeDimensions1.height, DISTANCE_ANGLE_BADGE_RADIUS);
+            
+            // Draw text for p2 tension
             context.save();
             context.fillStyle = parameters.textColor;
             context.font = `${DISTANCE_ANGLE_FONT_SIZE}px fontra-ui-regular, sans-serif`;
             context.textAlign = "center";
             context.textBaseline = "middle";
             context.scale(1, -1);
-            context.fillText(text, badgePosition.x + badgeDimensions.width / 2, -(badgePosition.y + badgeDimensions.height / 2));
+            context.fillText(text1, badgePosition1.x + badgeDimensions1.width / 2, -(badgePosition1.y + badgeDimensions1.height / 2));
+            context.restore();
+            
+            // Draw badge for p3 tension
+            context.fillStyle = parameters.badgeColor;
+            drawRoundRect(context, badgePosition2.x, badgePosition2.y, badgeDimensions2.width, badgeDimensions2.height, DISTANCE_ANGLE_BADGE_RADIUS);
+            
+            // Draw text for p3 tension
+            context.save();
+            context.fillStyle = parameters.textColor;
+            context.font = `${DISTANCE_ANGLE_FONT_SIZE}px fontra-ui-regular, sans-serif`;
+            context.textAlign = "center";
+            context.textBaseline = "middle";
+            context.scale(1, -1);
+            context.fillText(text2, badgePosition2.x + badgeDimensions2.width / 2, -(badgePosition2.y + badgeDimensions2.height / 2));
             context.restore();
           } catch (error) {
-            // Skip segments where distance calculation fails
-            console.warn("Failed to calculate control handle distance:", error);
+            // Skip segments where tension calculation fails
+            console.warn("Failed to calculate handle tensions:", error);
           }
         }
       }

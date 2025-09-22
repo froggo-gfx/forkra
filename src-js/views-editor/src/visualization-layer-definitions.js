@@ -55,7 +55,7 @@ import {
 } from "@fontra/core/curvature.js";
 
 import { VarPackedPath } from "@fontra/core/var-path.js";
-import { calculateTunniPoint, calculateControlHandleDistance, drawTunniHandleDistance } from "@fontra/core/tunni-calculations.js";
+import { calculateTunniPoint, calculateControlHandleDistance, drawTunniLabels } from "@fontra/core/tunni-calculations.js";
 import { distance } from "@fontra/core/vector.js";
 
 
@@ -2232,8 +2232,8 @@ registerVisualizationLayerDefinition({
 
 // Register the Tunni handle distance visualization layer
 registerVisualizationLayerDefinition({
-  identifier: "fontra.tunni.handle.distance",
-  name: "Tunni Handle Distance",
+  identifier: "fontra.tunni.labels",
+  name: "Tunni Labels",
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: true,
@@ -2243,5 +2243,5 @@ registerVisualizationLayerDefinition({
   },
   colors: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
   colorsDarkMode: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
-  draw: drawTunniHandleDistance,
+  draw: drawTunniLabels,
 });
