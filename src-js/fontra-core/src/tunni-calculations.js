@@ -48,6 +48,36 @@ export function calculateTunniPoint(segmentPoints) {
 }
 
 /**
+ * Calculate the true intersection-based Tunni point where rays from on-curve points intersect
+ * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
+ * @returns {Object|null} The intersection point or null if lines are parallel
+ */
+export function calculateTrueTunniPoint(segmentPoints) {
+  // segmentPoints should be an array of 4 points: [start, control1, control2, end]
+  if (segmentPoints.length !== 4) {
+    throw new Error("Segment must have exactly 4 points");
+  }
+  
+  const [p1, p2, p3, p4] = segmentPoints;
+  
+  // Calculate unit vectors for the original directions
+  const dir1 = normalizeVector(subVectors(p2, p1));
+  const dir2 = normalizeVector(subVectors(p3, p4));
+  
+  // Calculate the intersection point of the lines along the fixed directions
+  // This represents where the lines would intersect if extended infinitely
+  const line1Start = p1;
+  const line1End = addVectors(p1, dir1);
+  const line2Start = p4;
+  const line2End = addVectors(p4, dir2);
+  
+  // Calculate intersection of the lines along the fixed directions
+  const intersection = intersect(line1Start, line1End, line2Start, line2End);
+  
+  return intersection;
+}
+
+/**
  * Calculate new control points based on a Tunni point and segment points.
  *
  * @param {Object} tunniPoint - The Tunni point that defines the desired curve shape
@@ -140,61 +170,46 @@ export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equal
 */
 export function calculateEqualizedControlPoints(segmentPoints) {
   const [p1, p2, p3, p4] = segmentPoints;
-  
-  // Calculate the Tunni point (midpoint between control points)
-  const pt = {
-    x: (p2.x + p3.x) / 2,
-    y: (p2.y + p3.y) / 2
-  };
-  
-  // Calculate distances from on-curve points to Tunni point
+
+  const pt = calculateTrueTunniPoint(segmentPoints); // <- true Tunni point
+  if (!pt) return [p2, p3];
+
   const dist1ToPt = distance(p1, pt);
   const dist4ToPt = distance(p4, pt);
-  
-  // If either distance is zero, we can't calculate tensions
-  if (dist1ToPt <= 0 || dist4ToPt <= 0) {
-    return [p2, p3];
-  }
-  
-  // Calculate original tensions
+  if (dist1ToPt <= 0 || dist4ToPt <= 0) return [p2, p3];
+
+  // current tensions
   const t1 = distance(p1, p2) / dist1ToPt;
   const t2 = distance(p4, p3) / dist4ToPt;
-  
-  // Check if tensions are already equalized (idempotency)
-  const tensionTolerance = 0.01;
-  if (Math.abs(t1 - t2) < tensionTolerance) {
-    return [p2, p3]; // No changes needed
-  }
-  
-  // Calculate target tension as arithmetic mean
+
   const targetTension = (t1 + t2) / 2;
-  
-  // Calculate unit vectors for the initial directions from on-curve points to control points
-  const dir1 = normalizeVector(subVectors(p2, p1));  // Initial vector from p1 to p2
-  const dir2 = normalizeVector(subVectors(p3, p4));  // Initial vector from p4 to p3
-  
-  // Calculate new distances to achieve target tension
+
+  // directions are fixed
+  const dir1 = normalizeVector(subVectors(p2, p1));
+  const dir2 = normalizeVector(subVectors(p3, p4));
+
+  // new distances to hit equal tension
   const newDist1 = targetTension * dist1ToPt;
   const newDist2 = targetTension * dist4ToPt;
-  
-  // Calculate new control points along the initial direction vectors
+
   const newP2 = {
     x: p1.x + newDist1 * dir1.x,
     y: p1.y + newDist1 * dir1.y
   };
-  
+
   const newP3 = {
     x: p4.x + newDist2 * dir2.x,
     y: p4.y + newDist2 * dir2.y
   };
-  
+
   return [newP2, newP3];
 }
 
 export function balanceSegment(segmentPoints) {
-  const tunniPoint = calculateTunniPoint(segmentPoints);
+  const tunniPoint = calculateTrueTunniPoint(segmentPoints);
   if (!tunniPoint) {
-    return segmentPoints; // Can't balance if lines are parallel
+    const [p1, p2, p3, p4] = segmentPoints;
+    return [p1, p2, p3, p4]; // Can't balance if lines are parallel
   }
   
   const [p1, p2, p3, p4] = segmentPoints;
@@ -205,7 +220,7 @@ export function balanceSegment(segmentPoints) {
   
   // If either distance is zero, we can't balance
   if (sDistance <= 0 || eDistance <= 0) {
-    return segmentPoints;
+    return [p1, p2, p3, p4];
   }
   
   // Calculate percentages
