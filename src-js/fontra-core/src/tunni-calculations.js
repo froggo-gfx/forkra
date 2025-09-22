@@ -175,3 +175,20 @@ export function balanceSegment(segmentPoints) {
   
   return [p1, newP2, newP3, p4];
 }
+
+/**
+ * Check if the distances of control points in a segment are already equalized
+ * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
+ * @returns {boolean} - True if distances are already equalized, false otherwise
+ */
+export function areDistancesEqualized(segmentPoints) {
+ const [p1, p2, p3, p4] = segmentPoints;
+  
+  // Calculate distances from on-curve points to off-curve points
+  const dist1 = distance(p1, p2);
+  const dist2 = distance(p4, p3);
+  
+  // Check if distances are equal within a small tolerance
+  const tolerance = 0.001; // Small tolerance for floating point comparison
+  return Math.abs(dist1 - dist2) < tolerance;
+}

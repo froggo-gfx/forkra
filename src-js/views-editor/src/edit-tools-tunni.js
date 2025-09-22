@@ -1,5 +1,5 @@
 import { BaseTool } from "./edit-tools-base.js";
-import { calculateTunniPoint, calculateControlPointsFromTunni, calculateEqualizedControlPoints } from "@fontra/core/tunni-calculations.js";
+import { calculateTunniPoint, calculateControlPointsFromTunni, calculateEqualizedControlPoints, areDistancesEqualized } from "@fontra/core/tunni-calculations.js";
 import { distance, subVectors, dotVector, vectorLength } from "@fontra/core/vector.js";
 
 // TunniTool is a specialized editing tool for manipulating cubic Bézier curves
@@ -255,30 +255,13 @@ export class TunniEditingTool {
   }
 
   /**
-   * Check if the distances of control points in a segment are already equalized
-   * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
-   * @returns {boolean} - True if distances are already equalized, false otherwise
-   */
-  areDistancesEqualized(segmentPoints) {
-    const [p1, p2, p3, p4] = segmentPoints;
-    
-    // Calculate distances from on-curve points to off-curve points
-    const dist1 = distance(p1, p2);
-    const dist2 = distance(p4, p3);
-    
-    // Check if distances are equal within a small tolerance
-    const tolerance = 0.001; // Small tolerance for floating point comparison
-    return Math.abs(dist1 - dist2) < tolerance;
-  }
-
-  /**
    * Equalize the distances of control points in a segment using arithmetic mean
    * @param {Object} segment - The segment to modify
    * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
    */
   async equalizeSegmentDistances(segment, segmentPoints) {
     // Check if distances are already equalized
-    if (this.areDistancesEqualized(segmentPoints)) {
+    if (areDistancesEqualized(segmentPoints)) {
       console.log("Distances are already equalized, skipping...");
       return;
     }
