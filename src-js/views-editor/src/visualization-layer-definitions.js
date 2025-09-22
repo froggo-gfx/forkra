@@ -27,6 +27,9 @@ import {
   drawDistanceAngleVisualization,
   drawManhattanDistanceVisualization,
   drawOffCurveDistanceVisualization,
+  calculateTension,
+  calculateOffCurveAngle,
+  formatDistanceTensionAngle,
   DISTANCE_ANGLE_COLOR,
   DISTANCE_ANGLE_BADGE_COLOR,
   DISTANCE_ANGLE_TEXT_COLOR,
@@ -52,7 +55,7 @@ import {
 } from "@fontra/core/curvature.js";
 
 import { VarPackedPath } from "@fontra/core/var-path.js";
-import { calculateTunniPoint } from "@fontra/core/tunni-calculations.js";
+import { calculateTunniPoint, calculateControlHandleDistance, drawTunniLabels } from "@fontra/core/tunni-calculations.js";
 import { distance } from "@fontra/core/vector.js";
 
 
@@ -2225,4 +2228,20 @@ registerVisualizationLayerDefinition({
   colors: { strokeColor: OFFCURVE_DISTANCE_COLOR },
   colorsDarkMode: { strokeColor: OFFCURVE_DISTANCE_COLOR },
   draw: drawOffCurveDistanceVisualization,
+});
+
+// Register the Tunni handle distance visualization layer
+registerVisualizationLayerDefinition({
+  identifier: "fontra.tunni.labels",
+  name: "Tunni Labels",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: {
+    strokeWidth: 1,
+  },
+  colors: { strokeColor: "rgba(44, 28, 44, 1)", badgeColor: "#FF00FF", textColor: "white" },
+  colorsDarkMode: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
+  draw: drawTunniLabels,
 });
