@@ -192,3 +192,29 @@ export function areDistancesEqualized(segmentPoints) {
   const tolerance = 0.001; // Small tolerance for floating point comparison
   return Math.abs(dist1 - dist2) < tolerance;
 }
+
+/**
+ * Calculate the Euclidean distance between the two control points of a cubic segment
+ * @param {Array} segmentPoints - Array of 4 points representing a cubic segment: [start, control1, control2, end]
+ * @returns {number} The Euclidean distance between the two control points
+ */
+export function calculateControlHandleDistance(segmentPoints) {
+  // Validate that the segment is cubic (4 points)
+  if (!Array.isArray(segmentPoints) || segmentPoints.length !== 4) {
+    throw new Error("Segment must be an array of exactly 4 points");
+  }
+  
+  // Extract the control points (indices 1 and 2)
+  const controlPoint1 = segmentPoints[1];
+  const controlPoint2 = segmentPoints[2];
+  
+  // Validate that control points exist and have x,y coordinates
+  if (!controlPoint1 || !controlPoint2 ||
+      typeof controlPoint1.x !== 'number' || typeof controlPoint1.y !== 'number' ||
+      typeof controlPoint2.x !== 'number' || typeof controlPoint2.y !== 'number') {
+    throw new Error("Control points must have valid x and y coordinates");
+  }
+  
+  // Calculate and return the Euclidean distance between the control points
+  return distance(controlPoint1, controlPoint2);
+}
