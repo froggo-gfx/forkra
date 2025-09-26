@@ -44,6 +44,7 @@ import {
   OFFCURVE_DISTANCE_FONT_SIZE
 } from "@fontra/core/distance-angle.js";
 
+import { drawXYDistanceVisualization } from "@fontra/core/distance-measure.js";
 //// speedpunk
 import {
   calculateCurvatureForSegment,
@@ -2244,4 +2245,29 @@ registerVisualizationLayerDefinition({
   colors: { strokeColor: "rgba(44, 28, 44, 1)", badgeColor: "#FF00FF", textColor: "white" },
   colorsDarkMode: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
   draw: drawTunniLabels,
+});
+
+// Register the X/Y distance visualization layer
+registerVisualizationLayerDefinition({
+  identifier: "fontra.xy-distance",
+  name: "X/Y Distance Tool",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: {
+    strokeWidth: 1,
+    fontSize: 10,
+  },
+  colors: {
+    strokeColor: "rgba(255, 0, 0, 0.75)", // Red color for visibility
+    textColor: "white",
+    badgeColor: "rgba(255, 0, 0, 0.9)"
+  },
+  colorsDarkMode: {
+    strokeColor: "rgba(25, 10, 100, 0.75)",
+    textColor: "white",
+    badgeColor: "rgba(25, 10, 100, 0.9)"
+  },
+  draw: drawXYDistanceVisualization,
 });

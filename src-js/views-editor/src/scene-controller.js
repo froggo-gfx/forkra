@@ -65,6 +65,9 @@ export class SceneController {
     this.fontController = fontController;
     this.autoViewBox = true;
 
+    // Initialize altKeyPressed property to track Alt key state during hover
+    this.altKeyPressed = false;
+
     this.setupSceneSettings();
     //// grid
     this.sceneSettingsController.setItem("coarseGridSpacing", 10);
@@ -273,6 +276,47 @@ export class SceneController {
       (event) => {
         if (event.key === "selection") {
           this._checkSelectionForLockedItems();
+          
+          // Log point selection when exactly one point is selected in the main selection
+          const { point: pointSelection } = parseSelection(this.sceneSettings.selection);
+          if (pointSelection && pointSelection.length === 1) {
+            const pointIndex = pointSelection[0];
+            const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+            if (positionedGlyph && positionedGlyph.glyph && positionedGlyph.glyph.path) {
+              const point = positionedGlyph.glyph.path.getPoint(pointIndex);
+              if (point) {
+                console.log(`Point selected at coordinates: (${point.x}, ${point.y})`);
+              }
+            }
+          }
+        } else if (event.key === "hoverSelection") {
+          // Check if a point is selected and alt is pressed to determine logging behavior
+          const { point: selectedPointSelection } = parseSelection(this.sceneSettings.selection);
+          const isPointSelected = selectedPointSelection && selectedPointSelection.length === 1;
+          
+          // Log point selection when exactly one point is selected in the hover selection
+          const { point: pointSelection } = parseSelection(this.sceneSettings.hoverSelection);
+          if (pointSelection && pointSelection.length === 1) {
+            const pointIndex = pointSelection[0];
+            const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+            if (positionedGlyph && positionedGlyph.glyph && positionedGlyph.glyph.path) {
+              const point = positionedGlyph.glyph.path.getPoint(pointIndex);
+              if (point) {
+                // Always detect the hover point, but log based on conditions
+                if (!isPointSelected) {
+                  // If no point is selected, always show hover coordinates
+                  console.log(`Hover point selected at coordinates: (${point.x}, ${point.y})`);
+                } else if (isPointSelected && !this.altKeyPressed) {
+                  // If a point is selected but Alt is not pressed, show hover coordinates
+                  console.log(`Hover point selected at coordinates: (${point.x}, ${point.y})`);
+                } else if (isPointSelected && this.altKeyPressed) {
+                  // If a point is selected AND Alt is pressed, we'll show distance info elsewhere
+                  // So we don't log the hover coordinates here, but we still detect the point
+                  console.log(`Hover point selected at coordinates: (${point.x}, ${point.y}) - distance calculation will be shown separately`);
+                }
+              }
+            }
+          }
         }
         this.sceneSettings.combinedSelection = union(
           this.sceneSettings.selection,
@@ -466,6 +510,9 @@ export class SceneController {
     );
     this.canvasController.canvas.addEventListener("keydown", (event) =>
       this.handleKeyDown(event)
+    );
+    this.canvasController.canvas.addEventListener("keyup", (event) =>
+      this.handleKeyUp(event)
     );
   }
 
@@ -706,6 +753,14 @@ export class SceneController {
   }
 
   handleKeyDown(event) {
+    // Store Alt key state
+    if (event.key === 'Alt' && !this.altKeyPressed) {
+      console.log('Alt key pressed');
+      this.altKeyPressed = true;
+    } else if (event.altKey && !this.altKeyPressed) {
+      console.log('Alt key pressed (detected via altKey property)');
+      this.altKeyPressed = true;
+    }
     if ((!event[commandKeyProperty] || event.shiftKey) && event.key in arrowKeyDeltas) {
       event.preventDefault();
       if (this.selectedTool?.handleArrowKeys) {
@@ -717,6 +772,16 @@ export class SceneController {
     } else {
       this.selectedTool?.handleKeyDown(event);
     }
+  }
+  
+  handleKeyUp(event) {
+    // Update Alt key state when key is released
+    if (event.key === 'Alt' || (!event.altKey && this.altKeyPressed)) {
+      console.log('Alt key released');
+      this.altKeyPressed = false;
+    }
+    // Also call the selected tool's key up handler if it exists
+    this.selectedTool?.handleKeyUp?.(event);
   }
 
   async handleArrowKeys(event) {
@@ -903,10 +968,35 @@ export class SceneController {
     }
   }
 
+  /**
+   * Modifies the handleHover method to detect when Alt key is pressed
+   * @param {MouseEvent} event - Mouse event object
+   */
   handleHover(event) {
+    // Store Alt key state in a property like this.altKeyPressed
+    const previousAltState = this.altKeyPressed;
+    this.altKeyPressed = event.altKey;
+    
+    // Log if Alt key state changed during hover
+    if (previousAltState !== this.altKeyPressed) {
+      if (this.altKeyPressed) {
+        console.log('Alt key pressed (detected during hover)');
+      } else {
+        console.log('Alt key released (detected during hover)');
+      }
+    }
+    
+    // Call the original hover handling logic
     if (this.selectedTool) {
       this.selectedTool.handleHover(event);
     }
+    
+    // Update hover selection which will trigger visualization updates
+    const { selection: newHoverSelection } = this.sceneModel.selectionAtPoint(
+      this.selectedGlyphPoint(event),
+      this.mouseClickMargin
+    );
+    this.hoverSelection = newHoverSelection;
   }
 
   localPoint(event) {
@@ -945,6 +1035,19 @@ export class SceneController {
     if (!lenientIsEqualSet(selection, this.selection)) {
       this.sceneModel.selection = selection || new Set();
       this.sceneModel.hoverSelection = new Set();
+      
+      // Log point selection when exactly one point is selected
+      const { point: pointSelection } = parseSelection(this.sceneModel.selection);
+      if (pointSelection && pointSelection.length === 1) {
+        const pointIndex = pointSelection[0];
+        const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+        if (positionedGlyph && positionedGlyph.glyph && positionedGlyph.glyph.path) {
+          const point = positionedGlyph.glyph.path.getPoint(pointIndex);
+          if (point) {
+            console.log(`Point selected at coordinates: (${point.x}, ${point.y})`);
+          }
+        }
+      }
     }
   }
 
@@ -956,6 +1059,34 @@ export class SceneController {
     if (!lenientIsEqualSet(selection, this.hoverSelection)) {
       this.sceneModel.hoverSelection = selection;
       this.canvasController.requestUpdate();
+      
+      // Check if a point is selected and alt is pressed to determine logging behavior
+      const { point: selectedPointSelection } = parseSelection(this.sceneModel.selection);
+      const isPointSelected = selectedPointSelection && selectedPointSelection.length === 1;
+      
+      // Log point selection when exactly one point is selected via hover
+      const { point: pointSelection } = parseSelection(this.sceneModel.hoverSelection);
+      if (pointSelection && pointSelection.length === 1) {
+        const pointIndex = pointSelection[0];
+        const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+        if (positionedGlyph && positionedGlyph.glyph && positionedGlyph.glyph.path) {
+          const point = positionedGlyph.glyph.path.getPoint(pointIndex);
+          if (point) {
+            // Always detect the hover point, but log based on conditions
+            if (!isPointSelected) {
+              // If no point is selected, always show hover coordinates
+              console.log(`Hover point selected at coordinates: (${point.x}, ${point.y})`);
+            } else if (isPointSelected && !this.altKeyPressed) {
+              // If a point is selected but Alt is not pressed, show hover coordinates
+              console.log(`Hover point selected at coordinates: (${point.x}, ${point.y})`);
+            } else if (isPointSelected && this.altKeyPressed) {
+              // If a point is selected AND Alt is pressed, we'll show distance info elsewhere
+              // So we don't log the hover coordinates here, but we still detect the point
+              console.log(`Hover point selected at coordinates: (${point.x}, ${point.y}) - distance calculation will be shown separately`);
+            }
+          }
+        }
+      }
     }
   }
 
@@ -1539,6 +1670,115 @@ export class SceneController {
     }
     return staticGlyphControllers;
   }
+
+  /**
+   * Gets the coordinates of the currently selected point
+   * @returns {Object|undefined} Object with x, y coordinates of the selected point, or undefined if no point is selected
+   * @property {number} x - X coordinate of the selected point
+   * @property {number} y - Y coordinate of the selected point
+   */
+  getSelectedPointCoordinates() {
+    // Parse the current selection and return coordinates of the selected point if it exists
+    // Uses this.sceneModel.selection to determine the selected point
+    // Returns undefined if no point is selected or if multiple points are selected
+    const { point: pointSelection } = parseSelection(this.sceneModel.selection);
+    
+    // Check if exactly one point is selected
+    if (!pointSelection || pointSelection.length !== 1) {
+      return undefined;
+    }
+    
+    // Get the selected point index
+    const pointIndex = pointSelection[0];
+    
+    // Get the selected glyph to access its path
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph || !positionedGlyph.glyph || !positionedGlyph.glyph.path) {
+      return undefined;
+    }
+    
+    // Get the point coordinates from the path
+    const point = positionedGlyph.glyph.path.getPoint(pointIndex);
+    if (!point) {
+      return undefined;
+    }
+    
+    // Log the selected point and its coordinates
+    console.log(`Point selected at coordinates: (${point.x}, ${point.y})`);
+    
+    // Return the coordinates as an object with x and y properties
+    return { x: point.x, y: point.y };
+  }
+
+  /**
+    * Gets the coordinates of the point under the cursor during hover
+    * @param {MouseEvent} event - Mouse event object containing cursor position
+    * @returns {Object|undefined} Object with x, y coordinates of the point under the cursor, or undefined if no point is near the cursor
+    * @property {number} x - X coordinate of the hovered point
+    * @property {number} y - Y coordinate of the hovered point
+    */
+   getHoveredPointCoordinates(event) {
+      // Uses the scene model's point selection functionality to find the point under the cursor
+      // Takes into account the mouse click margin for hit detection
+      // Returns undefined if no point is found near the cursor position
+      
+      // Get the point in the glyph's coordinate system
+      const point = this.selectedGlyphPoint(event);
+      if (!point) {
+        return undefined;
+      }
+      
+      // Use the scene model's selectionAtPoint method to find points near the cursor
+      // This method takes into account the mouse click margin for hit detection
+      const { selection: pointSelection } = this.sceneModel.selectionAtPoint(
+        point,
+        this.mouseClickMargin
+      );
+      
+      // Parse the selection to get point indices
+      const { point: pointIndices } = parseSelection(pointSelection);
+      
+      // Check if any points were found near the cursor
+      if (!pointIndices || pointIndices.length === 0) {
+        return undefined;
+      }
+      
+      // Get the selected glyph to access its path
+      const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+      if (!positionedGlyph || !positionedGlyph.glyph || !positionedGlyph.glyph.path) {
+        return undefined;
+      }
+      
+      // Get the first point's coordinates from the path (in case multiple points are near the cursor)
+      const pointIndex = pointIndices[0];
+      const hoveredPoint = positionedGlyph.glyph.path.getPoint(pointIndex);
+      if (!hoveredPoint) {
+        return undefined;
+      }
+      
+      // Check if a point is selected and alt is pressed to determine logging behavior
+      const { point: selectedPointSelection } = parseSelection(this.sceneModel.selection);
+      const isPointSelected = selectedPointSelection && selectedPointSelection.length === 1;
+      
+      // Log the hovered point and its coordinates (only if exactly one point is found)
+      // Always detect the point, but log conditionally based on the requirements
+      if (pointIndices.length === 1) {
+        if (!isPointSelected) {
+          // If no point is selected, always show hover coordinates
+          console.log(`Hovered point at coordinates: (${hoveredPoint.x}, ${hoveredPoint.y})`);
+        } else if (isPointSelected && !this.altKeyPressed) {
+          // If a point is selected but Alt is not pressed, show hover coordinates
+          console.log(`Hovered point at coordinates: (${hoveredPoint.x}, ${hoveredPoint.y})`);
+        } else if (isPointSelected && this.altKeyPressed) {
+          // If a point is selected AND Alt is pressed, we'll show distance info elsewhere
+          // So we don't log the hover coordinates here, but we still detect the point
+          console.log(`Hovered point detected at coordinates: (${hoveredPoint.x}, ${hoveredPoint.y}) - distance calculation will be shown separately`);
+        }
+      }
+      
+      // Return the coordinates as an object with x and y properties
+      return { x: hoveredPoint.x, y: hoveredPoint.y };
+    }
 }
 
 class PathConnectDetector {

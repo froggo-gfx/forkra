@@ -272,7 +272,11 @@ export class EditorController extends ViewController {
       this.contextMenuHandler(event)
     );
     window.addEventListener("keydown", (event) => this.keyDownHandler(event));
-    window.addEventListener("keyup", (event) => this.keyUpHandler(event));
+    window.addEventListener("keyup", (event) => {
+      this.keyUpHandler(event);
+      // Also update the scene controller's Alt key state
+      this.sceneController.altKeyPressed = event.altKey;
+    });
 
     this.enteredText = "";
     this.updateWindowLocation = scheduleCalls(
@@ -1474,6 +1478,8 @@ export class EditorController extends ViewController {
   }
 
   async keyDownHandler(event) {
+    // Update the scene controller's Alt key state
+    this.sceneController.altKeyPressed = event.altKey;
     const actionIdentifier = getActionIdentifierFromKeyEvent(event);
     if (actionIdentifier) {
       this.sceneController.updateContextMenuState(null);
