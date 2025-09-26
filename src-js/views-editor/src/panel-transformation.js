@@ -105,6 +105,9 @@ export default class TransformationPanel extends Panel {
       customDistributionSpacing: null,
       dimensionWidth: null,
       dimensionHeight: null,
+      showTunniDistance: true,
+      showTunniTension: true,
+      showTunniAngle: true,
     };
     this.registerActions();
 
@@ -654,10 +657,86 @@ export default class TransformationPanel extends Panel {
       field3: {},
     });
 
+    // Add Tunni labels control section
+    formContents.push({ type: "divider" });
+    formContents.push({
+      type: "header",
+      label: "Tunni Labels",
+    });
+
+    // Create checkbox elements for Tunni labels
+    const distanceCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showTunniDistance ?? true,
+    });
+    
+    const tensionCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showTunniTension ?? true,
+    });
+    
+    const angleCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showTunniAngle ?? true,
+    });
+
+    // Add three individual checkboxes for distance, tension, and angle using universal-row
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showTunniDistance",
+        auxiliaryElement: distanceCheckbox
+      },
+      field2: {
+        type: "text",
+        key: "labelDistance",
+        value: "Distance"
+      },
+      field3: {}
+    });
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showTunniTension",
+        auxiliaryElement: tensionCheckbox
+      },
+      field2: {
+        type: "text",
+        key: "labelTension",
+        value: "Tension"
+      },
+      field3: {}
+    });
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showTunniAngle",
+        auxiliaryElement: angleCheckbox
+      },
+      field2: {
+        type: "text",
+        key: "labelAngle",
+        value: "Angle"
+      },
+      field3: {}
+    });
+
     this.infoForm.setFieldDescriptions(formContents);
 
     this.infoForm.onFieldChange = async (fieldItem, value, valueStream) => {
       this.transformParameters[fieldItem.key] = value;
+      
+      // Handle Tunni visibility parameters
+      if (["showTunniDistance", "showTunniTension", "showTunniAngle"].includes(fieldItem.key)) {
+        // Update the scene settings
+        this.sceneController.sceneSettingsController.setItem(fieldItem.key, value);
+      }
+      
       if (fieldItem.key === "originXButton" || fieldItem.key === "originYButton") {
         this.transformParameters[fieldItem.key.replace("Button", "")] = value;
 
@@ -669,6 +748,37 @@ export default class TransformationPanel extends Panel {
         });
       }
     };
+    
+    // Add event listeners to the checkboxes to update the form values properly
+    setTimeout(() => {
+      const distanceCheckbox = this.infoForm.contentElement.querySelector(`input[type="checkbox"]:nth-of-type(1)`);
+      const tensionCheckbox = this.infoForm.contentElement.querySelector(`input[type="checkbox"]:nth-of-type(2)`);
+      const angleCheckbox = this.infoForm.contentElement.querySelector(`input[type="checkbox"]:nth-of-type(3)`);
+      
+      if (distanceCheckbox) {
+        distanceCheckbox.checked = this.transformParameters.showTunniDistance ?? true;
+        distanceCheckbox.addEventListener("change", (event) => {
+          this.transformParameters.showTunniDistance = event.target.checked;
+          this.sceneController.sceneSettingsController.setItem("showTunniDistance", event.target.checked);
+        });
+      }
+      
+      if (tensionCheckbox) {
+        tensionCheckbox.checked = this.transformParameters.showTunniTension ?? true;
+        tensionCheckbox.addEventListener("change", (event) => {
+          this.transformParameters.showTunniTension = event.target.checked;
+          this.sceneController.sceneSettingsController.setItem("showTunniTension", event.target.checked);
+        });
+      }
+      
+      if (angleCheckbox) {
+        angleCheckbox.checked = this.transformParameters.showTunniAngle ?? true;
+        angleCheckbox.addEventListener("change", (event) => {
+          this.transformParameters.showTunniAngle = event.target.checked;
+          this.sceneController.sceneSettingsController.setItem("showTunniAngle", event.target.checked);
+        });
+      }
+    }, 0);
 
     this.updateDimensions();
   }

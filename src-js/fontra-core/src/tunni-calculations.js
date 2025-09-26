@@ -299,8 +299,13 @@ export function calculateControlHandleDistance(segmentPoints) {
 export function drawTunniLabels(context, positionedGlyph, parameters, model, controller) {
   const path = positionedGlyph.glyph.path;
   
+  // Extract visibility settings from model or controller
+  const showDistance = model.sceneSettings?.showTunniDistance ?? true;
+  const showTension = model.sceneSettings?.showTunniTension ?? true;
+  const showAngle = model.sceneSettings?.showTunniAngle ?? true;
+  
   // Save context state
-  context.save();
+ context.save();
   
   // Iterate through all contours
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
@@ -342,9 +347,19 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
             const angle1 = calculateOffCurveAngle(p2, p1);  // angle for p2
             const angle2 = calculateOffCurveAngle(p3, p4);  // angle for p3
             
-            // Format text for display
-            const text1 = `${dist1.toFixed(1)}\n${tension1.toFixed(2)}\n${angle1.toFixed(1)}°`;
-            const text2 = `${dist2.toFixed(1)}\n${tension2.toFixed(2)}\n${angle2.toFixed(1)}°`;
+            // Format text based on visibility settings
+            const visibleComponents = [];
+            if (showDistance) visibleComponents.push(dist1.toFixed(1));
+            if (showTension) visibleComponents.push(tension1.toFixed(2));
+            if (showAngle) visibleComponents.push(`${angle1.toFixed(1)}°`);
+            const text1 = visibleComponents.join('\n');
+
+            // Same logic for text2
+            const visibleComponents2 = [];
+            if (showDistance) visibleComponents2.push(dist2.toFixed(1));
+            if (showTension) visibleComponents2.push(tension2.toFixed(2));
+            if (showAngle) visibleComponents2.push(`${angle2.toFixed(1)}°`);
+            const text2 = visibleComponents2.join('\n');
             
             // Calculate badge dimensions for both labels
             const badgeDimensions1 = calculateBadgeDimensions(text1, 6); // 6pt font
@@ -504,8 +519,12 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
           const angle = calculateOffCurveAngle(offCurvePoint, onCurvePoint);
           
           // For off-curve points not part of cubic segments, we'll only show distance and angle (no tension)
-          // Format text for display - distance, angle (top to bottom)
-          const text = `${dist.toFixed(1)}\n${angle.toFixed(1)}°`;
+          // Format text for display - distance, angle (top to bottom) based on visibility settings
+          const visibleComponentsOff = [];
+          if (showDistance) visibleComponentsOff.push(dist.toFixed(1));
+          // No tension for off-curve points not part of cubic segments
+          if (showAngle) visibleComponentsOff.push(`${angle.toFixed(1)}°`);
+          const text = visibleComponentsOff.join('\n');
           
           // Calculate badge dimensions for the label
           const badgeDimensionsOff = calculateBadgeDimensions(text, 6); // 6pt font
