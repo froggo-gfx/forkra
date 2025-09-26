@@ -297,15 +297,19 @@ export function calculateControlHandleDistance(segmentPoints) {
  * @param {Object} controller - The controller
  */
 export function drawTunniLabels(context, positionedGlyph, parameters, model, controller) {
-  const path = positionedGlyph.glyph.path;
-  
-  // Extract visibility settings from model or controller
-  const showDistance = model.sceneSettings?.showTunniDistance ?? true;
-  const showTension = model.sceneSettings?.showTunniTension ?? true;
-  const showAngle = model.sceneSettings?.showTunniAngle ?? true;
-  
-  // Save context state
- context.save();
+ const path = positionedGlyph.glyph.path;
+ 
+ // Extract visibility settings from model or controller
+ // Try multiple ways to access scene settings to ensure compatibility
+ const showDistance = model.sceneSettings?.showTunniDistance ?? true;
+ const showTension = model.sceneSettings?.showTunniTension ?? true;
+ const showAngle = model.sceneSettings?.showTunniAngle ?? true;
+ 
+ // Debug logging to see if the function is being called and what values we're getting
+ // console.log("drawTunniLabels called", { showDistance, showTension, showAngle, model });
+ 
+ // Save context state
+context.save();
   
   // Iterate through all contours
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
