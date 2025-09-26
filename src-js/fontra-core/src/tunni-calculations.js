@@ -374,7 +374,7 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
             // Draw text for p2 with distance, tension, angle (top to bottom)
             context.save();
             context.fillStyle = "rgba(44, 28, 44, 1)"; // New text color
-            context.font = `5px fontra-ui-regular, sans-serif`; // 6pt font, medium weight
+            context.font = `6px fontra-ui-regular, sans-serif`; // 6pt font, medium weight
             context.textAlign = "left";
             context.textBaseline = "middle";
             context.scale(1, -1);
@@ -394,7 +394,7 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
             // Draw text for p3 with distance, tension, angle (top to bottom)
             context.save();
             context.fillStyle = "rgba(44, 28, 44, 1)"; // New text color
-            context.font = `5px fontra-ui-regular, sans-serif`; // 6pt font, medium weight
+            context.font = `6px fontra-ui-regular, sans-serif`; // 6pt font, medium weight
             context.textAlign = "left";
             context.textBaseline = "middle";
             context.scale(1, -1);
@@ -418,7 +418,7 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
     }
   }
   
-  // Now also handle off-curve points connected to on-curve points (for distance and angle)
+  // Now also handle off-curve points connected to on-curve points (for distance and angle only)
   // Iterate through all points in the path
   for (let pointIndex = 0; pointIndex < path.numPoints; pointIndex++) {
     const pointType = path.pointTypes[pointIndex];
@@ -426,6 +426,38 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
     // Check if this is an off-curve point
     if (pointType !== 0) { // Not an on-curve point
       const offCurvePoint = path.getPoint(pointIndex);
+      
+      // Check if this point was already processed as part of a cubic segment
+      // We need to check if this point is part of any cubic segment to avoid duplication
+      let isPartOfCubicSegment = false;
+      
+      // Iterate through all contours to check if this point is part of a cubic segment
+      for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+        for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
+          if (segment.points.length === 4) {
+            // Check if it's a cubic segment (two off-curve points)
+            const pointTypes = segment.parentPointIndices.map(
+              index => path.pointTypes[index]
+            );
+            
+            if (pointTypes[1] === 2 && pointTypes[2] === 2) { // Both are cubic control points
+              // Check if our current pointIndex matches either of the control points in this segment
+              if (segment.parentPointIndices[1] === pointIndex || segment.parentPointIndices[2] === pointIndex) {
+                isPartOfCubicSegment = true;
+                break;
+              }
+            }
+          }
+        }
+        if (isPartOfCubicSegment) {
+          break;
+        }
+      }
+      
+      // Skip if this point was already processed as part of a cubic segment
+      if (isPartOfCubicSegment) {
+        continue;
+      }
       
       // Get contour information
       const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
@@ -462,7 +494,7 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
         onCurveIndex = nextPointIndex;
       }
       
-      // If we found an on-curve neighbor, calculate and display distance and angle
+      // If we found an on-curve neighbor, calculate and display distance and angle only
       if (onCurvePoint && onCurveIndex >= 0) {
         try {
           // Calculate distance from on-curve to off-curve point
@@ -471,66 +503,40 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
           // Calculate angle for off-curve point relative to on-curve point
           const angle = calculateOffCurveAngle(offCurvePoint, onCurvePoint);
           
-          // Calculate tension using the same approach as in the original code
-          // Find the other control point connected to the on-curve point to calculate tension
-          let otherOffCurvePoint = null;
-          if (prevPoint && prevPointType === 0 && nextPoint && nextPointType !== 0) {
-            otherOffCurvePoint = nextPoint; // off-curve point on the other side
-          } else if (nextPoint && nextPointType === 0 && prevPoint && prevPointType !== 0) {
-            otherOffCurvePoint = prevPoint; // off-curve point on the other side
-          }
-          
-          let tension = 0;
-          if (otherOffCurvePoint) {
-            // Calculate the intersection point of the lines from on-curve to both off-curve points
-            const intersection = intersect(onCurvePoint, offCurvePoint, onCurvePoint, otherOffCurvePoint);
-            if (intersection) {
-              const distToIntersection = distance(onCurvePoint, intersection);
-              if (distToIntersection > 0) {
-                tension = dist / distToIntersection;
-              }
-            } else {
-              // If lines are parallel, use a different approach to calculate tension
-              tension = dist / distance(onCurvePoint, offCurvePoint);
-            }
-          } else {
-            // If there's no other off-curve point, calculate tension relative to the on-curve point
-            tension = dist / 100; // arbitrary reference value
-          }
-          
-          // Format text for display - distance, tension, angle (top to bottom)
-          const text = `${dist.toFixed(1)}\n${tension.toFixed(2)}\n${angle.toFixed(1)}°`;
+          // For off-curve points not part of cubic segments, we'll only show distance and angle (no tension)
+          // Format text for display - distance, angle (top to bottom)
+          const text = `${dist.toFixed(1)}\n${angle.toFixed(1)}°`;
           
           // Calculate badge dimensions for the label
-          const badgeDimensions = calculateBadgeDimensions(text, 6); // 6pt font
+          const badgeDimensionsOff = calculateBadgeDimensions(text, 6); // 6pt font
           
           // Calculate unit vector from on-curve to off-curve point for label positioning
-          const unitVector = unitVectorFromTo(onCurvePoint, offCurvePoint);
+          const unitVectorOff = unitVectorFromTo(onCurvePoint, offCurvePoint);
           
           // Calculate badge position and shift to the right of the off-curve point
-          const badgePosition = calculateBadgePosition(
-            { x: offCurvePoint.x + 13, y: offCurvePoint.y }, // Shift to the right
-            { x: -unitVector.y, y: unitVector.x },
-            badgeDimensions.width,
-            badgeDimensions.height
+          const badgePositionOff = calculateBadgePosition(
+            { x: offCurvePoint.x + 8, y: offCurvePoint.y }, // Shift to the right
+            { x: -unitVectorOff.y, y: unitVectorOff.x },
+            badgeDimensionsOff.width,
+            badgeDimensionsOff.height
           );
           
-          // Draw text with distance, tension, angle (top to bottom)
+          // Draw text with distance, angle (top to bottom)
           context.save();
           context.fillStyle = "rgba(44, 28, 44, 1)"; // New text color
-          context.font = `5px fontra-ui-regular, sans-serif`; // 6pt font, medium weight
+          context.font = `6px fontra-ui-regular, sans-serif`; // 6pt font, medium weight
           context.textAlign = "left";
-          context.textBaseline = "middle"; 
+          context.textBaseline = "middle";
           context.scale(1, -1);
           
           // Split the text into lines and draw each line
-          const lines = text.split('\n');
-          const lineHeight = 6; // font size
-          const totalHeight = lines.length * lineHeight;
-          const startY = -(badgePosition.y + badgeDimensions.height / 2) - totalHeight / 2 + lineHeight / 2;
+          const linesOff = text.split('\n');
+          const lineHeightOff = 6; // font size
+          const totalHeightOff = linesOff.length * lineHeightOff;
+          const startYOff = -(badgePositionOff.y + badgeDimensionsOff.height / 2) - totalHeightOff / 2 + lineHeightOff / 2;
           
-          for (let i = 0; i < lines.length; i++) {
-            context.fillText(lines[i], badgePosition.x, startY + i * lineHeight);
+          for (let i = 0; i < linesOff.length; i++) {
+            context.fillText(linesOff[i], badgePositionOff.x, startYOff + i * lineHeightOff);
           }
           
           context.restore();
