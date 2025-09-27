@@ -591,15 +591,8 @@ export function findTunniPointHit(point, size, positionedGlyph, calculateTunniPo
   
   const path = positionedGlyph.glyph.path;
   
-  // Convert from scene coordinates to glyph coordinates
-  if (!positionedGlyph || !positionedGlyph.x || !positionedGlyph.y) {
-    return null;
-  }
-  
-  const glyphPoint = {
-    x: point.x - positionedGlyph.x,
-    y: point.y - positionedGlyph.y,
-  };
+  // The point is already in the glyph coordinate system when passed from the pointer tool
+  const glyphPoint = point;
   
   // Iterate through ALL contours and check if the point is near any Tunni point
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
@@ -612,10 +605,22 @@ export function findTunniPointHit(point, size, positionedGlyph, calculateTunniPo
         );
     
         if (pointTypes[1] === 2 && pointTypes[2] === 2) { // Both are cubic control points
-          const tunniPoint = calculateTunniPoint(segment.points);
-          if (tunniPoint && distance(glyphPoint, tunniPoint) <= size) {
+          // Calculate both the true intersection point and the visual point (midpoint)
+          const trueTunniPoint = calculateTrueTunniPoint(segment.points);
+          const visualTunniPoint = calculateTunniPoint(segment.points);
+          
+          // Check both the true intersection point and the visual point (midpoint)
+          if (trueTunniPoint && distance(glyphPoint, trueTunniPoint) <= size) {
             return {
-              tunniPoint: tunniPoint,
+              tunniPoint: trueTunniPoint,
+              segment: segment,
+              segmentPoints: segment.points
+            };
+          }
+          
+          if (visualTunniPoint && distance(glyphPoint, visualTunniPoint) <= size) {
+            return {
+              tunniPoint: visualTunniPoint,
               segment: segment,
               segmentPoints: segment.points
             };
@@ -746,7 +751,8 @@ export function handleTunniPointMouseDown(event, sceneController, visualizationL
  };
  
  // First check if we clicked on an existing Tunni point
- const hit = findTunniPointHit(glyphPoint, size, positionedGlyph, calculateTunniPoint, distance);
+ // Use the same hit testing function that's used for hover detection to ensure consistency
+ const hit = tunniLayerHitTest(glyphPoint, size, positionedGlyph);
  if (!hit) {
    return null;
  }
@@ -815,7 +821,7 @@ export function handleTunniPointMouseDown(event, sceneController, visualizationL
 
  // Return initial state for drag operation
  return {
-   initialMousePosition: glyphPoint,
+   initialMousePosition: { ...glyphPoint }, // Make a copy to avoid reference issues
    initialOnPoint1,
    initialOffPoint1,
    initialOffPoint2,
@@ -1048,15 +1054,8 @@ export function tunniLayerHitTest(point, size, positionedGlyph) {
   
   const path = positionedGlyph.glyph.path;
   
-  // Convert from scene coordinates to glyph coordinates
-  if (!positionedGlyph || !positionedGlyph.x || !positionedGlyph.y) {
-    return null;
-  }
-  
-  const glyphPoint = {
-    x: point.x - positionedGlyph.x,
-    y: point.y - positionedGlyph.y,
-  };
+  // The point is already in the glyph coordinate system when passed from the pointer tool
+  const glyphPoint = point;
   
   // Iterate through ALL contours and check if the point is near any Tunni point
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
@@ -1069,13 +1068,25 @@ export function tunniLayerHitTest(point, size, positionedGlyph) {
         );
     
         if (pointTypes[1] === 2 && pointTypes[2] === 2) { // Both are cubic control points
-          // Calculate the Tunni point for this segment
-          const tunniPoint = calculateTunniPoint(segment.points);
+          // Calculate the true Tunni point (intersection-based) for this segment
+          const trueTunniPoint = calculateTrueTunniPoint(segment.points);
+          const visualTunniPoint = calculateTunniPoint(segment.points);
           
-          // Check if the distance from the given point to the Tunni point is within the hit margin
-          if (tunniPoint && distance(glyphPoint, tunniPoint) <= size) {
+          // Check both the true intersection point and the visual point (midpoint)
+          // This ensures we can hit both the actual intersection and the visual representation
+          if (trueTunniPoint && distance(glyphPoint, trueTunniPoint) <= size) {
             return {
-              tunniPoint: tunniPoint,
+              tunniPoint: trueTunniPoint,
+              segment: segment,
+              segmentPoints: segment.points,
+              contourIndex: contourIndex,
+              hitType: "tunni-point"
+            };
+          }
+          
+          if (visualTunniPoint && distance(glyphPoint, visualTunniPoint) <= size) {
+            return {
+              tunniPoint: visualTunniPoint,
               segment: segment,
               segmentPoints: segment.points,
               contourIndex: contourIndex,
