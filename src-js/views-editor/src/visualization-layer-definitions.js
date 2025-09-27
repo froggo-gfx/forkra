@@ -1934,21 +1934,33 @@ registerVisualizationLayerDefinition({
 function drawTunniLines(context, positionedGlyph, parameters, model, controller) {
   const path = positionedGlyph.glyph.path;
   
-  // Check if there's an active Tunni point
-  const isActive = model?.sceneController?.tunniEditingTool?.isActive || false;
+  // We can't determine if a Tunni point is actively being dragged from the visualization layer context
+  // The active state is determined by whether the Tunni visualization layer is enabled and
+  // if the user is interacting with Tunni points in the pointer tool
+  // For now, we'll base the active state on whether the layer is enabled and
+  // the pointer tool is in a state where it's handling Tunni points
+  const isTunniLayerActive = controller?.editor?.visualizationLayersSettings?.model?.["fontra.tunni.lines"] || false;
+  // Since we can't access the actual drag state from here, we'll just use the layer active state
+  // The actual active visual feedback is handled in the pointer tool interaction
+  const isActiveFinal = isTunniLayerActive;
   
   // Set colors based on active state
-  const tunniLineColor = isActive ?
-    (parameters.tunniLineColor + "80") : // Lighter outline when active (more transparent)
+  const tunniLineColor = isActiveFinal ?
+    "#FF000080" : // Red color when active (more transparent)
     parameters.tunniLineColor;
     
-  const tunniPointColor = isActive ?
-    "#FF0000" : // Red color when active
+  const tunniPointColor = isActiveFinal ?
+    "#FF000" : // Red color when active
     parameters.tunniPointColor;
+    
+  // Set stroke width based on active state
+  const strokeWidth = isActiveFinal ?
+    parameters.strokeWidth * 2 : // Thicker when active
+    parameters.strokeWidth;
   
   context.strokeStyle = tunniLineColor;
-  context.lineWidth = parameters.strokeWidth;
-  context.setLineDash(parameters.dashPattern);
+  context.lineWidth = strokeWidth;
+  context.setLineDash(isActiveFinal ? [] : parameters.dashPattern); // Remove dash pattern when active
   context.fillStyle = tunniPointColor;
   
   // Iterate through all contours
@@ -1982,7 +1994,7 @@ function drawTunniLines(context, positionedGlyph, parameters, model, controller)
             
             // Draw Tunni point
             context.beginPath();
-            context.arc(tunniPoint.x, tunniPoint.y, parameters.tunniPointSize, 0, 2 * Math.PI);
+            context.arc(tunniPoint.x, tunniPoint.y, isActiveFinal ? parameters.tunniPointSize * 1.5 : parameters.tunniPointSize, 0, 2 * Math.PI);
             context.fill();
             
             // Draw line between control points

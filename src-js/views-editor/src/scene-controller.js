@@ -49,7 +49,6 @@ import * as vector from "@fontra/core/vector.js";
 import { dialog, message } from "@fontra/web-components/modal-dialog.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import { SceneModel, getSelectedGlyphName } from "./scene-model.js";
-import { TunniEditingTool } from "./edit-tools-tunni.js";
 //// grid
 import { toggleMagneticSnap } from "./edit-behavior.js";
 
@@ -90,7 +89,6 @@ export class SceneController {
     this.setupSettingsListeners();
     this.setupEventHandling();
     this.setupContextMenuActions();
-    this.tunniEditingTool = new TunniEditingTool(this);
   }
 
   setupSceneSettings() {

@@ -6,7 +6,7 @@ import {
   calculateBadgeDimensions,
   calculateBadgePosition,
   calculateOffCurveAngle,
- DISTANCE_ANGLE_FONT_SIZE,
+  DISTANCE_ANGLE_FONT_SIZE,
   DISTANCE_ANGLE_BADGE_RADIUS
 } from "./distance-angle.js";
 
@@ -22,12 +22,12 @@ function drawRoundRect(context, x, y, width, height, radii) {
   // older versions of Safari don't support roundRect,
   // so we use rect instead
   context.beginPath();
-  if (context.roundRect) {
+ if (context.roundRect) {
     context.roundRect(x, y, width, height, radii);
   } else {
     context.rect(x, y, width, height);
   }
-  context.fill();
+ context.fill();
 }
 
 export function calculateTunniPoint(segmentPoints) {
@@ -39,7 +39,7 @@ export function calculateTunniPoint(segmentPoints) {
   const [p1, p2, p3, p4] = segmentPoints;
   
   // Calculate a point along the line segment between the two control points (p2 and p3)
-  // This is the midpoint by default, but can be adjusted as needed
+ // This is the midpoint by default, but can be adjusted as needed
   const tunniPoint = {
     x: (p2.x + p3.x) / 2,
     y: (p2.y + p3.y) / 2
@@ -128,7 +128,7 @@ export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equal
   const distToIntersection2 = distance(p4, intersection);
   
   // Calculate distances from on-curve points to the new Tunni point
-  const distToTunni1 = distance(p1, tunniPoint);
+ const distToTunni1 = distance(p1, tunniPoint);
   const distToTunni2 = distance(p4, tunniPoint);
   
   // Calculate additional distances beyond the intersection point
@@ -151,7 +151,7 @@ export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equal
   const newDistance2 = targetDist2 + finalAdditionalDist2;
   
   // Calculate new control points along fixed direction vectors
-  const newP2 = {
+ const newP2 = {
     x: p1.x + newDistance1 * dir1.x,
     y: p1.y + newDistance1 * dir1.y
   };
@@ -167,8 +167,8 @@ export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equal
 /**
 * Calculate new control points with equalized tensions using arithmetic mean
  * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
-* @returns {Array} Array of 2 new control points
-*/
+ * @returns {Array} Array of 2 new control points
+ */
 export function calculateEqualizedControlPoints(segmentPoints) {
   const [p1, p2, p3, p4] = segmentPoints;
   
@@ -177,7 +177,7 @@ export function calculateEqualizedControlPoints(segmentPoints) {
 
   const dist1ToPt = distance(p1, pt);
   const dist4ToPt = distance(p4, pt);
-  if (dist1ToPt <= 0 || dist4ToPt <= 0) return [p2, p3];
+ if (dist1ToPt <= 0 || dist4ToPt <= 0) return [p2, p3];
 
   // current tensions
   const t1 = distance(p1, p2) / dist1ToPt;
@@ -191,7 +191,7 @@ export function calculateEqualizedControlPoints(segmentPoints) {
 
   // new distances to hit equal tension
   const newDist1 = targetTension * dist1ToPt;
-  const newDist2 = targetTension * dist4ToPt;
+ const newDist2 = targetTension * dist4ToPt;
 
   const newP2 = {
     x: p1.x + newDist1 * dir1.x,
@@ -229,7 +229,7 @@ export function balanceSegment(segmentPoints) {
   const yPercent = distance(p3, p4) / eDistance;
   
   // Calculate average percentage
-  const avgPercent = (xPercent + yPercent) / 2;
+ const avgPercent = (xPercent + yPercent) / 2;
   
   // Calculate new control points
   const newP2 = {
@@ -254,11 +254,11 @@ export function areDistancesEqualized(segmentPoints) {
  const [p1, p2, p3, p4] = segmentPoints;
   
   // Calculate distances from on-curve points to off-curve points
-  const dist1 = distance(p1, p2);
+ const dist1 = distance(p1, p2);
   const dist2 = distance(p4, p3);
   
   // Check if distances are equal within a small tolerance
-  const tolerance = 0.001; // Small tolerance for floating point comparison
+  const tolerance = 0.01; // Small tolerance for floating point comparison
   return Math.abs(dist1 - dist2) < tolerance;
 }
 
@@ -309,7 +309,7 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
  // console.log("drawTunniLabels called", { showDistance, showTension, showAngle, model });
   
   // Save context state
-  context.save();
+ context.save();
   
   // Iterate through all contours
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
@@ -392,7 +392,7 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
             
             // Draw text for p2 with distance, tension, angle (top to bottom)
             context.save();
-            context.fillStyle = "rgba(44, 28, 44, 1)"; // New text color
+            context.fillStyle = "rgba(4, 28, 44, 1)"; // New text color
             context.font = `6px fontra-ui-regular, sans-serif`; // 6pt font, medium weight
             context.textAlign = "left";
             context.textBaseline = "middle";
@@ -573,4 +573,520 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
   
   // Restore context state
   context.restore();
+}
+
+/**
+ * Finds if a point is hitting a Tunni point within a given size margin
+ * @param {Object} point - The point to check
+ * @param {number} size - The size margin to check within
+ * @param {Object} positionedGlyph - The positioned glyph containing the path
+ * @param {Function} calculateTunniPoint - Function to calculate Tunni point from segment
+ * @param {Function} distance - Function to calculate distance between two points
+ * @returns {Object|null} Object with tunniPoint, segment, and segmentPoints if hit, null otherwise
+ */
+export function findTunniPointHit(point, size, positionedGlyph, calculateTunniPoint, distance) {
+  if (!positionedGlyph) {
+    return null;
+  }
+  
+  const path = positionedGlyph.glyph.path;
+  
+  // Convert from scene coordinates to glyph coordinates
+  if (!positionedGlyph || !positionedGlyph.x || !positionedGlyph.y) {
+    return null;
+  }
+  
+  const glyphPoint = {
+    x: point.x - positionedGlyph.x,
+    y: point.y - positionedGlyph.y,
+  };
+  
+  // Iterate through ALL contours and check if the point is near any Tunni point
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
+      // Process each segment in the contour
+      if (segment.points.length === 4) {
+        // Check if it's a cubic segment
+        const pointTypes = segment.parentPointIndices.map(
+          index => path.pointTypes[index]
+        );
+    
+        if (pointTypes[1] === 2 && pointTypes[2] === 2) { // Both are cubic control points
+          const tunniPoint = calculateTunniPoint(segment.points);
+          if (tunniPoint && distance(glyphPoint, tunniPoint) <= size) {
+            return {
+              tunniPoint: tunniPoint,
+              segment: segment,
+              segmentPoints: segment.points
+            };
+          }
+        }
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Equalizes the distances of control points in a segment using arithmetic mean
+ * @param {Object} point - The point where the mouse was clicked
+ * @param {number} size - The click margin size
+ * @param {Object} sceneModel - The scene model to access positioned glyph
+ * @param {Function} findTunniPointHit - Function to find if point hits a Tunni point
+ * @param {Function} equalizeSegmentDistances - Function to equalize distances in a segment
+ */
+export async function handleEqualizeDistances(point, size, sceneModel, findTunniPointHit, equalizeSegmentDistances) {
+  // First check if we clicked on an existing Tunni point
+  const positionedGlyph = sceneModel.getSelectedPositionedGlyph();
+ const hit = findTunniPointHit(point, size, positionedGlyph, calculateTunniPoint, distance);
+  if (hit) {
+    await equalizeSegmentDistances(hit.segment, hit.segmentPoints, sceneModel, positionedGlyph);
+    return;
+  }
+  
+  // If not, check if we clicked near a cubic segment
+ const pathHit = sceneModel.pathHitAtPoint(point, size);
+  if (pathHit.segment && pathHit.segment.points.length === 4) {
+    // Check if it's a cubic segment (two off-curve points)
+    const pointTypes = pathHit.segment.parentPointIndices.map(
+      index => sceneModel.getSelectedPositionedGlyph().glyph.path.pointTypes[index]
+    );
+    
+    if (pointTypes[1] === 2 && pointTypes[2] === 2) { // Both are cubic control points
+      await equalizeSegmentDistances(pathHit.segment, pathHit.segment.points, sceneModel, positionedGlyph);
+    }
+  }
+}
+
+/**
+ * Equalize the distances of control points in a segment using arithmetic mean
+ * @param {Object} segment - The segment to modify
+ * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
+ * @param {Object} sceneModel - The scene model
+ * @param {Object} positionedGlyph - The positioned glyph
+ * @param {Object} sceneController - The scene controller to perform edits
+ */
+export async function equalizeSegmentDistances(segment, segmentPoints, sceneModel, positionedGlyph, sceneController) {
+  // Check if distances are already equalized
+  if (areDistancesEqualized(segmentPoints)) {
+    console.log("Distances are already equalized, skipping...");
+    return;
+  }
+  
+  // Calculate new control points with equalized distances using arithmetic mean
+  const newControlPoints = calculateEqualizedControlPoints(segmentPoints);
+  
+  // Update the path with new control points using editLayersAndRecordChanges
+  try {
+    await sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        const path = layerGlyph.path;
+        
+        // Validate that the path and segment indices exist
+        if (!path || !segment?.parentPointIndices) {
+          console.warn("Invalid path or segment indices", {
+            path: !!path,
+            parentPointIndices: segment?.parentPointIndices
+          });
+          return "Equalize Control Point Distances"; // Return early but still provide undo label
+        }
+        
+        // Find the indices of the control points within the segment
+        // In a cubic segment, control points are typically at indices 1 and 2
+        const controlPoint1Index = segment.parentPointIndices[1];
+        const controlPoint2Index = segment.parentPointIndices[2];
+        
+        // Validate the control point indices
+        if (controlPoint1Index === undefined || controlPoint2Index === undefined) {
+          console.warn("Invalid control point indices", {
+            controlPoint1Index: controlPoint1Index,
+            controlPoint2Index: controlPoint2Index
+          });
+          return "Equalize Control Point Distances"; // Return early but still provide undo label
+        }
+        
+        // Update the control points in the path
+        path.setPointPosition(controlPoint1Index, newControlPoints[0].x, newControlPoints[0].y);
+        path.setPointPosition(controlPoint2Index, newControlPoints[1].x, newControlPoints[1].y);
+      }
+      return "Equalize Control Point Distances";
+    });
+  } catch (error) {
+    console.error("Error equalizing control point distances:", error);
+    throw error; // Re-throw the error so it can be handled upstream
+  }
+}
+
+/**
+* Handles mouse down event when clicking on a Tunni point
+* @param {Object} event - Mouse event
+* @param {Object} sceneController - Scene controller for scene access
+* @param {Object} visualizationLayerSettings - To check if Tunni layer is active
+* @returns {Object} Initial state for drag operation (initial mouse pos, vectors, etc.)
+*/
+export function handleTunniPointMouseDown(event, sceneController, visualizationLayerSettings) {
+ // Check if Tunni layer is active
+ if (!visualizationLayerSettings.model["fontra.tunni.lines"]) {
+   return null;
+ }
+
+ const point = sceneController.localPoint(event);
+ const size = sceneController.mouseClickMargin;
+ 
+ // Convert from scene coordinates to glyph coordinates
+ const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+ if (!positionedGlyph) {
+   return null; // No positioned glyph, so no Tunni point interaction possible
+ }
+ 
+ const glyphPoint = {
+   x: point.x - positionedGlyph.x,
+   y: point.y - positionedGlyph.y,
+ };
+ 
+ // First check if we clicked on an existing Tunni point
+ const hit = findTunniPointHit(glyphPoint, size, positionedGlyph, calculateTunniPoint, distance);
+ if (!hit) {
+   return null;
+ }
+
+ const segmentPoints = hit.segmentPoints;
+ 
+ // Store initial positions
+ const initialOnPoint1 = { ...segmentPoints[0] }; // p1
+ const initialOffPoint1 = { ...segmentPoints[1] }; // p2
+ const initialOffPoint2 = { ...segmentPoints[2] }; // p3
+ const initialOnPoint2 = { ...segmentPoints[3] }; // p4
+ 
+ // Calculate initial vectors from on-curve to off-curve points
+ const initialVector1 = {
+   x: initialOffPoint1.x - initialOnPoint1.x,
+   y: initialOffPoint1.y - initialOnPoint1.y
+ };
+
+ const initialVector2 = {
+   x: initialOffPoint2.x - initialOnPoint2.x,
+   y: initialOffPoint2.y - initialOnPoint2.y
+ };
+
+ // Calculate unit vectors for movement direction
+ const length1 = Math.sqrt(initialVector1.x * initialVector1.x + initialVector1.y * initialVector1.y);
+ const length2 = Math.sqrt(initialVector2.x * initialVector2.x + initialVector2.y * initialVector2.y);
+ 
+ const unitVector1 = length1 > 0 ? {
+   x: initialVector1.x / length1,
+   y: initialVector1.y / length1
+ } : { x: 1, y: 0 };
+ 
+ const unitVector2 = length2 > 0 ? {
+   x: initialVector2.x / length2,
+   y: initialVector2.y / length2
+ } : { x: 1, y: 0 };
+ 
+ // Calculate 45-degree vector (average of the two unit vectors)
+ let fortyFiveVector = {
+   x: (unitVector1.x + unitVector2.x) / 2,
+   y: (unitVector1.y + unitVector2.y) / 2
+ };
+ 
+ // Normalize the 45-degree vector
+ const fortyFiveLength = Math.sqrt(fortyFiveVector.x * fortyFiveVector.x + fortyFiveVector.y * fortyFiveVector.y);
+ if (fortyFiveLength > 0) {
+   fortyFiveVector.x /= fortyFiveLength;
+   fortyFiveVector.y /= fortyFiveLength;
+ }
+
+ // Store original control point positions for undo functionality
+ let originalControlPoints = null;
+ if (positionedGlyph && positionedGlyph.glyph && positionedGlyph.glyph.path) {
+   const path = positionedGlyph.glyph.path;
+   const controlPoint1Index = hit.segment.parentPointIndices[1];
+   const controlPoint2Index = hit.segment.parentPointIndices[2];
+   if (controlPoint1Index !== undefined && controlPoint2Index !== undefined) {
+     originalControlPoints = {
+       controlPoint1Index: controlPoint1Index,
+       controlPoint2Index: controlPoint2Index,
+       originalControlPoint1: { ...path.getPoint(controlPoint1Index) },
+       originalControlPoint2: { ...path.getPoint(controlPoint2Index) }
+     };
+   }
+ }
+
+ // Return initial state for drag operation
+ return {
+   initialMousePosition: glyphPoint,
+   initialOnPoint1,
+   initialOffPoint1,
+   initialOffPoint2,
+   initialOnPoint2,
+   initialVector1,
+   initialVector2,
+   unitVector1,
+   unitVector2,
+   fortyFiveVector,
+   selectedSegment: hit.segment,
+   originalSegmentPoints: [...segmentPoints],
+   originalControlPoints,
+   tunniPointHit: hit
+ };
+}
+
+/**
+* Handles mouse drag event to update control points based on Tunni point movement
+* @param {Object} event - Mouse event
+* @param {Object} initialState - Initial state from mouse down
+* @param {Object} sceneController - Scene controller for editing operations
+* @returns {Promise} Updates the glyph with new control point positions
+*/
+export async function handleTunniPointMouseDrag(event, initialState, sceneController) {
+ // Check if we have the necessary data to process the drag
+ if (!initialState || !initialState.initialMousePosition || !initialState.initialOffPoint1 || !initialState.initialOffPoint2 || !initialState.selectedSegment || !initialState.originalSegmentPoints) {
+   return;
+ }
+
+ const point = sceneController.localPoint(event);
+ 
+ // Convert from scene coordinates to glyph coordinates
+ const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+ if (!positionedGlyph) {
+   return; // No positioned glyph, so no Tunni point interaction possible
+ }
+ 
+ const glyphPoint = {
+   x: point.x - positionedGlyph.x,
+   y: point.y - positionedGlyph.y,
+ };
+ 
+ // Calculate mouse movement vector
+ const mouseDelta = {
+   x: glyphPoint.x - initialState.initialMousePosition.x,
+   y: glyphPoint.y - initialState.initialMousePosition.y
+ };
+ 
+ // Check if Alt key is pressed to disable equalizing distances
+ // (proportional editing is now the default behavior)
+ const equalizeDistances = !event.altKey;
+ 
+ let newControlPoint1, newControlPoint2;
+ 
+ if (equalizeDistances) {
+   // Proportional editing: Move both control points by the same amount along their respective vectors
+   // Project mouse movement onto the 45-degree vector
+   // This gives us the scalar amount to move along the 45-degree vector
+   const projection = mouseDelta.x * initialState.fortyFiveVector.x + mouseDelta.y * initialState.fortyFiveVector.y;
+   
+   // Move both control points by the same amount along their respective vectors
+   newControlPoint1 = {
+     x: initialState.initialOffPoint1.x + initialState.unitVector1.x * projection,
+     y: initialState.initialOffPoint1.y + initialState.unitVector1.y * projection
+   };
+   
+   newControlPoint2 = {
+     x: initialState.initialOffPoint2.x + initialState.unitVector2.x * projection,
+     y: initialState.initialOffPoint2.y + initialState.unitVector2.y * projection
+   };
+ } else {
+   // Non-proportional editing: Each control point moves independently along its own vector
+   // Project mouse movement onto each control point's individual unit vector
+   const projection1 = mouseDelta.x * initialState.unitVector1.x + mouseDelta.y * initialState.unitVector1.y;
+   const projection2 = mouseDelta.x * initialState.unitVector2.x + mouseDelta.y * initialState.unitVector2.y;
+   
+   // Move each control point by its own projection amount
+   newControlPoint1 = {
+     x: initialState.initialOffPoint1.x + initialState.unitVector1.x * projection1,
+     y: initialState.initialOffPoint1.y + initialState.unitVector1.y * projection1
+   };
+   
+   newControlPoint2 = {
+     x: initialState.initialOffPoint2.x + initialState.unitVector2.x * projection2,
+     y: initialState.initialOffPoint2.y + initialState.unitVector2.y * projection2
+   };
+ }
+ 
+ // Calculate Tunni point using the calculateTunniPoint function
+ const tunniPoint = calculateTunniPoint([
+   initialState.initialOnPoint1,
+   newControlPoint1,
+   newControlPoint2,
+   initialState.initialOnPoint2
+ ]);
+  
+  // Calculate new control points based on the new positions
+  const newControlPoints = [newControlPoint1, newControlPoint2];
+  
+  // Validate that we have a proper segment and control points
+  if (!initialState.selectedSegment || !newControlPoints || newControlPoints.length !== 2) {
+    console.warn("Invalid segment or control points", {
+      selectedSegment: initialState.selectedSegment,
+      newControlPoints: newControlPoints
+    });
+    return;
+  }
+  
+  // Validate that the selected segment is a cubic segment
+  if (initialState.selectedSegment.points.length !== 4) {
+    console.warn("Selected segment is not a cubic segment", {
+    segmentPointsLength: initialState.selectedSegment.points.length
+    });
+    return;
+  }
+  
+  // Update the path with new control points using editGlyph for incremental changes
+  // This will provide visual feedback during dragging without creating undo records
+  try {
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layerInfo = Object.entries(
+        sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+      ).map(([layerName, layerGlyph]) => {
+        return {
+          layerName,
+          layerGlyph,
+          changePath: ["layers", layerName, "glyph"],
+        };
+      });
+
+      const forwardChanges = [];
+      for (const { layerGlyph, changePath } of layerInfo) {
+        const path = layerGlyph.path;
+        
+        // Validate that the path and segment indices exist
+        if (!path || !initialState.selectedSegment?.parentPointIndices) {
+          console.warn("Invalid path or segment indices", {
+            path: !!path,
+            parentPointIndices: initialState.selectedSegment?.parentPointIndices
+          });
+          continue;
+        }
+        
+        // Find the indices of the control points within the segment
+        // In a cubic segment, control points are typically at indices 1 and 2
+        const controlPoint1Index = initialState.selectedSegment.parentPointIndices[1];
+        const controlPoint2Index = initialState.selectedSegment.parentPointIndices[2];
+        
+        // Validate the control point indices
+        if (controlPoint1Index === undefined || controlPoint2Index === undefined) {
+          console.warn("Invalid control point indices", {
+            controlPoint1Index: controlPoint1Index,
+            controlPoint2Index: controlPoint2Index
+          });
+          continue;
+        }
+        
+        // Update the control points in the path
+        path.setPointPosition(controlPoint1Index, newControlPoints[0].x, newControlPoints[0].y);
+        path.setPointPosition(controlPoint2Index, newControlPoints[1].x, newControlPoints[1].y);
+        
+        // Record the change for this layer using the proper format for incremental changes
+        forwardChanges.push({
+          p: changePath,
+          c: [
+            { f: "setPointPosition", a: [controlPoint1Index, newControlPoints[0].x, newControlPoints[0].y] },
+            { f: "setPointPosition", a: [controlPoint2Index, newControlPoints[1].x, newControlPoints[1].y] }
+          ]
+        });
+      }
+
+      if (forwardChanges.length > 0) {
+        await sendIncrementalChange({ c: forwardChanges }, true); // true: "may drop" for performance
+      }
+    });
+  } catch (error) {
+    console.error("Error updating Tunni points:", error);
+    throw error; // Re-throw the error so it can be handled upstream
+  }
+}
+
+/**
+* Handles mouse up event to finalize the Tunni point drag operation
+* @param {Object} initialState - Initial state from mouse down
+* @param {Object} sceneController - Scene controller for editing operations
+* @returns {Promise} Records final state for undo/redo
+*/
+export async function handleTunniPointMouseUp(initialState, sceneController) {
+ // Check if we have the necessary data to process the mouse up event
+ if (!initialState || !initialState.selectedSegment || !initialState.originalControlPoints) {
+   return;
+ }
+
+ // Record the final state for undo/redo functionality
+ try {
+   await sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+     for (const layerGlyph of Object.values(layerGlyphs)) {
+       const path = layerGlyph.path;
+       const controlPoint1Index = initialState.originalControlPoints.controlPoint1Index;
+       const controlPoint2Index = initialState.originalControlPoints.controlPoint2Index;
+       
+       // Get the current final positions of the control points
+       const finalControlPoint1 = path.getPoint(controlPoint1Index);
+       const finalControlPoint2 = path.getPoint(controlPoint2Index);
+       
+       // Update the control points in the path to their final positions
+       // (this is just for the undo record, the points are already at their final positions)
+       path.setPointPosition(controlPoint1Index, finalControlPoint1.x, finalControlPoint1.y);
+       path.setPointPosition(controlPoint2Index, finalControlPoint2.x, finalControlPoint2.y);
+     }
+     return "Move Tunni Points";
+   });
+ } catch (error) {
+   console.error("Error recording final state for undo/redo:", error);
+   throw error; // Re-throw the error so it can be handled upstream
+ }
+}
+
+/**
+ * Performs hit testing specifically for Tunni visualization layer elements
+ * @param {Object} point - The point to check (x, y coordinates)
+ * @param {number} size - The hit margin size
+ * @param {Object} positionedGlyph - The positioned glyph to test against
+ * @returns {Object|null} Hit result object if Tunni point is near the given point, null otherwise
+ */
+export function tunniLayerHitTest(point, size, positionedGlyph) {
+  if (!positionedGlyph || !positionedGlyph.glyph || !positionedGlyph.glyph.path) {
+    return null;
+  }
+  
+  const path = positionedGlyph.glyph.path;
+  
+  // Convert from scene coordinates to glyph coordinates
+  if (!positionedGlyph || !positionedGlyph.x || !positionedGlyph.y) {
+    return null;
+  }
+  
+  const glyphPoint = {
+    x: point.x - positionedGlyph.x,
+    y: point.y - positionedGlyph.y,
+  };
+  
+  // Iterate through ALL contours and check if the point is near any Tunni point
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
+      // Process each segment in the contour
+      if (segment.points.length === 4) {
+        // Check if it's a cubic segment
+        const pointTypes = segment.parentPointIndices.map(
+          index => path.pointTypes[index]
+        );
+    
+        if (pointTypes[1] === 2 && pointTypes[2] === 2) { // Both are cubic control points
+          // Calculate the Tunni point for this segment
+          const tunniPoint = calculateTunniPoint(segment.points);
+          
+          // Check if the distance from the given point to the Tunni point is within the hit margin
+          if (tunniPoint && distance(glyphPoint, tunniPoint) <= size) {
+            return {
+              tunniPoint: tunniPoint,
+              segment: segment,
+              segmentPoints: segment.points,
+              contourIndex: contourIndex,
+              hitType: "tunni-point"
+            };
+          }
+        }
+      }
+    }
+  }
+  
+  // If no Tunni point is found within the hit margin, return null
+  return null;
 }

@@ -41,6 +41,13 @@ import {
   strokeRoundNode,
   strokeSquareNode,
 } from "./visualization-layer-definitions.js";
+// Import Tunni functions for integration with pointer tool
+import {
+  handleTunniPointMouseDown,
+  handleTunniPointMouseDrag,
+  handleTunniPointMouseUp,
+  tunniLayerHitTest,
+} from "@fontra/core/tunni-calculations.js";
 
 const transformHandleMargin = 6;
 const transformHandleSize = 8;
@@ -78,6 +85,23 @@ export class PointerTool extends BaseTool {
 
     this.sceneController.sceneModel.showTransformSelection = true;
 
+    // Check if Tunni visualization layer is active and if we're hovering over a Tunni point
+    const isTunniLayerActive = this.editor.visualizationLayersSettings.model["fontra.tunni.lines"];
+    let isHoveringTunniPoint = false;
+    
+    if (isTunniLayerActive) {
+      const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+      if (positionedGlyph) {
+        // Convert from scene coordinates to glyph coordinates for hit testing
+        const glyphPoint = {
+          x: point.x - positionedGlyph.x,
+          y: point.y - positionedGlyph.y,
+        };
+        const tunniHit = tunniLayerHitTest(glyphPoint, size, positionedGlyph);
+        isHoveringTunniPoint = tunniHit !== null;
+      }
+    }
+
     const resizeHandle = this.getResizeHandle(event, sceneController.selection);
     const rotationHandle = !resizeHandle
       ? this.getRotationHandle(event, sceneController.selection)
@@ -90,6 +114,9 @@ export class PointerTool extends BaseTool {
       this.setCursorForRotationHandle(rotationHandle);
     } else if (resizeHandle) {
       this.setCursorForResizeHandle(resizeHandle);
+    } else if (isHoveringTunniPoint) {
+      // If hovering over a Tunni point, use pointer cursor
+      this.canvasController.canvas.style.cursor = "pointer";
     } else {
       this.setCursor();
     }
@@ -116,19 +143,57 @@ export class PointerTool extends BaseTool {
   setCursor(cursor = undefined) {
     if (cursor) {
       this.canvasController.canvas.style.cursor = cursor;
-    } else if (
-      this.sceneController.hoverSelection?.size ||
-      this.sceneController.hoverPathHit
-    ) {
-      this.canvasController.canvas.style.cursor = "pointer";
     } else {
-      this.canvasController.canvas.style.cursor = "default";
+      // Check if Tunni visualization layer is active and if we're hovering over a Tunni point
+      // This check is only relevant when called from hover event, so we don't check it here
+      // since this method is also called from other contexts
+      if (
+        this.sceneController.hoverSelection?.size ||
+        this.sceneController.hoverPathHit
+      ) {
+        this.canvasController.canvas.style.cursor = "pointer";
+      } else {
+        this.canvasController.canvas.style.cursor = "default";
+      }
     }
   }
 
   async handleDrag(eventStream, initialEvent) {
     const sceneController = this.sceneController;
     const initialSelection = sceneController.selection;
+    
+    // Check if Tunni visualization layer is active and if we clicked on a Tunni point
+    const isTunniLayerActive = this.editor.visualizationLayersSettings.model["fontra.tunni.lines"];
+    let tunniInitialState = null;
+    
+    if (isTunniLayerActive) {
+      tunniInitialState = handleTunniPointMouseDown(
+        initialEvent,
+        sceneController,
+        this.editor.visualizationLayersSettings
+      );
+    }
+    
+    // If we clicked on a Tunni point, handle the drag operation as a Tunni interaction
+    if (tunniInitialState) {
+      // Process the drag events for Tunni point manipulation
+      for await (const event of eventStream) {
+        if (event.type === "mouseup") {
+          // Handle mouse up event for Tunni point
+          await handleTunniPointMouseUp(tunniInitialState, sceneController);
+          break;
+        } else if (event.type === "mousemove") {
+          // Handle mouse drag events for Tunni point
+          try {
+            await handleTunniPointMouseDrag(event, tunniInitialState, sceneController);
+          } catch (error) {
+            console.error("Error handling Tunni point mouse drag:", error);
+          }
+        }
+      }
+      return;
+    }
+    
     const resizeHandle = this.getResizeHandle(initialEvent, initialSelection);
     const rotationHandle = this.getRotationHandle(initialEvent, initialSelection);
     if (resizeHandle || rotationHandle) {
