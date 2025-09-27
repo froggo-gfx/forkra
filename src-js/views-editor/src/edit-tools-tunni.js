@@ -271,22 +271,6 @@ export class TunniEditingTool {
                 originalControlPoint1: { ...path.getPoint(controlPoint1Index) },
                 originalControlPoint2: { ...path.getPoint(controlPoint2Index) }
               };
-              
-              // Immediately record the starting state for undo functionality
-              const originalControlPoint1 = { ...path.getPoint(controlPoint1Index) };
-              const originalControlPoint2 = { ...path.getPoint(controlPoint2Index) };
-              
-              // This will create the initial undo point for this action
-              await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
-                for (const layerGlyph of Object.values(layerGlyphs)) {
-                  const layerPath = layerGlyph.path;
-                  // The points are already at their original positions, so we're just recording this state
-                  // This creates the baseline for the undo operation
-                  layerPath.setPointPosition(controlPoint1Index, originalControlPoint1.x, originalControlPoint1.y);
-                  layerPath.setPointPosition(controlPoint2Index, originalControlPoint2.x, originalControlPoint2.y);
-                }
-                return "Start Tunni Point Drag";
-              });
             }
           }
           
@@ -533,10 +517,33 @@ export class TunniEditingTool {
     }
 }
 
- handleMouseUp(event) {
-    // The final state should already be applied from the drag operation
-    // The undo/redo is handled by the combination of the initial state recorded in handleMouseDown
-    // and the final state that's currently in the glyph
+ async handleMouseUp(event) {
+    // Record the final state for undo/redo functionality
+    if (this.selectedSegment && this.originalControlPoints) {
+      try {
+        await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+          for (const layerGlyph of Object.values(layerGlyphs)) {
+            const path = layerGlyph.path;
+            const controlPoint1Index = this.originalControlPoints.controlPoint1Index;
+            const controlPoint2Index = this.originalControlPoints.controlPoint2Index;
+            
+            // Get the current final positions of the control points
+            const finalControlPoint1 = path.getPoint(controlPoint1Index);
+            const finalControlPoint2 = path.getPoint(controlPoint2Index);
+            
+            // Update the control points in the path to their final positions
+            // (this is just for the undo record, the points are already at their final positions)
+            path.setPointPosition(controlPoint1Index, finalControlPoint1.x, finalControlPoint1.y);
+            path.setPointPosition(controlPoint2Index, finalControlPoint2.x, finalControlPoint2.y);
+          }
+          return "Move Tunni Points";
+        });
+      } catch (error) {
+        console.error("Error recording final state for undo/redo:", error);
+      }
+    }
+    
+    // Clear all stored state
     this.tunniPoint = null;
     this.selectedSegment = null;
     this.originalSegmentPoints = null;
@@ -552,6 +559,7 @@ export class TunniEditingTool {
     this.initialVector2 = null;
     this.unitVector1 = null;
     this.unitVector2 = null;
+    this.fortyFiveVector = null;
   }
 
   findTunniPointHit(point, size) {
