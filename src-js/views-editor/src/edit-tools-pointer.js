@@ -47,6 +47,9 @@ import {
   handleTunniPointMouseDrag,
   handleTunniPointMouseUp,
   tunniLayerHitTest,
+  calculateEqualizedControlPoints,
+  areDistancesEqualized,
+  equalizeSegmentDistances,
 } from "@fontra/core/tunni-calculations.js";
 
 const transformHandleMargin = 6;
@@ -177,6 +180,18 @@ export class PointerTool extends BaseTool {
     // If we clicked on a Tunni point, handle the drag operation to provide visual feedback during drag
     // while maintaining a single undo record
     if (tunniInitialState) {
+      // Check if Ctrl+Shift keys are pressed to equalize control point distances
+      if (initialEvent.ctrlKey && initialEvent.shiftKey) {
+        // Equalize the control point distances instead of starting drag
+        await equalizeSegmentDistances(
+          tunniInitialState.tunniPointHit.segment,
+          tunniInitialState.originalSegmentPoints,
+          sceneController.sceneModel,
+          sceneController.sceneModel.getSelectedPositionedGlyph(),
+          sceneController
+        );
+        return;
+      }
       // Process the drag events for Tunni point manipulation with visual feedback
       await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
         let finalChanges = null;
