@@ -839,16 +839,16 @@ export function handleTunniPointMouseDown(event, sceneController, visualizationL
 }
 
 /**
-* Handles mouse drag event to update control points based on Tunni point movement
+* Calculates new control points based on Tunni point movement during drag
 * @param {Object} event - Mouse event
 * @param {Object} initialState - Initial state from mouse down
 * @param {Object} sceneController - Scene controller for editing operations
-* @returns {Promise} Updates the glyph with new control point positions
+* @returns {Object} Object containing control point indices and new positions
 */
-export async function handleTunniPointMouseDrag(event, initialState, sceneController) {
+export function calculateTunniPointDragChanges(event, initialState, sceneController) {
  // Check if we have the necessary data to process the drag
  if (!initialState || !initialState.initialMousePosition || !initialState.initialOffPoint1 || !initialState.initialOffPoint2 || !initialState.selectedSegment || !initialState.originalSegmentPoints) {
-   return;
+   return null;
  }
 
  const point = sceneController.localPoint(event);
@@ -856,7 +856,7 @@ export async function handleTunniPointMouseDrag(event, initialState, sceneContro
  // Convert from scene coordinates to glyph coordinates
  const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
  if (!positionedGlyph) {
-   return; // No positioned glyph, so no Tunni point interaction possible
+   return null; // No positioned glyph, so no Tunni point interaction possible
  }
  
  const glyphPoint = {
@@ -909,135 +909,48 @@ export async function handleTunniPointMouseDrag(event, initialState, sceneContro
      y: initialState.initialOffPoint2.y + initialState.unitVector2.y * projection2
    };
  }
- 
- // Calculate Tunni point using the calculateTunniPoint function
- const tunniPoint = calculateTunniPoint([
-   initialState.initialOnPoint1,
-   newControlPoint1,
-   newControlPoint2,
-   initialState.initialOnPoint2
- ]);
-  
-  // Calculate new control points based on the new positions
-  const newControlPoints = [newControlPoint1, newControlPoint2];
-  
-  // Validate that we have a proper segment and control points
-  if (!initialState.selectedSegment || !newControlPoints || newControlPoints.length !== 2) {
-    console.warn("Invalid segment or control points", {
-      selectedSegment: initialState.selectedSegment,
-      newControlPoints: newControlPoints
-    });
-    return;
-  }
-  
-  // Validate that the selected segment is a cubic segment
-  if (initialState.selectedSegment.points.length !== 4) {
-    console.warn("Selected segment is not a cubic segment", {
-    segmentPointsLength: initialState.selectedSegment.points.length
-    });
-    return;
-  }
-  
-  // Update the path with new control points using editGlyph for incremental changes
-  // This will provide visual feedback during dragging without creating undo records
-  try {
-    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const layerInfo = Object.entries(
-        sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
-      ).map(([layerName, layerGlyph]) => {
-        return {
-          layerName,
-          layerGlyph,
-          changePath: ["layers", layerName, "glyph"],
-        };
-      });
 
-      const forwardChanges = [];
-      for (const { layerGlyph, changePath } of layerInfo) {
-        const path = layerGlyph.path;
-        
-        // Validate that the path and segment indices exist
-        if (!path || !initialState.selectedSegment?.parentPointIndices) {
-          console.warn("Invalid path or segment indices", {
-            path: !!path,
-            parentPointIndices: initialState.selectedSegment?.parentPointIndices
-          });
-          continue;
-        }
-        
-        // Find the indices of the control points within the segment
-        // In a cubic segment, control points are typically at indices 1 and 2
-        const controlPoint1Index = initialState.selectedSegment.parentPointIndices[1];
-        const controlPoint2Index = initialState.selectedSegment.parentPointIndices[2];
-        
-        // Validate the control point indices
-        if (controlPoint1Index === undefined || controlPoint2Index === undefined) {
-          console.warn("Invalid control point indices", {
-            controlPoint1Index: controlPoint1Index,
-            controlPoint2Index: controlPoint2Index
-          });
-          continue;
-        }
-        
-        // Update the control points in the path
-        path.setPointPosition(controlPoint1Index, newControlPoints[0].x, newControlPoints[0].y);
-        path.setPointPosition(controlPoint2Index, newControlPoints[1].x, newControlPoints[1].y);
-        
-        // Record the change for this layer using the proper format for incremental changes
-        forwardChanges.push({
-          p: changePath,
-          c: [
-            { f: "setPointPosition", a: [controlPoint1Index, newControlPoints[0].x, newControlPoints[0].y] },
-            { f: "setPointPosition", a: [controlPoint2Index, newControlPoints[1].x, newControlPoints[1].y] }
-          ]
-        });
-      }
-
-      if (forwardChanges.length > 0) {
-        await sendIncrementalChange({ c: forwardChanges }, true); // true: "may drop" for performance
-      }
-    });
-  } catch (error) {
-    console.error("Error updating Tunni points:", error);
-    throw error; // Re-throw the error so it can be handled upstream
-  }
+ // Return the changes instead of applying them
+ return {
+   controlPoint1Index: initialState.selectedSegment.parentPointIndices[1],
+   controlPoint2Index: initialState.selectedSegment.parentPointIndices[2],
+   newControlPoint1: newControlPoint1,
+   newControlPoint2: newControlPoint2
+ };
 }
 
 /**
-* Handles mouse up event to finalize the Tunni point drag operation
+* Handles mouse drag event to calculate control point changes based on Tunni point movement
+* @param {Object} event - Mouse event
 * @param {Object} initialState - Initial state from mouse down
 * @param {Object} sceneController - Scene controller for editing operations
-* @returns {Promise} Records final state for undo/redo
+* @returns {Object} Object containing control point indices and new positions
 */
-export async function handleTunniPointMouseUp(initialState, sceneController) {
+export function handleTunniPointMouseDrag(event, initialState, sceneController) {
+ // Calculate the changes for this mouse move event
+ return calculateTunniPointDragChanges(event, initialState, sceneController);
+}
+
+/**
+* Handles mouse up event to return the final state for the Tunni point drag operation
+* @param {Object} initialState - Initial state from mouse down
+* @param {Object} sceneController - Scene controller for editing operations
+* @returns {Object} Object containing original control point indices and their final positions
+*/
+export function handleTunniPointMouseUp(initialState, sceneController) {
  // Check if we have the necessary data to process the mouse up event
  if (!initialState || !initialState.selectedSegment || !initialState.originalControlPoints) {
-   return;
+   return null;
  }
 
- // Record the final state for undo/redo functionality
- try {
-   await sceneController.editLayersAndRecordChanges((layerGlyphs) => {
-     for (const layerGlyph of Object.values(layerGlyphs)) {
-       const path = layerGlyph.path;
-       const controlPoint1Index = initialState.originalControlPoints.controlPoint1Index;
-       const controlPoint2Index = initialState.originalControlPoints.controlPoint2Index;
-       
-       // Get the current final positions of the control points
-       const finalControlPoint1 = path.getPoint(controlPoint1Index);
-       const finalControlPoint2 = path.getPoint(controlPoint2Index);
-       
-       // Update the control points in the path to their final positions
-       // (this is just for the undo record, the points are already at their final positions)
-       path.setPointPosition(controlPoint1Index, finalControlPoint1.x, finalControlPoint1.y);
-       path.setPointPosition(controlPoint2Index, finalControlPoint2.x, finalControlPoint2.y);
-     }
-     return "Move Tunni Points";
-   });
- } catch (error) {
-   console.error("Error recording final state for undo/redo:", error);
-   throw error; // Re-throw the error so it can be handled upstream
- }
+ // Return the original control point information without applying changes
+ // The actual changes will be applied in the pointer tool as a single atomic operation
+ return {
+   controlPoint1Index: initialState.originalControlPoints.controlPoint1Index,
+   controlPoint2Index: initialState.originalControlPoints.controlPoint2Index,
+   originalControlPoint1: initialState.originalControlPoints.originalControlPoint1,
+   originalControlPoint2: initialState.originalControlPoints.originalControlPoint2
+ };
 }
 
 /**

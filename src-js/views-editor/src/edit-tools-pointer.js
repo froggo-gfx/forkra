@@ -174,22 +174,34 @@ export class PointerTool extends BaseTool {
       );
     }
     
-    // If we clicked on a Tunni point, handle the drag operation as a Tunni interaction
+    // If we clicked on a Tunni point, handle the drag operation as a single atomic operation
     if (tunniInitialState) {
-      // Process the drag events for Tunni point manipulation
+      // Process the drag events for Tunni point manipulation as a single atomic operation
+      let finalChanges = null;
       for await (const event of eventStream) {
         if (event.type === "mouseup") {
-          // Handle mouse up event for Tunni point
-          await handleTunniPointMouseUp(tunniInitialState, sceneController);
+          // Handle mouse up event for Tunni point - no separate action needed since
+          // all changes are part of the atomic operation
           break;
         } else if (event.type === "mousemove") {
-          // Handle mouse drag events for Tunni point
-          try {
-            await handleTunniPointMouseDrag(event, tunniInitialState, sceneController);
-          } catch (error) {
-            console.error("Error handling Tunni point mouse drag:", error);
+          // Calculate the changes for this mouse move event
+          const dragChanges = handleTunniPointMouseDrag(event, tunniInitialState, sceneController);
+          if (dragChanges) {
+            finalChanges = dragChanges;
           }
         }
+      }
+      
+      // Apply all changes in a single atomic operation
+      if (finalChanges) {
+        await sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+          for (const layerGlyph of Object.values(layerGlyphs)) {
+            // Update the control points in the path
+            layerGlyph.path.setPointPosition(finalChanges.controlPoint1Index, finalChanges.newControlPoint1.x, finalChanges.newControlPoint1.y);
+            layerGlyph.path.setPointPosition(finalChanges.controlPoint2Index, finalChanges.newControlPoint2.x, finalChanges.newControlPoint2.y);
+          }
+          return "Move Tunni Points";
+        });
       }
       return;
     }
