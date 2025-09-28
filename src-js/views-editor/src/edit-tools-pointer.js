@@ -174,35 +174,95 @@ export class PointerTool extends BaseTool {
       );
     }
     
-    // If we clicked on a Tunni point, handle the drag operation as a single atomic operation
+    // If we clicked on a Tunni point, handle the drag operation to provide visual feedback during drag
+    // while maintaining a single undo record
     if (tunniInitialState) {
-      // Process the drag events for Tunni point manipulation as a single atomic operation
-      let finalChanges = null;
-      for await (const event of eventStream) {
-        if (event.type === "mouseup") {
-          // Handle mouse up event for Tunni point - no separate action needed since
-          // all changes are part of the atomic operation
-          break;
-        } else if (event.type === "mousemove") {
-          // Calculate the changes for this mouse move event
-          const dragChanges = handleTunniPointMouseDrag(event, tunniInitialState, sceneController);
-          if (dragChanges) {
-            finalChanges = dragChanges;
+      // Process the drag events for Tunni point manipulation with visual feedback
+      await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+        let finalChanges = null;
+        
+        // Set up the initial layer info for the editing operation
+        const layerInfo = Object.entries(
+          sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+        ).map(([layerName, layerGlyph]) => {
+          return {
+            layerName,
+            layerGlyph,
+            changePath: ["layers", layerName, "glyph"],
+          };
+        });
+        
+        assert(layerInfo.length >= 1, "no layer to edit");
+        
+        // Get the original control point positions for rollback
+        const originalControlPoint1 = { ...layerInfo[0].layerGlyph.path.getPoint(tunniInitialState.originalControlPoints.controlPoint1Index) };
+        const originalControlPoint2 = { ...layerInfo[0].layerGlyph.path.getPoint(tunniInitialState.originalControlPoints.controlPoint2Index) };
+        
+        for await (const event of eventStream) {
+          if (event.type === "mouseup") {
+            // Handle mouse up event for Tunni point - finalize the changes
+            break;
+          } else if (event.type === "mousemove") {
+            // Calculate the changes for this mouse move event
+            const dragChanges = handleTunniPointMouseDrag(event, tunniInitialState, sceneController);
+            if (dragChanges) {
+              finalChanges = dragChanges;
+              
+              // Apply temporary visual changes for each mouse move event
+              const deepEditChanges = [];
+              for (const layer of layerInfo) {
+                // Create temporary changes for visual feedback using the correct format
+                const tempChanges = [
+                  { f: "=xy", a: [dragChanges.controlPoint1Index, dragChanges.newControlPoint1.x, dragChanges.newControlPoint1.y] },
+                  { f: "=xy", a: [dragChanges.controlPoint2Index, dragChanges.newControlPoint2.x, dragChanges.newControlPoint2.y] }
+                ];
+                
+                // Apply the changes to the layer glyph path for visual feedback
+                for (const tempChange of tempChanges) {
+                  applyChange(layer.layerGlyph.path, tempChange);
+                }
+                
+                // Consolidate the temporary changes for this layer
+                deepEditChanges.push(consolidateChanges(tempChanges, [...layer.changePath, "path"]));
+              }
+              
+              const editChange = consolidateChanges(deepEditChanges);
+              await sendIncrementalChange(editChange, true); // true: "may drop" - for visual feedback only
+            }
           }
         }
-      }
-      
-      // Apply all changes in a single atomic operation
-      if (finalChanges) {
-        await sceneController.editLayersAndRecordChanges((layerGlyphs) => {
-          for (const layerGlyph of Object.values(layerGlyphs)) {
-            // Update the control points in the path
-            layerGlyph.path.setPointPosition(finalChanges.controlPoint1Index, finalChanges.newControlPoint1.x, finalChanges.newControlPoint1.y);
-            layerGlyph.path.setPointPosition(finalChanges.controlPoint2Index, finalChanges.newControlPoint2.x, finalChanges.newControlPoint2.y);
+        
+        // Prepare the final atomic changes for the undo record
+        if (finalChanges) {
+          // Create the final change that will be recorded for undo
+          const finalLayerChanges = [];
+          const rollbackChanges = [];
+          
+          for (const layer of layerInfo) {
+            const finalChangesForLayer = [
+              { f: "=xy", a: [finalChanges.controlPoint1Index, finalChanges.newControlPoint1.x, finalChanges.newControlPoint1.y] },
+              { f: "=xy", a: [finalChanges.controlPoint2Index, finalChanges.newControlPoint2.x, finalChanges.newControlPoint2.y] }
+            ];
+            finalLayerChanges.push(consolidateChanges(finalChangesForLayer, [...layer.changePath, "path"]));
+            
+            // Create rollback changes to restore original positions
+            const rollbackChangesForLayer = [
+              { f: "=xy", a: [tunniInitialState.originalControlPoints.controlPoint1Index, originalControlPoint1.x, originalControlPoint1.y] },
+              { f: "=xy", a: [tunniInitialState.originalControlPoints.controlPoint2Index, originalControlPoint2.x, originalControlPoint2.y] }
+            ];
+            rollbackChanges.push(consolidateChanges(rollbackChangesForLayer, [...layer.changePath, "path"]));
           }
-          return "Move Tunni Points";
-        });
-      }
+          
+          return {
+            changes: ChangeCollector.fromChanges(
+              consolidateChanges(finalLayerChanges),
+              consolidateChanges(rollbackChanges)
+            ),
+            undoLabel: "Move Tunni Points",
+            broadcast: true,
+          };
+        }
+      });
       return;
     }
     
