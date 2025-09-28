@@ -377,14 +377,14 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
             
             // Calculate badge positions for both labels and shift to the right of the off-curve point
             const badgePosition1 = calculateBadgePosition(
-              { x: p2.x + 13, y: p2.y }, // Shift to the right
+              { x: p2.x + 14, y: p2.y }, // Shift to the right
               { x: -unitVector1.y, y: unitVector1.x },
               badgeDimensions1.width,
               badgeDimensions1.height
             );
             
             const badgePosition2 = calculateBadgePosition(
-              { x: p3.x + 13, y: p3.y }, // Shift to the right
+              { x: p3.x + 14, y: p3.y }, // Shift to the right
               { x: -unitVector2.y, y: unitVector2.x },
               badgeDimensions2.width,
               badgeDimensions2.height
