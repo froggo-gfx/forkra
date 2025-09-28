@@ -1840,6 +1840,59 @@ function drawRoundRect(context, x, y, width, height, radii) {
   context.fill();
 }
 
+// Register a new visualization layer for a draggable 8x8 circle
+registerVisualizationLayerDefinition({
+ identifier: "fontra.draggable.circle",
+  name: "Draggable 8x8 Circle",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true, // Enable by default so it can be shown when needed
+  zIndex: 800, // Higher than most other layers to ensure visibility
+  screenParameters: {
+    radius: 8,
+    strokeWidth: 1,
+  },
+  colors: {
+    fillColor: "#000",
+    strokeColor: "#FFF",
+  },
+  colorsDarkMode: {
+    fillColor: "#FFF",
+    strokeColor: "#000",
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    // Get circle position - first try from glyph's customData, then fallback to scene settings
+    let x, y;
+    
+    // Check if the current glyph has customData for the circle
+    if (positionedGlyph.glyph && positionedGlyph.glyph.customData) {
+      x = positionedGlyph.glyph.customData["draggableCircleX"];
+      y = positionedGlyph.glyph.customData["draggableCircleY"];
+    }
+    
+    // Fallback to scene settings if no customData found
+    if (x === undefined || y === undefined) {
+      x = model.sceneSettings.draggableCircleX;
+      y = model.sceneSettings.draggableCircleY;
+    }
+    
+    // Only draw if the circle has been explicitly positioned (not undefined)
+    if (x === undefined || y === undefined) {
+      return; // Don't draw if position is not set
+    }
+    
+    // Draw the circle using glyph coordinates (already in the right coordinate system)
+    context.beginPath();
+    context.arc(x, y, parameters.radius, 0, 2 * Math.PI);
+    context.fillStyle = parameters.fillColor;
+    context.fill();
+    
+    // Add a stroke for better visibility
+    context.strokeStyle = parameters.strokeColor;
+    context.lineWidth = parameters.strokeWidth;
+    context.stroke();
+  },
+});
 function getTextVerticalCenter(context, text) {
   const metrics = context.measureText(text);
   return (metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;

@@ -337,112 +337,224 @@ export class PointerTool extends BaseTool {
     this.sceneController.sceneModel.showTransformSelection = false;
     this._selectionBeforeSingleClick = undefined;
     const sceneController = this.sceneController;
-    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const initialPoint = sceneController.localPoint(initialEvent);
-      let behaviorName = getBehaviorName(initialEvent);
+    
+    // Check if the selection contains the draggable circle
+    if (sceneController.selection && sceneController.selection.has("draggable-circle/0")) {
+      // Handle dragging the draggable circle
+      await this.handleDraggableCircle(eventStream, initialEvent);
+    } else {
+      // Handle normal glyph element dragging
+      await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+        const initialPoint = sceneController.localPoint(initialEvent);
+        let behaviorName = getBehaviorName(initialEvent);
 
-      const layerInfo = Object.entries(
-        sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
-      ).map(([layerName, layerGlyph]) => {
-        const behaviorFactory = new EditBehaviorFactory(
-          layerGlyph,
-          sceneController.selection,
-          this.scalingEditBehavior
+        const layerInfo = Object.entries(
+          sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+        ).map(([layerName, layerGlyph]) => {
+          const behaviorFactory = new EditBehaviorFactory(
+            layerGlyph,
+            sceneController.selection,
+            this.scalingEditBehavior
+          );
+          return {
+            layerName,
+            layerGlyph,
+            changePath: ["layers", layerName, "glyph"],
+            pathPrefix: [],
+            connectDetector: sceneController.getPathConnectDetector(layerGlyph.path),
+            shouldConnect: false,
+            behaviorFactory,
+            editBehavior: behaviorFactory.getBehavior(behaviorName),
+          };
+        });
+
+        assert(layerInfo.length >= 1, "no layer to edit");
+
+        layerInfo[0].isPrimaryLayer = true;
+
+        let editChange;
+
+        for await (const event of eventStream) {
+          const newEditBehaviorName = getBehaviorName(event);
+          if (behaviorName !== newEditBehaviorName) {
+            // Behavior changed, undo current changes
+            behaviorName = newEditBehaviorName;
+            const rollbackChanges = [];
+            for (const layer of layerInfo) {
+              applyChange(layer.layerGlyph, layer.editBehavior.rollbackChange);
+              rollbackChanges.push(
+                consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
+              );
+              layer.editBehavior = layer.behaviorFactory.getBehavior(behaviorName);
+            }
+            await sendIncrementalChange(consolidateChanges(rollbackChanges));
+          }
+          const currentPoint = sceneController.localPoint(event);
+          const delta = {
+            x: currentPoint.x - initialPoint.x,
+            y: currentPoint.y - initialPoint.y,
+          };
+
+          const deepEditChanges = [];
+          for (const layer of layerInfo) {
+            const editChange = layer.editBehavior.makeChangeForDelta(delta);
+            applyChange(layer.layerGlyph, editChange);
+            deepEditChanges.push(consolidateChanges(editChange, layer.changePath));
+            layer.shouldConnect = layer.connectDetector.shouldConnect(
+              layer.isPrimaryLayer
+            );
+          }
+
+          editChange = consolidateChanges(deepEditChanges);
+          await sendIncrementalChange(editChange, true); // true: "may drop"
+        }
+        let changes = ChangeCollector.fromChanges(
+          editChange,
+          consolidateChanges(
+            layerInfo.map((layer) =>
+              consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
+            )
+          )
         );
+        let shouldConnect;
+        for (const layer of layerInfo) {
+          if (!layer.shouldConnect) {
+            continue;
+          }
+          shouldConnect = true;
+          if (layer.isPrimaryLayer) {
+            layer.connectDetector.clearConnectIndicator();
+          }
+
+          const connectChanges = recordChanges(layer.layerGlyph, (layerGlyph) => {
+            const selection = connectContours(
+              layerGlyph.path,
+              layer.connectDetector.connectSourcePointIndex,
+              layer.connectDetector.connectTargetPointIndex
+            );
+            if (layer.isPrimaryLayer) {
+              sceneController.selection = selection;
+            }
+          });
+          if (connectChanges.hasChange) {
+            changes = changes.concat(connectChanges.prefixed(layer.changePath));
+          }
+        }
         return {
-          layerName,
-          layerGlyph,
-          changePath: ["layers", layerName, "glyph"],
-          pathPrefix: [],
-          connectDetector: sceneController.getPathConnectDetector(layerGlyph.path),
-          shouldConnect: false,
-          behaviorFactory,
-          editBehavior: behaviorFactory.getBehavior(behaviorName),
+          undoLabel: shouldConnect
+            ? translate("edit-tools-pointer.undo.drag-selection-and-connect-contours")
+            : translate("edit-tools-pointer.undo.drag-selection"),
+          changes: changes,
+          broadcast: true,
         };
       });
-
-      assert(layerInfo.length >= 1, "no layer to edit");
-
-      layerInfo[0].isPrimaryLayer = true;
-
-      let editChange;
-
-      for await (const event of eventStream) {
-        const newEditBehaviorName = getBehaviorName(event);
-        if (behaviorName !== newEditBehaviorName) {
-          // Behavior changed, undo current changes
-          behaviorName = newEditBehaviorName;
-          const rollbackChanges = [];
-          for (const layer of layerInfo) {
-            applyChange(layer.layerGlyph, layer.editBehavior.rollbackChange);
-            rollbackChanges.push(
-              consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
-            );
-            layer.editBehavior = layer.behaviorFactory.getBehavior(behaviorName);
-          }
-          await sendIncrementalChange(consolidateChanges(rollbackChanges));
-        }
-        const currentPoint = sceneController.localPoint(event);
-        const delta = {
-          x: currentPoint.x - initialPoint.x,
-          y: currentPoint.y - initialPoint.y,
-        };
-
-        const deepEditChanges = [];
-        for (const layer of layerInfo) {
-          const editChange = layer.editBehavior.makeChangeForDelta(delta);
-          applyChange(layer.layerGlyph, editChange);
-          deepEditChanges.push(consolidateChanges(editChange, layer.changePath));
-          layer.shouldConnect = layer.connectDetector.shouldConnect(
-            layer.isPrimaryLayer
-          );
-        }
-
-        editChange = consolidateChanges(deepEditChanges);
-        await sendIncrementalChange(editChange, true); // true: "may drop"
-      }
-      let changes = ChangeCollector.fromChanges(
-        editChange,
-        consolidateChanges(
-          layerInfo.map((layer) =>
-            consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
-          )
-        )
-      );
-      let shouldConnect;
-      for (const layer of layerInfo) {
-        if (!layer.shouldConnect) {
-          continue;
-        }
-        shouldConnect = true;
-        if (layer.isPrimaryLayer) {
-          layer.connectDetector.clearConnectIndicator();
-        }
-
-        const connectChanges = recordChanges(layer.layerGlyph, (layerGlyph) => {
-          const selection = connectContours(
-            layerGlyph.path,
-            layer.connectDetector.connectSourcePointIndex,
-            layer.connectDetector.connectTargetPointIndex
-          );
-          if (layer.isPrimaryLayer) {
-            sceneController.selection = selection;
-          }
-        });
-        if (connectChanges.hasChange) {
-          changes = changes.concat(connectChanges.prefixed(layer.changePath));
-        }
-      }
-      return {
-        undoLabel: shouldConnect
-          ? translate("edit-tools-pointer.undo.drag-selection-and-connect-contours")
-          : translate("edit-tools-pointer.undo.drag-selection"),
-        changes: changes,
-        broadcast: true,
-      };
-    });
+    }
     this.sceneController.sceneModel.showTransformSelection = true;
   }
+
+   async handleDraggableCircle(eventStream, initialEvent) {
+     const sceneController = this.sceneController;
+     const initialPoint = sceneController.localPoint(initialEvent);
+     
+     // Get initial position from the scene settings
+     let initialX = sceneController.sceneSettings.draggableCircleX || 0;
+     let initialY = sceneController.sceneSettings.draggableCircleY || 0;
+ 
+     // Track the current position as we drag
+     let currentX = initialX;
+     let currentY = initialY;
+     
+     // Get the selected glyph name for the edit operation
+     const varGlyphController = await sceneController.getSelectedVariableGlyphController();
+     const glyphName = varGlyphController?.name;
+     
+     if (!glyphName) {
+       // If no glyph is selected, just update the scene settings without recording changes
+       for await (const event of eventStream) {
+         const currentPoint = sceneController.localPoint(event);
+         const deltaX = currentPoint.x - initialPoint.x;
+         const deltaY = currentPoint.y - initialPoint.y;
+         
+         // Calculate new position
+         currentX = initialX + deltaX;
+         currentY = initialY + deltaY;
+         
+         // Update the scene settings to reflect the current position during drag
+         sceneController.sceneSettings.draggableCircleX = currentX;
+         sceneController.sceneSettings.draggableCircleY = currentY;
+         
+         // Request a canvas update to reflect the new position
+         sceneController.canvasController.requestUpdate();
+       }
+       
+       return {
+         undoLabel: translate("edit-tools-pointer.undo.drag-circle"),
+         changes: ChangeCollector.empty(),
+         broadcast: true,
+       };
+     }
+     
+     // Use the editGlyph method to properly record changes in the undo/redo system
+     const result = await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+       // Record the initial state for rollback
+       let initialCustomData = { ...glyph.customData } || {};
+       let initialXBackup = initialCustomData["draggableCircleX"];
+       let initialYBackup = initialCustomData["draggableCircleY"];
+       
+       for await (const event of eventStream) {
+         const currentPoint = sceneController.localPoint(event);
+         const deltaX = currentPoint.x - initialPoint.x;
+         const deltaY = currentPoint.y - initialPoint.y;
+         
+         // Calculate new position
+         currentX = initialX + deltaX;
+         currentY = initialY + deltaY;
+         
+         // Update the scene settings to reflect the current position during drag
+         sceneController.sceneSettings.draggableCircleX = currentX;
+         sceneController.sceneSettings.draggableCircleY = currentY;
+         
+         // Update the glyph's customData with the current position
+         if (!glyph.customData) {
+           glyph.customData = {};
+         }
+         glyph.customData["draggableCircleX"] = currentX;
+         glyph.customData["draggableCircleY"] = currentY;
+         
+         // Request a canvas update to reflect the new position
+         sceneController.canvasController.requestUpdate();
+         
+         // Send incremental change for the undo/redo system to track
+         const incrementalChange = {
+           c: [
+             { p: ["customData"], f: "=", a: [glyph.customData] }
+           ]
+         };
+         await sendIncrementalChange(incrementalChange, true); // true: "may drop"
+       }
+       
+       // Create the final changes for the undo/redo system
+       const changes = recordChanges(glyph, (glyph) => {
+         if (!glyph.customData) {
+           glyph.customData = {};
+         }
+         glyph.customData["draggableCircleX"] = currentX;
+         glyph.customData["draggableCircleY"] = currentY;
+       });
+       
+       return {
+         changes: changes,
+         undoLabel: translate("edit-tools-pointer.undo.drag-circle"),
+         broadcast: true,
+       };
+     });
+     
+     // After the edit operation is complete, ensure the scene settings match the glyph's customData
+     sceneController.sceneSettings.draggableCircleX = currentX;
+     sceneController.sceneSettings.draggableCircleY = currentY;
+     
+     return result;
+   }
 
   async handleBoundsTransformSelection(
     selection,

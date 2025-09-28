@@ -556,6 +556,12 @@ export class SceneModel {
       return selection;
     }
 
+    // Check for draggable circle selection - do this before other selections to prioritize circle
+    const circleSelection = this.draggableCircleSelectionAtPoint(point, size);
+    if (circleSelection.size) {
+      return { selection: circleSelection };
+    }
+
     // If not, search all items
     selection = this._selectionAtPoint(point, size, undefined);
     if (selection.selection?.size) {
@@ -855,6 +861,54 @@ export class SceneModel {
       return new Set(["backgroundImage/0"]);
     }
 
+    return new Set();
+  }
+
+  draggableCircleSelectionAtPoint(point, size) {
+    // Check if there's a selected glyph and if it has customData for the circle
+    let circleX, circleY;
+    
+    // Ensure sceneSettings exists before accessing it
+    if (!this.sceneSettings) {
+      return new Set();
+    }
+    
+    const selectedGlyph = this.getSelectedPositionedGlyph();
+    if (!selectedGlyph) {
+      return new Set();
+    }
+    
+    // First check glyph's customData
+    if (selectedGlyph.glyph && selectedGlyph.glyph.customData) {
+      circleX = selectedGlyph.glyph.customData["draggableCircleX"];
+      circleY = selectedGlyph.glyph.customData["draggableCircleY"];
+    }
+    
+    // Fallback to scene settings if no circle found in customData
+    if (circleX === undefined || circleY === undefined) {
+      circleX = this.sceneSettings.draggableCircleX;
+      circleY = this.sceneSettings.draggableCircleY;
+    }
+    
+    // Check if the circle exists and is visible
+    if (this.visualizationLayersSettings?.model["fontra.draggable.circle"] &&
+        circleX !== undefined &&
+        circleY !== undefined) {
+      
+      // Adjust point coordinates to glyph coordinates
+      const glyphPoint = {
+        x: point.x - selectedGlyph.x,
+        y: point.y - selectedGlyph.y,
+      };
+      
+      const distance = Math.sqrt((glyphPoint.x - circleX) ** 2 + (glyphPoint.y - circleY) ** 2);
+      
+      // If the click is within the circle's radius + margin, select it
+      // Use a reasonable size threshold (e.g., 10 units) to make it easier to click
+      if (distance <= Math.max(size, 10)) {
+        return new Set(["draggable-circle/0"]);
+      }
+    }
     return new Set();
   }
 

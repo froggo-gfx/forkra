@@ -112,6 +112,8 @@ export class SceneController {
       backgroundImagesAreLocked: true,
       backgroundLayers: {},
       editingLayers: {},
+      draggableCircleX: undefined,
+      draggableCircleY: undefined,
     });
     this.sceneSettings = this.sceneSettingsController.model;
 
@@ -377,10 +379,16 @@ export class SceneController {
   }
 
   setupSettingsListeners() {
-    this.sceneSettingsController.addKeyListener("selectedGlyph", (event) => {
+    this.sceneSettingsController.addKeyListener("selectedGlyph", async (event) => {
       this._resetStoredGlyphPosition();
+      await this._loadCirclePositionForSelectedGlyph();
     });
-
+    
+    // Add a listener to save circle position when it changes
+    this.sceneSettingsController.addKeyListener(["draggableCircleX", "draggableCircleY"], (event) => {
+      this._saveCirclePositionToSelectedGlyph();
+    });
+    
     this.sceneSettingsController.addKeyListener(
       "align",
       (event) => {
@@ -431,6 +439,60 @@ export class SceneController {
         }
       }
     );
+  }
+
+  async _loadCirclePositionForSelectedGlyph() {
+    // Load the circle position from the currently selected glyph's customData
+    const varGlyphController = await this.getSelectedVariableGlyphController();
+    if (varGlyphController && varGlyphController.glyph && varGlyphController.glyph.customData) {
+      const customData = varGlyphController.glyph.customData;
+      if (customData["draggableCircleX"] !== undefined && customData["draggableCircleY"] !== undefined) {
+        // Update scene settings with the stored position
+        this.sceneSettings.draggableCircleX = customData["draggableCircleX"];
+        this.sceneSettings.draggableCircleY = customData["draggableCircleY"];
+      } else {
+        // If no custom data exists, clear the circle position
+        this.sceneSettings.draggableCircleX = undefined;
+        this.sceneSettings.draggableCircleY = undefined;
+      }
+    } else {
+      // If no glyph is selected or no custom data exists, clear the circle position
+      this.sceneSettings.draggableCircleX = undefined;
+      this.sceneSettings.draggableCircleY = undefined;
+    }
+  }
+ 
+  _saveCirclePositionToSelectedGlyph() {
+    // Save the circle position to the currently selected glyph's customData
+    // Only save if the circle position is actually defined
+    if (this.sceneSettings.draggableCircleX !== undefined &&
+        this.sceneSettings.draggableCircleY !== undefined) {
+      // Get the variable glyph controller to access the actual glyph data
+      const varGlyphControllerPromise = this.getSelectedVariableGlyphController();
+      varGlyphControllerPromise.then((varGlyphController) => {
+        if (varGlyphController && varGlyphController.glyph) {
+          // Update the customData of the variable glyph with the current circle position
+          const customData = { ...varGlyphController.glyph.customData } || {};
+          customData["draggableCircleX"] = this.sceneSettings.draggableCircleX;
+          customData["draggableCircleY"] = this.sceneSettings.draggableCircleY;
+          
+          // Apply the change to save the customData to the variable glyph
+          this.editNamedGlyphAndRecordChanges(varGlyphController.name, (glyph) => {
+            if (glyph) {
+              glyph.customData = customData;
+            }
+            return translate("action.update-circle-position");
+          });
+        }
+      });
+    }
+}
+ 
+  async getSelectedVariableGlyphController() {
+    if (!this.sceneSettings.selectedGlyph) {
+      return undefined;
+    }
+    return await this.fontController.getGlyph(this.sceneModel.getSelectedGlyphName());
   }
 
   setupEventHandling() {
@@ -662,6 +724,21 @@ export class SceneController {
   }
 
   handleKeyDown(event) {
+    // Check for shift+alt+M hotkey
+    if (event.shiftKey && event.altKey && event.key.toLowerCase() === 'm') {
+      event.preventDefault();
+      // Initialize the circle's position to x:100, y:100
+      this.sceneSettings.draggableCircleX = 100;
+      this.sceneSettings.draggableCircleY = 100;
+      // Ensure the visualization layer is properly activated
+      this.visualizationLayersSettings.model["fontra.draggable.circle"] = true;
+      // Request an update to refresh the canvas
+      this.canvasController.requestUpdate();
+      // Also save to the glyph's customData
+      this._saveCirclePositionToSelectedGlyph();
+      return;
+    }
+    
     if ((!event[commandKeyProperty] || event.shiftKey) && event.key in arrowKeyDeltas) {
       event.preventDefault();
       if (this.selectedTool?.handleArrowKeys) {
@@ -1194,6 +1271,15 @@ export class SceneController {
           undoInfo,
           broadcast
         );
+        
+        // After the edit is finalized, check if customData was updated and sync scene settings if needed
+        if (editSubject.customData &&
+            (editSubject.customData["draggableCircleX"] !== undefined ||
+             editSubject.customData["draggableCircleY"] !== undefined)) {
+          // Update scene settings to match the glyph's custom data after the edit
+          this.sceneSettings.draggableCircleX = editSubject.customData["draggableCircleX"];
+          this.sceneSettings.draggableCircleY = editSubject.customData["draggableCircleY"];
+        }
       } else {
         applyChange(editSubject, changes.rollbackChange);
         await editContext.editIncremental(changes.rollbackChange, false);
@@ -1281,6 +1367,8 @@ export class SceneController {
         this.sceneSettings.editLayerName = undoInfo.editLayerName;
       }
       await this.sceneModel.updateScene();
+      // After the scene is updated, make sure to load the circle position for the selected glyph
+      await this._loadCirclePositionForSelectedGlyph();
       this.canvasController.requestUpdate();
     }
     return undoInfo !== undefined;
