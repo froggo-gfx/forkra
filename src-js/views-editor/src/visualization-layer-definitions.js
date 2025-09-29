@@ -113,7 +113,7 @@ registerVisualizationLayerDefinition({
 //// grid
 registerVisualizationLayerDefinition({
   identifier: "fontra.grid",
-  name: "Grid",
+  name: "Coarse Grid",
   zIndex: 1 ,
   selectionFunc: glyphSelector("editing"),
   screenParameters: {
@@ -2227,20 +2227,6 @@ registerVisualizationLayerDefinition({
 });
 
 
-registerVisualizationLayerDefinition({
-  identifier: "fontra.point-offcurve-distance",
-  name: "Point to Off-curve Distance",
-  selectionFunc: glyphSelector("editing"),
-  userSwitchable: true,
-  defaultOn: true,
-  zIndex: 500,
-  screenParameters: {
-    strokeWidth: 1,
-  },
-  colors: { strokeColor: OFFCURVE_DISTANCE_COLOR },
-  colorsDarkMode: { strokeColor: OFFCURVE_DISTANCE_COLOR },
-  draw: drawOffCurveDistanceVisualization,
-});
 
 // Register the Tunni handle distance visualization layer
 registerVisualizationLayerDefinition({
