@@ -413,7 +413,7 @@ export default class DesignspaceNavigationPanel extends Panel {
       this.sceneController.scrollAdjustBehavior =
         this.getScrollAdjustBehavior("pin-glyph-center");
       const selectedItem = this.sourcesList.getSelectedItem();
-      const sourceIndex = selectedItem?.sourceIndex;
+      const sourceIndex = selectedItem?.active ? selectedItem?.sourceIndex : undefined;
 
       const varGlyphController =
         await this.sceneModel.getSelectedVariableGlyphController();
@@ -431,13 +431,14 @@ export default class DesignspaceNavigationPanel extends Panel {
         if (selectedItem) {
           if (!varGlyphController) {
             this.sceneSettings.fontLocationSourceMapped = {};
+            this.sceneSettings.glyphLocation = {};
           } else {
-            const { fontLocation } = varGlyphController.splitLocation(
+            const { fontLocation, glyphLocation } = varGlyphController.splitLocation(
               selectedItem.denseLocation
             );
             this.sceneSettings.fontLocationSourceMapped = fontLocation;
+            this.sceneSettings.glyphLocation = glyphLocation;
           }
-          this.sceneSettings.glyphLocation = {};
         }
       }
       this._updateRemoveSourceButtonState();
@@ -549,7 +550,7 @@ export default class DesignspaceNavigationPanel extends Panel {
         : undefined;
     this.sourcesList.setSelectedItem(sourceItem);
 
-    if (sourceItem && !sourceItem.isFontSource) {
+    if (sourceItem && sourceItem.active && !sourceItem.isFontSource) {
       // We are at a true glyph source
       const layerNames = varGlyphController.getSourceLayerNamesForSourceIndex(
         sourceItem.sourceIndex
@@ -920,7 +921,11 @@ export default class DesignspaceNavigationPanel extends Panel {
       });
       sourceController.addKeyListener("active", async (event) => {
         await this.sceneController.editGlyphAndRecordChanges((glyph) => {
+          this.sceneController.scrollAdjustBehavior =
+            this.getScrollAdjustBehavior("pin-glyph-center");
+
           glyph.sources[index].inactive = !event.newValue;
+
           return translate(
             event.newValue
               ? "sidebar.designspace-navigation.source.activate"
@@ -1242,6 +1247,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     if (
       !selectedItem ||
       selectedItem.isFontSource ||
+      !selectedItem.active ||
       !varGlyphController.sources[selectedItem.sourceIndex]
     ) {
       this.sceneSettings.editingLayers = {};

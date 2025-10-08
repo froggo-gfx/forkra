@@ -238,6 +238,22 @@ async def test_addLocalAxis(writableTestFont):
     assert asdict(glyph) == asdict(savedGlyph)
 
 
+async def test_addNewGlyph_glyphOrder(writableTestFont):
+    glyphName = "testglyph"
+    sourceGlyphName = "period"
+    glyph = await writableTestFont.getGlyph(sourceGlyphName)
+    await writableTestFont.putGlyph(glyphName, glyph, [])
+
+    count = 0
+
+    for ufoLayer in writableTestFont.ufoLayers:
+        lib = ufoLayer.reader.readLib()
+        if glyphName in lib.get("public.glyphOrder", []):
+            count += 1
+
+    assert count > 0, (count, len(writableTestFont.ufoLayers))
+
+
 # NOTE: font guidelines are tested via test_getSources, no need to repeat here
 
 
@@ -674,6 +690,11 @@ async def test_deleteGlyph(writableTestFont):
         glyphName in layer.glyphSet.contents for layer in writableTestFont.ufoLayers
     )
     assert await writableTestFont.getGlyph(glyphName) is None
+
+    # test that we removed the glyph from public.glyphOrder
+    for ufoLayer in writableTestFont.ufoLayers:
+        lib = ufoLayer.reader.readLib()
+        assert glyphName not in lib.get("public.glyphOrder", [])
 
 
 async def test_deleteGlyphRaisesKeyError(writableTestFont):
