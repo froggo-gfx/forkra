@@ -190,7 +190,9 @@ export class PenToolCubic extends BaseTool {
           path,
           segmentPointIndices.map((i) => path.getPoint(i)),
           segmentPointIndices[1],
-          this.curveType
+          //// quad handles
+          this.curveType,
+          this.sceneModel.pathInsertHandles.shiftKey
         );
       }
       delete this.sceneModel.pathInsertHandles;
@@ -267,6 +269,87 @@ export class PenToolQuad extends PenToolCubic {
 
   get curveType() {
     return "quad";
+  }
+
+  ////quad handles
+  _getPathConnectTargetPoint(event) {
+    // Requirements:
+    // - we must have an edited glyph at an editable location
+    // - we must be in append/prepend mode for an existing contour
+    // - the hovered point must be eligible to connect to:
+    //   - must be a start or end point of an open contour
+    //   - must not be the currently selected point
+
+    const hoveredPointIndex = getHoveredPointIndex(this.sceneController, event);
+
+    const glyphController = this.sceneModel.getSelectedPositionedGlyph().glyph;
+    if (!glyphController.canEdit) {
+      return {};
+    }
+    const path = glyphController.instance.path;
+
+    const appendInfo = getAppendInfo(path, this.sceneController.selection);
+    if (hoveredPointIndex === undefined && appendInfo.createContour) {
+      const point = this.sceneController.localPoint(event);
+      // The following max() call makes sure that the margin is never
+      // less than half a font unit. This works around a visualization
+      // artifact caused by bezier-js: Bezier.project() returns t values
+      // with a max precision of 0.001.
+      const size = Math.max(1, this.sceneController.mouseClickMargin);
+      const hit = this.sceneModel.pathHitAtPoint(point, size);
+      if (event.altKey && hit.segment?.points?.length === 2) {
+        const pt1 = hit.segment.points[0];
+        const pt2 = hit.segment.points[1];
+        if (event.altKey && event.shiftKey) {
+          // For quadratic curves with alt+shift, create two handles like cubic
+          const handle1 = vector.roundVector(vector.interpolateVectors(pt1, pt2, 1 / 3));
+          const handle2 = vector.roundVector(vector.interpolateVectors(pt1, pt2, 2 / 3));
+          return { insertHandles: { points: [handle1, handle2], hit: hit, shiftKey: event.shiftKey } };
+        } else {
+          // For quadratic curves with alt, create one handle at the midpoint
+          const handle = vector.roundVector(vector.interpolateVectors(pt1, pt2, 0.5));
+          return { insertHandles: { points: [handle], hit: hit, shiftKey: event.shiftKey } };
+        }
+      } else {
+        const targetPoint = { ...hit };
+        if ("x" in targetPoint) {
+          // Don't use vector.roundVector, as there are more properties besides
+          // x and y, and we want to preserve them
+          targetPoint.x = Math.round(targetPoint.x);
+          targetPoint.y = Math.round(targetPoint.y);
+        }
+        return { targetPoint: targetPoint };
+      }
+    }
+
+    if (hoveredPointIndex === undefined || appendInfo.createContour) {
+      return {};
+    }
+
+    const [contourIndex, contourPointIndex] =
+      path.getContourAndPointIndex(hoveredPointIndex);
+    const contourInfo = path.contourInfo[contourIndex];
+
+    if (
+      appendInfo.contourIndex == contourIndex &&
+      appendInfo.contourPointIndex == contourPointIndex
+    ) {
+      // We're hovering over the source point
+      const point = path.getPoint(hoveredPointIndex);
+      if (!appendInfo.isOnCurve) {
+        return { danglingOffCurve: point };
+      } else {
+        return { canDragOffCurve: point };
+      }
+    }
+
+    if (
+      contourInfo.isClosed ||
+      (contourPointIndex != 0 && hoveredPointIndex != contourInfo.endPoint)
+    ) {
+      return {};
+    }
+    return { targetPoint: path.getPoint(hoveredPointIndex) };
   }
 }
 
