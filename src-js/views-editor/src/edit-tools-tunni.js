@@ -1,6 +1,19 @@
+import { recordChanges } from "@fontra/core/change-recorder.js";
+import { ChangeCollector } from "@fontra/core/changes.js";
 import { BaseTool } from "./edit-tools-base.js";
 import { calculateTunniPoint, calculateControlPointsFromTunni, calculateEqualizedControlPoints, areDistancesEqualized } from "@fontra/core/tunni-calculations.js";
 import { distance, subVectors, dotVector, vectorLength } from "@fontra/core/vector.js";
+
+function recordLayerChanges(layerInfo, editFunc) {
+  const layerChanges = [];
+  for (const { layerName, layerGlyph } of layerInfo) {
+    const layerChange = recordChanges(layerGlyph, (layerGlyph) =>
+      editFunc(layerGlyph)
+    );
+    layerChanges.push(layerChange.prefixed(["layers", layerName, "glyph"]));
+  }
+  return new ChangeCollector().concat(...layerChanges);
+}
 
 // TunniTool is a specialized editing tool for manipulating cubic Bézier curves
 // using the Tunni construction method. It allows users to directly manipulate
@@ -43,29 +56,18 @@ export class TunniTool extends BaseTool {
     }
   }
 
-  async handleDrag(eventStream, initialEvent) {
+ async handleDrag(eventStream, initialEvent) {
     // Check if the tool is active before processing events
     if (!this.isActive) {
       return;
     }
     
-    // Handle the initial mouse down event
-    this.sceneController.tunniEditingTool.handleMouseDown(initialEvent);
-
-    // Process the drag events
-    for await (const event of eventStream) {
-      if (event.type === "mouseup") {
-        // Handle mouse up event
-        this.sceneController.tunniEditingTool.handleMouseUp(event);
-        break;
-      } else if (event.type === "mousemove") {
-        // Handle mouse drag events
-        try {
-          await this.sceneController.tunniEditingTool.handleMouseDrag(event);
-        } catch (error) {
-          console.error("Error handling mouse drag event:", error);
-        }
-      }
+    try {
+      // Use the new handleDragOperation method that wraps everything in a single editGlyph call
+      await this.sceneController.tunniEditingTool.handleDragOperation(eventStream, initialEvent);
+    } finally {
+      // Ensure state cleanup happens even if an error occurs
+      this.sceneController.tunniEditingTool.handleMouseUp({});
     }
   }
 }
@@ -171,22 +173,6 @@ export class TunniEditingTool {
             originalControlPoint1: { ...path.getPoint(controlPoint1Index) },
             originalControlPoint2: { ...path.getPoint(controlPoint2Index) }
           };
-          
-          // Immediately record the starting state for undo functionality
-          const originalControlPoint1 = { ...path.getPoint(controlPoint1Index) };
-          const originalControlPoint2 = { ...path.getPoint(controlPoint2Index) };
-          
-          // This will create the initial undo point for this action
-          await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
-            for (const layerGlyph of Object.values(layerGlyphs)) {
-              const layerPath = layerGlyph.path;
-              // The points are already at their original positions, so we're just recording this state
-              // This creates the baseline for the undo operation
-              layerPath.setPointPosition(controlPoint1Index, originalControlPoint1.x, originalControlPoint1.y);
-              layerPath.setPointPosition(controlPoint2Index, originalControlPoint2.x, originalControlPoint2.y);
-            }
-            return "Start Tunni Point Drag";
-          });
         }
       }
       
@@ -363,6 +349,10 @@ export class TunniEditingTool {
     }
   }
 
+ /**
+  * @deprecated This method is deprecated. All logic has moved to handleDragOperation method.
+  * This method is kept temporarily for reference only.
+  */
  async handleMouseDrag(event) {
    // Check if we have the necessary data to process the drag
    if (!this.initialMousePosition || !this.initialOffPoint1 || !this.initialOffPoint2 || !this.selectedSegment || !this.originalSegmentPoints) {
@@ -516,51 +506,235 @@ export class TunniEditingTool {
       throw error; // Re-throw the error so it can be handled upstream
     }
 }
+ 
+ async handleDragOperation(eventStream, initialEvent) {
+   // Handle the initial mouse down event
+   this.handleMouseDown(initialEvent);
 
- async handleMouseUp(event) {
-    // Record the final state for undo/redo functionality
-    if (this.selectedSegment && this.originalControlPoints) {
-      try {
-        await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
-          for (const layerGlyph of Object.values(layerGlyphs)) {
-            const path = layerGlyph.path;
-            const controlPoint1Index = this.originalControlPoints.controlPoint1Index;
-            const controlPoint2Index = this.originalControlPoints.controlPoint2Index;
-            
-            // Get the current final positions of the control points
-            const finalControlPoint1 = path.getPoint(controlPoint1Index);
-            const finalControlPoint2 = path.getPoint(controlPoint2Index);
-            
-            // Update the control points in the path to their final positions
-            // (this is just for the undo record, the points are already at their final positions)
-            path.setPointPosition(controlPoint1Index, finalControlPoint1.x, finalControlPoint1.y);
-            path.setPointPosition(controlPoint2Index, finalControlPoint2.x, finalControlPoint2.y);
-          }
-          return "Move Tunni Points";
-        });
-      } catch (error) {
-        console.error("Error recording final state for undo/redo:", error);
-      }
+   // Process all drag events in a single editGlyph call
+   return await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+     // Get layer information for processing
+     const layerInfo = Object.entries(
+       this.sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+     ).map(([layerName, layerGlyph]) => {
+       return {
+         layerName,
+         layerGlyph,
+         changePath: ["layers", layerName, "glyph"],
+       };
+     });
+
+     // Process the initial event if needed
+     if (!this.initialMousePosition || !this.initialOffPoint1 || !this.initialOffPoint2 || !this.selectedSegment || !this.originalSegmentPoints) {
+       return {
+         changes: new ChangeCollector(),
+         undoLabel: "Move Tunni Points",
+       };
+     }
+
+     let totalChanges = new ChangeCollector();
+
+     // Process all events in the stream
+     for await (const event of eventStream) {
+       if (event.type === "mouseup") {
+         // Handle mouse up event
+         break;
+       } else if (event.type === "mousemove") {
+         // Process mouse drag events using recordLayerChanges helper
+         const dragChanges = recordLayerChanges(layerInfo, (layerGlyph) => {
+           this.processDragEvent(layerGlyph, event);
+         });
+         
+         totalChanges = totalChanges.concat(dragChanges);
+         await sendIncrementalChange(dragChanges.change, true); // true: "may drop" for performance
+       }
+     }
+
+     // Record the final state for undo/redo functionality
+     if (this.selectedSegment && this.originalControlPoints) {
+       const finalChanges = recordLayerChanges(layerInfo, (layerGlyph) => {
+         const path = layerGlyph.path;
+         const controlPoint1Index = this.originalControlPoints.controlPoint1Index;
+         const controlPoint2Index = this.originalControlPoints.controlPoint2Index;
+         
+         // Get the current final positions of the control points
+         const finalControlPoint1 = path.getPoint(controlPoint1Index);
+         const finalControlPoint2 = path.getPoint(controlPoint2Index);
+         
+         // Update the control points in the path to their final positions
+         // (this is just for the undo record, the points are already at their final positions)
+         path.setPointPosition(controlPoint1Index, finalControlPoint1.x, finalControlPoint1.y);
+         path.setPointPosition(controlPoint2Index, finalControlPoint2.x, finalControlPoint2.y);
+       });
+       
+       totalChanges = totalChanges.concat(finalChanges);
+     }
+
+     // Clear all stored state
+     this.tunniPoint = null;
+     this.selectedSegment = null;
+     this.originalSegmentPoints = null;
+     this.originalControlPoints = null; // Clear stored original control points
+     this.isActive = false; // Clear active state when mouse is released
+     this.initialMousePosition = null;
+     // Clear vector-based properties
+     this.initialOnPoint1 = null;
+     this.initialOffPoint1 = null;
+     this.initialOffPoint2 = null;
+     this.initialOnPoint2 = null;
+     this.initialVector1 = null;
+     this.initialVector2 = null;
+     this.unitVector1 = null;
+     this.unitVector2 = null;
+     this.fortyFiveVector = null;
+
+     return {
+       changes: totalChanges,
+       undoLabel: "Move Tunni Points",
+     };
+   });
+ }
+
+ processDragEvent(layerGlyph, event) {
+   // Check if we have the necessary data to process the drag
+   if (!this.initialMousePosition || !this.initialOffPoint1 || !this.initialOffPoint2 || !this.selectedSegment || !this.originalSegmentPoints) {
+     return;
+   }
+   
+   const point = this.sceneController.localPoint(event);
+   
+   // Convert from scene coordinates to glyph coordinates
+   const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+   const glyphPoint = {
+     x: point.x - positionedGlyph.x,
+     y: point.y - positionedGlyph.y,
+   };
+   
+   // Calculate mouse movement vector
+   const mouseDelta = {
+     x: glyphPoint.x - this.initialMousePosition.x,
+     y: glyphPoint.y - this.initialMousePosition.y
+   };
+   
+   // Check if Alt key is pressed to disable equalizing distances
+   // (proportional editing is now the default behavior)
+   const equalizeDistances = !event.altKey;
+   
+   let newControlPoint1, newControlPoint2;
+   
+   if (equalizeDistances) {
+     // Proportional editing: Move both control points by the same amount along their respective vectors
+     // Project mouse movement onto the 45-degree vector
+     // This gives us the scalar amount to move along the 45-degree vector
+     const projection = mouseDelta.x * this.fortyFiveVector.x + mouseDelta.y * this.fortyFiveVector.y;
+     
+     // Move both control points by the same amount along their respective vectors
+     newControlPoint1 = {
+       x: this.initialOffPoint1.x + this.unitVector1.x * projection,
+       y: this.initialOffPoint1.y + this.unitVector1.y * projection
+     };
+     
+     newControlPoint2 = {
+       x: this.initialOffPoint2.x + this.unitVector2.x * projection,
+       y: this.initialOffPoint2.y + this.unitVector2.y * projection
+     };
+   } else {
+     // Non-proportional editing: Each control point moves independently along its own vector
+     // Project mouse movement onto each control point's individual unit vector
+     const projection1 = mouseDelta.x * this.unitVector1.x + mouseDelta.y * this.unitVector1.y;
+     const projection2 = mouseDelta.x * this.unitVector2.x + mouseDelta.y * this.unitVector2.y;
+     
+     // Move each control point by its own projection amount
+     newControlPoint1 = {
+       x: this.initialOffPoint1.x + this.unitVector1.x * projection1,
+       y: this.initialOffPoint1.y + this.unitVector1.y * projection1
+     };
+     
+     newControlPoint2 = {
+       x: this.initialOffPoint2.x + this.unitVector2.x * projection2,
+       y: this.initialOffPoint2.y + this.unitVector2.y * projection2
+     };
+   }
+   
+   // Calculate Tunni point using the calculateTunniPoint function
+   this.tunniPoint = calculateTunniPoint([
+     this.initialOnPoint1,
+     newControlPoint1,
+     newControlPoint2,
+     this.initialOnPoint2
+   ]);
+    
+    // Calculate new control points based on the new positions
+    const newControlPoints = [newControlPoint1, newControlPoint2];
+    
+    // Validate that we have a proper segment and control points
+    if (!this.selectedSegment || !newControlPoints || newControlPoints.length !== 2) {
+      console.warn("Invalid segment or control points", {
+        selectedSegment: this.selectedSegment,
+        newControlPoints: newControlPoints
+      });
+      return;
     }
     
-    // Clear all stored state
-    this.tunniPoint = null;
-    this.selectedSegment = null;
-    this.originalSegmentPoints = null;
-    this.originalControlPoints = null; // Clear stored original control points
-    this.isActive = false; // Clear active state when mouse is released
-    this.initialMousePosition = null;
-    // Clear vector-based properties
-    this.initialOnPoint1 = null;
-    this.initialOffPoint1 = null;
-    this.initialOffPoint2 = null;
-    this.initialOnPoint2 = null;
-    this.initialVector1 = null;
-    this.initialVector2 = null;
-    this.unitVector1 = null;
-    this.unitVector2 = null;
-    this.fortyFiveVector = null;
-  }
+    // Validate that the selected segment is a cubic segment
+    if (this.selectedSegment.points.length !== 4) {
+      console.warn("Selected segment is not a cubic segment", {
+      segmentPointsLength: this.selectedSegment.points.length
+      });
+      return;
+    }
+    
+    const path = layerGlyph.path;
+    
+    // Validate that the path and segment indices exist
+    if (!path || !this.selectedSegment?.parentPointIndices) {
+      console.warn("Invalid path or segment indices", {
+        path: !!path,
+        parentPointIndices: this.selectedSegment?.parentPointIndices
+      });
+      return;
+    }
+    
+    // Find the indices of the control points within the segment
+    // In a cubic segment, control points are typically at indices 1 and 2
+    const controlPoint1Index = this.selectedSegment.parentPointIndices[1];
+    const controlPoint2Index = this.selectedSegment.parentPointIndices[2];
+    
+    // Validate the control point indices
+    if (controlPoint1Index === undefined || controlPoint2Index === undefined) {
+      console.warn("Invalid control point indices", {
+        controlPoint1Index: controlPoint1Index,
+        controlPoint2Index: controlPoint2Index
+      });
+      return;
+    }
+    
+    // Update the control points in the path
+    path.setPointPosition(controlPoint1Index, newControlPoints[0].x, newControlPoints[0].y);
+    path.setPointPosition(controlPoint2Index, newControlPoints[1].x, newControlPoints[1].y);
+ }
+
+async handleMouseUp(event) {
+   // This method only cleans up state without performing any recording functionality
+   // All recording is handled in handleDragOperation
+   // Clear all stored state
+   this.tunniPoint = null;
+   this.selectedSegment = null;
+   this.originalSegmentPoints = null;
+   this.originalControlPoints = null; // Clear stored original control points
+   this.isActive = false; // Clear active state when mouse is released
+   this.initialMousePosition = null;
+   // Clear vector-based properties
+   this.initialOnPoint1 = null;
+   this.initialOffPoint1 = null;
+   this.initialOffPoint2 = null;
+   this.initialOnPoint2 = null;
+   this.initialVector1 = null;
+   this.initialVector2 = null;
+   this.unitVector1 = null;
+   this.unitVector2 = null;
+   this.fortyFiveVector = null;
+ }
 
   findTunniPointHit(point, size) {
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
@@ -601,5 +775,102 @@ export class TunniEditingTool {
     }
     
     return null;
+  }
+
+  /**
+   * Calculate new control point positions based on mouse event and stored state
+   * @param {Object} event - The mouse event containing position information
+   * @returns {Array|null} Array of new control point positions [newControlPoint1, newControlPoint2] or null if calculation fails
+   */
+  calculateNewControlPoints(event) {
+    // Check if we have the necessary data to process the calculation
+    if (!this.initialMousePosition || !this.initialOffPoint1 || !this.initialOffPoint2 || !this.selectedSegment || !this.originalSegmentPoints) {
+      return null;
+    }
+    
+    const point = this.sceneController.localPoint(event);
+    
+    // Convert from scene coordinates to glyph coordinates
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+    
+    // Calculate mouse movement vector
+    const mouseDelta = {
+      x: glyphPoint.x - this.initialMousePosition.x,
+      y: glyphPoint.y - this.initialMousePosition.y
+    };
+    
+    // Check if Alt key is pressed to disable equalizing distances
+    // (proportional editing is now the default behavior)
+    const equalizeDistances = !event.altKey;
+    
+    let newControlPoint1, newControlPoint2;
+    
+    if (equalizeDistances) {
+      // Proportional editing: Move both control points by the same amount along their respective vectors
+      // Project mouse movement onto the 45-degree vector
+      // This gives us the scalar amount to move along the 45-degree vector
+      const projection = mouseDelta.x * this.fortyFiveVector.x + mouseDelta.y * this.fortyFiveVector.y;
+      
+      // Move both control points by the same amount along their respective vectors
+      newControlPoint1 = {
+        x: this.initialOffPoint1.x + this.unitVector1.x * projection,
+        y: this.initialOffPoint1.y + this.unitVector1.y * projection
+      };
+      
+      newControlPoint2 = {
+        x: this.initialOffPoint2.x + this.unitVector2.x * projection,
+        y: this.initialOffPoint2.y + this.unitVector2.y * projection
+      };
+    } else {
+      // Non-proportional editing: Each control point moves independently along its own vector
+      // Project mouse movement onto each control point's individual unit vector
+      const projection1 = mouseDelta.x * this.unitVector1.x + mouseDelta.y * this.unitVector1.y;
+      const projection2 = mouseDelta.x * this.unitVector2.x + mouseDelta.y * this.unitVector2.y;
+      
+      // Move each control point by its own projection amount
+      newControlPoint1 = {
+        x: this.initialOffPoint1.x + this.unitVector1.x * projection1,
+        y: this.initialOffPoint1.y + this.unitVector1.y * projection1
+      };
+      
+      newControlPoint2 = {
+        x: this.initialOffPoint2.x + this.unitVector2.x * projection2,
+        y: this.initialOffPoint2.y + this.unitVector2.y * projection2
+      };
+    }
+    
+    // Calculate Tunni point using the calculateTunniPoint function
+    this.tunniPoint = calculateTunniPoint([
+      this.initialOnPoint1,
+      newControlPoint1,
+      newControlPoint2,
+      this.initialOnPoint2
+    ]);
+     
+     // Calculate new control points based on the new positions
+     const newControlPoints = [newControlPoint1, newControlPoint2];
+     
+     // Validate that we have a proper segment and control points
+     if (!this.selectedSegment || !newControlPoints || newControlPoints.length !== 2) {
+       console.warn("Invalid segment or control points", {
+         selectedSegment: this.selectedSegment,
+         newControlPoints: newControlPoints
+       });
+       return null;
+     }
+     
+     // Validate that the selected segment is a cubic segment
+     if (this.selectedSegment.points.length !== 4) {
+       console.warn("Selected segment is not a cubic segment", {
+       segmentPointsLength: this.selectedSegment.points.length
+       });
+       return null;
+     }
+
+     return newControlPoints;
   }
 }
