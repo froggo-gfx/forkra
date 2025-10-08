@@ -16,6 +16,18 @@ import {
 } from "@fontra/core/utils.js";
 import { subVectors } from "@fontra/core/vector.js";
 
+//// speedpunk
+import {
+  calculateCurvatureForSegment,
+  calculateCurvatureForQuadraticSegment,
+  findCurvatureRange,
+  curvatureToColor,
+  solveCubicBezier,
+  solveQuadraticBezier
+} from "@fontra/core/curvature.js"; 
+
+import { VarPackedPath } from "@fontra/core/var-path.js";
+
 export const visualizationLayerDefinitions = [];
 
 export function registerVisualizationLayerDefinition(newLayerDef) {
@@ -1647,6 +1659,181 @@ registerVisualizationLayerDefinition({
     context.strokeRect(x, y, w, h);
   },
 });
+
+//// speedpunk 
+// --- SpeedPunk / curvature visualization (replace existing fontra.curvature block) ---
+registerVisualizationLayerDefinition({
+ identifier: "fontra.curvature",
+  name: "SpeedPunk",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: false,
+  zIndex: 490, // Draw on top
+  screenParameters: {
+    drawfactor: 0.01,
+    baseUnitsPerEm: 1000,
+    curveGain: 1.0,
+    stepsPerSegment: 81,
+    colorStops: ["#8b939c", "#f29400", "#e3004f"],
+    illustrationPosition: "outsideOfCurve",
+    ribbonThickness: 20, // Add ribbonThickness parameter
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    // Use the path object consistently (other layers use positionedGlyph.glyph.path)
+    const path = positionedGlyph.glyph?.path;
+    if (!path) return;
+
+    context.save();
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    context.globalAlpha = 0.5;
+
+    const zoomFactor = controller.magnification || 1.0;
+    const dampeningFactor = Math.pow(zoomFactor, +(parameters.zoomDampening || 1.2));
+    const heightMultiplier = (parameters.drawfactor || 5.0) * 
+                             (parameters.curveGain || 1.0) * 
+                             dampeningFactor;
+    //const heightMultiplier = (parameters.drawfactor || 10.0) * (parameters.curveGain || 1.0);
+    const stepsPerSegment = parameters.stepsPerSegment || 64;
+    const colorStops = parameters.colorStops || ["#8b939c", "#f29400", "#e3004f"];
+    const illustrationPosition = parameters.illustrationPosition || "outsideOfCurve";
+
+    for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+        const contour = path.getContour(contourIndex);
+        const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
+        const numPoints = contour.pointTypes.length;
+
+        for (let i = 0; i < numPoints; i++) {
+            const pointIndex = startPoint + i;
+            const pointType = path.pointTypes[pointIndex];
+        if ((pointType & VarPackedPath.POINT_TYPE_MASK) !== VarPackedPath.ON_CURVE) continue;
+
+        const next1 = path.getAbsolutePointIndex(contourIndex, (i + 1) % numPoints);
+        const next2 = path.getAbsolutePointIndex(contourIndex, (i + 2) % numPoints);
+        const next3 = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
+
+        const t1 = path.pointTypes[next1];
+        const t2 = path.pointTypes[next2];
+        const t3 = path.pointTypes[next3];
+
+        // cubic: ON - OFFc - OFFc - ON
+        const isCubicSeg =
+          (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
+          (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
+          (t3 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
+
+        if (isCubicSeg) {
+                    const p1 = path.getPoint(pointIndex);
+          const p2 = path.getPoint(next1);
+          const p3 = path.getPoint(next2);
+          const p4 = path.getPoint(next3);
+
+          const samples = calculateCurvatureForSegment(
+            [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y],
+            stepsPerSegment
+                    );
+
+          // NORMALIZE PER SEGMENT (key fix)
+          const absVals = samples.map(s => Math.abs(s.curvature));
+          const minAbs = Math.min(...absVals);
+          const maxAbs = Math.max(...absVals);
+
+          // Build geometry and draw
+          const onCurve = [];
+          const offCurve = [];
+          for (let s = 0; s < samples.length; s++) {
+            const t = samples[s].t;
+            const { r, r1 } = solveCubicBezier([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y], t);
+            const [x, y] = r;
+            onCurve.push({ x, y, r1, k: samples[s].curvature });
+
+            // normal (choose orientation)
+            let nx = illustrationPosition === "outsideOfCurve" ? -r1[1] : r1[1];
+            let ny = illustrationPosition === "outsideOfCurve" ? r1[0] : -r1[0];
+            const mag = Math.hypot(nx, ny) || 1;
+            nx /= mag; ny /= mag;
+
+            // use signed height if desired; curvature in file is absolute, so sign=1.
+            const h = Math.sign(samples[s].curvature) * Math.abs(samples[s].curvature) * heightMultiplier * -180000;
+            offCurve.push({ x: x + nx * h, y: y + ny * h });
+          }
+
+          // draw quads and color by per-segment normalization
+          for (let s = 0; s < onCurve.length - 1; s++) {
+            const a = onCurve[s], b = onCurve[s + 1];
+            const quad = new Path2D();
+            quad.moveTo(a.x, a.y);
+            quad.lineTo(b.x, b.y);
+            quad.lineTo(offCurve[s + 1].x, offCurve[s + 1].y);
+            quad.lineTo(offCurve[s].x, offCurve[s].y);
+            quad.closePath();
+
+            // pass per-segment min/max and colorStops (NEW API)
+            const color = curvatureToColor(Math.abs(a.k), minAbs, maxAbs, colorStops);
+            context.fillStyle = color;
+            context.fill(quad);
+          }
+
+          continue;
+        }
+
+        // quadratic: ON - OFFq - ON
+        const isQuadSeg =
+          (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD &&
+          (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
+
+        if (isQuadSeg) {
+          const p1 = path.getPoint(pointIndex);
+          const p2 = path.getPoint(next1);
+          const p3 = path.getPoint(next2);
+
+          const samples = calculateCurvatureForQuadraticSegment(
+            [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y],
+            stepsPerSegment
+          );
+
+          const absVals = samples.map(s => Math.abs(s.curvature));
+          const minAbs = Math.min(...absVals);
+          const maxAbs = Math.max(...absVals);
+
+          const onCurveQ = [];
+          const offCurveQ = [];
+          for (let s = 0; s < samples.length; s++) {
+            const t = samples[s].t;
+            const { r, r1 } = solveQuadraticBezier([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], t);
+            const [x, y] = r;
+            onCurveQ.push({ x, y, r1, k: samples[s].curvature });
+
+            let nx = illustrationPosition === "outsideOfCurve" ? -r1[1] : r1[1];
+            let ny = illustrationPosition === "outsideOfCurve" ? r1[0] : -r1[0];
+            const mag = Math.hypot(nx, ny) || 1;
+            nx /= mag; ny /= mag;
+
+            const h = Math.sign(samples[s].curvature) * Math.abs(samples[s].curvature) * heightMultiplier * -480000;
+            offCurveQ.push({ x: x + nx * h, y: y + ny * h });
+        }
+
+          for (let s = 0; s < onCurveQ.length - 1; s++) {
+            const quad = new Path2D();
+            quad.moveTo(onCurveQ[s].x, onCurveQ[s].y);
+            quad.lineTo(onCurveQ[s + 1].x, onCurveQ[s + 1].y);
+            quad.lineTo(offCurveQ[s + 1].x, offCurveQ[s + 1].y);
+            quad.lineTo(offCurveQ[s].x, offCurveQ[s].y);
+            quad.closePath();
+                
+            const color = curvatureToColor(Math.abs(onCurveQ[s].k), minAbs, maxAbs, colorStops);
+                context.fillStyle = color;
+            context.fill(quad);
+            }
+        }
+    }
+    }
+
+    context.restore();
+  }
+});
+
+
 
 //
 // allGlyphsCleanVisualizationLayerDefinition is not registered, but used
