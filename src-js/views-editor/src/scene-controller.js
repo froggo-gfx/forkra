@@ -49,6 +49,8 @@ import * as vector from "@fontra/core/vector.js";
 import { dialog, message } from "@fontra/web-components/modal-dialog.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import { SceneModel, getSelectedGlyphName } from "./scene-model.js";
+//// grid
+import { toggleMagneticSnap } from "./edit-behavior.js";
 
 export class SceneController {
   constructor(
@@ -63,6 +65,8 @@ export class SceneController {
     this.autoViewBox = true;
 
     this.setupSceneSettings();
+    //// grid
+    this.sceneSettingsController.setItem("coarseGridSpacing", 10);
     this.sceneSettings = this.sceneSettingsController.model;
     this.visualizationLayersSettings = visualizationLayersSettings;
 
@@ -377,6 +381,16 @@ export class SceneController {
   }
 
   setupSettingsListeners() {
+    //// grid
+    this.sceneSettingsController.addKeyListener("coarseGridSpacing", () =>
+    this.canvasController.requestUpdate()
+    );
+
+    window.coarseGridSpacing = this.sceneSettings.coarseGridSpacing || 1;
+    this.sceneSettingsController.addKeyListener("coarseGridSpacing", (event) => {
+    window.coarseGridSpacing = event.newValue;
+    });
+
     this.sceneSettingsController.addKeyListener("selectedGlyph", (event) => {
       this._resetStoredGlyphPosition();
     });
@@ -452,6 +466,31 @@ export class SceneController {
 
   setupContextMenuActions() {
     const topic = "0030-action-topics.menu.edit";
+
+    //// grid
+    registerAction(
+        "action.decrease-coarse-grid",
+        { titleKey: "action.decrease-coarse-grid", defaultShortCuts: [{ baseKey: "f" }] },
+        () => {
+        const v = this.sceneSettings.coarseGridSpacing;
+        if (v > 5) this.sceneSettingsController.setItem("coarseGridSpacing", v - 5);
+        }
+        );
+    
+        registerAction(
+        "action.increase-coarse-grid",
+        { titleKey: "action.increase-coarse-grid", defaultShortCuts: [{ baseKey: "g" }] },
+        () => {
+        const v = this.sceneSettings.coarseGridSpacing;
+        if (v < 40) this.sceneSettingsController.setItem("coarseGridSpacing", v + 5);
+        }
+        );
+    
+        registerAction(
+      "action.toggle-magnetic-snap",
+      { titleKey: "action.toggle-magnetic-snap", defaultShortCuts: [{ baseKey: "g", shiftKey: true }] },
+      () => toggleMagneticSnap()
+    );
 
     registerAction(
       "action.join-contours",
@@ -692,6 +731,8 @@ export class SceneController {
       const layerInfo = Object.entries(
         this.getEditingLayerFromGlyphLayers(glyph.layers)
       ).map(([layerName, layerGlyph]) => {
+        //// grid
+        window._sceneController = this;   // <-- add this
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           this.selection,

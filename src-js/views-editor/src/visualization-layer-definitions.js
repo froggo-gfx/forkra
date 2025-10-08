@@ -67,6 +67,49 @@ registerVisualizationLayerDefinition({
     }
   },
 });
+//// grid
+registerVisualizationLayerDefinition({
+  identifier: "fontra.coarse.grid",
+  name: "Coarse Grid",
+  userSwitchable: true,
+  zIndex: 1 ,
+  selectionFunc: glyphSelector("editing"),
+  screenParameters: {
+    strokeWidth: 0.25,
+    strokeColor: "#00000020",
+    coarseStrokeWidth: 0.5,
+    coarseStrokeColor: "#00000040",
+  },
+  draw: (ctx, positionedGlyph, params, model, controller) => {
+    const { strokeWidth, strokeColor, coarseStrokeWidth, coarseStrokeColor } = params;
+    const coarseSpacing = model.sceneSettings.coarseGridSpacing;
+    let { xMin, yMin, xMax, yMax } = controller.getViewBox();
+
+    // convert view-box to glyph-local coordinates
+    xMin -= positionedGlyph.x;
+    xMax -= positionedGlyph.x;
+    yMin -= positionedGlyph.y;
+    yMax -= positionedGlyph.y;
+
+    // dotted coarse grid
+    //ctx.setLineDash([2, 2]);
+    ctx.lineWidth = coarseStrokeWidth;
+    ctx.strokeStyle = coarseStrokeColor;
+
+    for (let x = Math.floor(xMin / coarseSpacing) * coarseSpacing;
+         x <= Math.ceil(xMax / coarseSpacing) * coarseSpacing;
+         x += coarseSpacing) {
+      strokeLine(ctx, x, yMin, x, yMax);
+    }
+    for (let y = Math.floor(yMin / coarseSpacing) * coarseSpacing;
+         y <= Math.ceil(yMax / coarseSpacing) * coarseSpacing;
+         y += coarseSpacing) {
+      strokeLine(ctx, xMin, y, xMax, y);
+    }
+
+    ctx.setLineDash([]);
+  },
+});
 
 registerVisualizationLayerDefinition({
   identifier: "fontra.empty.selected.glyph",
