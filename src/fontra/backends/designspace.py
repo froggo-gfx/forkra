@@ -440,6 +440,20 @@ class DesignspaceBackend:
         for glyphName, fileName in glyphSet.contents.items():
             glifFileNames[fileName] = glyphName
 
+    def ensureGlyphInGlyphOrder(self, reader, glyphName):
+        lib = reader.readLib()
+        glyphOrder = lib.get("public.glyphOrder")
+        if glyphOrder is not None and glyphName not in glyphOrder:
+            glyphOrder.append(glyphName)
+            reader.writeLib(lib)
+
+    def ensureGlyphNotInGlyphOrder(self, reader, glyphName):
+        lib = reader.readLib()
+        glyphOrder = lib.get("public.glyphOrder")
+        if glyphOrder is not None and glyphName in glyphOrder:
+            glyphOrder.remove(glyphName)
+            reader.writeLib(lib)
+
     async def getGlyphMap(self) -> dict[str, list[int]]:
         return dict(self.glyphMap)
 
@@ -721,6 +735,7 @@ class DesignspaceBackend:
             if writeGlyphSetContents:
                 # FIXME: this is inefficient if we write many glyphs
                 self.updateGlyphSetContents(glyphSet)
+                self.ensureGlyphInGlyphOrder(ufoLayer.reader, glyphName)
 
             modTimes.add(glyphSet.getGLIFModificationTime(glyphName))
 
@@ -732,10 +747,13 @@ class DesignspaceBackend:
         )
         layersToDelete = relevantLayerNames - usedLayers
         for layerName in layersToDelete:
-            glyphSet = self.ufoLayers.findItem(fontraLayerName=layerName).glyphSet
+            ufoLayer = self.ufoLayers.findItem(fontraLayerName=layerName)
+            glyphSet = ufoLayer.glyphSet
             glyphSet.deleteGlyph(glyphName)
             # FIXME: this is inefficient if we write many glyphs
             self.updateGlyphSetContents(glyphSet)
+            if ufoLayer.isDefaultLayer:
+                self.ensureGlyphNotInGlyphOrder(ufoLayer.reader, glyphName)
             modTimes.add(None)
 
         self.savedGlyphModificationTimes[glyphName] = modTimes
@@ -974,10 +992,13 @@ class DesignspaceBackend:
     async def deleteGlyph(self, glyphName):
         if glyphName not in self.glyphMap:
             raise KeyError(f"Glyph '{glyphName}' does not exist")
-        for glyphSet in self.ufoLayers.iterAttrs("glyphSet"):
+        for ufoLayer in self.ufoLayers:
+            glyphSet = ufoLayer.glyphSet
             if glyphName in glyphSet:
                 glyphSet.deleteGlyph(glyphName)
                 glyphSet.writeContents()
+                if ufoLayer.isDefaultLayer:
+                    self.ensureGlyphNotInGlyphOrder(ufoLayer.reader, glyphName)
         del self.glyphMap[glyphName]
         self.savedGlyphModificationTimes[glyphName] = None
         if self._glyphDependencies is not None:
