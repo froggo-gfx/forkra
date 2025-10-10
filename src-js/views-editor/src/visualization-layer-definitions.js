@@ -16,6 +16,39 @@ import {
 } from "@fontra/core/utils.js";
 import { subVectors } from "@fontra/core/vector.js";
 
+// Distance and Angle
+import {
+  unitVectorFromTo,
+  calculateDistanceAndAngle,
+  calculateBadgeDimensions,
+  calculateBadgePosition,
+  formatDistanceAndAngle,
+  calculateDistancesFromPoint,
+  drawDistanceAngleVisualization,
+  drawManhattanDistanceVisualization,
+  drawOffCurveDistanceVisualization,
+  calculateTension,
+  calculateOffCurveAngle,
+  formatDistanceTensionAngle,
+  calculateTunniPoint,
+  calculateControlHandleDistance,
+  drawTunniLabels,
+  DISTANCE_ANGLE_COLOR,
+  DISTANCE_ANGLE_BADGE_COLOR,
+  DISTANCE_ANGLE_TEXT_COLOR,
+  DISTANCE_ANGLE_BADGE_PADDING,
+  DISTANCE_ANGLE_BADGE_RADIUS,
+  DISTANCE_ANGLE_FONT_SIZE,
+  OFFCURVE_DISTANCE_COLOR,
+  OFFCURVE_DISTANCE_BADGE_COLOR,
+  OFFCURVE_DISTANCE_TEXT_COLOR,
+  OFFCURVE_DISTANCE_BADGE_PADDING,
+  OFFCURVE_DISTANCE_BADGE_RADIUS,
+  OFFCURVE_DISTANCE_FONT_SIZE
+} from "@fontra/core/distance-angle.js";
+
+
+
 export const visualizationLayerDefinitions = [];
 
 export function registerVisualizationLayerDefinition(newLayerDef) {
@@ -1844,3 +1877,53 @@ function getTextVerticalCenter(context, text) {
   const metrics = context.measureText(text);
   return (metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
 }
+
+// Register the distance and angle visualization layer
+registerVisualizationLayerDefinition({
+  identifier: "fontra.distance-angle",
+  name: "Distance & Angle",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: {
+    strokeWidth: 1,
+  },
+  colors: { strokeColor: "rgba(0, 153, 255, 0.75)" },
+  colorsDarkMode: { strokeColor: "rgba(0, 153, 255, 0.75)" },
+  draw: drawDistanceAngleVisualization,
+});
+
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.manhattan-distance",
+  name: "Manhattan Distance",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: {
+    strokeWidth: 1,
+  },
+  colors: { strokeColor: "rgba(0, 153, 255, 0.75)" },
+  colorsDarkMode: { strokeColor: "rgba(0, 153, 255, 0.75)" },
+  draw: drawManhattanDistanceVisualization,
+});
+
+
+
+// Register the Tunni handle distance visualization layer
+registerVisualizationLayerDefinition({
+  identifier: "fontra.tunni.labels",
+  name: "Tunni Labels",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: {
+    strokeWidth: 1,
+  },
+  colors: { strokeColor: "rgba(44, 28, 44, 1)", badgeColor: "#FF00FF", textColor: "white" },
+  colorsDarkMode: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
+  draw: drawTunniLabels,
+});

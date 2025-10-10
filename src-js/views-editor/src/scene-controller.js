@@ -112,6 +112,9 @@ export class SceneController {
       backgroundImagesAreLocked: true,
       backgroundLayers: {},
       editingLayers: {},
+      showTunniDistance: true,
+      showTunniTension: true,
+      showTunniAngle: false,
     });
     this.sceneSettings = this.sceneSettingsController.model;
 
