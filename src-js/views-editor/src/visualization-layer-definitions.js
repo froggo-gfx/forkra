@@ -30,6 +30,9 @@ import {
   calculateTension,
   calculateOffCurveAngle,
   formatDistanceTensionAngle,
+  calculateTunniPoint,
+  calculateControlHandleDistance,
+  drawTunniLabels,
   DISTANCE_ANGLE_COLOR,
   DISTANCE_ANGLE_BADGE_COLOR,
   DISTANCE_ANGLE_TEXT_COLOR,
@@ -55,7 +58,6 @@ import {
 } from "@fontra/core/curvature.js";
 
 import { VarPackedPath } from "@fontra/core/var-path.js";
-import { calculateTunniPoint, calculateControlHandleDistance, drawTunniLabels } from "@fontra/core/tunni-calculations.js";
 import { distance } from "@fontra/core/vector.js";
 
 
