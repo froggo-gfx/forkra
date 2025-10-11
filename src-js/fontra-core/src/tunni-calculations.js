@@ -67,7 +67,7 @@ export function calculateTrueTunniPoint(segmentPoints) {
   const dir2 = normalizeVector(subVectors(p3, p4));
   
   // Calculate the intersection point of the lines along the fixed directions
-  // This represents where the lines would intersect if extended infinitely
+ // This represents where the lines would intersect if extended infinitely
   const line1Start = p1;
   const line1End = addVectors(p1, dir1);
   const line2Start = p4;
@@ -997,7 +997,7 @@ export function tunniLayerHitTest(point, size, positionedGlyph) {
               segment: segment,
               segmentPoints: segment.points,
               contourIndex: contourIndex,
-              hitType: "tunni-point"
+              hitType: "true-tunni-point"
             };
           }
           
@@ -1017,4 +1017,300 @@ export function tunniLayerHitTest(point, size, positionedGlyph) {
   
   // If no Tunni point is found within the hit margin, return null
   return null;
+}
+
+/**
+ * Handles mouse down event when clicking on a true Tunni point (intersection)
+ * @param {Object} event - Mouse event
+ * @param {Object} sceneController - Scene controller for scene access
+ * @param {Object} visualizationLayerSettings - To check if Tunni layer is active
+ * @returns {Object} Initial state for drag operation (initial mouse pos, vectors, etc.)
+ */
+export function handleTrueTunniPointMouseDown(event, sceneController, visualizationLayerSettings) {
+  // Check if Tunni layer is active
+  if (!visualizationLayerSettings.model["fontra.tunni.lines"]) {
+    return null;
+  }
+
+  const point = sceneController.localPoint(event);
+  const size = sceneController.mouseClickMargin;
+  
+  // Convert from scene coordinates to glyph coordinates
+  const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+  if (!positionedGlyph) {
+    return null; // No positioned glyph, so no Tunni point interaction possible
+  }
+  
+  const glyphPoint = {
+    x: point.x - positionedGlyph.x,
+    y: point.y - positionedGlyph.y,
+  };
+  
+  // First check if we clicked on an existing true Tunni point
+  // Use the same hit testing function that's used for hover detection to ensure consistency
+  const hit = tunniLayerHitTest(glyphPoint, size, positionedGlyph);
+  if (!hit || hit.hitType !== "true-tunni-point") {
+    return null;
+  }
+
+  const segmentPoints = hit.segmentPoints;
+  
+  // Store initial positions
+  const initialOnPoint1 = { ...segmentPoints[0] }; // p1 (on-curve)
+  const initialOffPoint1 = { ...segmentPoints[1] }; // p2 (off-curve)
+  const initialOffPoint2 = { ...segmentPoints[2] }; // p3 (off-curve)
+  const initialOnPoint2 = { ...segmentPoints[3] }; // p4 (on-curve)
+  
+  // Calculate initial vectors from on-curve to off-curve points
+  const initialVector1 = {
+    x: initialOffPoint1.x - initialOnPoint1.x,
+    y: initialOffPoint1.y - initialOnPoint1.y
+  };
+
+  const initialVector2 = {
+    x: initialOffPoint2.x - initialOnPoint2.x,
+    y: initialOffPoint2.y - initialOnPoint2.y
+  };
+
+  // Calculate unit vectors for movement direction
+  const length1 = Math.sqrt(initialVector1.x * initialVector1.x + initialVector1.y * initialVector1.y);
+  const length2 = Math.sqrt(initialVector2.x * initialVector2.x + initialVector2.y * initialVector2.y);
+  
+  const unitVector1 = length1 > 0 ? {
+    x: initialVector1.x / length1,
+    y: initialVector1.y / length1
+  } : { x: 1, y: 0 };
+  
+  const unitVector2 = length2 > 0 ? {
+    x: initialVector2.x / length2,
+    y: initialVector2.y / length2
+  } : { x: 1, y: 0 };
+  
+  // Store original control point positions (these should remain unchanged)
+  let originalControlPoints = null;
+  if (positionedGlyph && positionedGlyph.glyph && positionedGlyph.glyph.path) {
+    const path = positionedGlyph.glyph.path;
+    const controlPoint1Index = hit.segment.parentPointIndices[1];
+    const controlPoint2Index = hit.segment.parentPointIndices[2];
+    if (controlPoint1Index !== undefined && controlPoint2Index !== undefined) {
+      originalControlPoints = {
+        controlPoint1Index: controlPoint1Index,
+        controlPoint2Index: controlPoint2Index,
+        originalControlPoint1: { ...path.getPoint(controlPoint1Index) },
+        originalControlPoint2: { ...path.getPoint(controlPoint2Index) }
+      };
+    }
+  }
+
+  // Return initial state for drag operation
+  return {
+    initialMousePosition: { ...glyphPoint }, // Make a copy to avoid reference issues
+    initialOnPoint1,
+    initialOffPoint1,
+    initialOffPoint2,
+    initialOnPoint2,
+    initialVector1,
+    initialVector2,
+    unitVector1,
+    unitVector2,
+    selectedSegment: hit.segment,
+    originalSegmentPoints: [...segmentPoints],
+    originalControlPoints,
+    tunniPointHit: hit,
+    hitType: "true-tunni-point" // Distinguish from current handle
+  };
+}
+
+/**
+ * Calculates new on-curve point positions based on true Tunni point movement during drag
+ * @param {Object} event - Mouse event
+ * @param {Object} initialState - Initial state from mouse down
+ * @param {Object} sceneController - Scene controller for editing operations
+ * @returns {Object} Object containing on-curve point indices and new positions
+ */
+export function calculateTrueTunniPointDragChanges(event, initialState, sceneController) {
+  // Check if we have the necessary data to process the drag
+  if (!initialState || !initialState.initialMousePosition ||
+      !initialState.initialOnPoint1 || !initialState.initialOnPoint2 ||
+      !initialState.selectedSegment || !initialState.originalSegmentPoints) {
+    return null;
+  }
+
+  const point = sceneController.localPoint(event);
+  
+  // Convert from scene coordinates to glyph coordinates
+  const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+ if (!positionedGlyph) {
+    return null; // No positioned glyph, so no Tunni point interaction possible
+  }
+  
+  const glyphPoint = {
+    x: point.x - positionedGlyph.x,
+    y: point.y - positionedGlyph.y,
+  };
+  
+  // Calculate mouse movement vector
+  const mouseDelta = {
+    x: glyphPoint.x - initialState.initialMousePosition.x,
+    y: glyphPoint.y - initialState.initialMousePosition.y
+  };
+  
+  // Check if Alt key is pressed to disable equalizing distances
+  const equalizeDistances = !event.altKey;
+  
+  // Calculate how much to move the on-curve points along their fixed vectors
+  // The movement should be based on the projection of mouse movement onto the fixed direction vectors
+  const [p1, p2, p3, p4] = initialState.originalSegmentPoints;
+  
+  // Calculate unit vectors for the original directions (from on-curve to off-curve)
+  const dir1 = normalizeVector(subVectors(p2, p1)); // direction from p1 to p2
+  const dir2 = normalizeVector(subVectors(p3, p4)); // direction from p4 to p3 (reversed: from p4 to off-curve)
+  
+  // Project mouse movement onto the fixed direction vectors
+  const projection1 = mouseDelta.x * dir1.x + mouseDelta.y * dir1.y;
+  const projection2 = mouseDelta.x * dir2.x + mouseDelta.y * dir2.y;
+  
+  // For equalized distances, use the average of the projections
+  let finalProjection1, finalProjection2;
+  if (equalizeDistances) {
+    const avgProjection = (projection1 + projection2) / 2;
+    finalProjection1 = avgProjection;
+    finalProjection2 = avgProjection;
+  } else {
+    finalProjection1 = projection1;
+    finalProjection2 = projection2;
+  }
+  
+  // Calculate new on-curve point positions by moving along the fixed direction vectors
+  const newOnPoint1 = {
+    x: initialState.initialOnPoint1.x + finalProjection1 * dir1.x,
+    y: initialState.initialOnPoint1.y + finalProjection1 * dir1.y
+  };
+  
+  const newOnPoint2 = {
+    x: initialState.initialOnPoint2.x + finalProjection2 * dir2.x,
+    y: initialState.initialOnPoint2.y + finalProjection2 * dir2.y
+  };
+  
+  // Return the new on-curve points with original control points unchanged
+  const newOnCurvePoints = [newOnPoint1, p2, p3, newOnPoint2];
+  
+  // Get the original on-curve point indices
+  const onPoint1Index = initialState.selectedSegment.parentPointIndices[0];
+  const onPoint2Index = initialState.selectedSegment.parentPointIndices[3];
+  
+  // Return the changes instead of applying them
+  return {
+    onPoint1Index: onPoint1Index,
+    onPoint2Index: onPoint2Index,
+    newOnPoint1: newOnCurvePoints[0],  // New position for initialOnPoint1
+    newOnPoint2: newOnCurvePoints[3],  // New position for initialOnPoint2
+    // Keep control points unchanged
+    controlPoint1Index: initialState.originalControlPoints.controlPoint1Index,
+    controlPoint2Index: initialState.originalControlPoints.controlPoint2Index,
+    newControlPoint1: initialState.initialOffPoint1,  // Unchanged
+    newControlPoint2: initialState.initialOffPoint2   // Unchanged
+  };
+}
+
+/**
+ * Handles mouse drag event to calculate on-curve point changes based on true Tunni point movement
+ * @param {Object} event - Mouse event
+ * @param {Object} initialState - Initial state from mouse down
+ * @param {Object} sceneController - Scene controller for editing operations
+ * @returns {Object} Object containing on-curve point indices and new positions
+ */
+export function handleTrueTunniPointMouseDrag(event, initialState, sceneController) {
+  // Calculate the changes for this mouse move event
+  return calculateTrueTunniPointDragChanges(event, initialState, sceneController);
+}
+
+/**
+ * Handles mouse up event to return the final state for the true Tunni point drag operation
+ * @param {Object} initialState - Initial state from mouse down
+ * @param {Object} sceneController - Scene controller for editing operations
+ * @returns {Object} Object containing original on-curve point indices and their final positions
+ */
+export function handleTrueTunniPointMouseUp(initialState, sceneController) {
+  // Check if we have the necessary data to process the mouse up event
+  if (!initialState || !initialState.selectedSegment || !initialState.originalControlPoints) {
+    return null;
+  }
+
+  // Get the original on-curve point indices
+  const onPoint1Index = initialState.selectedSegment.parentPointIndices[0];
+  const onPoint2Index = initialState.selectedSegment.parentPointIndices[3];
+  
+  // Return the original control point information without applying changes
+ // The actual changes will be applied in the pointer tool as a single atomic operation
+  return {
+    onPoint1Index: onPoint1Index,
+    onPoint2Index: onPoint2Index,
+    originalOnPoint1: initialState.initialOnPoint1,
+    originalOnPoint2: initialState.initialOnPoint2,
+    controlPoint1Index: initialState.originalControlPoints.controlPoint1Index,
+    controlPoint2Index: initialState.originalControlPoints.controlPoint2Index,
+    originalControlPoint1: initialState.originalControlPoints.originalControlPoint1,
+    originalControlPoint2: initialState.originalControlPoints.originalControlPoint2
+  };
+}
+
+/**
+ * Calculate new on-curve point positions based on a moved Tunni point.
+ *
+ * @param {Object} tunniPoint - The new Tunni point position
+ * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
+ * @param {boolean} equalizeDistances - If true, makes distances from on-curve to Tunni point equal
+ * @returns {Array} Array of 4 points with new on-curve positions
+ */
+export function calculateOnCurvePointsFromTunni(tunniPoint, segmentPoints, equalizeDistances = true) {
+  const [p1, p2, p3, p4] = segmentPoints;
+  
+  // Calculate unit vectors for the original directions (from on-curve to off-curve)
+  const dir1 = normalizeVector(subVectors(p2, p1));
+  const dir2 = normalizeVector(subVectors(p3, p4));
+  
+  // Calculate original distances from on-curve points to their respective off-curve points
+  const origDist1 = distance(p1, p2);
+  const origDist2 = distance(p4, p3);
+  
+  // Calculate distances from on-curve points to the new Tunni point
+  const distToTunni1 = distance(p1, tunniPoint);
+  const distToTunni2 = distance(p4, tunniPoint);
+  
+  // Calculate the ratio of original distance to distance to Tunni point for each on-curve point
+  const ratio1 = origDist1 / distToTunni1;
+  const ratio2 = origDist2 / distToTunni2;
+  
+  let finalRatio1, finalRatio2;
+  
+  if (equalizeDistances) {
+    // Use average ratio to maintain equal distances
+    const avgRatio = (ratio1 + ratio2) / 2;
+    finalRatio1 = avgRatio;
+    finalRatio2 = avgRatio;
+  } else {
+    // Use individual ratios to allow uncoupled distances
+    finalRatio1 = ratio1;
+    finalRatio2 = ratio2;
+  }
+  
+  // Calculate new distances from Tunni point to on-curve points
+  const newDist1 = distToTunni1 * finalRatio1;
+  const newDist2 = distToTunni2 * finalRatio2;
+  
+  // Calculate new on-curve point positions along the fixed direction vectors
+  // The new on-curve points are positioned along the opposite direction from Tunni point
+  const newP1 = {
+    x: tunniPoint.x - newDist1 * dir1.x,
+    y: tunniPoint.y - newDist1 * dir1.y
+ };
+  
+  const newP4 = {
+    x: tunniPoint.x - newDist2 * dir2.x,
+    y: tunniPoint.y - newDist2 * dir2.y
+  };
+  
+  // Return with original control points unchanged
+  return [newP1, p2, p3, newP4];
 }

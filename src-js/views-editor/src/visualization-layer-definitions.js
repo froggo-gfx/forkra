@@ -18,7 +18,7 @@ import { subVectors } from "@fontra/core/vector.js";
 
 
 import { VarPackedPath } from "@fontra/core/var-path.js";
-import { calculateTunniPoint, calculateControlHandleDistance, drawTunniLabels } from "@fontra/core/tunni-calculations.js";
+import { calculateTunniPoint, calculateTrueTunniPoint, calculateControlHandleDistance, drawTunniLabels } from "@fontra/core/tunni-calculations.js";
 import { distance } from "@fontra/core/vector.js";
 
 
@@ -1664,7 +1664,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: false,
-  zIndex: 550,
+  zIndex: 50,
   screenParameters: {
     strokeWidth: 1,
     dashPattern: [5, 5],
@@ -1672,11 +1672,13 @@ registerVisualizationLayerDefinition({
   },
   colors: {
     tunniLineColor: "#0000FF80",
-    tunniPointColor: "#0000FF"
-  },
+    tunniPointColor: "#0000FF",
+    trueTunniPointColor: "#00FF00"  // Green for true Tunni point
+ },
   colorsDarkMode: {
     tunniLineColor: "#00FFFF80",
-    tunniPointColor: "#00FFFF"
+    tunniPointColor: "#00FFFF",
+    trueTunniPointColor: "#00FF00"  // Green remains the same in dark mode
   },
   draw: drawTunniLines
 });
@@ -1684,15 +1686,9 @@ registerVisualizationLayerDefinition({
 function drawTunniLines(context, positionedGlyph, parameters, model, controller) {
   const path = positionedGlyph.glyph.path;
   
-  // We can't determine if a Tunni point is actively being dragged from the visualization layer context
-  // The active state is determined by whether the Tunni visualization layer is enabled and
-  // if the user is interacting with Tunni points in the pointer tool
-  // For now, we'll base the active state on whether the layer is enabled and
-  // the pointer tool is in a state where it's handling Tunni points
+  // Set up colors and styles
   const isTunniLayerActive = controller?.editor?.visualizationLayersSettings?.model?.["fontra.tunni.lines"] || false;
-  // Since we can't access the actual drag state from here, we'll just use the layer active state
-  // The actual active visual feedback is handled in the pointer tool interaction
-  const isActiveFinal = isTunniLayerActive;
+ const isActiveFinal = isTunniLayerActive;
   
   // Set colors based on active state
   const tunniLineColor = isActiveFinal ?
@@ -1703,6 +1699,11 @@ function drawTunniLines(context, positionedGlyph, parameters, model, controller)
     "#FF000" : // Red color when active
     parameters.tunniPointColor;
     
+  // For the true Tunni point, use a different color
+ const trueTunniPointColor = isActiveFinal ?
+    "#00FF00" : // Green color when active
+    parameters.trueTunniPointColor || "#0FF00"; // Default to green
+  
   // Set stroke width based on active state
   const strokeWidth = isActiveFinal ?
     parameters.strokeWidth * 2 : // Thicker when active
@@ -1711,7 +1712,6 @@ function drawTunniLines(context, positionedGlyph, parameters, model, controller)
   context.strokeStyle = tunniLineColor;
   context.lineWidth = strokeWidth;
   context.setLineDash(isActiveFinal ? [] : parameters.dashPattern); // Remove dash pattern when active
-  context.fillStyle = tunniPointColor;
   
   // Iterate through all contours
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
@@ -1725,33 +1725,45 @@ function drawTunniLines(context, positionedGlyph, parameters, model, controller)
         
         // Both control points must be cubic
         if (pointTypes[1] === 2 && pointTypes[2] === 2) {
+          const [p1, p2, p3, p4] = segment.points;
+          
+          // Draw lines from start to first control and from second control to end
+          // These represent the on-curve to off-curve vectors
+          context.beginPath();
+          context.moveTo(p1.x, p1.y);
+          context.lineTo(p2.x, p2.y);
+          context.stroke();
+          
+          context.beginPath();
+          context.moveTo(p4.x, p4.y);
+          context.lineTo(p3.x, p3.y);
+          context.stroke();
+          
+          // Draw line between control points (the current handle line)
+          context.beginPath();
+          context.moveTo(p2.x, p2.y);
+          context.lineTo(p3.x, p3.y);
+          context.stroke();
+          
+          // Draw the current Tunni point (midpoint between control points)
           const tunniPoint = calculateTunniPoint(segment.points);
           if (tunniPoint) {
-            // Draw lines from start to first control and from second control to end
-            const [p1, p2, p3, p4] = segment.points;
-            
-            // Draw first line
-            context.beginPath();
-            context.moveTo(p1.x, p1.y);
-            context.lineTo(p2.x, p2.y);
-            context.stroke();
-            
-            // Draw second line
-            context.beginPath();
-            context.moveTo(p4.x, p4.y);
-            context.lineTo(p3.x, p3.y);
-            context.stroke();
-            
-            // Draw Tunni point
+            context.fillStyle = tunniPointColor;
             context.beginPath();
             context.arc(tunniPoint.x, tunniPoint.y, isActiveFinal ? parameters.tunniPointSize * 1.5 : parameters.tunniPointSize, 0, 2 * Math.PI);
             context.fill();
-            
-            // Draw line between control points
+          }
+          
+          // Draw the true Tunni point (intersection of on-curve to off-curve vectors)
+          const trueTunniPoint = calculateTrueTunniPoint(segment.points);
+          if (trueTunniPoint) {
+            context.fillStyle = trueTunniPointColor;
             context.beginPath();
-            context.moveTo(p2.x, p2.y);
-            context.lineTo(p3.x, p3.y);
-            context.stroke();
+            // Draw as a different shape to distinguish from current handle
+            const size = isActiveFinal ? parameters.tunniPointSize * 1.5 : parameters.tunniPointSize;
+            // Draw a diamond/square shape to distinguish from circle
+            context.rect(trueTunniPoint.x - size/2, trueTunniPoint.y - size/2, size, size);
+            context.fill();
           }
         }
       }
