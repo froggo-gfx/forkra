@@ -16,6 +16,12 @@ import {
 } from "@fontra/core/utils.js";
 import { subVectors } from "@fontra/core/vector.js";
 
+
+import { VarPackedPath } from "@fontra/core/var-path.js";
+import { calculateTunniPoint, calculateControlHandleDistance, drawTunniLabels } from "@fontra/core/tunni-calculations.js";
+import { distance } from "@fontra/core/vector.js";
+
+
 export const visualizationLayerDefinitions = [];
 
 export function registerVisualizationLayerDefinition(newLayerDef) {
@@ -1648,6 +1654,112 @@ registerVisualizationLayerDefinition({
   },
 });
 
+
+
+
+// Register the Tunni visualization layer
+registerVisualizationLayerDefinition({
+  identifier: "fontra.tunni.lines",
+  name: "Tunni Lines",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: false,
+  zIndex: 550,
+  screenParameters: {
+    strokeWidth: 1,
+    dashPattern: [5, 5],
+    tunniPointSize: 4
+  },
+  colors: {
+    tunniLineColor: "#0000FF80",
+    tunniPointColor: "#0000FF"
+  },
+  colorsDarkMode: {
+    tunniLineColor: "#00FFFF80",
+    tunniPointColor: "#00FFFF"
+  },
+  draw: drawTunniLines
+});
+
+function drawTunniLines(context, positionedGlyph, parameters, model, controller) {
+  const path = positionedGlyph.glyph.path;
+  
+  // We can't determine if a Tunni point is actively being dragged from the visualization layer context
+  // The active state is determined by whether the Tunni visualization layer is enabled and
+  // if the user is interacting with Tunni points in the pointer tool
+  // For now, we'll base the active state on whether the layer is enabled and
+  // the pointer tool is in a state where it's handling Tunni points
+  const isTunniLayerActive = controller?.editor?.visualizationLayersSettings?.model?.["fontra.tunni.lines"] || false;
+  // Since we can't access the actual drag state from here, we'll just use the layer active state
+  // The actual active visual feedback is handled in the pointer tool interaction
+  const isActiveFinal = isTunniLayerActive;
+  
+  // Set colors based on active state
+  const tunniLineColor = isActiveFinal ?
+    "#FF000080" : // Red color when active (more transparent)
+    parameters.tunniLineColor;
+    
+  const tunniPointColor = isActiveFinal ?
+    "#FF000" : // Red color when active
+    parameters.tunniPointColor;
+    
+  // Set stroke width based on active state
+  const strokeWidth = isActiveFinal ?
+    parameters.strokeWidth * 2 : // Thicker when active
+    parameters.strokeWidth;
+  
+  context.strokeStyle = tunniLineColor;
+  context.lineWidth = strokeWidth;
+  context.setLineDash(isActiveFinal ? [] : parameters.dashPattern); // Remove dash pattern when active
+  context.fillStyle = tunniPointColor;
+  
+  // Iterate through all contours
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    // Iterate through all segments in the contour
+    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
+      if (segment.points.length === 4) {
+        // Check if it's a cubic segment
+        const pointTypes = segment.parentPointIndices.map(
+          index => path.pointTypes[index]
+        );
+        
+        // Both control points must be cubic
+        if (pointTypes[1] === 2 && pointTypes[2] === 2) {
+          const tunniPoint = calculateTunniPoint(segment.points);
+          if (tunniPoint) {
+            // Draw lines from start to first control and from second control to end
+            const [p1, p2, p3, p4] = segment.points;
+            
+            // Draw first line
+            context.beginPath();
+            context.moveTo(p1.x, p1.y);
+            context.lineTo(p2.x, p2.y);
+            context.stroke();
+            
+            // Draw second line
+            context.beginPath();
+            context.moveTo(p4.x, p4.y);
+            context.lineTo(p3.x, p3.y);
+            context.stroke();
+            
+            // Draw Tunni point
+            context.beginPath();
+            context.arc(tunniPoint.x, tunniPoint.y, isActiveFinal ? parameters.tunniPointSize * 1.5 : parameters.tunniPointSize, 0, 2 * Math.PI);
+            context.fill();
+            
+            // Draw line between control points
+            context.beginPath();
+            context.moveTo(p2.x, p2.y);
+            context.lineTo(p3.x, p3.y);
+            context.stroke();
+          }
+        }
+      }
+    }
+  }
+  
+  context.setLineDash([]);
+}
 //
 // allGlyphsCleanVisualizationLayerDefinition is not registered, but used
 // separately for the "clean" display.
