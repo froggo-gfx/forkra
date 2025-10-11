@@ -325,8 +325,8 @@ export class PointerTool extends BaseTool {
                 { f: "=xy", a: [finalChanges.onPoint1Index, originalOnPoint1.x, originalOnPoint1.y] },
                 { f: "=xy", a: [finalChanges.onPoint2Index, originalOnPoint2.x, originalOnPoint2.y] },
                 // Control points remain unchanged
-                { f: "=xy", a: [finalChanges.controlPoint1Index, originalOnPoint1.x, originalOnPoint1.y] }, // This is correct - control points unchanged
-                { f: "=xy", a: [finalChanges.controlPoint2Index, originalOnPoint2.x, originalOnPoint2.y] }  // This is correct - control points unchanged
+                { f: "=xy", a: [finalChanges.controlPoint1Index, tunniInitialState.originalControlPoints.originalControlPoint1.x, tunniInitialState.originalControlPoints.originalControlPoint1.y] },
+                { f: "=xy", a: [finalChanges.controlPoint2Index, tunniInitialState.originalControlPoints.originalControlPoint2.x, tunniInitialState.originalControlPoints.originalControlPoint2.y] }
               ];
             } else {
               // For current handle, change control points
@@ -337,8 +337,8 @@ export class PointerTool extends BaseTool {
               
               // Rollback to original control point positions
               rollbackChangesForLayer = [
-                { f: "=xy", a: [tunniInitialState.originalControlPoints.controlPoint1Index, originalOnPoint1.x, originalOnPoint1.y] },
-                { f: "=xy", a: [tunniInitialState.originalControlPoints.controlPoint2Index, originalOnPoint2.x, originalOnPoint2.y] }
+                { f: "=xy", a: [tunniInitialState.originalControlPoints.controlPoint1Index, tunniInitialState.originalControlPoints.originalControlPoint1.x, tunniInitialState.originalControlPoints.originalControlPoint1.y] },
+                { f: "=xy", a: [tunniInitialState.originalControlPoints.controlPoint2Index, tunniInitialState.originalControlPoints.originalControlPoint2.x, tunniInitialState.originalControlPoints.originalControlPoint2.y] }
               ];
             }
             

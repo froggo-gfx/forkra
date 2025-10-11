@@ -1673,12 +1673,12 @@ registerVisualizationLayerDefinition({
   colors: {
     tunniLineColor: "#0000FF80",
     tunniPointColor: "#0000FF",
-    trueTunniPointColor: "#00FF00"  // Green for true Tunni point
+    trueTunniPointColor: "#f3b37eff"  // Green for true Tunni point
  },
   colorsDarkMode: {
     tunniLineColor: "#00FFFF80",
     tunniPointColor: "#00FFFF",
-    trueTunniPointColor: "#00FF00"  // Green remains the same in dark mode
+    trueTunniPointColor: "#f3b37eff"  // Green remains the same in dark mode
   },
   draw: drawTunniLines
 });
@@ -1701,7 +1701,7 @@ function drawTunniLines(context, positionedGlyph, parameters, model, controller)
     
   // For the true Tunni point, use a different color
  const trueTunniPointColor = isActiveFinal ?
-    "#00FF00" : // Green color when active
+    "#f3b37eff" : // Green color when active
     parameters.trueTunniPointColor || "#0FF00"; // Default to green
   
   // Set stroke width based on active state
