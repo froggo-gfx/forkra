@@ -15,9 +15,7 @@ import {
   withSavedState,
 } from "@fontra/core/utils.js";
 import { subVectors } from "@fontra/core/vector.js";
-import { VarPackedPath } from "@fontra/core/var-path.js";
-import { calculateTunniPoint, calculateTrueTunniPoint, calculateControlHandleDistance, drawTunniLabels } from "@fontra/core/tunni-calculations.js";
-import { distance } from "@fontra/core/vector.js";
+import { calculateTunniPoint, calculateTrueTunniPoint } from "@fontra/core/tunni-calculations.js";
 
 export const visualizationLayerDefinitions = [];
 
