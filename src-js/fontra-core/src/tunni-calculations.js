@@ -741,15 +741,16 @@ export async function equalizeSegmentDistances(segment, segmentPoints, sceneMode
 }
 
 /**
-* Handles mouse down event when clicking on a Tunni point
-* @param {Object} event - Mouse event
-* @param {Object} sceneController - Scene controller for scene access
-* @param {Object} visualizationLayerSettings - To check if Tunni layer is active
-* @returns {Object} Initial state for drag operation (initial mouse pos, vectors, etc.)
-*/
+ * Handles mouse down event when clicking on a Tunni point
+ * @param {Object} event - Mouse event
+ * @param {Object} sceneController - Scene controller for scene access
+ * @param {Object} visualizationLayerSettings - To check if Tunni layer is active
+ * @returns {Object} Initial state for drag operation (initial mouse pos, vectors, etc.)
+ */
 export function handleTunniPointMouseDown(event, sceneController, visualizationLayerSettings) {
- // Check if Tunni layer is active
- if (!visualizationLayerSettings.model["fontra.tunni.lines"]) {
+ // Check if any Tunni layer is active
+  if (!visualizationLayerSettings.model["fontra.tunni.combined"] &&
+      !visualizationLayerSettings.model["fontra.tunni.actual.points"]) {
    return null;
  }
 
@@ -1041,15 +1042,16 @@ export function tunniLayerHitTest(point, size, positionedGlyph) {
 /**
  * Handles mouse down event when clicking on a true Tunni point (intersection)
  * @param {Object} event - Mouse event
- * @param {Object} sceneController - Scene controller for scene access
+* @param {Object} sceneController - Scene controller for scene access
  * @param {Object} visualizationLayerSettings - To check if Tunni layer is active
  * @returns {Object} Initial state for drag operation (initial mouse pos, vectors, etc.)
  */
 export function handleTrueTunniPointMouseDown(event, sceneController, visualizationLayerSettings) {
-  // Check if Tunni layer is active
-  if (!visualizationLayerSettings.model["fontra.tunni.lines"]) {
-    return null;
-  }
+ // Check if any Tunni layer is active
+ if (!visualizationLayerSettings.model["fontra.tunni.combined"] &&
+      !visualizationLayerSettings.model["fontra.tunni.actual.points"]) {
+   return null;
+ }
 
   const point = sceneController.localPoint(event);
   const size = sceneController.mouseClickMargin;
