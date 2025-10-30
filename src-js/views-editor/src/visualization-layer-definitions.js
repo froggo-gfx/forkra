@@ -15,8 +15,6 @@ import {
   withSavedState,
 } from "@fontra/core/utils.js";
 import { subVectors } from "@fontra/core/vector.js";
-
-//// speedpunk
 import {
   calculateCurvatureForSegment,
   calculateCurvatureForQuadraticSegment,
@@ -25,7 +23,6 @@ import {
   solveCubicBezier,
   solveQuadraticBezier
 } from "@fontra/core/curvature.js"; 
-
 import { VarPackedPath } from "@fontra/core/var-path.js";
 
 export const visualizationLayerDefinitions = [];
@@ -1660,6 +1657,203 @@ registerVisualizationLayerDefinition({
   },
 });
 
+//
+// allGlyphsCleanVisualizationLayerDefinition is not registered, but used
+// separately for the "clean" display.
+//
+export const allGlyphsCleanVisualizationLayerDefinition = {
+  identifier: "fontra.all.glyphs",
+  name: "All glyphs",
+  selectionFunc: glyphSelector("all"),
+  zIndex: 500,
+  colors: { fillColor: "#000" },
+  colorsDarkMode: { fillColor: "#FFF" },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    context.fillStyle = parameters.fillColor;
+    context.fill(positionedGlyph.glyph.flattenedPath2d);
+  },
+};
+
+// Drawing helpers
+
+function fillNode(context, pt, cornerNodeSize, smoothNodeSize, handleNodeSize) {
+  if (!pt.type && !pt.smooth) {
+    fillSquareNode(context, pt, cornerNodeSize);
+  } else if (!pt.type) {
+    fillRoundNode(context, pt, smoothNodeSize);
+  } else {
+    fillRoundNode(context, pt, handleNodeSize);
+  }
+}
+
+function strokeNode(context, pt, cornerNodeSize, smoothNodeSize, handleNodeSize) {
+  if (!pt.type && !pt.smooth) {
+    strokeSquareNode(context, pt, cornerNodeSize);
+  } else if (!pt.type) {
+    strokeRoundNode(context, pt, smoothNodeSize);
+  } else {
+    strokeRoundNode(context, pt, handleNodeSize);
+  }
+}
+
+function fillSquareNode(context, pt, nodeSize) {
+  context.fillRect(pt.x - nodeSize / 2, pt.y - nodeSize / 2, nodeSize, nodeSize);
+}
+
+export function fillRoundNode(context, pt, nodeSize) {
+  context.beginPath();
+  context.arc(pt.x, pt.y, nodeSize / 2, 0, 2 * Math.PI, false);
+  context.fill();
+}
+
+export function strokeSquareNode(context, pt, nodeSize) {
+  context.strokeRect(pt.x - nodeSize / 2, pt.y - nodeSize / 2, nodeSize, nodeSize);
+}
+
+export function strokeRoundNode(context, pt, nodeSize) {
+  context.beginPath();
+  context.arc(pt.x, pt.y, nodeSize / 2, 0, 2 * Math.PI, false);
+  context.stroke();
+}
+
+export function strokeLine(context, x1, y1, x2, y2) {
+  context.beginPath();
+  context.moveTo(x1, y1);
+  context.lineTo(x2, y2);
+  context.stroke();
+}
+
+function strokeLineDashed(context, x1, y1, x2, y2, pattern = [5, 5]) {
+  context.beginPath();
+  context.setLineDash(pattern);
+  context.moveTo(x1, y1);
+  context.lineTo(x2, y2);
+  context.stroke();
+}
+
+function strokeCircle(context, cx, cy, radius) {
+  context.beginPath();
+  context.arc(cx, cy, radius, 0, 2 * Math.PI, false);
+  context.stroke();
+}
+
+function strokePolygon(context, points) {
+  context.beginPath();
+  context.moveTo(points[0].x, points[0].y);
+  for (const pt of points.slice(1)) {
+    context.lineTo(pt.x, pt.y);
+  }
+  context.closePath();
+  context.stroke();
+}
+
+function drawWithDoubleStroke(
+  context,
+  path,
+  outerLineWidth,
+  innerLineWidth,
+  strokeStyle,
+  fillStyle
+) {
+  context.lineJoin = "round";
+  context.lineWidth = outerLineWidth;
+  context.strokeStyle = strokeStyle;
+  context.stroke(path);
+  context.lineWidth = innerLineWidth;
+  context.strokeStyle = "black";
+  context.globalCompositeOperation = "destination-out";
+  context.stroke(path);
+  context.globalCompositeOperation = "source-over";
+  context.fillStyle = fillStyle;
+  context.fill(path);
+}
+
+function lenientUnion(setA, setB) {
+  if (!setA) {
+    return setB || new Set();
+  }
+  if (!setB) {
+    return setA || new Set();
+  }
+  return union(setA, setB);
+}
+
+function* iterPointsByIndex(path, pointIndices) {
+  if (!pointIndices) {
+    return;
+  }
+  for (const index of pointIndices) {
+    const pt = path.getPoint(index);
+    if (pt) {
+      yield pt;
+    }
+  }
+}
+
+function* iterAnchorsPointsByIndex(anchors, anchorIndices) {
+  if (!anchorIndices || !anchors.length) {
+    return;
+  }
+  for (const index of anchorIndices) {
+    if (anchors[index]) {
+      yield anchors[index];
+    }
+  }
+}
+
+function* iterGuidelinesPointsByIndex(guidelines, guidelineIndices) {
+  if (!guidelineIndices || !guidelines.length) {
+    return;
+  }
+  for (const index of guidelineIndices) {
+    if (guidelines[index]) {
+      yield guidelines[index];
+    }
+  }
+}
+
+function* iterComponentOriginsByIndex(components, componentIndices) {
+  if (!componentIndices) {
+    return;
+  }
+  for (const index of componentIndices) {
+    const compo = components[index];
+    if (compo) {
+      yield { x: compo.transformation.translateX, y: compo.transformation.translateY };
+    }
+  }
+}
+
+// {
+//   identifier: "fontra.baseline",
+//   name: "Baseline",
+//   selectionFunc: glyphSelector("hovered")  // choice from all, unselected, hovered, selected, editing
+//   selectionFilter: (positionedGlyph) => ...some condition...,  // OPTIONAL
+//   zIndex: 50
+//   screenParameters: {},  // in screen/pixel units
+//   glyphParameters: {},  // in glyph units
+//   colors: {},
+//   colorsDarkMode: {},
+//   draw: (context, positionedGlyph, parameters, model, controller) => { /* ... */ },
+// }
+
+function drawRoundRect(context, x, y, width, height, radii) {
+  // older versions of Safari don't support roundRect,
+  // so we use rect instead
+  context.beginPath();
+  if (context.roundRect) {
+    context.roundRect(x, y, width, height, radii);
+  } else {
+    context.rect(x, y, width, height);
+  }
+  context.fill();
+}
+
+function getTextVerticalCenter(context, text) {
+  const metrics = context.measureText(text);
+  return (metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
+}
+
 //// speedpunk
 // Add new functions before the main draw function
 function calculateSegmentBudget(numCurves, zoomFactor, baseSegments = 400, minSegmentsPerCurve = 5) {
@@ -2113,202 +2307,3 @@ registerVisualizationLayerDefinition({
      context.restore();
    }
 });
-
-
-
-//
-// allGlyphsCleanVisualizationLayerDefinition is not registered, but used
-// separately for the "clean" display.
-//
-export const allGlyphsCleanVisualizationLayerDefinition = {
-  identifier: "fontra.all.glyphs",
-  name: "All glyphs",
-  selectionFunc: glyphSelector("all"),
-  zIndex: 500,
-  colors: { fillColor: "#000" },
-  colorsDarkMode: { fillColor: "#FFF" },
-  draw: (context, positionedGlyph, parameters, model, controller) => {
-    context.fillStyle = parameters.fillColor;
-    context.fill(positionedGlyph.glyph.flattenedPath2d);
-  },
-};
-
-// Drawing helpers
-
-function fillNode(context, pt, cornerNodeSize, smoothNodeSize, handleNodeSize) {
-  if (!pt.type && !pt.smooth) {
-    fillSquareNode(context, pt, cornerNodeSize);
-  } else if (!pt.type) {
-    fillRoundNode(context, pt, smoothNodeSize);
-  } else {
-    fillRoundNode(context, pt, handleNodeSize);
-  }
-}
-
-function strokeNode(context, pt, cornerNodeSize, smoothNodeSize, handleNodeSize) {
-  if (!pt.type && !pt.smooth) {
-    strokeSquareNode(context, pt, cornerNodeSize);
-  } else if (!pt.type) {
-    strokeRoundNode(context, pt, smoothNodeSize);
-  } else {
-    strokeRoundNode(context, pt, handleNodeSize);
-  }
-}
-
-function fillSquareNode(context, pt, nodeSize) {
-  context.fillRect(pt.x - nodeSize / 2, pt.y - nodeSize / 2, nodeSize, nodeSize);
-}
-
-export function fillRoundNode(context, pt, nodeSize) {
-  context.beginPath();
-  context.arc(pt.x, pt.y, nodeSize / 2, 0, 2 * Math.PI, false);
-  context.fill();
-}
-
-export function strokeSquareNode(context, pt, nodeSize) {
-  context.strokeRect(pt.x - nodeSize / 2, pt.y - nodeSize / 2, nodeSize, nodeSize);
-}
-
-export function strokeRoundNode(context, pt, nodeSize) {
-  context.beginPath();
-  context.arc(pt.x, pt.y, nodeSize / 2, 0, 2 * Math.PI, false);
-  context.stroke();
-}
-
-export function strokeLine(context, x1, y1, x2, y2) {
-  context.beginPath();
-  context.moveTo(x1, y1);
-  context.lineTo(x2, y2);
-  context.stroke();
-}
-
-function strokeLineDashed(context, x1, y1, x2, y2, pattern = [5, 5]) {
-  context.beginPath();
-  context.setLineDash(pattern);
-  context.moveTo(x1, y1);
-  context.lineTo(x2, y2);
-  context.stroke();
-}
-
-function strokeCircle(context, cx, cy, radius) {
-  context.beginPath();
-  context.arc(cx, cy, radius, 0, 2 * Math.PI, false);
-  context.stroke();
-}
-
-function strokePolygon(context, points) {
-  context.beginPath();
-  context.moveTo(points[0].x, points[0].y);
-  for (const pt of points.slice(1)) {
-    context.lineTo(pt.x, pt.y);
-  }
-  context.closePath();
-  context.stroke();
-}
-
-function drawWithDoubleStroke(
-  context,
-  path,
-  outerLineWidth,
-  innerLineWidth,
-  strokeStyle,
-  fillStyle
-) {
-  context.lineJoin = "round";
-  context.lineWidth = outerLineWidth;
-  context.strokeStyle = strokeStyle;
-  context.stroke(path);
-  context.lineWidth = innerLineWidth;
-  context.strokeStyle = "black";
-  context.globalCompositeOperation = "destination-out";
-  context.stroke(path);
-  context.globalCompositeOperation = "source-over";
-  context.fillStyle = fillStyle;
-  context.fill(path);
-}
-
-function lenientUnion(setA, setB) {
-  if (!setA) {
-    return setB || new Set();
-  }
-  if (!setB) {
-    return setA || new Set();
-  }
-  return union(setA, setB);
-}
-
-function* iterPointsByIndex(path, pointIndices) {
-  if (!pointIndices) {
-    return;
-  }
-  for (const index of pointIndices) {
-    const pt = path.getPoint(index);
-    if (pt) {
-      yield pt;
-    }
-  }
-}
-
-function* iterAnchorsPointsByIndex(anchors, anchorIndices) {
-  if (!anchorIndices || !anchors.length) {
-    return;
-  }
-  for (const index of anchorIndices) {
-    if (anchors[index]) {
-      yield anchors[index];
-    }
-  }
-}
-
-function* iterGuidelinesPointsByIndex(guidelines, guidelineIndices) {
-  if (!guidelineIndices || !guidelines.length) {
-    return;
-  }
-  for (const index of guidelineIndices) {
-    if (guidelines[index]) {
-      yield guidelines[index];
-    }
-  }
-}
-
-function* iterComponentOriginsByIndex(components, componentIndices) {
-  if (!componentIndices) {
-    return;
-  }
-  for (const index of componentIndices) {
-    const compo = components[index];
-    if (compo) {
-      yield { x: compo.transformation.translateX, y: compo.transformation.translateY };
-    }
-  }
-}
-
-// {
-//   identifier: "fontra.baseline",
-//   name: "Baseline",
-//   selectionFunc: glyphSelector("hovered")  // choice from all, unselected, hovered, selected, editing
-//   selectionFilter: (positionedGlyph) => ...some condition...,  // OPTIONAL
-//   zIndex: 50
-//   screenParameters: {},  // in screen/pixel units
-//   glyphParameters: {},  // in glyph units
-//   colors: {},
-//   colorsDarkMode: {},
-//   draw: (context, positionedGlyph, parameters, model, controller) => { /* ... */ },
-// }
-
-function drawRoundRect(context, x, y, width, height, radii) {
-  // older versions of Safari don't support roundRect,
-  // so we use rect instead
-  context.beginPath();
-  if (context.roundRect) {
-    context.roundRect(x, y, width, height, radii);
-  } else {
-    context.rect(x, y, width, height);
-  }
-  context.fill();
-}
-
-function getTextVerticalCenter(context, text) {
-  const metrics = context.measureText(text);
-  return (metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
-}
