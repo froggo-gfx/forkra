@@ -92,12 +92,13 @@ export class PointerTool extends BaseTool {
 
     this.sceneController.sceneModel.showTransformSelection = true;
 
-    // Check if Tunni visualization layer is active and if we're hovering over a Tunni point
-    const isTunniLayerActive = this.editor.visualizationLayersSettings.model["fontra.tunni.lines"];
+    // Check if any Tunni visualization layer is active and if we're hovering over a Tunni point
+    const isTunniCombinedLayerActive = this.editor.visualizationLayersSettings.model["fontra.tunni.combined"];
+    const isTunniActualLayerActive = this.editor.visualizationLayersSettings.model["fontra.tunni.actual.points"];
     let isHoveringTunniPoint = false;
     let isHoveringTrueTunniPoint = false;  // New flag for true Tunni point
     
-    if (isTunniLayerActive) {
+    if (isTunniCombinedLayerActive || isTunniActualLayerActive) {
       const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
       if (positionedGlyph) {
         // Convert from scene coordinates to glyph coordinates for hit testing
@@ -176,12 +177,13 @@ export class PointerTool extends BaseTool {
     const sceneController = this.sceneController;
     const initialSelection = sceneController.selection;
     
-    // Check if Tunni visualization layer is active and if we clicked on a Tunni point
-    const isTunniLayerActive = this.editor.visualizationLayersSettings.model["fontra.tunni.lines"];
+    // Check if any Tunni visualization layer is active and if we clicked on a Tunni point
+    const isTunniCombinedLayerActive = this.editor.visualizationLayersSettings.model["fontra.tunni.combined"];
+    const isTunniActualLayerActive = this.editor.visualizationLayersSettings.model["fontra.tunni.actual.points"];
     let tunniInitialState = null;
-    let isTrueTunniPoint = false;  // Flag to distinguish between current handle and true Tunni point
+    let isTrueTunniPoint = false; // Flag to distinguish between current handle and true Tunni point
     
-    if (isTunniLayerActive) {
+    if (isTunniCombinedLayerActive || isTunniActualLayerActive) {
       // First try to handle true Tunni point (intersection)
       tunniInitialState = handleTrueTunniPointMouseDown(
         initialEvent,
