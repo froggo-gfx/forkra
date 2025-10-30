@@ -1170,7 +1170,7 @@ export function areDistancesEqualized(segmentPoints) {
  * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
  * @returns {Object} The Tunni point (midpoint between control points)
  */
-export function calculateTunniPoint(segmentPoints) {
+export function calculateTunniPointz(segmentPoints) {
   // segmentPoints should be an array of 4 points: [start, control1, control2, end]
   if (segmentPoints.length !== 4) {
     throw new Error("Segment must have exactly 4 points");
@@ -1247,7 +1247,7 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
             const p4 = segment.points[3];  // on-curve end point
             
             // Calculate Tunni point for visualization (keep midpoint)
-            const visualPt = calculateTunniPoint(segment.points);
+            const visualPt = calculateTunniPointz(segment.points);
 
             // Calculate true Tunni point for tension calculations
             const truePt = calculateTrueTunniPoint(segment.points);

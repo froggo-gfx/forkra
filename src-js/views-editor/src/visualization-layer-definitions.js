@@ -30,7 +30,7 @@ import {
   calculateTension,
   calculateOffCurveAngle,
   formatDistanceTensionAngle,
-  calculateTunniPoint,
+  calculateTunniPointz,
   calculateControlHandleDistance,
   drawTunniLabels,
   DISTANCE_ANGLE_COLOR,
