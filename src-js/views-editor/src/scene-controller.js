@@ -116,6 +116,7 @@ export class SceneController {
       backgroundImagesAreLocked: true,
       backgroundLayers: {},
       editingLayers: {},
+      gridSnapEnabled: true,  // Default to enabled
     });
     this.sceneSettings = this.sceneSettingsController.model;
 
@@ -1227,6 +1228,7 @@ export class SceneController {
         glyphLocation: this.sceneSettings.glyphLocation,
         editingLayers: this.sceneSettings.editingLayers,
         editLayerName: this.sceneSettings.editLayerName,
+        gridSnapEnabled: this.sceneSettings.gridSnapEnabled,
       };
       if (!this._cancelGlyphEditing) {
         editContext.editFinal(
@@ -1325,6 +1327,9 @@ export class SceneController {
         this.sceneSettings.glyphLocation = { ...undoInfo.glyphLocation };
         this.sceneSettings.editingLayers = undoInfo.editingLayers;
         this.sceneSettings.editLayerName = undoInfo.editLayerName;
+        if (undoInfo.gridSnapEnabled !== undefined) {
+          this.sceneSettings.gridSnapEnabled = undoInfo.gridSnapEnabled;
+        }
       }
       await this.sceneModel.updateScene();
       this.canvasController.requestUpdate();
