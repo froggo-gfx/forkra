@@ -36,7 +36,8 @@ export class MouseTracker {
   }
 
   handleMouseDown(event) {
-    if (event.button === 2 || event.ctrlKey) {
+    ////grid
+    if (event.button === 2 /*|| event.ctrlKey*/) {
       // We're not handling contextual menus
       return;
     }
