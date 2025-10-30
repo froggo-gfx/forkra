@@ -255,9 +255,9 @@ export class PointerTool extends BaseTool {
             // Calculate the changes for this mouse move event
             let dragChanges;
             if (isTrueTunniPoint) {
-              dragChanges = handleTrueTunniPointMouseDrag(event, tunniInitialState, sceneController);
+              dragChanges = handleTrueTunniPointMouseDrag(event, tunniInitialState, sceneController, sceneController.sceneSettings?.gridSnapEnabled);
             } else {
-              dragChanges = handleTunniPointMouseDrag(event, tunniInitialState, sceneController);
+              dragChanges = handleTunniPointMouseDrag(event, tunniInitialState, sceneController, sceneController.sceneSettings?.gridSnapEnabled);
             }
             
             if (dragChanges) {

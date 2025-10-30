@@ -31,6 +31,14 @@ function drawRoundRect(context, x, y, width, height, radii) {
  context.fill();
 }
 
+// Grid Snap Utility Function
+export function snapToGrid(point) {
+  return {
+    x: Math.round(point.x),
+    y: Math.round(point.y)
+  };
+}
+
 export function calculateTunniPoint(segmentPoints) {
   // segmentPoints should be an array of 4 points: [start, control1, control2, end]
   if (segmentPoints.length !== 4) {
@@ -88,7 +96,7 @@ export function calculateTrueTunniPoint(segmentPoints) {
  * @param {boolean} useArithmeticMean - If true, makes both control points distances an arithmetic mean of the original distances
  * @returns {Array} Array of 2 new control points
  */
-export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equalizeDistances = false, useArithmeticMean = false) {
+export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equalizeDistances = false, useArithmeticMean = false, gridSnapEnabled = false) {
   const [p1, p2, p3, p4] = segmentPoints;
   
   // Calculate unit vectors for the original directions
@@ -161,6 +169,11 @@ export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equal
     x: p4.x + newDistance2 * dir2.x,
     y: p4.y + newDistance2 * dir2.y
   };
+  
+  // Apply grid snapping if enabled
+ if (gridSnapEnabled) {
+    return [snapToGrid(newP2), snapToGrid(newP3)];
+  }
   
   return [newP2, newP3];
 }
@@ -849,7 +862,7 @@ export function handleTunniPointMouseDown(event, sceneController, visualizationL
 * @param {Object} sceneController - Scene controller for editing operations
 * @returns {Object} Object containing control point indices and new positions
 */
-export function calculateTunniPointDragChanges(event, initialState, sceneController) {
+export function calculateTunniPointDragChanges(event, initialState, sceneController, gridSnapEnabled = false) {
  // Check if we have the necessary data to process the drag
  if (!initialState || !initialState.initialMousePosition || !initialState.initialOffPoint1 || !initialState.initialOffPoint2 || !initialState.selectedSegment || !initialState.originalSegmentPoints) {
    return null;
@@ -878,42 +891,48 @@ export function calculateTunniPointDragChanges(event, initialState, sceneControl
  // (proportional editing is now the default behavior)
  const equalizeDistances = !event.altKey;
  
- let newControlPoint1, newControlPoint2;
- 
- if (equalizeDistances) {
-   // Proportional editing: Move both control points by the same amount along their respective vectors
-   // Project mouse movement onto the 45-degree vector
-   // This gives us the scalar amount to move along the 45-degree vector
-   const projection = mouseDelta.x * initialState.fortyFiveVector.x + mouseDelta.y * initialState.fortyFiveVector.y;
-   
-   // Move both control points by the same amount along their respective vectors
-   newControlPoint1 = {
-     x: initialState.initialOffPoint1.x + initialState.unitVector1.x * projection,
-     y: initialState.initialOffPoint1.y + initialState.unitVector1.y * projection
-   };
-   
-   newControlPoint2 = {
-     x: initialState.initialOffPoint2.x + initialState.unitVector2.x * projection,
-     y: initialState.initialOffPoint2.y + initialState.unitVector2.y * projection
-   };
- } else {
-   // Non-proportional editing: Each control point moves independently along its own vector
-   // Project mouse movement onto each control point's individual unit vector
-   const projection1 = mouseDelta.x * initialState.unitVector1.x + mouseDelta.y * initialState.unitVector1.y;
-   const projection2 = mouseDelta.x * initialState.unitVector2.x + mouseDelta.y * initialState.unitVector2.y;
-   
-   // Move each control point by its own projection amount
-   newControlPoint1 = {
-     x: initialState.initialOffPoint1.x + initialState.unitVector1.x * projection1,
-     y: initialState.initialOffPoint1.y + initialState.unitVector1.y * projection1
-   };
-   
-   newControlPoint2 = {
-     x: initialState.initialOffPoint2.x + initialState.unitVector2.x * projection2,
-     y: initialState.initialOffPoint2.y + initialState.unitVector2.y * projection2
-   };
- }
+  let newControlPoint1, newControlPoint2;
+  
+  if (equalizeDistances) {
+    // Proportional editing: Move both control points by the same amount along their respective vectors
+    // Project mouse movement onto the 45-degree vector
+    // This gives us the scalar amount to move along the 45-degree vector
+    const projection = mouseDelta.x * initialState.fortyFiveVector.x + mouseDelta.y * initialState.fortyFiveVector.y;
+    
+    // Move both control points by the same amount along their respective vectors
+    newControlPoint1 = {
+      x: initialState.initialOffPoint1.x + initialState.unitVector1.x * projection,
+      y: initialState.initialOffPoint1.y + initialState.unitVector1.y * projection
+    };
+    
+    newControlPoint2 = {
+      x: initialState.initialOffPoint2.x + initialState.unitVector2.x * projection,
+      y: initialState.initialOffPoint2.y + initialState.unitVector2.y * projection
+    };
+  } else {
+    // Non-proportional editing: Each control point moves independently along its own vector
+    // Project mouse movement onto each control point's individual unit vector
+    const projection1 = mouseDelta.x * initialState.unitVector1.x + mouseDelta.y * initialState.unitVector1.y;
+    const projection2 = mouseDelta.x * initialState.unitVector2.x + mouseDelta.y * initialState.unitVector2.y;
+    
+    // Move each control point by its own projection amount
+    newControlPoint1 = {
+      x: initialState.initialOffPoint1.x + initialState.unitVector1.x * projection1,
+      y: initialState.initialOffPoint1.y + initialState.unitVector1.y * projection1
+    };
+    
+    newControlPoint2 = {
+      x: initialState.initialOffPoint2.x + initialState.unitVector2.x * projection2,
+      y: initialState.initialOffPoint2.y + initialState.unitVector2.y * projection2
+    };
+  }
 
+  // Apply grid snapping if enabled
+  if (gridSnapEnabled) {
+    newControlPoint1 = snapToGrid(newControlPoint1);
+    newControlPoint2 = snapToGrid(newControlPoint2);
+  }
+ 
  // Return the changes instead of applying them
  return {
    controlPoint1Index: initialState.selectedSegment.parentPointIndices[1],
@@ -930,9 +949,9 @@ export function calculateTunniPointDragChanges(event, initialState, sceneControl
 * @param {Object} sceneController - Scene controller for editing operations
 * @returns {Object} Object containing control point indices and new positions
 */
-export function handleTunniPointMouseDrag(event, initialState, sceneController) {
- // Calculate the changes for this mouse move event
- return calculateTunniPointDragChanges(event, initialState, sceneController);
+export function handleTunniPointMouseDrag(event, initialState, sceneController, gridSnapEnabled = false) {
+  // Calculate the changes for this mouse move event
+  return calculateTunniPointDragChanges(event, initialState, sceneController, gridSnapEnabled);
 }
 
 /**
@@ -1128,7 +1147,7 @@ export function handleTrueTunniPointMouseDown(event, sceneController, visualizat
  * @param {Object} sceneController - Scene controller for editing operations
  * @returns {Object} Object containing on-curve point indices and new positions
  */
-export function calculateTrueTunniPointDragChanges(event, initialState, sceneController) {
+export function calculateTrueTunniPointDragChanges(event, initialState, sceneController, gridSnapEnabled = false) {
   // Check if we have the necessary data to process the drag
   if (!initialState || !initialState.initialMousePosition ||
       !initialState.initialOnPoint1 || !initialState.initialOnPoint2 ||
@@ -1182,12 +1201,12 @@ export function calculateTrueTunniPointDragChanges(event, initialState, sceneCon
   }
   
   // Calculate new on-curve point positions by moving along the fixed direction vectors
-  const newOnPoint1 = {
+  let newOnPoint1 = {
     x: initialState.initialOnPoint1.x + finalProjection1 * dir1.x,
     y: initialState.initialOnPoint1.y + finalProjection1 * dir1.y
   };
   
-  const newOnPoint2 = {
+  let newOnPoint2 = {
     x: initialState.initialOnPoint2.x + finalProjection2 * dir2.x,
     y: initialState.initialOnPoint2.y + finalProjection2 * dir2.y
   };
@@ -1199,12 +1218,18 @@ export function calculateTrueTunniPointDragChanges(event, initialState, sceneCon
   const onPoint1Index = initialState.selectedSegment.parentPointIndices[0];
   const onPoint2Index = initialState.selectedSegment.parentPointIndices[3];
   
+ // Apply grid snapping if enabled
+  if (gridSnapEnabled) {
+    newOnPoint1 = snapToGrid(newOnPoint1);
+    newOnPoint2 = snapToGrid(newOnPoint2);
+  }
+  
   // Return the changes instead of applying them
   return {
     onPoint1Index: onPoint1Index,
     onPoint2Index: onPoint2Index,
-    newOnPoint1: newOnCurvePoints[0],  // New position for initialOnPoint1
-    newOnPoint2: newOnCurvePoints[3],  // New position for initialOnPoint2
+    newOnPoint1: newOnPoint1,  // New position for initialOnPoint1
+    newOnPoint2: newOnPoint2,  // New position for initialOnPoint2
     // Keep control points unchanged
     controlPoint1Index: initialState.originalControlPoints.controlPoint1Index,
     controlPoint2Index: initialState.originalControlPoints.controlPoint2Index,
@@ -1220,9 +1245,9 @@ export function calculateTrueTunniPointDragChanges(event, initialState, sceneCon
  * @param {Object} sceneController - Scene controller for editing operations
  * @returns {Object} Object containing on-curve point indices and new positions
  */
-export function handleTrueTunniPointMouseDrag(event, initialState, sceneController) {
+export function handleTrueTunniPointMouseDrag(event, initialState, sceneController, gridSnapEnabled = false) {
   // Calculate the changes for this mouse move event
-  return calculateTrueTunniPointDragChanges(event, initialState, sceneController);
+  return calculateTrueTunniPointDragChanges(event, initialState, sceneController, gridSnapEnabled);
 }
 
 /**
@@ -1263,7 +1288,7 @@ export function handleTrueTunniPointMouseUp(initialState, sceneController) {
  * @param {boolean} equalizeDistances - If true, makes distances from on-curve to Tunni point equal
  * @returns {Array} Array of 4 points with new on-curve positions
  */
-export function calculateOnCurvePointsFromTunni(tunniPoint, segmentPoints, equalizeDistances = true) {
+export function calculateOnCurvePointsFromTunni(tunniPoint, segmentPoints, equalizeDistances = true, gridSnapEnabled = false) {
   const [p1, p2, p3, p4] = segmentPoints;
   
   // Calculate unit vectors for the original directions (from on-curve to off-curve)
@@ -1312,5 +1337,8 @@ export function calculateOnCurvePointsFromTunni(tunniPoint, segmentPoints, equal
   };
   
   // Return with original control points unchanged
+  if (gridSnapEnabled) {
+    return [snapToGrid(newP1), p2, p3, snapToGrid(newP4)];
+  }
   return [newP1, p2, p3, newP4];
 }
