@@ -1,5 +1,6 @@
 import { Bezier } from "bezier-js";
 import { fitCubic } from "./fit-cubic.js";
+import { addOverlap } from "./corner-overlap.js";
 import {
   arrayExtend,
   assert,
@@ -1193,4 +1194,12 @@ function cleanupPointAttributes(path) {
   ) {
     path.pointAttributes = null;
   }
+}
+
+export function addOverlapToPath(path, selectedPointIndices) {
+  // Debugging: Log the parameters
+  console.log('addOverlapToPath called with:', { path, selectedPointIndices });
+  
+  // Use the addOverlap function from corner-overlap.js to implement overlap functionality
+  return addOverlap(path, selectedPointIndices);
 }

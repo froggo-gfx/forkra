@@ -15,6 +15,7 @@ import { translate, translatePlural } from "@fontra/core/localization.js";
 import { MouseTracker } from "@fontra/core/mouse-tracker.js";
 import { ObservableController } from "@fontra/core/observable-object.js";
 import {
+  addOverlapToPath,
   connectContours,
   scalePoint,
   splitPathAtPointIndices,
@@ -554,6 +555,16 @@ export class SceneController {
         this.visualizationLayersSettings.model["fontra.background-image"] = true;
       }
     });
+
+    registerAction(
+      "action.add-overlap",
+      {
+        topic,
+        defaultShortCuts: [{ baseKey: "o", commandKey: true, shiftKey: true }],
+      },
+      () => this.doAddOverlap(),
+      () => this.contextMenuState.pointSelection?.length
+    );
   }
 
   setAutoViewBox() {
@@ -1515,6 +1526,71 @@ export class SceneController {
       }
       this.selection = new Set();
       return translatePlural("action.decompose-component", componentSelection?.length);
+    });
+  }
+
+  async doAddOverlap() {
+    const { point: pointSelection } = parseSelection(this.selection);
+    await this.editLayersAndRecordChanges((layerGlyphs) => {
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        // Debugging: Log what we're working with
+        console.log('Processing layerGlyph:', layerGlyph);
+        console.log('Layer name:', layerGlyph.name);
+        console.log('Path object:', layerGlyph.path);
+        
+        const path = layerGlyph.path;
+        // Validate that path is a VarPackedPath instance with all required methods
+        if (!path || typeof path !== 'object') {
+          console.warn('Invalid path object for addOverlap, skipping - not an object');
+          continue;
+        }
+        if (!(path instanceof VarPackedPath)) {
+          console.warn('Invalid path object for addOverlap, skipping - not a VarPackedPath instance');
+          continue;
+        }
+        
+        const requiredMethods = ['copy', 'getPoint', 'getAbsolutePointIndex', 'getNumPointsOfContour', 'setPointPosition', 'insertPoint'];
+        let hasAllMethods = true;
+        for (const method of requiredMethods) {
+          if (typeof path[method] !== 'function') {
+            console.warn(`Invalid path object for addOverlap, skipping - missing method: ${method}`);
+            hasAllMethods = false;
+            break;
+          }
+        }
+        
+        // Additional check for getPoint method specifically
+        if (typeof path.getPoint !== 'function') {
+          console.warn('Invalid path object for addOverlap, skipping - missing getPoint method');
+          continue;
+        }
+        
+        if (!hasAllMethods) {
+          continue;
+        }
+        
+        if (typeof path.numContours === 'undefined') {
+          console.warn('Invalid path object for addOverlap, skipping - missing numContours property');
+          continue;
+        }
+        
+        try {
+          // Debugging: Log the parameters we're passing to addOverlap
+          console.log('Calling addOverlapToPath with path:', path);
+          console.log('Point selection:', pointSelection);
+          
+          // Create a copy of the path with overlap added
+          const newPath = addOverlapToPath(path, pointSelection);
+          // Replace the path with the new path that has overlap
+          layerGlyph.path = newPath;
+        } catch (error) {
+          console.warn('Error while adding overlap:', error);
+          console.warn('Error stack:', error.stack);
+        }
+      }
+      // Clear the selection after adding overlap
+      this.selection = new Set();
+      return translate("action.add-overlap");
     });
   }
 
