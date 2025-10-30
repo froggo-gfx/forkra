@@ -15,12 +15,9 @@ import {
   withSavedState,
 } from "@fontra/core/utils.js";
 import { subVectors } from "@fontra/core/vector.js";
-
-
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { calculateTunniPoint, calculateTrueTunniPoint, calculateControlHandleDistance, drawTunniLabels } from "@fontra/core/tunni-calculations.js";
 import { distance } from "@fontra/core/vector.js";
-
 
 export const visualizationLayerDefinitions = [];
 
@@ -1654,124 +1651,6 @@ registerVisualizationLayerDefinition({
   },
 });
 
-
-
-
-// Register the Tunni visualization layer
-registerVisualizationLayerDefinition({
-  identifier: "fontra.tunni.lines",
-  name: "Tunni Lines",
-  selectionFunc: glyphSelector("editing"),
-  userSwitchable: true,
-  defaultOn: false,
-  zIndex: 50,
-  screenParameters: {
-    strokeWidth: 1,
-    dashPattern: [5, 5],
-    tunniPointSize: 4
-  },
-  colors: {
-    tunniLineColor: "#0000FF80",
-    tunniPointColor: "#0000FF",
-    trueTunniPointColor: "#f3b37eff"  // Green for true Tunni point
- },
-  colorsDarkMode: {
-    tunniLineColor: "#00FFFF80",
-    tunniPointColor: "#00FFFF",
-    trueTunniPointColor: "#f3b37eff"  // Green remains the same in dark mode
-  },
-  draw: drawTunniLines
-});
-
-function drawTunniLines(context, positionedGlyph, parameters, model, controller) {
-  const path = positionedGlyph.glyph.path;
-  
-  // Set up colors and styles
-  const isTunniLayerActive = controller?.editor?.visualizationLayersSettings?.model?.["fontra.tunni.lines"] || false;
- const isActiveFinal = isTunniLayerActive;
-  
-  // Set colors based on active state
-  const tunniLineColor = isActiveFinal ?
-    "#FF000080" : // Red color when active (more transparent)
-    parameters.tunniLineColor;
-    
-  const tunniPointColor = isActiveFinal ?
-    "#FF000" : // Red color when active
-    parameters.tunniPointColor;
-    
-  // For the true Tunni point, use a different color
- const trueTunniPointColor = isActiveFinal ?
-    "#f3b37eff" : // Green color when active
-    parameters.trueTunniPointColor || "#0FF00"; // Default to green
-  
-  // Set stroke width based on active state
-  const strokeWidth = isActiveFinal ?
-    parameters.strokeWidth * 2 : // Thicker when active
-    parameters.strokeWidth;
-  
-  context.strokeStyle = tunniLineColor;
-  context.lineWidth = strokeWidth;
-  context.setLineDash(isActiveFinal ? [] : parameters.dashPattern); // Remove dash pattern when active
-  
-  // Iterate through all contours
-  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
-    // Iterate through all segments in the contour
-    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
-      if (segment.points.length === 4) {
-        // Check if it's a cubic segment
-        const pointTypes = segment.parentPointIndices.map(
-          index => path.pointTypes[index]
-        );
-        
-        // Both control points must be cubic
-        if (pointTypes[1] === 2 && pointTypes[2] === 2) {
-          const [p1, p2, p3, p4] = segment.points;
-          
-          // Draw lines from start to first control and from second control to end
-          // These represent the on-curve to off-curve vectors
-          context.beginPath();
-          context.moveTo(p1.x, p1.y);
-          context.lineTo(p2.x, p2.y);
-          context.stroke();
-          
-          context.beginPath();
-          context.moveTo(p4.x, p4.y);
-          context.lineTo(p3.x, p3.y);
-          context.stroke();
-          
-          // Draw line between control points (the current handle line)
-          context.beginPath();
-          context.moveTo(p2.x, p2.y);
-          context.lineTo(p3.x, p3.y);
-          context.stroke();
-          
-          // Draw the current Tunni point (midpoint between control points)
-          const tunniPoint = calculateTunniPoint(segment.points);
-          if (tunniPoint) {
-            context.fillStyle = tunniPointColor;
-            context.beginPath();
-            context.arc(tunniPoint.x, tunniPoint.y, isActiveFinal ? parameters.tunniPointSize * 1.5 : parameters.tunniPointSize, 0, 2 * Math.PI);
-            context.fill();
-          }
-          
-          // Draw the true Tunni point (intersection of on-curve to off-curve vectors)
-          const trueTunniPoint = calculateTrueTunniPoint(segment.points);
-          if (trueTunniPoint) {
-            context.fillStyle = trueTunniPointColor;
-            context.beginPath();
-            // Draw as a different shape to distinguish from current handle
-            const size = isActiveFinal ? parameters.tunniPointSize * 1.5 : parameters.tunniPointSize;
-            // Draw a diamond/square shape to distinguish from circle
-            context.rect(trueTunniPoint.x - size/2, trueTunniPoint.y - size/2, size, size);
-            context.fill();
-          }
-        }
-      }
-    }
-  }
-  
-  context.setLineDash([]);
-}
 //
 // allGlyphsCleanVisualizationLayerDefinition is not registered, but used
 // separately for the "clean" display.
@@ -1967,4 +1846,120 @@ function drawRoundRect(context, x, y, width, height, radii) {
 function getTextVerticalCenter(context, text) {
   const metrics = context.measureText(text);
   return (metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
+}
+
+// Register the Tunni visualization layer
+registerVisualizationLayerDefinition({
+  identifier: "fontra.tunni.lines",
+  name: "Tunni Lines",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: false,
+  zIndex: 50,
+  screenParameters: {
+    strokeWidth: 1,
+    dashPattern: [5, 5],
+    tunniPointSize: 4
+  },
+  colors: {
+    tunniLineColor: "#0000FF80",
+    tunniPointColor: "#0000FF",
+    trueTunniPointColor: "#f3b37eff"  // Green for true Tunni point
+ },
+  colorsDarkMode: {
+    tunniLineColor: "#00FFFF80",
+    tunniPointColor: "#00FFFF",
+    trueTunniPointColor: "#f3b37eff"  // Green remains the same in dark mode
+  },
+  draw: drawTunniLines
+});
+
+function drawTunniLines(context, positionedGlyph, parameters, model, controller) {
+  const path = positionedGlyph.glyph.path;
+  
+  // Set up colors and styles
+  const isTunniLayerActive = controller?.editor?.visualizationLayersSettings?.model?.["fontra.tunni.lines"] || false;
+ const isActiveFinal = isTunniLayerActive;
+  
+  // Set colors based on active state
+  const tunniLineColor = isActiveFinal ?
+    "#FF000080" : // Red color when active (more transparent)
+    parameters.tunniLineColor;
+    
+  const tunniPointColor = isActiveFinal ?
+    "#FF000" : // Red color when active
+    parameters.tunniPointColor;
+    
+  // For the true Tunni point, use a different color
+ const trueTunniPointColor = isActiveFinal ?
+    "#f3b37eff" : // Green color when active
+    parameters.trueTunniPointColor || "#0FF00"; // Default to green
+  
+  // Set stroke width based on active state
+  const strokeWidth = isActiveFinal ?
+    parameters.strokeWidth * 2 : // Thicker when active
+    parameters.strokeWidth;
+  
+  context.strokeStyle = tunniLineColor;
+  context.lineWidth = strokeWidth;
+  context.setLineDash(isActiveFinal ? [] : parameters.dashPattern); // Remove dash pattern when active
+  
+  // Iterate through all contours
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    // Iterate through all segments in the contour
+    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
+      if (segment.points.length === 4) {
+        // Check if it's a cubic segment
+        const pointTypes = segment.parentPointIndices.map(
+          index => path.pointTypes[index]
+        );
+        
+        // Both control points must be cubic
+        if (pointTypes[1] === 2 && pointTypes[2] === 2) {
+          const [p1, p2, p3, p4] = segment.points;
+          
+          // Draw lines from start to first control and from second control to end
+          // These represent the on-curve to off-curve vectors
+          context.beginPath();
+          context.moveTo(p1.x, p1.y);
+          context.lineTo(p2.x, p2.y);
+          context.stroke();
+          
+          context.beginPath();
+          context.moveTo(p4.x, p4.y);
+          context.lineTo(p3.x, p3.y);
+          context.stroke();
+          
+          // Draw line between control points (the current handle line)
+          context.beginPath();
+          context.moveTo(p2.x, p2.y);
+          context.lineTo(p3.x, p3.y);
+          context.stroke();
+          
+          // Draw the current Tunni point (midpoint between control points)
+          const tunniPoint = calculateTunniPoint(segment.points);
+          if (tunniPoint) {
+            context.fillStyle = tunniPointColor;
+            context.beginPath();
+            context.arc(tunniPoint.x, tunniPoint.y, isActiveFinal ? parameters.tunniPointSize * 1.5 : parameters.tunniPointSize, 0, 2 * Math.PI);
+            context.fill();
+          }
+          
+          // Draw the true Tunni point (intersection of on-curve to off-curve vectors)
+          const trueTunniPoint = calculateTrueTunniPoint(segment.points);
+          if (trueTunniPoint) {
+            context.fillStyle = trueTunniPointColor;
+            context.beginPath();
+            // Draw as a different shape to distinguish from current handle
+            const size = isActiveFinal ? parameters.tunniPointSize * 1.5 : parameters.tunniPointSize;
+            // Draw a diamond/square shape to distinguish from circle
+            context.rect(trueTunniPoint.x - size/2, trueTunniPoint.y - size/2, size, size);
+            context.fill();
+          }
+        }
+      }
+    }
+  }
+  
+  context.setLineDash([]);
 }
