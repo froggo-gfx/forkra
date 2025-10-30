@@ -117,6 +117,9 @@ export class SceneController {
       backgroundLayers: {},
       editingLayers: {},
       gridSnapEnabled: true,  // Default to enabled
+      showTunniDistance: true,
+      showTunniTension: true,
+      showTunniAngle: false,
     });
     this.sceneSettings = this.sceneSettingsController.model;
 
