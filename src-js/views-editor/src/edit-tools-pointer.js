@@ -107,8 +107,20 @@ export class PointerTool extends BaseTool {
           y: point.y - positionedGlyph.y,
         };
         const tunniHit = tunniLayerHitTest(glyphPoint, size, positionedGlyph);
-        isHoveringTunniPoint = tunniHit !== null;
-        isHoveringTrueTunniPoint = tunniHit !== null && tunniHit.hitType === "true-tunni-point";
+        if (tunniHit) {
+          // Only register the hit if the corresponding layer is active
+          if (tunniHit.hitType === "tunni-point" && isTunniCombinedLayerActive) {
+            isHoveringTunniPoint = true;
+          } else if (tunniHit.hitType === "true-tunni-point" && isTunniActualLayerActive) {
+            isHoveringTrueTunniPoint = true;
+          } else if (tunniHit.hitType === "tunni-point" && !isTunniCombinedLayerActive) {
+            // Visual tunni point hit but layer is not active, so ignore
+            isHoveringTunniPoint = false;
+          } else if (tunniHit.hitType === "true-tunni-point" && !isTunniActualLayerActive) {
+            // Actual tunni point hit but layer is not active, so ignore
+            isHoveringTrueTunniPoint = false;
+          }
+        }
       }
     }
 
@@ -124,13 +136,20 @@ export class PointerTool extends BaseTool {
       this.setCursorForRotationHandle(rotationHandle);
     } else if (resizeHandle) {
       this.setCursorForResizeHandle(resizeHandle);
-    } else if (isHoveringTunniPoint) {
+    } else if (isHoveringTunniPoint || isHoveringTrueTunniPoint) {
       // If hovering over a Tunni point, use pointer cursor
       // If it's a true Tunni point, we could use a different cursor
-      if (isHoveringTrueTunniPoint) {
+      // Only show cursor if the corresponding layer is active
+      const isTunniCombinedLayerActive = this.editor.visualizationLayersSettings.model["fontra.tunni.combined"];
+      const isTunniActualLayerActive = this.editor.visualizationLayersSettings.model["fontra.tunni.actual.points"];
+      
+      if (isHoveringTrueTunniPoint && isTunniActualLayerActive) {
         this.canvasController.canvas.style.cursor = "crosshair";  // Different cursor for true Tunni point
-      } else {
+      } else if (isHoveringTunniPoint && isTunniCombinedLayerActive) {
         this.canvasController.canvas.style.cursor = "pointer";  // Current handle
+      } else {
+        // If the corresponding layer isn't active, don't show Tunni cursor
+        this.setCursor();
       }
     } else {
       this.setCursor();
@@ -184,16 +203,21 @@ export class PointerTool extends BaseTool {
     let isTrueTunniPoint = false; // Flag to distinguish between current handle and true Tunni point
     
     if (isTunniCombinedLayerActive || isTunniActualLayerActive) {
-      // First try to handle true Tunni point (intersection)
-      tunniInitialState = handleTrueTunniPointMouseDown(
-        initialEvent,
-        sceneController,
-        this.editor.visualizationLayersSettings
-      );
+      // First try to handle true Tunni point (intersection) - but only if that layer is active
+      if (isTunniActualLayerActive) {
+        tunniInitialState = handleTrueTunniPointMouseDown(
+          initialEvent,
+          sceneController,
+          this.editor.visualizationLayersSettings
+        );
+        
+        if (tunniInitialState) {
+          isTrueTunniPoint = true;
+        }
+      }
       
-      if (tunniInitialState) {
-        isTrueTunniPoint = true;
-      } else {
+      // If true Tunni point wasn't hit (or layer wasn't active), try visual Tunni point - but only if that layer is active
+      if (!tunniInitialState && isTunniCombinedLayerActive) {
         // Fall back to current handle
         tunniInitialState = handleTunniPointMouseDown(
           initialEvent,
