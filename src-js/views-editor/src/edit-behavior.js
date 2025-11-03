@@ -1105,6 +1105,15 @@ const actionFactories = {
     };
   },
 
+  Interpolate: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    const lenPrevNext = vector.distance(next, prev);
+    const lenPrev = vector.distance(thePoint, prev);
+    let t = lenPrevNext > 0.0001 ? lenPrev / lenPrevNext : 0;
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      const prevNext = vector.subVectors(next, prev);
+      return vector.addVectors(prev, vector.mulVectorScalar(prevNext, t));
+    };
+  },
    
   //// equalize
   Equalize: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
@@ -1288,15 +1297,18 @@ const alternateRules = [
   [    ANY|NIL,    ANY|NIL,    ANY|SEL,    SMO|SEL,    OFF|SEL,    ANY|NIL,    false,      "ConstrainMiddle"],
 
   // Unselected smooth between sharp and off-curve, one of them selected
-    [    ANY|NIL,    ANY|SEL,    SMO|UNS,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    true,       "Equalize"],
+  [    ANY|NIL,    ANY|SEL,    SMO|UNS,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    true,       "Equalize"],
   
-    // Selected tangent point: its neighboring off-curve point should move
-    [    ANY|NIL,    SHA|SMO|UNS,SMO|SEL,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    true,       "Equalize"],
-    [    ANY|NIL,    OFF|SEL,    SMO|UNS,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    true,       "RotateNextEqualLength"],
+  // Selected tangent point: its neighboring off-curve point should move
+  [    ANY|NIL,    OFF|SEL,    SMO|UNS,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    true,       "RotateNextEqualLength"],
 
   // Two unselected smooth points between two off-curves, one of them selected
   [    ANY|NIL,    OFF|UNS,    SMO|UNS,    SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "InterpolatePrevPrevNext"],
   [    ANY|NIL,    OFF|SEL,    SMO|UNS,    SMO|UNS,    OFF|UNS,    ANY|NIL,    true,       "InterpolatePrevPrevNext"],
+
+  // Smooth on-curve with single off-curve (for on-curve interpolation)
+  [    ANY|NIL,    ANY|NIL,    SHA|OFF|UNS,SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "Interpolate"],
+  [    ANY|NIL,    ANY|NIL,    SHA|OFF|SEL,SMO|UNS,    OFF|UNS,    ANY|NIL,    true,       "Interpolate"],
 
   // An unselected smooth point between two selected off-curves
   [    ANY|NIL,    ANY|NIL,    OFF|SEL,    SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "Move"],
