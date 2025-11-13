@@ -1,5 +1,5 @@
 import { recordChanges } from "./change-recorder.js";
-import { ChangeCollector, wildcard } from "./changes.js";
+import { ChangeCollector, iterChanges, wildcard } from "./changes.js";
 import { DiscreteVariationModel } from "./discrete-variation-model.js";
 import { assert, enumerate, isObjectEmpty, throttleCalls, zip } from "./utils.js";
 
@@ -13,6 +13,17 @@ export class KerningController {
       { kerning: { [wildcard]: { sourceIdentifiers: null } } },
       (change, isExternalChange) => {
         this.clearCaches();
+      },
+      false,
+      true // immediate
+    );
+
+    this.fontController.addChangeListener?.(
+      { kerning: { [wildcard]: { values: null } } },
+      (change, isExternalChange) => {
+        for (const [leftName, rightName] of getKernPairsFromChange(change)) {
+          this.clearPairCache(leftName, rightName);
+        }
       },
       false,
       true // immediate
@@ -95,7 +106,7 @@ export class KerningController {
   }
 
   clearPairCache(leftName, rightName) {
-    if (this._pairFunctions[leftName]?.[rightName]) {
+    if (this._pairFunctions[leftName]?.[rightName] !== undefined) {
       delete this._pairFunctions[leftName][rightName];
     }
   }
@@ -568,4 +579,12 @@ function addGroupPrefix(groupName) {
     groupName = "@" + groupName;
   }
   return groupName;
+}
+
+function getKernPairsFromChange(kerningChange) {
+  const pairs = [];
+  for (const { path, change } of iterChanges(kerningChange)) {
+    pairs.push([path.at(-1), change.a?.[0]]);
+  }
+  return pairs;
 }
