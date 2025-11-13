@@ -1364,7 +1364,7 @@ class KerningTool extends MetricsBaseTool {
 
     for (const i of sourceIndices) {
       if (values[i] == null /* nullish */) {
-        values[i] = existingGroupValues[i];
+        values[i] = existingGroupValues?.[i] ?? 0;
       }
     }
 
