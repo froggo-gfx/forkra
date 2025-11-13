@@ -528,3 +528,19 @@ export function hasChange(obj) {
 function noopItemCast(value) {
   return value;
 }
+
+export function* iterChanges(change, prefix) {
+  if (!prefix) {
+    prefix = [];
+  }
+  const path = prefix.concat(change.p || []);
+  if (change.f) {
+    yield { path, change };
+    return;
+  }
+  for (const childChange of change.c || []) {
+    for (const change of iterChanges(childChange, path)) {
+      yield change;
+    }
+  }
+}
