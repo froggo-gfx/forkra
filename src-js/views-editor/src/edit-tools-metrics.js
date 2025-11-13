@@ -1250,7 +1250,7 @@ class KerningTool extends MetricsBaseTool {
       undoLabel = "delete kerning pair from all sources";
       changes = await editContext.delete(undoLabel);
     } else {
-      undoLabel = "delete kerning value";
+      undoLabel = "delete kerning pair from this source";
       const newValues = new Array(values.length).fill(null);
       changes = await editContext.edit(newValues, undoLabel, event);
     }
