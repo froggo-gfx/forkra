@@ -1235,24 +1235,27 @@ class KerningTool extends MetricsBaseTool {
   }
 
   async doDelete(event) {
-    const deepDelete = !event.altKey;
+    await this.deleteSelectedKerningPairs(event.altKey);
+  }
 
-    const { editContext, values } = this.getEditContext(!deepDelete);
+  async deleteSelectedKerningPairs(forThisSource) {
+    const { editContext, values } = this.getEditContext(forThisSource);
     if (!editContext) {
       return;
     }
 
     this.updateScrollAdjustBehavior();
 
-    let undoLabel;
+    const undoLabel = getDeleteKerningPairLabel(
+      this.selectedHandles.length,
+      forThisSource
+    );
     let changes;
-    if (deepDelete) {
-      undoLabel = "delete kerning pair from all sources";
-      changes = await editContext.delete(undoLabel);
-    } else {
-      undoLabel = "delete kerning pair from this source";
+    if (forThisSource) {
       const newValues = new Array(values.length).fill(null);
-      changes = await editContext.edit(newValues, undoLabel, event);
+      changes = await editContext.edit(newValues, undoLabel, null);
+    } else {
+      changes = await editContext.delete(undoLabel);
     }
     this.pushUndoItem(changes, undoLabel);
   }
@@ -1291,6 +1294,16 @@ class KerningTool extends MetricsBaseTool {
       if (forThisSource && !sourceIdentifier) {
         continue;
       }
+      contextMenuItems.push({
+        title: capitalizeFirstLetter(
+          getDeleteKerningPairLabel(this.selectedHandles.length, forThisSource)
+        ),
+        callback: (event) => this.deleteSelectedKerningPairs(forThisSource),
+      });
+
+      {
+      }
+
       if (leftIsGroup || rightIsGroup) {
         exceptions.push({});
         exceptions.push({
@@ -1499,4 +1512,10 @@ function sidebearingSelectorToId(kerningSelector) {
 
 function metricSelectionSet(selector) {
   return new Set(selector.metric.split(","));
+}
+
+function getDeleteKerningPairLabel(numPairs, forThisSource) {
+  const suffix = forThisSource ? "for this source" : "for all sources";
+  const plural_s = numPairs > 1 ? "s" : "";
+  return `delete kerning pair${plural_s} ${suffix}`;
 }
