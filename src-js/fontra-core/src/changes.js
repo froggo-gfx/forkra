@@ -530,6 +530,9 @@ function noopItemCast(value) {
 }
 
 export function* iterChanges(change, prefix) {
+  /* Iterate over all individual changes contained within the given change,
+     together with the change path associated with each change.
+  */
   if (!prefix) {
     prefix = [];
   }
