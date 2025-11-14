@@ -1269,65 +1269,68 @@ class KerningTool extends MetricsBaseTool {
     const contextMenuItems = [];
     const selector = this.hoveredHandle?.selector || this.hoveredMetric;
 
-    if (selector) {
-      const { leftGlyph, rightGlyph } = this.getGlyphNamesFromSelector(selector);
-      const { leftName, rightName } = this.getPairNamesFromSelector(selector);
+    if (!selector) {
+      return contextMenuItems;
+    }
 
-      const leftIsGroup = leftName.startsWith("@");
-      const rightIsGroup = rightName.startsWith("@");
+    const { leftGlyph, rightGlyph } = this.getGlyphNamesFromSelector(selector);
+    const { leftName, rightName } = this.getPairNamesFromSelector(selector);
 
-      const sourceIdentifier = this.getSourceIdentifier();
+    const leftIsGroup = leftName.startsWith("@");
+    const rightIsGroup = rightName.startsWith("@");
 
-      const exceptions = [];
+    const sourceIdentifier = this.getSourceIdentifier();
 
-      for (const forThisSource of [true, false]) {
-        if (forThisSource && !sourceIdentifier) {
-          continue;
-        }
-        if (leftIsGroup || rightIsGroup) {
-          exceptions.push({});
-          exceptions.push({
-            leftException: leftGlyph,
-            rightException: rightGlyph,
-            sourceIdentifier: forThisSource ? sourceIdentifier : undefined,
-          });
-        }
+    const exceptions = [];
 
-        if (leftIsGroup && rightIsGroup) {
-          exceptions.push({
-            leftException: leftGlyph,
-            rightException: rightName,
-            sourceIdentifier,
-          });
-          exceptions.push({
-            leftException: leftName,
-            rightException: rightGlyph,
-            sourceIdentifier,
-          });
-        }
+    for (const forThisSource of [true, false]) {
+      if (forThisSource && !sourceIdentifier) {
+        continue;
+      }
+      if (leftIsGroup || rightIsGroup) {
+        exceptions.push({});
+        exceptions.push({
+          leftException: leftGlyph,
+          rightException: rightGlyph,
+          sourceIdentifier: forThisSource ? sourceIdentifier : undefined,
+        });
       }
 
-      for (const { leftException, rightException, sourceIdentifier } of exceptions) {
-        if (!leftException) {
-          contextMenuItems.push(MenuItemDivider);
-        } else {
-          const suffix = sourceIdentifier ? "for this source" : "for all sources";
-          const label = `make kerning exception ${leftException} ${rightException} ${suffix}`;
-          contextMenuItems.push({
-            title: capitalizeFirstLetter(label),
-            callback: (event) =>
-              this.makeKerningException(
-                leftName,
-                rightName,
-                leftException,
-                rightException,
-                sourceIdentifier,
-                label
-              ),
-          });
-        }
+      if (leftIsGroup && rightIsGroup) {
+        exceptions.push({
+          leftException: leftGlyph,
+          rightException: rightName,
+          sourceIdentifier,
+        });
+        exceptions.push({
+          leftException: leftName,
+          rightException: rightGlyph,
+          sourceIdentifier,
+        });
       }
     }
+
+    for (const { leftException, rightException, sourceIdentifier } of exceptions) {
+      if (!leftException) {
+        contextMenuItems.push(MenuItemDivider);
+      } else {
+        const suffix = sourceIdentifier ? "for this source" : "for all sources";
+        const label = `make kerning exception ${leftException} ${rightException} ${suffix}`;
+        contextMenuItems.push({
+          title: capitalizeFirstLetter(label),
+          callback: (event) =>
+            this.makeKerningException(
+              leftName,
+              rightName,
+              leftException,
+              rightException,
+              sourceIdentifier,
+              label
+            ),
+        });
+      }
+    }
+
     return contextMenuItems;
   }
 
