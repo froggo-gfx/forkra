@@ -1273,6 +1273,10 @@ class KerningTool extends MetricsBaseTool {
       return contextMenuItems;
     }
 
+    if (!this.hoveredHandle?.selected) {
+      this._selectHandle(selector, false);
+    }
+
     const { leftGlyph, rightGlyph } = this.getGlyphNamesFromSelector(selector);
     const { leftName, rightName } = this.getPairNamesFromSelector(selector);
 
