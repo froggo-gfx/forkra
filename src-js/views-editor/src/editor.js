@@ -1658,6 +1658,7 @@ export class EditorController extends ViewController {
       const clipboardObject = {
         "text/plain": plainTextString,
         "text/html": svgString,
+        "image/svg+xml": svgString,
         "web image/svg+xml": svgString,
         "web fontra/static-glyph": jsonString,
       };
@@ -1986,7 +1987,14 @@ export class EditorController extends ViewController {
   }
 
   async _unpackClipboard() {
-    const plainText = await readFromClipboard("text/plain");
+    let plainText;
+
+    for (const type of ["web image/svg+xml", "image/svg+xml", "text/plain"]) {
+      plainText = await readFromClipboard(type);
+      if (plainText) {
+        break;
+      }
+    }
     if (!plainText) {
       return {};
     }
