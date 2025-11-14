@@ -1,5 +1,13 @@
 # Changelog for Fontra
 
+## 2025-12-14 [version 2025.11.2]
+
+[PR 2310](https://github.com/fontra/fontra/pull/2310):
+
+- Fix some edge cases related to creating kerning exceptions
+- Fix kerning pair deletion (there were some stale cache issues)
+- Add explicit "Delete kerning pair" context menus for "all sources" and "this source"
+
 ## 2025-12-13 [version 2025.11.1]
 
 - [fontra-pak] Issue releases instead of nightly builds. Fontra Pak releases use a [Calender Versioning](https://calver.org/) scheme: "YYYY.MM.PATCH" and can be [found here](https://github.com/fontra/fontra-pak/releases). So, with a GitHub account, you can now subscribe to release notifications by watching releases on the [fontra-pak repository](https://github.com/fontra/fontra-pak).
