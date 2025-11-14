@@ -1235,24 +1235,27 @@ class KerningTool extends MetricsBaseTool {
   }
 
   async doDelete(event) {
-    const deepDelete = !event.altKey;
+    await this.deleteSelectedKerningPairs(event.altKey);
+  }
 
-    const { editContext, values } = this.getEditContext(!deepDelete);
+  async deleteSelectedKerningPairs(forThisSource) {
+    const { editContext, values } = this.getEditContext(forThisSource);
     if (!editContext) {
       return;
     }
 
     this.updateScrollAdjustBehavior();
 
-    let undoLabel;
+    const undoLabel = getDeleteKerningPairLabel(
+      this.selectedHandles.length,
+      forThisSource
+    );
     let changes;
-    if (deepDelete) {
-      undoLabel = "delete kerning pair from all sources";
-      changes = await editContext.delete(undoLabel);
-    } else {
-      undoLabel = "delete kerning value";
+    if (forThisSource) {
       const newValues = new Array(values.length).fill(null);
-      changes = await editContext.edit(newValues, undoLabel, event);
+      changes = await editContext.edit(newValues, undoLabel, null);
+    } else {
+      changes = await editContext.delete(undoLabel);
     }
     this.pushUndoItem(changes, undoLabel);
   }
@@ -1269,65 +1272,82 @@ class KerningTool extends MetricsBaseTool {
     const contextMenuItems = [];
     const selector = this.hoveredHandle?.selector || this.hoveredMetric;
 
-    if (selector) {
-      const { leftGlyph, rightGlyph } = this.getGlyphNamesFromSelector(selector);
-      const { leftName, rightName } = this.getPairNamesFromSelector(selector);
+    if (!selector) {
+      return contextMenuItems;
+    }
 
-      const leftIsGroup = leftName.startsWith("@");
-      const rightIsGroup = rightName.startsWith("@");
+    if (!this.hoveredHandle?.selected) {
+      this._selectHandle(selector, false);
+    }
 
-      const sourceIdentifier = this.getSourceIdentifier();
+    const { leftGlyph, rightGlyph } = this.getGlyphNamesFromSelector(selector);
+    const { leftName, rightName } = this.getPairNamesFromSelector(selector);
 
-      const exceptions = [];
+    const leftIsGroup = leftName.startsWith("@");
+    const rightIsGroup = rightName.startsWith("@");
 
-      for (const forThisSource of [true, false]) {
-        if (forThisSource && !sourceIdentifier) {
-          continue;
-        }
-        if (leftIsGroup || rightIsGroup) {
-          exceptions.push({});
-          exceptions.push({
-            leftException: leftGlyph,
-            rightException: rightGlyph,
-            sourceIdentifier: forThisSource ? sourceIdentifier : undefined,
-          });
-        }
+    const sourceIdentifier = this.getSourceIdentifier();
 
-        if (leftIsGroup && rightIsGroup) {
-          exceptions.push({
-            leftException: leftGlyph,
-            rightException: rightName,
-            sourceIdentifier,
-          });
-          exceptions.push({
-            leftException: leftName,
-            rightException: rightGlyph,
-            sourceIdentifier,
-          });
-        }
+    const exceptions = [];
+
+    for (const forThisSource of [true, false]) {
+      if (forThisSource && !sourceIdentifier) {
+        continue;
+      }
+      contextMenuItems.push({
+        title: capitalizeFirstLetter(
+          getDeleteKerningPairLabel(this.selectedHandles.length, forThisSource)
+        ),
+        callback: (event) => this.deleteSelectedKerningPairs(forThisSource),
+      });
+
+      {
       }
 
-      for (const { leftException, rightException, sourceIdentifier } of exceptions) {
-        if (!leftException) {
-          contextMenuItems.push(MenuItemDivider);
-        } else {
-          const suffix = sourceIdentifier ? "for this source" : "for all sources";
-          const label = `make kerning exception ${leftException} ${rightException} ${suffix}`;
-          contextMenuItems.push({
-            title: capitalizeFirstLetter(label),
-            callback: (event) =>
-              this.makeKerningException(
-                leftName,
-                rightName,
-                leftException,
-                rightException,
-                sourceIdentifier,
-                label
-              ),
-          });
-        }
+      if (leftIsGroup || rightIsGroup) {
+        exceptions.push({});
+        exceptions.push({
+          leftException: leftGlyph,
+          rightException: rightGlyph,
+          sourceIdentifier: forThisSource ? sourceIdentifier : undefined,
+        });
+      }
+
+      if (leftIsGroup && rightIsGroup) {
+        exceptions.push({
+          leftException: leftGlyph,
+          rightException: rightName,
+          sourceIdentifier,
+        });
+        exceptions.push({
+          leftException: leftName,
+          rightException: rightGlyph,
+          sourceIdentifier,
+        });
       }
     }
+
+    for (const { leftException, rightException, sourceIdentifier } of exceptions) {
+      if (!leftException) {
+        contextMenuItems.push(MenuItemDivider);
+      } else {
+        const suffix = sourceIdentifier ? "for this source" : "for all sources";
+        const label = `make kerning exception ${leftException} ${rightException} ${suffix}`;
+        contextMenuItems.push({
+          title: capitalizeFirstLetter(label),
+          callback: (event) =>
+            this.makeKerningException(
+              leftName,
+              rightName,
+              leftException,
+              rightException,
+              sourceIdentifier,
+              label
+            ),
+        });
+      }
+    }
+
     return contextMenuItems;
   }
 
@@ -1364,7 +1384,7 @@ class KerningTool extends MetricsBaseTool {
 
     for (const i of sourceIndices) {
       if (values[i] == null /* nullish */) {
-        values[i] = existingGroupValues[i];
+        values[i] = existingGroupValues?.[i] ?? 0;
       }
     }
 
@@ -1492,4 +1512,10 @@ function sidebearingSelectorToId(kerningSelector) {
 
 function metricSelectionSet(selector) {
   return new Set(selector.metric.split(","));
+}
+
+function getDeleteKerningPairLabel(numPairs, forThisSource) {
+  const suffix = forThisSource ? "for this source" : "for all sources";
+  const plural_s = numPairs > 1 ? "s" : "";
+  return `delete kerning pair${plural_s} ${suffix}`;
 }
