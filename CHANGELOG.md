@@ -1,5 +1,9 @@
 # Changelog for Fontra
 
+## 2025-12-15 [version 2025.11.3]
+
+- Improve pasting from other applications. This is done by recognizing SVG data on the clipboard with type `image/svg+xml`. Previously Fontra only recognized SVG when it was on the `text/plain` clipboard, but not all applications provide that. [Issue 2032](https://github.com/fontra/fontra/issues/2032), [PR 2312](https://github.com/fontra/fontra/pull/2312)
+
 ## 2025-12-14 [version 2025.11.2]
 
 [PR 2310](https://github.com/fontra/fontra/pull/2310):
