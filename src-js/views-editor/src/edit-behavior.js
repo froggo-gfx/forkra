@@ -1321,13 +1321,12 @@ const alternateRules = [
   // Selected tangent point: its neighboring off-curve point should move
   [    ANY|NIL,    OFF|SEL,    SMO|UNS,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    true,       "RotateNextEqualLength"],
 
-  // Two unselected smooth points between two off-curves, one of them selected
-  [    ANY|NIL,    OFF|UNS,    SMO|UNS,    SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "InterpolatePrevPrevNext"],
-  [    ANY|NIL,    OFF|SEL,    SMO|UNS,    SMO|UNS,    OFF|UNS,    ANY|NIL,    true,       "InterpolatePrevPrevNext"],
+[    ANY|NIL,    OFF|UNS,    SMO|UNS,    SMO|SEL,    OFF|SEL,    ANY|NIL,    true,       "InterpolatePrevPrevNext"],
+[    ANY|NIL,    OFF|SEL,    SMO|UNS,    SMO|SEL,    OFF|UNS,    ANY|NIL,    true,       "InterpolatePrevPrevNext"],
 
-  // Smooth on-curve with single off-curve (for on-curve interpolation)
-  [    ANY|NIL,    ANY|NIL,    SHA|OFF|UNS,SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "Interpolate"],
-  [    ANY|NIL,    ANY|NIL,    SHA|OFF|SEL,SMO|UNS,    OFF|UNS,    ANY|NIL,    true,       "Interpolate"],
+// Smooth on-curve with single off-curve - only when SMOOTH point is selected
+[    ANY|NIL,    ANY|NIL,    SHA|OFF|UNS,SMO|SEL,    OFF|SEL,    ANY|NIL,    true,       "Interpolate"],
+[    ANY|NIL,    ANY|NIL,    SHA|OFF|SEL,SMO|SEL,    OFF|UNS,    ANY|NIL,    true,       "Interpolate"],
 
   // An unselected smooth point between two selected off-curves
   [    ANY|NIL,    ANY|NIL,    OFF|SEL,    SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "Move"],
