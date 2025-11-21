@@ -1,10 +1,10 @@
 # Changelog for Fontra
 
-## 2025-12-15 [version 2025.11.3]
+## 2025-11-15 [version 2025.11.3]
 
 - Improve pasting vector data from other applications. This is done by recognizing SVG data on the clipboard with type `image/svg+xml`. Previously Fontra only recognized SVG when it was on the `text/plain` clipboard, but not all applications provide that. [Issue 2032](https://github.com/fontra/fontra/issues/2032), [PR 2312](https://github.com/fontra/fontra/pull/2312)
 
-## 2025-12-14 [version 2025.11.2]
+## 2025-11-14 [version 2025.11.2]
 
 [PR 2310](https://github.com/fontra/fontra/pull/2310):
 
@@ -12,7 +12,7 @@
 - Fix kerning pair deletion (there were some stale cache issues)
 - Add explicit "Delete kerning pair" context menus for "all sources" and "this source"
 
-## 2025-12-13 [version 2025.11.1]
+## 2025-11-13 [version 2025.11.1]
 
 - [fontra-pak] Issue releases instead of nightly builds. Fontra Pak releases use a [Calender Versioning](https://calver.org/) scheme: "YYYY.MM.PATCH" and can be [found here](https://github.com/fontra/fontra-pak/releases). So, with a GitHub account, you can now subscribe to release notifications by watching releases on the [fontra-pak repository](https://github.com/fontra/fontra-pak).
 - Add support for sparse kerning exceptions. These are kerning exceptions that only exist in some locations and not all. [Issue 2305](https://github.com/fontra/fontra/issues/2305), [PR 2306](https://github.com/fontra/fontra/pull/2306)
