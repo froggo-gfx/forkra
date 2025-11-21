@@ -390,6 +390,7 @@ class DesignspaceBackend:
                     layer=sourceLayer,
                     location=makeDenseLocation(source.location, self.defaultLocation),
                     isDefault=source == self.dsDoc.default,
+                    isSparse=source.layerName is not None,
                 )
             )
 
@@ -788,6 +789,7 @@ class DesignspaceBackend:
             layer=ufoLayer,
             location=self.defaultLocation,
             isDefault=True,
+            isSparse=False,
         )
         self.dsSources.append(dsSource)
         self.dsDoc.sources.append(dsSource.asDSSourceDescriptor(self.familyName))
@@ -902,6 +904,7 @@ class DesignspaceBackend:
             name=sourceName,
             layer=ufoLayer,
             location=location,
+            isSparse=notAtPole,
         )
 
     def _findDSSourceForSparseSource(self, location, dsSources=None):
@@ -1109,6 +1112,7 @@ class DesignspaceBackend:
                     identifier=sourceIdentifier,
                     name=fontSource.name,
                     location=denseSourceLocation,
+                    isSparse=fontSource.isSparse,
                 )
             else:
                 if not fontSource.isSparse:
@@ -1129,6 +1133,7 @@ class DesignspaceBackend:
                     layer=ufoLayer,
                     location=denseSourceLocation,
                     isDefault=denseSourceLocation == self.defaultLocation,
+                    isSparse=fontSource.isSparse,
                 )
 
             if not dsSource.isSparse:
@@ -1717,6 +1722,7 @@ class DSSource:
     layer: UFOLayer
     location: dict[str, float]
     isDefault: bool = False
+    isSparse: bool = False
 
     @cached_property
     def locationTuple(self):
@@ -1782,7 +1788,14 @@ class DSSource:
 
     def asDSSourceDescriptor(self, familyName) -> SourceDescriptor:
         defaultLayerName = self.layer.reader.getDefaultLayerName()
-        ufoLayerName = self.layer.name if self.layer.name != defaultLayerName else None
+        ufoLayerName = (
+            self.layer.name
+            if (
+                self.layer.name != defaultLayerName
+                or (self.isSparse and not self.isDefault)
+            )
+            else None
+        )
         return SourceDescriptor(
             name=self.identifier,
             styleName=self.name,
@@ -1791,10 +1804,6 @@ class DSSource:
             path=self.layer.path,
             layerName=ufoLayerName,
         )
-
-    @cached_property
-    def isSparse(self):
-        return not self.layer.isDefaultLayer
 
 
 @dataclass(kw_only=True, frozen=True)
