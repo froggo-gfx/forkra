@@ -1,5 +1,11 @@
 # Changelog for Fontra
 
+## 2025-11-?? [version 2025.11.4]
+
+- Add "Is Sparse" checkbox to the font source UI. A "sparse" font source does not participate in kerning and in line metrics. (Part of the designspace PR mentioned below)
+- In the sources panel, the default source name is now highlighted in bold. (Part of the designspace PR mentioned below)
+- [designspace] Synchronize "sparse master" behavior with fontmake's behavior: if a `<source>` element has a `layer` attribute, consider the source "sparse". (Fontra's old behavior only considered sources sparse when the layer attribute was presend _and_ differed from the default layer name.) [Issue 2314](https://github.com/fontra/fontra/issues/2314), [PR 2315](https://github.com/fontra/fontra/pull/2315)
+
 ## 2025-11-15 [version 2025.11.3]
 
 - Improve pasting vector data from other applications. This is done by recognizing SVG data on the clipboard with type `image/svg+xml`. Previously Fontra only recognized SVG when it was on the `text/plain` clipboard, but not all applications provide that. [Issue 2032](https://github.com/fontra/fontra/issues/2032), [PR 2312](https://github.com/fontra/fontra/pull/2312)
