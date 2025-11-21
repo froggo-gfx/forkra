@@ -1107,7 +1107,7 @@ class DesignspaceBackend:
             if dsSource is not None:
                 if dsSource.isDefault and dsSource.isSparse:
                     raise ValueError("The default source cannot be sparse")
-                if not fontSource.isSparse and dsSource.mustSourceBeSparse:
+                if not fontSource.isSparse and dsSource.mustBeSparse:
                     raise ValueError(
                         "A source using a non-default UFO layer cannot be made not sparse"
                     )
@@ -1810,7 +1810,7 @@ class DSSource:
         )
 
     @property
-    def mustSourceBeSparse(self):
+    def mustBeSparse(self):
         return not self.layer.isDefaultLayer
 
 
