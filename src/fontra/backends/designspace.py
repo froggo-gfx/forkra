@@ -1105,8 +1105,8 @@ class DesignspaceBackend:
                 )
 
             if dsSource is not None:
-                if dsSource.isSparse != fontSource.isSparse:
-                    raise ValueError("Modifying isSparse is currently not supported")
+                if dsSource.isDefault and dsSource.isSparse:
+                    raise ValueError("The default source cannot be sparse")
                 dsSource = replace(
                     dsSource,
                     identifier=sourceIdentifier,
