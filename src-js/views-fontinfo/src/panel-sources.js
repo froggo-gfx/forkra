@@ -126,7 +126,8 @@ export class SourcesPanel extends BaseInfoPanel {
         sources,
         identifier,
         this.postChange.bind(this),
-        this.setupUI.bind(this)
+        this.setupUI.bind(this),
+        identifier === this.fontController.defaultSourceIdentifier
       );
       containerSourcesNames.appendChild(sourceNameBoxElement);
     }
@@ -484,21 +485,34 @@ addStyleSheet(`
     grid-column-gap: 1em;
   }
 
+  .fontra-ui-font-info-sources-panel-source-name-box.default {
+    font-weight: bold;
+  }
+
   .fontra-ui-font-info-sources-panel-source-name-box.selected {
     background-color: var(--horizontal-rule-color);
   }
 `);
 
 class SourceNameBox extends HTMLElement {
-  constructor(fontAxesSourceSpace, sources, sourceIdentifier, postChange, setupUI) {
+  constructor(
+    fontAxesSourceSpace,
+    sources,
+    sourceIdentifier,
+    postChange,
+    setupUI,
+    isDefault
+  ) {
     super();
     this.classList.add("fontra-ui-font-info-sources-panel-source-name-box");
+    this.classList.toggle("default", isDefault);
     this.id = `source-name-box-${sourceIdentifier}`;
     this.fontAxesSourceSpace = fontAxesSourceSpace;
     this.sources = sources;
     this.sourceIdentifier = sourceIdentifier;
     this.postChange = postChange;
     this.setupUI = setupUI;
+    this.isDefault = isDefault;
     this._updateContents();
     this._selected = false;
     this.onclick = (event) => (this.selected = true);
@@ -506,6 +520,10 @@ class SourceNameBox extends HTMLElement {
 
   get source() {
     return this.sources[this.sourceIdentifier];
+  }
+
+  get sourceIsDefault() {
+    this.fontController.defaultSourceIdentifier;
   }
 
   get selected() {
@@ -546,16 +564,20 @@ class SourceNameBox extends HTMLElement {
         this.sources,
         this.sourceIdentifier,
         this.postChange.bind(this),
-        this.setupUI.bind(this)
+        this.setupUI.bind(this),
+        this.isDefault
       )
     );
   }
 
   _updateContents() {
     this.append(
-      html.div({ id: `source-name-box-name-${this.sourceIdentifier}` }, [
-        this.source.name,
-      ])
+      html.div(
+        {
+          id: `source-name-box-name-${this.sourceIdentifier}`,
+        },
+        [this.source.name]
+      )
     );
   }
 }
@@ -573,7 +595,14 @@ addStyleSheet(`
 `);
 
 class SourceBox extends HTMLElement {
-  constructor(fontAxesSourceSpace, sources, sourceIdentifier, postChange, setupUI) {
+  constructor(
+    fontAxesSourceSpace,
+    sources,
+    sourceIdentifier,
+    postChange,
+    setupUI,
+    isDefault
+  ) {
     super();
     this.classList.add("fontra-ui-font-info-sources-panel-source-box");
     this.fontAxesSourceSpace = fontAxesSourceSpace;
@@ -581,6 +610,7 @@ class SourceBox extends HTMLElement {
     this.sourceIdentifier = sourceIdentifier;
     this.postChange = postChange;
     this.setupUI = setupUI;
+    this.isDefault = isDefault;
     this.controllers = {};
     this.models = this._getModels();
     this.customDataKeys = openTypeSettingsFontSourcesLevel.map((item) => item.key);
@@ -597,7 +627,7 @@ class SourceBox extends HTMLElement {
       general: {
         name: source.name,
         italicAngle: source.italicAngle ? source.italicAngle : 0,
-        //isSparse: source.isSparse ? source.isSparse : false,
+        isSparse: source.isSparse ? source.isSparse : false,
       },
       location: { ...source.location },
       lineMetricsHorizontalLayout: prepareLineMetricsHorForController(
@@ -683,6 +713,7 @@ class SourceBox extends HTMLElement {
           return;
         }
       }
+
       this.editSource((source) => {
         if (typeof event.newValue == "string") {
           source[event.key] = event.newValue.trim();
@@ -698,6 +729,10 @@ class SourceBox extends HTMLElement {
           element.innerHTML = source[event.key];
         }
       }, `edit ${event.key}`); // TODO: translation
+
+      if (event.key == "isSparse") {
+        this._updateContents();
+      }
     });
 
     this.controllers.location.addListener((event) => {
@@ -777,7 +812,7 @@ input {
       {
         label: getLabelFromKey("general"),
         id: "general",
-        content: buildElement(this.controllers.general),
+        content: buildElement(this.controllers.general, this.isDefault),
         open: true,
       },
     ];
@@ -842,7 +877,7 @@ input {
 
 customElements.define("source-box", SourceBox);
 
-function buildElement(controller) {
+function buildElement(controller, sourceIsDefault) {
   let items = [];
   for (const key in controller.model) {
     items.push([getLabelFromKey(key), key, controller.model[key]]);
@@ -853,7 +888,10 @@ function buildElement(controller) {
     items
       .map(([labelName, keyName, value]) => {
         if (typeof value === "boolean") {
-          return [html.div(), labeledCheckbox(labelName, controller, keyName, {})];
+          const checkbox = labeledCheckbox(labelName, controller, keyName, {
+            disabled: keyName === "isSparse" && sourceIsDefault,
+          });
+          return [html.div(), checkbox];
         } else if (typeof value === "number") {
           return labeledTextInput(labelName, controller, keyName, {
             continuous: false,
