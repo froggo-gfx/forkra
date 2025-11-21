@@ -522,10 +522,6 @@ class SourceNameBox extends HTMLElement {
     return this.sources[this.sourceIdentifier];
   }
 
-  get sourceIsDefault() {
-    this.fontController.defaultSourceIdentifier;
-  }
-
   get selected() {
     return this._selected;
   }
@@ -572,12 +568,9 @@ class SourceNameBox extends HTMLElement {
 
   _updateContents() {
     this.append(
-      html.div(
-        {
-          id: `source-name-box-name-${this.sourceIdentifier}`,
-        },
-        [this.source.name]
-      )
+      html.div({ id: `source-name-box-name-${this.sourceIdentifier}` }, [
+        this.source.name,
+      ])
     );
   }
 }
