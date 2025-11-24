@@ -54,7 +54,7 @@ addStyleSheet(`
   display: grid;
   align-content: start;
   gap: 0.5em;
-  overflow: auto;
+  overflow: scroll;
 }
 
 .font-sources-container-wrapper {
@@ -64,7 +64,7 @@ addStyleSheet(`
   overflow: hidden;
 }
 
-#sources-panel.font-info-panel {
+#sources-panel {
   height: 100%;
 }
 `);
