@@ -50,7 +50,7 @@ class FileWatcher:
 
 
 def cleanupWatchFilesChanges(
-    changes: set[tuple[Change, str]]
+    changes: set[tuple[Change, str]],
 ) -> set[tuple[Change, str]]:
     # If a path is mentioned with more than one event type, we pick the most
     # appropriate one among them:

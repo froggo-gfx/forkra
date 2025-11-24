@@ -2450,7 +2450,7 @@ def prefixGroups(groups, prefix):
 
 
 def splitGroups(
-    groups: dict[str, list[str]]
+    groups: dict[str, list[str]],
 ) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     groupsSide1 = {}
     groupsSide2 = {}
