@@ -2,6 +2,7 @@
 
 ## 2025-11-?? [version 2025.11.4]
 
+- [font sources panel] Make source name list and source info panel scroll independently. [Issue 2318](https://github.com/fontra/fontra/issues/2318)
 - Add "Is Sparse" checkbox to the font source UI. A "sparse" font source does not participate in kerning and in line metrics. (Part of the designspace PR mentioned below)
 - In the sources panel, the default source name is now highlighted in bold. (Part of the designspace PR mentioned below)
 - [designspace] Synchronize "sparse master" behavior with fontmake's behavior: if a `<source>` element has a `layer` attribute, consider the source "sparse". (Fontra's old behavior only considered sources sparse when the layer attribute was present _and_ differed from the default layer name.) [Issue 2314](https://github.com/fontra/fontra/issues/2314), [PR 2315](https://github.com/fontra/fontra/pull/2315)
