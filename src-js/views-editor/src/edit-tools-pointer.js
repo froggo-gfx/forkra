@@ -475,12 +475,13 @@ export class PointerTool extends BaseTool {
     const fixDragLeftValue = clickedHandle.includes("left") ? -1 : 1;
     const fixDragBottomValue = clickedHandle.includes("bottom") ? -1 : 1;
 
+    const glyphController =
+      await sceneController.sceneModel.getSelectedStaticGlyphController();
+
     // The following is only needed in case of rotation, because we want to have
     // the roation angle for all layers the same and not different.
     let regularPinPointSelectedLayer, altPinPointSelectedLayer;
     if (rotation) {
-      const glyphController =
-        await sceneController.sceneModel.getSelectedStaticGlyphController();
       const selectedLayerBounds = glyphController.getSelectionBounds(
         selection,
         this.editor.fontController.getBackgroundImageBoundsFunc
@@ -494,6 +495,7 @@ export class PointerTool extends BaseTool {
     }
 
     const staticGlyphControllers = await sceneController.getStaticGlyphControllers();
+
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const initialPoint = sceneController.selectedGlyphPoint(initialEvent);
 
@@ -505,7 +507,9 @@ export class PointerTool extends BaseTool {
           sceneController.selection,
           this.scalingEditBehavior
         );
-        const layerBounds = staticGlyphControllers[layerName].getSelectionBounds(
+        const layerBounds = (
+          staticGlyphControllers[layerName] || glyphController
+        ).getSelectionBounds(
           selection,
           this.editor.fontController.getBackgroundImageBoundsFunc
         );
@@ -513,7 +517,7 @@ export class PointerTool extends BaseTool {
         return {
           layerName,
           changePath: ["layers", layerName, "glyph"],
-          layerGlyphController: staticGlyphControllers[layerName],
+          layerGlyph: layerGlyph,
           editBehavior: behaviorFactory.getTransformBehavior("default"),
           regularPinPoint: getPinPoint(layerBounds, origin.x, origin.y),
           altPinPoint: getPinPoint(layerBounds, undefined, undefined),
@@ -530,7 +534,7 @@ export class PointerTool extends BaseTool {
 
         const deepEditChanges = [];
         for (const layer of layerInfo) {
-          const layerGlyph = layer.layerGlyphController.instance;
+          const layerGlyph = layer.layerGlyph;
           const pinPoint = event.altKey ? layer.altPinPoint : layer.regularPinPoint;
           let transformation;
           if (rotation) {
