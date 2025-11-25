@@ -1010,7 +1010,7 @@ export default class TransformationPanel extends Panel {
       const rollbackChanges = [];
       for (const [layerName, layerGlyph] of Object.entries(editLayerGlyphs)) {
         const changePath = ["layers", layerName, "glyph"];
-        const controller = staticGlyphControllers[layerName];
+        const controller = staticGlyphControllers[layerName] || glyphController;
 
         const boundingBoxes = movableObjects.map((obj) =>
           obj.computeBounds(
