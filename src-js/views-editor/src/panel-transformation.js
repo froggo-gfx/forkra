@@ -743,6 +743,16 @@ export default class TransformationPanel extends Panel {
       positionedGlyph.varGlyph.glyph.layers
     );
 
+    if (!positionedGlyph.glyph.layerName) {
+      const newLayerName =
+        this.fontController.fontSourcesInstancer.getSourceIdentifierForLocation(
+          this.sceneController.sceneSettings.fontLocationSourceMapped
+        );
+      if (newLayerName) {
+        editLayerGlyphs[newLayerName] = positionedGlyph.glyph.instance;
+      }
+    }
+
     const layerPaths = await mapObjectValuesAsync(
       editLayerGlyphs,
       async (layerGlyph) => {
