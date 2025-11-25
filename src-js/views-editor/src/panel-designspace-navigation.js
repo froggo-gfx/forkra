@@ -1143,7 +1143,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     );
   }
 
-  async goToNearestSource() {
+  async goToNearestSource(allowSparseSource = true) {
     const glyphController = await this.sceneModel.getSelectedVariableGlyphController();
     if (!glyphController) {
       this.sceneController.scrollAdjustBehavior =
@@ -1155,7 +1155,9 @@ export default class DesignspaceNavigationPanel extends Panel {
         ...defaultLocation,
         ...this.sceneSettings.fontLocationSourceMapped,
       };
-      const sourceIdentifiers = this.fontController.getSortedSourceIdentifiers();
+      const sourceIdentifiers = this.fontController.getSortedSourceIdentifiers(
+        !allowSparseSource
+      );
       if (sourceIdentifiers.length) {
         const locations = sourceIdentifiers.map((sourceIdentifier) => ({
           ...defaultLocation,

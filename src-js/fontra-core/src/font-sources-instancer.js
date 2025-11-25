@@ -33,9 +33,15 @@ export class FontSourcesInstancer {
     this._instanceCache = new LRUCache(50);
   }
 
-  getSourceIdentifierForLocation(location) {
+  getSourceIdentifierForLocation(location, allowSparseSource = true) {
     location = { ...this.defaultSourceLocation, ...location };
-    return this._sourceIdsByLocationString[locationToString(location)];
+    const sourceIdentifier =
+      this._sourceIdsByLocationString[locationToString(location)];
+    return sourceIdentifier &&
+      !allowSparseSource &&
+      this.fontSources[sourceIdentifier].isSparse
+      ? undefined
+      : sourceIdentifier;
   }
 
   get model() {

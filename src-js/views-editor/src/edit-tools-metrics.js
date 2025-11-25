@@ -1175,13 +1175,14 @@ class KerningTool extends MetricsBaseTool {
       ]
     );
     if (result === "goToNearestSource") {
-      this.editor.goToNearestSource();
+      this.editor.goToNearestSource(false);
     }
   }
 
   getSourceIdentifier() {
     return this.fontController.fontSourcesInstancer.getSourceIdentifierForLocation(
-      this.sceneSettings.fontLocationSourceMapped
+      this.sceneSettings.fontLocationSourceMapped,
+      false
     );
   }
 
