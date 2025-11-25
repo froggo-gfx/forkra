@@ -53,14 +53,17 @@ export class KerningController {
     const locations = this.kernData.sourceIdentifiers.map(
       (sourceIdentifier) => this.fontController.sources[sourceIdentifier].location
     );
-    this.model = new DiscreteVariationModel(
-      locations,
-      this.fontController.fontAxesSourceSpace
-    );
 
     this._pairFunctions = {};
   }
 
+  get model() {
+    return this.fontController.fontSourcesInstancer.model;
+  }
+
+  getNonSparseSourceIdentifiers() {
+    return this.fontController.fontSourcesInstancer.getNonSparseSourceIdentifiers();
+  }
   _updatePairGroupMappings() {
     this.leftPairGroupMapping = makeGlyphGroupMapping(this.kernData.groupsSide1);
     this.rightPairGroupMapping = makeGlyphGroupMapping(this.kernData.groupsSide2);
@@ -68,6 +71,14 @@ export class KerningController {
 
   get sourceIdentifiers() {
     return this.kernData.sourceIdentifiers;
+  }
+
+  get sourceIdentifierIndexMapping() {
+    const mapping = {};
+    for (const [i, sourceIdentifier] of enumerate(this.sourceIdentifiers)) {
+      mapping[sourceIdentifier] = i;
+    }
+    return mapping;
   }
 
   get values() {
@@ -151,9 +162,11 @@ export class KerningController {
           }
         });
 
-      // Replace missing (nullish) values with zeros
-      const denseSourceValues = finalSourceValues.map((v) => (v == null ? 0 : v));
-      const deltas = this.model.getDeltas(denseSourceValues);
+      const mapping = this.sourceIdentifierIndexMapping;
+      const mappedSourceValues = this.getNonSparseSourceIdentifiers().map(
+        (sourceIdentifier) => finalSourceValues[mapping[sourceIdentifier]] ?? 0
+      );
+      const deltas = this.model.getDeltas(mappedSourceValues);
       return (location) => this.model.interpolateFromDeltas(location, deltas).instance;
     }
   }
