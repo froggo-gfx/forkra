@@ -4,7 +4,7 @@
 
 - Improve the "just start editing and the glyph source will come into existence" behavior for these cases ([PR 2319](https://github.com/fontra/fontra/pull/2319)):
   - Dragging the selection bounds handles to scale or rotate
-  - Various items in the Selection Transformation panel
+  - Using various items in the Selection Transformation panel
 - [font sources panel] Make source name list and source info panel scroll independently. [Issue 2318](https://github.com/fontra/fontra/issues/2318)
 - Add "Is Sparse" checkbox to the font source UI. A "sparse" font source does not participate in kerning and in line metrics. (Part of the designspace PR mentioned below)
 - In the sources panel, the default source name is now highlighted in bold. (Part of the designspace PR mentioned below)
