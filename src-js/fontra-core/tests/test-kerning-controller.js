@@ -17,7 +17,6 @@ describe("KerningController Tests", () => {
     ],
     sources: {
       a: { location: { Weight: 400 } },
-      ab: { location: { Weight: 500 } },
       b: { location: { Weight: 600 } },
       c: { location: { Weight: 800 } },
       d: { location: { Weight: 400, Width: 200 } },
