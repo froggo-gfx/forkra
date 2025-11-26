@@ -924,6 +924,13 @@ export default class DesignspaceNavigationPanel extends Panel {
           this.sceneController.scrollAdjustBehavior =
             this.getScrollAdjustBehavior("pin-glyph-center");
 
+          if (
+            !event.newValue &&
+            glyph.sources.filter((source) => !source.inactive).length < 2
+          ) {
+            return; // Don't deactivate the last active source or bad things will happen
+          }
+
           glyph.sources[index].inactive = !event.newValue;
 
           return translate(
