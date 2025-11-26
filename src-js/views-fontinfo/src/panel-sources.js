@@ -232,10 +232,6 @@ export class SourcesPanel extends BaseInfoPanel {
       kerning: await this.fontController.getKerning(),
     };
 
-    const sourceChanges = recordChanges(root, (root) => {
-      root.sources[sourceIdentifier] = newSource;
-    });
-
     const kerningChanges = [];
     for (const [kernTag, kernData] of Object.entries(root.kerning)) {
       const kerningController = await this.fontController.getKerningController(kernTag);
@@ -246,6 +242,10 @@ export class SourcesPanel extends BaseInfoPanel {
       );
       kerningChanges.push(changes);
     }
+
+    const sourceChanges = recordChanges(root, (root) => {
+      root.sources[sourceIdentifier] = newSource;
+    });
 
     const finalChanges = sourceChanges.concat(...kerningChanges);
 
