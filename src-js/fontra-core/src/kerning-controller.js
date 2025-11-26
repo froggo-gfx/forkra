@@ -49,11 +49,6 @@ export class KerningController {
 
   _setup() {
     this._updatePairGroupMappings();
-
-    const locations = this.kernData.sourceIdentifiers.map(
-      (sourceIdentifier) => this.fontController.sources[sourceIdentifier].location
-    );
-
     this._pairFunctions = {};
   }
 
@@ -64,6 +59,7 @@ export class KerningController {
   getNonSparseSourceIdentifiers() {
     return this.fontController.fontSourcesInstancer.getNonSparseSourceIdentifiers();
   }
+
   _updatePairGroupMappings() {
     this.leftPairGroupMapping = makeGlyphGroupMapping(this.kernData.groupsSide1);
     this.rightPairGroupMapping = makeGlyphGroupMapping(this.kernData.groupsSide2);
