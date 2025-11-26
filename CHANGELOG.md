@@ -2,6 +2,7 @@
 
 ## 2025-11-?? [version 2025.11.4]
 
+- Prevent deletion or deactivation of last active glyph source. This prevents confusing behavior. [Issue 2321](https://github.com/fontra/fontra/issues/2321), [PR 2322](https://github.com/fontra/fontra/pull/2322)
 - Improve the "just start editing and the glyph source will come into existence" behavior for these cases ([PR 2319](https://github.com/fontra/fontra/pull/2319)):
   - Dragging the selection bounds handles to scale or rotate
   - Using various items in the Selection Transformation panel
