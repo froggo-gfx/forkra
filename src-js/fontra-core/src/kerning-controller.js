@@ -346,10 +346,30 @@ export class KerningController {
           newValues.push(null);
         }
 
-        const pairFunction = this.getPairFunction(leftName, rightName);
-        assert(pairFunction);
+        // If the pair is sparse, ie. if not all sources have a non-null value,
+        // then we try to avoid inserting an interpolated value if this pair
+        // is an exception for a group-based pair. If the group fallback is the
+        // same as the interpolated value, we assume the exception is not needed
+        // at this location.
+        const isSparse = newValues.some((v) => v == null);
 
-        newValues.push(Math.round(pairFunction(location)));
+        const namesWithFallbacks = isSparse
+          ? [...this._getPairNamesWithFallbacks(leftName, rightName)]
+          : [[leftName, rightName]];
+
+        const interpolatedValueWithFallbacks = namesWithFallbacks
+          .map(([leftName, rightName]) =>
+            this.getPairFunction(leftName, rightName)?.(location)
+          )
+          .filter((v) => v != undefined);
+
+        const interpolatedValue =
+          !isSparse ||
+          interpolatedValueWithFallbacks[0] != interpolatedValueWithFallbacks[1]
+            ? Math.round(interpolatedValueWithFallbacks[0])
+            : null;
+
+        newValues.push(interpolatedValue);
         kernData.values[leftName][rightName] = newValues;
       }
     }
