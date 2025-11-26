@@ -2,7 +2,7 @@
 
 ## 2025-11-?? [version 2025.11.4]
 
-- [font overview] Distinguish more clearly between glyphs that exist and glyphs that do not exist in the font. Additionally, display the fallback glyph in _existing_ but _empty_ glyphs. Do the same in the editor view. [Issue 2311](https://github.com/fontra/fontra/issues/2311), [PR 2313](https://github.com/fontra/fontra/pull/2313)
+- [font overview] Distinguish more clearly between glyphs that exist and glyphs that do not exist in the font. Additionally, display the fallback glyph in _existing_ but _empty_ glyphs, both in the font overview and in the editor view. [Issue 2311](https://github.com/fontra/fontra/issues/2311), [PR 2313](https://github.com/fontra/fontra/pull/2313)
 - Prevent deletion or deactivation of last active glyph source. This prevents confusing behavior. [Issue 2321](https://github.com/fontra/fontra/issues/2321), [PR 2322](https://github.com/fontra/fontra/pull/2322)
 - Improve the "just start editing and the glyph source will come into existence" behavior for these cases ([PR 2319](https://github.com/fontra/fontra/pull/2319)):
   - Dragging the selection bounds handles to scale or rotate
