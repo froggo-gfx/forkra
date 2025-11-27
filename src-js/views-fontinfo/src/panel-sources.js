@@ -294,7 +294,7 @@ export class SourcesPanel extends BaseInfoPanel {
     };
 
     const nameController = new ObservableController({
-      sourceName: this.getSourceName(sources),
+      sourceName: makeUntitledSourceName(sources),
     });
 
     nameController.addKeyListener("sourceName", (event) => {
@@ -374,19 +374,6 @@ export class SourcesPanel extends BaseInfoPanel {
       ...interpolatedSource,
       ...newSource,
     });
-  }
-
-  getSourceName(sources) {
-    const sourceNames = Object.keys(sources).map((sourceIdentifier) => {
-      return sources[sourceIdentifier].name;
-    });
-    let sourceName = translate("sources.untitled-source");
-    let i = 1;
-    while (sourceNames.includes(sourceName)) {
-      sourceName = `${translate("sources.untitled-source")} ${i}`;
-      i++;
-    }
-    return sourceName;
   }
 
   _sourcePropertiesContentElement(locationAxes, nameController, locationController) {
@@ -475,6 +462,19 @@ export class SourcesPanel extends BaseInfoPanel {
 
     sourceNameBoxes[newIndex].selected = true;
   }
+}
+
+function makeUntitledSourceName(sources) {
+  const sourceNames = Object.keys(sources).map((sourceIdentifier) => {
+    return sources[sourceIdentifier].name;
+  });
+  let sourceName = translate("sources.untitled-source");
+  let i = 1;
+  while (sourceNames.includes(sourceName)) {
+    sourceName = `${translate("sources.untitled-source")} ${i}`;
+    i++;
+  }
+  return sourceName;
 }
 
 addStyleSheet(`
