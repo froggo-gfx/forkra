@@ -265,12 +265,10 @@ export class SourcesPanel extends BaseInfoPanel {
     };
 
     // First, delete kerning source
-    const kerningChanges = [];
-    for (const kernTag of Object.keys(root.kerning)) {
-      const kerningController = await this.fontController.getKerningController(kernTag);
-      const changes = kerningController.deleteSource(this.selectedSourceIdentifier);
-      kerningChanges.push(changes);
-    }
+    const kerningChanges = await deleteKerningSource(
+      this.fontController,
+      this.selectedSourceIdentifier
+    );
 
     // Then delete font source
     const sourceChanges = recordChanges(root, (root) => {
@@ -1106,4 +1104,15 @@ function getLabelFromKey(key) {
     customData: translate("OpenType settings"), // TODO: translation
   };
   return keyLabelMap[key] || key;
+}
+
+async function deleteKerningSource(fontController, sourceIdentifier) {
+  const kerning = await fontController.getKerning();
+  const kerningChanges = [];
+  for (const kernTag of Object.keys(kerning)) {
+    const kerningController = await fontController.getKerningController(kernTag);
+    const changes = kerningController.deleteSource(sourceIdentifier);
+    kerningChanges.push(changes);
+  }
+  return kerningChanges;
 }
