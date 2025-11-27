@@ -3,7 +3,7 @@ import {
   getActionIdentifierFromKeyEvent,
 } from "@fontra/core/actions.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
-import { wildcard } from "@fontra/core/changes.js";
+import { joinChanges, wildcard } from "@fontra/core/changes.js";
 import { ensureDenseSource } from "@fontra/core/font-controller.js";
 import { openTypeSettingsFontSourcesLevel } from "@fontra/core/font-info-data.js";
 import { NumberFormatter, OptionalNumberFormatter } from "@fontra/core/formatters.js";
@@ -650,11 +650,16 @@ class SourceBox extends HTMLElement {
     return true;
   }
 
-  editSource(editFunc, undoLabel) {
+  editSource(editFunc, undoLabel, preChanges) {
     const root = { sources: this.sources };
-    const changes = recordChanges(root, (root) => {
+    let changes = recordChanges(root, (root) => {
       editFunc(root.sources[this.sourceIdentifier]);
     });
+
+    if (preChanges) {
+      changes = preChanges.concat(changes);
+    }
+
     if (changes.hasChange) {
       const sourcesPanel = this.sourcesPanel;
       const sourceIdentifier = this.sourceIdentifier;
@@ -674,7 +679,7 @@ class SourceBox extends HTMLElement {
     }
 
     // create listeners
-    this.controllers.general.addListener((event) => {
+    this.controllers.general.addListener(async (event) => {
       if (event.key == "name") {
         if (!this.checkSourceEntry("name", undefined, event.newValue.trim())) {
           this.controllers.general.model.name = this.source.name;
@@ -682,13 +687,38 @@ class SourceBox extends HTMLElement {
         }
       }
 
-      this.editSource((source) => {
-        if (typeof event.newValue == "string") {
-          source[event.key] = event.newValue.trim();
+      let kerningChanges;
+      if (event.key == "isSparse") {
+        const fontController = this.sourcesPanel.fontController;
+        if (event.newValue) {
+          kerningChanges = await deleteKerningSource(
+            fontController,
+            this.sourceIdentifier
+          );
         } else {
-          source[event.key] = event.newValue;
+          kerningChanges = await insertInterpolatedKerning(
+            fontController,
+            this.sourceIdentifier,
+            fontController.sources[this.sourceIdentifier].location
+          );
         }
-      }, `edit ${event.key}`); // TODO: translation
+      }
+
+      const preChanges = kerningChanges?.length
+        ? joinChanges(...kerningChanges)
+        : undefined;
+
+      this.editSource(
+        (source) => {
+          if (typeof event.newValue == "string") {
+            source[event.key] = event.newValue.trim();
+          } else {
+            source[event.key] = event.newValue;
+          }
+        },
+        `edit ${event.key}`, // TODO: translation
+        preChanges
+      );
 
       if (event.key == "isSparse") {
         this._updateContents();
