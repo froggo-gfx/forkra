@@ -663,10 +663,11 @@ class SourceBox extends HTMLElement {
       editFunc(root.sources[this.sourceIdentifier]);
     });
     if (changes.hasChange) {
+      const sourcesPanel = this.sourcesPanel;
       const sourceIdentifier = this.sourceIdentifier;
-      this.sourcesPanel.postChange(changes.change, changes.rollbackChange, undoLabel, {
-        undoCallback: () => this.sourcesPanel.selectSource(sourceIdentifier),
-        redoCallback: () => this.sourcesPanel.selectSource(sourceIdentifier),
+      sourcesPanel.postChange(changes.change, changes.rollbackChange, undoLabel, {
+        undoCallback: () => sourcesPanel.selectSource(sourceIdentifier),
+        redoCallback: () => sourcesPanel.selectSource(sourceIdentifier),
       });
     }
   }
