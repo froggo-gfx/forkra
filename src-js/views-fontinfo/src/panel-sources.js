@@ -224,7 +224,6 @@ export class SourcesPanel extends BaseInfoPanel {
         await this.fontController.getSources(),
         this.selectedSourceIdentifier,
         this.postChange.bind(this),
-        this.setupUI.bind(this),
         this.selectedSourceIdentifier === this.fontController.defaultSourceIdentifier
       )
     );
@@ -555,21 +554,13 @@ addStyleSheet(`
 `);
 
 class SourceBox extends HTMLElement {
-  constructor(
-    fontAxesSourceSpace,
-    sources,
-    sourceIdentifier,
-    postChange,
-    setupUI,
-    isDefault
-  ) {
+  constructor(fontAxesSourceSpace, sources, sourceIdentifier, postChange, isDefault) {
     super();
     this.classList.add("fontra-ui-font-info-sources-panel-source-box");
     this.fontAxesSourceSpace = fontAxesSourceSpace;
     this.sources = sources;
     this.sourceIdentifier = sourceIdentifier;
     this.postChange = postChange;
-    this.setupUI = setupUI;
     this.isDefault = isDefault;
     this.controllers = {};
     this.models = this._getModels();
