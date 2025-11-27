@@ -232,6 +232,9 @@ export class SourcesPanel extends BaseInfoPanel {
       kerning: await this.fontController.getKerning(),
     };
 
+    // Do the kerning changes *first*, and then add the font source. This is needed
+    // because the *presence* of the new source will make it participate in kerning
+    // interpolation, but it doesn't exist yet, so it would be seen as all zeros.
     const kerningChanges = [];
     for (const [kernTag, kernData] of Object.entries(root.kerning)) {
       const kerningController = await this.fontController.getKerningController(kernTag);
