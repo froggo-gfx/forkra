@@ -173,7 +173,7 @@ export class FontController {
     return this._rootObject.sources;
   }
 
-  getSortedSourceIdentifiers() {
+  getSortedSourceIdentifiers(skipSparseSources = false) {
     const defaultSourceLocation = this.fontSourcesInstancer.defaultSourceLocation;
 
     const sortFunc = (identifierA, identifierB) => {
@@ -195,7 +195,12 @@ export class FontController {
       return 0;
     };
 
-    return Object.keys(this.sources).sort(sortFunc);
+    return Object.keys(this.sources)
+      .filter(
+        (sourceIdentifier) =>
+          !(skipSparseSources && this.sources[sourceIdentifier].isSparse)
+      )
+      .sort(sortFunc);
   }
 
   getBackgroundImage(imageIdentifier) {

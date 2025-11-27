@@ -909,9 +909,9 @@ export class EditorController extends ViewController {
     }
   }
 
-  goToNearestSource() {
+  goToNearestSource(allowSparseSource = true) {
     const panel = this.getSidebarPanel("designspace-navigation");
-    panel?.goToNearestSource();
+    panel?.goToNearestSource(allowSparseSource);
   }
 
   initTools() {
