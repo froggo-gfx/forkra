@@ -3,6 +3,7 @@ import {
   getActionIdentifierFromKeyEvent,
 } from "@fontra/core/actions.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
+import { wildcard } from "@fontra/core/changes.js";
 import { ensureDenseSource } from "@fontra/core/font-controller.js";
 import { openTypeSettingsFontSourcesLevel } from "@fontra/core/font-info-data.js";
 import { NumberFormatter, OptionalNumberFormatter } from "@fontra/core/formatters.js";
@@ -39,9 +40,6 @@ import { UIList } from "@fontra/web-components/ui-list.js";
 import { updateRemoveButton } from "./panel-axes.js";
 import { BaseInfoPanel } from "./panel-base.js";
 
-// Unfortunate global var, due to poor factoring between SourcePanel and SourceBox
-let selectedSourceIdentifier = undefined;
-
 addStyleSheet(`
 .font-sources-container {
   display: grid;
@@ -67,6 +65,24 @@ addStyleSheet(`
 #sources-panel {
   height: 100%;
 }
+
+.fontra-ui-font-info-sources-panel-source-name-box {
+  background-color: var(--ui-element-background-color);
+  border-radius: 0.5em;
+  padding: 1em;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: max-content auto;
+  grid-column-gap: 1em;
+}
+
+.fontra-ui-font-info-sources-panel-source-name-box.default {
+  font-weight: bold;
+}
+
+.fontra-ui-font-info-sources-panel-source-name-box.selected {
+  background-color: var(--horizontal-rule-color);
+}
 `);
 
 export class SourcesPanel extends BaseInfoPanel {
@@ -76,6 +92,7 @@ export class SourcesPanel extends BaseInfoPanel {
 
   initializePanel() {
     super.initializePanel();
+    this.selectedSourceIdentifier = undefined;
     this.fontController.addChangeListener(
       { axes: null },
       (change, isExternalChange) => {
@@ -84,10 +101,15 @@ export class SourcesPanel extends BaseInfoPanel {
       },
       false
     );
+
+    this.fontController.addChangeListener(
+      { sources: { [wildcard]: { name: null } } },
+      (change, isExternalChange) => this._setupSourceNames(),
+      false
+    );
   }
 
   async setupUI() {
-    const sources = await this.fontController.getSources();
     this.fontAxesSourceSpace = mapAxesFromUserSpaceToSourceSpace(
       this.fontController.axes.axes
     );
@@ -118,19 +140,7 @@ export class SourcesPanel extends BaseInfoPanel {
       [containerSourceContent]
     );
 
-    const sortedSourceIdentifiers = this.fontController.getSortedSourceIdentifiers();
-
-    for (const identifier of sortedSourceIdentifiers) {
-      const sourceNameBoxElement = new SourceNameBox(
-        this.fontAxesSourceSpace,
-        sources,
-        identifier,
-        this.postChange.bind(this),
-        this.setupUI.bind(this),
-        identifier === this.fontController.defaultSourceIdentifier
-      );
-      containerSourcesNames.appendChild(sourceNameBoxElement);
-    }
+    this.sortedSourceIdentifiers = this.fontController.getSortedSourceIdentifiers();
 
     const addRemoveSourceButtons = html.createDomElement("add-remove-buttons");
     addRemoveSourceButtons.addButtonCallback = (event) => {
@@ -146,22 +156,82 @@ export class SourcesPanel extends BaseInfoPanel {
     this.panelElement.appendChild(container);
     this.panelElement.focus();
 
-    selectedSourceIdentifier = sortedSourceIdentifiers.includes(
-      selectedSourceIdentifier
-    )
-      ? selectedSourceIdentifier
-      : this.fontController.defaultSourceIdentifier || sortedSourceIdentifiers[0];
-    const sourceNameBoxes = document.querySelectorAll(
-      ".fontra-ui-font-info-sources-panel-source-name-box"
+    await this._setupSourceNames();
+
+    this.selectSource(this.fontController.defaultSourceIdentifier);
+  }
+
+  async _setupSourceNames() {
+    const sources = await this.fontController.getSources();
+
+    const containerSourcesNames = document.getElementById(
+      "font-sources-container-names"
     );
-    if (selectedSourceIdentifier !== undefined) {
-      const index = sortedSourceIdentifiers.indexOf(selectedSourceIdentifier);
-      sourceNameBoxes[index].selected = true;
+
+    containerSourcesNames.innerHTML = "";
+
+    for (const sourceIdentifier of this.sortedSourceIdentifiers) {
+      const classes = ["fontra-ui-font-info-sources-panel-source-name-box"];
+      if (sourceIdentifier === this.fontController.defaultSourceIdentifier) {
+        classes.push("default");
+      }
+      if (sourceIdentifier === this.selectedSourceIdentifier) {
+        classes.push("selected");
+      }
+
+      const sourceNameElement = html.div(
+        {
+          "class": classes.join(" "),
+          "onclick": (event) => this.selectSource(sourceIdentifier),
+          "data-sourceIdentifier": sourceIdentifier,
+        },
+        [sources[sourceIdentifier].name]
+      );
+      containerSourcesNames.appendChild(sourceNameElement);
     }
   }
 
+  selectSource(sourceIdentifier) {
+    for (const nameElement of document.querySelectorAll(
+      ".fontra-ui-font-info-sources-panel-source-name-box"
+    )) {
+      const selected = nameElement.dataset.sourceIdentifier == sourceIdentifier;
+      nameElement.classList.toggle("selected", selected);
+      if (selected) {
+        nameElement.scrollIntoView({
+          behavior: "auto",
+          block: "nearest",
+          inline: "nearest",
+        });
+      }
+    }
+    this.selectedSourceIdentifier = sourceIdentifier;
+    this._updateSourceBox();
+  }
+
+  async _updateSourceBox() {
+    const containerSourceContent = document.getElementById(
+      "font-sources-container-source-content"
+    );
+    containerSourceContent.innerHTML = "";
+    if (!this.selectedSourceIdentifier) {
+      return;
+    }
+
+    containerSourceContent.appendChild(
+      new SourceBox(
+        this.fontAxesSourceSpace,
+        await this.fontController.getSources(),
+        this.selectedSourceIdentifier,
+        this.postChange.bind(this),
+        this.setupUI.bind(this),
+        this.selectedSourceIdentifier === this.fontController.defaultSourceIdentifier
+      )
+    );
+  }
+
   async deleteSource() {
-    if (!selectedSourceIdentifier) {
+    if (!this.selectedSourceIdentifier) {
       return;
     }
     const dialog = await dialogSetup(
@@ -179,7 +249,7 @@ export class SourcesPanel extends BaseInfoPanel {
 
     const undoLabel = translate(
       "sources.undo.delete",
-      this.fontController.sources[selectedSourceIdentifier].name
+      this.fontController.sources[this.selectedSourceIdentifier].name
     );
     const root = {
       sources: this.fontController.sources,
@@ -190,13 +260,13 @@ export class SourcesPanel extends BaseInfoPanel {
     const kerningChanges = [];
     for (const kernTag of Object.keys(root.kerning)) {
       const kerningController = await this.fontController.getKerningController(kernTag);
-      const changes = kerningController.deleteSource(selectedSourceIdentifier);
+      const changes = kerningController.deleteSource(this.selectedSourceIdentifier);
       kerningChanges.push(changes);
     }
 
     // Then delete font source
     const sourceChanges = recordChanges(root, (root) => {
-      delete root.sources[selectedSourceIdentifier];
+      delete root.sources[this.selectedSourceIdentifier];
     });
 
     const allChanges = [...kerningChanges, sourceChanges];
@@ -208,7 +278,7 @@ export class SourcesPanel extends BaseInfoPanel {
         finalChanges.rollbackChange,
         undoLabel
       );
-      selectedSourceIdentifier = undefined;
+      this.selectSource(undefined);
       await sleepAsync(0); // Breathe, so the font controller can purge some caches
       this.setupUI();
     }
@@ -258,8 +328,9 @@ export class SourcesPanel extends BaseInfoPanel {
         finalChanges.rollbackChange,
         undoLabel
       );
-      selectedSourceIdentifier = sourceIdentifier;
       this.setupUI();
+      await sleepAsync(0); // Breathe, so the font controller can purge some caches
+      this.selectSource(sourceIdentifier);
     }
   }
 
@@ -445,13 +516,9 @@ export class SourcesPanel extends BaseInfoPanel {
     }
     event.preventDefault();
     event.stopImmediatePropagation();
-    const sourceNameBoxes = document.querySelectorAll(
-      ".fontra-ui-font-info-sources-panel-source-name-box"
-    );
 
-    const sourcesLength = sourceNameBoxes.length;
-    const index = range(sourcesLength).find((i) => sourceNameBoxes[i].selected);
-
+    const sourcesLength = this.sortedSourceIdentifiers.length;
+    const index = this.sortedSourceIdentifiers.indexOf(this.selectedSourceIdentifier);
     const selectPrevious = "ArrowUp" == event.key;
     const newIndex =
       index == -1
@@ -460,7 +527,7 @@ export class SourcesPanel extends BaseInfoPanel {
           : 0
         : modulo(index + (selectPrevious ? -1 : 1), sourcesLength);
 
-    sourceNameBoxes[newIndex].selected = true;
+    this.selectSource(this.sortedSourceIdentifiers[newIndex]);
   }
 }
 
@@ -476,109 +543,6 @@ function makeUntitledSourceName(sources) {
   }
   return sourceName;
 }
-
-addStyleSheet(`
-  .fontra-ui-font-info-sources-panel-source-name-box {
-    background-color: var(--ui-element-background-color);
-    border-radius: 0.5em;
-    padding: 1em;
-    cursor: pointer;
-    display: grid;
-    grid-template-columns: max-content auto;
-    grid-column-gap: 1em;
-  }
-
-  .fontra-ui-font-info-sources-panel-source-name-box.default {
-    font-weight: bold;
-  }
-
-  .fontra-ui-font-info-sources-panel-source-name-box.selected {
-    background-color: var(--horizontal-rule-color);
-  }
-`);
-
-class SourceNameBox extends HTMLElement {
-  constructor(
-    fontAxesSourceSpace,
-    sources,
-    sourceIdentifier,
-    postChange,
-    setupUI,
-    isDefault
-  ) {
-    super();
-    this.classList.add("fontra-ui-font-info-sources-panel-source-name-box");
-    this.classList.toggle("default", isDefault);
-    this.id = `source-name-box-${sourceIdentifier}`;
-    this.fontAxesSourceSpace = fontAxesSourceSpace;
-    this.sources = sources;
-    this.sourceIdentifier = sourceIdentifier;
-    this.postChange = postChange;
-    this.setupUI = setupUI;
-    this.isDefault = isDefault;
-    this._updateContents();
-    this._selected = false;
-    this.onclick = (event) => (this.selected = true);
-  }
-
-  get source() {
-    return this.sources[this.sourceIdentifier];
-  }
-
-  get selected() {
-    return this._selected;
-  }
-
-  set selected(onOff) {
-    this._selected = onOff;
-    this.classList.toggle("selected", this._selected);
-    if (this._selected) {
-      selectedSourceIdentifier = this.sourceIdentifier;
-      this.scrollIntoView({ behavior: "auto", block: "nearest", inline: "nearest" });
-      this._deselectOtherSourceNameBoxs();
-      this._updateSourceBox();
-    }
-  }
-
-  _deselectOtherSourceNameBoxs() {
-    // TODO: In future we may want to support selection of multiple sources.
-    const sourceNameBoxes = document.querySelectorAll(
-      ".fontra-ui-font-info-sources-panel-source-name-box"
-    );
-    for (const sourceNameBox of sourceNameBoxes) {
-      if (sourceNameBox != this) {
-        sourceNameBox.selected = false;
-      }
-    }
-  }
-
-  _updateSourceBox() {
-    const containerSourceContent = document.getElementById(
-      "font-sources-container-source-content"
-    );
-    containerSourceContent.innerHTML = "";
-    containerSourceContent.appendChild(
-      new SourceBox(
-        this.fontAxesSourceSpace,
-        this.sources,
-        this.sourceIdentifier,
-        this.postChange.bind(this),
-        this.setupUI.bind(this),
-        this.isDefault
-      )
-    );
-  }
-
-  _updateContents() {
-    this.append(
-      html.div({ id: `source-name-box-name-${this.sourceIdentifier}` }, [
-        this.source.name,
-      ])
-    );
-  }
-}
-
-customElements.define("source-name-box", SourceNameBox);
 
 addStyleSheet(`
 .fontra-ui-font-info-sources-panel-source-box {
@@ -715,14 +679,6 @@ class SourceBox extends HTMLElement {
           source[event.key] = event.newValue.trim();
         } else {
           source[event.key] = event.newValue;
-        }
-
-        if (event.key == "name") {
-          // in case of name change, update source name card.
-          const element = document.getElementById(
-            `source-name-box-name-${this.sourceIdentifier}`
-          );
-          element.innerHTML = source[event.key];
         }
       }, `edit ${event.key}`); // TODO: translation
 
