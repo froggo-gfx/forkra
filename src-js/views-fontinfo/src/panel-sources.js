@@ -316,16 +316,11 @@ export class SourcesPanel extends BaseInfoPanel {
     // Do the kerning changes *first*, and then add the font source. This is needed
     // because the *presence* of the new source will make it participate in kerning
     // interpolation, but it doesn't exist yet, so it would be seen as all zeros.
-    const kerningChanges = [];
-    for (const [kernTag, kernData] of Object.entries(root.kerning)) {
-      const kerningController = await this.fontController.getKerningController(kernTag);
-      const changes = kerningController.insertInterpolatedSource(
-        sourceIdentifier,
-        newSource.location,
-        kernData
-      );
-      kerningChanges.push(changes);
-    }
+    const kerningChanges = await insertInterpolatedKerning(
+      this.fontController,
+      sourceIdentifier,
+      newSource.location
+    );
 
     const sourceChanges = recordChanges(root, (root) => {
       root.sources[sourceIdentifier] = newSource;
@@ -1112,6 +1107,21 @@ async function deleteKerningSource(fontController, sourceIdentifier) {
   for (const kernTag of Object.keys(kerning)) {
     const kerningController = await fontController.getKerningController(kernTag);
     const changes = kerningController.deleteSource(sourceIdentifier);
+    kerningChanges.push(changes);
+  }
+  return kerningChanges;
+}
+
+async function insertInterpolatedKerning(fontController, sourceIdentifier, location) {
+  const kerning = await fontController.getKerning();
+  const kerningChanges = [];
+  for (const [kernTag, kernData] of Object.entries(kerning)) {
+    const kerningController = await fontController.getKerningController(kernTag);
+    const changes = kerningController.insertInterpolatedSource(
+      sourceIdentifier,
+      location,
+      kernData
+    );
     kerningChanges.push(changes);
   }
   return kerningChanges;
