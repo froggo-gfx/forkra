@@ -92,7 +92,7 @@ export class SourcesPanel extends BaseInfoPanel {
 
   initializePanel() {
     super.initializePanel();
-    this.selectedSourceIdentifier = undefined;
+    this.selectedSourceIdentifier = this.fontController.defaultSourceIdentifier;
     this.fontController.addChangeListener(
       { axes: null },
       (change, isExternalChange) => {
@@ -158,7 +158,7 @@ export class SourcesPanel extends BaseInfoPanel {
 
     await this._setupSourceNames();
 
-    this.selectSource(this.fontController.defaultSourceIdentifier);
+    this.selectSource(this.selectedSourceIdentifier, true);
   }
 
   async _setupSourceNames() {
@@ -191,7 +191,16 @@ export class SourcesPanel extends BaseInfoPanel {
     }
   }
 
-  selectSource(sourceIdentifier) {
+  async selectSource(sourceIdentifier, forceUpdate = false) {
+    const sources = await this.fontController.getSources();
+    if (!sources.hasOwnProperty(sourceIdentifier)) {
+      sourceIdentifier = undefined;
+    }
+
+    if (!forceUpdate && sourceIdentifier === this.selectedSourceIdentifier) {
+      return;
+    }
+
     for (const nameElement of document.querySelectorAll(
       ".fontra-ui-font-info-sources-panel-source-name-box"
     )) {
@@ -220,10 +229,10 @@ export class SourcesPanel extends BaseInfoPanel {
 
     containerSourceContent.appendChild(
       new SourceBox(
+        this,
         this.fontAxesSourceSpace,
         await this.fontController.getSources(),
         this.selectedSourceIdentifier,
-        this.postChange.bind(this),
         this.selectedSourceIdentifier === this.fontController.defaultSourceIdentifier
       )
     );
@@ -272,10 +281,15 @@ export class SourcesPanel extends BaseInfoPanel {
     const finalChanges = allChanges[0].concat(...allChanges.slice(1));
 
     if (finalChanges.hasChange) {
+      const deletedSourceIdentifier = this.selectedSourceIdentifier;
       await this.postChange(
         finalChanges.change,
         finalChanges.rollbackChange,
-        undoLabel
+        undoLabel,
+        {
+          undoCallback: () => this.selectSource(deletedSourceIdentifier),
+          redoCallback: () => this.selectSource(undefined),
+        }
       );
       this.selectSource(undefined);
       await sleepAsync(0); // Breathe, so the font controller can purge some caches
@@ -322,10 +336,15 @@ export class SourcesPanel extends BaseInfoPanel {
     const finalChanges = sourceChanges.concat(...kerningChanges);
 
     if (finalChanges.hasChange) {
+      const currentSelectedSourceIdentifier = this.selectedSourceIdentifier;
       await this.postChange(
         finalChanges.change,
         finalChanges.rollbackChange,
-        undoLabel
+        undoLabel,
+        {
+          undoCallback: () => this.selectSource(currentSelectedSourceIdentifier),
+          redoCallback: () => this.selectSource(sourceIdentifier),
+        }
       );
       this.setupUI();
       await sleepAsync(0); // Breathe, so the font controller can purge some caches
@@ -554,13 +573,13 @@ addStyleSheet(`
 `);
 
 class SourceBox extends HTMLElement {
-  constructor(fontAxesSourceSpace, sources, sourceIdentifier, postChange, isDefault) {
+  constructor(sourcesPanel, fontAxesSourceSpace, sources, sourceIdentifier, isDefault) {
     super();
+    this.sourcesPanel = sourcesPanel;
     this.classList.add("fontra-ui-font-info-sources-panel-source-box");
     this.fontAxesSourceSpace = fontAxesSourceSpace;
     this.sources = sources;
     this.sourceIdentifier = sourceIdentifier;
-    this.postChange = postChange;
     this.isDefault = isDefault;
     this.controllers = {};
     this.models = this._getModels();
@@ -644,7 +663,11 @@ class SourceBox extends HTMLElement {
       editFunc(root.sources[this.sourceIdentifier]);
     });
     if (changes.hasChange) {
-      this.postChange(changes.change, changes.rollbackChange, undoLabel);
+      const sourceIdentifier = this.sourceIdentifier;
+      this.sourcesPanel.postChange(changes.change, changes.rollbackChange, undoLabel, {
+        undoCallback: () => this.sourcesPanel.selectSource(sourceIdentifier),
+        redoCallback: () => this.sourcesPanel.selectSource(sourceIdentifier),
+      });
     }
   }
 
