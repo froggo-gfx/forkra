@@ -687,26 +687,19 @@ class SourceBox extends HTMLElement {
         }
       }
 
-      let kerningChanges;
+      let preChanges;
       if (event.key == "isSparse") {
         const fontController = this.sourcesPanel.fontController;
         if (event.newValue) {
-          kerningChanges = await deleteKerningSource(
-            fontController,
-            this.sourceIdentifier
-          );
+          preChanges = await deleteKerningSource(fontController, this.sourceIdentifier);
         } else {
-          kerningChanges = await insertInterpolatedKerning(
+          preChanges = await insertInterpolatedKerning(
             fontController,
             this.sourceIdentifier,
             fontController.sources[this.sourceIdentifier].location
           );
         }
       }
-
-      const preChanges = kerningChanges?.length
-        ? joinChanges(...kerningChanges)
-        : undefined;
 
       this.editSource(
         (source) => {
@@ -717,7 +710,7 @@ class SourceBox extends HTMLElement {
           }
         },
         `edit ${event.key}`, // TODO: translation
-        preChanges
+        preChanges?.length ? joinChanges(...preChanges) : undefined
       );
 
       if (event.key == "isSparse") {
