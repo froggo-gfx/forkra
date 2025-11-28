@@ -1098,7 +1098,7 @@ function getLineMetricsHorRounded(lineMetricsHorizontalLayout) {
   for (const key in lineMetricsHorizontalLayout) {
     newLineMetricsHorizontalLayout[key] = {
       value: round(lineMetricsHorizontalLayout[key].value, 2),
-      zone: round(lineMetricsHorizontalLayout[key].zone, 2) | 0,
+      zone: round(lineMetricsHorizontalLayout[key].zone, 2) || 0,
     };
   }
   return newLineMetricsHorizontalLayout;
