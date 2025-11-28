@@ -575,7 +575,6 @@ class SourceBox extends HTMLElement {
     this.sourceIdentifier = sourceIdentifier;
     this.isDefault = isDefault;
     this.controllers = {};
-    this.models = this._getModels();
     this.customDataKeys = openTypeSettingsFontSourcesLevel.map((item) => item.key);
     this._updateContents();
   }
@@ -584,7 +583,7 @@ class SourceBox extends HTMLElement {
     return this.sources[this.sourceIdentifier];
   }
 
-  _getModels() {
+  get models() {
     const source = this.source;
     return {
       general: {
@@ -693,7 +692,7 @@ class SourceBox extends HTMLElement {
         if (event.newValue) {
           preChanges = await deleteKerningSource(fontController, this.sourceIdentifier);
         } else {
-          preChanges = await insertInterpolatedKerning(
+          preChanges = await insertInterpolatedKerningAndSourceInfo(
             fontController,
             this.sourceIdentifier,
             fontController.sources[this.sourceIdentifier].location
@@ -1133,6 +1132,32 @@ async function deleteKerningSource(fontController, sourceIdentifier) {
     kerningChanges.push(changes);
   }
   return kerningChanges;
+}
+
+async function insertInterpolatedKerningAndSourceInfo(
+  fontController,
+  sourceIdentifier,
+  location
+) {
+  const kerningChanges = await insertInterpolatedKerning(
+    fontController,
+    sourceIdentifier,
+    location
+  );
+
+  const sources = await fontController.getSources();
+  const interpolatedSource = getInterpolatedSourceData(fontController, location);
+  delete interpolatedSource["name"];
+  delete interpolatedSource["location"];
+  delete interpolatedSource["isSparse"];
+
+  const newSource = { ...sources[sourceIdentifier], ...interpolatedSource };
+
+  const sourceChanges = recordChanges({ sources }, (root) => {
+    root.sources[sourceIdentifier] = newSource;
+  });
+
+  return [...kerningChanges, sourceChanges];
 }
 
 async function insertInterpolatedKerning(fontController, sourceIdentifier, location) {
