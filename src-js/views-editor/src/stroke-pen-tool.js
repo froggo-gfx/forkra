@@ -4,8 +4,7 @@ import {
   applyChange,
   consolidateChanges,
 } from "@fontra/core/changes.js";
-import { translate } from "@fontra/core/localization.js";
-import { insertHandles, insertPoint, scalePoint } from "@fontra/core/path-functions.js";
+import { insertHandles, insertPoint } from "@fontra/core/path-functions.js";
 import { isEqualSet } from "@fontra/core/set-ops.js";
 import { modulo, parseSelection } from "@fontra/core/utils.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
@@ -13,14 +12,9 @@ import * as vector from "@fontra/core/vector.js";
 import { constrainHorVerDiag } from "./edit-behavior.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
 
-export class PenTool {
-  identifier = "pen-tool";
-  subTools = [PenToolCubic, PenToolQuad];
-}
-
-export class PenToolCubic extends BaseTool {
+export class StrokePenTool extends BaseTool {
+  identifier = "stroke-pen-tool";
   iconPath = "/images/pointeradd.svg";
-  identifier = "pen-tool-cubic";
 
   handleHover(event) {
     if (!this.sceneModel.selectedGlyph?.isEditing) {
@@ -49,15 +43,13 @@ export class PenToolCubic extends BaseTool {
     }
   }
 
-  get curveType() {
-    return "cubic";
-  }
-
-  deactivate() {
-    super.deactivate();
-    this._resetHover();
-    this.canvasController.requestUpdate();
-  }
+  setCursor() {
+    if (!this.sceneModel.selectedGlyph?.isEditing) {
+      this.editor.tools["pointer-tool"].setCursor();
+    } else {
+      this.canvasController.canvas.style.cursor = "crosshair";
+    }
+ }
 
   _resetHover() {
     delete this.sceneModel.pathInsertHandles;
@@ -66,12 +58,10 @@ export class PenToolCubic extends BaseTool {
     delete this.sceneModel.pathCanDragOffCurve;
   }
 
-  setCursor() {
-    if (!this.sceneModel.selectedGlyph?.isEditing) {
-      this.editor.tools["pointer-tool"].setCursor();
-    } else {
-      this.canvasController.canvas.style.cursor = "crosshair";
-    }
+  deactivate() {
+    super.deactivate();
+    this._resetHover();
+    this.canvasController.requestUpdate();
   }
 
   _getPathConnectTargetPoint(event) {
@@ -79,7 +69,7 @@ export class PenToolCubic extends BaseTool {
     // - we must have an edited glyph at an editable location
     // - we must be in append/prepend mode for an existing contour
     // - the hovered point must be eligible to connect to:
-    //   - must be a start or end point of an open regular (non-stroke) contour
+    //   - must be a start or end point of an open stroke contour
     //   - must not be the currently selected point
 
     const hoveredPointIndex = getHoveredPointIndex(this.sceneController, event);
@@ -92,7 +82,7 @@ export class PenToolCubic extends BaseTool {
 
     const appendInfo = getAppendInfo(path, this.sceneController.selection);
     if (hoveredPointIndex === undefined && appendInfo.createContour) {
-      const point = this.sceneController.localPoint(event);
+      const point = this.sceneController.selectedGlyphPoint(event);
       // The following max() call makes sure that the margin is never
       // less than half a font unit. This works around a visualization
       // artifact caused by bezier-js: Bezier.project() returns t values
@@ -100,31 +90,34 @@ export class PenToolCubic extends BaseTool {
       const size = Math.max(1, this.sceneController.mouseClickMargin);
       const hit = this.sceneModel.pathHitAtPoint(point, size);
       
-      // Check if this hit is on a stroke contour
-      if (hit.segment?.parentPointIndices) {
+      // Only allow inserting handles on stroke contours
+      if (event.altKey && hit.segment?.points?.length === 2) {
+        // Check if this hit is on a stroke contour
         const [contourIndex] = path.getContourAndPointIndex(hit.segment.parentPointIndices[0]);
         const isStrokeContour = path.contourInfo[contourIndex].strokeSource !== undefined;
         
         if (isStrokeContour) {
-          return {}; // Don't allow inserting handles on stroke contours with pen tool
+          const pt1 = hit.segment.points[0];
+          const pt2 = hit.segment.points[1];
+          const handle1 = vector.roundVector(vector.interpolateVectors(pt1, pt2, 1 / 3));
+          const handle2 = vector.roundVector(vector.interpolateVectors(pt1, pt2, 2 / 3));
+          return { insertHandles: { points: [handle1, handle2], hit: hit } };
         }
-      }
-      
-      if (event.altKey && hit.segment?.points?.length === 2) {
-        const pt1 = hit.segment.points[0];
-        const pt2 = hit.segment.points[1];
-        const handle1 = vector.roundVector(vector.interpolateVectors(pt1, pt2, 1 / 3));
-        const handle2 = vector.roundVector(vector.interpolateVectors(pt1, pt2, 2 / 3));
-        return { insertHandles: { points: [handle1, handle2], hit: hit } };
       } else {
-        const targetPoint = { ...hit };
-        if ("x" in targetPoint) {
-          // Don't use vector.roundVector, as there are more properties besides
-          // x and y, and we want to preserve them
-          targetPoint.x = Math.round(targetPoint.x);
-          targetPoint.y = Math.round(targetPoint.y);
+        // Only show target point if it's on a stroke contour
+        const [contourIndex] = path.getContourAndPointIndex(hit.segment?.parentPointIndices?.[0] || 0);
+        const isStrokeContour = path.contourInfo[contourIndex]?.strokeSource !== undefined;
+        
+        if (isStrokeContour || !hit.segment) { // If it's not a segment hit (maybe point hit), check hovered point
+          const targetPoint = { ...hit };
+          if ("x" in targetPoint) {
+            // Don't use vector.roundVector, as there are more properties besides
+            // x and y, and we want to preserve them
+            targetPoint.x = Math.round(targetPoint.x);
+            targetPoint.y = Math.round(targetPoint.y);
+          }
+          return { targetPoint: targetPoint };
         }
-        return { targetPoint: targetPoint };
       }
     }
 
@@ -136,11 +129,11 @@ export class PenToolCubic extends BaseTool {
       path.getContourAndPointIndex(hoveredPointIndex);
     const contourInfo = path.contourInfo[contourIndex];
     
-    // Check if this is a stroke contour (skip if it is, since pen tool doesn't edit stroke contours)
+    // Only allow operations on stroke contours
     const isStrokeContour = contourInfo.strokeSource !== undefined;
 
     if (
-      isStrokeContour ||  // Pen tool should not operate on stroke contours
+      isStrokeContour &&
       appendInfo.contourIndex == contourIndex &&
       appendInfo.contourPointIndex == contourPointIndex
     ) {
@@ -154,14 +147,14 @@ export class PenToolCubic extends BaseTool {
     }
 
     if (
-      isStrokeContour ||  // Don't operate on stroke contours
+      !isStrokeContour ||  // Only operate on stroke contours
       contourInfo.isClosed ||
       (contourPointIndex != 0 && hoveredPointIndex != contourInfo.endPoint)
     ) {
       return {};
     }
     return { targetPoint: path.getPoint(hoveredPointIndex) };
-  }
+ }
 
   async handleDrag(eventStream, initialEvent) {
     if (!this.sceneModel.selectedGlyph?.isEditing) {
@@ -177,7 +170,7 @@ export class PenToolCubic extends BaseTool {
       this._resetHover();
       await this._handleAddPoints(eventStream, initialEvent);
     }
-  }
+ }
 
   async _handleInsertPoint() {
     await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
@@ -191,7 +184,7 @@ export class PenToolCubic extends BaseTool {
       }
       delete this.sceneModel.pathConnectTargetPoint;
       this.sceneController.selection = selection;
-      return translate("edit-tools-pen.undo.insert-point");
+      return "Insert Point";
     });
   }
 
@@ -211,7 +204,7 @@ export class PenToolCubic extends BaseTool {
       }
       delete this.sceneModel.pathInsertHandles;
       this.sceneController.selection = selection;
-      return translate("edit-tools-pen.undo.insert-handles");
+      return "Insert Handles";
     });
   }
 
@@ -223,11 +216,10 @@ export class PenToolCubic extends BaseTool {
         return {
           layerName,
           layerGlyph,
-          behavior: getPenToolBehavior(
+          behavior: getStrokePenToolBehavior(
             this.sceneController,
             initialEvent,
-            layerGlyph.path,
-            this.curveType
+            layerGlyph.path
           ),
         };
       });
@@ -275,37 +267,27 @@ export class PenToolCubic extends BaseTool {
       };
     });
   }
-}
-
-export class PenToolQuad extends PenToolCubic {
-  iconPath = "/images/pointeraddquad.svg";
-  identifier = "pen-tool-quad";
 
   get curveType() {
-    return "quad";
+    return "cubic";
   }
 }
 
-const AppendModes = {
-  APPEND: "append",
-  PREPEND: "prepend",
-};
-
-function getPenToolBehavior(sceneController, initialEvent, path, curveType) {
+function getStrokePenToolBehavior(sceneController, initialEvent, path) {
   const appendInfo = getAppendInfo(path, sceneController.selection);
 
-  // If this is a stroke contour and we're not creating a new one, return null
-  if (!appendInfo.createContour) {
+  // If this is not a stroke contour and we're not creating a new one, return null
+ if (!appendInfo.createContour) {
     const isStrokeContour = path.contourInfo[appendInfo.contourIndex].strokeSource !== undefined;
-    if (isStrokeContour) {
-      return null; // Pen tool only operates on regular contours, not stroke contours
+    if (!isStrokeContour) {
+      return null; // This tool only operates on stroke contours
     }
  }
 
   let behaviorFuncs;
 
   if (appendInfo.createContour) {
-    // Let's add a new regular contour (not a stroke contour)
+    // Let's add a new stroke contour
     behaviorFuncs = {
       setup: [insertContourAndSetupAnchorPoint, insertAnchorPoint],
       setupDrag: insertHandleOut,
@@ -324,7 +306,7 @@ function getPenToolBehavior(sceneController, initialEvent, path, curveType) {
       appendInfo.contourPointIndex
     );
     const clickedSelection = sceneController.sceneModel.pointSelectionAtPoint(
-      sceneController.localPoint(initialEvent),
+      sceneController.selectedGlyphPoint(initialEvent),
       sceneController.mouseClickMargin
     );
     if (isEqualSet(clickedSelection, sceneController.selection)) {
@@ -357,7 +339,7 @@ function getPenToolBehavior(sceneController, initialEvent, path, curveType) {
         const isStrokeContour = path.contourInfo[clickedContourIndex].strokeSource !== undefined;
         
         if (
-          !isStrokeContour &&  // Only operate on regular contours, not stroke contours
+          isStrokeContour &&  // Only operate on stroke contours
           clickedContourPointIndex === 0 ||
           clickedContourPointIndex === numClickedContourPoints - 1
         ) {
@@ -366,10 +348,11 @@ function getPenToolBehavior(sceneController, initialEvent, path, curveType) {
             clickedContourPointIndex
           );
           if (clickedContourIndex === appendInfo.contourIndex) {
-            // Close the current contour
-            behaviorFuncs = { setup: [closeContour], noDrag: ensureCubicOffCurves };
+            // For stroke pen, we don't close contours - they remain open
+            // So we don't handle closing here, just return to avoid any action
+            return null;
           } else {
-            // Connect to other open contour
+            // Connect to other open stroke contour
             appendInfo.targetContourIndex = clickedContourIndex;
             appendInfo.targetContourPointIndex = clickedContourPointIndex;
             behaviorFuncs = { setup: [connectToContour], noDrag: ensureCubicOffCurves };
@@ -381,20 +364,20 @@ function getPenToolBehavior(sceneController, initialEvent, path, curveType) {
         }
       }
     }
-  }
+ }
 
   const getPointFromEvent = (event) => sceneController.selectedGlyphPoint(event);
 
-  return new PenToolBehavior(getPointFromEvent, appendInfo, behaviorFuncs, curveType);
+  return new StrokePenToolBehavior(getPointFromEvent, appendInfo, behaviorFuncs);
 }
 
-class PenToolBehavior {
-  undoLabel = translate("edit-tools-pen.undo.add-points");
+class StrokePenToolBehavior {
+  undoLabel = "Add Stroke Points";
 
-  constructor(getPointFromEvent, appendInfo, behaviorFuncs, curveType) {
+  constructor(getPointFromEvent, appendInfo, behaviorFuncs) {
     this.getPointFromEvent = getPointFromEvent;
     this.context = { ...appendInfo };
-    this.context.curveType = curveType;
+    this.context.curveType = "cubic";
     this.context.appendBias = this.context.appendMode === AppendModes.APPEND ? 1 : 0;
     this.context.prependBias = this.context.appendMode === AppendModes.PREPEND ? 1 : 0;
     this.context.appendDirection =
@@ -428,13 +411,23 @@ class PenToolBehavior {
   }
 }
 
+const AppendModes = {
+  APPEND: "append",
+  PREPEND: "prepend",
+};
+
 function insertContourAndSetupAnchorPoint(context, path, point, shiftKey) {
-  path.insertContour(context.contourIndex, emptyContour());
-  // Ensure this contour is not marked as a stroke contour by explicitly setting strokeSource to undefined
- // (regular contours should not have strokeSource property)
-  if (path.contourInfo[context.contourIndex].strokeSource !== undefined) {
-    delete path.contourInfo[context.contourIndex].strokeSource;
-  }
+  // Create an empty contour with strokeSource metadata set to null (not a derived contour)
+ const newContour = {
+    coordinates: [],
+    pointTypes: [],
+    pointAttributes: null,
+    isClosed: false, // Stroke contours are always open
+    strokeSource: null  // Explicitly mark this as a stroke spine contour
+  };
+  
+  path.insertContour(context.contourIndex, newContour);
+  
   context.anchorIndex = context.contourPointIndex;
 }
 
@@ -462,7 +455,27 @@ function insertAnchorPoint(context, path, point, shiftKey) {
   }
 
   point = vector.roundVector(point);
-  path.insertPoint(context.contourIndex, context.anchorIndex, point);
+  
+  // Add width attributes to the new point - only for stroke contours
+  const pointAttrs = {
+    widthLeft: 20,  // Default width
+    widthRight: 20, // Default width
+    isWidthHandle: false, // Not a width handle by default
+    strokeGroupId: "spine" // Links to source spine
+ };
+  
+  // Only add point attributes if this is a stroke contour
+  const contourInfo = path.contourInfo[context.contourIndex];
+  if (contourInfo.strokeSource === null || contourInfo.strokeSource) {
+    path.insertPoint(context.contourIndex, context.anchorIndex, {
+      ...point,
+      attrs: pointAttrs
+    });
+ } else {
+    // For regular pen paths, don't add stroke-specific attributes
+    path.insertPoint(context.contourIndex, context.anchorIndex, point);
+  }
+  
   context.anchorPoint = point;
   context.selection = getPointSelection(
     path,
@@ -539,34 +552,12 @@ function deleteHandle(context, path, point, shiftKey) {
   context.selection = getPointSelectionAbs(anchorIndex);
 }
 
-function closeContour(context, path, point, shiftKey) {
-  // Only allow closing if this is not a stroke contour
-  const isStrokeContour = path.contourInfo[context.contourIndex].strokeSource !== undefined;
-  if (isStrokeContour) {
-    return; // Don't allow closing stroke contours with pen tool
-  }
-  
- path.contourInfo[context.contourIndex].isClosed = true;
-  const numPoints = path.getNumPointsOfContour(context.contourIndex);
-  if (!context.contourPointIndex) {
-    const lastPointIndex = numPoints - 1;
-    const lastPoint = path.getContourPoint(context.contourIndex, lastPointIndex);
-    path.deletePoint(context.contourIndex, lastPointIndex);
-    path.insertPoint(context.contourIndex, 0, lastPoint);
-  }
-  // When appending, we pretend the anchor index is beyond the last point,
-  // so we insert the handle at the end of the contour, instead of at the front
-  context.anchorIndex = context.appendMode === AppendModes.APPEND ? numPoints : 0;
-  context.anchorPoint = path.getContourPoint(context.contourIndex, 0);
-  context.selection = getPointSelection(path, context.contourIndex, 0);
-}
-
 function dragHandle(context, path, point, shiftKey) {
   point = getHandle(point, context.anchorPoint, shiftKey);
   if (context.handleOutAbsIndex !== undefined) {
     path.setPointPosition(context.handleOutAbsIndex, point.x, point.y);
   }
-  if (context.handleInAbsIndex !== undefined) {
+ if (context.handleInAbsIndex !== undefined) {
     const oppositePoint = oppositeHandle(context.anchorPoint, point);
     path.setPointPosition(context.handleInAbsIndex, oppositePoint.x, oppositePoint.y);
   }
@@ -590,8 +581,8 @@ function connectToContour(context, path, point, shiftKey) {
     points: isPrepend
       ? targetContourPoints.concat(sourceContourPoints)
       : sourceContourPoints.concat(targetContourPoints),
-    isClosed: false,
-    // Ensure this is not treated as a stroke contour by not setting strokeSource
+    isClosed: false, // Stroke contours are always open
+    strokeSource: null // This is a spine contour, not a derived one
   };
   if (targetContourBefore) {
     deleteIndices.reverse();
@@ -633,7 +624,7 @@ function ensureCubicOffCurves(context, path) {
     return;
   }
 
-  // Compute handles for a cubic segment that will look the same as the
+ // Compute handles for a cubic segment that will look the same as the
   // one-off-curve quad segment we have.
   const [handle1, handle2] = [prevPrevPoint, thisPoint].map((point) => {
     return {
@@ -684,15 +675,14 @@ function getAppendInfo(path, selection) {
     const { point: pointSelection } = parseSelection(selection);
     const pointIndex = pointSelection?.[0];
     if (pointIndex !== undefined && pointIndex < path.numPoints) {
-      const [contourIndex, contourPointIndex] =
-        path.getContourAndPointIndex(pointIndex);
+      const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
       const numPointsContour = path.getNumPointsOfContour(contourIndex);
       
-      // Check if this is a stroke contour (skip if it is, since pen tool doesn't edit stroke contours)
+      // Check if this is a stroke contour (spine with strokeSource: null or strokeSource object)
       const isStrokeContour = path.contourInfo[contourIndex].strokeSource !== undefined;
       
       if (
-        !isStrokeContour &&  // Pen tool should not operate on stroke contours
+        isStrokeContour && // Only allow editing of stroke contours with this tool
         !path.contourInfo[contourIndex].isClosed &&
         (contourPointIndex === 0 || contourPointIndex === numPointsContour - 1)
       ) {
@@ -712,7 +702,9 @@ function getAppendInfo(path, selection) {
         };
       }
     }
- }
+  }
+  // For creating new contours, only allow if it's a stroke contour creation
+  // This will be handled in the behavior logic to ensure new contours are stroke contours
   return {
     contourIndex: path.contourInfo.length,
     contourPointIndex: 0,
@@ -722,15 +714,18 @@ function getAppendInfo(path, selection) {
   };
 }
 
-function emptyContour() {
-  return { coordinates: [], pointTypes: [], isClosed: false };
+function scalePoint(pinPoint, point, factor) {
+  return vector.addVectors(
+    pinPoint,
+    vector.mulVectorScalar(vector.subVectors(point, pinPoint), factor)
+ );
 }
 
 function getHandle(handleOut, anchorPoint, shiftKey) {
   if (shiftKey) {
     handleOut = shiftConstrain(anchorPoint, handleOut);
   }
-  return vector.roundVector(handleOut);
+ return vector.roundVector(handleOut);
 }
 
 function oppositeHandle(anchorPoint, handlePoint) {
@@ -747,7 +742,7 @@ function shiftConstrain(anchorPoint, handlePoint) {
 
 function getHoveredPointIndex(sceneController, event) {
   const hoveredSelection = sceneController.sceneModel.pointSelectionAtPoint(
-    sceneController.localPoint(event),
+    sceneController.selectedGlyphPoint(event),
     sceneController.mouseClickMargin
   );
   if (!hoveredSelection.size) {
@@ -782,5 +777,5 @@ function recordLayerChanges(layerInfo, editFunc) {
     );
     layerChanges.push(layerChange.prefixed(["layers", layerName, "glyph"]));
   }
-  return new ChangeCollector().concat(...layerChanges);
+ return new ChangeCollector().concat(...layerChanges);
 }

@@ -57,7 +57,12 @@ export class VarPackedPath {
     const coordinates = VarArray.from(obj.coordinates);
     const pointTypes = [...obj.pointTypes];
     const contourInfo = obj.contourInfo.map((item) => {
-      return { ...item };
+      // Ensure strokeSource metadata is preserved when loading from object
+      const contour = { ...item };
+      if (item.strokeSource !== undefined) {
+        contour.strokeSource = item.strokeSource;
+      }
+      return contour;
     });
     const pointAttributes =
       obj.pointAttributes?.map((attrs) => {
@@ -212,10 +217,15 @@ export class VarPackedPath {
 
   _getUnpackedContour(contourIndex) {
     const contourInfo = this.contourInfo[contourIndex];
-    return {
+    const unpackedContour = {
       points: Array.from(this._iterPointsOfContour(contourIndex)),
       isClosed: contourInfo.isClosed,
     };
+    // Include strokeSource metadata if present
+    if (contourInfo.strokeSource !== undefined) {
+      unpackedContour.strokeSource = contourInfo.strokeSource;
+    }
+    return unpackedContour;
   }
 
   setUnpackedContour(contourIndex, unpackedContour) {
@@ -234,7 +244,7 @@ export class VarPackedPath {
     contourIndex = this._normalizeContourIndex(contourIndex);
     const contour = this.contourInfo[contourIndex];
     const startPoint = this._getContourStartPoint(contourIndex);
-    return {
+    const contourData = {
       coordinates: this.coordinates.slice(startPoint * 2, (contour.endPoint + 1) * 2),
       pointTypes: this.pointTypes.slice(startPoint, contour.endPoint + 1),
       pointAttributes: filterPointAttributes(
@@ -242,6 +252,11 @@ export class VarPackedPath {
       ),
       isClosed: contour.isClosed,
     };
+    // Include strokeSource metadata if present
+    if (contour.strokeSource !== undefined) {
+      contourData.strokeSource = contour.strokeSource;
+    }
+    return contourData;
   }
 
   setContour(contourIndex, contour) {
@@ -257,6 +272,10 @@ export class VarPackedPath {
     );
     this._moveEndPoints(contourIndex, contour.pointTypes.length - numOldPoints);
     this.contourInfo[contourIndex].isClosed = contour.isClosed;
+    // Preserve strokeSource metadata
+    if (contour.strokeSource !== undefined) {
+      this.contourInfo[contourIndex].strokeSource = contour.strokeSource;
+    }
   }
 
   appendContour(contour) {
@@ -273,7 +292,12 @@ export class VarPackedPath {
       contour.pointTypes,
       contour.pointAttributes
     );
-    const contourInfo = { endPoint: startPoint - 1, isClosed: contour.isClosed };
+    // Initialize contour info with strokeSource metadata
+    const contourInfo = {
+      endPoint: startPoint - 1,
+      isClosed: contour.isClosed,
+      strokeSource: contour.strokeSource || null  // Add strokeSource metadata
+    };
     this.contourInfo.splice(contourIndex, 0, contourInfo);
     this._moveEndPoints(contourIndex, contour.pointTypes.length);
   }
@@ -1139,12 +1163,17 @@ export function packContour(unpackedContour) {
     pointTypes[i] = packPointType(point.type, point.smooth);
     pointAttributes[i] = copyPointAttrs(point.attrs);
   }
-  return {
+  const packed = {
     coordinates: coordinates,
     pointTypes: pointTypes,
     pointAttributes: filterPointAttributes(pointAttributes),
     isClosed: unpackedContour.isClosed,
   };
+  // Preserve strokeSource metadata if present
+  if (unpackedContour.strokeSource !== undefined) {
+    packed.strokeSource = unpackedContour.strokeSource;
+  }
+  return packed;
 }
 
 function coordinatesToPoints(coordinates) {
