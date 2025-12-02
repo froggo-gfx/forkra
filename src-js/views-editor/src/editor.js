@@ -107,6 +107,13 @@ export class EditorController extends ViewController {
     super(font);
     const canvas = document.querySelector("#edit-canvas");
     canvas.focus();
+    // This relates to getActionIdentifierFromKeyEvent which contains logic that
+    // allows selected text anywhere (say: a glyph name) to be copied. Normally,
+    // clicking "elsewhere" resets the global text selection, but somehow this
+    // doesn't happen when the canvas gets clicked. This selection interferes then
+    // with our shortcut mechanism. So let's just reset the text selection when
+    // the canvas receives focus.
+    canvas.onfocus = (event) => window.getSelection().removeAllRanges();
 
     canvas.ondragenter = (event) => this._onDragEnter(event);
     canvas.ondragover = (event) => this._onDragOver(event);
