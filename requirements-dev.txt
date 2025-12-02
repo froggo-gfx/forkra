@@ -4,4 +4,4 @@ pre-commit==4.3.0
 pytest==8.4.2
 pytest-asyncio==1.2.0
 types-PyYAML==6.0.12.20250915
-unicodedata2==16.0.0
+unicodedata2==17.0.0
