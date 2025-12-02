@@ -882,11 +882,7 @@ input {
       ]
     );
 
-    if (!(await dialog.run())) {
-      return false;
-    }
-
-    return true;
+    return !!(await dialog.run());
   }
 }
 
