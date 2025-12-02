@@ -1,7 +1,9 @@
 # Changelog for Fontra
 
-## 2025-11-?? [version 2025.11.4]
+## 2025-12-02 [version 2025.12.0]
 
+- [editor] Fix UI glitch where "select all" could unexpectedly cause all UI text to be selected instead of doing "select all" in the editor. [PR 2332](https://github.com/fontra/fontra/pull/2332)
+- [font sources] Prompt the user with a warning when toggling the "Is sparse" source checkbox. Part of [PR 2331](https://github.com/fontra/fontra/pull/2331).
 - [kerning] Various kerning improvements ([PR 2324](https://github.com/fontra/fontra/pull/2324)):
   - Bring Fontra's kerning behavior in line with how fontmake treats designspace/ufo: every non-sparse source participates, falling back to zeros when values are missing
   - Fix a bug that allowed adding kerning to sparse sources
