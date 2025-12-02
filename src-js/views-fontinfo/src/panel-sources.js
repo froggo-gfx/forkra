@@ -1168,6 +1168,28 @@ async function insertInterpolatedKerningAndSourceInfo(
   sourceIdentifier,
   location
 ) {
+  const interpolatedSource = getInterpolatedSourceData(fontController, location);
+  delete interpolatedSource["name"];
+  delete interpolatedSource["location"];
+  delete interpolatedSource["isSparse"];
+
+  const sources = await fontController.getSources();
+  const newSource = { ...sources[sourceIdentifier], ...interpolatedSource };
+
+  return await insertInterpolatedKerningAndInsertSource(
+    fontController,
+    sourceIdentifier,
+    location,
+    newSource
+  );
+}
+
+async function insertInterpolatedKerningAndInsertSource(
+  fontController,
+  sourceIdentifier,
+  location,
+  newSource
+) {
   const kerningChanges = await insertInterpolatedKerning(
     fontController,
     sourceIdentifier,
@@ -1175,13 +1197,6 @@ async function insertInterpolatedKerningAndSourceInfo(
   );
 
   const sources = await fontController.getSources();
-  const interpolatedSource = getInterpolatedSourceData(fontController, location);
-  delete interpolatedSource["name"];
-  delete interpolatedSource["location"];
-  delete interpolatedSource["isSparse"];
-
-  const newSource = { ...sources[sourceIdentifier], ...interpolatedSource };
-
   const sourceChanges = recordChanges({ sources }, (root) => {
     root.sources[sourceIdentifier] = newSource;
   });
