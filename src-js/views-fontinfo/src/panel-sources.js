@@ -444,7 +444,7 @@ export class SourcesPanel extends BaseInfoPanel {
     };
 
     if (interpolatedSource.lineMetricsHorizontalLayout) {
-      newSource.lineMetricsHorizontalLayout = getLineMetricsHorRounded(
+      newSource.lineMetricsHorizontalLayout = getLineMetricsRounded(
         interpolatedSource.lineMetricsHorizontalLayout
       );
     }
@@ -1093,15 +1093,15 @@ function prepareLineMetricsHorForController(lineMetricsHorizontalLayout) {
   return newLineMetricsHorizontalLayout;
 }
 
-function getLineMetricsHorRounded(lineMetricsHorizontalLayout) {
-  const newLineMetricsHorizontalLayout = {};
-  for (const key in lineMetricsHorizontalLayout) {
-    newLineMetricsHorizontalLayout[key] = {
-      value: round(lineMetricsHorizontalLayout[key].value, 2),
-      zone: round(lineMetricsHorizontalLayout[key].zone, 2) || 0,
+function getLineMetricsRounded(lineMetrics) {
+  const newLineMetrics = {};
+  for (const key in lineMetrics) {
+    newLineMetrics[key] = {
+      value: round(lineMetrics[key].value, 2),
+      zone: round(lineMetrics[key].zone, 2) || 0,
     };
   }
-  return newLineMetricsHorizontalLayout;
+  return newLineMetrics;
 }
 
 function getLabelFromKey(key) {
