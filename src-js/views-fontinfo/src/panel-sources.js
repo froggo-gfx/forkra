@@ -308,25 +308,13 @@ export class SourcesPanel extends BaseInfoPanel {
       sourceIdentifier = crypto.randomUUID().slice(0, 8);
     } while (sourceIdentifier in this.fontController.sources);
 
-    const root = {
-      sources: this.fontController.sources,
-      kerning: await this.fontController.getKerning(),
-    };
-
-    // Do the kerning changes *first*, and then add the font source. This is needed
-    // because the *presence* of the new source will make it participate in kerning
-    // interpolation, but it doesn't exist yet, so it would be seen as all zeros.
-    const kerningChanges = await insertInterpolatedKerning(
-      this.fontController,
-      sourceIdentifier,
-      newSource.location
+    const finalChanges = joinChanges(
+      ...(await insertInterpolatedKerningAndInsertSource(
+        this.fontController,
+        sourceIdentifier,
+        newSource
+      ))
     );
-
-    const sourceChanges = recordChanges(root, (root) => {
-      root.sources[sourceIdentifier] = newSource;
-    });
-
-    const finalChanges = sourceChanges.concat(...kerningChanges);
 
     if (finalChanges.hasChange) {
       const currentSelectedSourceIdentifier = this.selectedSourceIdentifier;
@@ -1179,7 +1167,6 @@ async function insertInterpolatedKerningAndSourceInfo(
   return await insertInterpolatedKerningAndInsertSource(
     fontController,
     sourceIdentifier,
-    location,
     newSource
   );
 }
@@ -1187,13 +1174,15 @@ async function insertInterpolatedKerningAndSourceInfo(
 async function insertInterpolatedKerningAndInsertSource(
   fontController,
   sourceIdentifier,
-  location,
   newSource
 ) {
+  // Do the kerning changes *first*, and then add the font source. This is needed
+  // because the *presence* of the new source will make it participate in kerning
+  // interpolation, but it doesn't exist yet, so it would be seen as all zeros.
   const kerningChanges = await insertInterpolatedKerning(
     fontController,
     sourceIdentifier,
-    location
+    newSource.location
   );
 
   const sources = await fontController.getSources();
