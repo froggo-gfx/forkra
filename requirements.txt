@@ -7,4 +7,4 @@ pyyaml==6.0.3
 ufoLib2==0.18.1
 ufomerge==1.9.6
 watchfiles==1.1.1
-skia-pathops==0.8.0.post2
+skia-pathops==0.9.0
