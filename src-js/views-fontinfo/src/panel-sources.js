@@ -669,7 +669,7 @@ class SourceBox extends HTMLElement {
     }
   }
 
-  _updateContents() {
+  async _updateContents() {
     const models = this.models;
 
     // create controllers
@@ -679,6 +679,10 @@ class SourceBox extends HTMLElement {
 
     // create listeners
     this.controllers.general.addListener(async (event) => {
+      if (event.senderInfo?.noUpdate) {
+        // We did this update ourselves
+        return;
+      }
       if (event.key == "name") {
         if (!this.checkSourceEntry("name", undefined, event.newValue.trim())) {
           this.controllers.general.model.name = this.source.name;
@@ -688,6 +692,14 @@ class SourceBox extends HTMLElement {
 
       let preChanges;
       if (event.key == "isSparse") {
+        if (!(await this.askChangeIsSparseOkayCancel(event.newValue))) {
+          // Revert the checkbox to the old state, but don't trigger an update
+          this.controllers.general.setItem("isSparse", event.oldValue, {
+            noUpdate: true,
+          });
+          return;
+        }
+
         const fontController = this.sourcesPanel.fontController;
         if (event.newValue) {
           preChanges = await deleteKerningSource(fontController, this.sourceIdentifier);
@@ -854,6 +866,27 @@ input {
 
     this.innerHTML = "";
     this.appendChild(accordion);
+  }
+
+  async askChangeIsSparseOkayCancel(onOff) {
+    const message = onOff
+      ? `This will delete any kerning for this source.`
+      : `This will add interpolated kerning and line metrics for this source.`;
+
+    const dialog = await dialogSetup(
+      `Are you sure you want to turn the "Is Sparse" flag ${onOff ? "on" : "off"}?`,
+      message,
+      [
+        { title: translate("dialog.cancel"), isCancelButton: true },
+        { title: translate("dialog.okay"), isDefaultButton: true, result: "ok" },
+      ]
+    );
+
+    if (!(await dialog.run())) {
+      return false;
+    }
+
+    return true;
   }
 }
 
