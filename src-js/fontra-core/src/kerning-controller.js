@@ -21,8 +21,13 @@ export class KerningController {
     this.fontController.addChangeListener?.(
       { kerning: { [wildcard]: { values: null } } },
       (change, isExternalChange) => {
-        for (const [leftName, rightName] of getKernPairsFromChange(change)) {
-          this.clearPairCache(leftName, rightName);
+        if (!change) {
+          // reload all
+          this._pairFunctions = {};
+        } else {
+          for (const [leftName, rightName] of getKernPairsFromChange(change)) {
+            this.clearPairCache(leftName, rightName);
+          }
         }
       },
       false,
@@ -614,6 +619,7 @@ function addGroupPrefix(groupName) {
 }
 
 function getKernPairsFromChange(kerningChange) {
+  assert(kerningChange, "invalid change object");
   const pairs = [];
   for (const { path, change } of iterChanges(kerningChange)) {
     pairs.push([path.at(-1), change.a?.[0]]);
