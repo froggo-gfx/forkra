@@ -1,5 +1,11 @@
 # Changelog for Fontra
 
+## 2025-12-03 [version 2025.12.1]
+
+- Fixed two regressions with the font sources panel and designspace files that were introduced with version `2025.12.0` ([PR 2333](https://github.com/fontra/fontra/pull/2333)):
+  - Fix "unknown kerning identifier" error when creating a new font source
+  - Fix warning when a sparse (designspace) source cannot be made not sparse
+
 ## 2025-12-02 [version 2025.12.0]
 
 - [editor] Fix UI glitch where "select all" could unexpectedly cause all UI text to be selected instead of doing "select all" in the editor. [PR 2332](https://github.com/fontra/fontra/pull/2332)
