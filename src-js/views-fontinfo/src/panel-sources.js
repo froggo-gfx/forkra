@@ -1190,7 +1190,11 @@ async function insertInterpolatedKerningAndInsertSource(
     root.sources[sourceIdentifier] = newSource;
   });
 
-  return [...kerningChanges, sourceChanges];
+  // While the kerning changes need to be *computed* before the source changes,
+  // the source change must be *emitted* before the kerning changes, to give backends
+  // (*cough* designspace *cough*) the chance to first create the source, because
+  // they may not be able to write kerning to a non-existing source.
+  return [sourceChanges, ...kerningChanges];
 }
 
 async function insertInterpolatedKerning(fontController, sourceIdentifier, location) {
