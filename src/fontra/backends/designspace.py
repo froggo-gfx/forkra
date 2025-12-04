@@ -25,7 +25,7 @@ from fontTools.designspaceLib import (
 from fontTools.misc.transform import DecomposedTransform, Transform
 from fontTools.pens.pointPen import AbstractPointPen
 from fontTools.pens.recordingPen import RecordingPointPen
-from fontTools.ufoLib import UFOLibError, UFOReaderWriter
+from fontTools.ufoLib import UFOLibError, UFOReader, UFOReaderWriter
 from fontTools.ufoLib.glifLib import GlyphSet
 
 from ..core.async_property import async_property
@@ -362,7 +362,7 @@ class DesignspaceBackend:
             if self._familyName is None and source.familyName:
                 self._familyName = source.familyName
             ufoPath = os.path.normpath(source.path)
-            reader = manager.getReader(ufoPath)
+            reader = manager.getReader(ufoPath, createIfNeeded=False)
             defaultLayerName = reader.getDefaultLayerName()
             ufoLayerName = source.layerName or defaultLayerName
 
@@ -402,7 +402,7 @@ class DesignspaceBackend:
         manager = self.ufoManager
         for source in self.dsDoc.sources:
             ufoPath = os.path.normpath(source.path)
-            reader = manager.getReader(ufoPath)
+            reader = manager.getReader(ufoPath, createIfNeeded=False)
             for ufoLayerName in reader.getLayerNames():
                 layer = self.ufoLayers.findItem(path=ufoPath, name=ufoLayerName)
                 if layer is None:
@@ -1711,7 +1711,9 @@ class UFOFontInfo:
 
 class UFOManager:
     @cache
-    def getReader(self, path: str) -> UFOReaderWriter:
+    def getReader(self, path: str, createIfNeeded: bool = True) -> UFOReaderWriter:
+        if not createIfNeeded and not os.path.exists(path):
+            raise FileNotFoundError(path)
         return UFOReaderWriter(path)
 
     @cache
@@ -2212,7 +2214,7 @@ async def extractGlyphDependenciesFromUFO(
 
 
 def _extractComponentInfoFromUFO(ufoPath: str, layerName: str) -> dict[str, set[str]]:
-    reader = UFOReaderWriter(ufoPath)
+    reader = UFOReader(ufoPath)
     glyphSet = reader.getGlyphSet(layerName=layerName)
     componentInfo = {}
     for glyphName in glyphSet.keys():
