@@ -1307,6 +1307,16 @@ async def test_uniqueFontSourceIdentifiers(writableTestFont):
     assert len(sources) == len(dsDoc.sources)
 
 
+async def test_missingUFOError(writableTestFont):
+    dsDoc = writableTestFont.dsDoc
+    dsPath = dsDoc.path
+    dsDoc.sources[0].path += ".invalid"
+    dsDoc.write(dsPath)
+
+    with pytest.raises(FileNotFoundError, match=r".*\.invalid$"):
+        _ = getFileSystemBackend(dsPath)
+
+
 def fileNamesFromDir(path):
     return sorted(p.name for p in path.iterdir())
 
