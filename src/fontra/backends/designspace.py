@@ -25,7 +25,7 @@ from fontTools.designspaceLib import (
 from fontTools.misc.transform import DecomposedTransform, Transform
 from fontTools.pens.pointPen import AbstractPointPen
 from fontTools.pens.recordingPen import RecordingPointPen
-from fontTools.ufoLib import UFOLibError, UFOReaderWriter
+from fontTools.ufoLib import UFOLibError, UFOReader, UFOReaderWriter
 from fontTools.ufoLib.glifLib import GlyphSet
 
 from ..core.async_property import async_property
@@ -2212,7 +2212,7 @@ async def extractGlyphDependenciesFromUFO(
 
 
 def _extractComponentInfoFromUFO(ufoPath: str, layerName: str) -> dict[str, set[str]]:
-    reader = UFOReaderWriter(ufoPath)
+    reader = UFOReader(ufoPath)
     glyphSet = reader.getGlyphSet(layerName=layerName)
     componentInfo = {}
     for glyphName in glyphSet.keys():
