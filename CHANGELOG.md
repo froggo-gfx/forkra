@@ -1,5 +1,9 @@
 # Changelog for Fontra
 
+## 2025-12-?? [version 2025.12.2]
+
+- [designspace] Fixed a bug where Fontra would create an invalid UFO when opening a .designspace file that refers to a non-existent UFO. [Issue 2335](https://github.com/fontra/fontra/issues/2335), [PR 2336](https://github.com/fontra/fontra/pull/2336)
+
 ## 2025-12-03 [version 2025.12.1]
 
 - Fixed two regressions with the font sources panel and designspace files that were introduced with version `2025.12.0` ([PR 2333](https://github.com/fontra/fontra/pull/2333)):
