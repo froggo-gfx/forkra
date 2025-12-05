@@ -1,7 +1,8 @@
 # Changelog for Fontra
 
-## 2025-12-?? [version 2025.12.2]
+## 2025-12-05 [version 2025.12.2]
 
+- [fontra-pak] Add a binary for Linux to the release. Contributed by Dr Anirban Mitra. [fontra-pak PR 203](https://github.com/fontra/fontra-pak/pull/203)
 - [designspace] Fixed a bug where Fontra would create an invalid UFO when opening a .designspace file that refers to a non-existent UFO. [Issue 2335](https://github.com/fontra/fontra/issues/2335), [PR 2336](https://github.com/fontra/fontra/pull/2336)
 
 ## 2025-12-03 [version 2025.12.1]
