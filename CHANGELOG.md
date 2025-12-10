@@ -1,5 +1,9 @@
 # Changelog for Fontra
 
+## 2025-12-?? [version 2025.12.3]
+
+- [shape tool] Fix the stroke color when dragging a new shape in dark mode. [commit](https://github.com/fontra/fontra/commit/a7d58f8437b7da8540541f11964841ffcba8b470)
+
 ## 2025-12-05 [version 2025.12.2]
 
 - [fontra-pak] Add a binary for Linux to the release. Contributed by Dr Anirban Mitra. [fontra-pak PR 203](https://github.com/fontra/fontra-pak/pull/203)
