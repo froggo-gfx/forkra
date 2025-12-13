@@ -1,7 +1,8 @@
 # Changelog for Fontra
 
-## 2025-12-?? [version 2025.12.3]
+## 2025-12-13 [version 2025.12.3]
 
+- [fontra-pak ubuntu] Make sure the binary for Ubuntu is executable. [fontra-pak PR 205](https://github.com/fontra/fontra-pak/pull/205)
 - [shape tool] Fix the stroke color when dragging a new shape in dark mode. [commit](https://github.com/fontra/fontra/commit/a7d58f8437b7da8540541f11964841ffcba8b470)
 
 ## 2025-12-05 [version 2025.12.2]
