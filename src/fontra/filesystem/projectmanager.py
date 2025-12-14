@@ -11,7 +11,7 @@ from aiohttp import web
 
 from ..backends import getFileSystemBackend
 from ..core.fonthandler import FontHandler
-from ..core.protocols import ExportManager, ProjectManager
+from ..core.protocols import ExportManager, ProjectManager, ProjectOpenListener
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,7 @@ class FileSystemProjectManager:
         maxFolderDepth: int = 3,
         readOnly: bool = False,
         exportManager: ExportManager | None = None,
+        projectOpenListener: ProjectOpenListener | None = None,
     ):
         self.rootPath = rootPath
         self.singleFilePath = None
@@ -71,6 +72,7 @@ class FileSystemProjectManager:
             self.rootPath = self.rootPath.parent
         self.fontHandlers: dict[str, FontHandler] = {}
         self.exportManager = exportManager
+        self.projectOpenListener = projectOpenListener
 
     async def aclose(self) -> None:
         for fontHandler in self.fontHandlers.values():
@@ -99,6 +101,8 @@ class FileSystemProjectManager:
                 logger.info(f"closing FontHandler for '{projectIdentifier}'")
                 del self.fontHandlers[projectIdentifier]
                 await fontHandler.aclose()
+                if self.projectOpenListener is not None:
+                    self.projectOpenListener.projectClosed(projectIdentifier)
 
             logger.info(f"new FontHandler for '{projectIdentifier}'")
             fontHandler = FontHandler(
@@ -111,6 +115,8 @@ class FileSystemProjectManager:
             )
             await fontHandler.startTasks()
             self.fontHandlers[projectIdentifier] = fontHandler
+            if self.projectOpenListener is not None:
+                self.projectOpenListener.projectOpened(projectIdentifier)
         return fontHandler
 
     def _getProjectPath(self, path: str) -> PathLike | None:
