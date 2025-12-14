@@ -1,5 +1,9 @@
 # Changelog for Fontra
 
+## 2025-12-?? [version 2025.12.4]
+
+- [fontra pak] When quitting, prompt the user if there are still open fonts. [fontra-pak Issue 195](https://github.com/fontra/fontra-pak/issues/195), [fontra-pak PR 206](https://github.com/fontra/fontra-pak/pull/206)
+
 ## 2025-12-13 [version 2025.12.3]
 
 - [fontra-pak ubuntu] Make sure the binary for Ubuntu is executable. [fontra-pak PR 205](https://github.com/fontra/fontra-pak/pull/205)
