@@ -1,0 +1,62 @@
+{
+"name": "H",
+"sources": [
+{
+"name": "<default>",
+"layerName": "<default>"
+},
+{
+"name": "weight=900",
+"layerName": "weight=900",
+"location": {
+"weight": 900
+}
+},
+{
+"name": "weight=650",
+"layerName": "weight=650",
+"location": {
+"weight": 650
+}
+}
+],
+"layers": {
+"<default>": {
+"glyph": {
+"components": [
+{
+"name": "F",
+"location": {
+}
+}
+],
+"xAdvance": 200
+}
+},
+"weight=650": {
+"glyph": {
+"components": [
+{
+"name": "F",
+"location": {
+"weight": 450
+}
+}
+],
+"xAdvance": 200
+}
+},
+"weight=900": {
+"glyph": {
+"components": [
+{
+"name": "F",
+"location": {
+}
+}
+],
+"xAdvance": 200
+}
+}
+}
+}

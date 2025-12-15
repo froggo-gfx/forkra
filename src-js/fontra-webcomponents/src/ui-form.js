@@ -112,6 +112,12 @@ export class Form extends SimpleElement {
       gap: 0.35rem;
     }
 
+    .ui-form-value.slider-has-checkbox {
+      display: grid;
+      gap: 0.25em;
+      grid-template-columns: auto 1.5em;
+    }
+
     .ui-form-icon {
       overflow-x: unset;
       width: 1.5em;
@@ -498,10 +504,24 @@ export class Form extends SimpleElement {
 
   _addEditNumberSlider(valueElement, fieldItem) {
     const rangeElement = new RangeSlider();
-    rangeElement.value = fieldItem.value;
+    rangeElement.value = getInitialValueWithFallback(fieldItem);
     rangeElement.minValue = fieldItem.minValue;
     rangeElement.defaultValue = fieldItem.defaultValue;
     rangeElement.maxValue = fieldItem.maxValue;
+
+    let checkboxElement;
+    if (fieldItem.hasCheckBox) {
+      checkboxElement = html.input({
+        type: "checkbox",
+        checked: fieldItem.value !== undefined,
+        onchange: (event) => {
+          const isChecked = event.target.checked;
+          const changeToValue = isChecked ? rangeElement.value : null;
+          this._fieldChanging(fieldItem, changeToValue, undefined);
+        },
+      });
+      valueElement.classList.add("slider-has-checkbox");
+    }
 
     {
       // Slider change closure
@@ -521,6 +541,10 @@ export class Form extends SimpleElement {
             valueStream.done();
             valueStream = undefined;
             this._dispatchEvent("endChange", { key: fieldItem.key });
+            // mark checkbox as used
+            if (checkboxElement) {
+              checkboxElement.checked = true;
+            }
           }
         } else {
           this._fieldChanging(fieldItem, value, undefined);
@@ -529,6 +553,9 @@ export class Form extends SimpleElement {
     }
 
     valueElement.appendChild(rangeElement);
+    if (checkboxElement) {
+      valueElement.appendChild(checkboxElement);
+    }
   }
 
   _addColorPicker(valueElement, fieldItem) {
@@ -660,6 +687,10 @@ function maybeRound(value, digits) {
 
 function maybeRoundToString(value, digits) {
   return value == undefined ? "" : digits == undefined ? value : round(value, digits);
+}
+
+function getInitialValueWithFallback(fieldItem) {
+  return fieldItem.value ?? fieldItem.fallbackValue ?? fieldItem.defaultValue;
 }
 
 customElements.define("ui-form", Form);

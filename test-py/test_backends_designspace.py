@@ -224,6 +224,45 @@ async def test_addNewDenseSource(writableTestFont):
     )
 
 
+async def test_makeSourceDense(writableTestFont):
+    sources = await writableTestFont.getSources()
+
+    for sourceIdentifier, source in sources.items():
+        if source.isSparse:
+            source.isSparse = False
+            break
+
+    with pytest.raises(ValueError, match="cannot be made not sparse"):
+        await writableTestFont.putSources(sources)
+
+
+async def test_makeSourceSparse(writableTestFont):
+    oldDSDoc = DesignSpaceDocument.fromfile(writableTestFont.dsDoc.path)
+    [dsSource] = [
+        dsSource for dsSource in oldDSDoc.sources if dsSource.name == "bold-wide"
+    ]
+    assert dsSource.layerName is None
+
+    sources = await writableTestFont.getSources()
+
+    source = sources["bold-wide"]
+    assert not source.isSparse
+    source.isSparse = True
+
+    await writableTestFont.putSources(sources)
+
+    reopenedBackend = getFileSystemBackend(writableTestFont.dsDoc.path)
+    reopenedFontSources = await reopenedBackend.getSources()
+    reopenedSource = reopenedFontSources["bold-wide"]
+    assert reopenedSource.isSparse
+
+    newDSDoc = DesignSpaceDocument.fromfile(writableTestFont.dsDoc.path)
+    [dsSource] = [
+        dsSource for dsSource in newDSDoc.sources if dsSource.name == "bold-wide"
+    ]
+    assert dsSource.layerName == "foreground"
+
+
 async def test_addLocalAxis(writableTestFont):
     glyphName = "period"
     glyphMap = await writableTestFont.getGlyphMap()
@@ -1266,6 +1305,16 @@ async def test_uniqueFontSourceIdentifiers(writableTestFont):
     backend = getFileSystemBackend(dsPath)
     sources = await backend.getSources()
     assert len(sources) == len(dsDoc.sources)
+
+
+async def test_missingUFOError(writableTestFont):
+    dsDoc = writableTestFont.dsDoc
+    dsPath = dsDoc.path
+    dsDoc.sources[0].path += ".invalid"
+    dsDoc.write(dsPath)
+
+    with pytest.raises(FileNotFoundError, match=r".*\.invalid$"):
+        _ = getFileSystemBackend(dsPath)
 
 
 def fileNamesFromDir(path):

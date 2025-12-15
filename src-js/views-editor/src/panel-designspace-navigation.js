@@ -112,7 +112,7 @@ export default class DesignspaceNavigationPanel extends Panel {
         "action.glyph.delete-source",
         { topic },
         () => this.removeSource(),
-        () => this.sourcesList.getSelectedItemIndex() !== undefined
+        () => this.canRemoveSource()
       );
 
       registerAction(
@@ -924,6 +924,13 @@ export default class DesignspaceNavigationPanel extends Panel {
           this.sceneController.scrollAdjustBehavior =
             this.getScrollAdjustBehavior("pin-glyph-center");
 
+          if (
+            !event.newValue &&
+            glyph.sources.filter((source) => !source.inactive).length < 2
+          ) {
+            return; // Don't deactivate the last active source or bad things will happen
+          }
+
           glyph.sources[index].inactive = !event.newValue;
 
           return translate(
@@ -1136,7 +1143,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     );
   }
 
-  async goToNearestSource() {
+  async goToNearestSource(allowSparseSource = true) {
     const glyphController = await this.sceneModel.getSelectedVariableGlyphController();
     if (!glyphController) {
       this.sceneController.scrollAdjustBehavior =
@@ -1148,7 +1155,9 @@ export default class DesignspaceNavigationPanel extends Panel {
         ...defaultLocation,
         ...this.sceneSettings.fontLocationSourceMapped,
       };
-      const sourceIdentifiers = this.fontController.getSortedSourceIdentifiers();
+      const sourceIdentifiers = this.fontController.getSortedSourceIdentifiers(
+        !allowSparseSource
+      );
       if (sourceIdentifiers.length) {
         const locations = sourceIdentifiers.map((sourceIdentifier) => ({
           ...defaultLocation,
@@ -1216,9 +1225,7 @@ export default class DesignspaceNavigationPanel extends Panel {
   }
 
   _updateRemoveSourceButtonState() {
-    const sourceItem = this.sourcesList.getSelectedItem();
-    this.addRemoveSourceButtons.disableRemoveButton =
-      !sourceItem || !!sourceItem.isFontSource;
+    this.addRemoveSourceButtons.disableRemoveButton = !this.canRemoveSource();
   }
 
   _updateRemoveSourceLayerButtonState() {
@@ -1289,11 +1296,26 @@ export default class DesignspaceNavigationPanel extends Panel {
     this.sceneSettings.editingLayers = editingLayers;
   }
 
-  async removeSource() {
+  canRemoveSource() {
     const sourceItem = this.sourcesList.getSelectedItem();
-    if (!sourceItem) {
+    const numActiveSources = this.sourcesList.items.reduce(
+      (total, item) => total + (item.active ? 1 : 0),
+      0
+    );
+
+    return (
+      sourceItem &&
+      !sourceItem.isFontSource &&
+      (!sourceItem.active || numActiveSources > 1)
+    );
+  }
+
+  async removeSource() {
+    if (!this.canRemoveSource()) {
       return;
     }
+
+    const sourceItem = this.sourcesList.getSelectedItem();
     const sourceIndex = sourceItem.sourceIndex;
 
     const glyphController = await this.sceneModel.getSelectedVariableGlyphController();

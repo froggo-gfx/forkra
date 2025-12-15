@@ -165,3 +165,12 @@ class ExportManager(Protocol):
 
     def getSupportedExportFormats(self) -> list[str]:
         pass
+
+
+@runtime_checkable
+class ProjectOpenListener(Protocol):
+    def projectOpened(self, projectIdentifier: str) -> None:
+        pass
+
+    def projectClosed(self, projectIdentifier: str) -> None:
+        pass

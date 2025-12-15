@@ -107,6 +107,13 @@ export class EditorController extends ViewController {
     super(font);
     const canvas = document.querySelector("#edit-canvas");
     canvas.focus();
+    // This relates to getActionIdentifierFromKeyEvent which contains logic that
+    // allows selected text anywhere (say: a glyph name) to be copied. Normally,
+    // clicking "elsewhere" resets the global text selection, but somehow this
+    // doesn't happen when the canvas gets clicked. This selection interferes then
+    // with our shortcut mechanism. So let's just reset the text selection when
+    // the canvas receives focus.
+    canvas.onfocus = (event) => window.getSelection().removeAllRanges();
 
     canvas.ondragenter = (event) => this._onDragEnter(event);
     canvas.ondragover = (event) => this._onDragOver(event);
@@ -909,9 +916,9 @@ export class EditorController extends ViewController {
     }
   }
 
-  goToNearestSource() {
+  goToNearestSource(allowSparseSource = true) {
     const panel = this.getSidebarPanel("designspace-navigation");
-    panel?.goToNearestSource();
+    panel?.goToNearestSource(allowSparseSource);
   }
 
   initTools() {
@@ -1658,6 +1665,7 @@ export class EditorController extends ViewController {
       const clipboardObject = {
         "text/plain": plainTextString,
         "text/html": svgString,
+        "image/svg+xml": svgString,
         "web image/svg+xml": svgString,
         "web fontra/static-glyph": jsonString,
       };
@@ -1986,7 +1994,14 @@ export class EditorController extends ViewController {
   }
 
   async _unpackClipboard() {
-    const plainText = await readFromClipboard("text/plain");
+    let plainText;
+
+    for (const type of ["web image/svg+xml", "image/svg+xml", "text/plain"]) {
+      plainText = await readFromClipboard(type);
+      if (plainText) {
+        break;
+      }
+    }
     if (!plainText) {
       return {};
     }
@@ -3252,7 +3267,14 @@ export class EditorController extends ViewController {
       // Legacy URL format
       viewInfo = {};
       for (const key of url.searchParams.keys()) {
-        viewInfo[key] = JSON.parse(url.searchParams.get(key));
+        if (key == "project") {
+          continue;
+        }
+        try {
+          viewInfo[key] = JSON.parse(url.searchParams.get(key));
+        } catch (e) {
+          console.log("failed to parse legacy url format", e.toString());
+        }
       }
     }
     this.sceneSettings.align = viewInfo["align"] || "center";

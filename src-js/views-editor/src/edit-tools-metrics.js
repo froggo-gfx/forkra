@@ -4,7 +4,15 @@ import { UndoStack, reverseUndoRecord } from "@fontra/core/font-controller.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import { isDisjoint, symmetricDifference, union } from "@fontra/core/set-ops.js";
-import { arrowKeyDeltas, assert, round, throttleCalls } from "@fontra/core/utils.js";
+import {
+  arrowKeyDeltas,
+  assert,
+  capitalizeFirstLetter,
+  range,
+  round,
+  throttleCalls,
+} from "@fontra/core/utils.js";
+import { MenuItemDivider } from "@fontra/web-components/menu-panel.js";
 import { dialog } from "@fontra/web-components/modal-dialog.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
 import { equalGlyphSelection } from "./scene-controller.js";
@@ -1141,7 +1149,11 @@ class KerningTool extends MetricsBaseTool {
 
   getPairNamesFromSelector(selector) {
     const { leftGlyph, rightGlyph } = this.getGlyphNamesFromSelector(selector);
-    return this.kerningController.getPairNames(leftGlyph, rightGlyph);
+    return this.kerningController.getPairNames(
+      leftGlyph,
+      rightGlyph,
+      this.getSourceIdentifier()
+    );
   }
 
   async showDialogLocationNotAtSource() {
@@ -1163,13 +1175,14 @@ class KerningTool extends MetricsBaseTool {
       ]
     );
     if (result === "goToNearestSource") {
-      this.editor.goToNearestSource();
+      this.editor.goToNearestSource(false);
     }
   }
 
   getSourceIdentifier() {
     return this.fontController.fontSourcesInstancer.getSourceIdentifierForLocation(
-      this.sceneSettings.fontLocationSourceMapped
+      this.sceneSettings.fontLocationSourceMapped,
+      false
     );
   }
 
@@ -1223,24 +1236,27 @@ class KerningTool extends MetricsBaseTool {
   }
 
   async doDelete(event) {
-    const deepDelete = !event.altKey;
+    await this.deleteSelectedKerningPairs(event.altKey);
+  }
 
-    const { editContext, values } = this.getEditContext(!deepDelete);
+  async deleteSelectedKerningPairs(forThisSource) {
+    const { editContext, values } = this.getEditContext(forThisSource);
     if (!editContext) {
       return;
     }
 
     this.updateScrollAdjustBehavior();
 
-    let undoLabel;
+    const undoLabel = getDeleteKerningPairLabel(
+      this.selectedHandles.length,
+      forThisSource
+    );
     let changes;
-    if (deepDelete) {
-      undoLabel = "delete kerning pair from all sources";
-      changes = await editContext.delete(undoLabel);
-    } else {
-      undoLabel = "delete kerning value";
+    if (forThisSource) {
       const newValues = new Array(values.length).fill(null);
-      changes = await editContext.edit(newValues, undoLabel, event);
+      changes = await editContext.edit(newValues, undoLabel, null);
+    } else {
+      changes = await editContext.delete(undoLabel);
     }
     this.pushUndoItem(changes, undoLabel);
   }
@@ -1257,34 +1273,82 @@ class KerningTool extends MetricsBaseTool {
     const contextMenuItems = [];
     const selector = this.hoveredHandle?.selector || this.hoveredMetric;
 
-    if (selector) {
-      const { leftGlyph, rightGlyph } = this.getGlyphNamesFromSelector(selector);
-      const { leftName, rightName } = this.getPairNamesFromSelector(selector);
+    if (!selector) {
+      return contextMenuItems;
+    }
 
-      const leftIsGroup = leftName.startsWith("@");
-      const rightIsGroup = rightName.startsWith("@");
+    if (!this.hoveredHandle?.selected) {
+      this._selectHandle(selector, false);
+    }
+
+    const { leftGlyph, rightGlyph } = this.getGlyphNamesFromSelector(selector);
+    const { leftName, rightName } = this.getPairNamesFromSelector(selector);
+
+    const leftIsGroup = leftName.startsWith("@");
+    const rightIsGroup = rightName.startsWith("@");
+
+    const sourceIdentifier = this.getSourceIdentifier();
+
+    const exceptions = [];
+
+    for (const forThisSource of [true, false]) {
+      if (forThisSource && !sourceIdentifier) {
+        continue;
+      }
+      contextMenuItems.push({
+        title: capitalizeFirstLetter(
+          getDeleteKerningPairLabel(this.selectedHandles.length, forThisSource)
+        ),
+        callback: (event) => this.deleteSelectedKerningPairs(forThisSource),
+      });
+
+      {
+      }
 
       if (leftIsGroup || rightIsGroup) {
-        contextMenuItems.push({
-          title: `Make kerning exception ${leftGlyph} ${rightGlyph}`,
-          callback: (event) =>
-            this.makeKerningException(leftName, rightName, leftGlyph, rightGlyph),
+        exceptions.push({});
+        exceptions.push({
+          leftException: leftGlyph,
+          rightException: rightGlyph,
+          sourceIdentifier: forThisSource ? sourceIdentifier : undefined,
         });
       }
 
       if (leftIsGroup && rightIsGroup) {
-        contextMenuItems.push({
-          title: `Make kerning exception ${leftGlyph} ${rightName}`,
-          callback: (event) =>
-            this.makeKerningException(leftName, rightName, leftGlyph, rightName),
+        exceptions.push({
+          leftException: leftGlyph,
+          rightException: rightName,
+          sourceIdentifier,
         });
-        contextMenuItems.push({
-          title: `Make kerning exception ${leftName} ${rightGlyph}`,
-          callback: (event) =>
-            this.makeKerningException(leftName, rightName, leftName, rightGlyph),
+        exceptions.push({
+          leftException: leftName,
+          rightException: rightGlyph,
+          sourceIdentifier,
         });
       }
     }
+
+    for (const { leftException, rightException, sourceIdentifier } of exceptions) {
+      if (!leftException) {
+        contextMenuItems.push(MenuItemDivider);
+      } else {
+        const suffix = sourceIdentifier ? "for this source" : "for all sources";
+        const label = `make kerning exception ${leftException} ${rightException} ${suffix}`;
+        contextMenuItems.push({
+          title: capitalizeFirstLetter(label),
+          callback: (event) =>
+            this.makeKerningException(
+              leftName,
+              rightName,
+              leftException,
+              rightException,
+              sourceIdentifier,
+              label
+            ),
+        });
+      }
+    }
+
     return contextMenuItems;
   }
 
@@ -1292,33 +1356,47 @@ class KerningTool extends MetricsBaseTool {
     leftNameExisting,
     rightNameExisting,
     leftNameNew,
-    rightNameNew
+    rightNameNew,
+    sourceIdentifier,
+    undoLabel
   ) {
-    let values = this.kerningController.getPairValues(
+    const sourceIdentifiers = this.kerningController.sourceIdentifiers;
+    const index = sourceIdentifier ? sourceIdentifiers.indexOf(sourceIdentifier) : -1;
+
+    const sourceIndices = index >= 0 ? [index] : [...range(sourceIdentifiers.length)];
+
+    const existingExceptionValues = this.kerningController.getPairValues(
+      leftNameNew,
+      rightNameNew
+    );
+
+    const values = existingExceptionValues
+      ? [...existingExceptionValues]
+      : Array(sourceIdentifiers.length).fill(null);
+
+    while (values.length < sourceIdentifiers.length) {
+      values.push(null);
+    }
+
+    const existingGroupValues = this.kerningController.getPairValues(
       leftNameExisting,
       rightNameExisting
     );
 
-    if (!values) {
-      values = Array(this.kerningController.sourceIdentifiers.length).fill(null);
-    } else {
-      values = [...values];
-      while (values.length < this.kerningController.sourceIdentifiers.length) {
-        values.push(null);
+    for (const i of sourceIndices) {
+      if (values[i] == null /* nullish */) {
+        values[i] = existingGroupValues?.[i] ?? 0;
       }
     }
 
-    const pairSelectors = this.kerningController.sourceIdentifiers.map(
-      (sourceIdentifier) => ({
-        sourceIdentifier,
-        leftName: leftNameNew,
-        rightName: rightNameNew,
-      })
-    );
+    const pairSelectors = sourceIdentifiers.map((sourceIdentifier) => ({
+      sourceIdentifier,
+      leftName: leftNameNew,
+      rightName: rightNameNew,
+    }));
 
     const editContext = this.kerningController.getEditContext(pairSelectors);
 
-    const undoLabel = `make kerning exception ${leftNameNew} ${rightNameNew}`;
     const changes = await editContext.edit(values, undoLabel);
 
     this.pushUndoItem(changes, undoLabel);
@@ -1435,4 +1513,10 @@ function sidebearingSelectorToId(kerningSelector) {
 
 function metricSelectionSet(selector) {
   return new Set(selector.metric.split(","));
+}
+
+function getDeleteKerningPairLabel(numPairs, forThisSource) {
+  const suffix = forThisSource ? "for this source" : "for all sources";
+  const plural_s = numPairs > 1 ? "s" : "";
+  return `delete kerning pair${plural_s} ${suffix}`;
 }

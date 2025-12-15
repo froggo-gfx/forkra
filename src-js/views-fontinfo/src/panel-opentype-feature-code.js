@@ -110,14 +110,14 @@ const openTypeFeatureCodeSimpleMode = simpleMode({
       token: "keyword",
     },
     {
-      regex: /\[\s*\\?[a-zA-Z0-9_.]+(?:\s+\\?[a-zA-Z0-9_.]+)*\s*\]/,
+      regex: /\[\s*\\?[a-zA-Z0-9_.-]+(?:\s+\\?[a-zA-Z0-9_.-]+)*\s*\]/,
       token: "glyphClass",
     },
     {
       regex: /\[\s*(\\?[a-zA-Z0-9_.]+)\s*-\s*(\\?[a-zA-Z0-9_.]+)\s*\]/,
       token: "glyphRange",
     },
-    { regex: /@[a-zA-Z0-9_.]+/, token: "namedGlyphClass" },
+    { regex: /@[a-zA-Z0-9_.-]+/, token: "namedGlyphClass" },
   ],
   languageData: {
     commentTokens: { line: "#" },

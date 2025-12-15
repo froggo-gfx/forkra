@@ -100,6 +100,9 @@ export function labeledCheckbox(label, controller, key, options) {
   const checkboxID = options?.id || `checkbox-${uniqueID()}-${key}`;
   const inputElement = html.input({ type: "checkbox", id: checkboxID });
   inputElement.checked = controller.model[key];
+  if (options?.disabled) {
+    inputElement.disabled = true;
+  }
 
   const inputWrapper = html.div();
   if (options?.class) {

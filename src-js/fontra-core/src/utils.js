@@ -312,6 +312,8 @@ export async function fetchJSON(url, options) {
   return await response.json();
 }
 
+const nonTypeableInputTypes = new Set(["range", "checkbox", "radio", "button"]);
+
 export function isActiveElementTypeable() {
   const element = findNestedActiveElement(document.activeElement);
 
@@ -321,7 +323,10 @@ export function isActiveElementTypeable() {
   if (element.tagName.toLowerCase() === "textarea") {
     return true;
   }
-  if (element.tagName.toLowerCase() === "input" && element.type !== "range") {
+  if (
+    element.tagName.toLowerCase() === "input" &&
+    !nonTypeableInputTypes.has(element.type)
+  ) {
     return true;
   }
   return false;

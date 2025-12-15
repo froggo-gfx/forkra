@@ -561,7 +561,9 @@ export function mapAxesFromUserSpaceToSourceSpace(axes) {
         newAxis[prop] = piecewiseLinearMap(axis[prop], mappingDict);
       }
       if (axis.values) {
-        axis.values.map((value) => piecewiseLinearMap(value, mappingDict));
+        newAxis.values = axis.values.map((value) =>
+          piecewiseLinearMap(value, mappingDict)
+        );
       }
     }
     return newAxis;

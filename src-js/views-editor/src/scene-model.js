@@ -465,6 +465,7 @@ export class SceneModel {
           isUndefined,
           isSelected: isSelectedGlyph,
           isEditing: !!(isSelectedGlyph && selectedGlyphIsEditing),
+          isEmpty: !glyphInstance.controlBounds,
         });
         x += glyphInstance.xAdvance;
         previousGlyphName = glyphInfo.glyphName;

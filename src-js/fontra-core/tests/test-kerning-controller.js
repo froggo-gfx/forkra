@@ -17,7 +17,6 @@ describe("KerningController Tests", () => {
     ],
     sources: {
       a: { location: { Weight: 400 } },
-      ab: { location: { Weight: 500 } },
       b: { location: { Weight: 600 } },
       c: { location: { Weight: 800 } },
       d: { location: { Weight: 400, Width: 200 } },
@@ -37,10 +36,15 @@ describe("KerningController Tests", () => {
       groupsSide2: { O: ["O", "C", "G", "Q"] },
       sourceIdentifiers: ["a", "b", "c", "d", "e", "f"],
       values: {
-        "T": { A: [-100, null, null, -200, null, null] },
+        "T": {
+          A: [-100, null, null, -200, null, null],
+          Agrave: [-100, 0, 0, -200, 0, 0],
+        },
         "@O": {
           "@O": [10, null, null, null, null, null],
-          "Q": [20, null, 40, null, null, null],
+          "Q": [20, null, 40, null, null, null], // sparse exception
+          "C": [null, 20, null, null, null, null], // sparse exception
+          "G": [null, null, null, null, 100, null], // sparse exception
         },
         "Q": { Q: [1, null, null, null, null] }, // missing value
       },
@@ -52,12 +56,14 @@ describe("KerningController Tests", () => {
     { leftGlyph: "T", rightGlyph: "A", expectedValue: -150, location: { Width: 150 } },
     { leftGlyph: "T", rightGlyph: "A", expectedValue: -200, location: { Width: 200 } },
     { leftGlyph: "O", rightGlyph: "O", expectedValue: 10, location: {} },
+    { leftGlyph: "O", rightGlyph: "O", expectedValue: 5, location: { Weight: 500 } },
     { leftGlyph: "D", rightGlyph: "G", expectedValue: 10, location: {} },
     { leftGlyph: "O", rightGlyph: "Q", expectedValue: 20, location: {} },
     { leftGlyph: "O", rightGlyph: "Q", expectedValue: 10, location: { Weight: 500 } },
     { leftGlyph: "O", rightGlyph: "Q", expectedValue: null, location: { Weight: 600 } },
     { leftGlyph: "Q", rightGlyph: "Q", expectedValue: 1, location: {} },
     { leftGlyph: "Q", rightGlyph: "Q", expectedValue: 0.5, location: { Weight: 500 } },
+    { leftGlyph: "O", rightGlyph: "C", expectedValue: 15, location: { Weight: 500 } },
   ];
 
   parametrize("KerningController basic test", testCasesBasic, (testCase) => {
@@ -66,6 +72,58 @@ describe("KerningController Tests", () => {
     expect(
       instance.getGlyphPairValue(testCase.leftGlyph, testCase.rightGlyph)
     ).to.equal(testCase.expectedValue);
+  });
+
+  const testCasesPairNames = [
+    {
+      leftGlyph: "T",
+      rightGlyph: "A",
+      expectedLeftName: "T",
+      expectedRightName: "A",
+      sourceIdentifier: undefined,
+    },
+    {
+      leftGlyph: "D",
+      rightGlyph: "O",
+      expectedLeftName: "@O",
+      expectedRightName: "@O",
+      sourceIdentifier: undefined,
+    },
+    {
+      leftGlyph: "D",
+      rightGlyph: "G",
+      expectedLeftName: "@O",
+      expectedRightName: "G",
+      sourceIdentifier: undefined,
+    },
+    {
+      leftGlyph: "D",
+      rightGlyph: "C",
+      expectedLeftName: "@O",
+      expectedRightName: "C",
+      sourceIdentifier: undefined,
+    },
+    {
+      leftGlyph: "D",
+      rightGlyph: "C",
+      expectedLeftName: "@O",
+      expectedRightName: "@O",
+      sourceIdentifier: "a",
+    },
+  ];
+
+  parametrize("KerningController test getPairName", testCasesPairNames, (testCase) => {
+    const controller = new KerningController("kern", testKerning, testFontController);
+    expect(
+      controller.getPairNames(
+        testCase.leftGlyph,
+        testCase.rightGlyph,
+        testCase.sourceIdentifier
+      )
+    ).to.deep.equal({
+      leftName: testCase.expectedLeftName,
+      rightName: testCase.expectedRightName,
+    });
   });
 
   const testCasesEditing = [
@@ -213,10 +271,15 @@ describe("KerningController Tests", () => {
         groupsSide2: { O: ["O", "C", "G", "Q"] },
         sourceIdentifiers: ["a", "b", "c", "d", "e", "f", "ab"],
         values: {
-          "T": { A: [-100, null, null, -200, null, null, -50] },
+          "T": {
+            A: [-100, null, null, -200, null, null, -50],
+            Agrave: [-100, 0, 0, -200, 0, 0, -50],
+          },
           "@O": {
             "@O": [10, null, null, null, null, null, 5],
             "Q": [20, null, 40, null, null, null, 10],
+            "C": [null, 20, null, null, null, null, 15],
+            "G": [null, null, null, null, 100, null, null],
           },
           "Q": { Q: [1, null, null, null, null, null, 1] }, // rounded: 0.5 -> 1
         },
@@ -238,10 +301,15 @@ describe("KerningController Tests", () => {
         groupsSide2: { O: ["O", "C", "G", "Q"] },
         sourceIdentifiers: ["a", "b", "d", "e", "f"],
         values: {
-          "T": { A: [-100, null, -200, null, null] },
+          "T": {
+            A: [-100, null, -200, null, null],
+            Agrave: [-100, 0, -200, 0, 0],
+          },
           "@O": {
             "@O": [10, null, null, null, null],
             "Q": [20, null, null, null, null],
+            "C": [null, 20, null, null, null],
+            "G": [null, null, null, 100, null],
           },
           "Q": { Q: [1, null, null, null] },
         },

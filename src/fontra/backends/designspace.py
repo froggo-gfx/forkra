@@ -25,7 +25,7 @@ from fontTools.designspaceLib import (
 from fontTools.misc.transform import DecomposedTransform, Transform
 from fontTools.pens.pointPen import AbstractPointPen
 from fontTools.pens.recordingPen import RecordingPointPen
-from fontTools.ufoLib import UFOLibError, UFOReaderWriter
+from fontTools.ufoLib import UFOLibError, UFOReader, UFOReaderWriter
 from fontTools.ufoLib.glifLib import GlyphSet
 
 from ..core.async_property import async_property
@@ -362,7 +362,7 @@ class DesignspaceBackend:
             if self._familyName is None and source.familyName:
                 self._familyName = source.familyName
             ufoPath = os.path.normpath(source.path)
-            reader = manager.getReader(ufoPath)
+            reader = manager.getReader(ufoPath, createIfNeeded=False)
             defaultLayerName = reader.getDefaultLayerName()
             ufoLayerName = source.layerName or defaultLayerName
 
@@ -390,6 +390,7 @@ class DesignspaceBackend:
                     layer=sourceLayer,
                     location=makeDenseLocation(source.location, self.defaultLocation),
                     isDefault=source == self.dsDoc.default,
+                    isSparse=source.layerName is not None,
                 )
             )
 
@@ -401,7 +402,7 @@ class DesignspaceBackend:
         manager = self.ufoManager
         for source in self.dsDoc.sources:
             ufoPath = os.path.normpath(source.path)
-            reader = manager.getReader(ufoPath)
+            reader = manager.getReader(ufoPath, createIfNeeded=False)
             for ufoLayerName in reader.getLayerNames():
                 layer = self.ufoLayers.findItem(path=ufoPath, name=ufoLayerName)
                 if layer is None:
@@ -788,6 +789,7 @@ class DesignspaceBackend:
             layer=ufoLayer,
             location=self.defaultLocation,
             isDefault=True,
+            isSparse=False,
         )
         self.dsSources.append(dsSource)
         self.dsDoc.sources.append(dsSource.asDSSourceDescriptor(self.familyName))
@@ -902,6 +904,7 @@ class DesignspaceBackend:
             name=sourceName,
             layer=ufoLayer,
             location=location,
+            isSparse=notAtPole,
         )
 
     def _findDSSourceForSparseSource(self, location, dsSources=None):
@@ -1102,13 +1105,18 @@ class DesignspaceBackend:
                 )
 
             if dsSource is not None:
-                if dsSource.isSparse != fontSource.isSparse:
-                    raise ValueError("Modifying isSparse is currently not supported")
+                if dsSource.isDefault and dsSource.isSparse:
+                    raise ValueError("The default source cannot be sparse")
+                if not fontSource.isSparse and dsSource.mustBeSparse:
+                    raise ValueError(
+                        "A source using a non-default UFO layer cannot be made not sparse"
+                    )
                 dsSource = replace(
                     dsSource,
                     identifier=sourceIdentifier,
                     name=fontSource.name,
                     location=denseSourceLocation,
+                    isSparse=fontSource.isSparse,
                 )
             else:
                 if not fontSource.isSparse:
@@ -1129,6 +1137,7 @@ class DesignspaceBackend:
                     layer=ufoLayer,
                     location=denseSourceLocation,
                     isDefault=denseSourceLocation == self.defaultLocation,
+                    isSparse=fontSource.isSparse,
                 )
 
             if not dsSource.isSparse:
@@ -1702,7 +1711,9 @@ class UFOFontInfo:
 
 class UFOManager:
     @cache
-    def getReader(self, path: str) -> UFOReaderWriter:
+    def getReader(self, path: str, createIfNeeded: bool = True) -> UFOReaderWriter:
+        if not createIfNeeded and not os.path.exists(path):
+            raise FileNotFoundError(path)
         return UFOReaderWriter(path)
 
     @cache
@@ -1717,6 +1728,7 @@ class DSSource:
     layer: UFOLayer
     location: dict[str, float]
     isDefault: bool = False
+    isSparse: bool = False
 
     @cached_property
     def locationTuple(self):
@@ -1782,7 +1794,14 @@ class DSSource:
 
     def asDSSourceDescriptor(self, familyName) -> SourceDescriptor:
         defaultLayerName = self.layer.reader.getDefaultLayerName()
-        ufoLayerName = self.layer.name if self.layer.name != defaultLayerName else None
+        ufoLayerName = (
+            self.layer.name
+            if (
+                self.layer.name != defaultLayerName
+                or (self.isSparse and not self.isDefault)
+            )
+            else None
+        )
         return SourceDescriptor(
             name=self.identifier,
             styleName=self.name,
@@ -1792,8 +1811,8 @@ class DSSource:
             layerName=ufoLayerName,
         )
 
-    @cached_property
-    def isSparse(self):
+    @property
+    def mustBeSparse(self):
         return not self.layer.isDefaultLayer
 
 
@@ -2195,7 +2214,7 @@ async def extractGlyphDependenciesFromUFO(
 
 
 def _extractComponentInfoFromUFO(ufoPath: str, layerName: str) -> dict[str, set[str]]:
-    reader = UFOReaderWriter(ufoPath)
+    reader = UFOReader(ufoPath)
     glyphSet = reader.getGlyphSet(layerName=layerName)
     componentInfo = {}
     for glyphName in glyphSet.keys():
@@ -2433,7 +2452,7 @@ def prefixGroups(groups, prefix):
 
 
 def splitGroups(
-    groups: dict[str, list[str]]
+    groups: dict[str, list[str]],
 ) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     groupsSide1 = {}
     groupsSide2 = {}

@@ -793,6 +793,9 @@ class Cu2QuGlyphGlue:
     def __post_init__(self):
         self._pen = None
 
+    def __len__(self):
+        return len(self.path.contourInfo)
+
     def clearContours(self):
         pass
 

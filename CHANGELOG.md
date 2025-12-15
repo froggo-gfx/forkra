@@ -1,6 +1,62 @@
 # Changelog for Fontra
 
-## 2025-10-18
+## 2025-12-?? [version 2025.12.4]
+
+- [fontra pak] When quitting, prompt the user if there are still open fonts. [fontra-pak Issue 195](https://github.com/fontra/fontra-pak/issues/195), [fontra-pak PR 206](https://github.com/fontra/fontra-pak/pull/206)
+
+## 2025-12-13 [version 2025.12.3]
+
+- [fontra-pak ubuntu] Make sure the binary for Ubuntu is executable. [fontra-pak PR 205](https://github.com/fontra/fontra-pak/pull/205)
+- [shape tool] Fix the stroke color when dragging a new shape in dark mode. [commit](https://github.com/fontra/fontra/commit/a7d58f8437b7da8540541f11964841ffcba8b470)
+
+## 2025-12-05 [version 2025.12.2]
+
+- [fontra-pak] Add a binary for Linux to the release. Contributed by Dr Anirban Mitra. [fontra-pak PR 203](https://github.com/fontra/fontra-pak/pull/203)
+- [designspace] Fixed a bug where Fontra would create an invalid UFO when opening a .designspace file that refers to a non-existent UFO. [Issue 2335](https://github.com/fontra/fontra/issues/2335), [PR 2336](https://github.com/fontra/fontra/pull/2336)
+
+## 2025-12-03 [version 2025.12.1]
+
+- Fixed two regressions with the font sources panel and designspace files that were introduced with version `2025.12.0` ([PR 2333](https://github.com/fontra/fontra/pull/2333)):
+  - Fix "unknown kerning identifier" error when creating a new font source
+  - Fix warning when a sparse (designspace) source cannot be made not sparse
+
+## 2025-12-02 [version 2025.12.0]
+
+- [editor] Fix UI glitch where "select all" could unexpectedly cause all UI text to be selected instead of doing "select all" in the editor. [PR 2332](https://github.com/fontra/fontra/pull/2332)
+- [font sources] Prompt the user with a warning when toggling the "Is sparse" source checkbox. Part of [PR 2331](https://github.com/fontra/fontra/pull/2331).
+- [kerning] Various kerning improvements ([PR 2324](https://github.com/fontra/fontra/pull/2324)):
+  - Bring Fontra's kerning behavior in line with how fontmake treats designspace/ufo: every non-sparse source participates, falling back to zeros when values are missing
+  - Fix a bug that allowed adding kerning to sparse sources
+  - Improve "insert interpolated kerning source" so it will keep sparse kerning exceptions as sparse as possible
+- [font overview] Distinguish more clearly between glyphs that exist and glyphs that do not exist in the font. Additionally, display the fallback glyph in _existing_ but _empty_ glyphs, both in the font overview and in the editor view. [Issue 2311](https://github.com/fontra/fontra/issues/2311), [PR 2313](https://github.com/fontra/fontra/pull/2313)
+- Prevent deletion or deactivation of last active glyph source. This prevents confusing behavior. [Issue 2321](https://github.com/fontra/fontra/issues/2321), [PR 2322](https://github.com/fontra/fontra/pull/2322)
+- Improve the "just start editing and the glyph source will come into existence" behavior for these cases ([PR 2319](https://github.com/fontra/fontra/pull/2319)):
+  - Dragging the selection bounds handles to scale or rotate
+  - Using various items in the Selection Transformation panel
+- [font sources panel] Make source name list and source info panel scroll independently. [Issue 2318](https://github.com/fontra/fontra/issues/2318)
+- Add "Is Sparse" checkbox to the font source UI. A "sparse" font source does not participate in kerning and in line metrics. (Part of the designspace PR mentioned below)
+- In the sources panel, the default source name is now highlighted in bold. (Part of the designspace PR mentioned below)
+- [designspace] Synchronize "sparse master" behavior with fontmake's behavior: if a `<source>` element has a `layer` attribute, consider the source "sparse". (Fontra's old behavior only considered sources sparse when the layer attribute was present _and_ differed from the default layer name.) [Issue 2314](https://github.com/fontra/fontra/issues/2314), [PR 2315](https://github.com/fontra/fontra/pull/2315)
+
+## 2025-11-15 [version 2025.11.3]
+
+- Improve pasting vector data from other applications. This is done by recognizing SVG data on the clipboard with type `image/svg+xml`. Previously Fontra only recognized SVG when it was on the `text/plain` clipboard, but not all applications provide that. [Issue 2032](https://github.com/fontra/fontra/issues/2032), [PR 2312](https://github.com/fontra/fontra/pull/2312)
+
+## 2025-11-14 [version 2025.11.2]
+
+[PR 2310](https://github.com/fontra/fontra/pull/2310):
+
+- Fix some edge cases related to creating kerning exceptions
+- Fix kerning pair deletion (there were some stale cache issues)
+- Add explicit "Delete kerning pair" context menus for "all sources" and "this source"
+
+## 2025-11-13 [version 2025.11.1]
+
+- [fontra-pak] Issue releases instead of nightly builds. Fontra Pak releases use a [Calender Versioning](https://calver.org/) scheme: "YYYY.MM.PATCH" and can be [found here](https://github.com/fontra/fontra-pak/releases). So, with a GitHub account, you can now subscribe to release notifications by watching releases on the [fontra-pak repository](https://github.com/fontra/fontra-pak).
+- Add support for sparse kerning exceptions. These are kerning exceptions that only exist in some locations and not all. [Issue 2305](https://github.com/fontra/fontra/issues/2305), [PR 2306](https://github.com/fontra/fontra/pull/2306)
+- Improve support for global axes in variable components, by allowing the designer to override or fine-tune global axis values. The component sections in selection info panel now have a "hamburger" menu with some options: 1. Show global axes (as part of the component location) (default off), 2. Sort glyph axes (default on). Co-authored with NightFurySL2001. [Issue 2155](https://github.com/fontra/fontra/issues/2155), [PR 2276](https://github.com/fontra/fontra/pull/2276)
+
+## 2025-10-18 [version 2025.11.0]
 
 - Add "Font overview" menu item to "Font" menu, so users can go to the Font overview from other views. [PR 2293](https://github.com/fontra/fontra/pull/2293)
 - Fixed the Reference Font panel for Safari. [Issue 2156](https://github.com/fontra/fontra/issues/2156), [PR 2165](https://github.com/fontra/fontra/pull/2165)

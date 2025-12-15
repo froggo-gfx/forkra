@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import Enum
 from functools import cached_property, singledispatch
+from types import SimpleNamespace
 from typing import Any, Iterable
 
 from fontTools.misc.transform import DecomposedTransform, Transform
@@ -98,6 +99,10 @@ class FontInstancer:
     def fontAxisNames(self) -> set[str]:
         return {axis.name for axis in self.fontAxes}
 
+    @cached_property
+    def defaultSourceLocation(self) -> dict[str, float]:
+        return {axis.name: axis.defaultValue for axis in self.fontAxes}
+
     def getGlyphSourceLocation(self, glyphSource: GlyphSource) -> dict[str, float]:
         fontSource = (
             self.fontSources.get(glyphSource.locationBase)
@@ -157,15 +162,17 @@ class FontInstancer:
     async def _ensureComponentLocationCompatibility(
         self, glyph: VariableGlyph
     ) -> VariableGlyph:
-        layerGlyphs = {
-            source.layerName: glyph.layers[source.layerName].glyph
+        sourcesWithLayers = [
+            SimpleNamespace(source=source, glyph=glyph.layers[source.layerName].glyph)
             for source in glyph.sources
             if not source.inactive
-        }
+        ]
+
+        layerGlyphs = [sourceLayer.glyph for sourceLayer in sourcesWithLayers]
 
         componentConfigs = {
             tuple(component.name for component in layerGlyph.components)
-            for layerGlyph in layerGlyphs.values()
+            for layerGlyph in layerGlyphs
         }
         if len(componentConfigs) != 1:
             message = f"glyph {glyph.name}: components are not interpolatable"
@@ -175,26 +182,53 @@ class FontInstancer:
                 self.glyphError(message)
                 return glyph
 
-        ok, componentAxisNames = _areComponentLocationsCompatible(layerGlyphs.values())
+        ok, componentAxisNames = _areComponentLocationsCompatible(layerGlyphs)
         if ok:
             # All good
             return glyph
 
-        componentGlyphNames = set(list(componentConfigs)[0])
-
-        baseGlyphs = [
-            (glyphName, await self.getGlyphInstancer(glyphName, True))
-            for glyphName in componentGlyphNames
-        ]
-
-        axisDefaults = {
-            glyphName: {axis.name: axis.defaultValue for axis in baseGlyph.combinedAxes}
-            for glyphName, baseGlyph in baseGlyphs
+        baseGlyphs = {
+            baseGlyphName: await self.getGlyphInstancer(baseGlyphName, True)
+            for baseGlyphName in list(componentConfigs)[0]
         }
 
-        return _fixComponentLocationsCompatibility(
-            glyph, layerGlyphs, componentAxisNames, axisDefaults
+        return replace(
+            glyph,
+            sources=[sourceItem.source for sourceItem in sourcesWithLayers],
+            layers=self._fixComponentLocationsCompatibility(
+                sourcesWithLayers, componentAxisNames, baseGlyphs
+            ),
         )
+
+    def _fixComponentLocationsCompatibility(
+        self,
+        sourcesWithLayers: list[SimpleNamespace],
+        componentAxisNames: list[set[str]],
+        baseGlyphs: dict[str, GlyphInstancer],
+    ) -> dict[str, Layer]:
+        return {
+            sourceLayer.source.layerName: Layer(
+                glyph=replace(
+                    sourceLayer.glyph,
+                    components=[
+                        _fixComponentLocation(
+                            compo,
+                            axisNames,
+                            baseGlyphs[compo.name].defaultSourceLocation
+                            | self.getGlyphSourceLocation(sourceLayer.source),
+                        )
+                        for componentIndex, (axisNames, compo) in enumerate(
+                            zip(
+                                componentAxisNames,
+                                sourceLayer.glyph.components,
+                                strict=True,
+                            )
+                        )
+                    ],
+                )
+            )
+            for sourceLayer in sourcesWithLayers
+        }
 
 
 def _areComponentLocationsCompatible(
@@ -221,33 +255,6 @@ def _areComponentLocationsCompatible(
     assert componentAxisNames is not None
 
     return ok, componentAxisNames
-
-
-def _fixComponentLocationsCompatibility(
-    glyph: VariableGlyph,
-    layerGlyphs: dict,
-    componentAxisNames: list[set[str]],
-    axisDefaults,
-) -> VariableGlyph:
-    return replace(
-        glyph,
-        layers={
-            layerName: Layer(
-                glyph=replace(
-                    layerGlyph,
-                    components=[
-                        _fixComponentLocation(
-                            compo, axisNames, axisDefaults[compo.name]
-                        )
-                        for compo, axisNames in zip(
-                            layerGlyph.components, componentAxisNames, strict=True
-                        )
-                    ],
-                )
-            )
-            for layerName, layerGlyph in layerGlyphs.items()
-        },
-    )
 
 
 def _fixComponentLocation(

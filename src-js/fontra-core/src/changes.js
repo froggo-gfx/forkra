@@ -115,6 +115,10 @@ export class ChangeCollector {
   }
 }
 
+export function joinChanges(...changes) {
+  return new ChangeCollector().concat(...changes);
+}
+
 export function consolidateChanges(changes, prefixPath) {
   let change;
   let path;
@@ -527,4 +531,23 @@ export function hasChange(obj) {
 
 function noopItemCast(value) {
   return value;
+}
+
+export function* iterChanges(change, prefix) {
+  /* Iterate over all individual changes contained within the given change,
+     together with the change path associated with each change.
+  */
+  if (!prefix) {
+    prefix = [];
+  }
+  const path = prefix.concat(change.p || []);
+  if (change.f) {
+    yield { path, change };
+    return;
+  }
+  for (const childChange of change.c || []) {
+    for (const change of iterChanges(childChange, path)) {
+      yield change;
+    }
+  }
 }

@@ -1,3 +1,4 @@
+import { applicationSettingsController } from "@fontra/core/application-settings.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
@@ -16,6 +17,7 @@ import {
   splitGlyphNameExtension,
   throttleCalls,
 } from "@fontra/core/utils.js";
+import { showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialog } from "@fontra/web-components/modal-dialog.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
@@ -61,6 +63,11 @@ export default class SelectionInfoPanel extends Panel {
     this.sceneController.addEventListener("glyphEditLocationNotAtSource", async () => {
       this.update();
     });
+
+    applicationSettingsController.addKeyListener(
+      ["alwaysShowGlobalAxesInComponentLocation", "sortComponentLocationGlyphAxes"],
+      (event) => this.update()
+    );
   }
 
   getContentElement() {
@@ -409,40 +416,56 @@ export default class SelectionInfoPanel extends Panel {
       addTransformationItems(formContents, componentKey, component.transformation);
 
       const baseGlyph = await this.fontController.getGlyph(component.name);
-      if (baseGlyph && component.location) {
-        const fontAxisNames = this.fontController.fontAxes.map((axis) => axis.name);
-        const locationItems = [];
 
-        // We also add global axes, if in location and not in baseGlyph.axes
-        // (This is partially handled by the .combinedAxes property)
-        // TODO: this needs more thinking, as the axes of *nested* components
-        // may also be of interest. Also: we need to be able to *add* such a value
-        // to component.location.
-        const axes = Object.fromEntries(
-          baseGlyph.combinedAxes
-            .filter(
-              (axis) =>
-                !fontAxisNames.includes(axis.name) || axis.name in component.location
+      if (baseGlyph) {
+        const showGlobalAxes =
+          this.sceneController.applicationSettings
+            .alwaysShowGlobalAxesInComponentLocation;
+
+        const fontAxisNames = baseGlyph.continuousFontAxisNames;
+        const selectedFontAxisNames = [...fontAxisNames].filter(
+          (axisName) =>
+            showGlobalAxes ||
+            Object.values(varGlyphController.layers).some((layer) =>
+              layer.glyph.components[index]?.location.hasOwnProperty(axisName)
             )
-            .map((axis) => [axis.name, axis])
         );
 
-        const axisList = Object.values(axes);
-        // Sort axes: lowercase first, uppercase last
-        axisList.sort((a, b) => {
-          const firstCharAIsUpper = a.name[0] === a.name[0].toUpperCase();
-          const firstCharBIsUpper = b.name[0] === b.name[0].toUpperCase();
-          if (firstCharAIsUpper != firstCharBIsUpper) {
-            return firstCharBIsUpper ? -1 : 1;
-          } else {
-            return a.name < b.name ? -1 : +1;
-          }
-        });
-        for (const axis of axisList) {
-          let value = component.location[axis.name];
-          if (value === undefined) {
-            value = axis.defaultValue;
-          }
+        const glyphAxisNames = [...baseGlyph.glyphAxisNames];
+        if (this.sceneController.applicationSettings.sortComponentLocationGlyphAxes) {
+          glyphAxisNames.sort((a, b) => {
+            const firstCharAIsUpper = a[0] === a[0].toUpperCase();
+            const firstCharBIsUpper = b[0] === b[0].toUpperCase();
+            if (firstCharAIsUpper != firstCharBIsUpper) {
+              return firstCharBIsUpper ? -1 : 1;
+            } else {
+              return a < b ? -1 : +1;
+            }
+          });
+        }
+
+        const axisNames = [...selectedFontAxisNames, ...glyphAxisNames];
+
+        const locationItems = [];
+
+        // TODO: this needs more thinking, as the axes of *nested* components may also
+        // be of interest. We would then need to be able to *add* such a value to
+        // component.location. This could work somewhat similar to showing global axes.
+        // Given we have no direct use case, we'll leave this for now.
+
+        const combinedAxes = Object.fromEntries(
+          baseGlyph.combinedAxes.map((axis) => [axis.name, axis])
+        );
+
+        for (const axisName of axisNames) {
+          const isGlobalAxis = fontAxisNames.has(axisName);
+          const axis = combinedAxes[axisName];
+          const value = component.location[axis.name];
+          const currentGlobalAxisLocationValue =
+            this.sceneController.sceneSettingsController.model.fontLocationSourceMapped[
+              axisName
+            ] ?? axis.defaultValue;
+
           locationItems.push({
             type: "edit-number-slider",
             key: componentKey("location", axis.name),
@@ -451,21 +474,41 @@ export default class SelectionInfoPanel extends Panel {
             minValue: axis.minValue,
             defaultValue: axis.defaultValue,
             maxValue: axis.maxValue,
+            hasCheckBox: isGlobalAxis,
+            fallbackValue: isGlobalAxis ? currentGlobalAxisLocationValue : undefined,
           });
         }
-        if (locationItems.length) {
+
+        if (locationItems.length || true) {
           formContents.push({
             type: "header",
             label: "Location",
-            auxiliaryElement: html.createDomElement("icon-button", {
-              "style": `width: 1.3em;`,
-              "src": "/tabler-icons/refresh.svg",
-              "onclick": (event) => this._resetAxisValuesForComponent(index),
-              "data-tooltip": translate(
-                "sidebar.selection-info.component.reset-axis-values"
-              ),
-              "data-tooltipposition": "left",
-            }),
+            auxiliaryElement: html.div(
+              {
+                style: `width: auto; display: flex; flex-direction: row; gap: 0.15em;`,
+              },
+              [
+                html.createDomElement("icon-button", {
+                  "id": "component-axis-options-button",
+                  "style": `width: 1.3em;`,
+                  "src": "/tabler-icons/menu-2.svg",
+                  "onclick": (event) => this.showComponentAxesOptionsMenu(event),
+                  "data-tooltip": translate(
+                    "sidebar.designspace-navigation.font-axes-view-options-button.tooltip"
+                  ),
+                  "data-tooltipposition": "left",
+                }),
+                html.createDomElement("icon-button", {
+                  "style": `width: 1.3em;`,
+                  "src": "/tabler-icons/refresh.svg",
+                  "onclick": (event) => this._resetAxisValuesForComponent(index),
+                  "data-tooltip": translate(
+                    "sidebar.selection-info.component.reset-axis-values"
+                  ),
+                  "data-tooltipposition": "left",
+                }),
+              ]
+            ),
           });
           formContents.push(...locationItems);
         }
@@ -492,6 +535,37 @@ export default class SelectionInfoPanel extends Panel {
         await this._setupSelectionInfoHandlers(glyphName);
       }
     }
+  }
+
+  showComponentAxesOptionsMenu(event) {
+    const menuItems = [
+      {
+        title: translate("Show global axes"),
+        callback: () => {
+          this.sceneController.applicationSettings.alwaysShowGlobalAxesInComponentLocation =
+            !this.sceneController.applicationSettings
+              .alwaysShowGlobalAxesInComponentLocation;
+        },
+        checked:
+          this.sceneController.applicationSettings
+            .alwaysShowGlobalAxesInComponentLocation,
+      },
+      {
+        title: translate("Sort glyph axes"),
+        callback: () => {
+          this.sceneController.applicationSettings.sortComponentLocationGlyphAxes =
+            !this.sceneController.applicationSettings.sortComponentLocationGlyphAxes;
+        },
+        checked:
+          this.sceneController.applicationSettings.sortComponentLocationGlyphAxes,
+      },
+    ];
+
+    const button = this.infoForm.shadowRoot.querySelector(
+      "#component-axis-options-button"
+    );
+    const buttonRect = button.getBoundingClientRect();
+    showMenu(menuItems, { x: buttonRect.right, y: buttonRect.bottom });
   }
 
   async _toggleGlyphLock(varGlyph) {
@@ -966,6 +1040,7 @@ function deleteNestedValue(subject, path) {
 
 function applyNewValue(glyph, layerInfo, value, fieldItem, absolute) {
   const setFieldValue = fieldItem.setValue || defaultSetFieldValue;
+  const deleteFieldValue = fieldItem.deleteValue || defaultDeleteFieldValue;
 
   const primaryOrgValue = layerInfo[0].orgValue;
   const isNumber = typeof primaryOrgValue === "number";
@@ -974,14 +1049,24 @@ function applyNewValue(glyph, layerInfo, value, fieldItem, absolute) {
   return recordChanges(glyph, (glyph) => {
     const layers = glyph.layers;
     for (const { layerName, layerGlyphController, orgValue } of layerInfo) {
-      const layerValue = value?.getValue ? value.getValue(layerName) : value;
+      if (value == null) {
+        deleteFieldValue(layers[layerName].glyph, layerGlyphController, fieldItem);
+      } else {
+        const layerValue = value?.getValue ? value.getValue(layerName) : value;
 
-      let newValue =
-        delta === null || orgValue === undefined ? layerValue : orgValue + delta;
-      if (isNumber) {
-        newValue = maybeClampValue(newValue, fieldItem.minValue, fieldItem.maxValue);
+        let newValue =
+          delta === null || orgValue === undefined ? layerValue : orgValue + delta;
+
+        if (isNumber) {
+          newValue = maybeClampValue(newValue, fieldItem.minValue, fieldItem.maxValue);
+        }
+        setFieldValue(
+          layers[layerName].glyph,
+          layerGlyphController,
+          fieldItem,
+          newValue
+        );
       }
-      setFieldValue(layers[layerName].glyph, layerGlyphController, fieldItem, newValue);
     }
   });
 }
