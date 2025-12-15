@@ -5,6 +5,7 @@ export const strings = {
   "action-topics.export-as": "出力…",
   "action-topics.glyph-editor-appearance": "グリフエディター表示",
   "action-topics.menu.edit": "編集",
+  "action-topics.menu.file": "ファイル",
   "action-topics.menu.glyph": "グリフ",
   "action-topics.menu.view": "表示",
   "action-topics.reference-font": "リファレンスフォント",

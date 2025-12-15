@@ -5,6 +5,7 @@ export const strings = {
   "action-topics.export-as": "导出为…",
   "action-topics.glyph-editor-appearance": "字形编辑器外观",
   "action-topics.menu.edit": "编辑",
+  "action-topics.menu.file": "文件",
   "action-topics.menu.glyph": "字形",
   "action-topics.menu.view": "视图",
   "action-topics.reference-font": "参考字体",
