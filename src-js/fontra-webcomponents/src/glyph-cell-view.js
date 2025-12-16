@@ -370,6 +370,7 @@ export class GlyphCellView extends HTMLElement {
     }
 
     this._firstClickedCell = glyphCell;
+    this._secondClickedCell = null;
     this._cellCenterForArrowUpDown = null;
 
     const glyphName = glyphCell.glyphName;
