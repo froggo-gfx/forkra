@@ -2,6 +2,7 @@
 
 ## 2025-12-?? [version 2025.12.4]
 
+- [font overview] Fix odd selection behavior when using both shift-click and command-click. [Issue 2034](https://github.com/fontra/fontra/issues/2034), [PR 2341](https://github.com/fontra/fontra/pull/2341)
 - [fontra pak] When quitting, prompt the user if there are still open fonts. [fontra-pak Issue 195](https://github.com/fontra/fontra-pak/issues/195), [fontra-pak PR 206](https://github.com/fontra/fontra-pak/pull/206)
 
 ## 2025-12-13 [version 2025.12.3]
