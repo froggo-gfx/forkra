@@ -126,7 +126,7 @@ export class VariableGlyphController {
   }
 
   getSourceLocation(source) {
-    return { ...this.fontSources[source.locationBase]?.location, ...source.location };
+    return { ...this.fontSources?.[source.locationBase]?.location, ...source.location };
   }
 
   _setupAxisMapping() {
