@@ -30,6 +30,7 @@ import {
 import {
   areGuidelinesCompatible,
   assert,
+  compare,
   enumerate,
   filterObject,
   mapObjectValues,
@@ -318,7 +319,7 @@ export class VariableGlyphController {
       if (source.layerName in layerGlyphs) {
         continue;
       }
-      layerGlyphs[source.layerName] = stripNonInterpolatables(
+      layerGlyphs[source.layerName] = stripNonInterpolatablesAndSortAnchors(
         this.layers[source.layerName].glyph
       );
     }
@@ -1226,6 +1227,7 @@ function ensureGlyphCompatibility(layers, glyphDependencies) {
         components: componentsAreCompatible
           ? normalizeComponents(glyph, sourceLocation, componentLocationFallbackValues)
           : glyph.components,
+        anchors: glyph.anchors.slice().sort((a, b) => compare(a.name > b.name)),
         guidelines: guidelinesAreCompatible
           ? normalizeGuidelines(glyph.guidelines, true)
           : [],
@@ -1324,13 +1326,7 @@ function normalizeComponents(glyph, sourceLocation, componentLocationFallbackVal
   return normalizedComponents;
 }
 
-function stripNonInterpolatables(glyph) {
-  // Hm, the following optimization oddly causes a false positive when undoing a bg img
-  // placement. TODO: figure out what's going on.
-  // if (!glyph.components.length && !glyph.guidelines.length && !glyph.backgroundImage) {
-  //   console.log("have bg img?", !!glyph.backgroundImage);
-  //   return glyph;
-  // }
+function stripNonInterpolatablesAndSortAnchors(glyph) {
   return StaticGlyph.fromObject(
     {
       ...glyph,
@@ -1340,6 +1336,7 @@ function stripNonInterpolatables(glyph) {
           location: {},
         };
       }),
+      anchors: glyph.anchors.slice().sort((a, b) => compare(a.name, b.name)),
       guidelines: [],
       backgroundImage: undefined,
     },

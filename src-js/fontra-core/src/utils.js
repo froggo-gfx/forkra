@@ -221,6 +221,11 @@ export function* product(...args) {
   }
 }
 
+export function compare(a, b) {
+  // Return -1 when a < b, 1 when a > b, and 0 when a == b
+  return (a > b) - (a < b);
+}
+
 export function valueInRange(min, v, max) {
   return min <= v && v <= max;
 }
