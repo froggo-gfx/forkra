@@ -2,6 +2,7 @@
 
 ## 2025-12-?? [version 2025.12.4]
 
+- Accept differently ordered anchor lists when interpolating. This matches fontmake's behavior. [PR 2344](https://github.com/fontra/fontra/pull/2344)
 - Fix buggy behavior when trying to add an axis to a UFO. [Issue 1142](https://github.com/fontra/fontra/issues/1142), [PR 2343](https://github.com/fontra/fontra/pull/2343)
 - Fix bad shortcut key repeat behavior [Issue 1930](https://github.com/fontra/fontra/issues/1930), [PR 2342](https://github.com/fontra/fontra/pull/2342)
 - [font overview] Fix odd selection behavior when using both shift-click and command-click. [Issue 2034](https://github.com/fontra/fontra/issues/2034), [PR 2341](https://github.com/fontra/fontra/pull/2341)
