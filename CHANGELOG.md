@@ -1,6 +1,6 @@
 # Changelog for Fontra
 
-## 2025-12-?? [version 2025.12.4]
+## 2025-12-19 [version 2025.12.4]
 
 - Accept differently ordered anchor lists when interpolating. This matches fontmake's behavior. [PR 2344](https://github.com/fontra/fontra/pull/2344)
 - Fix buggy behavior when trying to add an axis to a UFO. [Issue 1142](https://github.com/fontra/fontra/issues/1142), [PR 2343](https://github.com/fontra/fontra/pull/2343)
