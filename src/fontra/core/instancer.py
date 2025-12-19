@@ -452,7 +452,7 @@ class GlyphInstancer:
             layerGlyphs = [
                 replace(
                     layerGlyph,
-                    anchors=sorted(layerGlyph.anchors, key=lambda a: a.name),
+                    anchors=sorted(layerGlyph.anchors, key=lambda a: a.name or ""),
                     guidelines=[],
                     backgroundImage=None,
                 )
