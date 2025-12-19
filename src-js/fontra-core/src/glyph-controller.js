@@ -319,7 +319,7 @@ export class VariableGlyphController {
       if (source.layerName in layerGlyphs) {
         continue;
       }
-      layerGlyphs[source.layerName] = stripNonInterpolatables(
+      layerGlyphs[source.layerName] = stripNonInterpolatablesAndSortAnchors(
         this.layers[source.layerName].glyph
       );
     }
@@ -1326,7 +1326,7 @@ function normalizeComponents(glyph, sourceLocation, componentLocationFallbackVal
   return normalizedComponents;
 }
 
-function stripNonInterpolatables(glyph) {
+function stripNonInterpolatablesAndSortAnchors(glyph) {
   return StaticGlyph.fromObject(
     {
       ...glyph,
