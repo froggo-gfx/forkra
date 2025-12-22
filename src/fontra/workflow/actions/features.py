@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class GeneratePaltVpalFeature(BaseFilter):
     languageSystems: list[tuple[str, str]] = field(default_factory=list)
 
-    async def processFeatures(self, features):
+    async def processFeatures(self, features: OpenTypeFeatures) -> OpenTypeFeatures:
         glyphMap = await self.inputGlyphMap
 
         axes = await self.inputAxes
@@ -289,3 +289,10 @@ class GenerateVkrnFeature(BaseGenerateKerningFeature):
     _kern1Prefix = "kern.top."
     _kern2Prefix = "kern.bottom."
     _dropKernAttrName = "dropVkrn"
+
+
+@registerFilterAction("drop-features")
+@dataclass(kw_only=True)
+class DropFeatures(BaseFilter):
+    async def processFeatures(self, features: OpenTypeFeatures) -> OpenTypeFeatures:
+        return OpenTypeFeatures()
