@@ -207,10 +207,13 @@ ufoInfoAttributesToRoundTrip = [
 
 featuresWarning = """\
 #
-# FONTRA WARNING! Please read the following comment before editing the feature code.
+# FONTRA WARNING! Fontra had to alter the feature code when it was read from the UFO.
 #
-# Fontra is not a general purpose UFO features editor, and has limitations that
-# affect how the features are written back to the UFO(s) when edited:
+# If you are editing a .designspace/UFO project that was not originally authored with
+# Fontra, please beware of the following.
+#
+# Fontra is not a general purpose UFO features editor, and has limitations that affect
+# how the features are written back to the UFO(s) when edited:
 # - 'Included files' are resolved and are inlined
 # - Only the UFO at the default designspace location will contain features
 # - Variable GPOS features currently lose their variability, unless they use
