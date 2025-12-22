@@ -1299,15 +1299,11 @@ class DesignspaceBackend:
             )
             return
 
-        # Once this https://github.com/googlefonts/ufo2ft/pull/833 gets merged:
-        # Write feature text to default UFO, write empty feature text to others
-        # Until then: write features to all UFOs
         paths = sorted(set(self.ufoLayers.iterAttrs("path")))
-        # defaultPath = self.defaultUFOLayer.path
+        defaultPath = self.defaultUFOLayer.path if paths else None
         for path in paths:
             writer = self.ufoManager.getReader(path)
-            # featureText = features.text if path == defaultPath else ""
-            featureText = features.text
+            featureText = features.text if path == defaultPath else ""
             writer.writeFeatures(featureText)
 
     async def getBackgroundImage(self, imageIdentifier: str) -> ImageData | None:
