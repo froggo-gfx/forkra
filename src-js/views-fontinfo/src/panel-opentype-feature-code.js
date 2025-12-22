@@ -66,7 +66,7 @@ addStyleSheet(`
   --named-glyph-class-color: var(--named-glyph-class-color-light, var(--named-glyph-class-color-dark));
 }
 
-#opentype-feature-code-panel.font-info-panel {
+#opentype-feature-code-panel {
   height: 100%;
 }
 
