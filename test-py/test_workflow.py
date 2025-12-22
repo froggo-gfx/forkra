@@ -1566,6 +1566,7 @@ def test_command(tmpdir, configYAMLSources, substitutions):
             steps:
             - input: fontra-read
               source: "test-py/data/mutatorsans/MutatorSans.designspace"
+            - filter: drop-features
             - filter: subset-glyphs
               glyphNames: ["B"]
             - filter: drop-shapes
@@ -1582,6 +1583,7 @@ def test_command(tmpdir, configYAMLSources, substitutions):
             steps:
             - input: fontra-read
               source: "test-py/data/mutatorsans/MutatorSans.designspace"
+            - filter: drop-features
             - filter: subset-glyphs
               glyphNames: ["B", "varcotest2"]
             - filter: drop-shapes
@@ -1599,6 +1601,7 @@ def test_command(tmpdir, configYAMLSources, substitutions):
             steps:
             - input: fontra-read
               source: "test-py/data/mutatorsans/MutatorSans.designspace"
+            - filter: drop-features
             - filter: subset-glyphs
               glyphNames: ["B"]
             - filter: drop-shapes
