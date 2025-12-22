@@ -205,6 +205,23 @@ ufoInfoAttributesToRoundTrip = [
 #     "postscriptNominalWidthX", # Nominal width for glyphs.
 
 
+featuresWarning = """\
+#
+# FONTRA WARNING! Please read the following comment before editing the feature code.
+#
+# Fontra is not a general purpose UFO features editor, and has limitations that
+# affect how the features are written back to the UFO(s) when edited:
+# - 'Included files' are resolved and are inlined
+# - Only the UFO at the default designspace location will contain features
+# - Variable GPOS features currently lose their variability, unless they use
+#   fonttools variable feature syntax: https://github.com/fontra/fontra/issues/2185
+#   In a future version of Fontra, variable GPOS features that are spread out over
+#   the source UFOs will likely be converted to single-file variable feature syntax.
+#
+
+"""
+
+
 class DesignspaceBackend:
     @classmethod
     def fromPath(cls, path: PathLike) -> WritableFontBackend:
@@ -1286,10 +1303,12 @@ class DesignspaceBackend:
                     )
 
     async def getFeatures(self) -> OpenTypeFeatures:
-        featureText = self.defaultReader.readFeatures()
+        ufoFeatureText = self.defaultReader.readFeatures()
         featureText = resolveFeatureIncludes(
-            featureText, self.ufoDir, set(self.glyphMap)
+            ufoFeatureText, self.ufoDir, set(self.glyphMap)
         )
+        if featureText != ufoFeatureText:
+            featureText = featuresWarning + featureText
         return OpenTypeFeatures(language="fea", text=featureText)
 
     async def putFeatures(self, features: OpenTypeFeatures) -> None:
