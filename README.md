@@ -11,9 +11,9 @@ Fontra is an in-development browser-based font editor. It consists of two main p
 
 ### Download and install _Fontra Pak_
 
-[Fontra Pak](https://github.com/fontra/fontra-pak) is a Fontra distribution for macOS and Windows. It is a self-contained Fontra server application, which allows you to view and edit fonts in the default browser. We don't have releases for it yet, but you can grab the latest nightly build from the topmost [“Build Application”](https://github.com/fontra/fontra-pak/actions) workflow, or, more conveniently, directly from [fontra.xyz](https://fontra.xyz).
+[Fontra Pak](https://github.com/fontra/fontra-pak) is a Fontra distribution for macOS, Windows and Linux(x86_64). It is a self-contained Fontra server application, which allows you to view and edit fonts in the default browser. We don't have releases for it yet, but you can grab the latest release from [Release section](https://github.com/fontra/fontra-pak/releases) , or more conveniently, directly from [fontra.xyz](https://fontra.xyz).
 
-Fontra Pak also works on Linux and other platforms, but we do not provide binaries. For Linux, there are community-supported options.
+Fontra Pak is also available as [Flatpak](https://github.com/fontra/fontra-flatpak)  and other community-supported options like Snap package in amd64. 
 
 ### Install from the source code
 
