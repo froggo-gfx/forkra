@@ -471,17 +471,23 @@ export class GlyphCellView extends HTMLElement {
       this._firstClickedCell = glyphCell;
     }
 
+    this._clickedCell = glyphCell;
+
     this._dragErase = event.metaKey ? glyphCell.selected : false;
   }
 
   handleWindowMouseUp(event) {
     delete this._mouseDownEvent;
+    this._clickedCell?.setDragging(false);
+    delete this._clickedCell;
   }
 
   handleCellMouseEnter(event, glyphCell) {
-    if (!this._mouseDownEvent) {
+    if (!this._mouseDownEvent || !this._firstClickedCell) {
       return;
     }
+
+    this._clickedCell?.setDragging(true);
 
     if (this._mouseDownEvent.shiftKey) {
       this.extendSelection(glyphCell);

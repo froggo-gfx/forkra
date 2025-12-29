@@ -75,7 +75,7 @@ export class GlyphCell extends UnlitElement {
     --this-background-color: var(--cell-hover-color);
   }
 
-  #glyph-cell-container:active {
+  #glyph-cell-container:active:not(.dragging) {
     --this-background-color: var(--cell-active-color);
   }
 
@@ -288,6 +288,10 @@ export class GlyphCell extends UnlitElement {
 
   _updateSelectedState() {
     this._glyphCellContent?.classList.toggle("selected", this._selected);
+  }
+
+  setDragging(onOff) {
+    return this._glyphCellContent?.classList.toggle("dragging", onOff);
   }
 }
 
