@@ -88,6 +88,15 @@ export class GlyphCellView extends HTMLElement {
     this.addEventListener("keydown", (event) => this.handleKeyDown(event));
   }
 
+  connectedCallback() {
+    this._handleWindowMouseUp = (event) => this.handleWindowMouseUp(event);
+    window.addEventListener("mouseup", this._handleWindowMouseUp);
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener("mouseup", this._handleWindowMouseUp);
+  }
+
   _resetSelectionHelpers() {
     this._firstClickedCell = null;
     this._secondClickedCell = null;
@@ -259,6 +268,8 @@ export class GlyphCellView extends HTMLElement {
         this.handleSingleClick(event, glyphCell, false);
         this.onCellContextMenu?.(event, glyphCell);
       };
+      glyphCell.onmousedown = (event) => this.handleCellMouseDown(event, glyphCell);
+      glyphCell.onmouseenter = (event) => this.handleCellMouseEnter(event, glyphCell);
 
       glyphCell.selected = this.glyphSelection.has(glyphName);
 
@@ -451,6 +462,38 @@ export class GlyphCellView extends HTMLElement {
       }
     }
     return glyphSelection;
+  }
+
+  handleCellMouseDown(event, glyphCell) {
+    this._mouseDownEvent = event;
+
+    if (!event.shiftKey) {
+      this._firstClickedCell = glyphCell;
+    }
+
+    this._dragErase = event.metaKey ? glyphCell.selected : false;
+  }
+
+  handleWindowMouseUp(event) {
+    delete this._mouseDownEvent;
+  }
+
+  handleCellMouseEnter(event, glyphCell) {
+    if (!this._mouseDownEvent) {
+      return;
+    }
+
+    if (this._mouseDownEvent.shiftKey) {
+      this.extendSelection(glyphCell);
+    } else {
+      let selection = this.getGlyphNamesForRange(this._firstClickedCell, glyphCell);
+      if (this._mouseDownEvent.metaKey) {
+        selection = this._dragErase
+          ? difference(this.glyphSelection, selection)
+          : union(selection, this.glyphSelection);
+      }
+      this.glyphSelection = selection;
+    }
   }
 
   handleKeyDown(event) {
