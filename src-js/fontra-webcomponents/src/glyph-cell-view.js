@@ -476,8 +476,8 @@ export class GlyphCellView extends HTMLElement {
     }
 
     this._clickedCell = glyphCell;
-
     this._dragErase = event.metaKey ? glyphCell.selected : false;
+    this._mouseInCell = true;
   }
 
   handleWindowMouseUp(event) {
