@@ -91,6 +91,9 @@ export class GlyphCellView extends HTMLElement {
   connectedCallback() {
     this._handleWindowMouseUp = (event) => this.handleWindowMouseUp(event);
     window.addEventListener("mouseup", this._handleWindowMouseUp);
+    this.parentElement.addEventListener("mousemove", (event) =>
+      this.handleCellViewMouseMove(event)
+    );
   }
 
   disconnectedCallback() {
@@ -270,6 +273,7 @@ export class GlyphCellView extends HTMLElement {
       };
       glyphCell.onmousedown = (event) => this.handleCellMouseDown(event, glyphCell);
       glyphCell.onmouseenter = (event) => this.handleCellMouseEnter(event, glyphCell);
+      glyphCell.onmouseleave = (event) => this.handleCellMouseLeave(event, glyphCell);
 
       glyphCell.selected = this.glyphSelection.has(glyphName);
 
@@ -487,8 +491,50 @@ export class GlyphCellView extends HTMLElement {
       return;
     }
 
-    this._clickedCell?.setDragging(true);
+    this._mouseInCell = true;
 
+    this._clickedCell?.setDragging(true);
+    this.adjustSelectionOnDrag(glyphCell);
+  }
+
+  handleCellMouseLeave(event, glyphCell) {
+    this._mouseInCell = false;
+  }
+
+  handleCellViewMouseMove(event) {
+    if (!this._mouseDownEvent || !this._firstClickedCell || this._mouseInCell) {
+      return;
+    }
+    let glyphCell = this.accordion.querySelector(".visible");
+    let previousCell = glyphCell;
+
+    while (true) {
+      if (!glyphCell) {
+        break;
+      }
+      const { top, bottom } = glyphCell.getBoundingClientRect();
+      if (bottom >= event.y) {
+        if (top > event.y) {
+          glyphCell = previousCell;
+        }
+        break;
+      }
+      previousCell = glyphCell;
+      glyphCell = firstCellInNextLine(glyphCell);
+    }
+
+    if (glyphCell) {
+      glyphCell = lastCellInLine(glyphCell);
+    }
+
+    if (!glyphCell) {
+      glyphCell = findFirstLastGlyphCell(previousCell, 1);
+    }
+
+    this.adjustSelectionOnDrag(glyphCell);
+  }
+
+  adjustSelectionOnDrag(glyphCell) {
     if (this._mouseDownEvent.shiftKey) {
       this.extendSelection(glyphCell);
     } else {
@@ -662,6 +708,38 @@ function nextGlyphCellVertical(firstCell, direction, cellCenter) {
     nextCell = findFirstLastGlyphCell(firstCell, direction);
   }
   return nextCell;
+}
+
+function firstCellInNextLine(glyphCell) {
+  const { y } = glyphCell.getBoundingClientRect();
+  let nextCell = null;
+  while (true) {
+    glyphCell = nextGlyphCellHorizontal(glyphCell, 1);
+    if (!glyphCell) {
+      break;
+    }
+    if (glyphCell.getBoundingClientRect().y > y) {
+      nextCell = glyphCell;
+      break;
+    }
+  }
+  return nextCell;
+}
+
+function lastCellInLine(glyphCell) {
+  const { y } = glyphCell.getBoundingClientRect();
+  let lastCell = glyphCell;
+  while (true) {
+    glyphCell = nextGlyphCellHorizontal(glyphCell, 1);
+    if (!glyphCell) {
+      break;
+    }
+    if (glyphCell.getBoundingClientRect().y > y) {
+      break;
+    }
+    lastCell = glyphCell;
+  }
+  return lastCell;
 }
 
 function findFirstLastGlyphCell(firstCell, direction) {
