@@ -89,6 +89,8 @@ class GeneratePaltVpalFeature(BaseFilter):
                 )
                 continue
 
+            assert glyph is not None
+
             hAdjustments = []
             vAdjustments = []
             for source in getActiveSources(glyph.sources):
@@ -111,7 +113,9 @@ class GeneratePaltVpalFeature(BaseFilter):
 
                 if lsbAnchorPos is not None and rsbAnchorPos is not None:
                     placementAdjust = -lsbAnchorPos
-                    advanceAdjust = rsbAnchorPos - lsbAnchorPos - layerGlyph.xAdvance
+                    advanceAdjust = (
+                        rsbAnchorPos - lsbAnchorPos - (layerGlyph.xAdvance or 0)
+                    )
                     location = mapLocation(sourceLocation)
                     hAdjustments.append((location, placementAdjust, advanceAdjust))
 
