@@ -419,10 +419,12 @@ export class GlyphCellView extends HTMLElement {
     this.extendSelection(glyphCell);
   }
 
-  extendSelection(glyphCell) {
+  extendSelection(glyphCell, selection) {
     this.ensureFirstClickedCell(glyphCell);
 
-    let selection = this.glyphSelection;
+    if (!selection) {
+      selection = this.glyphSelection;
+    }
 
     if (this._secondClickedCell) {
       selection = difference(
@@ -478,6 +480,7 @@ export class GlyphCellView extends HTMLElement {
     this._clickedCell = glyphCell;
     this._dragErase = event.metaKey ? glyphCell.selected : false;
     this._mouseInCell = true;
+    this._mouseDownSelection = this.glyphSelection;
   }
 
   handleWindowMouseUp(event) {
@@ -536,13 +539,13 @@ export class GlyphCellView extends HTMLElement {
 
   adjustSelectionOnDrag(glyphCell) {
     if (this._mouseDownEvent.shiftKey) {
-      this.extendSelection(glyphCell);
+      this.extendSelection(glyphCell, this._mouseDownSelection);
     } else {
       let selection = this.getGlyphNamesForRange(this._firstClickedCell, glyphCell);
       if (this._mouseDownEvent.metaKey) {
         selection = this._dragErase
           ? difference(this.glyphSelection, selection)
-          : union(this.glyphSelection, selection);
+          : union(this._mouseDownSelection, selection);
       }
       this.glyphSelection = selection;
       if (!this._dragErase) {
