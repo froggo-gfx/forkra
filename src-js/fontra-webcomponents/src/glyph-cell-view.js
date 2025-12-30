@@ -25,6 +25,7 @@ export class GlyphCellView extends HTMLElement {
       options?.closedGlyphSectionsKey || "closedGlyphSections";
 
     this._magnification = 1;
+    this.classList.add("focus-preferred");
 
     this._resetSelectionHelpers();
 
@@ -528,11 +529,11 @@ export class GlyphCellView extends HTMLElement {
         break;
       }
       previousCell = glyphCell;
-      glyphCell = firstCellInNextLine(glyphCell);
+      glyphCell = firstCellInNextLine(glyphCell, 1);
     }
 
     if (glyphCell) {
-      glyphCell = lastCellInLine(glyphCell);
+      glyphCell = firstLastCellInLine(glyphCell, 1);
     }
 
     if (!glyphCell) {
@@ -636,7 +637,7 @@ export class GlyphCellView extends HTMLElement {
         this._cellCenterForArrowUpDown = null;
         nextCell = nextGlyphCellHorizontal(referenceCell, deltaX);
       } else {
-        if (this._cellCenterForArrowUpDown === null) {
+        if (this._cellCenterForArrowUpDown == null) {
           this._cellCenterForArrowUpDown = boundsCenterX(
             referenceCell.getBoundingClientRect()
           );
@@ -735,59 +736,63 @@ function nextSibling(element, direction) {
 
 function nextGlyphCellVertical(firstCell, direction, cellCenter) {
   const firstCellBounds = firstCell.getBoundingClientRect();
-  let nextCell = firstCell;
 
-  const matches = [];
+  let nextCell = undefined;
+  let currentCell = firstCellInNextLine(firstCell, direction);
+
+  if (!currentCell) {
+    return findFirstLastGlyphCell(firstCell, direction);
+  }
+
+  let top = undefined;
+
   while (true) {
-    nextCell = nextGlyphCellHorizontal(nextCell, direction);
-    if (!nextCell) {
+    const currentCellBounds = currentCell.getBoundingClientRect();
+
+    if (top === undefined) {
+      top = currentCellBounds.top;
+    } else if (top != currentCellBounds.top || currentCellBounds.left > cellCenter) {
       break;
     }
 
-    const nextCellBounds = nextCell.getBoundingClientRect();
-    const overlap = horizontalOverlap(firstCellBounds, nextCellBounds);
-
-    if (overlap) {
-      matches.push({ cell: nextCell, center: boundsCenterX(nextCellBounds) });
-    } else if (matches.length) {
+    nextCell = currentCell;
+    currentCell = nextGlyphCellHorizontal(nextCell, 1);
+    if (!currentCell) {
       break;
     }
   }
-  matches.sort(
-    (a, b) => Math.abs(cellCenter - a.center) - Math.abs(cellCenter - b.center)
-  );
-  nextCell = matches[0]?.cell;
+
   if (!nextCell) {
     nextCell = findFirstLastGlyphCell(firstCell, direction);
   }
   return nextCell;
 }
 
-function firstCellInNextLine(glyphCell) {
-  const { y } = glyphCell.getBoundingClientRect();
+function firstCellInNextLine(glyphCell, direction) {
+  const { top } = glyphCell.getBoundingClientRect();
   let nextCell = null;
   while (true) {
-    glyphCell = nextGlyphCellHorizontal(glyphCell, 1);
+    glyphCell = nextGlyphCellHorizontal(glyphCell, direction);
     if (!glyphCell) {
       break;
     }
-    if (glyphCell.getBoundingClientRect().y > y) {
-      nextCell = glyphCell;
+    if (glyphCell.getBoundingClientRect().top != top) {
+      nextCell = firstLastCellInLine(glyphCell, -1);
       break;
     }
   }
   return nextCell;
 }
 
-function lastCellInLine(glyphCell) {
-  const { y } = glyphCell.getBoundingClientRect();
+function firstLastCellInLine(glyphCell, direction) {
+  const { top } = glyphCell.getBoundingClientRect();
   let lastCell = glyphCell;
   while (true) {
-    glyphCell = nextGlyphCellHorizontal(glyphCell, 1);
+    glyphCell = nextGlyphCellHorizontal(glyphCell, direction);
     if (!glyphCell) {
       break;
     }
-    if (glyphCell.getBoundingClientRect().y > y) {
+    if (glyphCell.getBoundingClientRect().top != top) {
       break;
     }
     lastCell = glyphCell;
@@ -805,12 +810,6 @@ function findFirstLastGlyphCell(firstCell, direction) {
     firstLastCell = nextCell;
   }
   return firstLastCell;
-}
-
-function horizontalOverlap(rect1, rect2) {
-  const left = Math.max(rect1.left, rect2.left);
-  const right = Math.min(rect1.right, rect2.right);
-  return left < right ? right - left : 0;
 }
 
 function boundsCenterX(rect) {
