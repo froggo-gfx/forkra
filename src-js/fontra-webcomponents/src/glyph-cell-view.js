@@ -419,12 +419,10 @@ export class GlyphCellView extends HTMLElement {
     this.extendSelection(glyphCell);
   }
 
-  extendSelection(glyphCell, selection) {
+  extendSelection(glyphCell) {
     this.ensureFirstClickedCell(glyphCell);
 
-    if (!selection) {
-      selection = this.glyphSelection;
-    }
+    let selection = this.glyphSelection;
 
     if (this._secondClickedCell) {
       selection = difference(
@@ -590,7 +588,7 @@ export class GlyphCellView extends HTMLElement {
 
   adjustSelectionOnDrag(glyphCell) {
     if (this._mouseDownEvent.shiftKey) {
-      this.extendSelection(glyphCell, this._mouseDownSelection);
+      this.extendSelection(glyphCell);
     } else {
       let selection = this.getGlyphNamesForRange(this._firstClickedCell, glyphCell);
       if (this._mouseDownEvent.metaKey) {
