@@ -505,9 +505,16 @@ export class GlyphCellView extends HTMLElement {
   }
 
   handleCellViewMouseMove(event) {
-    if (!this._mouseDownEvent || !this._firstClickedCell || this._mouseInCell) {
+    if (!this._mouseDownEvent || !this._firstClickedCell) {
       return;
     }
+
+    this.autoScrollNearTopOrBottom(event);
+
+    if (this._mouseInCell) {
+      return;
+    }
+
     let glyphCell = this.accordion.querySelector(".visible");
     let previousCell = glyphCell;
 
@@ -535,6 +542,50 @@ export class GlyphCellView extends HTMLElement {
     }
 
     this.adjustSelectionOnDrag(glyphCell);
+  }
+
+  autoScrollNearTopOrBottom(event) {
+    if (this._autoScrollTimer) {
+      clearTimeout(this._autoScrollTimer);
+    }
+
+    const container = this.parentElement;
+    const bounds = container.getBoundingClientRect();
+    const { height } = this.getBoundingClientRect();
+
+    if (height < bounds.height) {
+      // There is no scrolling, everything is in view
+      return;
+    }
+
+    const maxScrollTop = height - bounds.height + 50;
+    const scrollRegion = 30;
+
+    function scroll(delta) {
+      container.scrollTop += delta;
+    }
+
+    const maybeScroll = (speed) => {
+      const topDistance = event.y - bounds.top;
+      const bottomDistance = bounds.bottom - event.y;
+
+      let delta = 0;
+      if (topDistance < scrollRegion && container.scrollTop > 0) {
+        delta = -speed;
+      } else if (bottomDistance < scrollRegion && container.scrollTop <= maxScrollTop) {
+        delta = speed;
+      }
+
+      if (delta) {
+        scroll(delta);
+        this._autoScrollTimer = setTimeout(
+          () => maybeScroll(Math.min(15, speed + 1)),
+          10
+        );
+      }
+    };
+
+    maybeScroll(2);
   }
 
   adjustSelectionOnDrag(glyphCell) {
