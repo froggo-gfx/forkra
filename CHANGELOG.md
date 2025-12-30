@@ -1,5 +1,9 @@
 # Changelog for Fontra
 
+## 2025-12-30 [version 2025.12.6]
+
+- [fontra pak] Fix update detection mechanism on MacOS.
+
 ## 2025-12-30 [version 2025.12.5]
 
 - [font overview] Implement dragging in the glyph cell view to quickly select ranges. [PR 2350](https://github.com/fontra/fontra/pull/2350)
