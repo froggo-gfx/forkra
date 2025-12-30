@@ -50,7 +50,7 @@ def existingFolderOrFontFile(path):
     path = pathlib.Path(path).resolve()
     ext = path.suffix.lower()
     if ext not in fileExtensions and not path.is_dir():
-        raise argparse.ArgumentError("invalid path")
+        raise argparse.ArgumentError(None, "invalid path")
     return path
 
 
