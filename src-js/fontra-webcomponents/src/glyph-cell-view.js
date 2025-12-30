@@ -542,7 +542,7 @@ export class GlyphCellView extends HTMLElement {
       if (this._mouseDownEvent.metaKey) {
         selection = this._dragErase
           ? difference(this.glyphSelection, selection)
-          : union(selection, this.glyphSelection);
+          : union(this.glyphSelection, selection);
       }
       this.glyphSelection = selection;
       if (!this._dragErase) {
