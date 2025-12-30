@@ -1,6 +1,6 @@
 # Changelog for Fontra
 
-## 2025-12-?? [version 2025.12.5]
+## 2025-12-30 [version 2025.12.5]
 
 - [font overview] Implement dragging in the glyph cell view to quickly select ranges. [PR 2350](https://github.com/fontra/fontra/pull/2350)
 - [font overview] Fix arrow key up/down behavior to not skip lines that are shorter than the current position. [PR 2351](https://github.com/fontra/fontra/pull/2351)
