@@ -514,7 +514,7 @@ export class GlyphCellView extends HTMLElement {
     }
 
     let glyphCell = this.accordion.querySelector(".visible");
-    let previousCell = glyphCell;
+    let previousCell = null;
 
     while (true) {
       if (!glyphCell) {
@@ -536,7 +536,8 @@ export class GlyphCellView extends HTMLElement {
     }
 
     if (!glyphCell) {
-      glyphCell = findFirstLastGlyphCell(previousCell, 1);
+      glyphCell = previousCell || this.accordion.querySelector("glyph-cell");
+      glyphCell = findFirstLastGlyphCell(glyphCell, previousCell ? 1 : -1);
     }
 
     this.adjustSelectionOnDrag(glyphCell);
