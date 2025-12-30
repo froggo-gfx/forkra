@@ -499,6 +499,9 @@ export class GlyphCellView extends HTMLElement {
           : union(selection, this.glyphSelection);
       }
       this.glyphSelection = selection;
+      if (!this._dragErase) {
+        this._secondClickedCell = glyphCell;
+      }
     }
   }
 
