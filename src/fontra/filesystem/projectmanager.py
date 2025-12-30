@@ -100,6 +100,7 @@ class FileSystemProjectManager:
             async def closeFontHandler():
                 logger.info(f"closing FontHandler for '{projectIdentifier}'")
                 del self.fontHandlers[projectIdentifier]
+                assert fontHandler is not None
                 await fontHandler.aclose()
                 if self.projectOpenListener is not None:
                     self.projectOpenListener.projectClosed(projectIdentifier)
