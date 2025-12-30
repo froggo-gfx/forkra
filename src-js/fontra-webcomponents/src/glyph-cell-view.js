@@ -88,6 +88,18 @@ export class GlyphCellView extends HTMLElement {
     this.addEventListener("keydown", (event) => this.handleKeyDown(event));
   }
 
+  connectedCallback() {
+    this._handleWindowMouseUp = (event) => this.handleWindowMouseUp(event);
+    window.addEventListener("mouseup", this._handleWindowMouseUp);
+    this.parentElement.addEventListener("mousemove", (event) =>
+      this.handleCellViewMouseMove(event)
+    );
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener("mouseup", this._handleWindowMouseUp);
+  }
+
   _resetSelectionHelpers() {
     this._firstClickedCell = null;
     this._secondClickedCell = null;
@@ -259,6 +271,9 @@ export class GlyphCellView extends HTMLElement {
         this.handleSingleClick(event, glyphCell, false);
         this.onCellContextMenu?.(event, glyphCell);
       };
+      glyphCell.onmousedown = (event) => this.handleCellMouseDown(event, glyphCell);
+      glyphCell.onmouseenter = (event) => this.handleCellMouseEnter(event, glyphCell);
+      glyphCell.onmouseleave = (event) => this.handleCellMouseLeave(event, glyphCell);
 
       glyphCell.selected = this.glyphSelection.has(glyphName);
 
@@ -453,6 +468,142 @@ export class GlyphCellView extends HTMLElement {
     return glyphSelection;
   }
 
+  handleCellMouseDown(event, glyphCell) {
+    this._mouseDownEvent = event;
+
+    if (!event.shiftKey) {
+      this._firstClickedCell = glyphCell;
+    }
+
+    this._clickedCell = glyphCell;
+    this._dragErase = event.metaKey ? glyphCell.selected : false;
+    this._mouseInCell = true;
+    this._mouseDownSelection = this.glyphSelection;
+  }
+
+  handleWindowMouseUp(event) {
+    delete this._mouseDownEvent;
+    this._clickedCell?.setDragging(false);
+    delete this._clickedCell;
+  }
+
+  handleCellMouseEnter(event, glyphCell) {
+    if (!this._mouseDownEvent || !this._firstClickedCell) {
+      return;
+    }
+
+    this._mouseInCell = true;
+
+    this._clickedCell?.setDragging(true);
+    this.adjustSelectionOnDrag(glyphCell);
+  }
+
+  handleCellMouseLeave(event, glyphCell) {
+    this._mouseInCell = false;
+  }
+
+  handleCellViewMouseMove(event) {
+    if (!this._mouseDownEvent || !this._firstClickedCell) {
+      return;
+    }
+
+    this.autoScrollNearTopOrBottom(event);
+
+    if (this._mouseInCell) {
+      return;
+    }
+
+    let glyphCell = this.accordion.querySelector(".visible");
+    let previousCell = null;
+
+    while (true) {
+      if (!glyphCell) {
+        break;
+      }
+      const { top, bottom } = glyphCell.getBoundingClientRect();
+      if (bottom >= event.y) {
+        if (top > event.y) {
+          glyphCell = previousCell;
+        }
+        break;
+      }
+      previousCell = glyphCell;
+      glyphCell = firstCellInNextLine(glyphCell);
+    }
+
+    if (glyphCell) {
+      glyphCell = lastCellInLine(glyphCell);
+    }
+
+    if (!glyphCell) {
+      glyphCell = previousCell || this.accordion.querySelector("glyph-cell");
+      glyphCell = findFirstLastGlyphCell(glyphCell, previousCell ? 1 : -1);
+    }
+
+    this.adjustSelectionOnDrag(glyphCell);
+  }
+
+  autoScrollNearTopOrBottom(event) {
+    if (this._autoScrollTimer) {
+      clearTimeout(this._autoScrollTimer);
+    }
+
+    const container = this.parentElement;
+    const bounds = container.getBoundingClientRect();
+    const { height } = this.getBoundingClientRect();
+
+    if (height < bounds.height) {
+      // There is no scrolling, everything is in view
+      return;
+    }
+
+    const maxScrollTop = height - bounds.height + 50;
+    const scrollRegion = 30;
+
+    function scroll(delta) {
+      container.scrollTop += delta;
+    }
+
+    const maybeScroll = (speed) => {
+      const topDistance = event.y - bounds.top;
+      const bottomDistance = bounds.bottom - event.y;
+
+      let delta = 0;
+      if (topDistance < scrollRegion && container.scrollTop > 0) {
+        delta = -speed;
+      } else if (bottomDistance < scrollRegion && container.scrollTop <= maxScrollTop) {
+        delta = speed;
+      }
+
+      if (delta) {
+        scroll(delta);
+        this._autoScrollTimer = setTimeout(
+          () => maybeScroll(Math.min(15, speed + 1)),
+          10
+        );
+      }
+    };
+
+    maybeScroll(2);
+  }
+
+  adjustSelectionOnDrag(glyphCell) {
+    if (this._mouseDownEvent.shiftKey) {
+      this.extendSelection(glyphCell);
+    } else {
+      let selection = this.getGlyphNamesForRange(this._firstClickedCell, glyphCell);
+      if (this._mouseDownEvent.metaKey) {
+        selection = this._dragErase
+          ? difference(this.glyphSelection, selection)
+          : union(this._mouseDownSelection, selection);
+      }
+      this.glyphSelection = selection;
+      if (!this._dragErase) {
+        this._secondClickedCell = glyphCell;
+      }
+    }
+  }
+
   handleKeyDown(event) {
     if (event.key in arrowKeyDeltas) {
       this.handleArrowKeys(event);
@@ -610,6 +761,38 @@ function nextGlyphCellVertical(firstCell, direction, cellCenter) {
     nextCell = findFirstLastGlyphCell(firstCell, direction);
   }
   return nextCell;
+}
+
+function firstCellInNextLine(glyphCell) {
+  const { y } = glyphCell.getBoundingClientRect();
+  let nextCell = null;
+  while (true) {
+    glyphCell = nextGlyphCellHorizontal(glyphCell, 1);
+    if (!glyphCell) {
+      break;
+    }
+    if (glyphCell.getBoundingClientRect().y > y) {
+      nextCell = glyphCell;
+      break;
+    }
+  }
+  return nextCell;
+}
+
+function lastCellInLine(glyphCell) {
+  const { y } = glyphCell.getBoundingClientRect();
+  let lastCell = glyphCell;
+  while (true) {
+    glyphCell = nextGlyphCellHorizontal(glyphCell, 1);
+    if (!glyphCell) {
+      break;
+    }
+    if (glyphCell.getBoundingClientRect().y > y) {
+      break;
+    }
+    lastCell = glyphCell;
+  }
+  return lastCell;
 }
 
 function findFirstLastGlyphCell(firstCell, direction) {
