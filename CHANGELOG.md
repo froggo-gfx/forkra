@@ -2,7 +2,10 @@
 
 ## 2025-12-?? [version 2025.12.5]
 
-- Fix scrolling behavior in the OpenType feature editor. [Issue 2345](https://github.com/fontra/fontra/issues/2345)
+- [font overview] Implement dragging in the glyph cell view to quickly select ranges. [PR 2350](https://github.com/fontra/fontra/pull/2350)
+- [font overview] Fix arrow key up/down behavior to not skip lines that are shorter than the current position. [PR 2351](https://github.com/fontra/fontra/pull/2351)
+- [opentype feature editor] Fix scrolling behavior in the OpenType feature editor. [Issue 2345](https://github.com/fontra/fontra/issues/2345)
+- [designspace] Write OpenType features only to the default source, write empty features to the other sources. When applicable, add a warning to the feature text to inform about Fontra's current destructive behavior when editing features. [PR 2346](https://github.com/fontra/fontra/pull/2346)
 
 ## 2025-12-19 [version 2025.12.4]
 
