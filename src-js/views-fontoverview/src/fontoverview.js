@@ -5,6 +5,7 @@ import {
 } from "@fontra/core/actions.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { getGlyphMapProxy } from "@fontra/core/cmap.js";
+import { UndoStack, reverseUndoRecord } from "@fontra/core/font-controller.js";
 import { makeFontraMenuBar } from "@fontra/core/fontra-menus.js";
 import { GlyphOrganizer } from "@fontra/core/glyph-organizer.js";
 import * as html from "@fontra/core/html-utils.js";
@@ -81,6 +82,8 @@ export class FontOverviewController extends ViewController {
     super(font);
 
     this._loadedGlyphSets = {};
+
+    this.undoStack = new UndoStack();
 
     this.initActions();
 
@@ -574,13 +577,15 @@ export class FontOverviewController extends ViewController {
     registerActionCallbacks(
       "action.undo",
       () => this.doUndoRedo(false),
-      () => this.canUndoRedo(false)
+      () => this.canUndoRedo(false),
+      () => this.getUndoRedoLabel(false)
     );
 
     registerActionCallbacks(
       "action.redo",
       () => this.doUndoRedo(true),
-      () => this.canUndoRedo(true)
+      () => this.canUndoRedo(true),
+      () => this.getUndoRedoLabel(true)
     );
 
     registerActionCallbacks(
@@ -599,14 +604,36 @@ export class FontOverviewController extends ViewController {
     return { subscriptionPattern };
   }
 
-  canUndoRedo(isRedo) {
-    // For now we have no undo
-    return false;
+  getUndoRedoLabel(isRedo) {
+    const info = this.undoStack.getTopUndoRedoRecord(isRedo)?.info;
+    return (
+      (isRedo ? translate("action.redo") : translate("action.undo")) +
+      (info ? " " + info.label : "")
+    );
   }
 
-  doUndoRedo(isRedo) {
-    // Stub
-    console.log(isRedo ? "redo" : "undo");
+  canUndoRedo(isRedo) {
+    return this.undoStack.getTopUndoRedoRecord(isRedo)?.info;
+  }
+
+  async doUndoRedo(isRedo) {
+    let undoRecord = this.undoStack.popUndoRedoRecord(isRedo);
+    if (!undoRecord) {
+      return;
+    }
+    if (isRedo) {
+      undoRecord = reverseUndoRecord(undoRecord);
+    }
+    this.fontController.applyChange(undoRecord.rollbackChange);
+
+    await this.fontController.postChange(
+      undoRecord.rollbackChange,
+      undoRecord.change,
+      undoRecord.info.label
+    );
+
+    await sleepAsync(0);
+    undoRecord.info.contextCallbacks?.[isRedo ? "redoCallback" : "undoCallback"]?.();
   }
 
   canDelete() {
@@ -628,11 +655,7 @@ export class FontOverviewController extends ViewController {
         delete root.glyphs[glyphName];
       }
     });
-    await this.fontController.postChange(
-      changes.change,
-      changes.rollbackChange,
-      "Delete glyph(s)"
-    );
+    await this.postChange(changes, "delete glyph(s)");
   }
 
   getSelectedExistingGlyphNames() {
@@ -652,6 +675,25 @@ export class FontOverviewController extends ViewController {
     this.fontOverviewSettings.cellMagnification = Math.max(
       this.fontOverviewSettings.cellMagnification / CELL_MAGNIFICATION_FACTOR,
       CELL_MAGNIFICATION_MIN
+    );
+  }
+
+  async postChange(changes, undoLabel, contextCallbacks) {
+    const undoRecord = {
+      change: changes.change,
+      rollbackChange: changes.rollbackChange,
+      info: {
+        label: undoLabel,
+        contextCallbacks: contextCallbacks,
+      },
+    };
+
+    this.undoStack.pushUndoRecord(undoRecord);
+
+    await this.fontController.postChange(
+      changes.change,
+      changes.rollbackChange,
+      undoLabel
     );
   }
 }
