@@ -3,6 +3,7 @@ import {
   getActionIdentifierFromKeyEvent,
   registerActionCallbacks,
 } from "@fontra/core/actions.js";
+import { recordChanges } from "@fontra/core/change-recorder.js";
 import { getGlyphMapProxy } from "@fontra/core/cmap.js";
 import { makeFontraMenuBar } from "@fontra/core/fontra-menus.js";
 import { GlyphOrganizer } from "@fontra/core/glyph-organizer.js";
@@ -582,6 +583,12 @@ export class FontOverviewController extends ViewController {
       () => this.canUndoRedo(true)
     );
 
+    registerActionCallbacks(
+      "action.delete",
+      (event) => this.doDelete(),
+      () => this.canDelete()
+    );
+
     registerActionCallbacks("action.zoom-in", () => this.zoomIn());
     registerActionCallbacks("action.zoom-out", () => this.zoomOut());
   }
@@ -600,6 +607,38 @@ export class FontOverviewController extends ViewController {
   doUndoRedo(isRedo) {
     // Stub
     console.log(isRedo ? "redo" : "undo");
+  }
+
+  canDelete() {
+    return this.getSelectedExistingGlyphNames().length > 0;
+  }
+
+  async doDelete() {
+    const glyphMap = this.fontController.glyphMap;
+    const glyphNamesToDelete = this.getSelectedExistingGlyphNames();
+    const glyphs = {};
+    for (const glyphName of glyphNamesToDelete) {
+      glyphs[glyphName] = (await this.fontController.getGlyph(glyphName)).glyph;
+    }
+
+    const root = { glyphs, glyphMap };
+    const changes = recordChanges(root, (root) => {
+      for (const glyphName of glyphNamesToDelete) {
+        delete root.glyphMap[glyphName];
+        delete root.glyphs[glyphName];
+      }
+    });
+    await this.fontController.postChange(
+      changes.change,
+      changes.rollbackChange,
+      "Delete glyph(s)"
+    );
+  }
+
+  getSelectedExistingGlyphNames() {
+    const glyphMap = this.fontController.glyphMap;
+    const selectedGlyphNames = [...(this.glyphCellView.glyphSelection || [])].sort();
+    return selectedGlyphNames.filter((glyphName) => glyphName in glyphMap);
   }
 
   zoomIn() {
