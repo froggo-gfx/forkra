@@ -708,6 +708,10 @@ export class FontOverviewController extends ViewController {
     const glyphMap = this.fontController.glyphMap;
     const glyphNamesToDelete = this.getSelectedExistingGlyphNames();
     const glyphs = {};
+    // TODO: The following can take a long time for a big font with a big selection
+    // Should there be:
+    // - a warning?
+    // - a progress dialog?
     for (const glyphName of glyphNamesToDelete) {
       glyphs[glyphName] = (await this.fontController.getGlyph(glyphName)).glyph;
     }
