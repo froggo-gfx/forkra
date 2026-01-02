@@ -1,5 +1,9 @@
 # Changelog for Fontra
 
+## 2026-01-?? [version 2026.1.0]
+
+- [font overview] Implement glyph deletion, added context menu, implement "select all" and "select none". [Issue 2354](https://github.com/fontra/fontra/issues/2354), [PR 2355](https://github.com/fontra/fontra/pull/2355)
+
 ## 2025-12-30 [version 2025.12.6]
 
 - [fontra pak] Fix update detection mechanism on MacOS.
