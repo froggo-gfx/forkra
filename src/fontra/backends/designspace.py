@@ -461,16 +461,27 @@ class DesignspaceBackend:
         for glyphName, fileName in glyphSet.contents.items():
             glifFileNames[fileName] = glyphName
 
-    def ensureGlyphInGlyphOrder(self, reader, glyphName):
+    def ensureGlyphInGlyphOrder(self, layer, glyphName):
+        reader = layer.reader
+        originalGlyphOrderMapping = layer.originalGlyphOrderMapping
         lib = reader.readLib()
         glyphOrder = lib.get("public.glyphOrder")
         if glyphOrder is not None and glyphName not in glyphOrder:
             glyphOrder.append(glyphName)
+            glyphOrder.sort(
+                key=lambda gn: originalGlyphOrderMapping.get(gn, 0xFFFFFFFF)
+            )
             reader.writeLib(lib)
 
-    def ensureGlyphNotInGlyphOrder(self, reader, glyphName):
+    def ensureGlyphNotInGlyphOrder(self, layer, glyphName):
+        reader = layer.reader
         lib = reader.readLib()
         glyphOrder = lib.get("public.glyphOrder")
+        if not layer.originalGlyphOrderMapping and glyphOrder is not None:
+            layer.originalGlyphOrderMapping.update(
+                {gn: i for i, gn in enumerate(glyphOrder)}
+            )
+
         if glyphOrder is not None and glyphName in glyphOrder:
             glyphOrder.remove(glyphName)
             reader.writeLib(lib)
@@ -756,7 +767,7 @@ class DesignspaceBackend:
             if writeGlyphSetContents:
                 # FIXME: this is inefficient if we write many glyphs
                 self.updateGlyphSetContents(glyphSet)
-                self.ensureGlyphInGlyphOrder(ufoLayer.reader, glyphName)
+                self.ensureGlyphInGlyphOrder(ufoLayer, glyphName)
 
             modTimes.add(glyphSet.getGLIFModificationTime(glyphName))
 
@@ -774,7 +785,7 @@ class DesignspaceBackend:
             # FIXME: this is inefficient if we write many glyphs
             self.updateGlyphSetContents(glyphSet)
             if ufoLayer.isDefaultLayer:
-                self.ensureGlyphNotInGlyphOrder(ufoLayer.reader, glyphName)
+                self.ensureGlyphNotInGlyphOrder(ufoLayer, glyphName)
             modTimes.add(None)
 
         self.savedGlyphModificationTimes[glyphName] = modTimes
@@ -1021,7 +1032,7 @@ class DesignspaceBackend:
                 glyphSet.deleteGlyph(glyphName)
                 glyphSet.writeContents()
                 if ufoLayer.isDefaultLayer:
-                    self.ensureGlyphNotInGlyphOrder(ufoLayer.reader, glyphName)
+                    self.ensureGlyphNotInGlyphOrder(ufoLayer, glyphName)
         del self.glyphMap[glyphName]
         self.savedGlyphModificationTimes[glyphName] = None
         if self._glyphDependencies is not None:
@@ -1840,6 +1851,7 @@ class UFOLayer:
     path: str
     name: str
     fontraLayerName: str
+    originalGlyphOrderMapping: dict[str, int] = field(default_factory=dict)
 
     @cached_property
     def fileName(self) -> str:
