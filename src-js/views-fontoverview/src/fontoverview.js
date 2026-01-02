@@ -667,7 +667,8 @@ export class FontOverviewController extends ViewController {
     {
       // glyphSelection closure
       const glyphSelection = this.glyphCellView.glyphSelection;
-      await this.postChange(changes, "delete glyph(s)", {
+      const plural_s = glyphNamesToDelete.length > 1 ? "s" : "";
+      await this.postChange(changes, `delete glyph${plural_s}`, {
         undoCallback: () => {
           this.glyphCellView.glyphSelection = glyphSelection;
         },
