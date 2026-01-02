@@ -736,6 +736,36 @@ async def test_deleteGlyph(writableTestFont):
         assert glyphName not in lib.get("public.glyphOrder", [])
 
 
+async def test_deleteGlyph_addGlyph(writableTestFont):
+    # Test that the public.glyphOrder is unchanged after we delete a glyph and
+    # then re-add it.
+
+    beforeGlyphOrders = [
+        ufoLayer.reader.readLib().get("public.glyphOrder")
+        for ufoLayer in writableTestFont.ufoLayers
+    ]
+
+    glyphName = "A"
+    glyphMap = await writableTestFont.getGlyphMap()
+    glyph = await writableTestFont.getGlyph(glyphName)
+    await writableTestFont.deleteGlyph(glyphName)
+    assert await writableTestFont.getGlyph(glyphName) is None
+
+    await writableTestFont.putGlyph(glyphName, glyph, glyphMap[glyphName])
+
+    afterGlyphOrders = [
+        ufoLayer.reader.readLib().get("public.glyphOrder")
+        for ufoLayer in writableTestFont.ufoLayers
+    ]
+
+    for beforeGlyphOrder, afterGlyphOrder in zip(
+        beforeGlyphOrders, afterGlyphOrders, strict=True
+    ):
+        assert glyphName in beforeGlyphOrder
+        assert glyphName in afterGlyphOrder
+        assert beforeGlyphOrder == afterGlyphOrder
+
+
 async def test_deleteGlyphRaisesKeyError(writableTestFont):
     glyphName = "A.doesnotexist"
     with pytest.raises(KeyError, match="Glyph 'A.doesnotexist' does not exist"):
