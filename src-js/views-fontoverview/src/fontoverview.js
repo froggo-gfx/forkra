@@ -29,6 +29,7 @@ import {
 } from "@fontra/core/utils.js";
 import { ViewController } from "@fontra/core/view-controller.js";
 import { GlyphCellView } from "@fontra/web-components/glyph-cell-view.js";
+import { MenuItemDivider, showMenu } from "@fontra/web-components/menu-panel.js";
 import { message } from "@fontra/web-components/modal-dialog.js";
 import { FontOverviewNavigation } from "./panel-navigation.js";
 
@@ -96,6 +97,36 @@ export class FontOverviewController extends ViewController {
       (event) => this._updateWindowLocation(),
       200
     );
+  }
+
+  getEditMenuItems() {
+    const menuItems = [
+      { actionIdentifier: "action.undo" },
+      { actionIdentifier: "action.redo" },
+      MenuItemDivider,
+      { actionIdentifier: "action.cut" }, // TODO: see comment below
+      { actionIdentifier: "action.copy" },
+      { actionIdentifier: "action.paste" },
+      { actionIdentifier: "action.delete" },
+      MenuItemDivider,
+      { actionIdentifier: "action.select-all" },
+      { actionIdentifier: "action.select-none" },
+    ];
+
+    return menuItems;
+
+    // if (!insecureSafariConnection()) {
+    //   // In Safari, the async clipboard API only works in a secure context
+    //   // (HTTPS). We apply a workaround using the clipboard event API, but
+    //   // only in Safari, and when in an HTTP context.
+    //   // So, since the "actions" versions of cut/copy/paste won't work, we
+    //   // do not add their menu items.
+    //   this.basicContextMenuItems.push(
+    //     { actionIdentifier: "action.cut" },
+    //     { actionIdentifier: "action.copy" },
+    //     { actionIdentifier: "action.paste" }
+    //   );
+    // }
   }
 
   getViewMenuItems() {
@@ -195,6 +226,7 @@ export class FontOverviewController extends ViewController {
     this.glyphCellView.magnification = this.fontOverviewSettings.cellMagnification;
 
     this.glyphCellView.onOpenSelectedGlyphs = (event) => this.openSelectedGlyphs();
+    this.glyphCellView.oncontextmenu = (event) => this.handleContextMenu(event);
 
     sidebarContainer.appendChild(this.navigation);
     glyphCellViewContainer.appendChild(this.glyphCellView);
@@ -550,6 +582,14 @@ export class FontOverviewController extends ViewController {
     }
 
     this.fontOverviewSettings.glyphSetErrors = glyphSetErrors;
+  }
+
+  handleContextMenu(event) {
+    event.preventDefault();
+
+    const { x, y } = event;
+    this.contextMenuPosition = { x: x, y: y };
+    showMenu(this.getEditMenuItems(), { x: x + 1, y: y - 1 });
   }
 
   openSelectedGlyphs() {
