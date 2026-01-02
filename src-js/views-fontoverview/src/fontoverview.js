@@ -431,6 +431,8 @@ export class FontOverviewController extends ViewController {
     if (this.glyphCellView.glyphSelection?.size) {
       // If we have a selection, make sure the (beginning of) the selection
       // is visible. But wait until the next event cycle.
+      // FIXME: this currently does not work if the first selected cell
+      // does not exist yet (is too far out of view)
       await sleepAsync(0);
       const firstSelectedCell = this.glyphCellView.findFirstSelectedCell();
       firstSelectedCell?.scrollIntoView({
