@@ -643,6 +643,21 @@ export class FontOverviewController extends ViewController {
       () => this.canDelete()
     );
 
+    registerActionCallbacks(
+      "action.select-all",
+      () =>
+        (this.glyphCellView.glyphSelection = new Set(
+          Object.keys(this.fontController.glyphMap)
+        )),
+      () => true
+    );
+
+    registerActionCallbacks(
+      "action.select-none",
+      () => (this.glyphCellView.glyphSelection = new Set()),
+      () => this.glyphCellView.glyphSelection?.size > 0
+    );
+
     registerActionCallbacks("action.zoom-in", () => this.zoomIn());
     registerActionCallbacks("action.zoom-out", () => this.zoomOut());
   }
