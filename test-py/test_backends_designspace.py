@@ -741,8 +741,8 @@ async def test_deleteGlyph_addGlyph(writableTestFont):
     # then re-add it.
 
     beforeGlyphOrders = [
-        ufoLayer.reader.readLib().get("public.glyphOrder")
-        for ufoLayer in writableTestFont.ufoLayers
+        dsSource.layer.reader.readLib().get("public.glyphOrder")
+        for dsSource in writableTestFont.dsSources
     ]
 
     glyphName = "A"
@@ -754,15 +754,16 @@ async def test_deleteGlyph_addGlyph(writableTestFont):
     await writableTestFont.putGlyph(glyphName, glyph, glyphMap[glyphName])
 
     afterGlyphOrders = [
-        ufoLayer.reader.readLib().get("public.glyphOrder")
-        for ufoLayer in writableTestFont.ufoLayers
+        dsSource.layer.reader.readLib().get("public.glyphOrder")
+        for dsSource in writableTestFont.dsSources
     ]
 
     for beforeGlyphOrder, afterGlyphOrder in zip(
         beforeGlyphOrders, afterGlyphOrders, strict=True
     ):
-        assert glyphName in beforeGlyphOrder
-        assert glyphName in afterGlyphOrder
+        if beforeGlyphOrder is not None:
+            assert glyphName in beforeGlyphOrder
+            assert glyphName in afterGlyphOrder
         assert beforeGlyphOrder == afterGlyphOrder
 
 
