@@ -387,9 +387,6 @@ export class FontOverviewController extends ViewController {
   }
 
   async _updateGlyphSelection() {
-    // We possibly need to be smarter about this:
-    this.glyphCellView.parentElement.scrollTop = 0;
-
     const combinedGlyphItemList = await this._getCombineGlyphItemList();
     const glyphItemList = this.glyphOrganizer.filterGlyphs(combinedGlyphItemList);
     const glyphSections = this.glyphOrganizer.groupGlyphs(glyphItemList);
@@ -398,6 +395,18 @@ export class FontOverviewController extends ViewController {
     // Show placeholder if no glyphs are found
     const noGlyphsElement = document.querySelector("#font-overview-no-glyphs");
     noGlyphsElement.classList.toggle("shown", !glyphSections.length);
+
+    if (this.glyphCellView.glyphSelection?.size) {
+      // If we have a selection, make sure the (beginning of) the selection
+      // is visible. But wait until the next event cycle.
+      await sleepAsync(0);
+      const firstSelectedCell = this.glyphCellView.findFirstSelectedCell();
+      firstSelectedCell?.scrollIntoView({
+        behavior: "auto",
+        block: "nearest",
+        inline: "nearest",
+      });
+    }
   }
 
   async _getCombineGlyphItemList() {
