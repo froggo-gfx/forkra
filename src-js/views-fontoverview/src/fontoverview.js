@@ -3,7 +3,9 @@ import {
   getActionIdentifierFromKeyEvent,
   registerActionCallbacks,
 } from "@fontra/core/actions.js";
+import { recordChanges } from "@fontra/core/change-recorder.js";
 import { getGlyphMapProxy } from "@fontra/core/cmap.js";
+import { UndoStack, reverseUndoRecord } from "@fontra/core/font-controller.js";
 import { makeFontraMenuBar } from "@fontra/core/fontra-menus.js";
 import { GlyphOrganizer } from "@fontra/core/glyph-organizer.js";
 import * as html from "@fontra/core/html-utils.js";
@@ -27,6 +29,7 @@ import {
 } from "@fontra/core/utils.js";
 import { ViewController } from "@fontra/core/view-controller.js";
 import { GlyphCellView } from "@fontra/web-components/glyph-cell-view.js";
+import { MenuItemDivider, showMenu } from "@fontra/web-components/menu-panel.js";
 import { message } from "@fontra/web-components/modal-dialog.js";
 import { FontOverviewNavigation } from "./panel-navigation.js";
 
@@ -81,6 +84,8 @@ export class FontOverviewController extends ViewController {
 
     this._loadedGlyphSets = {};
 
+    this.undoStack = new UndoStack();
+
     this.initActions();
 
     const myMenuBar = makeFontraMenuBar(["File", "Edit", "View", "Font"], this);
@@ -92,6 +97,36 @@ export class FontOverviewController extends ViewController {
       (event) => this._updateWindowLocation(),
       200
     );
+  }
+
+  getEditMenuItems() {
+    const menuItems = [
+      { actionIdentifier: "action.undo" },
+      { actionIdentifier: "action.redo" },
+      MenuItemDivider,
+      { actionIdentifier: "action.cut" }, // TODO: see comment below
+      { actionIdentifier: "action.copy" },
+      { actionIdentifier: "action.paste" },
+      { actionIdentifier: "action.delete" },
+      MenuItemDivider,
+      { actionIdentifier: "action.select-all" },
+      { actionIdentifier: "action.select-none" },
+    ];
+
+    return menuItems;
+
+    // if (!insecureSafariConnection()) {
+    //   // In Safari, the async clipboard API only works in a secure context
+    //   // (HTTPS). We apply a workaround using the clipboard event API, but
+    //   // only in Safari, and when in an HTTP context.
+    //   // So, since the "actions" versions of cut/copy/paste won't work, we
+    //   // do not add their menu items.
+    //   this.basicContextMenuItems.push(
+    //     { actionIdentifier: "action.cut" },
+    //     { actionIdentifier: "action.copy" },
+    //     { actionIdentifier: "action.paste" }
+    //   );
+    // }
   }
 
   getViewMenuItems() {
@@ -191,6 +226,7 @@ export class FontOverviewController extends ViewController {
     this.glyphCellView.magnification = this.fontOverviewSettings.cellMagnification;
 
     this.glyphCellView.onOpenSelectedGlyphs = (event) => this.openSelectedGlyphs();
+    this.glyphCellView.oncontextmenu = (event) => this.handleContextMenu(event);
 
     sidebarContainer.appendChild(this.navigation);
     glyphCellViewContainer.appendChild(this.glyphCellView);
@@ -383,9 +419,6 @@ export class FontOverviewController extends ViewController {
   }
 
   async _updateGlyphSelection() {
-    // We possibly need to be smarter about this:
-    this.glyphCellView.parentElement.scrollTop = 0;
-
     const combinedGlyphItemList = await this._getCombineGlyphItemList();
     const glyphItemList = this.glyphOrganizer.filterGlyphs(combinedGlyphItemList);
     const glyphSections = this.glyphOrganizer.groupGlyphs(glyphItemList);
@@ -394,6 +427,20 @@ export class FontOverviewController extends ViewController {
     // Show placeholder if no glyphs are found
     const noGlyphsElement = document.querySelector("#font-overview-no-glyphs");
     noGlyphsElement.classList.toggle("shown", !glyphSections.length);
+
+    if (this.glyphCellView.glyphSelection?.size) {
+      // If we have a selection, make sure the (beginning of) the selection
+      // is visible. But wait until the next event cycle.
+      // FIXME: this currently does not work if the first selected cell
+      // does not exist yet (is too far out of view)
+      await sleepAsync(0);
+      const firstSelectedCell = this.glyphCellView.findFirstSelectedCell();
+      firstSelectedCell?.scrollIntoView({
+        behavior: "auto",
+        block: "nearest",
+        inline: "nearest",
+      });
+    }
   }
 
   async _getCombineGlyphItemList() {
@@ -539,6 +586,14 @@ export class FontOverviewController extends ViewController {
     this.fontOverviewSettings.glyphSetErrors = glyphSetErrors;
   }
 
+  handleContextMenu(event) {
+    event.preventDefault();
+
+    const { x, y } = event;
+    this.contextMenuPosition = { x: x, y: y };
+    showMenu(this.getEditMenuItems(), { x: x + 1, y: y - 1 });
+  }
+
   openSelectedGlyphs() {
     const selectedGlyphInfo = this.glyphCellView.getSelectedGlyphInfo();
     if (!selectedGlyphInfo.length) {
@@ -573,13 +628,36 @@ export class FontOverviewController extends ViewController {
     registerActionCallbacks(
       "action.undo",
       () => this.doUndoRedo(false),
-      () => this.canUndoRedo(false)
+      () => this.canUndoRedo(false),
+      () => this.getUndoRedoLabel(false)
     );
 
     registerActionCallbacks(
       "action.redo",
       () => this.doUndoRedo(true),
-      () => this.canUndoRedo(true)
+      () => this.canUndoRedo(true),
+      () => this.getUndoRedoLabel(true)
+    );
+
+    registerActionCallbacks(
+      "action.delete",
+      (event) => this.doDelete(),
+      () => this.canDelete()
+    );
+
+    registerActionCallbacks(
+      "action.select-all",
+      () =>
+        (this.glyphCellView.glyphSelection = new Set(
+          Object.keys(this.fontController.glyphMap)
+        )),
+      () => true
+    );
+
+    registerActionCallbacks(
+      "action.select-none",
+      () => (this.glyphCellView.glyphSelection = new Set()),
+      () => this.glyphCellView.glyphSelection?.size > 0
     );
 
     registerActionCallbacks("action.zoom-in", () => this.zoomIn());
@@ -592,14 +670,80 @@ export class FontOverviewController extends ViewController {
     return { subscriptionPattern };
   }
 
-  canUndoRedo(isRedo) {
-    // For now we have no undo
-    return false;
+  getUndoRedoLabel(isRedo) {
+    const info = this.undoStack.getTopUndoRedoRecord(isRedo)?.info;
+    return (
+      (isRedo ? translate("action.redo") : translate("action.undo")) +
+      (info ? " " + info.label : "")
+    );
   }
 
-  doUndoRedo(isRedo) {
-    // Stub
-    console.log(isRedo ? "redo" : "undo");
+  canUndoRedo(isRedo) {
+    return this.undoStack.getTopUndoRedoRecord(isRedo)?.info;
+  }
+
+  async doUndoRedo(isRedo) {
+    let undoRecord = this.undoStack.popUndoRedoRecord(isRedo);
+    if (!undoRecord) {
+      return;
+    }
+    if (isRedo) {
+      undoRecord = reverseUndoRecord(undoRecord);
+    }
+    this.fontController.applyChange(undoRecord.rollbackChange);
+
+    await this.fontController.postChange(
+      undoRecord.rollbackChange,
+      undoRecord.change,
+      undoRecord.info.label
+    );
+
+    await sleepAsync(0);
+    undoRecord.info.contextCallbacks?.[isRedo ? "redoCallback" : "undoCallback"]?.();
+  }
+
+  canDelete() {
+    return this.getSelectedExistingGlyphNames().length > 0;
+  }
+
+  async doDelete() {
+    const glyphMap = this.fontController.glyphMap;
+    const glyphNamesToDelete = this.getSelectedExistingGlyphNames();
+    const glyphs = {};
+    // TODO: The following can take a long time for a big font with a big selection
+    // Should there be:
+    // - a warning?
+    // - a progress dialog?
+    for (const glyphName of glyphNamesToDelete) {
+      glyphs[glyphName] = (await this.fontController.getGlyph(glyphName)).glyph;
+    }
+
+    const root = { glyphs, glyphMap };
+    const changes = recordChanges(root, (root) => {
+      for (const glyphName of glyphNamesToDelete) {
+        delete root.glyphMap[glyphName];
+        delete root.glyphs[glyphName];
+      }
+    });
+    {
+      // glyphSelection closure
+      const glyphSelection = this.glyphCellView.glyphSelection;
+      const plural_s = glyphNamesToDelete.length > 1 ? "s" : "";
+      await this.postChange(changes, `delete glyph${plural_s}`, {
+        undoCallback: () => {
+          this.glyphCellView.glyphSelection = glyphSelection;
+        },
+        redoCallback: () => {
+          this.glyphCellView.glyphSelection = new Set();
+        },
+      });
+    }
+  }
+
+  getSelectedExistingGlyphNames() {
+    const glyphMap = this.fontController.glyphMap;
+    const selectedGlyphNames = [...(this.glyphCellView.glyphSelection || [])].sort();
+    return selectedGlyphNames.filter((glyphName) => glyphName in glyphMap);
   }
 
   zoomIn() {
@@ -613,6 +757,25 @@ export class FontOverviewController extends ViewController {
     this.fontOverviewSettings.cellMagnification = Math.max(
       this.fontOverviewSettings.cellMagnification / CELL_MAGNIFICATION_FACTOR,
       CELL_MAGNIFICATION_MIN
+    );
+  }
+
+  async postChange(changes, undoLabel, contextCallbacks) {
+    const undoRecord = {
+      change: changes.change,
+      rollbackChange: changes.rollbackChange,
+      info: {
+        label: undoLabel,
+        contextCallbacks: contextCallbacks,
+      },
+    };
+
+    this.undoStack.pushUndoRecord(undoRecord);
+
+    await this.fontController.postChange(
+      changes.change,
+      changes.rollbackChange,
+      undoLabel
     );
   }
 }
