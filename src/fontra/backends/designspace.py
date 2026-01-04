@@ -1448,11 +1448,9 @@ class DesignspaceBackend:
             if glyphName in self.glyphMap:
                 glyphMapUpdates[glyphName] = None
 
-        reloadPattern: dict[str, Any] = (
-            {"glyphs": dict.fromkeys(changedItems.changedGlyphs)}
-            if changedItems.changedGlyphs
-            else {}
-        )
+        reloadPattern = changedItems.reloadPattern
+        if changedItems.changedGlyphs:
+            reloadPattern["glyphs"] = dict.fromkeys(changedItems.changedGlyphs)
 
         if glyphMapUpdates:
             reloadPattern["glyphMap"] = None
@@ -1470,16 +1468,21 @@ class DesignspaceBackend:
             return None
 
         changedItems = SimpleNamespace(
+            reloadPattern={},
             changedGlyphs=set(),
             newGlyphs=set(),
             deletedGlyphs=set(),
             rebuildGlyphSetContents=False,
         )
         for change, path in sorted(changes):
-            _, fileSuffix = os.path.splitext(path)
+            fileName = os.path.basename(path)
+            _, fileSuffix = os.path.splitext(fileName)
 
             if fileSuffix == ".glif":
                 self._analyzeExternalGlyphChanges(change, path, changedItems)
+
+            if fileName in {"kerning.plist", "groups.plist"}:
+                changedItems.reloadPattern["kerning"] = None
 
         if changedItems.rebuildGlyphSetContents:
             #
