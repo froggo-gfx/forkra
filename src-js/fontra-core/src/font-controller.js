@@ -82,7 +82,11 @@ export class FontController {
     if (initListener) {
       this.addChangeListener(
         { axes: null, sources: null },
-        (change, isExternalChange) => this._purgeCachesRelatedToAxesAndSourcesChanges()
+        (change, isExternalChange) => {
+          this._purgeCachesRelatedToAxesAndSourcesChanges();
+        },
+        false,
+        true // immediate
       );
     }
 

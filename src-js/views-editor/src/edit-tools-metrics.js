@@ -1025,6 +1025,9 @@ class KerningTool extends MetricsBaseTool {
       (change, isExternalChange) => {
         if (isExternalChange) {
           this.undoStack.clear();
+          this.fontController.getKerningController("kern").then((kerningController) => {
+            this.kerningController = kerningController;
+          });
         }
       },
       false
