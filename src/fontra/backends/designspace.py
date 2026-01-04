@@ -1484,6 +1484,9 @@ class DesignspaceBackend:
             if fileName in {"kerning.plist", "groups.plist"}:
                 changedItems.reloadPattern["kerning"] = None
 
+            if fileName == "features.fea":
+                changedItems.reloadPattern["features"] = None
+
         if changedItems.rebuildGlyphSetContents:
             #
             # In some cases we're responding to a changed glyph while the
