@@ -254,11 +254,6 @@ class DesignspaceBackend:
     def _initialize(self, dsDoc: DesignSpaceDocument) -> None:
         self.dsDoc = ensureDSSourceNamesAreUnique(dsDoc)
 
-        # Keep track of the dsDoc's modification time so we can distinguish between
-        # external changes and internal changes
-        self.dsDocModTime = (
-            os.stat(self.dsDoc.path).st_mtime if self.dsDoc.path else None
-        )
         self.ufoManager = UFOManager()
         self.updateAxisInfo()
         self.loadUFOLayers()
@@ -1396,7 +1391,8 @@ class DesignspaceBackend:
         for source in self.dsDoc.sources:
             source.location = {**self.defaultLocation, **source.location}
         self.dsDoc.write(self.dsDoc.path)
-        self.dsDocModTime = os.stat(self.dsDoc.path).st_mtime
+        if self.fileWatcher is not None:
+            self.fileWatcher.ignoreNextChange(self.dsDoc.path)
 
     async def watchExternalChanges(
         self, callback: Callable[[Any], Awaitable[None]]
@@ -1470,15 +1466,8 @@ class DesignspaceBackend:
 
     async def _analyzeExternalChanges(self, changes) -> SimpleNamespace | None:
         if any(os.path.splitext(path)[1] == ".designspace" for _, path in changes):
-            if (
-                self.dsDoc.path
-                and self.dsDocModTime != os.stat(self.dsDoc.path).st_mtime
-            ):
-                # .designspace changed externally, reload all the things
-                self.dsDocModTime = os.stat(self.dsDoc.path).st_mtime
-                return None
-            # else:
-            #     print("it was our own change, not an external one")
+            # .designspace changed externally, reload all the things
+            return None
 
         changedItems = SimpleNamespace(
             changedGlyphs=set(),
