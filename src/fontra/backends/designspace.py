@@ -1314,6 +1314,12 @@ class DesignspaceBackend:
                     dsSource.layer.reader.writeGroups(groups)
                     ufoKerning = kerningPerSource.get(dsSource.identifier, {})
                     dsSource.layer.reader.writeKerning(ufoKerning)
+                    self._fileWatcherIgnoreNextChange(
+                        os.path.join(dsSource.layer.path, GROUPS_FILENAME)
+                    )
+                    self._fileWatcherIgnoreNextChange(
+                        os.path.join(dsSource.layer.path, KERNING_FILENAME)
+                    )
                 else:
                     # TODO: store in lib
                     logger.error(
