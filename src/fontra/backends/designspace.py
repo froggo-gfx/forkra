@@ -1391,8 +1391,7 @@ class DesignspaceBackend:
         for source in self.dsDoc.sources:
             source.location = {**self.defaultLocation, **source.location}
         self.dsDoc.write(self.dsDoc.path)
-        if self.fileWatcher is not None:
-            self.fileWatcher.ignoreNextChange(self.dsDoc.path)
+        self._fileWatcherIgnoreNextChange(self.dsDoc.path)
 
     async def watchExternalChanges(
         self, callback: Callable[[Any], Awaitable[None]]
@@ -1401,6 +1400,10 @@ class DesignspaceBackend:
             self.fileWatcher = FileWatcher(self._fileWatcherCallback)
             self._updatePathsToWatch()
         self.fileWatcherCallbacks.append(callback)
+
+    def _fileWatcherIgnoreNextChange(self, path):
+        if self.fileWatcher is not None:
+            self.fileWatcher.ignoreNextChange(path)
 
     def _updatePathsToWatch(self):
         if self.fileWatcher is None:
@@ -1480,6 +1483,11 @@ class DesignspaceBackend:
 
             if fileSuffix == ".glif":
                 self._analyzeExternalGlyphChanges(change, path, changedItems)
+
+            if fileName == "fontinfo.plist":
+                changedItems.reloadPattern["fontInfo"] = None
+                changedItems.reloadPattern["sources"] = None
+                self._defaultFontInfo = None
 
             if fileName in {"kerning.plist", "groups.plist"}:
                 changedItems.reloadPattern["kerning"] = None
