@@ -25,7 +25,15 @@ from fontTools.designspaceLib import (
 from fontTools.misc.transform import DecomposedTransform, Transform
 from fontTools.pens.pointPen import AbstractPointPen
 from fontTools.pens.recordingPen import RecordingPointPen
-from fontTools.ufoLib import UFOLibError, UFOReader, UFOReaderWriter
+from fontTools.ufoLib import (
+    FEATURES_FILENAME,
+    FONTINFO_FILENAME,
+    GROUPS_FILENAME,
+    KERNING_FILENAME,
+    UFOLibError,
+    UFOReader,
+    UFOReaderWriter,
+)
 from fontTools.ufoLib.glifLib import GlyphSet
 
 from ..core.async_property import async_property
@@ -1484,15 +1492,15 @@ class DesignspaceBackend:
             if fileSuffix == ".glif":
                 self._analyzeExternalGlyphChanges(change, path, changedItems)
 
-            if fileName == "fontinfo.plist":
+            if fileName == FONTINFO_FILENAME:
                 changedItems.reloadPattern["fontInfo"] = None
                 changedItems.reloadPattern["sources"] = None
                 self._defaultFontInfo = None
 
-            if fileName in {"kerning.plist", "groups.plist"}:
+            if fileName in {KERNING_FILENAME, GROUPS_FILENAME}:
                 changedItems.reloadPattern["kerning"] = None
 
-            if fileName == "features.fea":
+            if fileName == FEATURES_FILENAME:
                 changedItems.reloadPattern["features"] = None
 
         if changedItems.rebuildGlyphSetContents:
