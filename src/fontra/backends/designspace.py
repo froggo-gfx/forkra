@@ -1176,6 +1176,9 @@ class DesignspaceBackend:
 
             if not dsSource.isSparse:
                 updateFontInfoFromFontSource(dsSource.layer.reader, fontSource)
+                self._fileWatcherIgnoreNextChange(
+                    os.path.join(dsSource.layer.path, FONTINFO_FILENAME)
+                )
 
             newDSSources.append(dsSource)
 
