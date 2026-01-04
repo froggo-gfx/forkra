@@ -1225,6 +1225,7 @@ class DesignspaceBackend:
             reader.readInfo(info)
             _updateFontInfoFromDict(info, infoDict)
             reader.writeInfo(info)
+            self._fileWatcherIgnoreNextChange(os.path.join(ufoPath, FONTINFO_FILENAME))
 
     async def getKerning(self) -> dict[str, Kerning]:
         groups: dict[str, list[str]] = {}
