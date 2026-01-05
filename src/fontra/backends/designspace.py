@@ -1456,14 +1456,15 @@ class DesignspaceBackend:
 
         # TODO: update glyphMap for changed non-new glyphs
 
-        for glyphName in changedItems.newGlyphs:
+        for glyphName in changedItems.newGlyphs | changedItems.changedGlyphs:
             try:
                 glifData = self.defaultDSSource.layer.glyphSet.getGLIF(glyphName)
             except KeyError:
                 logger.info(f"new glyph '{glyphName}' not found in default source")
                 continue
             gn, codePoints = extractGlyphNameAndCodePoints(glifData)
-            glyphMapUpdates[glyphName] = codePoints
+            if self.glyphMap.get(glyphName) != codePoints:
+                glyphMapUpdates[glyphName] = codePoints
 
         for glyphName in changedItems.deletedGlyphs:
             if glyphName in self.glyphMap:
