@@ -345,6 +345,7 @@ class FontraBackend(WatchableBackend):
                 reloadPattern["fontInfo"] = None
                 reloadPattern["axes"] = None
                 reloadPattern["sources"] = None
+                reloadPattern["customData"] = None
                 self._readFontData()
 
             if fileName == self.glyphInfoFileName:
