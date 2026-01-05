@@ -66,11 +66,13 @@ class FontraBackend(WatchableBackend):
             self.path.mkdir()
         self.glyphsDir.mkdir(exist_ok=True)
         self.glyphMap: dict[str, list[int]] = {}
+        self.fontData = Font()
         if not create:
             self._readGlyphInfo()
             self._readFontData()
+            self._readKerning()
+            self._readFeatures()
         else:
-            self.fontData = Font()
             self._writeGlyphInfo()
             self._writeFontData()
         self._scheduler = Scheduler()
@@ -244,15 +246,23 @@ class FontraBackend(WatchableBackend):
         self.fileWatcherIgnoreNextChange(self.glyphInfoPath)
 
     def _readFontData(self) -> None:
+        kerning = self.fontData.kerning
+        features = self.fontData.features
         self.fontData = structure(
             json.loads(self.fontDataPath.read_text(encoding="utf-8")), Font
         )
+        self.fontData.kerning = kerning
+        self.fontData.features = features
+
+    def _readKerning(self) -> None:
+        if self.kerningPath.exists():
+            self.fontData.kerning = readKerningFile(self.kerningPath)
+
+    def _readFeatures(self) -> None:
         if self.featureTextPath.exists():
             self.fontData.features.text = self.featureTextPath.read_text(
                 encoding="utf-8"
             )
-        if self.kerningPath.exists():
-            self.fontData.kerning = readKerningFile(self.kerningPath)
 
     def _writeFontData(self) -> None:
         fontData = unstructure(self.fontData)
@@ -355,11 +365,11 @@ class FontraBackend(WatchableBackend):
 
             if fileName == self.kerningFileName:
                 reloadPattern["kerning"] = None
-                self._readFontData()
+                self._readKerning()
 
             if fileName == self.featureTextFileName:
                 reloadPattern["features"] = None
-                self._readFontData()
+                self._readFeatures()
 
             if path.startswith(glyphsDir) and suffix == ".json":
                 glyphName = fileNameToString(stem)
