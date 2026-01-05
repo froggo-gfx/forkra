@@ -2,6 +2,7 @@ import asyncio
 import csv
 import json
 import logging
+import os
 import pathlib
 import shutil
 from collections import defaultdict
@@ -104,6 +105,7 @@ class FontraBackend(WatchableBackend):
 
     async def aclose(self):
         self.flush()
+        await self.fileWatcherClose()
 
     def flush(self):
         self._scheduler.flush()
@@ -136,6 +138,7 @@ class FontraBackend(WatchableBackend):
         jsonSource = serializeGlyph(glyph, glyphName)
         filePath = self.getGlyphFilePath(glyphName)
         filePath.write_text(jsonSource, encoding="utf=8")
+        self.fileWatcherIgnoreNextChange(filePath)
 
         if codePoints != self.glyphMap.get(glyphName):
             self.glyphMap[glyphName] = codePoints
@@ -320,8 +323,20 @@ class FontraBackend(WatchableBackend):
     async def fileWatcherProcessChanges(
         self, changes: set[tuple[Change, str]]
     ) -> dict[str, Any] | None:
-        print("!!!!", changes)
-        return {}
+        reloadPattern = {}
+        glyphChanges = set()
+        glyphsDir = os.fspath(self.glyphsDir)
+        for change, path in changes:
+            fileName = os.path.basename(path)
+            stem, suffix = os.path.splitext(fileName)
+            if path.startswith(glyphsDir) and suffix == ".json":
+                glyphName = fileNameToString(stem)
+                glyphChanges.add(glyphName)
+
+        if glyphChanges:
+            reloadPattern["glyphs"] = dict.fromkeys(sorted(glyphChanges))
+
+        return reloadPattern
 
 
 def _parseCodePoints(cell: str) -> list[int]:
