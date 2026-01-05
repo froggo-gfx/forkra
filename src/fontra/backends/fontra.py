@@ -339,6 +339,25 @@ class FontraBackend(WatchableBackend):
         for change, path in changes:
             fileName = os.path.basename(path)
             stem, suffix = os.path.splitext(fileName)
+
+            if fileName == self.fontDataFileName:
+                reloadPattern["fontInfo"] = None
+                reloadPattern["axes"] = None
+                reloadPattern["sources"] = None
+                self._readFontData()
+
+            if fileName == self.glyphInfoFileName:
+                reloadPattern["glyphMap"] = None
+                self._readGlyphInfo()
+
+            if fileName == self.kerningFileName:
+                reloadPattern["kerning"] = None
+                self._readFontData()
+
+            if fileName == self.featureTextFileName:
+                reloadPattern["features"] = None
+                self._readFontData()
+
             if path.startswith(glyphsDir) and suffix == ".json":
                 glyphName = fileNameToString(stem)
                 glyphChanges.add(glyphName)
