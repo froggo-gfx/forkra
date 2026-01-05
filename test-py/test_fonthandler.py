@@ -74,6 +74,8 @@ async def test_fontHandler_externalChange(testFontHandler):
         glyph = await testFontHandler.getGlyph("A")
         layerName, layer = firstLayerItem(glyph)
         assert 20 == layer.glyph.path.coordinates[0]
+        fontInfo = await testFontHandler.getFontInfo()
+        assert "License same as MutatorMath" in fontInfo.copyright
 
         dsDoc = testFontHandler.backend.dsDoc
         ufoPath = pathlib.Path(dsDoc.sources[0].path)
@@ -82,10 +84,17 @@ async def test_fontHandler_externalChange(testFontHandler):
         glifData = glifData.replace('x="20"', 'x="-100"')
         glifPath.write_text(glifData)
 
+        fontInfoPath = ufoPath / "fontinfo.plist"
+        fontInfoData = fontInfoPath.read_text()
+        fontInfoData = fontInfoData.replace("License same as MutatorMath", "-----")
+        fontInfoPath.write_text(fontInfoData)
+
         # We should see the "before", as it's cached
         glyph = await testFontHandler.getGlyph("A")
         layerName, layer = firstLayerItem(glyph)
         assert 20 == layer.glyph.path.coordinates[0]
+        fontInfo = await testFontHandler.getFontInfo()
+        assert "License same as MutatorMath" in fontInfo.copyright
 
         await asyncio.sleep(0.3)
 
@@ -94,6 +103,8 @@ async def test_fontHandler_externalChange(testFontHandler):
         glyph = await testFontHandler.getGlyph("A")
         layerName, layer = firstLayerItem(glyph)
         assert -100 == layer.glyph.path.coordinates[0]
+        fontInfo = await testFontHandler.getFontInfo()
+        assert "License same as MutatorMath" not in fontInfo.copyright
 
 
 @pytest.mark.asyncio
