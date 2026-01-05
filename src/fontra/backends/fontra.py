@@ -337,6 +337,8 @@ class FontraBackend(WatchableBackend):
         reloadPattern: dict[str, Any] = {}
         glyphChanges = set()
         glyphsDir = os.fspath(self.glyphsDir)
+        backgroundImagesDir = os.fspath(self.backgroundImagesDir)
+
         for change, path in changes:
             fileName = os.path.basename(path)
             stem, suffix = os.path.splitext(fileName)
@@ -360,6 +362,11 @@ class FontraBackend(WatchableBackend):
             if path.startswith(glyphsDir) and suffix == ".json":
                 glyphName = fileNameToString(stem)
                 glyphChanges.add(glyphName)
+
+            if path.startswith(backgroundImagesDir):
+                # Reload everything, as we don't want to bother to figure out
+                # which glyph uses the changed image
+                return None
 
         if glyphChanges:
             reloadPattern["glyphs"] = dict.fromkeys(sorted(glyphChanges))

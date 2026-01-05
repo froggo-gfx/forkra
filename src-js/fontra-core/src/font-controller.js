@@ -61,11 +61,11 @@ export class FontController {
     });
     this.undoStacks = {}; // glyph name -> undo stack
     this.readOnly = true;
-    this._instanceRequestQueue = new InstanceRequestQueue(this);
-    this._backgroundImageCache = new LRUCache(BACKGROUND_IMAGE_CACHE_SIZE);
   }
 
   async initialize(initListener = true) {
+    this._instanceRequestQueue = new InstanceRequestQueue(this);
+    this._backgroundImageCache = new LRUCache(BACKGROUND_IMAGE_CACHE_SIZE);
     const glyphMap = await this.font.getGlyphMap();
     this.characterMap = makeCharacterMapFromGlyphMap(glyphMap, false);
     this._rootObject = {};
