@@ -18,7 +18,7 @@ from ..core.classes import (
     VariableGlyph,
     unstructure,
 )
-from ..core.protocols import ReadableFontBackend
+from ..core.protocols import ReadableFontBackend, ReadBackgroundImage
 from ..core.varutils import locationToTuple
 from .actions.axes import mapFontSourceLocationsAndFilter
 from .actions.subset import subsetKerning
@@ -36,12 +36,12 @@ class FontBackendMerger:
     def __post_init__(self):
         self._glyphNamesA = None
         self._glyphNamesB = None
-        self._glyphMap = None
+        self._glyphMap: dict[str, list[int]] | None = None
 
     async def aclose(self) -> None:
         pass
 
-    async def _prepareGlyphMap(self):
+    async def _prepareGlyphMap(self) -> None:
         if self._glyphMap is not None:
             return
         self._glyphMapA = await self.inputA.getGlyphMap()
@@ -64,6 +64,8 @@ class FontBackendMerger:
 
     async def getGlyph(self, glyphName: str) -> VariableGlyph | None:
         await self._prepareGlyphMap()
+        assert self._glyphNamesA is not None
+        assert self._glyphNamesB is not None
         if glyphName in self._glyphNamesB:
             if glyphName in self._glyphNamesA and self.warnAboutDuplicates:
                 logger.warning(f"Merger: Glyph {glyphName!r} exists in both fonts")
@@ -162,10 +164,14 @@ class FontBackendMerger:
 
     async def getGlyphMap(self) -> dict[str, list[int]]:
         await self._prepareGlyphMap()
+        assert self._glyphMap is not None
         return self._glyphMap
 
     async def getKerning(self) -> dict[str, Kerning]:
         await self._prepareGlyphMap()
+        assert self._glyphNamesA is not None
+        assert self._glyphNamesB is not None
+
         mergeInfo = await self.mergedSourcesInfo
 
         kerningA = subsetKerning(
@@ -214,6 +220,7 @@ class FontBackendMerger:
             featuresA.text, self._glyphMapA, featuresB.text, self._glyphMapB
         )
 
+        assert self._glyphMap is not None
         assert set(mergedGlyphMap) == set(self._glyphMap)
 
         return OpenTypeFeatures(text=mergedFeatureText)
@@ -234,7 +241,7 @@ class FontBackendMerger:
 
     async def getBackgroundImage(self, imageIdentifier) -> ImageData | None:
         for inp in [self.inputB, self.inputA]:
-            if hasattr(inp, "getBackgroundImage"):
+            if isinstance(inp, ReadBackgroundImage):
                 imageData = await inp.getBackgroundImage(imageIdentifier)
                 if imageData is not None:
                     return imageData
