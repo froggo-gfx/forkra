@@ -2,6 +2,7 @@
 
 ## 2026-01-?? [version 2026.1.0]
 
+- [.fontra backend] Respond to external changes. [Issue 1872](https://github.com/fontra/fontra/issues/1872), [PR 2364](https://github.com/fontra/fontra/pull/2364)
 - [designspace] Respond to more external changes: font info, kerning, groups, features, encoding/cmap changes [Issue 2360](https://github.com/fontra/fontra/issues/2360), [Issue 2338](https://github.com/fontra/fontra/issues/2338), [PR 2361](https://github.com/fontra/fontra/pull/2361)
 - [font overview] Implement glyph deletion, added context menu, implement "select all" and "select none". [Issue 2354](https://github.com/fontra/fontra/issues/2354), [PR 2355](https://github.com/fontra/fontra/pull/2355)
 - [designspace] Maintain glyph order when re-adding a previously deleted glyph. [PR 2357](https://github.com/fontra/fontra/pull/2357)
