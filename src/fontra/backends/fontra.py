@@ -152,6 +152,8 @@ class FontraBackend(WatchableBackend):
             raise KeyError(f"Glyph '{glyphName}' does not exist")
         filePath = self.getGlyphFilePath(glyphName)
         filePath.unlink()
+        self.fileWatcherIgnoreNextChange(filePath)
+
         del self.glyphMap[glyphName]
         self._scheduler.schedule(self._writeGlyphInfo)
         if self._glyphDependencies is not None:
@@ -208,6 +210,7 @@ class FontraBackend(WatchableBackend):
         self.backgroundImagesDir.mkdir(exist_ok=True)
         path = self.backgroundImagesDir / fileName
         path.write_bytes(data.data)
+        self.fileWatcherIgnoreNextChange(path)
 
     async def getCustomData(self) -> dict[str, Any]:
         return deepcopy(self.fontData.customData)
@@ -237,6 +240,8 @@ class FontraBackend(WatchableBackend):
                 codePointsString = ",".join(f"U+{cp:04X}" for cp in codePoints)
                 writer.writerow([glyphName, codePointsString])
 
+        self.fileWatcherIgnoreNextChange(self.glyphInfoPath)
+
     def _readFontData(self) -> None:
         self.fontData = structure(
             json.loads(self.fontDataPath.read_text(encoding="utf-8")), Font
@@ -262,6 +267,7 @@ class FontraBackend(WatchableBackend):
             del fontData["features"]
 
         self.fontDataPath.write_text(serialize(fontData) + "\n", encoding="utf-8")
+        self.fileWatcherIgnoreNextChange(self.fontDataPath)
 
     def _writeKerning(self) -> None:
         if any(
@@ -271,6 +277,8 @@ class FontraBackend(WatchableBackend):
             writeKerningFile(self.kerningPath, self.fontData.kerning)
         elif self.kerningPath.exists():
             self.kerningPath.unlink()
+
+        self.fileWatcherIgnoreNextChange(self.kerningPath)
 
     def _writeFeatures(self) -> None:
         featureText = (
@@ -283,6 +291,8 @@ class FontraBackend(WatchableBackend):
             self.featureTextPath.write_text(featureText, encoding="utf-8")
         elif self.featureTextPath.exists():
             self.featureTextPath.unlink()
+
+        self.fileWatcherIgnoreNextChange(self.featureTextPath)
 
     def getGlyphData(self, glyphName: str) -> str:
         filePath = self.getGlyphFilePath(glyphName)
