@@ -258,12 +258,14 @@ async def test_externalChanges(writableFontraFont):
 
         glyphName = "A"
 
+        listenerGlyphMap = await listenerHandler.getGlyphMap()  # load in cache
         listenerGlyph = await listenerHandler.getGlyph(glyphName)  # load in cache
         listenerFontInfo = await listenerHandler.getFontInfo()  # load in cache
         listenerKerning = await listenerHandler.getKerning()  # load in cache
         listenerFeatures = await listenerHandler.getFeatures()  # load in cache
 
         glyphMap = await writableFontraFont.getGlyphMap()
+        glyphMap[glyphName] = glyphMap[glyphName][:1]
         glyph = await writableFontraFont.getGlyph(glyphName)
         layerGlyph = glyph.layers[glyph.sources[0].layerName].glyph
         layerGlyph.path.coordinates[0] = 999
@@ -297,3 +299,6 @@ async def test_externalChanges(writableFontraFont):
 
         listenerFeatures = await listenerHandler.getFeatures()
         assert features == listenerFeatures
+
+        listenerGlyphMap = await listenerHandler.getGlyphMap()
+        assert glyphMap == listenerGlyphMap
