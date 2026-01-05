@@ -260,7 +260,7 @@ class FontHandler:
                 raise KeyError(key)
 
     @remoteMethod
-    async def getGlyphMap(self, *, connection):
+    async def getGlyphMap(self, *, connection=None):
         self.glyphMap = await self.getData("glyphMap")
         return self.glyphMap
 
