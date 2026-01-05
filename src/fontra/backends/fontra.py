@@ -342,11 +342,8 @@ class FontraBackend(WatchableBackend):
             stem, suffix = os.path.splitext(fileName)
 
             if fileName == self.fontDataFileName:
-                reloadPattern["fontInfo"] = None
-                reloadPattern["axes"] = None
-                reloadPattern["sources"] = None
-                reloadPattern["customData"] = None
                 self._readFontData()
+                return None  # reload everything
 
             if fileName == self.glyphInfoFileName:
                 reloadPattern["glyphMap"] = None
