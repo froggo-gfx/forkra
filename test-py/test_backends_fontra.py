@@ -286,7 +286,7 @@ async def test_externalChanges(writableFontraFont):
 
         writableFontraFont.flush()
 
-        await asyncio.sleep(0.15)  # give the file watcher a moment to catch up
+        await asyncio.sleep(0.25)  # give the file watcher a moment to catch up
 
         listenerGlyph = await listenerHandler.getGlyph(glyphName)
         assert glyph == listenerGlyph
