@@ -13,7 +13,7 @@ from datetime import datetime
 from functools import cache, cached_property, partial, singledispatch
 from os import PathLike
 from types import SimpleNamespace
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
 from fontTools.designspaceLib import (
     AxisDescriptor,
@@ -66,8 +66,9 @@ from ..core.path import PackedPathPointPen
 from ..core.protocols import WritableFontBackend
 from ..core.subprocess import runInSubProcess
 from ..core.varutils import locationToTuple, makeDenseLocation, makeSparseLocation
-from .filewatcher import Change, FileWatcher
+from .filewatcher import Change
 from .ufo_utils import extractGlyphNameAndCodePoints
+from .watchable import WatchableBackend
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +234,7 @@ featuresWarning = """\
 """
 
 
-class DesignspaceBackend:
+class DesignspaceBackend(WatchableBackend):
     @classmethod
     def fromPath(cls, path: PathLike) -> WritableFontBackend:
         return cls(DesignSpaceDocument.fromfile(path))
@@ -245,8 +246,7 @@ class DesignspaceBackend:
         return cls(dsDoc)
 
     def __init__(self, dsDoc: DesignSpaceDocument) -> None:
-        self.fileWatcher: FileWatcher | None = None
-        self.fileWatcherCallbacks: list[Callable[[Any], Awaitable[None]]] = []
+        super().__init__()
         self._glyphDependenciesTask: asyncio.Task[GlyphDependencies] | None = None
         self._glyphDependencies: GlyphDependencies | None = None
         self._backgroundTasksTask: asyncio.Task | None = None
@@ -338,8 +338,7 @@ class DesignspaceBackend:
         self.defaultLocation = defaultLocation
 
     async def aclose(self) -> None:
-        if self.fileWatcher is not None:
-            await self.fileWatcher.aclose()
+        await self.fileWatcherClose()
         if self._glyphDependenciesTask is not None:
             self._glyphDependenciesTask.cancel()
         if self._backgroundTasksTask is not None:
@@ -1176,7 +1175,7 @@ class DesignspaceBackend:
 
             if not dsSource.isSparse:
                 updateFontInfoFromFontSource(dsSource.layer.reader, fontSource)
-                self._fileWatcherIgnoreNextChange(
+                self.fileWatcherIgnoreNextChange(
                     os.path.join(dsSource.layer.path, FONTINFO_FILENAME)
                 )
 
@@ -1211,7 +1210,7 @@ class DesignspaceBackend:
 
         self._writeDesignSpaceDocument()
 
-        await self._notifyWatcherCallbacks({"glyphs": None})
+        await self.fileWatcherNotifyCallbacks({"glyphs": None})
 
     async def getUnitsPerEm(self) -> int:
         return self.defaultFontInfo.unitsPerEm
@@ -1228,7 +1227,7 @@ class DesignspaceBackend:
             reader.readInfo(info)
             _updateFontInfoFromDict(info, infoDict)
             reader.writeInfo(info)
-            self._fileWatcherIgnoreNextChange(os.path.join(ufoPath, FONTINFO_FILENAME))
+            self.fileWatcherIgnoreNextChange(os.path.join(ufoPath, FONTINFO_FILENAME))
 
     async def getKerning(self) -> dict[str, Kerning]:
         groups: dict[str, list[str]] = {}
@@ -1317,10 +1316,10 @@ class DesignspaceBackend:
                     dsSource.layer.reader.writeGroups(groups)
                     ufoKerning = kerningPerSource.get(dsSource.identifier, {})
                     dsSource.layer.reader.writeKerning(ufoKerning)
-                    self._fileWatcherIgnoreNextChange(
+                    self.fileWatcherIgnoreNextChange(
                         os.path.join(dsSource.layer.path, GROUPS_FILENAME)
                     )
-                    self._fileWatcherIgnoreNextChange(
+                    self.fileWatcherIgnoreNextChange(
                         os.path.join(dsSource.layer.path, KERNING_FILENAME)
                     )
                 else:
@@ -1409,40 +1408,17 @@ class DesignspaceBackend:
         for source in self.dsDoc.sources:
             source.location = {**self.defaultLocation, **source.location}
         self.dsDoc.write(self.dsDoc.path)
-        self._fileWatcherIgnoreNextChange(self.dsDoc.path)
+        self.fileWatcherIgnoreNextChange(self.dsDoc.path)
 
-    async def watchExternalChanges(
-        self, callback: Callable[[Any], Awaitable[None]]
-    ) -> None:
-        if self.fileWatcher is None:
-            self.fileWatcher = FileWatcher(self._fileWatcherCallback)
-            self._updatePathsToWatch()
-        self.fileWatcherCallbacks.append(callback)
-
-    def _fileWatcherIgnoreNextChange(self, path):
-        if self.fileWatcher is not None:
-            self.fileWatcher.ignoreNextChange(path)
+    def fileWatcherWasInstalled(self):
+        self._updatePathsToWatch()
 
     def _updatePathsToWatch(self):
-        if self.fileWatcher is None:
-            return
-
         paths = sorted(set(self.ufoLayers.iterAttrs("path")))
         if self.dsDoc.path:
             paths.append(self.dsDoc.path)
 
-        self.fileWatcher.setPaths(paths)
-
-    async def _fileWatcherCallback(self, changes: set[tuple[Change, str]]) -> None:
-        reloadPattern = await self.processExternalChanges(changes)
-        if reloadPattern is None:
-            self._reloadDesignSpaceFromFile()
-        if reloadPattern or reloadPattern is None:
-            await self._notifyWatcherCallbacks(reloadPattern)
-
-    async def _notifyWatcherCallbacks(self, reloadPattern):
-        for callback in self.fileWatcherCallbacks:
-            await callback(reloadPattern)
+        self.fileWatcherSetPaths(paths)
 
     async def processExternalChanges(
         self, changes: set[tuple[Change, str]]
@@ -1450,6 +1426,7 @@ class DesignspaceBackend:
         changedItems = await self._analyzeExternalChanges(changes)
         if changedItems is None:
             # The .designspace file changed, reload all the things
+            self._reloadDesignSpaceFromFile()
             return None
 
         glyphMapUpdates: dict[str, list[int] | None] = {}
