@@ -57,10 +57,11 @@ class FileWatcher:
         async for changes in awatch(*sorted(self.paths), stop_event=self._stopEvent):
             changes = cleanupWatchFilesChanges(changes)
             changes = self._filterIgnores(changes)
-            try:
-                await self.callback(changes)
-            except Exception:
-                logger.exception("exception in FileWatcher callback")
+            if changes:
+                try:
+                    await self.callback(changes)
+                except Exception:
+                    logger.exception("exception in FileWatcher callback")
 
     def _filterIgnores(
         self, changes: set[tuple[Change, str]]
