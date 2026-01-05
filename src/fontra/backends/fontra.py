@@ -28,11 +28,13 @@ from ..core.glyphdependencies import GlyphDependencies
 from ..core.protocols import WritableFontBackend
 from ..core.subprocess import runInSubProcess
 from .filenames import fileNameToString, stringToFileName
+from .filewatcher import Change
+from .watchable import WatchableBackend
 
 logger = logging.getLogger(__name__)
 
 
-class FontraBackend:
+class FontraBackend(WatchableBackend):
     glyphInfoFileName = "glyph-info.csv"
     fontDataFileName = "font-data.json"
     kerningFileName = "kerning.csv"
@@ -49,6 +51,7 @@ class FontraBackend:
         return cls(path=path, create=True)
 
     def __init__(self, *, path: Any, create: bool = False):
+        super().__init__()
         # Typing TODO: `path` needs to be PathLike or be similar to pathlib.Path
         if not hasattr(path, "read_text"):
             self.path = pathlib.Path(path).resolve()
@@ -178,7 +181,7 @@ class FontraBackend:
     async def putKerning(self, kerning: dict[str, Kerning]) -> None:
         assert all(isinstance(table, Kerning) for table in kerning.values())
         self.fontData.kerning = deepcopy(kerning)
-        self._scheduler.schedule(self._writeFontData)
+        self._scheduler.schedule(self._writeKerning)
 
     async def getFeatures(self) -> OpenTypeFeatures:
         return deepcopy(self.fontData.features)
@@ -186,7 +189,7 @@ class FontraBackend:
     async def putFeatures(self, features: OpenTypeFeatures) -> None:
         assert isinstance(features, OpenTypeFeatures)
         self.fontData.features = deepcopy(features)
-        self._scheduler.schedule(self._writeFontData)
+        self._scheduler.schedule(self._writeFeatures)
 
     async def getBackgroundImage(self, imageIdentifier: str) -> ImageData | None:
         for imageType in [ImageType.PNG, ImageType.JPEG]:
@@ -248,6 +251,16 @@ class FontraBackend:
         fontData.pop("glyphMap", None)
         fontData.pop("kerning", None)
 
+        if (
+            "features" in fontData
+            and fontData["features"].get("language", "fea") == "fea"
+        ):
+            # omit if default feature format
+            del fontData["features"]
+
+        self.fontDataPath.write_text(serialize(fontData) + "\n", encoding="utf-8")
+
+    def _writeKerning(self) -> None:
         if any(
             kernTable.values or kernTable.groupsSide1 or kernTable.groupsSide2
             for kernTable in self.fontData.kerning.values()
@@ -256,18 +269,17 @@ class FontraBackend:
         elif self.kerningPath.exists():
             self.kerningPath.unlink()
 
-        featureText = None
-        if "features" in fontData:
-            featureText = fontData["features"].pop("text", None)
-            if fontData["features"].get("language", "fea") == "fea":
-                # omit if default
-                del fontData["features"]
-            if featureText:
-                self.featureTextPath.write_text(featureText, encoding="utf-8")
-        if not featureText and self.featureTextPath.exists():
-            self.featureTextPath.unlink()
+    def _writeFeatures(self) -> None:
+        featureText = (
+            self.fontData.features.text
+            if self.fontData.features.language == "fea"
+            else None  # Other hypothetical feature format
+        )
 
-        self.fontDataPath.write_text(serialize(fontData) + "\n", encoding="utf-8")
+        if featureText:
+            self.featureTextPath.write_text(featureText, encoding="utf-8")
+        elif self.featureTextPath.exists():
+            self.featureTextPath.unlink()
 
     def getGlyphData(self, glyphName: str) -> str:
         filePath = self.getGlyphFilePath(glyphName)
@@ -301,6 +313,15 @@ class FontraBackend:
 
     def startOptionalBackgroundTasks(self) -> None:
         self._backgroundTasksTask = asyncio.create_task(self.glyphDependencies)
+
+    def fileWatcherWasInstalled(self):
+        self.fileWatcher.setPaths([self.path])
+
+    async def fileWatcherProcessChanges(
+        self, changes: set[tuple[Change, str]]
+    ) -> dict[str, Any] | None:
+        print("!!!!", changes)
+        return {}
 
 
 def _parseCodePoints(cell: str) -> list[int]:
