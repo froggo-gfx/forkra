@@ -220,6 +220,7 @@ class FontraBackend(WatchableBackend):
         self._scheduler.schedule(self._writeFontData)
 
     def _readGlyphInfo(self) -> None:
+        self.glyphMap = {}
         with self.glyphInfoPath.open("r", encoding="utf-8", newline="") as file:
             reader = csv.reader(file, delimiter=";")
             header = next(reader)
