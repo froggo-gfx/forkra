@@ -339,13 +339,15 @@ class FontraBackend(WatchableBackend):
         glyphsDir = os.fspath(self.glyphsDir)
         backgroundImagesDir = os.fspath(self.backgroundImagesDir)
 
-        for change, path in changes:
+        shouldReloadAll = False
+
+        for change, path in sorted(changes):
             fileName = os.path.basename(path)
             stem, suffix = os.path.splitext(fileName)
 
             if fileName == self.fontDataFileName:
                 self._readFontData()
-                return None  # reload everything
+                shouldReloadAll = True
 
             if fileName == self.glyphInfoFileName:
                 reloadPattern["glyphMap"] = None
@@ -366,7 +368,10 @@ class FontraBackend(WatchableBackend):
             if path.startswith(backgroundImagesDir):
                 # Reload everything, as we don't want to bother to figure out
                 # which glyph uses the changed image
-                return None
+                shouldReloadAll = True
+
+        if shouldReloadAll:
+            return None
 
         if glyphChanges:
             reloadPattern["glyphs"] = dict.fromkeys(sorted(glyphChanges))
