@@ -334,7 +334,7 @@ class FontraBackend(WatchableBackend):
     async def fileWatcherProcessChanges(
         self, changes: set[tuple[Change, str]]
     ) -> dict[str, Any] | None:
-        reloadPattern = {}
+        reloadPattern: dict[str, Any] = {}
         glyphChanges = set()
         glyphsDir = os.fspath(self.glyphsDir)
         for change, path in changes:
