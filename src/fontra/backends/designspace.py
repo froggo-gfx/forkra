@@ -25,7 +25,15 @@ from fontTools.designspaceLib import (
 from fontTools.misc.transform import DecomposedTransform, Transform
 from fontTools.pens.pointPen import AbstractPointPen
 from fontTools.pens.recordingPen import RecordingPointPen
-from fontTools.ufoLib import UFOLibError, UFOReader, UFOReaderWriter
+from fontTools.ufoLib import (
+    FEATURES_FILENAME,
+    FONTINFO_FILENAME,
+    GROUPS_FILENAME,
+    KERNING_FILENAME,
+    UFOLibError,
+    UFOReader,
+    UFOReaderWriter,
+)
 from fontTools.ufoLib.glifLib import GlyphSet
 
 from ..core.async_property import async_property
@@ -254,11 +262,6 @@ class DesignspaceBackend:
     def _initialize(self, dsDoc: DesignSpaceDocument) -> None:
         self.dsDoc = ensureDSSourceNamesAreUnique(dsDoc)
 
-        # Keep track of the dsDoc's modification time so we can distinguish between
-        # external changes and internal changes
-        self.dsDocModTime = (
-            os.stat(self.dsDoc.path).st_mtime if self.dsDoc.path else None
-        )
         self.ufoManager = UFOManager()
         self.updateAxisInfo()
         self.loadUFOLayers()
@@ -1173,6 +1176,9 @@ class DesignspaceBackend:
 
             if not dsSource.isSparse:
                 updateFontInfoFromFontSource(dsSource.layer.reader, fontSource)
+                self._fileWatcherIgnoreNextChange(
+                    os.path.join(dsSource.layer.path, FONTINFO_FILENAME)
+                )
 
             newDSSources.append(dsSource)
 
@@ -1222,6 +1228,7 @@ class DesignspaceBackend:
             reader.readInfo(info)
             _updateFontInfoFromDict(info, infoDict)
             reader.writeInfo(info)
+            self._fileWatcherIgnoreNextChange(os.path.join(ufoPath, FONTINFO_FILENAME))
 
     async def getKerning(self) -> dict[str, Kerning]:
         groups: dict[str, list[str]] = {}
@@ -1310,6 +1317,12 @@ class DesignspaceBackend:
                     dsSource.layer.reader.writeGroups(groups)
                     ufoKerning = kerningPerSource.get(dsSource.identifier, {})
                     dsSource.layer.reader.writeKerning(ufoKerning)
+                    self._fileWatcherIgnoreNextChange(
+                        os.path.join(dsSource.layer.path, GROUPS_FILENAME)
+                    )
+                    self._fileWatcherIgnoreNextChange(
+                        os.path.join(dsSource.layer.path, KERNING_FILENAME)
+                    )
                 else:
                     # TODO: store in lib
                     logger.error(
@@ -1396,7 +1409,7 @@ class DesignspaceBackend:
         for source in self.dsDoc.sources:
             source.location = {**self.defaultLocation, **source.location}
         self.dsDoc.write(self.dsDoc.path)
-        self.dsDocModTime = os.stat(self.dsDoc.path).st_mtime
+        self._fileWatcherIgnoreNextChange(self.dsDoc.path)
 
     async def watchExternalChanges(
         self, callback: Callable[[Any], Awaitable[None]]
@@ -1405,6 +1418,10 @@ class DesignspaceBackend:
             self.fileWatcher = FileWatcher(self._fileWatcherCallback)
             self._updatePathsToWatch()
         self.fileWatcherCallbacks.append(callback)
+
+    def _fileWatcherIgnoreNextChange(self, path):
+        if self.fileWatcher is not None:
+            self.fileWatcher.ignoreNextChange(path)
 
     def _updatePathsToWatch(self):
         if self.fileWatcher is None:
@@ -1439,24 +1456,23 @@ class DesignspaceBackend:
 
         # TODO: update glyphMap for changed non-new glyphs
 
-        for glyphName in changedItems.newGlyphs:
+        for glyphName in changedItems.newGlyphs | changedItems.changedGlyphs:
             try:
                 glifData = self.defaultDSSource.layer.glyphSet.getGLIF(glyphName)
             except KeyError:
                 logger.info(f"new glyph '{glyphName}' not found in default source")
                 continue
             gn, codePoints = extractGlyphNameAndCodePoints(glifData)
-            glyphMapUpdates[glyphName] = codePoints
+            if self.glyphMap.get(glyphName) != codePoints:
+                glyphMapUpdates[glyphName] = codePoints
 
         for glyphName in changedItems.deletedGlyphs:
             if glyphName in self.glyphMap:
                 glyphMapUpdates[glyphName] = None
 
-        reloadPattern: dict[str, Any] = (
-            {"glyphs": dict.fromkeys(changedItems.changedGlyphs)}
-            if changedItems.changedGlyphs
-            else {}
-        )
+        reloadPattern = changedItems.reloadPattern
+        if changedItems.changedGlyphs:
+            reloadPattern["glyphs"] = dict.fromkeys(changedItems.changedGlyphs)
 
         if glyphMapUpdates:
             reloadPattern["glyphMap"] = None
@@ -1470,27 +1486,33 @@ class DesignspaceBackend:
 
     async def _analyzeExternalChanges(self, changes) -> SimpleNamespace | None:
         if any(os.path.splitext(path)[1] == ".designspace" for _, path in changes):
-            if (
-                self.dsDoc.path
-                and self.dsDocModTime != os.stat(self.dsDoc.path).st_mtime
-            ):
-                # .designspace changed externally, reload all the things
-                self.dsDocModTime = os.stat(self.dsDoc.path).st_mtime
-                return None
-            # else:
-            #     print("it was our own change, not an external one")
+            # .designspace changed externally, reload all the things
+            return None
 
         changedItems = SimpleNamespace(
+            reloadPattern={},
             changedGlyphs=set(),
             newGlyphs=set(),
             deletedGlyphs=set(),
             rebuildGlyphSetContents=False,
         )
         for change, path in sorted(changes):
-            _, fileSuffix = os.path.splitext(path)
+            fileName = os.path.basename(path)
+            _, fileSuffix = os.path.splitext(fileName)
 
             if fileSuffix == ".glif":
                 self._analyzeExternalGlyphChanges(change, path, changedItems)
+
+            if fileName == FONTINFO_FILENAME:
+                changedItems.reloadPattern["fontInfo"] = None
+                changedItems.reloadPattern["sources"] = None
+                self._defaultFontInfo = None
+
+            if fileName in {KERNING_FILENAME, GROUPS_FILENAME}:
+                changedItems.reloadPattern["kerning"] = None
+
+            if fileName == FEATURES_FILENAME:
+                changedItems.reloadPattern["features"] = None
 
         if changedItems.rebuildGlyphSetContents:
             #
