@@ -260,7 +260,7 @@ class FontHandler:
                 raise KeyError(key)
 
     @remoteMethod
-    async def getGlyphMap(self, *, connection):
+    async def getGlyphMap(self, *, connection=None):
         self.glyphMap = await self.getData("glyphMap")
         return self.glyphMap
 
@@ -273,27 +273,27 @@ class FontHandler:
         return await self.getData("sources")
 
     @remoteMethod
-    async def getAxes(self, *, connection):
+    async def getAxes(self, *, connection=None):
         return await self.getData("axes")
 
     @remoteMethod
-    async def getUnitsPerEm(self, *, connection):
+    async def getUnitsPerEm(self, *, connection=None):
         return await self.getData("unitsPerEm")
 
     @remoteMethod
-    async def getFeatures(self, *, connection):
+    async def getFeatures(self, *, connection=None):
         return await self.getData("features")
 
     @remoteMethod
-    async def getKerning(self, *, connection):
+    async def getKerning(self, *, connection=None):
         return await self.getData("kerning")
 
     @remoteMethod
-    async def getCustomData(self, *, connection):
+    async def getCustomData(self, *, connection=None):
         return await self.getData("customData")
 
     @remoteMethod
-    async def getMetaInfo(self, *, connection):
+    async def getMetaInfo(self, *, connection=None):
         return await self.getData("metaInfo", connection=connection)
 
     @remoteMethod

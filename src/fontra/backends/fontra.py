@@ -2,6 +2,7 @@ import asyncio
 import csv
 import json
 import logging
+import os
 import pathlib
 import shutil
 from collections import defaultdict
@@ -28,11 +29,13 @@ from ..core.glyphdependencies import GlyphDependencies
 from ..core.protocols import WritableFontBackend
 from ..core.subprocess import runInSubProcess
 from .filenames import fileNameToString, stringToFileName
+from .filewatcher import Change
+from .watchable import WatchableBackend
 
 logger = logging.getLogger(__name__)
 
 
-class FontraBackend:
+class FontraBackend(WatchableBackend):
     glyphInfoFileName = "glyph-info.csv"
     fontDataFileName = "font-data.json"
     kerningFileName = "kerning.csv"
@@ -49,6 +52,7 @@ class FontraBackend:
         return cls(path=path, create=True)
 
     def __init__(self, *, path: Any, create: bool = False):
+        super().__init__()
         # Typing TODO: `path` needs to be PathLike or be similar to pathlib.Path
         if not hasattr(path, "read_text"):
             self.path = pathlib.Path(path).resolve()
@@ -62,11 +66,13 @@ class FontraBackend:
             self.path.mkdir()
         self.glyphsDir.mkdir(exist_ok=True)
         self.glyphMap: dict[str, list[int]] = {}
+        self.fontData = Font()
         if not create:
             self._readGlyphInfo()
             self._readFontData()
+            self._readKerning()
+            self._readFeatures()
         else:
-            self.fontData = Font()
             self._writeGlyphInfo()
             self._writeFontData()
         self._scheduler = Scheduler()
@@ -101,6 +107,7 @@ class FontraBackend:
 
     async def aclose(self):
         self.flush()
+        await self.fileWatcherClose()
 
     def flush(self):
         self._scheduler.flush()
@@ -133,6 +140,7 @@ class FontraBackend:
         jsonSource = serializeGlyph(glyph, glyphName)
         filePath = self.getGlyphFilePath(glyphName)
         filePath.write_text(jsonSource, encoding="utf=8")
+        self.fileWatcherIgnoreNextChange(filePath)
 
         if codePoints != self.glyphMap.get(glyphName):
             self.glyphMap[glyphName] = codePoints
@@ -146,6 +154,8 @@ class FontraBackend:
             raise KeyError(f"Glyph '{glyphName}' does not exist")
         filePath = self.getGlyphFilePath(glyphName)
         filePath.unlink()
+        self.fileWatcherIgnoreNextChange(filePath)
+
         del self.glyphMap[glyphName]
         self._scheduler.schedule(self._writeGlyphInfo)
         if self._glyphDependencies is not None:
@@ -178,7 +188,7 @@ class FontraBackend:
     async def putKerning(self, kerning: dict[str, Kerning]) -> None:
         assert all(isinstance(table, Kerning) for table in kerning.values())
         self.fontData.kerning = deepcopy(kerning)
-        self._scheduler.schedule(self._writeFontData)
+        self._scheduler.schedule(self._writeKerning)
 
     async def getFeatures(self) -> OpenTypeFeatures:
         return deepcopy(self.fontData.features)
@@ -186,7 +196,7 @@ class FontraBackend:
     async def putFeatures(self, features: OpenTypeFeatures) -> None:
         assert isinstance(features, OpenTypeFeatures)
         self.fontData.features = deepcopy(features)
-        self._scheduler.schedule(self._writeFontData)
+        self._scheduler.schedule(self._writeFeatures)
 
     async def getBackgroundImage(self, imageIdentifier: str) -> ImageData | None:
         for imageType in [ImageType.PNG, ImageType.JPEG]:
@@ -202,6 +212,7 @@ class FontraBackend:
         self.backgroundImagesDir.mkdir(exist_ok=True)
         path = self.backgroundImagesDir / fileName
         path.write_bytes(data.data)
+        self.fileWatcherIgnoreNextChange(path)
 
     async def getCustomData(self) -> dict[str, Any]:
         return deepcopy(self.fontData.customData)
@@ -211,6 +222,7 @@ class FontraBackend:
         self._scheduler.schedule(self._writeFontData)
 
     def _readGlyphInfo(self) -> None:
+        self.glyphMap = {}
         with self.glyphInfoPath.open("r", encoding="utf-8", newline="") as file:
             reader = csv.reader(file, delimiter=";")
             header = next(reader)
@@ -231,16 +243,26 @@ class FontraBackend:
                 codePointsString = ",".join(f"U+{cp:04X}" for cp in codePoints)
                 writer.writerow([glyphName, codePointsString])
 
+        self.fileWatcherIgnoreNextChange(self.glyphInfoPath)
+
     def _readFontData(self) -> None:
+        kerning = self.fontData.kerning
+        features = self.fontData.features
         self.fontData = structure(
             json.loads(self.fontDataPath.read_text(encoding="utf-8")), Font
         )
+        self.fontData.kerning = kerning
+        self.fontData.features = features
+
+    def _readKerning(self) -> None:
+        if self.kerningPath.exists():
+            self.fontData.kerning = readKerningFile(self.kerningPath)
+
+    def _readFeatures(self) -> None:
         if self.featureTextPath.exists():
             self.fontData.features.text = self.featureTextPath.read_text(
                 encoding="utf-8"
             )
-        if self.kerningPath.exists():
-            self.fontData.kerning = readKerningFile(self.kerningPath)
 
     def _writeFontData(self) -> None:
         fontData = unstructure(self.fontData)
@@ -248,6 +270,17 @@ class FontraBackend:
         fontData.pop("glyphMap", None)
         fontData.pop("kerning", None)
 
+        if (
+            "features" in fontData
+            and fontData["features"].get("language", "fea") == "fea"
+        ):
+            # omit if default feature format
+            del fontData["features"]
+
+        self.fontDataPath.write_text(serialize(fontData) + "\n", encoding="utf-8")
+        self.fileWatcherIgnoreNextChange(self.fontDataPath)
+
+    def _writeKerning(self) -> None:
         if any(
             kernTable.values or kernTable.groupsSide1 or kernTable.groupsSide2
             for kernTable in self.fontData.kerning.values()
@@ -256,18 +289,21 @@ class FontraBackend:
         elif self.kerningPath.exists():
             self.kerningPath.unlink()
 
-        featureText = None
-        if "features" in fontData:
-            featureText = fontData["features"].pop("text", None)
-            if fontData["features"].get("language", "fea") == "fea":
-                # omit if default
-                del fontData["features"]
-            if featureText:
-                self.featureTextPath.write_text(featureText, encoding="utf-8")
-        if not featureText and self.featureTextPath.exists():
+        self.fileWatcherIgnoreNextChange(self.kerningPath)
+
+    def _writeFeatures(self) -> None:
+        featureText = (
+            self.fontData.features.text
+            if self.fontData.features.language == "fea"
+            else None  # Other hypothetical feature format
+        )
+
+        if featureText:
+            self.featureTextPath.write_text(featureText, encoding="utf-8")
+        elif self.featureTextPath.exists():
             self.featureTextPath.unlink()
 
-        self.fontDataPath.write_text(serialize(fontData) + "\n", encoding="utf-8")
+        self.fileWatcherIgnoreNextChange(self.featureTextPath)
 
     def getGlyphData(self, glyphName: str) -> str:
         filePath = self.getGlyphFilePath(glyphName)
@@ -301,6 +337,56 @@ class FontraBackend:
 
     def startOptionalBackgroundTasks(self) -> None:
         self._backgroundTasksTask = asyncio.create_task(self.glyphDependencies)
+
+    def fileWatcherWasInstalled(self):
+        self.fileWatcher.setPaths([self.path])
+
+    async def fileWatcherProcessChanges(
+        self, changes: set[tuple[Change, str]]
+    ) -> dict[str, Any] | None:
+        reloadPattern: dict[str, Any] = {}
+        glyphChanges = set()
+        glyphsDir = os.fspath(self.glyphsDir)
+        backgroundImagesDir = os.fspath(self.backgroundImagesDir)
+
+        shouldReloadAll = False
+
+        for change, path in sorted(changes):
+            fileName = os.path.basename(path)
+            stem, suffix = os.path.splitext(fileName)
+
+            if fileName == self.fontDataFileName:
+                self._readFontData()
+                shouldReloadAll = True
+
+            if fileName == self.glyphInfoFileName:
+                reloadPattern["glyphMap"] = None
+                self._readGlyphInfo()
+
+            if fileName == self.kerningFileName:
+                reloadPattern["kerning"] = None
+                self._readKerning()
+
+            if fileName == self.featureTextFileName:
+                reloadPattern["features"] = None
+                self._readFeatures()
+
+            if path.startswith(glyphsDir) and suffix == ".json":
+                glyphName = fileNameToString(stem)
+                glyphChanges.add(glyphName)
+
+            if path.startswith(backgroundImagesDir):
+                # Reload everything, as we don't want to bother to figure out
+                # which glyph uses the changed image
+                shouldReloadAll = True
+
+        if shouldReloadAll:
+            return None
+
+        if glyphChanges:
+            reloadPattern["glyphs"] = dict.fromkeys(sorted(glyphChanges))
+
+        return reloadPattern
 
 
 def _parseCodePoints(cell: str) -> list[int]:
