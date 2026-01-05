@@ -1420,7 +1420,7 @@ class DesignspaceBackend(WatchableBackend):
 
         self.fileWatcherSetPaths(paths)
 
-    async def processExternalChanges(
+    async def fileWatcherProcessChanges(
         self, changes: set[tuple[Change, str]]
     ) -> dict[str, Any] | None:
         changedItems = await self._analyzeExternalChanges(changes)

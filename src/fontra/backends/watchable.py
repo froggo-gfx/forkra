@@ -20,18 +20,19 @@ class WatchableBackend:
             self.fileWatcherWasInstalled()
         self.fileWatcherCallbacks.append(callback)
 
-    async def processExternalChanges(
+    async def fileWatcherProcessChanges(
         self, changes: set[tuple[Change, str]]
     ) -> dict[str, Any] | None:
+        # Must override
         raise NotImplementedError
+
+    def fileWatcherWasInstalled(self) -> None:
+        # May overridable
+        pass
 
     async def fileWatcherClose(self) -> None:
         if self.fileWatcher is not None:
             await self.fileWatcher.aclose()
-
-    def fileWatcherWasInstalled(self) -> None:
-        # overridable hook
-        pass
 
     def fileWatcherSetPaths(self, paths: Iterable[PathLike | str]) -> None:
         if self.fileWatcher is not None:
@@ -46,6 +47,6 @@ class WatchableBackend:
             await callback(reloadPattern)
 
     async def _fileWatcherCallback(self, changes: set[tuple[Change, str]]) -> None:
-        reloadPattern = await self.processExternalChanges(changes)
+        reloadPattern = await self.fileWatcherProcessChanges(changes)
         if reloadPattern or reloadPattern is None:
             await self.fileWatcherNotifyCallbacks(reloadPattern)
