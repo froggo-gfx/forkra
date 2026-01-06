@@ -649,6 +649,14 @@ def computeGlyphMapChange(glyphMapA, glyphMapB):
     diffGlyphNames = set()
 
     while True:
+        if indexA >= len(itemsA):
+            diffGlyphNames.update(item[0] for item in itemsB[indexB:])
+            break
+
+        if indexB >= len(itemsB):
+            diffGlyphNames.update(item[0] for item in itemsA[indexA:])
+            break
+
         itemA = itemsA[indexA]
         itemB = itemsB[indexB]
 
@@ -662,14 +670,6 @@ def computeGlyphMapChange(glyphMapA, glyphMapB):
             # itemA > itemB
             diffGlyphNames.add(itemB[0])
             indexB += 1
-
-        if indexA >= len(itemsA):
-            diffGlyphNames.update(item[0] for item in itemsB[indexB:])
-            break
-
-        if indexB >= len(itemsB):
-            diffGlyphNames.update(item[0] for item in itemsA[indexA:])
-            break
 
     glyphMapUpdates = {}
 
