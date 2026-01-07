@@ -871,3 +871,11 @@ export function stringCompare(a, b) {
 export function deepCopyObject(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
+
+export async function asyncMap(iterable, func) {
+  const result = [];
+  for (const item of iterable) {
+    result.push(await func(item));
+  }
+  return result;
+}
