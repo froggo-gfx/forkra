@@ -15,6 +15,7 @@ import { ObservableController } from "@fontra/core/observable-object.js";
 import { parseGlyphSet, redirectGlyphSetURL } from "@fontra/core/parse-glyphset.js";
 import {
   assert,
+  asyncMap,
   dumpURLFragment,
   friendlyHttpStatus,
   glyphMapToItemList,
@@ -26,6 +27,7 @@ import {
   sleepAsync,
   throttleCalls,
   writeObjectToURLFragment,
+  writeToClipboard,
 } from "@fontra/core/utils.js";
 import { ViewController } from "@fontra/core/view-controller.js";
 import { GlyphCellView } from "@fontra/web-components/glyph-cell-view.js";
@@ -724,8 +726,32 @@ export class FontOverviewController extends ViewController {
     console.log("cut");
   }
 
-  doCopy() {
-    console.log("copy");
+  async doCopy() {
+    const glyphNamesToCopy = this.getSelectedExistingGlyphNames();
+    const glyphs = await this.fontController.getMultipleGlyphs(glyphNamesToCopy);
+    const sourceLocations = this.fontController.getSourceLocations();
+    const glyphMap = this.fontController.glyphMap;
+
+    const clipboardData = {
+      clipboardType: "fontra-glyphs-array",
+      glyphs: await asyncMap(glyphNamesToCopy, async (glyphName) => ({
+        codePoints: glyphMap[glyphName],
+        variableGlyph: glyphs[glyphName],
+        backgroundImageData: await this.fontController.collectBackgroundImageData(
+          glyphs[glyphName]
+        ),
+      })),
+      sourceLocations,
+    };
+
+    const jsonString = JSON.stringify(clipboardData);
+
+    const clipboardObject = {
+      "text/plain": jsonString,
+      "web fontra/multiple-glyphs": jsonString,
+    };
+
+    await writeToClipboard(clipboardObject);
   }
 
   canPaste() {
