@@ -2,7 +2,7 @@
 
 ## 2026-01-?? [version 2026.1.0]
 
-- [fontra-glyphs] Respond to external changes. [fontra-glyphs Issue 117](https://github.com/fontra/fontra-glyphs/issues/117), [fontra-glyphs PR 118](https://github.com/fontra/fontra-glyphs/pull/118). This completes a [very old issue](https://github.com/fontra/fontra/issues/17) about responding to external changes.
+- [fontra-glyphs] Respond to external changes. [fontra-glyphs Issue 117](https://github.com/fontra/fontra-glyphs/issues/117), [fontra-glyphs PR 118](https://github.com/fontra/fontra-glyphs/pull/118), [fontra-glyphs PR 119](https://github.com/fontra/fontra-glyphs/pull/119). This completes a [very old issue](https://github.com/fontra/fontra/issues/17) about responding to external changes.
 - [.fontra backend] Respond to external changes. [Issue 1872](https://github.com/fontra/fontra/issues/1872), [PR 2364](https://github.com/fontra/fontra/pull/2364)
 - [designspace] Respond to more external changes: font info, kerning, groups, features, encoding/cmap changes [Issue 2360](https://github.com/fontra/fontra/issues/2360), [Issue 2338](https://github.com/fontra/fontra/issues/2338), [PR 2361](https://github.com/fontra/fontra/pull/2361)
 - [font overview] Implement glyph deletion, added context menu, implement "select all" and "select none". [Issue 2354](https://github.com/fontra/fontra/issues/2354), [PR 2355](https://github.com/fontra/fontra/pull/2355)
