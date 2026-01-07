@@ -1089,6 +1089,22 @@ export class FontController {
       ])
     );
   }
+
+  async collectBackgroundImageData(glyph) {
+    const backgroundImageData = {};
+
+    for (const layer of Object.values(glyph.layers)) {
+      if (layer.glyph.backgroundImage) {
+        const backgroundImage = await this.getBackgroundImage(
+          layer.glyph.backgroundImage.identifier
+        );
+        backgroundImageData[layer.glyph.backgroundImage.identifier] =
+          backgroundImage.src;
+      }
+    }
+
+    return backgroundImageData;
+  }
 }
 
 export function reverseUndoRecord(undoRecord) {
