@@ -640,9 +640,27 @@ export class FontOverviewController extends ViewController {
     );
 
     registerActionCallbacks(
+      "action.cut",
+      () => this.doCut(),
+      () => this.canCutCopyOrDelete()
+    );
+
+    registerActionCallbacks(
+      "action.copy",
+      () => this.doCopy(),
+      () => this.canCutCopyOrDelete()
+    );
+
+    registerActionCallbacks(
+      "action.paste",
+      () => this.doPaste(),
+      () => this.canPaste()
+    );
+
+    registerActionCallbacks(
       "action.delete",
       (event) => this.doDelete(),
-      () => this.canDelete()
+      () => this.canCutCopyOrDelete()
     );
 
     registerActionCallbacks(
@@ -702,21 +720,35 @@ export class FontOverviewController extends ViewController {
     undoRecord.info.contextCallbacks?.[isRedo ? "redoCallback" : "undoCallback"]?.();
   }
 
-  canDelete() {
+  doCut() {
+    console.log("cut");
+  }
+
+  doCopy() {
+    console.log("copy");
+  }
+
+  canPaste() {
+    // TODO: do we have a pastable clipboard?
+    return true;
+  }
+
+  doPaste() {
+    console.log("paste");
+  }
+
+  canCutCopyOrDelete() {
     return this.getSelectedExistingGlyphNames().length > 0;
   }
 
   async doDelete() {
     const glyphMap = this.fontController.glyphMap;
     const glyphNamesToDelete = this.getSelectedExistingGlyphNames();
-    const glyphs = {};
     // TODO: The following can take a long time for a big font with a big selection
     // Should there be:
     // - a warning?
     // - a progress dialog?
-    for (const glyphName of glyphNamesToDelete) {
-      glyphs[glyphName] = (await this.fontController.getGlyph(glyphName)).glyph;
-    }
+    const glyphs = await this.fontController.getMultipleGlyphs(glyphNamesToDelete);
 
     const root = { glyphs, glyphMap };
     const changes = recordChanges(root, (root) => {
