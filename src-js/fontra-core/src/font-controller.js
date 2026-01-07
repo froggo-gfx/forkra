@@ -1072,6 +1072,23 @@ export class FontController {
   async exportAs(options) {
     return await this.font.exportAs(options);
   }
+
+  async getMultipleGlyphs(glyphNames) {
+    const glyphs = {};
+    for (const glyphName of glyphNames) {
+      glyphs[glyphName] = (await this.getGlyph(glyphName)).glyph;
+    }
+    return glyphs;
+  }
+
+  getSourceLocations() {
+    return Object.fromEntries(
+      Object.entries(this.sources).map(([sourceIdentifier, source]) => [
+        sourceIdentifier,
+        source.location,
+      ])
+    );
+  }
 }
 
 export function reverseUndoRecord(undoRecord) {
