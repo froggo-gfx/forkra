@@ -260,18 +260,8 @@ export function makeUPlusStringFromCodePoint(codePoint) {
 export async function writeToClipboard(clipboardObject) {
   if (!clipboardObject) return;
 
-  const clipboardItemObject = {};
-  for (const [key, value] of Object.entries(clipboardObject)) {
-    if (value instanceof Blob) {
-      assert(key === value.type);
-      clipboardItemObject[key] = value;
-    } else {
-      clipboardItemObject[key] = new Blob([value], { type: key });
-    }
-  }
-
   try {
-    await navigator.clipboard.write([new ClipboardItem(clipboardItemObject)]);
+    await navigator.clipboard.write([new ClipboardItem(clipboardObject)]);
   } catch (error) {
     // Write at least the plain/text MIME type to the clipboard
     if (clipboardObject["text/plain"]) {
