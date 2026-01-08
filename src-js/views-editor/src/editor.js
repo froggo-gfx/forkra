@@ -45,6 +45,7 @@ import {
   loadURLFragment,
   makeUPlusStringFromCodePoint,
   modulo,
+  parseDataURL,
   parseSelection,
   range,
   readFileOrBlobAsDataURL,
@@ -311,30 +312,23 @@ export class EditorController extends ViewController {
         () => this.callDelegateMethod("getUndoRedoLabel", true)
       );
 
-      if (insecureSafariConnection()) {
-        // In Safari, the async clipboard API only works in a secure context
-        // (HTTPS). We apply a workaround using the clipboard event API, but
-        // only in Safari, and when in an HTTP context
-        this.initFallbackClipboardEventListeners();
-      } else {
-        registerActionCallbacks(
-          "action.cut",
-          () => this.doCut(),
-          () => this.canCut()
-        );
+      registerActionCallbacks(
+        "action.cut",
+        () => this.doCut(),
+        () => this.canCut()
+      );
 
-        registerActionCallbacks(
-          "action.copy",
-          () => this.doCopy(),
-          () => this.canCopy()
-        );
+      registerActionCallbacks(
+        "action.copy",
+        () => this.doCopy(),
+        () => this.canCopy()
+      );
 
-        registerActionCallbacks(
-          "action.paste",
-          () => this.doPaste(),
-          () => this.canPaste()
-        );
-      }
+      registerActionCallbacks(
+        "action.paste",
+        () => this.doPaste(),
+        () => this.canPaste()
+      );
 
       registerActionCallbacks(
         "action.delete",
@@ -1385,18 +1379,11 @@ export class EditorController extends ViewController {
 
     this.basicContextMenuItems.push(MenuItemDivider);
 
-    if (!insecureSafariConnection()) {
-      // In Safari, the async clipboard API only works in a secure context
-      // (HTTPS). We apply a workaround using the clipboard event API, but
-      // only in Safari, and when in an HTTP context.
-      // So, since the "actions" versions of cut/copy/paste won't work, we
-      // do not add their menu items.
-      this.basicContextMenuItems.push(
-        { actionIdentifier: "action.cut" },
-        { actionIdentifier: "action.copy" },
-        { actionIdentifier: "action.paste" }
-      );
-    }
+    this.basicContextMenuItems.push(
+      { actionIdentifier: "action.cut" },
+      { actionIdentifier: "action.copy" },
+      { actionIdentifier: "action.paste" }
+    );
 
     this.basicContextMenuItems.push({ actionIdentifier: "action.delete" });
 
@@ -1635,14 +1622,25 @@ export class EditorController extends ViewController {
     if (backgroundImageData && !isObjectEmpty(backgroundImageData)) {
       jsonObject.backgroundImageData = backgroundImageData;
     }
-    const jsonString = JSON.stringify(jsonObject);
 
-    const mapping = { "svg": svgString, "glif": glifString, "fontra-json": jsonString };
+    const buildJSONString = async () => {
+      return JSON.stringify(jsonObject);
+    };
+    const jsonStringPromise = buildJSONString();
+
+    const mapping = {
+      "svg": svgString,
+      "glif": glifString,
+      "fontra-json": jsonStringPromise,
+    };
+
     const plainTextString =
       mapping[applicationSettingsController.model.clipboardFormat] || glifString;
 
     localStorage.setItem("clipboardSelection.text-plain", plainTextString);
-    localStorage.setItem("clipboardSelection.glyph", jsonString);
+    jsonStringPromise.then((jsonString) => {
+      localStorage.setItem("clipboardSelection.glyph", jsonString);
+    });
 
     if (event) {
       // This *has* to be called before anything is awaited, or
@@ -1654,25 +1652,27 @@ export class EditorController extends ViewController {
         "text/html": svgString,
         "image/svg+xml": svgString,
         "web image/svg+xml": svgString,
-        "web fontra/static-glyph": jsonString,
+        "web fontra/static-glyph": jsonStringPromise,
       };
 
-      await this._addBackgroundImageToClipboard(clipboardObject, backgroundImageData);
+      this._addBackgroundImageToClipboard(clipboardObject, backgroundImageData);
 
-      await writeToClipboard(clipboardObject);
+      writeToClipboard(clipboardObject).catch((error) =>
+        console.error("error during clipboard write:", error)
+      );
     }
   }
 
-  async _addBackgroundImageToClipboard(clipboardObject, backgroundImageData) {
+  _addBackgroundImageToClipboard(clipboardObject, backgroundImageData) {
     if (
       this.sceneController.selection.size == 1 &&
-      this.sceneController.selection.has("backgroundImage/0") &&
-      backgroundImageData &&
-      Object.keys(backgroundImageData).length == 1
+      this.sceneController.selection.has("backgroundImage/0")
     ) {
-      const res = await fetch(Object.values(backgroundImageData)[0]);
-      const blob = await res.blob();
-      clipboardObject[blob.type] = blob;
+      const imageDataURL = Object.values(backgroundImageData)[0];
+      const { type } = parseDataURL(imageDataURL);
+      clipboardObject[type] = fetch(Object.values(backgroundImageData)[0]).then(
+        (response) => response.blob()
+      );
     }
   }
 
@@ -3684,10 +3684,6 @@ function chunks(array, n) {
     chunked.push(array.slice(i, i + n));
   }
   return chunked;
-}
-
-function insecureSafariConnection() {
-  return window.safari !== undefined && window.location.protocol === "http:";
 }
 
 function collapseSubTools(editToolsElement) {
