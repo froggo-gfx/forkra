@@ -22,6 +22,7 @@ import {
   getCharFromCodePoint,
   mapObjectValues,
   normalizeGuidelines,
+  parseDataURL,
   sleepAsync,
   throttleCalls,
   uniqueID,
@@ -322,11 +323,9 @@ export class FontController {
   }
 
   async putBackgroundImageData(imageIdentifier, imageDataURL) {
-    const [header, imageData] = imageDataURL.split(",");
-    const imageTypeRegex = /data:image\/(.+?);/g;
-    const match = imageTypeRegex.exec(header);
-    const imageType = match[1];
-    assert(imageType === "png" || imageType === "jpeg");
+    const { type, data } = parseDataURL(imageDataURL);
+    assert(type === "image/png" || type === "image/jpeg");
+    const imageType = type.split("/")[1];
 
     this._cacheBackgroundImageFromDataURLPromise(
       imageIdentifier,
@@ -335,7 +334,7 @@ export class FontController {
 
     await this.font.putBackgroundImage(imageIdentifier, {
       type: imageType,
-      data: imageData,
+      data,
     });
   }
 
