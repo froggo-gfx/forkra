@@ -599,6 +599,16 @@ export class SceneModel {
       return { selection: pointSelection };
     }
 
+    // Check for skeleton points
+    const skeletonPointSelection = this.skeletonPointSelectionAtPoint(
+      point,
+      size,
+      parsedCurrentSelection
+    );
+    if (skeletonPointSelection.size) {
+      return { selection: skeletonPointSelection };
+    }
+
     const anchorSelection = this.anchorSelectionAtPoint(
       point,
       size,
@@ -649,6 +659,60 @@ export class SceneModel {
     }
     if (pointIndex !== undefined) {
       return new Set([`point/${pointIndex}`]);
+    }
+
+    return new Set();
+  }
+
+  skeletonPointSelectionAtPoint(point, size, parsedCurrentSelection) {
+    const positionedGlyph = this.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+      return new Set();
+    }
+
+    const editLayerName = this.sceneSettings?.editLayerName;
+    if (!editLayerName) {
+      return new Set();
+    }
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (!skeletonData?.contours?.length) {
+      return new Set();
+    }
+
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+
+    // Check if we should prefer current selection
+    if (parsedCurrentSelection?.skeletonPoint?.size) {
+      for (const selKey of parsedCurrentSelection.skeletonPoint) {
+        const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+        const contour = skeletonData.contours[contourIdx];
+        if (contour) {
+          const skeletonPoint = contour.points[pointIdx];
+          if (skeletonPoint) {
+            const dist = vector.distance(glyphPoint, skeletonPoint);
+            if (dist <= size) {
+              return new Set([`skeletonPoint/${contourIdx}/${pointIdx}`]);
+            }
+          }
+        }
+      }
+    }
+
+    // Search all skeleton points
+    for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
+      const contour = skeletonData.contours[contourIdx];
+      for (let pointIdx = 0; pointIdx < contour.points.length; pointIdx++) {
+        const skeletonPoint = contour.points[pointIdx];
+        const dist = vector.distance(glyphPoint, skeletonPoint);
+        if (dist <= size) {
+          return new Set([`skeletonPoint/${contourIdx}/${pointIdx}`]);
+        }
+      }
     }
 
     return new Set();
