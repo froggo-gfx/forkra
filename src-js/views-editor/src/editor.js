@@ -1597,7 +1597,8 @@ export class EditorController extends ViewController {
     } else {
       const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
       const varGlyph = positionedGlyph.varGlyph.glyph;
-      const backgroundImageData = await this._collectBackgroundImageData(varGlyph);
+      const backgroundImageData =
+        await this.fontController.collectBackgroundImageData(varGlyph);
       const glyphController = positionedGlyph.glyph;
       await this._writeLayersToClipboard(
         varGlyph,
@@ -1607,20 +1608,6 @@ export class EditorController extends ViewController {
         event
       );
     }
-  }
-
-  async _collectBackgroundImageData(varGlyph) {
-    const backgroundImageData = {};
-    for (const layer of Object.values(varGlyph.layers)) {
-      if (layer.glyph.backgroundImage) {
-        const imageIdentifier = layer.glyph.backgroundImage.identifier;
-        const bgImage = await this.fontController.getBackgroundImage(imageIdentifier);
-        if (bgImage) {
-          backgroundImageData[imageIdentifier] = bgImage.src;
-        }
-      }
-    }
-    return backgroundImageData;
   }
 
   async _writeLayersToClipboard(
