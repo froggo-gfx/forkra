@@ -1265,9 +1265,11 @@ function setupComponentLocationFallbackValues(layers, glyphDependencies) {
   const baseGlyphAxesByName = Object.fromEntries(
     componentInfo.map(({ name }) => [
       name,
-      Object.fromEntries(
-        glyphDependencies[name].combinedAxes.map((axis) => [axis.name, axis])
-      ),
+      glyphDependencies[name]
+        ? Object.fromEntries(
+            glyphDependencies[name].combinedAxes.map((axis) => [axis.name, axis])
+          )
+        : {},
     ])
   );
 
