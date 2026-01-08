@@ -870,3 +870,14 @@ export async function asyncMap(iterable, func) {
   }
   return result;
 }
+
+export function parseDataURL(dataURL) {
+  const [header, data] = dataURL.split(",");
+  const typeRegex = /data:(.+?\/.+?);/g;
+  const match = typeRegex.exec(header);
+  const type = match[1];
+  if (!type) {
+    throw Error("invalid data URL");
+  }
+  return { type, data };
+}
