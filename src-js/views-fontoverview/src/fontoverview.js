@@ -15,18 +15,23 @@ import { ObservableController } from "@fontra/core/observable-object.js";
 import { parseGlyphSet, redirectGlyphSetURL } from "@fontra/core/parse-glyphset.js";
 import {
   assert,
+  asyncMap,
   dumpURLFragment,
   friendlyHttpStatus,
   glyphMapToItemList,
   isActiveElementTypeable,
   modulo,
+  objectsEqual,
   range,
+  readFromClipboard,
   readObjectFromURLFragment,
   scheduleCalls,
   sleepAsync,
   throttleCalls,
   writeObjectToURLFragment,
+  writeToClipboard,
 } from "@fontra/core/utils.js";
+import { VariableGlyph } from "@fontra/core/var-glyph.js";
 import { ViewController } from "@fontra/core/view-controller.js";
 import { GlyphCellView } from "@fontra/web-components/glyph-cell-view.js";
 import { MenuItemDivider, showMenu } from "@fontra/web-components/menu-panel.js";
@@ -254,6 +259,11 @@ export class FontOverviewController extends ViewController {
     document.addEventListener("keydown", (event) => this.handleKeyDown(event));
 
     this._updateGlyphItemList();
+  }
+
+  async externalChange(change, isLiveChange) {
+    await super.externalChange(change, isLiveChange);
+    this.undoStack.clear();
   }
 
   _setupProjectGlyphSetsDependencies() {
@@ -640,9 +650,27 @@ export class FontOverviewController extends ViewController {
     );
 
     registerActionCallbacks(
+      "action.cut",
+      () => this.doCut(),
+      () => this.canCutCopyOrDelete()
+    );
+
+    registerActionCallbacks(
+      "action.copy",
+      () => this.doCopy(),
+      () => this.canCutCopyOrDelete()
+    );
+
+    registerActionCallbacks(
+      "action.paste",
+      () => this.doPaste(),
+      () => this.canPaste()
+    );
+
+    registerActionCallbacks(
       "action.delete",
       (event) => this.doDelete(),
-      () => this.canDelete()
+      () => this.canCutCopyOrDelete()
     );
 
     registerActionCallbacks(
@@ -702,21 +730,187 @@ export class FontOverviewController extends ViewController {
     undoRecord.info.contextCallbacks?.[isRedo ? "redoCallback" : "undoCallback"]?.();
   }
 
-  canDelete() {
+  doCut() {
+    this.doCopy();
+    this.doDelete();
+  }
+
+  doCopy() {
+    const glyphNamesToCopy = this.getSelectedExistingGlyphNames();
+
+    const buildJSONString = async () => {
+      const glyphs = await this.fontController.getMultipleGlyphs(glyphNamesToCopy);
+      const sourceLocations = this.fontController.getSourceLocations();
+      // We need to freeze the glyphMap because it may otherwise have been changed
+      const glyphMap = Object.fromEntries(
+        glyphNamesToCopy.map((glyphName) => [
+          glyphName,
+          this.fontController.glyphMap[glyphName],
+        ])
+      );
+
+      const clipboardData = {
+        type: "fontra-glyph-array",
+        data: {
+          glyphs: await asyncMap(glyphNamesToCopy, async (glyphName) => ({
+            codePoints: glyphMap[glyphName],
+            variableGlyph: glyphs[glyphName],
+            backgroundImageData: await this.fontController.collectBackgroundImageData(
+              glyphs[glyphName]
+            ),
+          })),
+          sourceLocations,
+        },
+      };
+
+      return JSON.stringify(clipboardData);
+    };
+
+    const jsonStringPromise = buildJSONString();
+
+    const clipboardObject = {
+      "text/plain": jsonStringPromise,
+      "web fontra/fontra-glyph-array": jsonStringPromise,
+    };
+
+    writeToClipboard(clipboardObject).catch((error) =>
+      console.error("error during clipboard write:", error)
+    );
+
+    this.glyphCellView.glyphSelection = new Set(glyphNamesToCopy);
+  }
+
+  canPaste() {
+    // TODO: do we have a pastable clipboard?
+    return true;
+  }
+
+  async doPaste() {
+    let clipboardString = await readFromClipboard("web fontra/fontra-glyph-array");
+    if (!clipboardString) {
+      clipboardString = await readFromClipboard("text/plain");
+    }
+
+    if (!clipboardString) {
+      return;
+    }
+
+    let clipboardData;
+
+    try {
+      clipboardData = JSON.parse(clipboardString);
+    } catch (error) {
+      console.error("can't parse JSON:", error);
+      return;
+    }
+
+    if (clipboardData.type != "fontra-glyph-array") {
+      console.log("Invalid JSON clipboard data");
+      return;
+    }
+
+    let selectedGlyphInfos = this.glyphCellView.getSelectedGlyphInfo();
+    let selectedGlyphNames = selectedGlyphInfos.map((info) => info.glyphName);
+    const clipboardGlyphNames = clipboardData.data.glyphs.map(
+      (glyphData) => glyphData.variableGlyph.name
+    );
+
+    const glyphMap = { ...this.fontController.glyphMap };
+
+    if (!selectedGlyphInfos.length) {
+      selectedGlyphInfos = null;
+      selectedGlyphNames = clipboardGlyphNames;
+      if (selectedGlyphNames.some((glyphName) => glyphMap[glyphName])) {
+        // TODO ask user "replace existing glyphs"?
+        // - cancel
+        // - replace
+        // - keep both, use .xxx glyphname extension
+        console.log("Ask user 'replace existing glyphs?'");
+      }
+    }
+
+    if (clipboardData.data.glyphs.length != selectedGlyphNames.length) {
+      // TODO: warn if the source and target array lengths don't match?
+    }
+
+    const numGlyphs = Math.min(
+      clipboardData.data.glyphs.length,
+      selectedGlyphNames.length
+    );
+    selectedGlyphNames = selectedGlyphNames.slice(0, numGlyphs);
+
+    const clipboardGlyphs = Object.fromEntries(
+      clipboardData.data.glyphs.slice(0, numGlyphs).map((clipboardGlyphInfo) => {
+        return [
+          clipboardGlyphInfo.variableGlyph.name,
+          clipboardGlyphInfo.variableGlyph,
+        ];
+      })
+    );
+
+    const glyphs = await this.fontController.getMultipleGlyphs(
+      selectedGlyphNames.filter((glyphName) => !!glyphMap[glyphName])
+    );
+    const root = { glyphs, glyphMap };
+
+    const changes = recordChanges(root, (root) => {
+      for (const i of range(numGlyphs)) {
+        const clipboardGlyphInfo = clipboardData.data.glyphs[i];
+        const selectedGlyphInfo = selectedGlyphInfos?.[i];
+        const destinationGlyphName = selectedGlyphNames[i];
+        assert(clipboardGlyphInfo);
+        assert(destinationGlyphName);
+        const sourceGlyphName = clipboardGlyphInfo.variableGlyph.name;
+
+        if (!selectedGlyphInfo) {
+          root.glyphMap[destinationGlyphName] = clipboardGlyphInfo.codePoints;
+          assert(clipboardGlyphInfo.codePoints, clipboardGlyphInfo.codePoints);
+        } else if (!glyphMap[destinationGlyphName]) {
+          assert(selectedGlyphInfo.codePoints, selectedGlyphInfo.codePoints);
+          root.glyphMap[destinationGlyphName] = selectedGlyphInfo.codePoints;
+        }
+
+        const glyph = VariableGlyph.fromObject(clipboardGlyphs[sourceGlyphName]);
+        glyph.name = destinationGlyphName;
+        root.glyphs[destinationGlyphName] = glyph;
+      }
+    });
+
+    this.glyphCellView.glyphSelection = new Set(selectedGlyphNames);
+
+    this.fontController.applyChange(changes.change);
+
+    {
+      // glyphSelection closure
+      const glyphSelection = this.glyphCellView.glyphSelection;
+      const plural_s = numGlyphs > 1 ? "s" : "";
+      await this.postChange(changes, `paste glyph${plural_s}`, {
+        undoCallback: () => {
+          this.glyphCellView.glyphSelection = glyphSelection;
+        },
+        redoCallback: () => {
+          this.glyphCellView.glyphSelection = glyphSelection;
+        },
+      });
+    }
+
+    selectedGlyphNames.forEach((glyphName) =>
+      this.fontController.glyphChanged(glyphName)
+    );
+  }
+
+  canCutCopyOrDelete() {
     return this.getSelectedExistingGlyphNames().length > 0;
   }
 
   async doDelete() {
     const glyphMap = this.fontController.glyphMap;
     const glyphNamesToDelete = this.getSelectedExistingGlyphNames();
-    const glyphs = {};
     // TODO: The following can take a long time for a big font with a big selection
     // Should there be:
     // - a warning?
     // - a progress dialog?
-    for (const glyphName of glyphNamesToDelete) {
-      glyphs[glyphName] = (await this.fontController.getGlyph(glyphName)).glyph;
-    }
+    const glyphs = await this.fontController.getMultipleGlyphs(glyphNamesToDelete);
 
     const root = { glyphs, glyphMap };
     const changes = recordChanges(root, (root) => {
@@ -740,10 +934,14 @@ export class FontOverviewController extends ViewController {
     }
   }
 
+  getSelectedGlyphNames(filterDuplicates = false) {
+    const selectedGlyphInfo = this.glyphCellView.getSelectedGlyphInfo(filterDuplicates);
+    return selectedGlyphInfo.map((info) => info.glyphName);
+  }
+
   getSelectedExistingGlyphNames() {
     const glyphMap = this.fontController.glyphMap;
-    const selectedGlyphNames = [...(this.glyphCellView.glyphSelection || [])].sort();
-    return selectedGlyphNames.filter((glyphName) => glyphName in glyphMap);
+    return this.getSelectedGlyphNames().filter((glyphName) => glyphName in glyphMap);
   }
 
   zoomIn() {

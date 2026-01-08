@@ -260,22 +260,13 @@ export function makeUPlusStringFromCodePoint(codePoint) {
 export async function writeToClipboard(clipboardObject) {
   if (!clipboardObject) return;
 
-  const clipboardItemObject = {};
-  for (const [key, value] of Object.entries(clipboardObject)) {
-    if (value instanceof Blob) {
-      assert(key === value.type);
-      clipboardItemObject[key] = value;
-    } else {
-      clipboardItemObject[key] = new Blob([value], { type: key });
-    }
-  }
-
   try {
-    await navigator.clipboard.write([new ClipboardItem(clipboardItemObject)]);
+    await navigator.clipboard.write([new ClipboardItem(clipboardObject)]);
   } catch (error) {
+    console.log("Error while writing to clipboard, falling back to text/plain", error);
     // Write at least the plain/text MIME type to the clipboard
     if (clipboardObject["text/plain"]) {
-      await navigator.clipboard.writeText(clipboardObject["text/plain"]);
+      await navigator.clipboard.writeText(await clipboardObject["text/plain"]);
     }
   }
 }
@@ -870,4 +861,12 @@ export function stringCompare(a, b) {
 
 export function deepCopyObject(obj) {
   return JSON.parse(JSON.stringify(obj));
+}
+
+export async function asyncMap(iterable, func) {
+  const result = [];
+  for (const item of iterable) {
+    result.push(await func(item));
+  }
+  return result;
 }

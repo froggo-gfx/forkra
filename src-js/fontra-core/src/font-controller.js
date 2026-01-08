@@ -1,9 +1,9 @@
 import { recordChanges } from "./change-recorder.js";
 import {
   applyChange,
-  collectChangePaths,
   consolidateChanges,
   filterChangePattern,
+  iterChanges,
   matchChangePattern,
 } from "./changes.js";
 import { getClassSchema } from "./classes.js";
@@ -786,47 +786,30 @@ export class FontController {
       console.log("can't edit font in read-only mode");
       return;
     }
-    const cachedPattern = this.getCachedDataPattern();
 
-    const unmatched = filterChangePattern(change, cachedPattern, true);
-    const glyphSetChange = unmatched
-      ? filterChangePattern(unmatched, { glyphs: null })
-      : null;
+    const cachedPattern = this.getCachedDataPattern();
     change = filterChangePattern(change, cachedPattern);
     if (!change) {
       return;
     }
 
     const glyphNames = collectGlyphNames(change);
-    const glyphSet = {};
-    for (const glyphName of glyphNames) {
-      glyphSet[glyphName] = (await this.getGlyph(glyphName)).glyph;
-    }
+    const glyphSet = await this.getMultipleGlyphs(glyphNames);
+    const glyphSetTracker = objectPropertyTracker(glyphSet);
 
-    this._rootObject["glyphs"] = glyphSet;
+    this._rootObject["glyphs"] = glyphSetTracker.proxy;
     applyChange(this._rootObject, change, this._rootClassDef);
     delete this._rootObject["glyphs"];
 
-    if (glyphSetChange) {
-      // Some glyphs got added and/or some glyphs got deleted, let's find out which.
-      const glyphSet = {};
-      const glyphSetTracker = objectPropertyTracker(glyphSet);
-      applyChange(
-        { glyphs: glyphSetTracker.proxy },
-        glyphSetChange,
-        this._rootClassDef
+    for (const glyphName of glyphSetTracker.addedProperties) {
+      this._glyphsPromiseCache.put(
+        glyphName,
+        Promise.resolve(this.makeVariableGlyphController(glyphSet[glyphName]))
       );
-      for (const glyphName of glyphSetTracker.addedProperties) {
-        this._glyphsPromiseCache.put(
-          glyphName,
-          Promise.resolve(this.makeVariableGlyphController(glyphSet[glyphName]))
-        );
-        glyphNames.push(glyphName);
-      }
-      for (const glyphName of glyphSetTracker.deletedProperties) {
-        this._glyphsPromiseCache.delete(glyphName);
-        glyphNames.push(glyphName);
-      }
+    }
+
+    for (const glyphName of glyphSetTracker.deletedProperties) {
+      this._glyphsPromiseCache.delete(glyphName);
     }
 
     for (const glyphName of glyphNames) {
@@ -1072,6 +1055,42 @@ export class FontController {
   async exportAs(options) {
     return await this.font.exportAs(options);
   }
+
+  async getMultipleGlyphs(glyphNames) {
+    const glyphs = {};
+    for (const glyphName of glyphNames) {
+      const glyph = await this.getGlyph(glyphName);
+      if (glyph) {
+        glyphs[glyphName] = glyph.glyph;
+      }
+    }
+    return glyphs;
+  }
+
+  getSourceLocations() {
+    return Object.fromEntries(
+      Object.entries(this.sources).map(([sourceIdentifier, source]) => [
+        sourceIdentifier,
+        source.location,
+      ])
+    );
+  }
+
+  async collectBackgroundImageData(glyph) {
+    const backgroundImageData = {};
+
+    for (const layer of Object.values(glyph.layers)) {
+      if (layer.glyph.backgroundImage) {
+        const backgroundImage = await this.getBackgroundImage(
+          layer.glyph.backgroundImage.identifier
+        );
+        backgroundImageData[layer.glyph.backgroundImage.identifier] =
+          backgroundImage.src;
+      }
+    }
+
+    return backgroundImageData;
+  }
 }
 
 export function reverseUndoRecord(undoRecord) {
@@ -1191,9 +1210,19 @@ function _popUndoRedoRecord(popStack, pushStack) {
 }
 
 function collectGlyphNames(change) {
-  return collectChangePaths(change, 2)
-    .filter((item) => item[0] === "glyphs" && item[1] !== undefined)
-    .map((item) => item[1]);
+  const glyphNames = new Set();
+
+  for (const { path, change: thisChange } of iterChanges(change)) {
+    if (path.length >= 1 && path[0] == "glyphs") {
+      if (path.length == 1) {
+        glyphNames.add(thisChange.a[0]);
+      } else {
+        glyphNames.add(path[1]);
+      }
+    }
+  }
+
+  return [...glyphNames].sort();
 }
 
 function objectPropertyTracker(obj) {
