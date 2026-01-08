@@ -794,7 +794,7 @@ export class FontController {
     }
 
     const glyphNames = collectGlyphNames(change);
-    const glyphSet = this.getMultipleGlyphs(glyphNames);
+    const glyphSet = await this.getMultipleGlyphs(glyphNames);
     const glyphSetTracker = objectPropertyTracker(glyphSet);
 
     this._rootObject["glyphs"] = glyphSetTracker.proxy;
