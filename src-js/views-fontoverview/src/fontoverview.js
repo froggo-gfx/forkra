@@ -811,7 +811,7 @@ export class FontOverviewController extends ViewController {
     } else if (clipboardData.type == "fontra-variable-glyph") {
       clipboardGlyphArray = [clipboardData.data];
     } else {
-      console.log("Invalid JSON clipboard data");
+      console.log("Unrecognized JSON clipboard data format");
       return;
     }
 
