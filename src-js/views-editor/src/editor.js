@@ -1531,7 +1531,7 @@ export class EditorController extends ViewController {
     return this.sceneSettings.selectedGlyph;
   }
 
-  async doCopy(event) {
+  async doCopy() {
     if (!this.canCopy()) {
       return;
     }
@@ -1544,8 +1544,7 @@ export class EditorController extends ViewController {
         null,
         layerGlyphs,
         flattenedPath,
-        backgroundImageData,
-        event
+        backgroundImageData
       );
     } else {
       const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
@@ -1557,8 +1556,7 @@ export class EditorController extends ViewController {
         varGlyph,
         [{ glyph: glyphController.instance }],
         glyphController.flattenedPath,
-        backgroundImageData,
-        event
+        backgroundImageData
       );
     }
   }
@@ -1567,8 +1565,7 @@ export class EditorController extends ViewController {
     varGlyph,
     layerGlyphs,
     flattenedPath,
-    backgroundImageData,
-    event
+    backgroundImageData
   ) {
     if (!layerGlyphs?.length) {
       // nothing to do
@@ -1608,25 +1605,19 @@ export class EditorController extends ViewController {
       localStorage.setItem("clipboardSelection.glyph", jsonString);
     });
 
-    if (event) {
-      // This *has* to be called before anything is awaited, or
-      // Safari won't recognize it as part of the same event handler
-      event.clipboardData.setData("text/plain", plainTextString);
-    } else {
-      const clipboardObject = {
-        "text/plain": plainTextString,
-        "text/html": svgString,
-        "image/svg+xml": svgString,
-        "web image/svg+xml": svgString,
-        "web fontra/static-glyph": jsonStringPromise,
-      };
+    const clipboardObject = {
+      "text/plain": plainTextString,
+      "text/html": svgString,
+      "image/svg+xml": svgString,
+      "web image/svg+xml": svgString,
+      "web fontra/static-glyph": jsonStringPromise,
+    };
 
-      this._addBackgroundImageToClipboard(clipboardObject, backgroundImageData);
+    this._addBackgroundImageToClipboard(clipboardObject, backgroundImageData);
 
-      writeToClipboard(clipboardObject).catch((error) =>
-        console.error("error during clipboard write:", error)
-      );
-    }
+    writeToClipboard(clipboardObject).catch((error) =>
+      console.error("error during clipboard write:", error)
+    );
   }
 
   _addBackgroundImageToClipboard(clipboardObject, backgroundImageData) {
