@@ -1442,29 +1442,6 @@ export class EditorController extends ViewController {
     });
   }
 
-  initFallbackClipboardEventListeners() {
-    window.addEventListener("paste", async (event) => {
-      if (document.activeElement === this.canvasController.canvas) {
-        event.preventDefault();
-        this.doPaste();
-      }
-    });
-
-    window.addEventListener("copy", async (event) => {
-      if (document.activeElement === this.canvasController.canvas) {
-        event.preventDefault();
-        await this.doCopy(event);
-      }
-    });
-
-    window.addEventListener("cut", async (event) => {
-      if (document.activeElement === this.canvasController.canvas) {
-        event.preventDefault();
-        await this.doCut(event);
-      }
-    });
-  }
-
   async keyDownHandler(event) {
     const actionIdentifier = getActionIdentifierFromKeyEvent(event);
     if (actionIdentifier) {
