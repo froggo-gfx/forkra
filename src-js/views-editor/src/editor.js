@@ -1582,7 +1582,10 @@ export class EditorController extends ViewController {
     const codePoints = this.fontController.glyphMap[glyphName] || [];
     const glifString = staticGlyphToGLIF(glyphName, layerGlyphs[0].glyph, codePoints);
     const jsonObject = varGlyph
-      ? { type: "fontra-variable-glyph", data: { variableGlyph: varGlyph } }
+      ? {
+          type: "fontra-variable-glyph",
+          data: { variableGlyph: varGlyph, codePoints: codePoints },
+        }
       : { type: "fontra-layer-glyphs", data: { layerGlyphs } };
 
     const buildJSONString = async () => {
