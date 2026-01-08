@@ -1581,14 +1581,18 @@ export class EditorController extends ViewController {
     const glyphName = this.sceneSettings.selectedGlyphName;
     const codePoints = this.fontController.glyphMap[glyphName] || [];
     const glifString = staticGlyphToGLIF(glyphName, layerGlyphs[0].glyph, codePoints);
-    const jsonObject = varGlyph ? { variableGlyph: varGlyph } : { layerGlyphs };
-    if (backgroundImageData && !isObjectEmpty(backgroundImageData)) {
-      jsonObject.backgroundImageData = backgroundImageData;
-    }
+    const jsonObject = varGlyph
+      ? { type: "fontra-variable-glyph", data: { variableGlyph: varGlyph } }
+      : { type: "fontra-layer-glyphs", data: { layerGlyphs } };
 
     const buildJSONString = async () => {
+      const resolvedImageData = await backgroundImageData;
+      if (resolvedImageData && !isObjectEmpty(resolvedImageData)) {
+        jsonObject.data.backgroundImageData = resolvedImageData;
+      }
       return JSON.stringify(jsonObject);
     };
+
     const jsonStringPromise = buildJSONString();
 
     const mapping = {
