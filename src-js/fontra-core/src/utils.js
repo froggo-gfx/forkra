@@ -263,9 +263,10 @@ export async function writeToClipboard(clipboardObject) {
   try {
     await navigator.clipboard.write([new ClipboardItem(clipboardObject)]);
   } catch (error) {
+    console.log("Error while writing to clipboard, falling back to text/plain", error);
     // Write at least the plain/text MIME type to the clipboard
     if (clipboardObject["text/plain"]) {
-      await navigator.clipboard.writeText(clipboardObject["text/plain"]);
+      await navigator.clipboard.writeText(await clipboardObject["text/plain"]);
     }
   }
 }
