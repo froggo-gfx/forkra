@@ -884,7 +884,7 @@ export class FontOverviewController extends ViewController {
           this.glyphCellView.glyphSelection = glyphSelection;
         },
         redoCallback: () => {
-          this.glyphCellView.glyphSelection = new Set();
+          this.glyphCellView.glyphSelection = glyphSelection;
         },
       });
     }
