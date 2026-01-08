@@ -1488,35 +1488,23 @@ export class EditorController extends ViewController {
     );
   }
 
-  async doCut(event = null) {
+  async doCut() {
     if (
       this.sceneSettings.selectedGlyph.isEditing &&
       !this.sceneController.selection.size
     ) {
       return;
     }
+
     if (!this.sceneSettings.selectedGlyph.isEditing) {
-      await this.doCopy(event);
+      await this.doCopy();
       this.fontController.deleteGlyph(
         this.sceneSettings.selectedGlyphName,
         `cut glyph "${this.sceneSettings.selectedGlyphName}"`
       );
       return;
     }
-    if (event) {
-      // We *have* to do this first, as it won't work after any
-      // await (Safari insists on that). So we have to do a bit
-      // of redundant work by calling _prepareCopyOrCut twice.
-      const { layerGlyphs, flattenedPath, backgroundImageData } =
-        this._prepareCopyOrCutLayers(undefined, false);
-      await this._writeLayersToClipboard(
-        null,
-        layerGlyphs,
-        flattenedPath,
-        backgroundImageData,
-        event
-      );
-    }
+
     let copyResult;
     await this.sceneController.editGlyphAndRecordChanges(
       (glyph) => {
@@ -1527,7 +1515,8 @@ export class EditorController extends ViewController {
       undefined,
       true
     );
-    if (copyResult && !event) {
+
+    if (copyResult) {
       const { layerGlyphs, flattenedPath, backgroundImageData } = copyResult;
       await this._writeLayersToClipboard(
         null,
