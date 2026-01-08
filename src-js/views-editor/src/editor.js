@@ -1986,10 +1986,16 @@ export class EditorController extends ViewController {
               glyph: StaticGlyph.fromObject(layer.glyph),
             };
           });
+          backgroundImageData = clipboardObject.data.backgroundImageData;
         } else if (clipboardObject.type === "fontra-variable-glyph") {
           pasteVarGlyph = VariableGlyph.fromObject(clipboardObject.data.variableGlyph);
+          backgroundImageData = clipboardObject.data.backgroundImageData;
+        } else if (clipboardObject.type === "fontra-glyph-array") {
+          pasteVarGlyph = VariableGlyph.fromObject(
+            clipboardObject.data.glyphs[0].variableGlyph
+          );
+          backgroundImageData = clipboardObject.data.glyphs[0].backgroundImageData;
         }
-        backgroundImageData = clipboardObject.data.backgroundImageData;
       } catch (error) {
         console.log("couldn't paste from JSON:", error.toString());
       }
