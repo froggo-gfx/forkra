@@ -1978,17 +1978,18 @@ export class EditorController extends ViewController {
     if (customJSON) {
       try {
         const clipboardObject = JSON.parse(customJSON);
-        pasteLayerGlyphs = clipboardObject.layerGlyphs?.map((layer) => {
-          return {
-            layerName: layer.layerName,
-            location: layer.location,
-            glyph: StaticGlyph.fromObject(layer.glyph),
-          };
-        });
-        if (clipboardObject.variableGlyph) {
-          pasteVarGlyph = VariableGlyph.fromObject(clipboardObject.variableGlyph);
+        if (clipboardObject.type === "fontra-layer-glyphs") {
+          pasteLayerGlyphs = clipboardObject.data.layerGlyphs?.map((layer) => {
+            return {
+              layerName: layer.layerName,
+              location: layer.location,
+              glyph: StaticGlyph.fromObject(layer.glyph),
+            };
+          });
+        } else if (clipboardObject.type === "fontra-variable-glyph") {
+          pasteVarGlyph = VariableGlyph.fromObject(clipboardObject.data.variableGlyph);
         }
-        backgroundImageData = clipboardObject.backgroundImageData;
+        backgroundImageData = clipboardObject.data.backgroundImageData;
       } catch (error) {
         console.log("couldn't paste from JSON:", error.toString());
       }
