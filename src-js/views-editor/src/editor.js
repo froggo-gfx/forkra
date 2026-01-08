@@ -3219,7 +3219,7 @@ export class EditorController extends ViewController {
   async externalChange(change, isLiveChange) {
     await super.externalChange(change, isLiveChange);
 
-    // Force even trigger for fontLocationSourceMapped, as the glyph's
+    // Force event trigger for fontLocationSourceMapped, as the glyph's
     // source list may have changed
     this.sceneSettings.fontLocationSourceMapped = {
       ...this.sceneSettings.fontLocationSourceMapped,
