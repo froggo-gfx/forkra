@@ -804,14 +804,20 @@ export class FontOverviewController extends ViewController {
       return;
     }
 
-    if (clipboardData.type != "fontra-glyph-array") {
+    let clipboardGlyphArray;
+
+    if (clipboardData.type == "fontra-glyph-array") {
+      clipboardGlyphArray = clipboardData.data.glyphs;
+    } else if (clipboardData.type == "fontra-variable-glyph") {
+      clipboardGlyphArray = [clipboardData.data];
+    } else {
       console.log("Invalid JSON clipboard data");
       return;
     }
 
     let selectedGlyphInfos = this.glyphCellView.getSelectedGlyphInfo();
     let selectedGlyphNames = selectedGlyphInfos.map((info) => info.glyphName);
-    const clipboardGlyphNames = clipboardData.data.glyphs.map(
+    const clipboardGlyphNames = clipboardGlyphArray.map(
       (glyphData) => glyphData.variableGlyph.name
     );
 
@@ -829,18 +835,15 @@ export class FontOverviewController extends ViewController {
       }
     }
 
-    if (clipboardData.data.glyphs.length != selectedGlyphNames.length) {
+    if (clipboardGlyphArray.length != selectedGlyphNames.length) {
       // TODO: warn if the source and target array lengths don't match?
     }
 
-    const numGlyphs = Math.min(
-      clipboardData.data.glyphs.length,
-      selectedGlyphNames.length
-    );
+    const numGlyphs = Math.min(clipboardGlyphArray.length, selectedGlyphNames.length);
     selectedGlyphNames = selectedGlyphNames.slice(0, numGlyphs);
 
     const clipboardGlyphs = Object.fromEntries(
-      clipboardData.data.glyphs.slice(0, numGlyphs).map((clipboardGlyphInfo) => {
+      clipboardGlyphArray.slice(0, numGlyphs).map((clipboardGlyphInfo) => {
         return [
           clipboardGlyphInfo.variableGlyph.name,
           clipboardGlyphInfo.variableGlyph,
@@ -855,7 +858,7 @@ export class FontOverviewController extends ViewController {
 
     const changes = recordChanges(root, (root) => {
       for (const i of range(numGlyphs)) {
-        const clipboardGlyphInfo = clipboardData.data.glyphs[i];
+        const clipboardGlyphInfo = clipboardGlyphArray[i];
         const selectedGlyphInfo = selectedGlyphInfos?.[i];
         const destinationGlyphName = selectedGlyphNames[i];
         assert(clipboardGlyphInfo);
@@ -863,11 +866,9 @@ export class FontOverviewController extends ViewController {
         const sourceGlyphName = clipboardGlyphInfo.variableGlyph.name;
 
         if (!selectedGlyphInfo) {
-          root.glyphMap[destinationGlyphName] = clipboardGlyphInfo.codePoints;
-          assert(clipboardGlyphInfo.codePoints, clipboardGlyphInfo.codePoints);
+          root.glyphMap[destinationGlyphName] = clipboardGlyphInfo.codePoints || [];
         } else if (!glyphMap[destinationGlyphName]) {
-          assert(selectedGlyphInfo.codePoints, selectedGlyphInfo.codePoints);
-          root.glyphMap[destinationGlyphName] = selectedGlyphInfo.codePoints;
+          root.glyphMap[destinationGlyphName] = selectedGlyphInfo.codePoints || [];
         }
 
         const glyph = VariableGlyph.fromObject(clipboardGlyphs[sourceGlyphName]);
