@@ -261,6 +261,11 @@ export class FontOverviewController extends ViewController {
     this._updateGlyphItemList();
   }
 
+  async externalChange(change, isLiveChange) {
+    await super.externalChange(change, isLiveChange);
+    this.undoStack.clear();
+  }
+
   _setupProjectGlyphSetsDependencies() {
     this.fontController.addChangeListener(
       { customData: { [PROJECT_GLYPH_SETS_CUSTOM_DATA_KEY]: null } },
