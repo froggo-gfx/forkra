@@ -726,32 +726,41 @@ export class FontOverviewController extends ViewController {
     console.log("cut");
   }
 
-  async doCopy() {
+  doCopy() {
     const glyphNamesToCopy = this.getSelectedExistingGlyphNames();
-    const glyphs = await this.fontController.getMultipleGlyphs(glyphNamesToCopy);
-    const sourceLocations = this.fontController.getSourceLocations();
-    const glyphMap = this.fontController.glyphMap;
 
-    const clipboardData = {
-      clipboardType: "fontra-glyphs-array",
-      glyphs: await asyncMap(glyphNamesToCopy, async (glyphName) => ({
-        codePoints: glyphMap[glyphName],
-        variableGlyph: glyphs[glyphName],
-        backgroundImageData: await this.fontController.collectBackgroundImageData(
-          glyphs[glyphName]
-        ),
-      })),
-      sourceLocations,
+    const buildJSONString = async () => {
+      const glyphs = await this.fontController.getMultipleGlyphs(glyphNamesToCopy);
+      const sourceLocations = this.fontController.getSourceLocations();
+      const glyphMap = this.fontController.glyphMap;
+
+      const clipboardData = {
+        type: "fontra-glyphs-array",
+        data: {
+          glyphs: await asyncMap(glyphNamesToCopy, async (glyphName) => ({
+            codePoints: glyphMap[glyphName],
+            variableGlyph: glyphs[glyphName],
+            backgroundImageData: await this.fontController.collectBackgroundImageData(
+              glyphs[glyphName]
+            ),
+          })),
+          sourceLocations,
+        },
+      };
+
+      return JSON.stringify(clipboardData);
     };
 
-    const jsonString = JSON.stringify(clipboardData);
+    const jsonStringPromise = buildJSONString();
 
     const clipboardObject = {
-      "text/plain": jsonString,
-      "web fontra/multiple-glyphs": jsonString,
+      "text/plain": jsonStringPromise,
+      "web fontra/fontra-glyphs-array": jsonStringPromise,
     };
 
-    await writeToClipboard(clipboardObject);
+    writeToClipboard(clipboardObject).catch((error) =>
+      console.error("error during clipboard write:", error)
+    );
   }
 
   canPaste() {
