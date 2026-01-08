@@ -1586,7 +1586,7 @@ export class EditorController extends ViewController {
           type: "fontra-variable-glyph",
           data: { variableGlyph: varGlyph, codePoints: codePoints },
         }
-      : { type: "fontra-layer-glyphs", data: { layerGlyphs } };
+      : { type: "fontra-layer-glyphs", data: { layerGlyphs, glyphName, codePoints } };
 
     const buildJSONString = async () => {
       const resolvedImageData = await backgroundImageData;
