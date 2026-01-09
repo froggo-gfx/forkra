@@ -828,6 +828,11 @@ export class FontOverviewController extends ViewController {
     const glyphMap = { ...this.fontController.glyphMap };
 
     if (!selectedGlyphInfos.length) {
+      if (clipboardGlyphArray.some((glyphData) => !glyphData.variableGlyph.name)) {
+        console.log("can't paste: clipboard has no glyph names");
+        return;
+      }
+
       selectedGlyphInfos = null;
       selectedGlyphNames = clipboardGlyphNames;
       if (selectedGlyphNames.some((glyphName) => glyphMap[glyphName])) {
