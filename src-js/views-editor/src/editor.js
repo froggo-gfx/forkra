@@ -1953,42 +1953,35 @@ export class EditorController extends ViewController {
   }
 
   async _unpackClipboard() {
-    let plainText;
+    const acceptableClipboardTypes = [
+      "web fontra/json-clipboard",
+      "web image/svg+xml",
+      "image/svg+xml",
+      "text/plain",
+    ];
 
-    for (const type of ["web image/svg+xml", "image/svg+xml", "text/plain"]) {
-      plainText = await readFromClipboard(type);
-      if (plainText) {
-        break;
-      }
-    }
-    if (!plainText) {
+    const clipboardString = await readFromClipboard(acceptableClipboardTypes);
+
+    if (!clipboardString) {
       return {};
     }
 
-    let customJSON;
-    try {
-      customJSON = await readFromClipboard("web fontra/json-clipboard");
-    } catch (error) {
-      // fall through, try localStorage clipboard
-    }
+    let jsonString = clipboardString.startsWith("{") ? clipboardString : null;
 
     if (
-      !customJSON &&
-      plainText === localStorage.getItem("clipboardSelection.text-plain")
+      !jsonString &&
+      clipboardString === localStorage.getItem("clipboardSelection.text-plain")
     ) {
-      customJSON = localStorage.getItem("clipboardSelection.fontra-json");
-    }
-    if (!customJSON && plainText[0] == "{") {
-      customJSON = plainText;
+      jsonString = localStorage.getItem("clipboardSelection.fontra-json");
     }
 
     let pasteLayerGlyphs;
     let pasteVarGlyph;
     let backgroundImageData;
 
-    if (customJSON) {
+    if (jsonString) {
       try {
-        const clipboardObject = JSON.parse(customJSON);
+        const clipboardObject = JSON.parse(jsonString);
         if (clipboardObject.type === "fontra-layer-glyphs") {
           pasteLayerGlyphs = clipboardObject.data.layerGlyphs?.map((layer) => {
             return {
@@ -2011,7 +2004,7 @@ export class EditorController extends ViewController {
         console.log("couldn't paste from JSON:", error.toString());
       }
     } else {
-      const glyph = await Backend.parseClipboard(plainText);
+      const glyph = await Backend.parseClipboard(clipboardString);
       if (glyph) {
         pasteLayerGlyphs = [{ glyph }];
       }
