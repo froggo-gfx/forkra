@@ -271,21 +271,14 @@ export async function writeToClipboard(clipboardObject) {
   }
 }
 
-export async function readClipboardTypes() {
-  const clipboardContents = await navigator.clipboard.read();
-  const clipboardTypes = [];
-  for (const item of clipboardContents) {
-    clipboardTypes.push(...item.types);
-  }
-  return clipboardTypes;
-}
-
-export async function readFromClipboard(type, plainText = true) {
+export async function readFromClipboard(types, plainText = true) {
   const clipboardContents = await navigator.clipboard.read();
   for (const item of clipboardContents) {
-    if (item.types.includes(type)) {
-      const blob = await item.getType(type);
-      return plainText ? await blob.text() : blob;
+    for (const type of types) {
+      if (item.types.includes(type)) {
+        const blob = await item.getType(type);
+        return plainText ? await blob.text() : blob;
+      }
     }
   }
   return undefined;
