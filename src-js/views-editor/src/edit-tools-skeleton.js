@@ -76,19 +76,30 @@ export class SkeletonPenTool extends BaseTool {
     const skeletonHit = this._hitTestSkeletonPoints(initialEvent);
 
     if (skeletonHit) {
-      // Drag existing skeleton point
-      await this._handleDragSkeletonPoint(eventStream, initialEvent, skeletonHit);
-    } else {
-      // Check if we clicked on a skeleton centerline (to insert point)
-      const centerlineHit = this._hitTestSkeletonCenterline(initialEvent);
+      // Select the clicked skeleton point
+      this.sceneController.selection = new Set([
+        `skeletonPoint/${skeletonHit.contourIndex}/${skeletonHit.pointIndex}`,
+      ]);
+      // Defer dragging to the Pointer Tool by consuming the drag without action
+      // (The Pointer Tool will handle dragging if user tries to drag skeleton points)
+      eventStream.done();
+      return;
+    }
 
-      if (centerlineHit) {
-        // Insert point on skeleton centerline
-        await this._handleInsertSkeletonPoint(eventStream, initialEvent, centerlineHit);
+    // Check if we clicked on a skeleton centerline (to insert point or handles)
+    const centerlineHit = this._hitTestSkeletonCenterline(initialEvent);
+
+    if (centerlineHit) {
+      if (initialEvent.altKey) {
+        // Alt+click: Insert handles (convert line to curve)
+        await this._handleInsertSkeletonHandles(eventStream, initialEvent, centerlineHit);
       } else {
-        // Add new skeleton point
-        await this._handleAddSkeletonPoint(eventStream, initialEvent);
+        // Normal click: Insert point on skeleton centerline
+        await this._handleInsertSkeletonPoint(eventStream, initialEvent, centerlineHit);
       }
+    } else {
+      // Add new skeleton point
+      await this._handleAddSkeletonPoint(eventStream, initialEvent);
     }
   }
 
@@ -292,6 +303,83 @@ export class SkeletonPenTool extends BaseTool {
   }
 
   /**
+   * Insert two cubic handles on a skeleton line segment (Alt+click).
+   * This converts a line segment to a cubic bezier curve.
+   */
+  async _handleInsertSkeletonHandles(eventStream, initialEvent, centerlineHit) {
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = this.sceneController.editingLayerNames?.[0];
+      if (!editLayerName || !glyph.layers[editLayerName]) {
+        return;
+      }
+
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      if (!skeletonData) return;
+
+      skeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+      const contour = skeletonData.contours[centerlineHit.contourIndex];
+      if (!contour) return;
+
+      const startIdx = centerlineHit.segmentStartIndex;
+      const endIdx = centerlineHit.segmentEndIndex;
+
+      const startPoint = contour.points[startIdx];
+      const endPoint = contour.points[endIdx];
+
+      if (!startPoint || !endPoint) return;
+
+      // Calculate handle positions at 1/3 and 2/3 along the segment
+      const handle1 = {
+        x: Math.round(startPoint.x + (endPoint.x - startPoint.x) / 3),
+        y: Math.round(startPoint.y + (endPoint.y - startPoint.y) / 3),
+        type: "cubic",
+        smooth: false,
+      };
+      const handle2 = {
+        x: Math.round(startPoint.x + ((endPoint.x - startPoint.x) * 2) / 3),
+        y: Math.round(startPoint.y + ((endPoint.y - startPoint.y) * 2) / 3),
+        type: "cubic",
+        smooth: false,
+      };
+
+      // Insert handles between the two on-curve points
+      // Insert in order: startPoint, handle1, handle2, endPoint
+      // So we insert handle2 first at startIdx + 1, then handle1 at startIdx + 1
+      contour.points.splice(startIdx + 1, 0, handle1, handle2);
+
+      // Record changes
+      const changes = [];
+
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        this._regenerateOutlineContours(sg, skeletonData);
+      });
+      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const combinedChange = new ChangeCollector().concat(...changes);
+      await sendIncrementalChange(combinedChange.change);
+
+      // Select both handles
+      this.sceneController.selection = new Set([
+        `skeletonPoint/${centerlineHit.contourIndex}/${startIdx + 1}`,
+        `skeletonPoint/${centerlineHit.contourIndex}/${startIdx + 2}`,
+      ]);
+
+      return {
+        changes: combinedChange,
+        undoLabel: "Insert skeleton handles",
+      };
+    });
+  }
+
+  /**
    * Insert a point on a skeleton centerline segment.
    */
   async _handleInsertSkeletonPoint(eventStream, initialEvent, centerlineHit) {
@@ -433,20 +521,12 @@ export class SkeletonPenTool extends BaseTool {
       const sendChanges = async () => {
         const changes = [];
 
-        console.log("[Skeleton Tool] Recording changes for layer:", editLayerName);
-        console.log("[Skeleton Tool] Layer object:", layer);
-        console.log("[Skeleton Tool] Layer customData before:", layer.customData);
-        console.log("[Skeleton Tool] Skeleton data to save:", JSON.stringify(skeletonData));
-
         const customDataChange = recordChanges(layer, (l) => {
           if (!l.customData) {
             l.customData = {};
           }
           l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(skeletonData));
         });
-
-        console.log("[Skeleton Tool] customDataChange:", customDataChange);
-        console.log("[Skeleton Tool] customDataChange.change:", customDataChange.change);
 
         changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
@@ -456,9 +536,7 @@ export class SkeletonPenTool extends BaseTool {
         });
         changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
-        const combined = new ChangeCollector().concat(...changes);
-        console.log("[Skeleton Tool] Combined change:", combined.change);
-        return combined;
+        return new ChangeCollector().concat(...changes);
       };
 
       let combinedChange = await sendChanges();
@@ -567,97 +645,6 @@ export class SkeletonPenTool extends BaseTool {
       return {
         changes: combinedChange,
         undoLabel: "Add skeleton point",
-      };
-    });
-  }
-
-  async _handleDragSkeletonPoint(eventStream, initialEvent, skeletonHit) {
-    const startGlyphPoint = this._getGlyphPoint(initialEvent);
-    if (!startGlyphPoint) return;
-
-    // Select the clicked point
-    this.sceneController.selection = new Set([
-      `skeletonPoint/${skeletonHit.contourIndex}/${skeletonHit.pointIndex}`,
-    ]);
-
-    if (!(await shouldInitiateDrag(eventStream, initialEvent))) {
-      return;
-    }
-
-    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const editLayerName = this.sceneController.editingLayerNames?.[0];
-      if (!editLayerName || !glyph.layers[editLayerName]) {
-        return;
-      }
-
-      const layer = glyph.layers[editLayerName];
-      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
-      if (!skeletonData) return;
-
-      // Deep clone for manipulation
-      skeletonData = JSON.parse(JSON.stringify(skeletonData));
-
-      const originalPoint = { ...skeletonHit.point };
-
-      for await (const event of eventStream) {
-        const currentGlyphPoint = this._getGlyphPoint(event);
-        if (!currentGlyphPoint) continue;
-
-        let delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
-
-        if (event.shiftKey) {
-          delta = constrainHorVerDiag(delta);
-        }
-
-        // Update skeleton point position
-        const contour = skeletonData.contours[skeletonHit.contourIndex];
-        if (!contour) continue;
-
-        const point = contour.points[skeletonHit.pointIndex];
-        if (!point) continue;
-
-        point.x = Math.round(originalPoint.x + delta.x);
-        point.y = Math.round(originalPoint.y + delta.y);
-
-        // Record changes
-        const changes = [];
-
-        // Update customData
-        const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(skeletonData));
-        });
-        changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
-        // Regenerate path
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          this._regenerateOutlineContours(sg, skeletonData);
-        });
-        changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-        const combinedChange = new ChangeCollector().concat(...changes);
-        await sendIncrementalChange(combinedChange.change, true);
-      }
-
-      // Final change
-      const finalChanges = [];
-
-      const finalCustomDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-      });
-      finalChanges.push(finalCustomDataChange.prefixed(["layers", editLayerName]));
-
-      const staticGlyph = layer.glyph;
-      const finalPathChange = recordChanges(staticGlyph, (sg) => {
-        this._regenerateOutlineContours(sg, skeletonData);
-      });
-      finalChanges.push(finalPathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-      const finalCombinedChange = new ChangeCollector().concat(...finalChanges);
-
-      return {
-        changes: finalCombinedChange,
-        undoLabel: "Move skeleton point",
       };
     });
   }

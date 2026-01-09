@@ -658,10 +658,52 @@ export class SceneModel {
       pointIndex = positionedGlyph.glyph.path.pointIndexNearPoint(glyphPoint, size);
     }
     if (pointIndex !== undefined) {
+      // Check if this point belongs to a skeleton-generated contour
+      if (this._isPointInSkeletonGeneratedContour(positionedGlyph, pointIndex)) {
+        // Skip skeleton-generated outline points - they shouldn't be directly editable
+        return new Set();
+      }
       return new Set([`point/${pointIndex}`]);
     }
 
     return new Set();
+  }
+
+  /**
+   * Check if a point index belongs to a skeleton-generated contour.
+   * These points should not be directly editable.
+   */
+  _isPointInSkeletonGeneratedContour(positionedGlyph, pointIndex) {
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+      return false;
+    }
+
+    // Get the current editing layer name
+    const editLayerName =
+      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+    if (!editLayerName) {
+      return false;
+    }
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (!skeletonData?.generatedContourIndices?.length) {
+      return false;
+    }
+
+    // Find which contour the point belongs to
+    const path = positionedGlyph.glyph.path;
+    const contourInfo = path.contourInfo;
+    let contourIndex = 0;
+    for (let i = 0; i < contourInfo.length; i++) {
+      if (pointIndex <= contourInfo[i].endPoint) {
+        contourIndex = i;
+        break;
+      }
+    }
+
+    // Check if this contour is in the skeleton-generated list
+    return skeletonData.generatedContourIndices.includes(contourIndex);
   }
 
   skeletonPointSelectionAtPoint(point, size, parsedCurrentSelection) {
@@ -670,7 +712,9 @@ export class SceneModel {
       return new Set();
     }
 
-    const editLayerName = this.sceneSettings?.editLayerName;
+    // Use editLayerName if explicitly set, otherwise fall back to the positioned glyph's layer
+    const editLayerName =
+      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
     if (!editLayerName) {
       return new Set();
     }

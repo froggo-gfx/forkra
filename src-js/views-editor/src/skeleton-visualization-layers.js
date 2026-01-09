@@ -18,27 +18,23 @@ import {
  */
 function getSkeletonDataFromGlyph(positionedGlyph, model) {
   if (!positionedGlyph?.varGlyph?.glyph?.layers) {
-    console.log("[Skeleton Viz] No layers on varGlyph.glyph");
     return null;
   }
 
-  const editLayerName = model.sceneSettings?.editLayerName;
+  // Use editLayerName if explicitly set, otherwise fall back to the positioned glyph's layer
+  // This handles the case where no layer has been explicitly selected in the UI yet
+  const editLayerName =
+    model.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
   if (!editLayerName) {
-    console.log("[Skeleton Viz] No editLayerName in sceneSettings");
     return null;
   }
 
   const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
   if (!layer) {
-    console.log("[Skeleton Viz] Layer not found:", editLayerName);
     return null;
   }
 
-  const skeletonData = getSkeletonData(layer);
-  if (skeletonData) {
-    console.log("[Skeleton Viz] Found skeleton data:", skeletonData);
-  }
-  return skeletonData;
+  return getSkeletonData(layer);
 }
 
 /**

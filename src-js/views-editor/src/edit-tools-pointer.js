@@ -6,6 +6,7 @@ import {
 } from "@fontra/core/changes.js";
 import { translate } from "@fontra/core/localization.js";
 import { connectContours, toggleSmooth } from "@fontra/core/path-functions.js";
+import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
 import {
   centeredRect,
   normalizeRect,
@@ -31,7 +32,7 @@ import {
 import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
-import { EditBehaviorFactory } from "./edit-behavior.js";
+import { EditBehaviorFactory, constrainHorVerDiag } from "./edit-behavior.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
 import { getPinPoint } from "./panel-transformation.js";
 import { equalGlyphSelection } from "./scene-controller.js";
@@ -45,6 +46,7 @@ import {
 const transformHandleMargin = 6;
 const transformHandleSize = 8;
 const rotationHandleSizeFactor = 1.2;
+const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
 
 export class PointerTools {
   identifier = "pointer-tools";
@@ -337,6 +339,17 @@ export class PointerTool extends BaseTool {
     this.sceneController.sceneModel.showTransformSelection = false;
     this._selectionBeforeSingleClick = undefined;
     const sceneController = this.sceneController;
+
+    // Check if we're dragging skeleton points
+    const { skeletonPoint: skeletonPointSelection } = parseSelection(
+      sceneController.selection
+    );
+    if (skeletonPointSelection?.size) {
+      await this._handleDragSkeletonPoints(eventStream, initialEvent);
+      this.sceneController.sceneModel.showTransformSelection = true;
+      return;
+    }
+
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const initialPoint = sceneController.localPoint(initialEvent);
       let behaviorName = getBehaviorName(initialEvent);
@@ -442,6 +455,157 @@ export class PointerTool extends BaseTool {
       };
     });
     this.sceneController.sceneModel.showTransformSelection = true;
+  }
+
+  /**
+   * Handle dragging skeleton points with the Pointer Tool.
+   */
+  async _handleDragSkeletonPoints(eventStream, initialEvent) {
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+
+    if (!positionedGlyph) return;
+
+    // Get initial point in glyph coordinates
+    const localPoint = sceneController.localPoint(initialEvent);
+    const startGlyphPoint = {
+      x: localPoint.x - positionedGlyph.x,
+      y: localPoint.y - positionedGlyph.y,
+    };
+
+    // Parse skeleton point selection
+    const { skeletonPoint: selectedSkeletonPoints } = parseSelection(
+      sceneController.selection
+    );
+    if (!selectedSkeletonPoints?.size) return;
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = sceneController.editingLayerNames?.[0];
+      if (!editLayerName || !glyph.layers[editLayerName]) {
+        return;
+      }
+
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      if (!skeletonData) return;
+
+      // Deep clone for manipulation
+      skeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+      // Collect original positions of selected skeleton points
+      const originalPositions = new Map();
+      for (const selKey of selectedSkeletonPoints) {
+        const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+        const contour = skeletonData.contours?.[contourIdx];
+        if (contour) {
+          const point = contour.points?.[pointIdx];
+          if (point) {
+            originalPositions.set(selKey, { ...point });
+          }
+        }
+      }
+
+      if (originalPositions.size === 0) return;
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        // Get indices of previously generated contours
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+
+        // Remove old generated contours (in reverse order to maintain indices)
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        // Generate new contours from skeleton
+        const generatedContours = generateContoursFromSkeleton(skelData);
+
+        // Add new contours and track their indices
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.appendUnpackedContour(contour);
+          newGeneratedIndices.push(newIndex);
+        }
+
+        // Update generated contour indices
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      // Drag loop
+      for await (const event of eventStream) {
+        const currentLocalPoint = sceneController.localPoint(event);
+        const currentGlyphPoint = {
+          x: currentLocalPoint.x - positionedGlyph.x,
+          y: currentLocalPoint.y - positionedGlyph.y,
+        };
+
+        let delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+
+        if (event.shiftKey) {
+          delta = constrainHorVerDiag(delta);
+        }
+
+        // Update all selected skeleton points
+        for (const [selKey, originalPos] of originalPositions) {
+          const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+          const contour = skeletonData.contours?.[contourIdx];
+          if (!contour) continue;
+
+          const point = contour.points?.[pointIdx];
+          if (!point) continue;
+
+          point.x = Math.round(originalPos.x + delta.x);
+          point.y = Math.round(originalPos.y + delta.y);
+        }
+
+        // Record changes
+        const changes = [];
+
+        // Update customData
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+            JSON.stringify(skeletonData)
+          );
+        });
+        changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+        // Regenerate path
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          regenerateOutline(sg, skeletonData);
+        });
+        changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const combinedChange = new ChangeCollector().concat(...changes);
+        await sendIncrementalChange(combinedChange.change, true);
+      }
+
+      // Final change
+      const finalChanges = [];
+
+      const finalCustomDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      finalChanges.push(finalCustomDataChange.prefixed(["layers", editLayerName]));
+
+      const staticGlyph = layer.glyph;
+      const finalPathChange = recordChanges(staticGlyph, (sg) => {
+        regenerateOutline(sg, skeletonData);
+      });
+      finalChanges.push(finalPathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const finalCombinedChange = new ChangeCollector().concat(...finalChanges);
+
+      return {
+        changes: finalCombinedChange,
+        undoLabel: translate("edit-tools-pointer.undo.move-skeleton-points"),
+        broadcast: true,
+      };
+    });
   }
 
   async handleBoundsTransformSelection(
