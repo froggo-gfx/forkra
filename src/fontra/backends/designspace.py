@@ -1425,7 +1425,7 @@ class DesignspaceBackend(WatchableBackend):
     ) -> dict[str, Any] | None:
         changedItems = await self._analyzeExternalChanges(changes)
         if changedItems is None:
-            # The .designspace file changed, reload all the things
+            # The .designspace file changed, or a .ufo was replaced: reload all the things
             self._reloadDesignSpaceFromFile()
             return None
 
@@ -1462,8 +1462,10 @@ class DesignspaceBackend(WatchableBackend):
         return reloadPattern
 
     async def _analyzeExternalChanges(self, changes) -> SimpleNamespace | None:
-        if any(os.path.splitext(path)[1] == ".designspace" for _, path in changes):
-            # .designspace changed externally, reload all the things
+        if any(
+            os.path.splitext(path)[1] in {".designspace", ".ufo"} for _, path in changes
+        ):
+            # .designspace or whole .ufo changed externally, reload all the things
             return None
 
         changedItems = SimpleNamespace(
