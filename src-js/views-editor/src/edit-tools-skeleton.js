@@ -1,5 +1,5 @@
 import { recordChanges } from "@fontra/core/change-recorder.js";
-import { ChangeCollector } from "@fontra/core/changes.js";
+import { ChangeCollector, consolidateChanges, applyChange } from "@fontra/core/changes.js";
 import { translate } from "@fontra/core/localization.js";
 import { parseSelection } from "@fontra/core/utils.js";
 import * as vector from "@fontra/core/vector.js";
@@ -84,6 +84,20 @@ export class SkeletonPenTool extends BaseTool {
     }
   }
 
+  /**
+   * Get the positioned glyph adjusted point from a mouse event
+   */
+  _getGlyphPoint(event) {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return null;
+
+    const localPoint = this.sceneController.localPoint(event);
+    return {
+      x: localPoint.x - positionedGlyph.x,
+      y: localPoint.y - positionedGlyph.y,
+    };
+  }
+
   _hitTestSkeletonPoints(event) {
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph?.glyph?.canEdit) {
@@ -95,28 +109,25 @@ export class SkeletonPenTool extends BaseTool {
       return null;
     }
 
-    const editingLayers = this.sceneController.getEditingLayerFromGlyphLayers(
-      varGlyph.glyph.layers
-    );
-    const editingLayerName = Object.keys(editingLayers)[0];
-
-    if (!editingLayerName) {
+    // Get the editing layer name
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    if (!editLayerName) {
       return null;
     }
 
-    const layer = varGlyph.glyph.layers[editingLayerName];
-    const skeletonData = getSkeletonData(layer);
+    const layer = varGlyph.glyph.layers[editLayerName];
+    if (!layer) {
+      return null;
+    }
 
+    const skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
     if (!skeletonData?.contours?.length) {
       return null;
     }
 
-    const localPoint = this.sceneController.localPoint(event);
-    // Adjust for glyph position
-    const glyphPoint = {
-      x: localPoint.x - positionedGlyph.x,
-      y: localPoint.y - positionedGlyph.y,
-    };
+    const glyphPoint = this._getGlyphPoint(event);
+    if (!glyphPoint) return null;
+
     const margin = this.sceneController.mouseClickMargin;
 
     for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
@@ -125,7 +136,7 @@ export class SkeletonPenTool extends BaseTool {
         const skeletonPoint = contour.points[pointIndex];
         const dist = vector.distance(glyphPoint, skeletonPoint);
         if (dist <= margin) {
-          return { contourIndex, pointIndex, point: skeletonPoint };
+          return { contourIndex, pointIndex, point: { ...skeletonPoint } };
         }
       }
     }
@@ -134,37 +145,32 @@ export class SkeletonPenTool extends BaseTool {
   }
 
   async _handleAddSkeletonPoint(eventStream, initialEvent) {
-    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const editingLayers = this.sceneController.getEditingLayerFromGlyphLayers(
-        glyph.layers
-      );
-      const layerEntries = Object.entries(editingLayers);
+    const glyphPoint = this._getGlyphPoint(initialEvent);
+    if (!glyphPoint) return;
 
-      if (layerEntries.length === 0) {
+    const newPoint = {
+      x: Math.round(glyphPoint.x),
+      y: Math.round(glyphPoint.y),
+      type: null,
+      smooth: true,
+    };
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = this.sceneController.editingLayerNames?.[0];
+      if (!editLayerName || !glyph.layers[editLayerName]) {
         return;
       }
 
-      const [primaryLayerName, primaryLayerGlyph] = layerEntries[0];
-
-      // Get or create skeleton data
-      let skeletonData = getSkeletonData(primaryLayerGlyph);
+      // Get current skeleton data from layer
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
       if (!skeletonData) {
         skeletonData = createEmptySkeletonData();
       } else {
-        // Deep clone to avoid mutation issues
         skeletonData = JSON.parse(JSON.stringify(skeletonData));
       }
 
-      const clickPoint = this.sceneController.localPoint(initialEvent);
-      const newPoint = {
-        x: Math.round(clickPoint.x),
-        y: Math.round(clickPoint.y),
-        type: null,
-        smooth: true,
-        width: skeletonData.contours[0]?.defaultWidth || 20,
-      };
-
-      // Determine which contour to add to
+      // Determine which contour to add to based on selection
       const { skeletonPoint: selectedSkeletonPoints } = parseSelection(
         this.sceneController.selection
       );
@@ -173,180 +179,170 @@ export class SkeletonPenTool extends BaseTool {
       let insertAtEnd = true;
 
       if (selectedSkeletonPoints?.size === 1) {
-        // We have a selected skeleton point - append/prepend to its contour
         const selectedKey = [...selectedSkeletonPoints][0];
         const [contourIdx, pointIdx] = selectedKey.split("/").map(Number);
-        targetContourIndex = contourIdx;
 
-        const contour = skeletonData.contours[targetContourIndex];
-        if (contour && !contour.isClosed) {
-          // Check if selected point is at start or end
-          insertAtEnd = pointIdx === contour.points.length - 1;
+        if (contourIdx < skeletonData.contours.length) {
+          targetContourIndex = contourIdx;
+          const contour = skeletonData.contours[targetContourIndex];
+          if (contour && !contour.isClosed) {
+            insertAtEnd = pointIdx === contour.points.length - 1;
+          }
         }
       }
 
-      // Record changes for all layers
-      const layerChanges = [];
-
-      for (const [layerName, layerGlyph] of layerEntries) {
-        const layerChange = recordChanges(layerGlyph, (lg) => {
-          // Get or create skeleton data for this layer
-          if (!lg.customData) {
-            lg.customData = {};
-          }
-
-          let layerSkeletonData = lg.customData[SKELETON_CUSTOM_DATA_KEY];
-          if (!layerSkeletonData) {
-            layerSkeletonData = createEmptySkeletonData();
-          } else {
-            layerSkeletonData = JSON.parse(JSON.stringify(layerSkeletonData));
-          }
-
-          if (targetContourIndex >= 0 && targetContourIndex < layerSkeletonData.contours.length) {
-            // Add to existing contour
-            const contour = layerSkeletonData.contours[targetContourIndex];
-            if (insertAtEnd) {
-              contour.points.push({ ...newPoint });
-            } else {
-              contour.points.unshift({ ...newPoint });
-            }
-          } else {
-            // Create new contour
-            const newContour = createSkeletonContour(false);
-            newContour.points.push({ ...newPoint });
-            layerSkeletonData.contours.push(newContour);
-            targetContourIndex = layerSkeletonData.contours.length - 1;
-          }
-
-          // Regenerate outline contours from skeleton
-          this._regenerateOutlineContours(lg, layerSkeletonData);
-
-          lg.customData[SKELETON_CUSTOM_DATA_KEY] = layerSkeletonData;
-        });
-
-        layerChanges.push(layerChange.prefixed(["layers", layerName, "glyph"]));
+      // Add point to skeleton
+      if (targetContourIndex >= 0 && targetContourIndex < skeletonData.contours.length) {
+        const contour = skeletonData.contours[targetContourIndex];
+        if (insertAtEnd) {
+          contour.points.push({ ...newPoint });
+        } else {
+          contour.points.unshift({ ...newPoint });
+        }
+      } else {
+        // Create new contour
+        const newContour = createSkeletonContour(false);
+        newContour.points.push({ ...newPoint });
+        skeletonData.contours.push(newContour);
+        targetContourIndex = skeletonData.contours.length - 1;
       }
 
-      const changes = new ChangeCollector().concat(...layerChanges);
-      await sendIncrementalChange(changes.change);
+      // Record changes to both customData and path
+      const changes = [];
 
-      // Update selection to new point
-      const contour = skeletonData.contours[targetContourIndex] ||
-        { points: [newPoint] };
-      const newPointIndex = insertAtEnd
-        ? contour.points.length  // Will be at end after add
-        : 0;
+      // Change 1: Update skeleton data in layer.customData
+      const customDataChange = recordChanges(layer, (l) => {
+        if (!l.customData) {
+          l.customData = {};
+        }
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+      // Change 2: Regenerate path contours from skeleton
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        this._regenerateOutlineContours(sg, skeletonData);
+      });
+      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const combinedChange = new ChangeCollector().concat(...changes);
+      await sendIncrementalChange(combinedChange.change);
+
+      // Update selection
+      const contour = skeletonData.contours[targetContourIndex];
+      const newPointIndex = insertAtEnd ? contour.points.length - 1 : 0;
       this.sceneController.selection = new Set([
         `skeletonPoint/${targetContourIndex}/${newPointIndex}`,
       ]);
 
-      // Handle dragging to create handles
-      if (await shouldInitiateDrag(eventStream, initialEvent)) {
-        for await (const event of eventStream) {
-          const dragPoint = this.sceneController.localPoint(event);
-          // For now, just track the drag - handle creation can be added later
-        }
-      }
-
       return {
-        changes: changes,
+        changes: combinedChange,
         undoLabel: "Add skeleton point",
       };
     });
   }
 
   async _handleDragSkeletonPoint(eventStream, initialEvent, skeletonHit) {
+    const startGlyphPoint = this._getGlyphPoint(initialEvent);
+    if (!startGlyphPoint) return;
+
+    // Select the clicked point
+    this.sceneController.selection = new Set([
+      `skeletonPoint/${skeletonHit.contourIndex}/${skeletonHit.pointIndex}`,
+    ]);
+
+    if (!(await shouldInitiateDrag(eventStream, initialEvent))) {
+      return;
+    }
+
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const editingLayers = this.sceneController.getEditingLayerFromGlyphLayers(
-        glyph.layers
-      );
-      const layerEntries = Object.entries(editingLayers);
-
-      if (layerEntries.length === 0) {
+      const editLayerName = this.sceneController.editingLayerNames?.[0];
+      if (!editLayerName || !glyph.layers[editLayerName]) {
         return;
       }
 
-      const startPoint = this.sceneController.localPoint(initialEvent);
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      if (!skeletonData) return;
 
-      // Select the clicked point
-      this.sceneController.selection = new Set([
-        `skeletonPoint/${skeletonHit.contourIndex}/${skeletonHit.pointIndex}`,
-      ]);
+      // Deep clone for manipulation
+      skeletonData = JSON.parse(JSON.stringify(skeletonData));
 
-      if (!(await shouldInitiateDrag(eventStream, initialEvent))) {
-        // Just a click - selection is set, nothing else to do
-        return;
-      }
+      const originalPoint = { ...skeletonHit.point };
 
-      // Drag the point
       for await (const event of eventStream) {
-        const currentPoint = this.sceneController.localPoint(event);
-        let delta = vector.subVectors(currentPoint, startPoint);
+        const currentGlyphPoint = this._getGlyphPoint(event);
+        if (!currentGlyphPoint) continue;
 
-        // Apply shift constraint if needed
+        let delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+
         if (event.shiftKey) {
           delta = constrainHorVerDiag(delta);
         }
 
-        const layerChanges = [];
+        // Update skeleton point position
+        const contour = skeletonData.contours[skeletonHit.contourIndex];
+        if (!contour) continue;
 
-        for (const [layerName, layerGlyph] of layerEntries) {
-          const layerChange = recordChanges(layerGlyph, (lg) => {
-            const layerSkeletonData = lg.customData?.[SKELETON_CUSTOM_DATA_KEY];
-            if (!layerSkeletonData) return;
+        const point = contour.points[skeletonHit.pointIndex];
+        if (!point) continue;
 
-            const contour = layerSkeletonData.contours[skeletonHit.contourIndex];
-            if (!contour) return;
+        point.x = Math.round(originalPoint.x + delta.x);
+        point.y = Math.round(originalPoint.y + delta.y);
 
-            const point = contour.points[skeletonHit.pointIndex];
-            if (!point) return;
+        // Record changes
+        const changes = [];
 
-            // Update point position
-            point.x = Math.round(skeletonHit.point.x + delta.x);
-            point.y = Math.round(skeletonHit.point.y + delta.y);
-
-            // Regenerate outline contours
-            this._regenerateOutlineContours(lg, layerSkeletonData);
-          });
-
-          layerChanges.push(layerChange.prefixed(["layers", layerName, "glyph"]));
-        }
-
-        const changes = new ChangeCollector().concat(...layerChanges);
-        await sendIncrementalChange(changes.change, true); // true = may drop
-      }
-
-      // Final change after drag ends
-      const finalLayerChanges = [];
-
-      for (const [layerName, layerGlyph] of layerEntries) {
-        const layerChange = recordChanges(layerGlyph, (lg) => {
-          const layerSkeletonData = lg.customData?.[SKELETON_CUSTOM_DATA_KEY];
-          if (layerSkeletonData) {
-            this._regenerateOutlineContours(lg, layerSkeletonData);
-          }
+        // Update customData
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(skeletonData));
         });
-        finalLayerChanges.push(layerChange.prefixed(["layers", layerName, "glyph"]));
+        changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+        // Regenerate path
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const combinedChange = new ChangeCollector().concat(...changes);
+        await sendIncrementalChange(combinedChange.change, true);
       }
 
-      const finalChanges = new ChangeCollector().concat(...finalLayerChanges);
+      // Final change
+      const finalChanges = [];
+
+      const finalCustomDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      finalChanges.push(finalCustomDataChange.prefixed(["layers", editLayerName]));
+
+      const staticGlyph = layer.glyph;
+      const finalPathChange = recordChanges(staticGlyph, (sg) => {
+        this._regenerateOutlineContours(sg, skeletonData);
+      });
+      finalChanges.push(finalPathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const finalCombinedChange = new ChangeCollector().concat(...finalChanges);
 
       return {
-        changes: finalChanges,
+        changes: finalCombinedChange,
         undoLabel: "Move skeleton point",
       };
     });
   }
 
-  _regenerateOutlineContours(layerGlyph, skeletonData) {
+  _regenerateOutlineContours(staticGlyph, skeletonData) {
     // Get indices of previously generated contours
     const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
 
     // Remove old generated contours (in reverse order to maintain indices)
     const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
     for (const idx of sortedIndices) {
-      if (idx < layerGlyph.path.numContours) {
-        layerGlyph.path.deleteContour(idx);
+      if (idx < staticGlyph.path.numContours) {
+        staticGlyph.path.deleteContour(idx);
       }
     }
 
@@ -356,41 +352,12 @@ export class SkeletonPenTool extends BaseTool {
     // Add new contours and track their indices
     const newGeneratedIndices = [];
     for (const contour of generatedContours) {
-      const newIndex = layerGlyph.path.numContours;
-      layerGlyph.path.appendUnpackedContour(contour);
+      const newIndex = staticGlyph.path.numContours;
+      staticGlyph.path.appendUnpackedContour(contour);
       newGeneratedIndices.push(newIndex);
     }
 
     // Update generated contour indices
     skeletonData.generatedContourIndices = newGeneratedIndices;
   }
-}
-
-/**
- * Parse skeletonPoint selection entries.
- * Format: "skeletonPoint/contourIndex/pointIndex"
- */
-export function parseSkeletonSelection(selection) {
-  const result = {
-    skeletonPoint: new Set(),
-    skeletonHandle: new Set(),
-  };
-
-  if (!selection) return result;
-
-  for (const item of selection) {
-    if (item.startsWith("skeletonPoint/")) {
-      const parts = item.split("/");
-      if (parts.length === 3) {
-        result.skeletonPoint.add(`${parts[1]}/${parts[2]}`);
-      }
-    } else if (item.startsWith("skeletonHandle/")) {
-      const parts = item.split("/");
-      if (parts.length === 4) {
-        result.skeletonHandle.add(`${parts[1]}/${parts[2]}/${parts[3]}`);
-      }
-    }
-  }
-
-  return result;
 }
