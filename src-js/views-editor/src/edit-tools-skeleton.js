@@ -432,12 +432,22 @@ export class SkeletonPenTool extends BaseTool {
       // Record initial change (add on-curve point)
       const sendChanges = async () => {
         const changes = [];
+
+        console.log("[Skeleton Tool] Recording changes for layer:", editLayerName);
+        console.log("[Skeleton Tool] Layer object:", layer);
+        console.log("[Skeleton Tool] Layer customData before:", layer.customData);
+        console.log("[Skeleton Tool] Skeleton data to save:", JSON.stringify(skeletonData));
+
         const customDataChange = recordChanges(layer, (l) => {
           if (!l.customData) {
             l.customData = {};
           }
           l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(skeletonData));
         });
+
+        console.log("[Skeleton Tool] customDataChange:", customDataChange);
+        console.log("[Skeleton Tool] customDataChange.change:", customDataChange.change);
+
         changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
         const staticGlyph = layer.glyph;
@@ -446,7 +456,9 @@ export class SkeletonPenTool extends BaseTool {
         });
         changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
-        return new ChangeCollector().concat(...changes);
+        const combined = new ChangeCollector().concat(...changes);
+        console.log("[Skeleton Tool] Combined change:", combined.change);
+        return combined;
       };
 
       let combinedChange = await sendChanges();

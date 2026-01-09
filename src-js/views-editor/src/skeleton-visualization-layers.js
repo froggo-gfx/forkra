@@ -18,20 +18,27 @@ import {
  */
 function getSkeletonDataFromGlyph(positionedGlyph, model) {
   if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+    console.log("[Skeleton Viz] No layers on varGlyph.glyph");
     return null;
   }
 
   const editLayerName = model.sceneSettings?.editLayerName;
   if (!editLayerName) {
+    console.log("[Skeleton Viz] No editLayerName in sceneSettings");
     return null;
   }
 
   const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
   if (!layer) {
+    console.log("[Skeleton Viz] Layer not found:", editLayerName);
     return null;
   }
 
-  return getSkeletonData(layer);
+  const skeletonData = getSkeletonData(layer);
+  if (skeletonData) {
+    console.log("[Skeleton Viz] Found skeleton data:", skeletonData);
+  }
+  return skeletonData;
 }
 
 /**
