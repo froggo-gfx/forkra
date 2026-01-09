@@ -770,7 +770,7 @@ export class FontOverviewController extends ViewController {
 
     const clipboardObject = {
       "text/plain": jsonStringPromise,
-      "web fontra/fontra-glyph-array": jsonStringPromise,
+      "web fontra/json-clipboard": jsonStringPromise,
     };
 
     writeToClipboard(clipboardObject).catch((error) =>
@@ -786,7 +786,7 @@ export class FontOverviewController extends ViewController {
   }
 
   async doPaste() {
-    let clipboardString = await readFromClipboard("web fontra/fontra-glyph-array");
+    let clipboardString = await readFromClipboard("web fontra/json-clipboard");
     if (!clipboardString) {
       clipboardString = await readFromClipboard("text/plain");
     }

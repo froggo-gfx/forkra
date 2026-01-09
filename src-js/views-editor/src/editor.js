@@ -1617,7 +1617,7 @@ export class EditorController extends ViewController {
       "text/html": svgString,
       "image/svg+xml": svgString,
       "web image/svg+xml": svgString,
-      "web fontra/static-glyph": jsonStringPromise,
+      "web fontra/json-clipboard": jsonStringPromise,
     };
 
     this._addBackgroundImageToClipboard(clipboardObject, backgroundImageData);
@@ -1967,7 +1967,7 @@ export class EditorController extends ViewController {
 
     let customJSON;
     try {
-      customJSON = await readFromClipboard("web fontra/static-glyph");
+      customJSON = await readFromClipboard("web fontra/json-clipboard");
     } catch (error) {
       // fall through, try localStorage clipboard
     }
