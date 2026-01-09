@@ -2,7 +2,7 @@
 
 ## 2026-01-?? [version 2026.1.0]
 
-- Reworked "paste" logic so it works better Firefox and Safari. [Issue 2339](https://github.com/fontra/fontra/issues/2339), [PR 2367](https://github.com/fontra/fontra/pull/2367)
+- Reworked "paste" logic so it works better in Firefox and Safari. [Issue 2339](https://github.com/fontra/fontra/issues/2339), [PR 2367](https://github.com/fontra/fontra/pull/2367)
 - [.ufo .fontra] Reload when a .ufo or .fontra folder gets replaced externally. [PR 2368](https://github.com/fontra/fontra/pull/2368)
 - [fontra-glyphs] Respond to external changes. [fontra-glyphs Issue 117](https://github.com/fontra/fontra-glyphs/issues/117), [fontra-glyphs PR 118](https://github.com/fontra/fontra-glyphs/pull/118), [fontra-glyphs PR 119](https://github.com/fontra/fontra-glyphs/pull/119). This completes a [very old issue](https://github.com/fontra/fontra/issues/17) about responding to external changes.
 - [.fontra backend] Respond to external changes. [Issue 1872](https://github.com/fontra/fontra/issues/1872), [PR 2364](https://github.com/fontra/fontra/pull/2364)
