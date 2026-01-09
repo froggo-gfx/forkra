@@ -52,16 +52,23 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
 
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
-    const prevSegment = segments[(i - 1 + segments.length) % segments.length];
-    const nextSegment = segments[(i + 1) % segments.length];
+    // For open skeletons, don't wrap around - first/last segments have no prev/next
+    const prevSegment =
+      isClosed || i > 0 ? segments[(i - 1 + segments.length) % segments.length] : null;
+    const nextSegment =
+      isClosed || i < segments.length - 1 ? segments[(i + 1) % segments.length] : null;
+
+    const isFirstSegment = i === 0;
+    const isLastSegment = i === segments.length - 1;
 
     const offsetPoints = generateOffsetPointsForSegment(
       segment,
       prevSegment,
       nextSegment,
       defaultWidth,
-      i === 0 && !isClosed,
-      i === segments.length - 1 && !isClosed
+      isFirstSegment,
+      isLastSegment,
+      isClosed
     );
 
     leftSide.push(...offsetPoints.left);
@@ -179,6 +186,8 @@ function buildSegmentsFromPoints(points, isClosed) {
 
 /**
  * Generate offset points for a segment.
+ * For open skeletons: first segment adds start, all segments add end
+ * For closed skeletons: all segments add start (end connects to next start)
  */
 function generateOffsetPointsForSegment(
   segment,
@@ -186,7 +195,8 @@ function generateOffsetPointsForSegment(
   nextSegment,
   width,
   isFirst,
-  isLast
+  isLast,
+  isClosed
 ) {
   const halfWidth = width / 2;
   const left = [];
@@ -199,11 +209,15 @@ function generateOffsetPointsForSegment(
     );
     const normal = vector.rotateVector90CW(direction);
 
-    // Start point offset (only for first segment or closed)
-    if (isFirst || prevSegment) {
-      const startNormal = isFirst
-        ? normal
-        : calculateCornerNormal(prevSegment, segment, halfWidth);
+    // Add start point offset:
+    // - For open skeletons: only for the first segment
+    // - For closed skeletons: for all segments (each adds its start)
+    const shouldAddStart = isClosed || isFirst;
+    if (shouldAddStart) {
+      const startNormal =
+        !prevSegment || (isFirst && !isClosed)
+          ? normal
+          : calculateCornerNormal(prevSegment, segment, halfWidth);
 
       left.push({
         x: segment.startPoint.x + startNormal.x * halfWidth,
@@ -215,11 +229,15 @@ function generateOffsetPointsForSegment(
       });
     }
 
-    // End point offset (only for last segment or closed)
-    if (isLast || nextSegment) {
-      const endNormal = isLast
-        ? normal
-        : calculateCornerNormal(segment, nextSegment, halfWidth);
+    // Add end point offset:
+    // - For open skeletons: for all segments (each adds its end)
+    // - For closed skeletons: don't add (next segment's start is this end)
+    const shouldAddEnd = !isClosed;
+    if (shouldAddEnd) {
+      const endNormal =
+        !nextSegment || isLast
+          ? normal
+          : calculateCornerNormal(segment, nextSegment, halfWidth);
 
       left.push({
         x: segment.endPoint.x + endNormal.x * halfWidth,
@@ -244,7 +262,13 @@ function generateOffsetPointsForSegment(
     // Sample curve at regular intervals
     const numSamples = Math.max(8, segment.controlPoints.length * 4);
 
-    for (let i = 0; i <= numSamples; i++) {
+    // Determine start/end indices to avoid duplicate samples
+    // - For open skeletons: first segment starts at 0, all end at numSamples
+    // - For closed skeletons: all start at 0, don't include final sample (next segment's start)
+    const startSample = isClosed || isFirst ? 0 : 1; // Skip first sample if prev segment added it
+    const endSample = isClosed ? numSamples - 1 : numSamples; // Skip last for closed (next will add it)
+
+    for (let i = startSample; i <= endSample; i++) {
       const t = i / numSamples;
       const point = bezier.get(t);
       const derivative = bezier.derivative(t);
@@ -252,16 +276,19 @@ function generateOffsetPointsForSegment(
       const tangent = vector.normalizeVector({ x: derivative.x, y: derivative.y });
       const normal = vector.rotateVector90CW(tangent);
 
+      // Determine if this is an on-curve or off-curve point
+      const isEndpoint = i === 0 || i === numSamples;
+      const pointType = isEndpoint ? null : "cubic";
+
       left.push({
         x: point.x + normal.x * halfWidth,
         y: point.y + normal.y * halfWidth,
-        // Mark intermediate points as cubic off-curves for smooth result
-        type: i > 0 && i < numSamples ? "cubic" : null,
+        type: pointType,
       });
       right.push({
         x: point.x - normal.x * halfWidth,
         y: point.y - normal.y * halfWidth,
-        type: i > 0 && i < numSamples ? "cubic" : null,
+        type: pointType,
       });
     }
   }
