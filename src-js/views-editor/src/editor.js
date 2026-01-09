@@ -2017,9 +2017,7 @@ export class EditorController extends ViewController {
       return;
     }
 
-    const imageBlob =
-      (await readFromClipboard("image/png", false)) ||
-      (await readFromClipboard("image/jpeg", false));
+    const imageBlob = await readFromClipboard(["image/png", "image/jpeg"], false);
 
     if (!imageBlob) {
       return;
