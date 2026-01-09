@@ -3,6 +3,7 @@ import {
   getActionIdentifierFromKeyEvent,
   registerActionCallbacks,
 } from "@fontra/core/actions.js";
+import { Backend } from "@fontra/core/backend-api.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { getGlyphMapProxy } from "@fontra/core/cmap.js";
 import { UndoStack, reverseUndoRecord } from "@fontra/core/font-controller.js";
@@ -23,6 +24,7 @@ import {
   modulo,
   objectsEqual,
   range,
+  readClipboardTypes,
   readFromClipboard,
   readObjectFromURLFragment,
   scheduleCalls,
@@ -782,36 +784,38 @@ export class FontOverviewController extends ViewController {
 
   canPaste() {
     // TODO: do we have a pastable clipboard?
+    // We need async support in the "canXxx" mechanism to find out.
     return true;
   }
 
   async doPaste() {
-    let clipboardString = await readFromClipboard("web fontra/json-clipboard");
-    if (!clipboardString) {
-      clipboardString = await readFromClipboard("text/plain");
+    const bestClipboardType = (await this._getPastableClipboardTypes())[0];
+    if (!bestClipboardType) {
+      return;
     }
+
+    const clipboardString = await readFromClipboard(bestClipboardType);
 
     if (!clipboardString) {
       return;
+    }
+
+    let jsonString = clipboardString.startsWith("{") ? clipboardString : null;
+
+    if (
+      !jsonString &&
+      clipboardString === localStorage.getItem("clipboardSelection.text-plain")
+    ) {
+      jsonString = localStorage.getItem("clipboardSelection.fontra-json");
     }
 
     let clipboardData;
 
-    try {
-      clipboardData = JSON.parse(clipboardString);
-    } catch (error) {
-      console.error("can't parse JSON:", error);
-      return;
-    }
+    const clipboardGlyphArray = jsonString
+      ? this._jsonClipboardToGlyphArray(jsonString)
+      : await this._otherClipboardToGlyphArray(clipboardString);
 
-    let clipboardGlyphArray;
-
-    if (clipboardData.type == "fontra-glyph-array") {
-      clipboardGlyphArray = clipboardData.data.glyphs;
-    } else if (clipboardData.type == "fontra-variable-glyph") {
-      clipboardGlyphArray = [clipboardData.data];
-    } else {
-      console.log("Unrecognized JSON clipboard data format");
+    if (!clipboardGlyphArray) {
       return;
     }
 
@@ -851,9 +855,7 @@ export class FontOverviewController extends ViewController {
       })
     );
 
-    const glyphs = await this.fontController.getMultipleGlyphs(
-      selectedGlyphNames.filter((glyphName) => !!glyphMap[glyphName])
-    );
+    const glyphs = await this.fontController.getMultipleGlyphs(selectedGlyphNames);
     const root = { glyphs, glyphMap };
 
     const changes = recordChanges(root, (root) => {
@@ -898,6 +900,64 @@ export class FontOverviewController extends ViewController {
     selectedGlyphNames.forEach((glyphName) =>
       this.fontController.glyphChanged(glyphName)
     );
+  }
+
+  async _getPastableClipboardTypes() {
+    const availableClipboardTypes = await readClipboardTypes();
+    const pastableClipboardTypes = [
+      "web fontra/json-clipboard",
+      "web image/svg+xml",
+      "image/svg+xml",
+      "text/plain",
+    ].filter((type) => availableClipboardTypes.includes(type));
+
+    return pastableClipboardTypes;
+  }
+
+  _jsonClipboardToGlyphArray(jsonString) {
+    let clipboardData;
+
+    try {
+      clipboardData = JSON.parse(jsonString);
+    } catch (error) {
+      console.error("can't parse JSON:", error);
+      return;
+    }
+
+    if (clipboardData.type == "fontra-glyph-array") {
+      return clipboardData.data.glyphs;
+    } else if (clipboardData.type == "fontra-variable-glyph") {
+      return [clipboardData.data];
+    } else if (clipboardData.type == "fontra-layer-glyphs") {
+      const glyphName = clipboardData.data.glyphName;
+      const codePoints = clipboardData.data.codePoints || [];
+      assert(glyphName);
+
+      const glyph = clipboardData.data.layerGlyphs[0]?.glyph;
+      assert(glyph);
+
+      const variableGlyph = this.fontController.makeVariableGlyphFromSingleStaticGlyph(
+        glyphName,
+        glyph
+      );
+
+      return [{ variableGlyph, glyphName, codePoints }];
+    }
+    console.log("Unrecognized JSON clipboard data format");
+    return;
+  }
+
+  async _otherClipboardToGlyphArray(clipboardString) {
+    const glyph = await Backend.parseClipboard(clipboardString);
+    if (!glyph) {
+      return;
+    }
+
+    const variableGlyph = this.fontController.makeVariableGlyphFromSingleStaticGlyph(
+      undefined,
+      glyph
+    );
+    return [{ variableGlyph }];
   }
 
   canCutCopyOrDelete() {
