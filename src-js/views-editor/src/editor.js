@@ -45,6 +45,7 @@ import {
   loadURLFragment,
   makeUPlusStringFromCodePoint,
   modulo,
+  parseDataURL,
   parseSelection,
   range,
   readFileOrBlobAsDataURL,
@@ -311,30 +312,23 @@ export class EditorController extends ViewController {
         () => this.callDelegateMethod("getUndoRedoLabel", true)
       );
 
-      if (insecureSafariConnection()) {
-        // In Safari, the async clipboard API only works in a secure context
-        // (HTTPS). We apply a workaround using the clipboard event API, but
-        // only in Safari, and when in an HTTP context
-        this.initFallbackClipboardEventListeners();
-      } else {
-        registerActionCallbacks(
-          "action.cut",
-          () => this.doCut(),
-          () => this.canCut()
-        );
+      registerActionCallbacks(
+        "action.cut",
+        () => this.doCut(),
+        () => this.canCut()
+      );
 
-        registerActionCallbacks(
-          "action.copy",
-          () => this.doCopy(),
-          () => this.canCopy()
-        );
+      registerActionCallbacks(
+        "action.copy",
+        () => this.doCopy(),
+        () => this.canCopy()
+      );
 
-        registerActionCallbacks(
-          "action.paste",
-          () => this.doPaste(),
-          () => this.canPaste()
-        );
-      }
+      registerActionCallbacks(
+        "action.paste",
+        () => this.doPaste(),
+        () => this.canPaste()
+      );
 
       registerActionCallbacks(
         "action.delete",
@@ -1385,18 +1379,11 @@ export class EditorController extends ViewController {
 
     this.basicContextMenuItems.push(MenuItemDivider);
 
-    if (!insecureSafariConnection()) {
-      // In Safari, the async clipboard API only works in a secure context
-      // (HTTPS). We apply a workaround using the clipboard event API, but
-      // only in Safari, and when in an HTTP context.
-      // So, since the "actions" versions of cut/copy/paste won't work, we
-      // do not add their menu items.
-      this.basicContextMenuItems.push(
-        { actionIdentifier: "action.cut" },
-        { actionIdentifier: "action.copy" },
-        { actionIdentifier: "action.paste" }
-      );
-    }
+    this.basicContextMenuItems.push(
+      { actionIdentifier: "action.cut" },
+      { actionIdentifier: "action.copy" },
+      { actionIdentifier: "action.paste" }
+    );
 
     this.basicContextMenuItems.push({ actionIdentifier: "action.delete" });
 
@@ -1455,29 +1442,6 @@ export class EditorController extends ViewController {
     });
   }
 
-  initFallbackClipboardEventListeners() {
-    window.addEventListener("paste", async (event) => {
-      if (document.activeElement === this.canvasController.canvas) {
-        event.preventDefault();
-        this.doPaste();
-      }
-    });
-
-    window.addEventListener("copy", async (event) => {
-      if (document.activeElement === this.canvasController.canvas) {
-        event.preventDefault();
-        await this.doCopy(event);
-      }
-    });
-
-    window.addEventListener("cut", async (event) => {
-      if (document.activeElement === this.canvasController.canvas) {
-        event.preventDefault();
-        await this.doCut(event);
-      }
-    });
-  }
-
   async keyDownHandler(event) {
     const actionIdentifier = getActionIdentifierFromKeyEvent(event);
     if (actionIdentifier) {
@@ -1524,35 +1488,23 @@ export class EditorController extends ViewController {
     );
   }
 
-  async doCut(event = null) {
+  async doCut() {
     if (
       this.sceneSettings.selectedGlyph.isEditing &&
       !this.sceneController.selection.size
     ) {
       return;
     }
+
     if (!this.sceneSettings.selectedGlyph.isEditing) {
-      await this.doCopy(event);
+      await this.doCopy();
       this.fontController.deleteGlyph(
         this.sceneSettings.selectedGlyphName,
         `cut glyph "${this.sceneSettings.selectedGlyphName}"`
       );
       return;
     }
-    if (event) {
-      // We *have* to do this first, as it won't work after any
-      // await (Safari insists on that). So we have to do a bit
-      // of redundant work by calling _prepareCopyOrCut twice.
-      const { layerGlyphs, flattenedPath, backgroundImageData } =
-        this._prepareCopyOrCutLayers(undefined, false);
-      await this._writeLayersToClipboard(
-        null,
-        layerGlyphs,
-        flattenedPath,
-        backgroundImageData,
-        event
-      );
-    }
+
     let copyResult;
     await this.sceneController.editGlyphAndRecordChanges(
       (glyph) => {
@@ -1563,7 +1515,8 @@ export class EditorController extends ViewController {
       undefined,
       true
     );
-    if (copyResult && !event) {
+
+    if (copyResult) {
       const { layerGlyphs, flattenedPath, backgroundImageData } = copyResult;
       await this._writeLayersToClipboard(
         null,
@@ -1578,7 +1531,7 @@ export class EditorController extends ViewController {
     return this.sceneSettings.selectedGlyph;
   }
 
-  async doCopy(event) {
+  async doCopy() {
     if (!this.canCopy()) {
       return;
     }
@@ -1591,44 +1544,28 @@ export class EditorController extends ViewController {
         null,
         layerGlyphs,
         flattenedPath,
-        backgroundImageData,
-        event
+        backgroundImageData
       );
     } else {
       const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
       const varGlyph = positionedGlyph.varGlyph.glyph;
-      const backgroundImageData = await this._collectBackgroundImageData(varGlyph);
+      const backgroundImageData =
+        await this.fontController.collectBackgroundImageData(varGlyph);
       const glyphController = positionedGlyph.glyph;
       await this._writeLayersToClipboard(
         varGlyph,
         [{ glyph: glyphController.instance }],
         glyphController.flattenedPath,
-        backgroundImageData,
-        event
+        backgroundImageData
       );
     }
-  }
-
-  async _collectBackgroundImageData(varGlyph) {
-    const backgroundImageData = {};
-    for (const layer of Object.values(varGlyph.layers)) {
-      if (layer.glyph.backgroundImage) {
-        const imageIdentifier = layer.glyph.backgroundImage.identifier;
-        const bgImage = await this.fontController.getBackgroundImage(imageIdentifier);
-        if (bgImage) {
-          backgroundImageData[imageIdentifier] = bgImage.src;
-        }
-      }
-    }
-    return backgroundImageData;
   }
 
   async _writeLayersToClipboard(
     varGlyph,
     layerGlyphs,
     flattenedPath,
-    backgroundImageData,
-    event
+    backgroundImageData
   ) {
     if (!layerGlyphs?.length) {
       // nothing to do
@@ -1644,48 +1581,62 @@ export class EditorController extends ViewController {
     const glyphName = this.sceneSettings.selectedGlyphName;
     const codePoints = this.fontController.glyphMap[glyphName] || [];
     const glifString = staticGlyphToGLIF(glyphName, layerGlyphs[0].glyph, codePoints);
-    const jsonObject = varGlyph ? { variableGlyph: varGlyph } : { layerGlyphs };
-    if (backgroundImageData && !isObjectEmpty(backgroundImageData)) {
-      jsonObject.backgroundImageData = backgroundImageData;
-    }
-    const jsonString = JSON.stringify(jsonObject);
+    const jsonObject = varGlyph
+      ? {
+          type: "fontra-variable-glyph",
+          data: { variableGlyph: varGlyph, codePoints: codePoints },
+        }
+      : { type: "fontra-layer-glyphs", data: { layerGlyphs, glyphName, codePoints } };
 
-    const mapping = { "svg": svgString, "glif": glifString, "fontra-json": jsonString };
+    const buildJSONString = async () => {
+      const resolvedImageData = await backgroundImageData;
+      if (resolvedImageData && !isObjectEmpty(resolvedImageData)) {
+        jsonObject.data.backgroundImageData = resolvedImageData;
+      }
+      return JSON.stringify(jsonObject);
+    };
+
+    const jsonStringPromise = buildJSONString();
+
+    const mapping = {
+      "svg": svgString,
+      "glif": glifString,
+      "fontra-json": jsonStringPromise,
+    };
+
     const plainTextString =
       mapping[applicationSettingsController.model.clipboardFormat] || glifString;
 
     localStorage.setItem("clipboardSelection.text-plain", plainTextString);
-    localStorage.setItem("clipboardSelection.glyph", jsonString);
+    jsonStringPromise.then((jsonString) => {
+      localStorage.setItem("clipboardSelection.fontra-json", jsonString);
+    });
 
-    if (event) {
-      // This *has* to be called before anything is awaited, or
-      // Safari won't recognize it as part of the same event handler
-      event.clipboardData.setData("text/plain", plainTextString);
-    } else {
-      const clipboardObject = {
-        "text/plain": plainTextString,
-        "text/html": svgString,
-        "image/svg+xml": svgString,
-        "web image/svg+xml": svgString,
-        "web fontra/static-glyph": jsonString,
-      };
+    const clipboardObject = {
+      "text/plain": plainTextString,
+      "text/html": svgString,
+      "image/svg+xml": svgString,
+      "web image/svg+xml": svgString,
+      "web fontra/json-clipboard": jsonStringPromise,
+    };
 
-      await this._addBackgroundImageToClipboard(clipboardObject, backgroundImageData);
+    this._addBackgroundImageToClipboard(clipboardObject, backgroundImageData);
 
-      await writeToClipboard(clipboardObject);
-    }
+    writeToClipboard(clipboardObject).catch((error) =>
+      console.error("error during clipboard write:", error)
+    );
   }
 
-  async _addBackgroundImageToClipboard(clipboardObject, backgroundImageData) {
+  _addBackgroundImageToClipboard(clipboardObject, backgroundImageData) {
     if (
       this.sceneController.selection.size == 1 &&
-      this.sceneController.selection.has("backgroundImage/0") &&
-      backgroundImageData &&
-      Object.keys(backgroundImageData).length == 1
+      this.sceneController.selection.has("backgroundImage/0")
     ) {
-      const res = await fetch(Object.values(backgroundImageData)[0]);
-      const blob = await res.blob();
-      clipboardObject[blob.type] = blob;
+      const imageDataURL = Object.values(backgroundImageData)[0];
+      const { type } = parseDataURL(imageDataURL);
+      clipboardObject[type] = fetch(Object.values(backgroundImageData)[0]).then(
+        (response) => response.blob()
+      );
     }
   }
 
@@ -1852,19 +1803,27 @@ export class EditorController extends ViewController {
   }
 
   canPaste() {
-    if (this.fontController.readOnly || this.sceneModel.isSelectedGlyphLocked()) {
-      return false;
-    }
-    return true;
+    return !!(
+      this.sceneSettings.selectedGlyph &&
+      !this.fontController.readOnly &&
+      !this.sceneModel.isSelectedGlyphLocked()
+    );
   }
 
   async doPaste() {
+    if (!this.sceneSettings.selectedGlyph) {
+      return;
+    }
+
     let { pasteVarGlyph, pasteLayerGlyphs, backgroundImageData } =
       await this._unpackClipboard();
     if (!pasteVarGlyph && !pasteLayerGlyphs?.length) {
       await this._pasteClipboardImage();
       return;
     }
+
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const glyphName = positionedGlyph.glyphName;
 
     const backgroundImageIdentifierMapping =
       this._makeBackgroundImageIdentifierMapping(backgroundImageData);
@@ -1902,21 +1861,22 @@ export class EditorController extends ViewController {
     } else if (!pasteVarGlyph && !this.sceneSettings.selectedGlyph.isEditing) {
       // We're pasting layers onto a glyph in select mode. Build a VariableGlyph
       // from the layers as good as we can.
-      const layers = {};
-      const sources = [];
       if (pasteLayerGlyphs.length === 1) {
-        const layerName = "default";
-        layers[layerName] = { glyph: pasteLayerGlyphs[0].glyph };
-        sources.push({ name: layerName, layerName });
+        pasteVarGlyph = this.fontController.makeVariableGlyphFromSingleStaticGlyph(
+          glyphName,
+          pasteLayerGlyphs[0].glyph
+        );
       } else {
+        const layers = {};
+        const sources = [];
         for (const { layerName, location, glyph } of pasteLayerGlyphs) {
           if (layerName) {
             layers[layerName] = { glyph };
             sources.push({ name: layerName, layerName, location: location || {} });
           }
         }
+        pasteVarGlyph = VariableGlyph.fromObject({ layers, sources });
       }
-      pasteVarGlyph = VariableGlyph.fromObject({ layers, sources });
       pasteLayerGlyphs = null;
     }
 
@@ -1925,14 +1885,13 @@ export class EditorController extends ViewController {
         Object.values(pasteVarGlyph.layers).map((layerGlyph) => layerGlyph.glyph),
         backgroundImageIdentifierMapping
       );
-      const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
       if (positionedGlyph.isUndefined) {
         await this.fontController.newGlyph(
-          positionedGlyph.glyphName,
+          glyphName,
           positionedGlyph.character?.codePointAt(0),
           pasteVarGlyph,
           null,
-          `paste new glyph "${positionedGlyph.glyphName}"`
+          `paste new glyph "${glyphName}"`
         );
       } else {
         await this._pasteReplaceGlyph(pasteVarGlyph);
@@ -1994,58 +1953,58 @@ export class EditorController extends ViewController {
   }
 
   async _unpackClipboard() {
-    let plainText;
+    const acceptableClipboardTypes = [
+      "web fontra/json-clipboard",
+      "web image/svg+xml",
+      "image/svg+xml",
+      "text/plain",
+    ];
 
-    for (const type of ["web image/svg+xml", "image/svg+xml", "text/plain"]) {
-      plainText = await readFromClipboard(type);
-      if (plainText) {
-        break;
-      }
-    }
-    if (!plainText) {
+    const clipboardString = await readFromClipboard(acceptableClipboardTypes);
+
+    if (!clipboardString) {
       return {};
     }
 
-    let customJSON;
-    try {
-      customJSON = await readFromClipboard("web fontra/static-glyph");
-    } catch (error) {
-      // fall through, try localStorage clipboard
-    }
+    let jsonString = clipboardString.startsWith("{") ? clipboardString : null;
 
     if (
-      !customJSON &&
-      plainText === localStorage.getItem("clipboardSelection.text-plain")
+      !jsonString &&
+      clipboardString === localStorage.getItem("clipboardSelection.text-plain")
     ) {
-      customJSON = localStorage.getItem("clipboardSelection.glyph");
-    }
-    if (!customJSON && plainText[0] == "{") {
-      customJSON = plainText;
+      jsonString = localStorage.getItem("clipboardSelection.fontra-json");
     }
 
     let pasteLayerGlyphs;
     let pasteVarGlyph;
     let backgroundImageData;
 
-    if (customJSON) {
+    if (jsonString) {
       try {
-        const clipboardObject = JSON.parse(customJSON);
-        pasteLayerGlyphs = clipboardObject.layerGlyphs?.map((layer) => {
-          return {
-            layerName: layer.layerName,
-            location: layer.location,
-            glyph: StaticGlyph.fromObject(layer.glyph),
-          };
-        });
-        if (clipboardObject.variableGlyph) {
-          pasteVarGlyph = VariableGlyph.fromObject(clipboardObject.variableGlyph);
+        const clipboardObject = JSON.parse(jsonString);
+        if (clipboardObject.type === "fontra-layer-glyphs") {
+          pasteLayerGlyphs = clipboardObject.data.layerGlyphs?.map((layer) => {
+            return {
+              layerName: layer.layerName,
+              location: layer.location,
+              glyph: StaticGlyph.fromObject(layer.glyph),
+            };
+          });
+          backgroundImageData = clipboardObject.data.backgroundImageData;
+        } else if (clipboardObject.type === "fontra-variable-glyph") {
+          pasteVarGlyph = VariableGlyph.fromObject(clipboardObject.data.variableGlyph);
+          backgroundImageData = clipboardObject.data.backgroundImageData;
+        } else if (clipboardObject.type === "fontra-glyph-array") {
+          pasteVarGlyph = VariableGlyph.fromObject(
+            clipboardObject.data.glyphs[0].variableGlyph
+          );
+          backgroundImageData = clipboardObject.data.glyphs[0].backgroundImageData;
         }
-        backgroundImageData = clipboardObject.backgroundImageData;
       } catch (error) {
         console.log("couldn't paste from JSON:", error.toString());
       }
     } else {
-      const glyph = await Backend.parseClipboard(plainText);
+      const glyph = await Backend.parseClipboard(clipboardString);
       if (glyph) {
         pasteLayerGlyphs = [{ glyph }];
       }
@@ -2058,9 +2017,7 @@ export class EditorController extends ViewController {
       return;
     }
 
-    const imageBlob =
-      (await readFromClipboard("image/png", false)) ||
-      (await readFromClipboard("image/jpeg", false));
+    const imageBlob = await readFromClipboard(["image/png", "image/jpeg"], false);
 
     if (!imageBlob) {
       return;
@@ -3697,10 +3654,6 @@ function chunks(array, n) {
     chunked.push(array.slice(i, i + n));
   }
   return chunked;
-}
-
-function insecureSafariConnection() {
-  return window.safari !== undefined && window.location.protocol === "http:";
 }
 
 function collapseSubTools(editToolsElement) {

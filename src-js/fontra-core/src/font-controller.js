@@ -22,6 +22,7 @@ import {
   getCharFromCodePoint,
   mapObjectValues,
   normalizeGuidelines,
+  parseDataURL,
   sleepAsync,
   throttleCalls,
   uniqueID,
@@ -322,11 +323,9 @@ export class FontController {
   }
 
   async putBackgroundImageData(imageIdentifier, imageDataURL) {
-    const [header, imageData] = imageDataURL.split(",");
-    const imageTypeRegex = /data:image\/(.+?);/g;
-    const match = imageTypeRegex.exec(header);
-    const imageType = match[1];
-    assert(imageType === "png" || imageType === "jpeg");
+    const { type, data } = parseDataURL(imageDataURL);
+    assert(type === "image/png" || type === "image/jpeg");
+    const imageType = type.split("/")[1];
 
     this._cacheBackgroundImageFromDataURLPromise(
       imageIdentifier,
@@ -335,7 +334,7 @@ export class FontController {
 
     await this.font.putBackgroundImage(imageIdentifier, {
       type: imageType,
-      data: imageData,
+      data,
     });
   }
 
@@ -489,32 +488,19 @@ export class FontController {
       );
     }
 
-    if (!varGlyph) {
-      const sourceIdentifier = this.defaultSourceIdentifier;
-      const layerName = sourceIdentifier || "default";
-      const sourceName = this.sources[sourceIdentifier] ? "" : layerName;
-      varGlyph = {
-        name: glyphName,
-        sources: [
-          {
-            name: sourceName,
-            location: {},
-            layerName: layerName,
-            locationBase: sourceIdentifier,
-          },
-        ],
-        layers: {
-          [layerName]: {
-            glyph: defaultLayerGlyph || StaticGlyph.fromObject({ xAdvance: 500 }),
-          },
-        },
-      };
-    } else {
+    let glyph;
+
+    if (varGlyph) {
+      glyph = VariableGlyph.fromObject(varGlyph);
+      glyph.name = glyphName;
       assert(!defaultLayerGlyph, "can't pass defaultLayerGlyph when passing varGlyph");
+    } else {
+      glyph = this.makeVariableGlyphFromSingleStaticGlyph(
+        glyphName,
+        defaultLayerGlyph || StaticGlyph.fromObject({ xAdvance: 500 })
+      );
     }
 
-    const glyph = VariableGlyph.fromObject(varGlyph);
-    glyph.name = glyphName;
     const glyphController = this.makeVariableGlyphController(glyph);
     this._glyphsPromiseCache.put(glyphName, Promise.resolve(glyphController));
 
@@ -1090,6 +1076,26 @@ export class FontController {
     }
 
     return backgroundImageData;
+  }
+
+  makeVariableGlyphFromSingleStaticGlyph(glyphName, glyph) {
+    const sourceIdentifier = this.defaultSourceIdentifier;
+    const layerName = sourceIdentifier || "default";
+    const sourceName = this.sources[sourceIdentifier] ? "" : layerName;
+    return VariableGlyph.fromObject({
+      name: glyphName,
+      sources: [
+        {
+          name: sourceName,
+          location: {},
+          layerName: layerName,
+          locationBase: sourceIdentifier,
+        },
+      ],
+      layers: {
+        [layerName]: { glyph },
+      },
+    });
   }
 }
 
