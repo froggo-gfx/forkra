@@ -1609,7 +1609,7 @@ export class EditorController extends ViewController {
 
     localStorage.setItem("clipboardSelection.text-plain", plainTextString);
     jsonStringPromise.then((jsonString) => {
-      localStorage.setItem("clipboardSelection.glyph", jsonString);
+      localStorage.setItem("clipboardSelection.fontra-json", jsonString);
     });
 
     const clipboardObject = {
@@ -1976,7 +1976,7 @@ export class EditorController extends ViewController {
       !customJSON &&
       plainText === localStorage.getItem("clipboardSelection.text-plain")
     ) {
-      customJSON = localStorage.getItem("clipboardSelection.glyph");
+      customJSON = localStorage.getItem("clipboardSelection.fontra-json");
     }
     if (!customJSON && plainText[0] == "{") {
       customJSON = plainText;
