@@ -308,7 +308,7 @@ class DesignspaceBackend(WatchableBackend):
     async def findGlyphsThatUseGlyph(self, glyphName):
         return sorted((await self.glyphDependencies).usedBy.get(glyphName, []))
 
-    def _reloadDesignSpaceFromFile(self):
+    def _reloadEverything(self):
         self._initialize(DesignSpaceDocument.fromfile(self.dsDoc.path))
 
     def updateAxisInfo(self):
@@ -1426,7 +1426,7 @@ class DesignspaceBackend(WatchableBackend):
         changedItems = await self._analyzeExternalChanges(changes)
         if changedItems is None:
             # The .designspace file changed, or a .ufo was replaced: reload all the things
-            self._reloadDesignSpaceFromFile()
+            self._reloadEverything()
             return None
 
         glyphMapUpdates: dict[str, list[int] | None] = {}
