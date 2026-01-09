@@ -1803,19 +1803,27 @@ export class EditorController extends ViewController {
   }
 
   canPaste() {
-    if (this.fontController.readOnly || this.sceneModel.isSelectedGlyphLocked()) {
-      return false;
-    }
-    return true;
+    return !!(
+      this.sceneSettings.selectedGlyph &&
+      !this.fontController.readOnly &&
+      !this.sceneModel.isSelectedGlyphLocked()
+    );
   }
 
   async doPaste() {
+    if (!this.sceneSettings.selectedGlyph) {
+      return;
+    }
+
     let { pasteVarGlyph, pasteLayerGlyphs, backgroundImageData } =
       await this._unpackClipboard();
     if (!pasteVarGlyph && !pasteLayerGlyphs?.length) {
       await this._pasteClipboardImage();
       return;
     }
+
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const glyphName = positionedGlyph.glyphName;
 
     const backgroundImageIdentifierMapping =
       this._makeBackgroundImageIdentifierMapping(backgroundImageData);
@@ -1853,21 +1861,22 @@ export class EditorController extends ViewController {
     } else if (!pasteVarGlyph && !this.sceneSettings.selectedGlyph.isEditing) {
       // We're pasting layers onto a glyph in select mode. Build a VariableGlyph
       // from the layers as good as we can.
-      const layers = {};
-      const sources = [];
       if (pasteLayerGlyphs.length === 1) {
-        const layerName = "default";
-        layers[layerName] = { glyph: pasteLayerGlyphs[0].glyph };
-        sources.push({ name: layerName, layerName });
+        pasteVarGlyph = this.fontController.makeVariableGlyphFromSingleStaticGlyph(
+          glyphName,
+          pasteLayerGlyphs[0].glyph
+        );
       } else {
+        const layers = {};
+        const sources = [];
         for (const { layerName, location, glyph } of pasteLayerGlyphs) {
           if (layerName) {
             layers[layerName] = { glyph };
             sources.push({ name: layerName, layerName, location: location || {} });
           }
         }
+        pasteVarGlyph = VariableGlyph.fromObject({ layers, sources });
       }
-      pasteVarGlyph = VariableGlyph.fromObject({ layers, sources });
       pasteLayerGlyphs = null;
     }
 
@@ -1876,14 +1885,13 @@ export class EditorController extends ViewController {
         Object.values(pasteVarGlyph.layers).map((layerGlyph) => layerGlyph.glyph),
         backgroundImageIdentifierMapping
       );
-      const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
       if (positionedGlyph.isUndefined) {
         await this.fontController.newGlyph(
-          positionedGlyph.glyphName,
+          glyphName,
           positionedGlyph.character?.codePointAt(0),
           pasteVarGlyph,
           null,
-          `paste new glyph "${positionedGlyph.glyphName}"`
+          `paste new glyph "${glyphName}"`
         );
       } else {
         await this._pasteReplaceGlyph(pasteVarGlyph);
