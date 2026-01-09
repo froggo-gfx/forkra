@@ -348,12 +348,22 @@ class FontraBackend(WatchableBackend):
         glyphChanges = set()
         glyphsDir = os.fspath(self.glyphsDir)
         backgroundImagesDir = os.fspath(self.backgroundImagesDir)
+        ourPath = os.fspath(self.path)
 
         shouldReloadAll = False
 
         for change, path in sorted(changes):
             fileName = os.path.basename(path)
             stem, suffix = os.path.splitext(fileName)
+
+            if path == ourPath:
+                # The whole .fontra folder might have been replaced. Reload everything.
+                self._readGlyphInfo()
+                self._readFontData()
+                self._readKerning()
+                self._readFeatures()
+                shouldReloadAll = True
+                break
 
             if fileName == self.fontDataFileName:
                 self._readFontData()
