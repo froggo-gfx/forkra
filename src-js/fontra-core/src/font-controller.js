@@ -488,17 +488,19 @@ export class FontController {
       );
     }
 
-    if (!varGlyph) {
-      varGlyph = this.makeVariableGlyphFromSingleStaticGlyph(
+    let glyph;
+
+    if (varGlyph) {
+      glyph = VariableGlyph.fromObject(varGlyph);
+      glyph.name = glyphName;
+      assert(!defaultLayerGlyph, "can't pass defaultLayerGlyph when passing varGlyph");
+    } else {
+      glyph = this.makeVariableGlyphFromSingleStaticGlyph(
         glyphName,
         defaultLayerGlyph || StaticGlyph.fromObject({ xAdvance: 500 })
       );
-    } else {
-      assert(!defaultLayerGlyph, "can't pass defaultLayerGlyph when passing varGlyph");
     }
 
-    const glyph = VariableGlyph.fromObject(varGlyph);
-    glyph.name = glyphName;
     const glyphController = this.makeVariableGlyphController(glyph);
     this._glyphsPromiseCache.put(glyphName, Promise.resolve(glyphController));
 
@@ -1080,7 +1082,7 @@ export class FontController {
     const sourceIdentifier = this.defaultSourceIdentifier;
     const layerName = sourceIdentifier || "default";
     const sourceName = this.sources[sourceIdentifier] ? "" : layerName;
-    return {
+    return VariableGlyph.fromObject({
       name: glyphName,
       sources: [
         {
@@ -1093,7 +1095,7 @@ export class FontController {
       layers: {
         [layerName]: { glyph },
       },
-    };
+    });
   }
 }
 
