@@ -308,7 +308,7 @@ class DesignspaceBackend(WatchableBackend):
     async def findGlyphsThatUseGlyph(self, glyphName):
         return sorted((await self.glyphDependencies).usedBy.get(glyphName, []))
 
-    def _reloadEverything(self):
+    def _reloadEverything(self) -> None:
         self._initialize(DesignSpaceDocument.fromfile(self.dsDoc.path))
 
     def updateAxisInfo(self):
@@ -1672,6 +1672,9 @@ class UFOBackend(DesignspaceBackend):
             path.unlink()
         dsDoc = createDSDocFromUFOPath(path, "default")
         return cls(dsDoc)
+
+    def _reloadEverything(self) -> None:
+        self._initialize(self.dsDoc)
 
     async def getCustomData(self) -> dict[str, Any]:
         return self.defaultReader.readLib()
