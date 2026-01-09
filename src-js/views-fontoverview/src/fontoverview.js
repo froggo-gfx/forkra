@@ -24,7 +24,6 @@ import {
   modulo,
   objectsEqual,
   range,
-  readClipboardTypes,
   readFromClipboard,
   readObjectFromURLFragment,
   scheduleCalls,
@@ -789,12 +788,14 @@ export class FontOverviewController extends ViewController {
   }
 
   async doPaste() {
-    const bestClipboardType = (await this._getPastableClipboardTypes())[0];
-    if (!bestClipboardType) {
-      return;
-    }
+    const acceptableClipboardTypes = [
+      "web fontra/json-clipboard",
+      "web image/svg+xml",
+      "image/svg+xml",
+      "text/plain",
+    ];
 
-    const clipboardString = await readFromClipboard(bestClipboardType);
+    const clipboardString = await readFromClipboard(acceptableClipboardTypes);
 
     if (!clipboardString) {
       return;
@@ -905,18 +906,6 @@ export class FontOverviewController extends ViewController {
     selectedGlyphNames.forEach((glyphName) =>
       this.fontController.glyphChanged(glyphName)
     );
-  }
-
-  async _getPastableClipboardTypes() {
-    const availableClipboardTypes = await readClipboardTypes();
-    const pastableClipboardTypes = [
-      "web fontra/json-clipboard",
-      "web image/svg+xml",
-      "image/svg+xml",
-      "text/plain",
-    ].filter((type) => availableClipboardTypes.includes(type));
-
-    return pastableClipboardTypes;
   }
 
   _jsonClipboardToGlyphArray(jsonString) {
