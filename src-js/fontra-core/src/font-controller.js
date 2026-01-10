@@ -1432,6 +1432,7 @@ function adjustStaticGlyphFromClipboard(glyph, backgroundImageMapping) {
 
   const backgroundImage = glyph.backgroundImage;
   const identifier = backgroundImage?.identifier;
+
   return StaticGlyph.fromObject({
     ...glyph,
     backgroundImage: backgroundImage
