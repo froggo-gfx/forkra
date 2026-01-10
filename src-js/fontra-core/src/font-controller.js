@@ -326,6 +326,16 @@ export class FontController {
     return this.getBackgroundImageBounds.bind(this);
   }
 
+  async writeBackgroundImages(backgroundImageData) {
+    if (!backgroundImageData || !this.backendInfo.features["background-image"]) {
+      return;
+    }
+
+    for (const [identifier, data] of Object.entries(backgroundImageData)) {
+      await this.putBackgroundImageData(identifier, data);
+    }
+  }
+
   async putBackgroundImageData(imageIdentifier, imageDataURL) {
     const { type, data } = parseDataURL(imageDataURL);
     assert(type === "image/png" || type === "image/jpeg");
