@@ -1611,10 +1611,15 @@ export class EditorController extends ViewController {
     const plainTextString =
       mapping[applicationSettingsController.model.clipboardFormat] || glifString;
 
-    localStorage.setItem("clipboardSelection.text-plain", plainTextString);
-    jsonStringPromise.then((jsonString) => {
-      localStorage.setItem("clipboardSelection.fontra-json", jsonString);
-    });
+    if (plainTextString == jsonStringPromise) {
+      localStorage.removeItem("clipboardSelection.text-plain");
+      localStorage.removeItem("clipboardSelection.fontra-json");
+    } else {
+      localStorage.setItem("clipboardSelection.text-plain", plainTextString);
+      jsonStringPromise.then((jsonString) => {
+        localStorage.setItem("clipboardSelection.fontra-json", jsonString);
+      });
+    }
 
     const clipboardObject = {
       "text/plain": plainTextString,
