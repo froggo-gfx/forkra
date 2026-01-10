@@ -812,9 +812,13 @@ export class FontOverviewController extends ViewController {
 
     let clipboardData;
 
-    const clipboardGlyphArray = jsonString
-      ? this._jsonClipboardToGlyphArray(jsonString)
-      : await this._otherClipboardToGlyphArray(clipboardString);
+    const {
+      glyphs: clipboardGlyphArray,
+      sourceLocations,
+      backgroundImageData,
+    } = jsonString
+      ? this._unpackJSONClipboard(jsonString)
+      : await this._unpackOtherClipboard(clipboardString);
 
     if (!clipboardGlyphArray) {
       return;
@@ -852,13 +856,19 @@ export class FontOverviewController extends ViewController {
     const numGlyphs = Math.min(clipboardGlyphArray.length, selectedGlyphNames.length);
     selectedGlyphNames = selectedGlyphNames.slice(0, numGlyphs);
 
-    const clipboardGlyphs = Object.fromEntries(
-      clipboardGlyphArray.slice(0, numGlyphs).map((clipboardGlyphInfo) => {
-        return [
-          clipboardGlyphInfo.variableGlyph.name,
-          clipboardGlyphInfo.variableGlyph,
-        ];
-      })
+    const {
+      glyphs: adjustedClipboardGlyphs,
+      backgroundImageData: adjustedBackgroundImageData,
+    } = this.fontController.adjustGlyphsFromClipboard(
+      clipboardGlyphArray
+        .slice(0, numGlyphs)
+        .map((clipboardGlyphInfo) => clipboardGlyphInfo.variableGlyph),
+      sourceLocations || {},
+      backgroundImageData
+    );
+
+    const clipboardGlyphsByName = Object.fromEntries(
+      adjustedClipboardGlyphs.map((glyph) => [glyph.name, glyph])
     );
 
     const glyphs = await this.fontController.getMultipleGlyphs(selectedGlyphNames);
@@ -879,7 +889,7 @@ export class FontOverviewController extends ViewController {
           root.glyphMap[destinationGlyphName] = selectedGlyphInfo.codePoints || [];
         }
 
-        const glyph = VariableGlyph.fromObject(clipboardGlyphs[sourceGlyphName]);
+        const glyph = VariableGlyph.fromObject(clipboardGlyphsByName[sourceGlyphName]);
         glyph.name = destinationGlyphName;
         root.glyphs[destinationGlyphName] = glyph;
       }
@@ -908,20 +918,22 @@ export class FontOverviewController extends ViewController {
     );
   }
 
-  _jsonClipboardToGlyphArray(jsonString) {
+  _unpackJSONClipboard(jsonString) {
     let clipboardData;
 
     try {
       clipboardData = JSON.parse(jsonString);
     } catch (error) {
       console.error("can't parse JSON:", error);
-      return;
+      return {};
     }
 
+    let clipboardGlyphs;
+
     if (clipboardData.type == "fontra-glyph-array") {
-      return clipboardData.data.glyphs;
+      clipboardGlyphs = clipboardData.data.glyphs;
     } else if (clipboardData.type == "fontra-variable-glyph") {
-      return [clipboardData.data];
+      clipboardGlyphs = [clipboardData.data];
     } else if (clipboardData.type == "fontra-layer-glyphs") {
       const glyphName = clipboardData.data.glyphName;
       const codePoints = clipboardData.data.codePoints || [];
@@ -935,23 +947,30 @@ export class FontOverviewController extends ViewController {
         glyph
       );
 
-      return [{ variableGlyph, glyphName, codePoints }];
+      clipboardGlyphs = [{ variableGlyph, glyphName, codePoints }];
+    } else {
+      console.log("Unrecognized JSON clipboard data format");
+      return {};
     }
-    console.log("Unrecognized JSON clipboard data format");
-    return;
+
+    return {
+      glyphs: clipboardGlyphs,
+      sourceLocations: clipboardData.sourceLocations,
+      backgroundImageData: clipboardData.backgroundImageData,
+    };
   }
 
-  async _otherClipboardToGlyphArray(clipboardString) {
+  async _unpackOtherClipboard(clipboardString) {
     const glyph = await Backend.parseClipboard(clipboardString);
     if (!glyph) {
-      return;
+      return {};
     }
 
     const variableGlyph = this.fontController.makeVariableGlyphFromSingleStaticGlyph(
       undefined,
       glyph
     );
-    return [{ variableGlyph }];
+    return { glyphs: [{ variableGlyph }] };
   }
 
   canCutCopyOrDelete() {
