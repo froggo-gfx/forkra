@@ -1584,7 +1584,11 @@ export class EditorController extends ViewController {
     const jsonObject = varGlyph
       ? {
           type: "fontra-variable-glyph",
-          data: { variableGlyph: varGlyph, codePoints: codePoints },
+          data: {
+            variableGlyph: varGlyph,
+            codePoints: codePoints,
+            sourceLocations: this.fontController.getSourceLocations(),
+          },
         }
       : { type: "fontra-layer-glyphs", data: { layerGlyphs, glyphName, codePoints } };
 
