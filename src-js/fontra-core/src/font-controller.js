@@ -20,6 +20,8 @@ import {
   chain,
   colorizeImage,
   getCharFromCodePoint,
+  mapObject,
+  mapObjectKeys,
   mapObjectValues,
   normalizeGuidelines,
   parseDataURL,
@@ -1097,6 +1099,36 @@ export class FontController {
       },
     });
   }
+
+  adjustGlyphsFromClipboard(glyphs, sourceLocations, backgroundImageData) {
+    // 1. Try to map original locationBase to ours, or fall back to concrete location
+    // 2. Create new unique identifiers for background images
+
+    const locationBaseMapping = mapObjectValues(
+      sourceLocations,
+      ([oldIdentifier, location]) =>
+        this.fontSourcesInstancer.getSourceIdentifierForLocation(location)
+    );
+
+    const backgroundImageMapping =
+      makeBackgroundImageIdentifierMapping(backgroundImageData);
+
+    glyphs = glyphs.map((glyph) =>
+      adjustVariableGlyphFromClipboard(
+        glyph,
+        sourceLocations,
+        locationBaseMapping,
+        backgroundImageMapping
+      )
+    );
+
+    backgroundImageData = remapBackgroundImageData(
+      backgroundImageData,
+      backgroundImageMapping
+    );
+
+    return { glyphs, backgroundImageData };
+  }
 }
 
 export function reverseUndoRecord(undoRecord) {
@@ -1331,4 +1363,66 @@ class InstanceRequestQueue {
       this.requests.delete(requestID);
     }
   }
+}
+
+function makeBackgroundImageIdentifierMapping(backgroundImageData) {
+  return mapObject(backgroundImageData || {}, ([identifier, data]) => [
+    identifier,
+    crypto.randomUUID(),
+  ]);
+}
+
+function adjustVariableGlyphFromClipboard(
+  glyph,
+  sourceLocations,
+  locationBaseMapping,
+  backgroundImageMapping
+) {
+  return VariableGlyph.fromObject({
+    ...glyph,
+    sources: glyph.sources.map((source) => {
+      if (source.locationBase) {
+        const locationBase = locationBaseMapping[source.locationBase];
+        const location = locationBase
+          ? source.location
+          : { ...sourceLocations[source.locationBase], ...source.location };
+        source = { ...source, locationBase, location };
+      }
+      return source;
+    }),
+    layers: mapObject(glyph.layers, ([layerName, layer]) => [
+      layerName,
+      {
+        ...layer,
+        glyph: adjustStaticGlyphFromClipboard(layer.glyph, backgroundImageMapping),
+      },
+    ]),
+  });
+}
+
+function adjustStaticGlyphFromClipboard(glyph, backgroundImageMapping) {
+  if (!glyph.backgroundImage) {
+    return glyph;
+  }
+
+  const backgroundImage = glyph.backgroundImage;
+  const identifier = backgroundImage?.identifier;
+  return StaticGlyph.fromObject({
+    ...glyph,
+    backgroundImage: backgroundImage
+      ? {
+          ...backgroundImage,
+          identifier: backgroundImageMapping[identifier] || identifier,
+        }
+      : undefined,
+  });
+}
+
+function remapBackgroundImageData(backgroundImageData, backgroundImageMapping) {
+  return backgroundImageData
+    ? mapObjectKeys(
+        backgroundImageData,
+        ([identifier, data]) => backgroundImageMapping[identifier] || identifier
+      )
+    : undefined;
 }
