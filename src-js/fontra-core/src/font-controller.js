@@ -31,7 +31,9 @@ import {
 } from "./utils.js";
 import { StaticGlyph, VariableGlyph } from "./var-glyph.js";
 import {
+  locationToName,
   locationToString,
+  makeSparseLocation,
   mapAxesFromUserSpaceToSourceSpace,
   mapBackward,
   mapForward,
@@ -1104,10 +1106,12 @@ export class FontController {
     // 1. Try to map original locationBase to ours, or fall back to concrete location
     // 2. Create new unique identifiers for background images
 
-    const locationBaseMapping = mapObjectValues(
+    const locationBaseMapping = mapObject(
       sourceLocations,
-      ([oldIdentifier, location]) =>
-        this.fontSourcesInstancer.getSourceIdentifierForLocation(location)
+      ([oldIdentifier, location]) => [
+        oldIdentifier,
+        this.fontSourcesInstancer.getSourceIdentifierForLocation(location),
+      ]
     );
 
     const backgroundImageMapping =
@@ -1118,7 +1122,8 @@ export class FontController {
         glyph,
         sourceLocations,
         locationBaseMapping,
-        backgroundImageMapping
+        backgroundImageMapping,
+        this.fontAxesSourceSpace
       )
     );
 
@@ -1376,22 +1381,40 @@ function adjustVariableGlyphFromClipboard(
   glyph,
   sourceLocations,
   locationBaseMapping,
-  backgroundImageMapping
+  backgroundImageMapping,
+  fontAxes
 ) {
+  const layerNameMapping = {};
+
+  const newSources = glyph.sources.map((source) => {
+    if (source.locationBase) {
+      const locationBase = locationBaseMapping[source.locationBase];
+
+      const location = locationBase
+        ? source.location
+        : { ...sourceLocations[source.locationBase], ...source.location };
+
+      const name = locationBase
+        ? source.name
+        : source.name || locationToName(makeSparseLocation(location, fontAxes));
+
+      const layerName =
+        source.layerName == source.locationBase && locationBase
+          ? locationBase
+          : source.layerName;
+
+      layerNameMapping[source.layerName] = layerName;
+
+      source = { ...source, locationBase, location, name, layerName };
+    }
+    return source;
+  });
+
   return VariableGlyph.fromObject({
     ...glyph,
-    sources: glyph.sources.map((source) => {
-      if (source.locationBase) {
-        const locationBase = locationBaseMapping[source.locationBase];
-        const location = locationBase
-          ? source.location
-          : { ...sourceLocations[source.locationBase], ...source.location };
-        source = { ...source, locationBase, location };
-      }
-      return source;
-    }),
+    sources: newSources,
     layers: mapObject(glyph.layers, ([layerName, layer]) => [
-      layerName,
+      layerNameMapping[layerName] || layerName,
       {
         ...layer,
         glyph: adjustStaticGlyphFromClipboard(layer.glyph, backgroundImageMapping),
