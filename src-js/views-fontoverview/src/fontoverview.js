@@ -853,6 +853,14 @@ export class FontOverviewController extends ViewController {
       }
     }
 
+    if (clipboardGlyphArray.length == 1 && selectedGlyphNames.length > 1) {
+      // The clipboard contains a single glyph, yet multiple glyphs are selected.
+      // Let's paste the copied glyph into all selected glyphs.
+      for (const i of range(selectedGlyphNames.length - 1)) {
+        clipboardGlyphArray.push(clipboardGlyphArray[0]);
+      }
+    }
+
     if (clipboardGlyphArray.length != selectedGlyphNames.length) {
       // TODO: warn if the source and target array lengths don't match?
     }
