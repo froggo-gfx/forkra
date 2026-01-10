@@ -920,6 +920,12 @@ export class FontOverviewController extends ViewController {
     selectedGlyphNames.forEach((glyphName) =>
       this.fontController.glyphChanged(glyphName)
     );
+
+    for (const [identifier, data] of Object.entries(
+      adjustedBackgroundImageData || {}
+    )) {
+      await this.fontController.putBackgroundImageData(identifier, data);
+    }
   }
 
   _unpackJSONClipboard(jsonString) {
