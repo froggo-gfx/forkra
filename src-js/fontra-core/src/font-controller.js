@@ -1448,7 +1448,7 @@ function remapBackgroundImageData(backgroundImageData, backgroundImageMapping) {
   return backgroundImageData
     ? mapObjectKeys(
         backgroundImageData,
-        ([identifier, data]) => backgroundImageMapping[identifier] || identifier
+        (identifier) => backgroundImageMapping[identifier] || identifier
       )
     : undefined;
 }
