@@ -1114,7 +1114,7 @@ export class FontController {
     });
   }
 
-  adjustGlyphsFromClipboard(glyphs, sourceLocations, backgroundImageData) {
+  adjustVariableGlyphsFromClipboard(glyphs, sourceLocations, backgroundImageData) {
     // 1. Try to map original locationBase to ours, or fall back to concrete location
     // 2. Create new unique identifiers for background images
 
@@ -1137,6 +1137,22 @@ export class FontController {
         backgroundImageMapping,
         this.fontAxesSourceSpace
       )
+    );
+
+    backgroundImageData = remapBackgroundImageData(
+      backgroundImageData,
+      backgroundImageMapping
+    );
+
+    return { glyphs, backgroundImageData };
+  }
+
+  adjustStaticGlyphsFromClipboard(glyphs, backgroundImageData) {
+    const backgroundImageMapping =
+      makeBackgroundImageIdentifierMapping(backgroundImageData);
+
+    glyphs = glyphs.map((glyph) =>
+      adjustStaticGlyphFromClipboard(glyph, backgroundImageMapping)
     );
 
     backgroundImageData = remapBackgroundImageData(

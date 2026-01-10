@@ -863,7 +863,7 @@ export class FontOverviewController extends ViewController {
     const {
       glyphs: adjustedClipboardGlyphs,
       backgroundImageData: adjustedBackgroundImageData,
-    } = this.fontController.adjustGlyphsFromClipboard(
+    } = this.fontController.adjustVariableGlyphsFromClipboard(
       clipboardGlyphArray
         .slice(0, numGlyphs)
         .map((clipboardGlyphInfo) => clipboardGlyphInfo.variableGlyph),
