@@ -35,6 +35,7 @@ import {
 import { GlyphSource, Layer, StaticGlyph } from "@fontra/core/var-glyph.js";
 import {
   isLocationAtDefault,
+  locationToName,
   locationToString,
   makeSparseLocation,
   mapAxesFromUserSpaceToSourceSpace,
@@ -1594,7 +1595,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     const suggestedSourceName =
       fontSourceName && !hasGlyphLocation
         ? fontSourceName
-        : suggestedSourceNameFromLocation(makeSparseLocation(location, locationAxes));
+        : locationToName(makeSparseLocation(location, locationAxes));
     const suggestedLayerName =
       locationBase && !hasGlyphLocation
         ? locationBase
@@ -1645,7 +1646,7 @@ export default class DesignspaceNavigationPanel extends Panel {
       }
       nameController.model.sourceName = "";
 
-      const suggestedSourceName = suggestedSourceNameFromLocation(
+      const suggestedSourceName = locationToName(
         makeSparseLocation(locationController.model, locationAxes)
       );
 
@@ -1666,7 +1667,7 @@ export default class DesignspaceNavigationPanel extends Panel {
       }
 
       if (!nameController.model.locationBase || isGlyphAxisChange) {
-        const suggestedSourceName = suggestedSourceNameFromLocation(
+        const suggestedSourceName = locationToName(
           makeSparseLocation(locationController.model, locationAxes)
         );
         if (
@@ -2138,17 +2139,6 @@ function foldNLIAxes(axes) {
     axisInfo[baseName] = { ...axis, name: baseName };
   }
   return Object.values(axisInfo);
-}
-
-function suggestedSourceNameFromLocation(location) {
-  return (
-    Object.entries(location)
-      .map(([name, value]) => {
-        value = round(value, 1);
-        return `${name}=${value}`;
-      })
-      .join(",") || "default"
-  );
 }
 
 function getGlyphAxisNamesSet(glyph) {

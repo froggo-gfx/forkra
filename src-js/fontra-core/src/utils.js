@@ -617,11 +617,19 @@ export function normalizeGuidelines(guidelines, resetLocked = false) {
   });
 }
 
+export function mapObject(obj, func) {
+  // Return a copy of the object, with each [key, value] passed through `func`
+  return Object.fromEntries(Object.entries(obj).map(func));
+}
+
+export function mapObjectKeys(obj, func) {
+  // Return a copy of the object, with each key passed through `func`
+  return mapObject(obj, ([key, value]) => [func(key), value]);
+}
+
 export function mapObjectValues(obj, func) {
   // Return a copy of the object, with each value passed through `func`
-  return Object.fromEntries(
-    Object.entries(obj).map(([key, value]) => [key, func(value)])
-  );
+  return mapObject(obj, ([key, value]) => [key, func(value)]);
 }
 
 export async function mapObjectValuesAsync(obj, func) {

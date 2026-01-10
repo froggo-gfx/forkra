@@ -1584,7 +1584,11 @@ export class EditorController extends ViewController {
     const jsonObject = varGlyph
       ? {
           type: "fontra-variable-glyph",
-          data: { variableGlyph: varGlyph, codePoints: codePoints },
+          data: {
+            variableGlyph: varGlyph,
+            codePoints: codePoints,
+            sourceLocations: this.fontController.getSourceLocations(),
+          },
         }
       : { type: "fontra-layer-glyphs", data: { layerGlyphs, glyphName, codePoints } };
 
@@ -1815,7 +1819,7 @@ export class EditorController extends ViewController {
       return;
     }
 
-    let { pasteVarGlyph, pasteLayerGlyphs, backgroundImageData } =
+    let { pasteVarGlyph, pasteLayerGlyphs, sourceLocations, backgroundImageData } =
       await this._unpackClipboard();
     if (!pasteVarGlyph && !pasteLayerGlyphs?.length) {
       await this._pasteClipboardImage();
@@ -1824,9 +1828,6 @@ export class EditorController extends ViewController {
 
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     const glyphName = positionedGlyph.glyphName;
-
-    const backgroundImageIdentifierMapping =
-      this._makeBackgroundImageIdentifierMapping(backgroundImageData);
 
     if (backgroundImageData && !isObjectEmpty(backgroundImageData)) {
       // Ensure background images are visible and not locked
@@ -1881,10 +1882,18 @@ export class EditorController extends ViewController {
     }
 
     if (pasteVarGlyph) {
-      this._remapBackgroundImageIdentifiers(
-        Object.values(pasteVarGlyph.layers).map((layerGlyph) => layerGlyph.glyph),
-        backgroundImageIdentifierMapping
+      const {
+        glyphs: adjustedGlyphs,
+        backgroundImageData: adjustedBackgroundImageData,
+      } = this.fontController.adjustVariableGlyphsFromClipboard(
+        [pasteVarGlyph],
+        sourceLocations || {},
+        backgroundImageData
       );
+
+      [pasteVarGlyph] = adjustedGlyphs;
+      backgroundImageData = adjustedBackgroundImageData;
+
       if (positionedGlyph.isUndefined) {
         await this.fontController.newGlyph(
           glyphName,
@@ -1903,53 +1912,23 @@ export class EditorController extends ViewController {
       };
       this.sceneSettings.glyphLocation = { ...this.sceneSettings.glyphLocation };
     } else {
-      this._remapBackgroundImageIdentifiers(
-        pasteLayerGlyphs.map((layerGlyph) => layerGlyph.glyph),
-        backgroundImageIdentifierMapping
+      const {
+        glyphs: adjustedGlyphs,
+        backgroundImageData: adjustedBackgroundImageData,
+      } = this.fontController.adjustStaticGlyphsFromClipboard(
+        pasteLayerGlyphs.map((layerInfo) => layerInfo.glyph),
+        backgroundImageData
       );
+
+      for (const i of range(pasteLayerGlyphs.length)) {
+        pasteLayerGlyphs[i].glyph = adjustedGlyphs[i];
+      }
+      backgroundImageData = adjustedBackgroundImageData;
+
       await this._pasteLayerGlyphs(pasteLayerGlyphs);
     }
 
-    if (this.fontController.backendInfo.features["background-image"]) {
-      await this._writeBackgroundImageData(
-        backgroundImageData,
-        backgroundImageIdentifierMapping
-      );
-    }
-  }
-
-  _makeBackgroundImageIdentifierMapping(backgroundImageData) {
-    if (!backgroundImageData || isObjectEmpty(backgroundImageData)) {
-      return {};
-    }
-    const mapping = {};
-    for (const originalImageIdentifier of Object.keys(backgroundImageData)) {
-      const newImageIdentifier = crypto.randomUUID();
-      mapping[originalImageIdentifier] = newImageIdentifier;
-    }
-    return mapping;
-  }
-
-  _remapBackgroundImageIdentifiers(glyphs, identifierMapping) {
-    for (const glyph of glyphs) {
-      if (glyph.backgroundImage) {
-        glyph.backgroundImage.identifier =
-          identifierMapping[glyph.backgroundImage.identifier] ||
-          glyph.backgroundImage.identifier;
-      }
-    }
-  }
-
-  async _writeBackgroundImageData(backgroundImageData, identifierMapping) {
-    if (!backgroundImageData) {
-      return;
-    }
-    for (const [imageIdentifier, imageData] of Object.entries(backgroundImageData)) {
-      const mappedIdentifier = identifierMapping[imageIdentifier] || imageIdentifier;
-      await this.fontController.putBackgroundImageData(mappedIdentifier, imageData);
-    }
-    // Writing the background image data does not cause a refresh
-    this.canvasController.requestUpdate();
+    await this.fontController.writeBackgroundImages(backgroundImageData);
   }
 
   async _unpackClipboard() {
@@ -1977,6 +1956,7 @@ export class EditorController extends ViewController {
 
     let pasteLayerGlyphs;
     let pasteVarGlyph;
+    let sourceLocations;
     let backgroundImageData;
 
     if (jsonString) {
@@ -1993,12 +1973,14 @@ export class EditorController extends ViewController {
           backgroundImageData = clipboardObject.data.backgroundImageData;
         } else if (clipboardObject.type === "fontra-variable-glyph") {
           pasteVarGlyph = VariableGlyph.fromObject(clipboardObject.data.variableGlyph);
+          sourceLocations = clipboardObject.data.sourceLocations;
           backgroundImageData = clipboardObject.data.backgroundImageData;
         } else if (clipboardObject.type === "fontra-glyph-array") {
           pasteVarGlyph = VariableGlyph.fromObject(
             clipboardObject.data.glyphs[0].variableGlyph
           );
-          backgroundImageData = clipboardObject.data.glyphs[0].backgroundImageData;
+          sourceLocations = clipboardObject.data.sourceLocations;
+          backgroundImageData = clipboardObject.data.backgroundImageData;
         }
       } catch (error) {
         console.log("couldn't paste from JSON:", error.toString());
@@ -2009,7 +1991,7 @@ export class EditorController extends ViewController {
         pasteLayerGlyphs = [{ glyph }];
       }
     }
-    return { pasteVarGlyph, pasteLayerGlyphs, backgroundImageData };
+    return { pasteVarGlyph, pasteLayerGlyphs, sourceLocations, backgroundImageData };
   }
 
   async _pasteClipboardImage() {
