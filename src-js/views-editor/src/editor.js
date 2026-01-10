@@ -3592,7 +3592,7 @@ function newVisualizationLayersSettings(visualizationLayers) {
 
 async function runDialogWholeGlyphPaste() {
   const controller = new ObservableController({ behavior: PASTE_BEHAVIOR_REPLACE });
-  controller.synchronizeWithLocalStorage("fontra-glyph-paste");
+  controller.synchronizeWithLocalStorage("fontra-glyph-paste.");
   if (
     controller.model.behavior !== PASTE_BEHAVIOR_REPLACE &&
     controller.model.behavior !== PASTE_BEHAVIOR_ADD
