@@ -1980,7 +1980,7 @@ export class EditorController extends ViewController {
             clipboardObject.data.glyphs[0].variableGlyph
           );
           sourceLocations = clipboardObject.data.sourceLocations;
-          backgroundImageData = clipboardObject.data.glyphs[0].backgroundImageData;
+          backgroundImageData = clipboardObject.data.backgroundImageData;
         }
       } catch (error) {
         console.log("couldn't paste from JSON:", error.toString());
