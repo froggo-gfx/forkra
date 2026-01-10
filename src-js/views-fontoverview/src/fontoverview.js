@@ -750,17 +750,21 @@ export class FontOverviewController extends ViewController {
         ])
       );
 
+      const clipboardGlyphs = glyphNamesToCopy.map((glyphName) => ({
+        codePoints: glyphMap[glyphName],
+        variableGlyph: glyphs[glyphName],
+      }));
+
+      const backgroundImageData = await this.fontController.collectBackgroundImageData(
+        ...clipboardGlyphs.map((g) => g.variableGlyph)
+      );
+
       const clipboardData = {
         type: "fontra-glyph-array",
         data: {
-          glyphs: await asyncMap(glyphNamesToCopy, async (glyphName) => ({
-            codePoints: glyphMap[glyphName],
-            variableGlyph: glyphs[glyphName],
-            backgroundImageData: await this.fontController.collectBackgroundImageData(
-              glyphs[glyphName]
-            ),
-          })),
+          glyphs: clipboardGlyphs,
           sourceLocations,
+          backgroundImageData,
         },
       };
 
