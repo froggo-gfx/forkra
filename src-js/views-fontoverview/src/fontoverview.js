@@ -955,8 +955,8 @@ export class FontOverviewController extends ViewController {
 
     return {
       glyphs: clipboardGlyphs,
-      sourceLocations: clipboardData.sourceLocations,
-      backgroundImageData: clipboardData.backgroundImageData,
+      sourceLocations: clipboardData.data.sourceLocations,
+      backgroundImageData: clipboardData.data.backgroundImageData,
     };
   }
 
