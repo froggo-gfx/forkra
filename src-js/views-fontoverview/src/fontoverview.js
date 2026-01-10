@@ -921,11 +921,7 @@ export class FontOverviewController extends ViewController {
       this.fontController.glyphChanged(glyphName)
     );
 
-    for (const [identifier, data] of Object.entries(
-      adjustedBackgroundImageData || {}
-    )) {
-      await this.fontController.putBackgroundImageData(identifier, data);
-    }
+    await this.fontController.writeBackgroundImages(adjustedBackgroundImageData);
   }
 
   _unpackJSONClipboard(jsonString) {
