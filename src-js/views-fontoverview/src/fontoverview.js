@@ -831,9 +831,6 @@ export class FontOverviewController extends ViewController {
 
     let selectedGlyphInfos = this.glyphCellView.getSelectedGlyphInfo();
     let selectedGlyphNames = selectedGlyphInfos.map((info) => info.glyphName);
-    const clipboardGlyphNames = clipboardGlyphArray.map(
-      (glyphData) => glyphData.variableGlyph.name
-    );
 
     const glyphMap = { ...this.fontController.glyphMap };
 
@@ -844,8 +841,11 @@ export class FontOverviewController extends ViewController {
       }
 
       selectedGlyphInfos = null;
-      selectedGlyphNames = clipboardGlyphNames;
-      if (selectedGlyphNames.some((glyphName) => glyphMap[glyphName])) {
+
+      if (
+        clipboardGlyphArray.some((glyphInfo) => glyphMap[glyphInfo.variableGlyph.name])
+      ) {
+        // At least some glyphs would be overwritten by the paste. Give the user some options.
         const response = await runDialogReplaceGlyphs(selectedGlyphNames, glyphMap);
         if (!response) {
           // user cancelled
@@ -854,15 +854,23 @@ export class FontOverviewController extends ViewController {
 
         switch (response.behavior) {
           case PASTE_ADD_SUFFIX_TO_ALL:
-            selectedGlyphNames = selectedGlyphNames.map(
-              (glyphName) => glyphName + response.suffix
-            );
+            clipboardGlyphArray.forEach((glyphInfo) => {
+              glyphInfo.variableGlyph.name += response.suffix;
+              glyphInfo.codePoints = [];
+            });
           case PASTE_ADD_SUFFIX_TO_DUPLICATES:
-            selectedGlyphNames = selectedGlyphNames.map((glyphName) =>
-              glyphMap[glyphName] ? glyphName + response.suffix : glyphName
-            );
+            clipboardGlyphArray.forEach((glyphInfo) => {
+              if (glyphMap[glyphInfo.variableGlyph.name]) {
+                glyphInfo.variableGlyph.name += response.suffix;
+                glyphInfo.codePoints = [];
+              }
+            });
         }
       }
+
+      selectedGlyphNames = clipboardGlyphArray.map(
+        (glyphInfo) => glyphInfo.variableGlyph.name
+      );
     }
 
     if (clipboardGlyphArray.length == 1 && selectedGlyphNames.length > 1) {
