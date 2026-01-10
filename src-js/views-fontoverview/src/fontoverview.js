@@ -14,6 +14,7 @@ import { loaderSpinner } from "@fontra/core/loader-spinner.js";
 import { translate } from "@fontra/core/localization.js";
 import { ObservableController } from "@fontra/core/observable-object.js";
 import { parseGlyphSet, redirectGlyphSetURL } from "@fontra/core/parse-glyphset.js";
+import { labeledTextInput } from "@fontra/core/ui-utils.js";
 import {
   assert,
   asyncMap,
@@ -36,7 +37,7 @@ import { VariableGlyph } from "@fontra/core/var-glyph.js";
 import { ViewController } from "@fontra/core/view-controller.js";
 import { GlyphCellView } from "@fontra/web-components/glyph-cell-view.js";
 import { MenuItemDivider, showMenu } from "@fontra/web-components/menu-panel.js";
-import { message } from "@fontra/web-components/modal-dialog.js";
+import { dialogSetup, message } from "@fontra/web-components/modal-dialog.js";
 import { FontOverviewNavigation } from "./panel-navigation.js";
 
 const persistentSettings = [
@@ -845,11 +846,22 @@ export class FontOverviewController extends ViewController {
       selectedGlyphInfos = null;
       selectedGlyphNames = clipboardGlyphNames;
       if (selectedGlyphNames.some((glyphName) => glyphMap[glyphName])) {
-        // TODO ask user "replace existing glyphs"?
-        // - cancel
-        // - replace
-        // - keep both, use .xxx glyphname extension
-        console.log("Ask user 'replace existing glyphs?'");
+        const response = await runDialogReplaceGlyphs(selectedGlyphNames, glyphMap);
+        if (!response) {
+          // user cancelled
+          return;
+        }
+
+        switch (response.behavior) {
+          case PASTE_ADD_SUFFIX_TO_ALL:
+            selectedGlyphNames = selectedGlyphNames.map(
+              (glyphName) => glyphName + response.suffix
+            );
+          case PASTE_ADD_SUFFIX_TO_DUPLICATES:
+            selectedGlyphNames = selectedGlyphNames.map((glyphName) =>
+              glyphMap[glyphName] ? glyphName + response.suffix : glyphName
+            );
+        }
       }
     }
 
@@ -1103,4 +1115,86 @@ function readProjectGlyphSets(fontController) {
       ...(fontController.customData[PROJECT_GLYPH_SETS_CUSTOM_DATA_KEY] || []),
     ].map((glyphSet) => [glyphSet.url, glyphSet])
   );
+}
+
+const PASTE_REPLACE = "replace";
+const PASTE_ADD_SUFFIX_TO_DUPLICATES = "add-suffix-to-duplicates";
+const PASTE_ADD_SUFFIX_TO_ALL = "add-suffix-to-all";
+
+async function runDialogReplaceGlyphs(targetGlyphNames, glyphMap) {
+  const controller = new ObservableController({
+    behavior: PASTE_REPLACE,
+    suffix: ".alt",
+  });
+  controller.synchronizeWithLocalStorage("fontra-paste-replace-glyphs.");
+  if (
+    controller.model.behavior !== PASTE_REPLACE &&
+    controller.model.behavior !== PASTE_ADD_SUFFIX_TO_DUPLICATES &&
+    controller.model.behavior !== PASTE_ADD_SUFFIX_TO_ALL
+  ) {
+    controller.model.behavior = PASTE_REPLACE;
+  }
+
+  // TODO translation
+  const dialog = await dialogSetup("Replace existing glyphs?", null, [
+    { title: translate("dialog.cancel"), resultValue: "cancel", isCancelButton: true },
+    { title: translate("dialog.okay"), resultValue: "ok", isDefaultButton: true },
+  ]);
+
+  const radioGroup = [];
+
+  for (const [label, value] of [
+    ["Replace existing glyphs", PASTE_REPLACE],
+    ["Add a suffix to duplicate glyph names", PASTE_ADD_SUFFIX_TO_DUPLICATES],
+    ["Add a suffix to all pasted glyph names", PASTE_ADD_SUFFIX_TO_ALL],
+  ]) {
+    radioGroup.push(
+      html.input({
+        type: "radio",
+        id: value,
+        value: value,
+        name: "paste-replace-radio-group",
+        checked: controller.model.behavior === value,
+        onchange: (event) => (controller.model.behavior = event.target.value),
+      }),
+      html.label({ for: value }, [label]),
+      html.br()
+    );
+  }
+
+  radioGroup.push(
+    html.div(
+      {
+        style: `
+        margin-top: 0.5em;
+        display: grid;
+        grid-template-columns: min-content auto;
+        justify-items: start;
+        align-items: center;
+        align-content: start;
+        gap: 0.25em;
+      `,
+      },
+      labeledTextInput("Suffix:", controller, "suffix", { id: "suffix-text-input" })
+    )
+  );
+
+  radioGroup.push(html.br());
+  const dialogContent = html.div({}, radioGroup);
+
+  const validateInput = () => {
+    const suffixInput = dialogContent.querySelector("#suffix-text-input");
+    suffixInput.disabled = controller.model.behavior === PASTE_REPLACE;
+  };
+
+  controller.addKeyListener("behavior", (event) => validateInput());
+  validateInput();
+
+  dialog.setContent(dialogContent);
+
+  const result = await dialog.run();
+
+  return result === "ok"
+    ? { behavior: controller.model.behavior, suffix: controller.model.suffix }
+    : null;
 }
