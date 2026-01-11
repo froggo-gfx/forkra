@@ -1130,12 +1130,11 @@ export class FontController {
       makeBackgroundImageIdentifierMapping(backgroundImageData);
 
     glyphs = glyphs.map((glyph) =>
-      adjustVariableGlyphFromClipboard(
+      this._adjustVariableGlyphFromClipboard(
         glyph,
         sourceLocations,
         locationBaseMapping,
-        backgroundImageMapping,
-        this.fontAxesSourceSpace
+        backgroundImageMapping
       )
     );
 
@@ -1145,6 +1144,59 @@ export class FontController {
     );
 
     return { glyphs, backgroundImageData };
+  }
+
+  _adjustVariableGlyphFromClipboard(
+    glyph,
+    sourceLocations,
+    locationBaseMapping,
+    backgroundImageMapping
+  ) {
+    const layerNameMapping = {};
+
+    const defaultSourceName = this.defaultSourceIdentifier
+      ? this.sources[this.defaultSourceIdentifier].name
+      : "default";
+
+    const newSources = glyph.sources.map((source) => {
+      if (source.locationBase) {
+        const locationBase = locationBaseMapping[source.locationBase];
+
+        const location = locationBase
+          ? source.location
+          : { ...sourceLocations[source.locationBase], ...source.location };
+
+        const name = locationBase
+          ? source.name
+          : source.name ||
+            locationToName(
+              makeSparseLocation(location, this.fontAxesSourceSpace),
+              defaultSourceName
+            );
+
+        const layerName =
+          source.layerName == source.locationBase && locationBase
+            ? locationBase
+            : source.layerName;
+
+        layerNameMapping[source.layerName] = layerName;
+
+        source = { ...source, locationBase, location, name, layerName };
+      }
+      return source;
+    });
+
+    return VariableGlyph.fromObject({
+      ...glyph,
+      sources: newSources,
+      layers: mapObject(glyph.layers, ([layerName, layer]) => [
+        layerNameMapping[layerName] || layerName,
+        {
+          ...layer,
+          glyph: adjustStaticGlyphFromClipboard(layer.glyph, backgroundImageMapping),
+        },
+      ]),
+    });
   }
 
   adjustStaticGlyphsFromClipboard(glyphs, backgroundImageData) {
@@ -1403,52 +1455,6 @@ function makeBackgroundImageIdentifierMapping(backgroundImageData) {
     identifier,
     crypto.randomUUID(),
   ]);
-}
-
-function adjustVariableGlyphFromClipboard(
-  glyph,
-  sourceLocations,
-  locationBaseMapping,
-  backgroundImageMapping,
-  fontAxes
-) {
-  const layerNameMapping = {};
-
-  const newSources = glyph.sources.map((source) => {
-    if (source.locationBase) {
-      const locationBase = locationBaseMapping[source.locationBase];
-
-      const location = locationBase
-        ? source.location
-        : { ...sourceLocations[source.locationBase], ...source.location };
-
-      const name = locationBase
-        ? source.name
-        : source.name || locationToName(makeSparseLocation(location, fontAxes));
-
-      const layerName =
-        source.layerName == source.locationBase && locationBase
-          ? locationBase
-          : source.layerName;
-
-      layerNameMapping[source.layerName] = layerName;
-
-      source = { ...source, locationBase, location, name, layerName };
-    }
-    return source;
-  });
-
-  return VariableGlyph.fromObject({
-    ...glyph,
-    sources: newSources,
-    layers: mapObject(glyph.layers, ([layerName, layer]) => [
-      layerNameMapping[layerName] || layerName,
-      {
-        ...layer,
-        glyph: adjustStaticGlyphFromClipboard(layer.glyph, backgroundImageMapping),
-      },
-    ]),
-  });
 }
 
 function adjustStaticGlyphFromClipboard(glyph, backgroundImageMapping) {

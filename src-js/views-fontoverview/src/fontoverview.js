@@ -3,17 +3,21 @@ import {
   getActionIdentifierFromKeyEvent,
   registerActionCallbacks,
 } from "@fontra/core/actions.js";
+import { applicationSettingsController } from "@fontra/core/application-settings.js";
 import { Backend } from "@fontra/core/backend-api.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { getGlyphMapProxy } from "@fontra/core/cmap.js";
 import { UndoStack, reverseUndoRecord } from "@fontra/core/font-controller.js";
 import { makeFontraMenuBar } from "@fontra/core/fontra-menus.js";
+import { staticGlyphToGLIF } from "@fontra/core/glyph-glif.js";
 import { GlyphOrganizer } from "@fontra/core/glyph-organizer.js";
+import { pathToSVG } from "@fontra/core/glyph-svg.js";
 import * as html from "@fontra/core/html-utils.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
 import { translate } from "@fontra/core/localization.js";
 import { ObservableController } from "@fontra/core/observable-object.js";
 import { parseGlyphSet, redirectGlyphSetURL } from "@fontra/core/parse-glyphset.js";
+import { labeledTextInput } from "@fontra/core/ui-utils.js";
 import {
   assert,
   asyncMap,
@@ -36,7 +40,7 @@ import { VariableGlyph } from "@fontra/core/var-glyph.js";
 import { ViewController } from "@fontra/core/view-controller.js";
 import { GlyphCellView } from "@fontra/web-components/glyph-cell-view.js";
 import { MenuItemDivider, showMenu } from "@fontra/web-components/menu-panel.js";
-import { message } from "@fontra/web-components/modal-dialog.js";
+import { dialogSetup, message } from "@fontra/web-components/modal-dialog.js";
 import { FontOverviewNavigation } from "./panel-navigation.js";
 
 const persistentSettings = [
@@ -739,50 +743,110 @@ export class FontOverviewController extends ViewController {
   doCopy() {
     const glyphNamesToCopy = this.getSelectedExistingGlyphNames();
 
-    const buildJSONString = async () => {
-      const glyphs = await this.fontController.getMultipleGlyphs(glyphNamesToCopy);
-      const sourceLocations = this.fontController.getSourceLocations();
-      // We need to freeze the glyphMap because it may otherwise have been changed
-      const glyphMap = Object.fromEntries(
-        glyphNamesToCopy.map((glyphName) => [
-          glyphName,
-          this.fontController.glyphMap[glyphName],
-        ])
-      );
+    const jsonStringPromise = this.buildJSONStringForGlyphs(glyphNamesToCopy);
 
-      const clipboardGlyphs = glyphNamesToCopy.map((glyphName) => ({
-        codePoints: glyphMap[glyphName],
-        variableGlyph: glyphs[glyphName],
-      }));
+    let svgStringPromise;
+    let glifStringPromise;
 
-      const backgroundImageData = await this.fontController.collectBackgroundImageData(
-        ...clipboardGlyphs.map((g) => g.variableGlyph)
-      );
+    if (glyphNamesToCopy.length == 1) {
+      const stringPromises = this.buildPathStringsForGlyph(glyphNamesToCopy[0]);
+      svgStringPromise = stringPromises.then((strings) => strings.svgString);
+      glifStringPromise = stringPromises.then((strings) => strings.glifString);
+    }
 
-      const clipboardData = {
-        type: "fontra-glyph-array",
-        data: {
-          glyphs: clipboardGlyphs,
-          sourceLocations,
-          backgroundImageData,
-        },
-      };
-
-      return JSON.stringify(clipboardData);
+    const mapping = {
+      "svg": svgStringPromise,
+      "glif": glifStringPromise,
+      "fontra-json": jsonStringPromise,
     };
 
-    const jsonStringPromise = buildJSONString();
+    const plainTextStringPromise =
+      mapping[applicationSettingsController.model.clipboardFormat] || jsonStringPromise;
+
+    if (plainTextStringPromise == jsonStringPromise) {
+      localStorage.removeItem("clipboardSelection.text-plain");
+      localStorage.removeItem("clipboardSelection.fontra-json");
+    } else {
+      plainTextStringPromise.then((plainTextString) => {
+        localStorage.setItem("clipboardSelection.text-plain", plainTextString);
+      });
+      jsonStringPromise.then((jsonString) => {
+        localStorage.setItem("clipboardSelection.fontra-json", jsonString);
+      });
+    }
 
     const clipboardObject = {
-      "text/plain": jsonStringPromise,
+      "text/plain": plainTextStringPromise,
       "web fontra/json-clipboard": jsonStringPromise,
     };
+
+    if (svgStringPromise) {
+      clipboardObject["text/html"] = svgStringPromise;
+      clipboardObject["image/svg+xml"] = svgStringPromise;
+      clipboardObject["web image/svg+xml"] = svgStringPromise;
+    }
 
     writeToClipboard(clipboardObject).catch((error) =>
       console.error("error during clipboard write:", error)
     );
 
     this.glyphCellView.glyphSelection = new Set(glyphNamesToCopy);
+  }
+
+  async buildJSONStringForGlyphs(glyphNames) {
+    const glyphs = await this.fontController.getMultipleGlyphs(glyphNames);
+    const sourceLocations = this.fontController.getSourceLocations();
+    // We need to freeze the glyphMap because it may otherwise have been changed
+    const glyphMap = Object.fromEntries(
+      glyphNames.map((glyphName) => [
+        glyphName,
+        this.fontController.glyphMap[glyphName],
+      ])
+    );
+
+    const clipboardGlyphs = glyphNames.map((glyphName) => ({
+      codePoints: glyphMap[glyphName],
+      variableGlyph: glyphs[glyphName],
+    }));
+
+    const backgroundImageData = await this.fontController.collectBackgroundImageData(
+      ...clipboardGlyphs.map((g) => g.variableGlyph)
+    );
+
+    const clipboardData = {
+      type: "fontra-glyph-array",
+      data: {
+        glyphs: clipboardGlyphs,
+        sourceLocations,
+        backgroundImageData,
+      },
+    };
+
+    return JSON.stringify(clipboardData);
+  }
+
+  async buildPathStringsForGlyph(glyphName) {
+    const glyphController = await this.fontController.getGlyphInstance(
+      glyphName,
+      this.fontOverviewSettings.fontLocationSource
+    );
+
+    const flattenedPath = glyphController.flattenedPath;
+    const bounds = flattenedPath.getControlBounds() || {
+      xMin: 0,
+      yMin: 0,
+      xMax: 0,
+      yMax: 0,
+    };
+
+    const svgString = pathToSVG(flattenedPath, bounds);
+    const glifString = staticGlyphToGLIF(
+      glyphName,
+      glyphController.instance,
+      this.fontController.glyphMap[glyphName] || []
+    );
+
+    return { svgString, glifString };
   }
 
   canPaste() {
@@ -830,9 +894,6 @@ export class FontOverviewController extends ViewController {
 
     let selectedGlyphInfos = this.glyphCellView.getSelectedGlyphInfo();
     let selectedGlyphNames = selectedGlyphInfos.map((info) => info.glyphName);
-    const clipboardGlyphNames = clipboardGlyphArray.map(
-      (glyphData) => glyphData.variableGlyph.name
-    );
 
     const glyphMap = { ...this.fontController.glyphMap };
 
@@ -843,13 +904,44 @@ export class FontOverviewController extends ViewController {
       }
 
       selectedGlyphInfos = null;
-      selectedGlyphNames = clipboardGlyphNames;
-      if (selectedGlyphNames.some((glyphName) => glyphMap[glyphName])) {
-        // TODO ask user "replace existing glyphs"?
-        // - cancel
-        // - replace
-        // - keep both, use .xxx glyphname extension
-        console.log("Ask user 'replace existing glyphs?'");
+
+      if (
+        clipboardGlyphArray.some((glyphInfo) => glyphMap[glyphInfo.variableGlyph.name])
+      ) {
+        // At least some glyphs would be overwritten by the paste. Give the user some options.
+
+        const newGlyphNames = await runDialogReplaceGlyphs(
+          clipboardGlyphArray.map((glyphInfo) => glyphInfo.variableGlyph.name),
+          glyphMap
+        );
+        if (!newGlyphNames) {
+          // user cancelled
+          return;
+        }
+
+        assert(newGlyphNames.length == clipboardGlyphArray.length);
+
+        for (const i of range(clipboardGlyphArray.length)) {
+          const glyphInfo = clipboardGlyphArray[i];
+          const glyphName = newGlyphNames[i];
+
+          if (glyphInfo.variableGlyph.name != glyphName) {
+            glyphInfo.variableGlyph.name = glyphName;
+            glyphInfo.codePoints = [];
+          }
+        }
+      }
+
+      selectedGlyphNames = clipboardGlyphArray.map(
+        (glyphInfo) => glyphInfo.variableGlyph.name
+      );
+    }
+
+    if (clipboardGlyphArray.length == 1 && selectedGlyphNames.length > 1) {
+      // The clipboard contains a single glyph, yet multiple glyphs are selected.
+      // Let's paste the copied glyph into all selected glyphs.
+      for (const i of range(selectedGlyphNames.length - 1)) {
+        clipboardGlyphArray.push(clipboardGlyphArray[0]);
       }
     }
 
@@ -1094,5 +1186,133 @@ function readProjectGlyphSets(fontController) {
       { name: "This font's glyphs", url: THIS_FONTS_GLYPHSET },
       ...(fontController.customData[PROJECT_GLYPH_SETS_CUSTOM_DATA_KEY] || []),
     ].map((glyphSet) => [glyphSet.url, glyphSet])
+  );
+}
+
+const PASTE_REPLACE = "replace";
+const PASTE_ADD_SUFFIX_TO_DUPLICATES = "add-suffix-to-duplicates";
+const PASTE_ADD_SUFFIX_TO_ALL = "add-suffix-to-all";
+
+async function runDialogReplaceGlyphs(glyphNames, glyphMap) {
+  let outputGlyphNames = glyphNames;
+
+  const controller = new ObservableController({
+    behavior: PASTE_REPLACE,
+    suffix: ".alt",
+  });
+
+  controller.synchronizeWithLocalStorage("fontra-paste-replace-glyphs.");
+
+  if (
+    controller.model.behavior !== PASTE_REPLACE &&
+    controller.model.behavior !== PASTE_ADD_SUFFIX_TO_DUPLICATES &&
+    controller.model.behavior !== PASTE_ADD_SUFFIX_TO_ALL
+  ) {
+    controller.model.behavior = PASTE_REPLACE;
+  }
+
+  // TODO translation
+  const dialog = await dialogSetup("Replace existing glyphs?", null, [
+    { title: translate("dialog.cancel"), resultValue: "cancel", isCancelButton: true },
+    { title: translate("dialog.okay"), resultValue: "ok", isDefaultButton: true },
+  ]);
+
+  const radioGroup = [];
+
+  for (const [label, value] of [
+    ["Replace existing glyphs", PASTE_REPLACE],
+    ["Add a suffix to duplicate glyph names", PASTE_ADD_SUFFIX_TO_DUPLICATES],
+    ["Add a suffix to all pasted glyph names", PASTE_ADD_SUFFIX_TO_ALL],
+  ]) {
+    radioGroup.push(
+      html.input({
+        type: "radio",
+        id: value,
+        value: value,
+        name: "paste-replace-radio-group",
+        checked: controller.model.behavior === value,
+        onchange: (event) => (controller.model.behavior = event.target.value),
+      }),
+      html.label({ for: value }, [label]),
+      html.br()
+    );
+  }
+
+  radioGroup.push(
+    html.div(
+      {
+        style: `
+        margin-top: 0.5em;
+        margin-bottom: 0.5em;
+        display: grid;
+        grid-template-columns: min-content auto;
+        justify-items: start;
+        align-items: center;
+        align-content: start;
+        gap: 0.25em;
+      `,
+      },
+      labeledTextInput("Suffix:", controller, "suffix", { id: "suffix-text-input" })
+    ),
+    html.div({ id: "warning-string" }, [""])
+  );
+
+  const dialogContent = html.div({}, radioGroup);
+
+  const updateAndValidate = () => {
+    const { behavior, suffix } = controller.model;
+    const cleanSuffix = suffix.trim();
+
+    switch (behavior) {
+      case PASTE_ADD_SUFFIX_TO_ALL:
+        outputGlyphNames = glyphNames.map((glyphName) => glyphName + cleanSuffix);
+        break;
+      case PASTE_ADD_SUFFIX_TO_DUPLICATES:
+        outputGlyphNames = glyphNames.map((glyphName) =>
+          glyphMap[glyphName] ? glyphName + cleanSuffix : glyphName
+        );
+        break;
+      default:
+        outputGlyphNames = glyphNames;
+    }
+
+    const warningString = makeOverwriteGlyphsWarningString(outputGlyphNames, glyphMap);
+    const warningElement = dialogContent.querySelector("#warning-string");
+    warningElement.innerText = warningString;
+  };
+
+  controller.addKeyListener(["behavior", "suffix"], (event) => updateAndValidate());
+  updateAndValidate();
+
+  dialog.setContent(dialogContent);
+
+  const result = await dialog.run();
+
+  return result === "ok" ? outputGlyphNames : null;
+}
+
+function makeOverwriteGlyphsWarningString(
+  glyphNames,
+  glyphMap,
+  numMentionedGlyphs = 3
+) {
+  glyphNames = glyphNames.filter((glyphName) => glyphMap[glyphName]);
+
+  if (glyphNames.length <= 1) {
+    return glyphNames.length
+      ? `⚠️ Glyph '${glyphNames[0]}' will be overwritten.`
+      : "No glyphs will be overwritten.";
+  }
+
+  const firstNames = glyphNames.slice(0, numMentionedGlyphs);
+  const numMore =
+    glyphNames.length > numMentionedGlyphs ? glyphNames.length - numMentionedGlyphs : 0;
+  const lastMentioned = !numMore ? firstNames.pop() : undefined;
+
+  return (
+    "⚠️ Glyphs " +
+    firstNames.map((glyphName) => `'${glyphName}'`).join(", ") +
+    (numMore ? ` and ${numMore} more` : ` and '${lastMentioned}'`) +
+    " will be overwritten."
   );
 }
