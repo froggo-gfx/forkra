@@ -31,6 +31,7 @@ import {
   lenientIsEqualSet,
   union,
 } from "@fontra/core/set-ops.js";
+import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
 import {
   arrowKeyDeltas,
   assert,
@@ -148,6 +149,8 @@ export class SceneController {
     this.sceneSettingsController.addKeyListener("selectedGlyph", (event) => {
       if (event.newValue?.isEditing) {
         this.autoViewBox = false;
+        // Initialize skeleton-generated contours when entering edit mode
+        this._initializeSkeletonContours();
       }
       this.canvasController.requestUpdate();
     });
@@ -346,6 +349,97 @@ export class SceneController {
       this.sceneSettings.selection = difference(this.sceneSettings.selection, [
         "backgroundImage/0",
       ]);
+    }
+  }
+
+  /**
+   * Initialize skeleton-generated contours when entering edit mode.
+   * This ensures that if a glyph has skeleton data but no generated contours,
+   * the contours are created and persisted.
+   */
+  async _initializeSkeletonContours() {
+    const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
+
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+      return;
+    }
+
+    const varGlyph = positionedGlyph.varGlyph;
+
+    // Check all layers for skeleton data that needs initialization
+    for (const [layerName, layer] of Object.entries(varGlyph.glyph.layers)) {
+      const skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      if (!skeletonData?.contours?.length) {
+        continue;
+      }
+
+      // Check if generated contours exist
+      const generatedIndices = skeletonData.generatedContourIndices || [];
+      const pathNumContours = layer.glyph?.path?.numContours || 0;
+
+      // If generatedContourIndices is empty or points to invalid contours, regenerate
+      const needsInit =
+        generatedIndices.length === 0 ||
+        generatedIndices.some((idx) => idx >= pathNumContours);
+
+      if (!needsInit) {
+        continue;
+      }
+
+      // Generate and persist contours
+      await this.editGlyph(async (sendIncrementalChange, glyph) => {
+        const editLayer = glyph.layers[layerName];
+        if (!editLayer) return;
+
+        let skelData = editLayer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+        if (!skelData?.contours?.length) return;
+
+        // Deep clone
+        skelData = JSON.parse(JSON.stringify(skelData));
+
+        // Remove any existing generated contours (if indices are valid)
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const staticGlyph = editLayer.glyph;
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        // Generate new contours
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.appendUnpackedContour(contour);
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+
+        // Record changes
+        const changes = [];
+
+        const customDataChange = recordChanges(editLayer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skelData;
+        });
+        changes.push(customDataChange.prefixed(["layers", layerName]));
+
+        const pathChange = recordChanges(staticGlyph, () => {
+          // Path already modified above
+        });
+        changes.push(pathChange.prefixed(["layers", layerName, "glyph"]));
+
+        const combinedChange = new ChangeCollector().concat(...changes);
+        await sendIncrementalChange(combinedChange.change);
+
+        return {
+          changes: combinedChange,
+          undoLabel: "Initialize skeleton contours",
+          broadcast: true,
+        };
+      });
     }
   }
 

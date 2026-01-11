@@ -54,23 +54,53 @@ function getPointFlags(point, isSelected) {
 
 /**
  * Check if a point matches a rule pattern
+ *
+ * Pattern flags:
+ * - ANY: match any point type (OFF/SMO/SHA) - used for "don't care" positions
+ * - NIL: match when there's no point (boundary)
+ * - OFF/SMO/SHA: match specific point types
+ * - SEL/UNS: match selection state
+ *
+ * When ANY is combined with SEL/UNS, it means "any type but must match selection"
+ * When ANY is combined with NIL, it means "any point or no point"
  */
 function matchesPattern(flags, pattern) {
-  if (pattern & ANY) return true;
-  if ((pattern & NIL) && (flags & NIL)) return true;
-  if (flags & NIL) return false; // NIL doesn't match anything else
+  // Handle NIL (no point / boundary)
+  if (flags & NIL) {
+    // NIL point matches if pattern allows NIL
+    return !!(pattern & NIL);
+  }
 
-  // Check type match (OFF, SMO, SHA)
+  // For non-NIL points, check type and selection
+
+  // Check type match: ANY matches all types, or specific type must match
+  const hasTypePattern = pattern & (OFF | SMO | SHA);
   const typeMatch =
+    (pattern & ANY) || // ANY matches any type
     ((pattern & OFF) && (flags & OFF)) ||
     ((pattern & SMO) && (flags & SMO)) ||
     ((pattern & SHA) && (flags & SHA));
 
-  // Check selection match (SEL, UNS)
-  const selMatch =
-    ((pattern & SEL) && (flags & SEL)) || ((pattern & UNS) && (flags & UNS));
+  if (!typeMatch && hasTypePattern) {
+    return false;
+  }
 
-  return typeMatch && selMatch;
+  // Check selection match (SEL, UNS) - must be checked if specified
+  const hasSelPattern = pattern & (SEL | UNS);
+  if (hasSelPattern) {
+    const selMatch =
+      ((pattern & SEL) && (flags & SEL)) || ((pattern & UNS) && (flags & UNS));
+    if (!selMatch) {
+      return false;
+    }
+  }
+
+  // If pattern is just ANY | NIL for neighbor positions, allow anything
+  if ((pattern & ANY) && (pattern & NIL) && !hasSelPattern) {
+    return true;
+  }
+
+  return typeMatch;
 }
 
 /**
