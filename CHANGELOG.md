@@ -16,10 +16,11 @@
 
 ### Miscellaneous
 
-- Reworked "paste" logic so it works better in Firefox and Safari. [Issue 2339](https://github.com/fontra/fontra/issues/2339), [PR 2367](https://github.com/fontra/fontra/pull/2367)
+- [editor] Reworked "paste" logic so it works better in Firefox and Safari. [Issue 2339](https://github.com/fontra/fontra/issues/2339), [PR 2367](https://github.com/fontra/fontra/pull/2367)
 - [designspace] Maintain glyph order when re-adding a previously deleted glyph. [PR 2357](https://github.com/fontra/fontra/pull/2357)
 - [fontra-glyphs] Maintain glyph order when re-adding a previously deleted glyph. [fontra-glyphs PR 115](https://github.com/fontra/fontra-glyphs/pull/115)
 - [fontra-glyphs] Fix kerning group behavior when deleting a glyph and re-adding it. [fontra-glyphs PR 116](https://github.com/fontra/fontra-glyphs/pull/116)
+- [editor] Moved the menu items that are also part of the context menu from the Edit menu to the Glyph menu, where they make more sense. This also fixes a menu redundancy. [Issue 1833](https://github.com/fontra/fontra/issues/1833), [PR 2371](https://github.com/fontra/fontra/pull/2371)
 
 ## 2025-12-30 [version 2025.12.6]
 
