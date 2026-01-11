@@ -740,39 +740,7 @@ export class FontOverviewController extends ViewController {
   doCopy() {
     const glyphNamesToCopy = this.getSelectedExistingGlyphNames();
 
-    const buildJSONString = async () => {
-      const glyphs = await this.fontController.getMultipleGlyphs(glyphNamesToCopy);
-      const sourceLocations = this.fontController.getSourceLocations();
-      // We need to freeze the glyphMap because it may otherwise have been changed
-      const glyphMap = Object.fromEntries(
-        glyphNamesToCopy.map((glyphName) => [
-          glyphName,
-          this.fontController.glyphMap[glyphName],
-        ])
-      );
-
-      const clipboardGlyphs = glyphNamesToCopy.map((glyphName) => ({
-        codePoints: glyphMap[glyphName],
-        variableGlyph: glyphs[glyphName],
-      }));
-
-      const backgroundImageData = await this.fontController.collectBackgroundImageData(
-        ...clipboardGlyphs.map((g) => g.variableGlyph)
-      );
-
-      const clipboardData = {
-        type: "fontra-glyph-array",
-        data: {
-          glyphs: clipboardGlyphs,
-          sourceLocations,
-          backgroundImageData,
-        },
-      };
-
-      return JSON.stringify(clipboardData);
-    };
-
-    const jsonStringPromise = buildJSONString();
+    const jsonStringPromise = this.buildJSONStringForGlyphNames(glyphNamesToCopy);
 
     const clipboardObject = {
       "text/plain": jsonStringPromise,
@@ -784,6 +752,38 @@ export class FontOverviewController extends ViewController {
     );
 
     this.glyphCellView.glyphSelection = new Set(glyphNamesToCopy);
+  }
+
+  async buildJSONStringForGlyphNames(glyphNames) {
+    const glyphs = await this.fontController.getMultipleGlyphs(glyphNames);
+    const sourceLocations = this.fontController.getSourceLocations();
+    // We need to freeze the glyphMap because it may otherwise have been changed
+    const glyphMap = Object.fromEntries(
+      glyphNames.map((glyphName) => [
+        glyphName,
+        this.fontController.glyphMap[glyphName],
+      ])
+    );
+
+    const clipboardGlyphs = glyphNames.map((glyphName) => ({
+      codePoints: glyphMap[glyphName],
+      variableGlyph: glyphs[glyphName],
+    }));
+
+    const backgroundImageData = await this.fontController.collectBackgroundImageData(
+      ...clipboardGlyphs.map((g) => g.variableGlyph)
+    );
+
+    const clipboardData = {
+      type: "fontra-glyph-array",
+      data: {
+        glyphs: clipboardGlyphs,
+        sourceLocations,
+        backgroundImageData,
+      },
+    };
+
+    return JSON.stringify(clipboardData);
   }
 
   canPaste() {
