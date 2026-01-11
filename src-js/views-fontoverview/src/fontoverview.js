@@ -1200,7 +1200,9 @@ async function runDialogReplaceGlyphs(glyphNames, glyphMap) {
     behavior: PASTE_REPLACE,
     suffix: ".alt",
   });
+
   controller.synchronizeWithLocalStorage("fontra-paste-replace-glyphs.");
+
   if (
     controller.model.behavior !== PASTE_REPLACE &&
     controller.model.behavior !== PASTE_ADD_SUFFIX_TO_DUPLICATES &&
