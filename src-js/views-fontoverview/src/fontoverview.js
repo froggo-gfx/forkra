@@ -909,25 +909,26 @@ export class FontOverviewController extends ViewController {
         clipboardGlyphArray.some((glyphInfo) => glyphMap[glyphInfo.variableGlyph.name])
       ) {
         // At least some glyphs would be overwritten by the paste. Give the user some options.
-        const response = await runDialogReplaceGlyphs(selectedGlyphNames, glyphMap);
-        if (!response) {
+
+        const newGlyphNames = await runDialogReplaceGlyphs(
+          clipboardGlyphArray.map((glyphInfo) => glyphInfo.variableGlyph.name),
+          glyphMap
+        );
+        if (!newGlyphNames) {
           // user cancelled
           return;
         }
 
-        switch (response.behavior) {
-          case PASTE_ADD_SUFFIX_TO_ALL:
-            clipboardGlyphArray.forEach((glyphInfo) => {
-              glyphInfo.variableGlyph.name += response.suffix;
-              glyphInfo.codePoints = [];
-            });
-          case PASTE_ADD_SUFFIX_TO_DUPLICATES:
-            clipboardGlyphArray.forEach((glyphInfo) => {
-              if (glyphMap[glyphInfo.variableGlyph.name]) {
-                glyphInfo.variableGlyph.name += response.suffix;
-                glyphInfo.codePoints = [];
-              }
-            });
+        assert(newGlyphNames.length == clipboardGlyphArray.length);
+
+        for (const i of range(clipboardGlyphArray.length)) {
+          const glyphInfo = clipboardGlyphArray[i];
+          const glyphName = newGlyphNames[i];
+
+          if (glyphInfo.variableGlyph.name != glyphName) {
+            glyphInfo.variableGlyph.name = glyphName;
+            glyphInfo.codePoints = [];
+          }
         }
       }
 
@@ -1192,7 +1193,9 @@ const PASTE_REPLACE = "replace";
 const PASTE_ADD_SUFFIX_TO_DUPLICATES = "add-suffix-to-duplicates";
 const PASTE_ADD_SUFFIX_TO_ALL = "add-suffix-to-all";
 
-async function runDialogReplaceGlyphs(targetGlyphNames, glyphMap) {
+async function runDialogReplaceGlyphs(glyphNames, glyphMap) {
+  let outputGlyphNames = glyphNames;
+
   const controller = new ObservableController({
     behavior: PASTE_REPLACE,
     suffix: ".alt",
@@ -1238,6 +1241,7 @@ async function runDialogReplaceGlyphs(targetGlyphNames, glyphMap) {
       {
         style: `
         margin-top: 0.5em;
+        margin-bottom: 0.5em;
         display: grid;
         grid-template-columns: min-content auto;
         justify-items: start;
@@ -1247,25 +1251,66 @@ async function runDialogReplaceGlyphs(targetGlyphNames, glyphMap) {
       `,
       },
       labeledTextInput("Suffix:", controller, "suffix", { id: "suffix-text-input" })
-    )
+    ),
+    html.div({ id: "warning-string" }, [""])
   );
 
-  radioGroup.push(html.br());
   const dialogContent = html.div({}, radioGroup);
 
-  const validateInput = () => {
-    const suffixInput = dialogContent.querySelector("#suffix-text-input");
-    suffixInput.disabled = controller.model.behavior === PASTE_REPLACE;
+  const updateAndValidate = () => {
+    const { behavior, suffix } = controller.model;
+    const cleanSuffix = suffix.trim();
+
+    switch (behavior) {
+      case PASTE_ADD_SUFFIX_TO_ALL:
+        outputGlyphNames = glyphNames.map((glyphName) => glyphName + cleanSuffix);
+        break;
+      case PASTE_ADD_SUFFIX_TO_DUPLICATES:
+        outputGlyphNames = glyphNames.map((glyphName) =>
+          glyphMap[glyphName] ? glyphName + cleanSuffix : glyphName
+        );
+        break;
+      default:
+        outputGlyphNames = glyphNames;
+    }
+
+    const warningString = makeOverWriteGlyphsString(outputGlyphNames, glyphMap, 3);
+    const warningElement = dialogContent.querySelector("#warning-string");
+    warningElement.innerText = warningString;
   };
 
-  controller.addKeyListener("behavior", (event) => validateInput());
-  validateInput();
+  controller.addKeyListener(["behavior", "suffix"], (event) => updateAndValidate());
+  updateAndValidate();
 
   dialog.setContent(dialogContent);
 
   const result = await dialog.run();
 
-  return result === "ok"
-    ? { behavior: controller.model.behavior, suffix: controller.model.suffix }
-    : null;
+  return result === "ok" ? outputGlyphNames : null;
+}
+
+function makeOverWriteGlyphsString(glyphNames, glyphMap, numMentionedGlyphs) {
+  glyphNames = glyphNames.filter((glyphName) => glyphMap[glyphName]);
+
+  if (glyphNames.length <= 1) {
+    return glyphNames.length
+      ? `Glyph '${glyphNames[0]}' will be overwritten.`
+      : "No glyphs will be overwritten.";
+  }
+
+  const firstNames = glyphNames.slice(0, numMentionedGlyphs);
+  const numMore =
+    glyphNames.length > numMentionedGlyphs ? glyphNames.length - numMentionedGlyphs : 0;
+
+  return (
+    "Glyphs " +
+    firstNames
+      .slice(0, -1)
+      .map((glyphName) => `'${glyphName}'`)
+      .join(", ") +
+    " and " +
+    firstNames.at(-1) +
+    (numMore ? ` and ${numMore} more` : "") +
+    " will be overwritten."
+  );
 }
