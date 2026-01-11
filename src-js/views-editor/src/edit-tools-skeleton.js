@@ -452,6 +452,7 @@ export class SkeletonPenTool extends BaseTool {
       return {
         changes: combinedChange,
         undoLabel: "Insert skeleton handles",
+        broadcast: true,
       };
     });
   }
@@ -460,11 +461,12 @@ export class SkeletonPenTool extends BaseTool {
    * Insert a point on a skeleton centerline segment.
    */
   async _handleInsertSkeletonPoint(eventStream, initialEvent, centerlineHit) {
+    // New points without off-curve handles should be angle (not smooth)
     const insertPoint = {
       x: Math.round(centerlineHit.point.x),
       y: Math.round(centerlineHit.point.y),
       type: null,
-      smooth: true,
+      smooth: false,
     };
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
@@ -520,6 +522,7 @@ export class SkeletonPenTool extends BaseTool {
       return {
         changes: combinedChange,
         undoLabel: "Insert skeleton point",
+        broadcast: true,
       };
     });
   }
@@ -528,11 +531,12 @@ export class SkeletonPenTool extends BaseTool {
     const anchorPoint = this._getGlyphPoint(initialEvent);
     if (!anchorPoint) return;
 
+    // New points without off-curve handles should be angle (not smooth)
     const newOnCurve = {
       x: Math.round(anchorPoint.x),
       y: Math.round(anchorPoint.y),
       type: null,
-      smooth: true,
+      smooth: false,
     };
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
@@ -722,6 +726,7 @@ export class SkeletonPenTool extends BaseTool {
       return {
         changes: combinedChange,
         undoLabel: "Add skeleton point",
+        broadcast: true,
       };
     });
   }

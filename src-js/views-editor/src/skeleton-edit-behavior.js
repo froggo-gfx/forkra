@@ -2,152 +2,25 @@
  * Skeleton Edit Behavior System
  *
  * This module implements a rule-based editing system for skeleton points,
- * mirroring the architecture of edit-behavior.js for path points.
- *
- * Key concepts:
- * - Skeleton points can be on-curve (type: null) or off-curve (type: "cubic")
- * - On-curve points can be smooth (smooth: true) or sharp (smooth: false)
- * - When moving a smooth on-curve point, adjacent off-curve handles rotate to maintain tangent
- * - When moving an off-curve handle, the opposite handle of a smooth point rotates too
- * - Rules are applied bidirectionally (both prev and next handles are affected)
+ * reusing the exact same rules and matching infrastructure from edit-behavior.js
  */
 
+import { reversed } from "@fontra/core/utils.js";
 import * as vector from "@fontra/core/vector.js";
+import {
+  ANY,
+  NIL,
+  OFF,
+  SEL,
+  SHA,
+  SMO,
+  UNS,
+  buildPointMatchTree,
+  findPointMatch,
+} from "./edit-behavior-support.js";
 
-// Point type flags for rule matching
-// Note: ANY = SHA | SMO | OFF (doesn't include NIL)
-export const NIL = 1 << 0; // Does not exist (boundary)
-export const SEL = 1 << 1; // Selected
-export const UNS = 1 << 2; // Unselected
-export const SHA = 1 << 3; // Sharp On-Curve
-export const SMO = 1 << 4; // Smooth On-Curve
-export const OFF = 1 << 5; // Off-Curve
-export const ANY = SHA | SMO | OFF; // Any point type (not including NIL)
-
-/**
- * Get the type flags for a skeleton point
- */
-function getPointFlags(point, isSelected) {
-  if (!point) return NIL;
-
-  let flags = 0;
-
-  // Off-curve vs on-curve
-  if (point.type === "cubic" || point.type === "quad") {
-    flags |= OFF;
-  } else {
-    // On-curve point - check smooth flag
-    if (point.smooth) {
-      flags |= SMO;
-    } else {
-      flags |= SHA;
-    }
-  }
-
-  // Selected state
-  if (isSelected) {
-    flags |= SEL;
-  } else {
-    flags |= UNS;
-  }
-
-  return flags;
-}
-
-/**
- * Check if a point matches a rule pattern
- */
-function matchesPattern(flags, pattern) {
-  // Handle NIL (no point / boundary)
-  if (flags & NIL) {
-    return !!(pattern & NIL);
-  }
-
-  // For non-NIL points, check type and selection
-  const hasTypePattern = pattern & (OFF | SMO | SHA);
-  const typeMatch =
-    !hasTypePattern || // No type specified means any type
-    ((pattern & OFF) && (flags & OFF)) ||
-    ((pattern & SMO) && (flags & SMO)) ||
-    ((pattern & SHA) && (flags & SHA));
-
-  if (!typeMatch) {
-    return false;
-  }
-
-  // Check selection match (SEL, UNS) - must be checked if specified
-  const hasSelPattern = pattern & (SEL | UNS);
-  if (hasSelPattern) {
-    const selMatch =
-      ((pattern & SEL) && (flags & SEL)) || ((pattern & UNS) && (flags & UNS));
-    if (!selMatch) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/**
- * Find matching rule for a point in context, checking both directions
- */
-function findMatchingRule(rules, pointIndex, points, selectedIndices, isClosed) {
-  const numPoints = points.length;
-  const isSelected = (idx) => selectedIndices.has(idx);
-
-  const getFlags = (idx) => {
-    if (idx < 0 || idx >= numPoints) {
-      if (!isClosed) return NIL;
-      const wrappedIdx = ((idx % numPoints) + numPoints) % numPoints;
-      return getPointFlags(points[wrappedIdx], isSelected(wrappedIdx));
-    }
-    return getPointFlags(points[idx], isSelected(idx));
-  };
-
-  // Get flags for the point and its neighbors
-  const flags = [
-    getFlags(pointIndex - 3),
-    getFlags(pointIndex - 2),
-    getFlags(pointIndex - 1),
-    getFlags(pointIndex),
-    getFlags(pointIndex + 1),
-    getFlags(pointIndex + 2),
-    getFlags(pointIndex + 3),
-  ];
-
-  // Try to match rules in both forward and backward directions
-  for (const rule of rules) {
-    const [rPPP, rPP, rP, rT, rN, rNN, constrain, action] = rule;
-    const pattern = [rPPP, rPP, rP, rT, rN, rNN];
-
-    // Try forward direction
-    if (
-      matchesPattern(flags[0], pattern[0]) &&
-      matchesPattern(flags[1], pattern[1]) &&
-      matchesPattern(flags[2], pattern[2]) &&
-      matchesPattern(flags[3], pattern[3]) &&
-      matchesPattern(flags[4], pattern[4]) &&
-      matchesPattern(flags[5], pattern[5])
-    ) {
-      return { action, constrain, pointIndex, direction: 1 };
-    }
-
-    // Try backward direction (reverse the pattern around thePoint)
-    const reversedPattern = [pattern[5], pattern[4], pattern[3], pattern[2], pattern[1], pattern[0]];
-    if (
-      matchesPattern(flags[1], reversedPattern[0]) &&
-      matchesPattern(flags[2], reversedPattern[1]) &&
-      matchesPattern(flags[3], reversedPattern[2]) &&
-      matchesPattern(flags[4], reversedPattern[3]) &&
-      matchesPattern(flags[5], reversedPattern[4]) &&
-      matchesPattern(flags[6], reversedPattern[5])
-    ) {
-      return { action, constrain, pointIndex, direction: -1 };
-    }
-  }
-
-  return null;
-}
+// Re-export flags for convenience
+export { ANY, NIL, OFF, SEL, SHA, SMO, UNS };
 
 /**
  * Constrain a vector to horizontal, vertical, or 45-degree diagonal
@@ -163,7 +36,6 @@ export function constrainHorVerDiag(vec) {
     tan = ay / ax;
   }
   if (0.414 < tan && tan < 2.414) {
-    // between 22.5 and 67.5 degrees
     const d = 0.5 * (ax + ay);
     constrainedVector.x = d * Math.sign(constrainedVector.x);
     constrainedVector.y = d * Math.sign(constrainedVector.y);
@@ -175,210 +47,322 @@ export function constrainHorVerDiag(vec) {
   return constrainedVector;
 }
 
-// Action factories - create functions that compute new point positions
-// Each action respects the `direction` parameter:
-// direction = 1: prev is "before", next is "after" (normal)
-// direction = -1: prev is "after", next is "before" (reversed)
+// Action factories - copied exactly from edit-behavior.js
+// These take (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) and return
+// a function that takes (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext)
 const actionFactories = {
-  /**
-   * Don't move the point
-   */
-  DontMove: (context) => {
-    return (delta, editedPoints) => {
-      return { ...context.thePoint };
+  DontMove: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      return thePoint;
     };
   },
 
-  /**
-   * Move the point by delta
-   */
-  Move: (context) => {
-    return (delta, editedPoints) => {
-      return {
-        ...context.thePoint,
-        x: context.thePoint.x + delta.x,
-        y: context.thePoint.y + delta.y,
-      };
+  Move: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      return transform.constrained(thePoint);
     };
   },
 
-  /**
-   * Rotate handle to maintain tangent direction when anchor moves
-   * Uses direction to determine which anchor to follow
-   */
-  RotateNext: (context) => {
-    // With direction, "prev" is the anchor we're attached to
-    const anchor = context.direction === 1 ? context.prev : context.next;
-    const anchorIndex = context.direction === 1 ? context.prevIndex : context.nextIndex;
-    const tangentRef = context.direction === 1 ? context.prevPrev : context.nextNext;
-    const tangentRefIndex = context.direction === 1 ? context.prevPrevIndex : context.nextNextIndex;
-
-    if (!anchor) return actionFactories.DontMove(context);
-
-    const handleVector = vector.subVectors(context.thePoint, anchor);
-    const handleLength = Math.hypot(handleVector.x, handleVector.y);
-
-    return (delta, editedPoints) => {
-      const editedAnchor = editedPoints[anchorIndex] || anchor;
-      const editedTangentRef = editedPoints[tangentRefIndex] || tangentRef;
-
-      if (!editedTangentRef) {
-        return { ...context.thePoint };
+  RotateNext: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    const handle = vector.subVectors(thePoint, prev);
+    const handleLength = Math.hypot(handle.x, handle.y);
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      const delta = vector.subVectors(prev, prevPrev);
+      if (!delta.x && !delta.y) {
+        return thePoint;
       }
-
-      const tangent = vector.subVectors(editedAnchor, editedTangentRef);
-      if (!tangent.x && !tangent.y) {
-        return { ...context.thePoint };
-      }
-
-      const angle = Math.atan2(tangent.y, tangent.x);
-      return {
-        ...context.thePoint,
-        x: editedAnchor.x + handleLength * Math.cos(angle),
-        y: editedAnchor.y + handleLength * Math.sin(angle),
+      const angle = Math.atan2(delta.y, delta.x);
+      const handlePoint = {
+        x: prev.x + handleLength * Math.cos(angle),
+        y: prev.y + handleLength * Math.sin(angle),
       };
+      return handlePoint;
     };
   },
 
-  /**
-   * Keep handle on the same line as anchor-tangentRef
-   */
-  ConstrainPrevAngle: (context) => {
-    const anchor = context.direction === 1 ? context.prev : context.next;
-    const tangentRef = context.direction === 1 ? context.prevPrev : context.nextNext;
-
-    if (!tangentRef || !anchor) return actionFactories.Move(context);
-
-    const tangent = vector.subVectors(anchor, tangentRef);
-    const perpVector = vector.rotateVector90CW(tangent);
-
-    return (delta, editedPoints) => {
-      const newPoint = {
-        x: context.thePoint.x + delta.x,
-        y: context.thePoint.y + delta.y,
-      };
-
+  ConstrainPrevAngle: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    const pt1 = prevPrev;
+    const pt2 = prev;
+    const perpVector = vector.rotateVector90CW(vector.subVectors(pt2, pt1));
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      let point = transform.free(thePoint);
       const intersection = vector.intersect(
-        tangentRef,
-        anchor,
-        newPoint,
-        vector.addVectors(newPoint, perpVector)
+        pt1,
+        pt2,
+        point,
+        vector.addVectors(point, perpVector)
       );
-
       if (!intersection) {
-        return { ...context.thePoint, ...newPoint };
+        return point;
       }
-      return { ...context.thePoint, ...intersection };
+      return intersection;
     };
   },
 
-  /**
-   * Find intersection of two handle directions
-   */
-  HandleIntersect: (context) => {
-    const { prev, thePoint, next } = context;
-    if (!prev || !next) return actionFactories.Move(context);
+  ConstrainMiddle: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    const pt1 = prev;
+    const pt2 = next;
+    const perpVector = vector.rotateVector90CW(vector.subVectors(pt2, pt1));
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      let point = transform.free(thePoint);
+      const intersection = vector.intersect(
+        pt1,
+        pt2,
+        point,
+        vector.addVectors(point, perpVector)
+      );
+      if (!intersection) {
+        return point;
+      }
+      return intersection;
+    };
+  },
 
+  ConstrainMiddleTwo: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    const pt1 = prevPrev;
+    const pt2 = next;
+    const perpVector = vector.rotateVector90CW(vector.subVectors(pt2, pt1));
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      let point = transform.free(thePoint);
+      const intersection = vector.intersect(
+        pt1,
+        pt2,
+        point,
+        vector.addVectors(point, perpVector)
+      );
+      if (!intersection) {
+        return point;
+      }
+      return intersection;
+    };
+  },
+
+  TangentIntersect: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    const nextHandle = vector.subVectors(thePoint, next);
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      let point = transform.free(thePoint);
+      const intersection = vector.intersect(
+        prevPrev,
+        prev,
+        next,
+        vector.addVectors(next, nextHandle)
+      );
+      if (!intersection) {
+        return point;
+      }
+      return intersection;
+    };
+  },
+
+  TangentIntersectLive: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      let point = transform.free(thePoint);
+      const intersection = vector.intersect(prevPrev, prev, next, nextNext);
+      if (!intersection) {
+        return thePoint;
+      }
+      return intersection;
+    };
+  },
+
+  HandleIntersect: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
     const handlePrev = vector.subVectors(thePoint, prev);
     const handleNext = vector.subVectors(thePoint, next);
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      const intersection = vector.intersect(
+        prev,
+        vector.addVectors(prev, handlePrev),
+        next,
+        vector.addVectors(next, handleNext)
+      );
+      if (!intersection) {
+        return thePoint;
+      }
+      return intersection;
+    };
+  },
 
-    return (delta, editedPoints) => {
-      const editedPrev = editedPoints[context.prevIndex] || prev;
-      const editedNext = editedPoints[context.nextIndex] || next;
+  ConstrainHandle: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      const newPoint = transform.free(thePoint);
+      const handleVector = transform.constrainDelta(vector.subVectors(newPoint, prev));
+      return vector.addVectors(prev, handleVector);
+    };
+  },
+
+  ConstrainHandleIntersect: (
+    prevPrevPrev,
+    prevPrev,
+    prev,
+    thePoint,
+    next,
+    nextNext
+  ) => {
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      const newPoint = transform.free(thePoint);
+      const handlePrev = transform.constrainDelta(vector.subVectors(newPoint, prev));
+      const handleNext = transform.constrainDelta(vector.subVectors(newPoint, next));
 
       const intersection = vector.intersect(
-        editedPrev,
-        vector.addVectors(editedPrev, handlePrev),
-        editedNext,
-        vector.addVectors(editedNext, handleNext)
+        prev,
+        vector.addVectors(prev, handlePrev),
+        next,
+        vector.addVectors(next, handleNext)
       );
-
       if (!intersection) {
-        return { ...context.thePoint };
+        return newPoint;
       }
-      return { ...context.thePoint, ...intersection };
+      return intersection;
     };
   },
 
-  /**
-   * Constrain handle to 0/45/90 degrees from anchor
-   */
-  ConstrainHandle: (context) => {
-    const anchor = context.direction === 1 ? context.prev : context.next;
-    const anchorIndex = context.direction === 1 ? context.prevIndex : context.nextIndex;
+  ConstrainHandleIntersectPrev: (
+    prevPrevPrev,
+    prevPrev,
+    prev,
+    thePoint,
+    next,
+    nextNext
+  ) => {
+    const tangentPrev = vector.subVectors(prev, prevPrev);
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      const newPoint = transform.free(thePoint);
+      const handleNext = transform.constrainDelta(vector.subVectors(newPoint, next));
 
-    if (!anchor) return actionFactories.Move(context);
-
-    return (delta, editedPoints, constrainDelta) => {
-      const editedAnchor = editedPoints[anchorIndex] || anchor;
-      const newPoint = {
-        x: context.thePoint.x + delta.x,
-        y: context.thePoint.y + delta.y,
-      };
-      const handleVector = constrainDelta(vector.subVectors(newPoint, editedAnchor));
-      return {
-        ...context.thePoint,
-        x: editedAnchor.x + handleVector.x,
-        y: editedAnchor.y + handleVector.y,
-      };
+      const intersection = vector.intersect(
+        prev,
+        vector.addVectors(prev, tangentPrev),
+        next,
+        vector.addVectors(next, handleNext)
+      );
+      if (!intersection) {
+        return newPoint;
+      }
+      return intersection;
     };
   },
 
-  /**
-   * Move with the anchor (for handles attached to selected on-curve)
-   */
-  MoveWithAnchor: (context) => {
-    const anchor = context.direction === 1 ? context.prev : context.next;
-    const anchorIndex = context.direction === 1 ? context.prevIndex : context.nextIndex;
+  Interpolate: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    const lenPrevNext = vector.distance(next, prev);
+    const lenPrev = vector.distance(thePoint, prev);
+    let t = lenPrevNext > 0.0001 ? lenPrev / lenPrevNext : 0;
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      const prevNext = vector.subVectors(next, prev);
+      return vector.addVectors(prev, vector.mulVectorScalar(prevNext, t));
+    };
+  },
 
-    if (!anchor) return actionFactories.Move(context);
+  InterpolatePrevPrevNext: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    const lenPrevPrevNext = vector.distance(next, prevPrev);
+    const lenPrevPrev = vector.distance(thePoint, prevPrev);
+    let t = lenPrevPrevNext > 0.0001 ? lenPrevPrev / lenPrevPrevNext : 0;
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      const prevPrevNext = vector.subVectors(next, prevPrev);
+      return vector.addVectors(prevPrev, vector.mulVectorScalar(prevPrevNext, t));
+    };
+  },
 
-    const offset = vector.subVectors(context.thePoint, anchor);
+  ConstrainAroundPrevPrev: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      const newPoint = transform.free(thePoint);
+      const handleVector = transform.constrainDelta(
+        vector.subVectors(newPoint, prevPrev)
+      );
+      return vector.addVectors(prevPrev, handleVector);
+    };
+  },
 
-    return (delta, editedPoints) => {
-      const editedAnchor = editedPoints[anchorIndex] || anchor;
-      return {
-        ...context.thePoint,
-        x: editedAnchor.x + offset.x,
-        y: editedAnchor.y + offset.y,
-      };
+  ConstrainAroundPrevPrevPrev: (
+    prevPrevPrev,
+    prevPrev,
+    prev,
+    thePoint,
+    next,
+    nextNext
+  ) => {
+    return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+      const newPoint = transform.free(thePoint);
+      const handleVector = transform.constrainDelta(
+        vector.subVectors(newPoint, prevPrevPrev)
+      );
+      return vector.addVectors(prevPrevPrev, handleVector);
     };
   },
 };
 
-// Rules for skeleton point editing
-// Format: [prevPrevPrev, prevPrev, prev, thePoint, next, nextNext, constrain, action]
-// Rules are tried in both forward and backward directions
+// Rules copied exactly from edit-behavior.js
 // prettier-ignore
 const defaultRules = [
-  // Default rule: move selected points
-  [ANY | NIL, ANY | NIL, ANY | NIL, ANY | SEL, ANY | NIL, ANY | NIL, false, "Move"],
+  //   prev3       prevPrev    prev        the point   next        nextNext    Constrain   Action
 
-  // Unselected off-curve next to smooth point that's next to selected point -> rotate
-  // This handles the case: selected_point - smooth - off_curve
-  [ANY | NIL, ANY | SEL, SMO | UNS, OFF | UNS, ANY | NIL, ANY | NIL, false, "RotateNext"],
+  // Default rule: if no other rules apply, just move the selected point
+  [    ANY|NIL,    ANY|NIL,    ANY|NIL,    ANY|SEL,    ANY|NIL,    ANY|NIL,    false,      "Move"],
 
-  // Selected smooth point: neighboring off-curve should rotate
-  // This handles: any - smooth_selected - off_curve
-  [ANY | NIL, ANY | NIL, SMO | SEL, OFF | UNS, ANY | NIL, ANY | NIL, false, "RotateNext"],
+  // Unselected off-curve point next to a smooth point next to a selected point
+  [    ANY|NIL,    ANY|SEL,    SMO|UNS,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    true,       "RotateNext"],
 
-  // Unselected off-curve attached to selected on-curve -> move with it
-  [ANY | NIL, ANY | NIL, SMO | SEL, OFF | UNS, ANY | NIL, ANY | NIL, false, "MoveWithAnchor"],
-  [ANY | NIL, ANY | NIL, SHA | SEL, OFF | UNS, ANY | NIL, ANY | NIL, false, "MoveWithAnchor"],
+  // Selected tangent point: its neighboring off-curve point should move
+  [    ANY|NIL,    SHA|SMO|UNS,SMO|SEL,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    true,       "RotateNext"],
 
-  // Off-curve between two on-curve points, one selected -> find intersection
-  [ANY | NIL, SMO | SHA, OFF | UNS, SMO | SHA | SEL, ANY | NIL, ANY | NIL, false, "HandleIntersect"],
+  // Selected tangent point, selected handle: constrain both on original angle
+  [    ANY|NIL,    SHA|SMO|UNS,SMO|SEL,    OFF|SEL,    OFF|SHA|NIL,ANY|NIL,    true,       "ConstrainPrevAngle"],
+  [    ANY|NIL,    ANY,        SHA|SMO|UNS,SMO|SEL,    OFF|SEL,    OFF|SHA|NIL,true,       "ConstrainMiddle"],
+
+  // Unselected free off-curve point, move with on-curve neighbor
+  [    ANY|NIL,    ANY|NIL,    SHA|SMO|SEL,OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    false,      "Move"],
+  [    ANY|NIL,    OFF,        SMO|SEL,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    false,      "Move"],
+
+  // An unselected off-curve between two on-curve points
+  [    ANY|NIL,    ANY,        SMO|SHA|SEL,OFF|UNS,    SMO|SHA,    ANY|NIL,    true,       "HandleIntersect"],
+  [    ANY|NIL,    ANY|SEL,    SMO|UNS,    OFF|UNS,    SMO,        ANY|NIL,    true,       "TangentIntersectLive"],
+  [    ANY|NIL,    SMO|SHA,    SMO|SEL,    OFF|UNS,    SMO|SHA,    ANY|NIL,    true,       "TangentIntersect"],
+  [    ANY|NIL,    SMO|SHA,    SMO|UNS,    OFF|SEL,    SMO|SEL,    ANY|NIL,    true,       "HandleIntersect"],
+  [    ANY|NIL,    ANY|SEL,    SMO|UNS,    OFF|UNS,    SHA|SEL,    ANY|NIL,    true,       "TangentIntersect"],
+
+  // Tangent bcp constraint
+  [    ANY|NIL,    SMO|SHA,    SMO|UNS,    OFF|SEL,    ANY|UNS|NIL,ANY|NIL,    false,      "ConstrainPrevAngle"],
+  [    ANY|NIL,    SMO|SHA,    SMO|UNS,    OFF|SEL,    SHA|OFF,    ANY|NIL,    false,      "ConstrainPrevAngle"],
+
+  // Two selected points with an unselected smooth point between them
+  [    ANY|NIL,    ANY|SEL,    SMO|UNS,    ANY|SEL,    ANY|NIL,    ANY|NIL,    false,      "ConstrainPrevAngle"],
+  [    ANY|NIL,    ANY|SEL,    SMO|UNS,    ANY|SEL,    SMO|UNS,    ANY|SEL,    false,      "DontMove"],
+  [    ANY|NIL,    ANY|SEL,    SMO|UNS,    ANY|SEL,    SMO|UNS,    SMO|UNS,    false,      "DontMove"],
+
+  // Selected tangent with selected handle: constrain at original tangent line
+  [    ANY|NIL,    SMO|SHA|UNS,SMO|SEL,    OFF|SEL,    ANY|NIL,    ANY|NIL,    false,      "ConstrainPrevAngle"],
+  [    ANY|NIL,    ANY,        SHA|SMO|UNS,SMO|SEL,    OFF|SEL,    ANY|NIL,    true,       "ConstrainMiddle"],
+
+  // Selected tangent, selected off-curve, selected smooth
+  [    ANY|NIL,    SMO|SHA|UNS,SMO|SEL,    OFF|SEL,    SMO|SEL,    ANY|NIL,    true,       "HandleIntersect"],
+
+  // Selected single off-curve, locked between two unselected smooth points
+  [    ANY|NIL,    SHA|SMO|UNS,SMO|UNS,    OFF|SEL,    SMO|UNS,    OFF|SEL,    false,      "DontMove"],
+
 ];
 
 // prettier-ignore
 const constrainRules = defaultRules.concat([
-  // Constrain handle to 0/45/90 degrees
-  [ANY | NIL, ANY | NIL, SMO | SHA | UNS, OFF | SEL, ANY | NIL, ANY | NIL, false, "ConstrainHandle"],
-  [ANY | NIL, ANY | NIL, SMO | SHA | SEL, OFF | SEL, ANY | NIL, ANY | NIL, false, "ConstrainPrevAngle"],
+
+  // Selected free off curve: constrain to 0, 45 or 90 degrees
+  [    ANY|NIL,    OFF|UNS,    SMO|UNS,    OFF|SEL,    OFF|NIL,    ANY|NIL,    false,      "ConstrainHandle"],
+  [    ANY|NIL,    ANY|NIL,    SHA|UNS,    OFF|SEL,    OFF|NIL,    ANY|NIL,    false,      "ConstrainHandle"],
+  [    ANY|NIL,    OFF|UNS,    SMO|UNS,    OFF|SEL,    SMO|UNS,    OFF|UNS,    false,      "ConstrainHandleIntersect"],
+  [    ANY|NIL,    ANY|NIL,    SHA|UNS,    OFF|SEL,    SHA|UNS,    ANY|NIL,    false,      "ConstrainHandleIntersect"],
+  [    ANY|NIL,    OFF|UNS,    SMO|UNS,    OFF|SEL,    SHA|UNS,    ANY|NIL,    false,      "ConstrainHandleIntersect"],
+  [    ANY|NIL,    SHA|SMO|UNS,SMO|UNS,    OFF|SEL,    SMO|UNS,    OFF|UNS,    false,      "ConstrainHandleIntersectPrev"],
+
+  // Selected smooth between unselected on-curve and off-curve
+  [    ANY|NIL,    ANY|UNS,    SMO|SHA|UNS,SMO|SEL,    OFF|UNS,    ANY|NIL,    false,      "ConstrainHandle"],
+
 ]);
+
+// Build match trees
+const defaultMatchTree = buildPointMatchTree(defaultRules);
+const constrainMatchTree = buildPointMatchTree(constrainRules);
 
 /**
  * SkeletonEditBehavior - manages editing of skeleton points
+ * Uses the same rule matching system as edit-behavior.js
  */
 export class SkeletonEditBehavior {
   constructor(skeletonData, contourIndex, selectedPointIndices, useConstraint = false) {
@@ -388,8 +372,11 @@ export class SkeletonEditBehavior {
     this.points = this.contour.points;
     this.isClosed = this.contour.isClosed;
     this.selectedIndices = new Set(selectedPointIndices);
-    this.rules = useConstraint ? constrainRules : defaultRules;
+    this.matchTree = useConstraint ? constrainMatchTree : defaultMatchTree;
     this.constrainDelta = useConstraint ? constrainHorVerDiag : (v) => v;
+
+    // Mark selected points
+    this._preparePoints();
 
     // Build edit functions for each point
     this.editFuncs = this._buildEditFuncs();
@@ -398,72 +385,65 @@ export class SkeletonEditBehavior {
     this.originalPositions = this.points.map((p) => ({ x: p.x, y: p.y }));
   }
 
+  _preparePoints() {
+    // Add 'selected' flag to points for findPointMatch
+    for (let i = 0; i < this.points.length; i++) {
+      this.points[i].selected = this.selectedIndices.has(i);
+    }
+  }
+
   _buildEditFuncs() {
-    const editFuncs = [];
+    const editFuncsTransform = [];
+    const editFuncsConstrain = [];
     const numPoints = this.points.length;
 
     for (let i = 0; i < numPoints; i++) {
-      const match = findMatchingRule(
-        this.rules,
+      const [match, neighborIndices] = findPointMatch(
+        this.matchTree,
         i,
         this.points,
-        this.selectedIndices,
+        numPoints,
         this.isClosed
       );
 
       if (!match) continue;
 
-      // Build context for action factory
-      const getPoint = (idx) => {
-        if (idx < 0 || idx >= numPoints) {
-          if (!this.isClosed) return null;
-          return this.points[((idx % numPoints) + numPoints) % numPoints];
-        }
-        return this.points[idx];
-      };
+      // Use direction to get correct neighbor order (same as edit-behavior.js)
+      const [prevPrevPrev, prevPrev, prev, thePoint, next, nextNext, nextNextNext] =
+        match.direction > 0 ? neighborIndices : reversed(neighborIndices);
 
-      const context = {
-        direction: match.direction,
-        prevPrevPrevIndex: this._wrapIndex(i - 3),
-        prevPrevIndex: this._wrapIndex(i - 2),
-        prevIndex: this._wrapIndex(i - 1),
-        thePointIndex: i,
-        nextIndex: this._wrapIndex(i + 1),
-        nextNextIndex: this._wrapIndex(i + 2),
-        nextNextNextIndex: this._wrapIndex(i + 3),
-        prevPrevPrev: getPoint(i - 3),
-        prevPrev: getPoint(i - 2),
-        prev: getPoint(i - 1),
-        thePoint: this.points[i],
-        next: getPoint(i + 1),
-        nextNext: getPoint(i + 2),
-        nextNextNext: getPoint(i + 3),
-      };
-
-      const factory = actionFactories[match.action];
-      if (!factory) {
+      const actionFactory = actionFactories[match.action];
+      if (!actionFactory) {
         console.warn(`Unknown action: ${match.action}`);
         continue;
       }
 
-      const actionFunc = factory(context);
-      editFuncs.push({
-        pointIndex: i,
+      // Create action function with original points
+      const actionFunc = actionFactory(
+        this.points[prevPrevPrev],
+        this.points[prevPrev],
+        this.points[prev],
+        this.points[thePoint],
+        this.points[next],
+        this.points[nextNext]
+      );
+
+      const editEntry = {
+        pointIndex: thePoint,
+        neighborIndices: { prevPrevPrev, prevPrev, prev, thePoint, next, nextNext },
         constrain: match.constrain,
-        apply: actionFunc,
-      });
+        actionFunc,
+      };
+
+      if (!match.constrain) {
+        editFuncsTransform.push(editEntry);
+      } else {
+        editFuncsConstrain.push(editEntry);
+      }
     }
 
-    // Sort: non-constrain actions first, then constrain actions
-    editFuncs.sort((a, b) => (a.constrain ? 1 : 0) - (b.constrain ? 1 : 0));
-
-    return editFuncs;
-  }
-
-  _wrapIndex(idx) {
-    if (!this.isClosed) return idx;
-    const n = this.points.length;
-    return ((idx % n) + n) % n;
+    // Transform (non-constrain) first, then constrain
+    return [...editFuncsTransform, ...editFuncsConstrain];
   }
 
   /**
@@ -471,19 +451,46 @@ export class SkeletonEditBehavior {
    * Returns array of { pointIndex, x, y } for changed points
    */
   applyDelta(delta) {
-    const constrainedDelta = this.constrainDelta(delta);
-    const editedPoints = {};
+    const editedPoints = [...this.points]; // Copy for mutation
     const changes = [];
 
-    for (const { pointIndex, apply, constrain } of this.editFuncs) {
-      const d = constrain ? constrainedDelta : delta;
-      const newPos = apply(d, editedPoints, this.constrainDelta);
+    // Create transform object matching edit-behavior.js interface
+    const constrainedDelta = this.constrainDelta(delta);
+    const transformConstrained = (point) => ({
+      x: point.x + constrainedDelta.x,
+      y: point.y + constrainedDelta.y,
+    });
+    const transformFree = (point) => ({
+      x: point.x + delta.x,
+      y: point.y + delta.y,
+    });
 
-      editedPoints[pointIndex] = newPos;
+    const transform = {
+      constrained: transformConstrained,
+      free: transformFree,
+      constrainDelta: this.constrainDelta,
+    };
+
+    for (const { pointIndex, neighborIndices, actionFunc } of this.editFuncs) {
+      const { prevPrevPrev, prevPrev, prev, thePoint, next, nextNext } = neighborIndices;
+
+      const newPoint = actionFunc(
+        transform,
+        editedPoints[prevPrevPrev],
+        editedPoints[prevPrev],
+        editedPoints[prev],
+        editedPoints[thePoint],
+        editedPoints[next],
+        editedPoints[nextNext]
+      );
+
+      // Update edited points for subsequent constrain actions
+      editedPoints[pointIndex] = { ...this.points[pointIndex], ...newPoint };
+
       changes.push({
         pointIndex,
-        x: Math.round(newPos.x),
-        y: Math.round(newPos.y),
+        x: Math.round(newPoint.x),
+        y: Math.round(newPoint.y),
       });
     }
 
