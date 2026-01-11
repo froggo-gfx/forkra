@@ -1276,7 +1276,7 @@ async function runDialogReplaceGlyphs(glyphNames, glyphMap) {
         outputGlyphNames = glyphNames;
     }
 
-    const warningString = makeOverWriteGlyphsString(outputGlyphNames, glyphMap, 3);
+    const warningString = makeOverwriteGlyphsWarningString(outputGlyphNames, glyphMap);
     const warningElement = dialogContent.querySelector("#warning-string");
     warningElement.innerText = warningString;
   };
@@ -1291,12 +1291,16 @@ async function runDialogReplaceGlyphs(glyphNames, glyphMap) {
   return result === "ok" ? outputGlyphNames : null;
 }
 
-function makeOverWriteGlyphsString(glyphNames, glyphMap, numMentionedGlyphs) {
+function makeOverwriteGlyphsWarningString(
+  glyphNames,
+  glyphMap,
+  numMentionedGlyphs = 3
+) {
   glyphNames = glyphNames.filter((glyphName) => glyphMap[glyphName]);
 
   if (glyphNames.length <= 1) {
     return glyphNames.length
-      ? `Glyph '${glyphNames[0]}' will be overwritten.`
+      ? `⚠️ Glyph '${glyphNames[0]}' will be overwritten.`
       : "No glyphs will be overwritten.";
   }
 
@@ -1306,7 +1310,7 @@ function makeOverWriteGlyphsString(glyphNames, glyphMap, numMentionedGlyphs) {
   const lastMentioned = !numMore ? firstNames.pop() : undefined;
 
   return (
-    "Glyphs " +
+    "⚠️ Glyphs " +
     firstNames.map((glyphName) => `'${glyphName}'`).join(", ") +
     (numMore ? ` and ${numMore} more` : ` and '${lastMentioned}'`) +
     " will be overwritten."
