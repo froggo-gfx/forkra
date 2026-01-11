@@ -271,7 +271,9 @@ export class SkeletonPenTool extends BaseTool {
     const glyphPoint = this._getGlyphPoint(event);
     if (!glyphPoint) return null;
 
-    const margin = this.sceneController.mouseClickMargin;
+    // Use a larger margin for centerline hit testing since it's a thin line
+    // Regular path hit testing uses mouseClickMargin / 2, we use 1.5x for easier targeting
+    const margin = this.sceneController.mouseClickMargin * 1.5;
 
     for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
       const contour = skeletonData.contours[contourIndex];

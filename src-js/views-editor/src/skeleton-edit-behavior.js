@@ -9,18 +9,20 @@
  * - On-curve points can be smooth (smooth: true) or sharp (smooth: false)
  * - When moving a smooth on-curve point, adjacent off-curve handles rotate to maintain tangent
  * - When moving an off-curve handle, the opposite handle of a smooth point rotates too
+ * - Rules are applied bidirectionally (both prev and next handles are affected)
  */
 
 import * as vector from "@fontra/core/vector.js";
 
 // Point type flags for rule matching
-export const ANY = 1; // Any point type
-export const NIL = 2; // No point (boundary)
-export const OFF = 4; // Off-curve point (handle)
-export const SEL = 8; // Selected
-export const SHA = 16; // Sharp (corner) point
-export const SMO = 32; // Smooth point
-export const UNS = 64; // Unselected
+// Note: ANY = SHA | SMO | OFF (doesn't include NIL)
+export const NIL = 1 << 0; // Does not exist (boundary)
+export const SEL = 1 << 1; // Selected
+export const UNS = 1 << 2; // Unselected
+export const SHA = 1 << 3; // Sharp On-Curve
+export const SMO = 1 << 4; // Smooth On-Curve
+export const OFF = 1 << 5; // Off-Curve
+export const ANY = SHA | SMO | OFF; // Any point type (not including NIL)
 
 /**
  * Get the type flags for a skeleton point
@@ -54,34 +56,22 @@ function getPointFlags(point, isSelected) {
 
 /**
  * Check if a point matches a rule pattern
- *
- * Pattern flags:
- * - ANY: match any point type (OFF/SMO/SHA) - used for "don't care" positions
- * - NIL: match when there's no point (boundary)
- * - OFF/SMO/SHA: match specific point types
- * - SEL/UNS: match selection state
- *
- * When ANY is combined with SEL/UNS, it means "any type but must match selection"
- * When ANY is combined with NIL, it means "any point or no point"
  */
 function matchesPattern(flags, pattern) {
   // Handle NIL (no point / boundary)
   if (flags & NIL) {
-    // NIL point matches if pattern allows NIL
     return !!(pattern & NIL);
   }
 
   // For non-NIL points, check type and selection
-
-  // Check type match: ANY matches all types, or specific type must match
   const hasTypePattern = pattern & (OFF | SMO | SHA);
   const typeMatch =
-    (pattern & ANY) || // ANY matches any type
+    !hasTypePattern || // No type specified means any type
     ((pattern & OFF) && (flags & OFF)) ||
     ((pattern & SMO) && (flags & SMO)) ||
     ((pattern & SHA) && (flags & SHA));
 
-  if (!typeMatch && hasTypePattern) {
+  if (!typeMatch) {
     return false;
   }
 
@@ -95,29 +85,15 @@ function matchesPattern(flags, pattern) {
     }
   }
 
-  // If pattern is just ANY | NIL for neighbor positions, allow anything
-  if ((pattern & ANY) && (pattern & NIL) && !hasSelPattern) {
-    return true;
-  }
-
-  return typeMatch;
+  return true;
 }
 
 /**
- * Find matching rule for a point in context
+ * Find matching rule for a point in context, checking both directions
  */
 function findMatchingRule(rules, pointIndex, points, selectedIndices, isClosed) {
   const numPoints = points.length;
   const isSelected = (idx) => selectedIndices.has(idx);
-
-  // Get point with wrapping for closed contours
-  const getPoint = (idx) => {
-    if (idx < 0 || idx >= numPoints) {
-      if (!isClosed) return null;
-      return points[((idx % numPoints) + numPoints) % numPoints];
-    }
-    return points[idx];
-  };
 
   const getFlags = (idx) => {
     if (idx < 0 || idx >= numPoints) {
@@ -129,35 +105,44 @@ function findMatchingRule(rules, pointIndex, points, selectedIndices, isClosed) 
   };
 
   // Get flags for the point and its neighbors
-  const prevPrevPrevFlags = getFlags(pointIndex - 3);
-  const prevPrevFlags = getFlags(pointIndex - 2);
-  const prevFlags = getFlags(pointIndex - 1);
-  const thePointFlags = getFlags(pointIndex);
-  const nextFlags = getFlags(pointIndex + 1);
-  const nextNextFlags = getFlags(pointIndex + 2);
+  const flags = [
+    getFlags(pointIndex - 3),
+    getFlags(pointIndex - 2),
+    getFlags(pointIndex - 1),
+    getFlags(pointIndex),
+    getFlags(pointIndex + 1),
+    getFlags(pointIndex + 2),
+    getFlags(pointIndex + 3),
+  ];
 
-  // Try to match rules in order (first match wins)
+  // Try to match rules in both forward and backward directions
   for (const rule of rules) {
-    const [
-      rPrevPrevPrev,
-      rPrevPrev,
-      rPrev,
-      rThePoint,
-      rNext,
-      rNextNext,
-      constrain,
-      action,
-    ] = rule;
+    const [rPPP, rPP, rP, rT, rN, rNN, constrain, action] = rule;
+    const pattern = [rPPP, rPP, rP, rT, rN, rNN];
 
+    // Try forward direction
     if (
-      matchesPattern(prevPrevPrevFlags, rPrevPrevPrev) &&
-      matchesPattern(prevPrevFlags, rPrevPrev) &&
-      matchesPattern(prevFlags, rPrev) &&
-      matchesPattern(thePointFlags, rThePoint) &&
-      matchesPattern(nextFlags, rNext) &&
-      matchesPattern(nextNextFlags, rNextNext)
+      matchesPattern(flags[0], pattern[0]) &&
+      matchesPattern(flags[1], pattern[1]) &&
+      matchesPattern(flags[2], pattern[2]) &&
+      matchesPattern(flags[3], pattern[3]) &&
+      matchesPattern(flags[4], pattern[4]) &&
+      matchesPattern(flags[5], pattern[5])
     ) {
-      return { action, constrain, pointIndex };
+      return { action, constrain, pointIndex, direction: 1 };
+    }
+
+    // Try backward direction (reverse the pattern around thePoint)
+    const reversedPattern = [pattern[5], pattern[4], pattern[3], pattern[2], pattern[1], pattern[0]];
+    if (
+      matchesPattern(flags[1], reversedPattern[0]) &&
+      matchesPattern(flags[2], reversedPattern[1]) &&
+      matchesPattern(flags[3], reversedPattern[2]) &&
+      matchesPattern(flags[4], reversedPattern[3]) &&
+      matchesPattern(flags[5], reversedPattern[4]) &&
+      matchesPattern(flags[6], reversedPattern[5])
+    ) {
+      return { action, constrain, pointIndex, direction: -1 };
     }
   }
 
@@ -191,6 +176,9 @@ export function constrainHorVerDiag(vec) {
 }
 
 // Action factories - create functions that compute new point positions
+// Each action respects the `direction` parameter:
+// direction = 1: prev is "before", next is "after" (normal)
+// direction = -1: prev is "after", next is "before" (reversed)
 const actionFactories = {
   /**
    * Don't move the point
@@ -216,64 +204,71 @@ const actionFactories = {
 
   /**
    * Rotate handle to maintain tangent direction when anchor moves
-   * Used for unselected off-curve next to moved smooth point
+   * Uses direction to determine which anchor to follow
    */
   RotateNext: (context) => {
-    const { prev, thePoint } = context;
-    if (!prev) return actionFactories.DontMove(context);
+    // With direction, "prev" is the anchor we're attached to
+    const anchor = context.direction === 1 ? context.prev : context.next;
+    const anchorIndex = context.direction === 1 ? context.prevIndex : context.nextIndex;
+    const tangentRef = context.direction === 1 ? context.prevPrev : context.nextNext;
+    const tangentRefIndex = context.direction === 1 ? context.prevPrevIndex : context.nextNextIndex;
 
-    const handleVector = vector.subVectors(thePoint, prev);
+    if (!anchor) return actionFactories.DontMove(context);
+
+    const handleVector = vector.subVectors(context.thePoint, anchor);
     const handleLength = Math.hypot(handleVector.x, handleVector.y);
 
     return (delta, editedPoints) => {
-      const editedPrev = editedPoints[context.prevIndex] || prev;
-      const editedPrevPrev = editedPoints[context.prevPrevIndex] || context.prevPrev;
+      const editedAnchor = editedPoints[anchorIndex] || anchor;
+      const editedTangentRef = editedPoints[tangentRefIndex] || tangentRef;
 
-      if (!editedPrevPrev) {
-        return { ...thePoint };
+      if (!editedTangentRef) {
+        return { ...context.thePoint };
       }
 
-      const tangent = vector.subVectors(editedPrev, editedPrevPrev);
+      const tangent = vector.subVectors(editedAnchor, editedTangentRef);
       if (!tangent.x && !tangent.y) {
-        return { ...thePoint };
+        return { ...context.thePoint };
       }
 
       const angle = Math.atan2(tangent.y, tangent.x);
       return {
-        ...thePoint,
-        x: editedPrev.x + handleLength * Math.cos(angle),
-        y: editedPrev.y + handleLength * Math.sin(angle),
+        ...context.thePoint,
+        x: editedAnchor.x + handleLength * Math.cos(angle),
+        y: editedAnchor.y + handleLength * Math.sin(angle),
       };
     };
   },
 
   /**
-   * Keep handle on the same line as prev-prevPrev
+   * Keep handle on the same line as anchor-tangentRef
    */
   ConstrainPrevAngle: (context) => {
-    const { prevPrev, prev, thePoint } = context;
-    if (!prevPrev || !prev) return actionFactories.Move(context);
+    const anchor = context.direction === 1 ? context.prev : context.next;
+    const tangentRef = context.direction === 1 ? context.prevPrev : context.nextNext;
 
-    const tangent = vector.subVectors(prev, prevPrev);
+    if (!tangentRef || !anchor) return actionFactories.Move(context);
+
+    const tangent = vector.subVectors(anchor, tangentRef);
     const perpVector = vector.rotateVector90CW(tangent);
 
     return (delta, editedPoints) => {
       const newPoint = {
-        x: thePoint.x + delta.x,
-        y: thePoint.y + delta.y,
+        x: context.thePoint.x + delta.x,
+        y: context.thePoint.y + delta.y,
       };
 
       const intersection = vector.intersect(
-        prevPrev,
-        prev,
+        tangentRef,
+        anchor,
         newPoint,
         vector.addVectors(newPoint, perpVector)
       );
 
       if (!intersection) {
-        return { ...thePoint, ...newPoint };
+        return { ...context.thePoint, ...newPoint };
       }
-      return { ...thePoint, ...intersection };
+      return { ...context.thePoint, ...intersection };
     };
   },
 
@@ -299,9 +294,9 @@ const actionFactories = {
       );
 
       if (!intersection) {
-        return { ...thePoint };
+        return { ...context.thePoint };
       }
-      return { ...thePoint, ...intersection };
+      return { ...context.thePoint, ...intersection };
     };
   },
 
@@ -309,20 +304,22 @@ const actionFactories = {
    * Constrain handle to 0/45/90 degrees from anchor
    */
   ConstrainHandle: (context) => {
-    const { prev, thePoint } = context;
-    if (!prev) return actionFactories.Move(context);
+    const anchor = context.direction === 1 ? context.prev : context.next;
+    const anchorIndex = context.direction === 1 ? context.prevIndex : context.nextIndex;
+
+    if (!anchor) return actionFactories.Move(context);
 
     return (delta, editedPoints, constrainDelta) => {
-      const editedPrev = editedPoints[context.prevIndex] || prev;
+      const editedAnchor = editedPoints[anchorIndex] || anchor;
       const newPoint = {
-        x: thePoint.x + delta.x,
-        y: thePoint.y + delta.y,
+        x: context.thePoint.x + delta.x,
+        y: context.thePoint.y + delta.y,
       };
-      const handleVector = constrainDelta(vector.subVectors(newPoint, editedPrev));
+      const handleVector = constrainDelta(vector.subVectors(newPoint, editedAnchor));
       return {
-        ...thePoint,
-        x: editedPrev.x + handleVector.x,
-        y: editedPrev.y + handleVector.y,
+        ...context.thePoint,
+        x: editedAnchor.x + handleVector.x,
+        y: editedAnchor.y + handleVector.y,
       };
     };
   },
@@ -331,17 +328,19 @@ const actionFactories = {
    * Move with the anchor (for handles attached to selected on-curve)
    */
   MoveWithAnchor: (context) => {
-    const { prev, thePoint } = context;
-    if (!prev) return actionFactories.Move(context);
+    const anchor = context.direction === 1 ? context.prev : context.next;
+    const anchorIndex = context.direction === 1 ? context.prevIndex : context.nextIndex;
 
-    const offset = vector.subVectors(thePoint, prev);
+    if (!anchor) return actionFactories.Move(context);
+
+    const offset = vector.subVectors(context.thePoint, anchor);
 
     return (delta, editedPoints) => {
-      const editedPrev = editedPoints[context.prevIndex] || prev;
+      const editedAnchor = editedPoints[anchorIndex] || anchor;
       return {
-        ...thePoint,
-        x: editedPrev.x + offset.x,
-        y: editedPrev.y + offset.y,
+        ...context.thePoint,
+        x: editedAnchor.x + offset.x,
+        y: editedAnchor.y + offset.y,
       };
     };
   },
@@ -349,24 +348,26 @@ const actionFactories = {
 
 // Rules for skeleton point editing
 // Format: [prevPrevPrev, prevPrev, prev, thePoint, next, nextNext, constrain, action]
+// Rules are tried in both forward and backward directions
 // prettier-ignore
 const defaultRules = [
   // Default rule: move selected points
   [ANY | NIL, ANY | NIL, ANY | NIL, ANY | SEL, ANY | NIL, ANY | NIL, false, "Move"],
 
-  // Unselected off-curve next to smooth point next to selected point -> rotate
-  [ANY | NIL, ANY | SEL, SMO | UNS, OFF | UNS, ANY | NIL, ANY | NIL, true, "RotateNext"],
+  // Unselected off-curve next to smooth point that's next to selected point -> rotate
+  // This handles the case: selected_point - smooth - off_curve
+  [ANY | NIL, ANY | SEL, SMO | UNS, OFF | UNS, ANY | NIL, ANY | NIL, false, "RotateNext"],
 
   // Selected smooth point: neighboring off-curve should rotate
-  [ANY | NIL, SHA | SMO | UNS, SMO | SEL, OFF | UNS, ANY | NIL, ANY | NIL, true, "RotateNext"],
+  // This handles: any - smooth_selected - off_curve
+  [ANY | NIL, ANY | NIL, SMO | SEL, OFF | UNS, ANY | NIL, ANY | NIL, false, "RotateNext"],
 
-  // Unselected off-curve attached to selected smooth -> move with it
+  // Unselected off-curve attached to selected on-curve -> move with it
   [ANY | NIL, ANY | NIL, SMO | SEL, OFF | UNS, ANY | NIL, ANY | NIL, false, "MoveWithAnchor"],
   [ANY | NIL, ANY | NIL, SHA | SEL, OFF | UNS, ANY | NIL, ANY | NIL, false, "MoveWithAnchor"],
 
-  // Off-curve between two on-curve points, one selected
-  [ANY | NIL, ANY, SMO | SHA | SEL, OFF | UNS, SMO | SHA, ANY | NIL, true, "HandleIntersect"],
-  [ANY | NIL, SMO | SHA, SMO | SHA | SEL, OFF | UNS, SMO | SHA, ANY | NIL, true, "HandleIntersect"],
+  // Off-curve between two on-curve points, one selected -> find intersection
+  [ANY | NIL, SMO | SHA, OFF | UNS, SMO | SHA | SEL, ANY | NIL, ANY | NIL, false, "HandleIntersect"],
 ];
 
 // prettier-ignore
@@ -422,18 +423,21 @@ export class SkeletonEditBehavior {
       };
 
       const context = {
+        direction: match.direction,
         prevPrevPrevIndex: this._wrapIndex(i - 3),
         prevPrevIndex: this._wrapIndex(i - 2),
         prevIndex: this._wrapIndex(i - 1),
         thePointIndex: i,
         nextIndex: this._wrapIndex(i + 1),
         nextNextIndex: this._wrapIndex(i + 2),
+        nextNextNextIndex: this._wrapIndex(i + 3),
         prevPrevPrev: getPoint(i - 3),
         prevPrev: getPoint(i - 2),
         prev: getPoint(i - 1),
         thePoint: this.points[i],
         next: getPoint(i + 1),
         nextNext: getPoint(i + 2),
+        nextNextNext: getPoint(i + 3),
       };
 
       const factory = actionFactories[match.action];
