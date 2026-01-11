@@ -58,7 +58,7 @@ import {
 import { addItemwise, mulScalar, subItemwise } from "@fontra/core/var-funcs.js";
 import { StaticGlyph, VariableGlyph, copyComponent } from "@fontra/core/var-glyph.js";
 import { locationToString, makeSparseLocation } from "@fontra/core/var-model.js";
-import { VarPackedPath, joinPaths } from "@fontra/core/var-path.js";
+import { VarPackedPath, joinPaths, packContour } from "@fontra/core/var-path.js";
 import "@fontra/web-components/inline-svg.js";
 import { MenuItemDivider, showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialog, dialogSetup, message } from "@fontra/web-components/modal-dialog.js";
@@ -2387,7 +2387,7 @@ export class EditorController extends ViewController {
         const newGeneratedIndices = [];
         for (const contour of generatedContours) {
           const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.appendUnpackedContour(contour);
+          staticGlyph.path.insertContour(newIndex, packContour(contour));
           newGeneratedIndices.push(newIndex);
         }
         skelData.generatedContourIndices = newGeneratedIndices;

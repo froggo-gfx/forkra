@@ -31,7 +31,7 @@ import {
   range,
 } from "@fontra/core/utils.js";
 import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
-import { VarPackedPath } from "@fontra/core/var-path.js";
+import { VarPackedPath, packContour } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
 import { EditBehaviorFactory, constrainHorVerDiag } from "./edit-behavior.js";
 import { createSkeletonEditBehavior } from "./skeleton-edit-behavior.js";
@@ -172,7 +172,7 @@ export class PointerTool extends BaseTool {
         const newGeneratedIndices = [];
         for (const contour of generatedContours) {
           const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.appendUnpackedContour(contour);
+          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
           newGeneratedIndices.push(newIndex);
         }
         skelData.generatedContourIndices = newGeneratedIndices;
@@ -474,7 +474,7 @@ export class PointerTool extends BaseTool {
         const newGeneratedIndices = [];
         for (const contour of generatedContours) {
           const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.appendUnpackedContour(contour);
+          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
           newGeneratedIndices.push(newIndex);
         }
         skelData.generatedContourIndices = newGeneratedIndices;
@@ -712,7 +712,7 @@ export class PointerTool extends BaseTool {
         const newGeneratedIndices = [];
         for (const contour of generatedContours) {
           const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.appendUnpackedContour(contour);
+          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
           newGeneratedIndices.push(newIndex);
         }
         skelData.generatedContourIndices = newGeneratedIndices;

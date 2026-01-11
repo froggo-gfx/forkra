@@ -2,6 +2,7 @@ import { recordChanges } from "@fontra/core/change-recorder.js";
 import { ChangeCollector, consolidateChanges, applyChange } from "@fontra/core/changes.js";
 import { translate } from "@fontra/core/localization.js";
 import { parseSelection } from "@fontra/core/utils.js";
+import { packContour } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
 import {
   generateContoursFromSkeleton,
@@ -739,10 +740,11 @@ export class SkeletonPenTool extends BaseTool {
     const generatedContours = generateContoursFromSkeleton(skeletonData);
 
     // Add new contours and track their indices
+    // Use insertContour with packContour to ensure changes are recorded properly
     const newGeneratedIndices = [];
     for (const contour of generatedContours) {
       const newIndex = staticGlyph.path.numContours;
-      staticGlyph.path.appendUnpackedContour(contour);
+      staticGlyph.path.insertContour(newIndex, packContour(contour));
       newGeneratedIndices.push(newIndex);
     }
 

@@ -398,38 +398,42 @@ export class SceneController {
         // Deep clone
         skelData = JSON.parse(JSON.stringify(skelData));
 
-        // Remove any existing generated contours (if indices are valid)
+        // Get old generated indices before modification
         const oldGeneratedIndices = skelData.generatedContourIndices || [];
-        const staticGlyph = editLayer.glyph;
-        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-        for (const idx of sortedIndices) {
-          if (idx < staticGlyph.path.numContours) {
-            staticGlyph.path.deleteContour(idx);
-          }
-        }
 
-        // Generate new contours
+        // Generate new contours from skeleton
         const generatedContours = generateContoursFromSkeleton(skelData);
-        const newGeneratedIndices = [];
-        for (const contour of generatedContours) {
-          const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.appendUnpackedContour(contour);
-          newGeneratedIndices.push(newIndex);
-        }
-        skelData.generatedContourIndices = newGeneratedIndices;
 
-        // Record changes
+        // Record all changes properly
         const changes = [];
 
+        // Record path changes - delete old contours and insert new ones
+        const staticGlyph = editLayer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          // Remove old generated contours (in reverse order to maintain indices)
+          const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+          for (const idx of sortedIndices) {
+            if (idx < sg.path.numContours) {
+              sg.path.deleteContour(idx);
+            }
+          }
+
+          // Add new contours
+          const newGeneratedIndices = [];
+          for (const contour of generatedContours) {
+            const newIndex = sg.path.numContours;
+            sg.path.insertContour(newIndex, packContour(contour));
+            newGeneratedIndices.push(newIndex);
+          }
+          skelData.generatedContourIndices = newGeneratedIndices;
+        });
+        changes.push(pathChange.prefixed(["layers", layerName, "glyph"]));
+
+        // Record custom data change
         const customDataChange = recordChanges(editLayer, (l) => {
           l.customData[SKELETON_CUSTOM_DATA_KEY] = skelData;
         });
         changes.push(customDataChange.prefixed(["layers", layerName]));
-
-        const pathChange = recordChanges(staticGlyph, () => {
-          // Path already modified above
-        });
-        changes.push(pathChange.prefixed(["layers", layerName, "glyph"]));
 
         const combinedChange = new ChangeCollector().concat(...changes);
         await sendIncrementalChange(combinedChange.change);
