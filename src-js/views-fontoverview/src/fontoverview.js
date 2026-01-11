@@ -763,6 +763,18 @@ export class FontOverviewController extends ViewController {
     const plainTextStringPromise =
       mapping[applicationSettingsController.model.clipboardFormat] || jsonStringPromise;
 
+    if (plainTextStringPromise == jsonStringPromise) {
+      localStorage.removeItem("clipboardSelection.text-plain");
+      localStorage.removeItem("clipboardSelection.fontra-json");
+    } else {
+      plainTextStringPromise.then((plainTextString) => {
+        localStorage.setItem("clipboardSelection.text-plain", plainTextString);
+      });
+      jsonStringPromise.then((jsonString) => {
+        localStorage.setItem("clipboardSelection.fontra-json", jsonString);
+      });
+    }
+
     const clipboardObject = {
       "text/plain": plainTextStringPromise,
       "web fontra/json-clipboard": jsonStringPromise,
