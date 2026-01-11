@@ -4,7 +4,7 @@
 
 ### Font overview
 
-- Implement copy/paste, with multi-glyph selection. [Issue 2356](https://github.com/fontra/fontra/issues/2356)
+- Implement copy/paste, with multi-glyph selection. [Issue 2356](https://github.com/fontra/fontra/issues/2356), [PR 2366](https://github.com/fontra/fontra/pull/2366), [PR 2369](https://github.com/fontra/fontra/pull/2369), [PR 2367](https://github.com/fontra/fontra/pull/2367), [PR 2370](https://github.com/fontra/fontra/pull/2370)
 - Implement glyph deletion, added context menu, implement "select all" and "select none". [Issue 2354](https://github.com/fontra/fontra/issues/2354), [PR 2355](https://github.com/fontra/fontra/pull/2355)
 
 ### Responding to external changes
