@@ -677,8 +677,6 @@ export class EditorController extends ViewController {
     const menuItems = [...this.basicContextMenuItems];
     if (this.sceneSettings.selectedGlyph?.isEditing) {
       this.sceneController.updateContextMenuState(event);
-      menuItems.push(MenuItemDivider);
-      menuItems.push(...this.glyphEditContextMenuItems);
     }
     return menuItems;
   }
@@ -722,7 +720,7 @@ export class EditorController extends ViewController {
       { actionIdentifier: "action.glyph.delete-source" },
       { actionIdentifier: "action.glyph.edit-glyph-axes" },
       MenuItemDivider,
-      { actionIdentifier: "action.glyph.add-background-image" },
+      ...this.glyphEditContextMenuItems,
     ];
   }
 
