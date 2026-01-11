@@ -1303,16 +1303,12 @@ function makeOverWriteGlyphsString(glyphNames, glyphMap, numMentionedGlyphs) {
   const firstNames = glyphNames.slice(0, numMentionedGlyphs);
   const numMore =
     glyphNames.length > numMentionedGlyphs ? glyphNames.length - numMentionedGlyphs : 0;
+  const lastMentioned = !numMore ? firstNames.pop() : undefined;
 
   return (
     "Glyphs " +
-    firstNames
-      .slice(0, -1)
-      .map((glyphName) => `'${glyphName}'`)
-      .join(", ") +
-    " and " +
-    firstNames.at(-1) +
-    (numMore ? ` and ${numMore} more` : "") +
+    firstNames.map((glyphName) => `'${glyphName}'`).join(", ") +
+    (numMore ? ` and ${numMore} more` : ` and '${lastMentioned}'`) +
     " will be overwritten."
   );
 }
