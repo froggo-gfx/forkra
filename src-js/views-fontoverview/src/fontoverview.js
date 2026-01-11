@@ -3,12 +3,15 @@ import {
   getActionIdentifierFromKeyEvent,
   registerActionCallbacks,
 } from "@fontra/core/actions.js";
+import { applicationSettingsController } from "@fontra/core/application-settings.js";
 import { Backend } from "@fontra/core/backend-api.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { getGlyphMapProxy } from "@fontra/core/cmap.js";
 import { UndoStack, reverseUndoRecord } from "@fontra/core/font-controller.js";
 import { makeFontraMenuBar } from "@fontra/core/fontra-menus.js";
+import { staticGlyphToGLIF } from "@fontra/core/glyph-glif.js";
 import { GlyphOrganizer } from "@fontra/core/glyph-organizer.js";
+import { pathToSVG } from "@fontra/core/glyph-svg.js";
 import * as html from "@fontra/core/html-utils.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
 import { translate } from "@fontra/core/localization.js";
@@ -740,12 +743,36 @@ export class FontOverviewController extends ViewController {
   doCopy() {
     const glyphNamesToCopy = this.getSelectedExistingGlyphNames();
 
-    const jsonStringPromise = this.buildJSONStringForGlyphNames(glyphNamesToCopy);
+    const jsonStringPromise = this.buildJSONStringForGlyphs(glyphNamesToCopy);
+
+    let svgStringPromise;
+    let glifStringPromise;
+
+    if (glyphNamesToCopy.length == 1) {
+      const stringPromises = this.buildPathStringsForGlyph(glyphNamesToCopy[0]);
+      svgStringPromise = stringPromises.then((strings) => strings.svgString);
+      glifStringPromise = stringPromises.then((strings) => strings.glifString);
+    }
+
+    const mapping = {
+      "svg": svgStringPromise,
+      "glif": glifStringPromise,
+      "fontra-json": jsonStringPromise,
+    };
+
+    const plainTextStringPromise =
+      mapping[applicationSettingsController.model.clipboardFormat] || jsonStringPromise;
 
     const clipboardObject = {
-      "text/plain": jsonStringPromise,
+      "text/plain": plainTextStringPromise,
       "web fontra/json-clipboard": jsonStringPromise,
     };
+
+    if (svgStringPromise) {
+      clipboardObject["text/html"] = svgStringPromise;
+      clipboardObject["image/svg+xml"] = svgStringPromise;
+      clipboardObject["web image/svg+xml"] = svgStringPromise;
+    }
 
     writeToClipboard(clipboardObject).catch((error) =>
       console.error("error during clipboard write:", error)
@@ -754,7 +781,7 @@ export class FontOverviewController extends ViewController {
     this.glyphCellView.glyphSelection = new Set(glyphNamesToCopy);
   }
 
-  async buildJSONStringForGlyphNames(glyphNames) {
+  async buildJSONStringForGlyphs(glyphNames) {
     const glyphs = await this.fontController.getMultipleGlyphs(glyphNames);
     const sourceLocations = this.fontController.getSourceLocations();
     // We need to freeze the glyphMap because it may otherwise have been changed
@@ -784,6 +811,30 @@ export class FontOverviewController extends ViewController {
     };
 
     return JSON.stringify(clipboardData);
+  }
+
+  async buildPathStringsForGlyph(glyphName) {
+    const glyphController = await this.fontController.getGlyphInstance(
+      glyphName,
+      this.fontOverviewSettings.fontLocationSource
+    );
+
+    const flattenedPath = glyphController.flattenedPath;
+    const bounds = flattenedPath.getControlBounds() || {
+      xMin: 0,
+      yMin: 0,
+      xMax: 0,
+      yMax: 0,
+    };
+
+    const svgString = pathToSVG(flattenedPath, bounds);
+    const glifString = staticGlyphToGLIF(
+      glyphName,
+      glyphController.instance,
+      this.fontController.glyphMap[glyphName] || []
+    );
+
+    return { svgString, glifString };
   }
 
   canPaste() {
