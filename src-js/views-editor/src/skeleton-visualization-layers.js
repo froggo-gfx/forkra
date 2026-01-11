@@ -264,19 +264,36 @@ registerVisualizationLayerDefinition({
         // Skip on-curve points
         if (!point.type) continue;
 
-        // Find previous on-curve point
-        let prevOnCurve = null;
-        for (let j = 1; j < numPoints; j++) {
-          const idx = (i - j + numPoints) % numPoints;
-          if (!points[idx].type) {
-            prevOnCurve = points[idx];
-            break;
-          }
-        }
+        // Determine which on-curve point this handle belongs to
+        // by checking if the previous point is on-curve or off-curve
+        const prevIdx = (i - 1 + numPoints) % numPoints;
+        const nextIdx = (i + 1) % numPoints;
+        const prevPoint = points[prevIdx];
+        const nextPoint = points[nextIdx];
 
-        // Draw line from this off-curve to previous on-curve
-        if (prevOnCurve) {
-          strokeLine(context, prevOnCurve.x, prevOnCurve.y, point.x, point.y);
+        // If previous point is on-curve, this handle belongs to it (outgoing handle)
+        if (prevPoint && !prevPoint.type) {
+          strokeLine(context, prevPoint.x, prevPoint.y, point.x, point.y);
+        }
+        // If previous point is off-curve and next is on-curve,
+        // this handle belongs to the next on-curve (incoming handle)
+        else if (prevPoint?.type && nextPoint && !nextPoint.type) {
+          strokeLine(context, nextPoint.x, nextPoint.y, point.x, point.y);
+        }
+        // Fallback: find nearest on-curve
+        else {
+          // Find previous on-curve point
+          let prevOnCurve = null;
+          for (let j = 1; j < numPoints; j++) {
+            const idx = (i - j + numPoints) % numPoints;
+            if (!points[idx].type) {
+              prevOnCurve = points[idx];
+              break;
+            }
+          }
+          if (prevOnCurve) {
+            strokeLine(context, prevOnCurve.x, prevOnCurve.y, point.x, point.y);
+          }
         }
       }
     }
@@ -373,6 +390,61 @@ registerVisualizationLayerDefinition({
           }
         }
       }
+    }
+  },
+});
+
+// Skeleton insert handles preview (shown when Alt+hovering over centerline)
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.insert.handles",
+  name: "Skeleton Insert Handles Preview",
+  selectionFunc: glyphSelector("editing"),
+  zIndex: 560,
+  screenParameters: {
+    handleRadius: 5,
+    lineWidth: 1,
+  },
+  colors: {
+    handleColor: "rgba(48, 128, 255, 0.5)",
+    lineColor: "rgba(48, 128, 255, 0.3)",
+  },
+  colorsDarkMode: {
+    handleColor: "rgba(80, 160, 255, 0.5)",
+    lineColor: "rgba(80, 160, 255, 0.3)",
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    const insertHandles = model.skeletonInsertHandles;
+    if (!insertHandles?.points?.length) {
+      return;
+    }
+
+    context.fillStyle = parameters.handleColor;
+    context.strokeStyle = parameters.lineColor;
+    context.lineWidth = parameters.lineWidth;
+
+    // Draw lines from handles to their anchor points
+    if (insertHandles.startPoint && insertHandles.points[0]) {
+      strokeLine(
+        context,
+        insertHandles.startPoint.x,
+        insertHandles.startPoint.y,
+        insertHandles.points[0].x,
+        insertHandles.points[0].y
+      );
+    }
+    if (insertHandles.endPoint && insertHandles.points[1]) {
+      strokeLine(
+        context,
+        insertHandles.endPoint.x,
+        insertHandles.endPoint.y,
+        insertHandles.points[1].x,
+        insertHandles.points[1].y
+      );
+    }
+
+    // Draw handle preview circles
+    for (const point of insertHandles.points) {
+      fillRoundNode(context, point, parameters.handleRadius);
     }
   },
 });

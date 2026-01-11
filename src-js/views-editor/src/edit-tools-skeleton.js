@@ -36,12 +36,85 @@ export class SkeletonPenTool extends BaseTool {
         this.sceneController.hoverSelection = newHover;
         this.canvasController.requestUpdate();
       }
+      // Clear insert handles preview when hovering over points
+      if (this.sceneModel.skeletonInsertHandles) {
+        delete this.sceneModel.skeletonInsertHandles;
+        this.canvasController.requestUpdate();
+      }
     } else {
       if (this.sceneController.hoverSelection?.size) {
         this.sceneController.hoverSelection = new Set();
         this.canvasController.requestUpdate();
       }
+
+      // Check for Alt+hover on skeleton centerline for handle preview
+      const prevInsertHandles = this.sceneModel.skeletonInsertHandles;
+      let newInsertHandles = null;
+
+      if (event.altKey) {
+        const centerlineHit = this._hitTestSkeletonCenterline(event);
+        if (centerlineHit) {
+          // Calculate preview handle positions at 1/3 and 2/3 along the segment
+          const skeletonData = this._getSkeletonData();
+          if (skeletonData) {
+            const contour = skeletonData.contours[centerlineHit.contourIndex];
+            if (contour) {
+              const startPoint = contour.points[centerlineHit.segmentStartIndex];
+              const endPoint = contour.points[centerlineHit.segmentEndIndex];
+              if (startPoint && endPoint) {
+                const handle1 = {
+                  x: Math.round(startPoint.x + (endPoint.x - startPoint.x) / 3),
+                  y: Math.round(startPoint.y + (endPoint.y - startPoint.y) / 3),
+                };
+                const handle2 = {
+                  x: Math.round(startPoint.x + ((endPoint.x - startPoint.x) * 2) / 3),
+                  y: Math.round(startPoint.y + ((endPoint.y - startPoint.y) * 2) / 3),
+                };
+                newInsertHandles = {
+                  points: [handle1, handle2],
+                  startPoint: startPoint,
+                  endPoint: endPoint,
+                };
+              }
+            }
+          }
+        }
+      }
+
+      // Update preview if changed
+      if (!this._insertHandlesEqual(prevInsertHandles, newInsertHandles)) {
+        this.sceneModel.skeletonInsertHandles = newInsertHandles;
+        this.canvasController.requestUpdate();
+      }
     }
+  }
+
+  _getSkeletonData() {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.glyph?.canEdit) return null;
+
+    const varGlyph = positionedGlyph.varGlyph;
+    if (!varGlyph?.glyph?.layers) return null;
+
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    if (!editLayerName) return null;
+
+    const layer = varGlyph.glyph.layers[editLayerName];
+    if (!layer) return null;
+
+    return layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+  }
+
+  _insertHandlesEqual(a, b) {
+    if (!a && !b) return true;
+    if (!a || !b) return false;
+    if (a.points?.length !== b.points?.length) return false;
+    for (let i = 0; i < (a.points?.length || 0); i++) {
+      if (a.points[i].x !== b.points[i].x || a.points[i].y !== b.points[i].y) {
+        return false;
+      }
+    }
+    return true;
   }
 
   _setsEqual(setA, setB) {
@@ -55,6 +128,7 @@ export class SkeletonPenTool extends BaseTool {
   deactivate() {
     super.deactivate();
     this.sceneController.hoverSelection = new Set();
+    delete this.sceneModel.skeletonInsertHandles;
     this.canvasController.requestUpdate();
   }
 

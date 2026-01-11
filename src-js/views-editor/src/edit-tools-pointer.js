@@ -22,6 +22,7 @@ import {
 } from "@fontra/core/set-ops.js";
 import { Transform } from "@fontra/core/transform.js";
 import {
+  arrowKeyDeltas,
   assert,
   boolInt,
   commandKeyProperty,
@@ -33,6 +34,7 @@ import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
 import { EditBehaviorFactory, constrainHorVerDiag } from "./edit-behavior.js";
+import { createSkeletonEditBehavior } from "./skeleton-edit-behavior.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
 import { getPinPoint } from "./panel-transformation.js";
 import { equalGlyphSelection } from "./scene-controller.js";
@@ -95,6 +97,110 @@ export class PointerTool extends BaseTool {
     } else {
       this.setCursor();
     }
+  }
+
+  /**
+   * Handle arrow key movement for skeleton points.
+   * Falls back to default handler for regular path points.
+   */
+  async handleArrowKeys(event) {
+    const sceneController = this.sceneController;
+
+    // Check if we have skeleton points selected
+    const { skeletonPoint: skeletonPointSelection } = parseSelection(
+      sceneController.selection
+    );
+
+    if (!skeletonPointSelection?.size) {
+      // No skeleton points - use default handler
+      return sceneController.handleArrowKeys(event);
+    }
+
+    // Handle skeleton point nudging
+    let [dx, dy] = arrowKeyDeltas[event.key];
+    if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
+      dx *= 100;
+      dy *= 100;
+    } else if (event.shiftKey) {
+      dx *= 10;
+      dy *= 10;
+    }
+    const delta = { x: dx, y: dy };
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = sceneController.editingLayerNames?.[0];
+      if (!editLayerName || !glyph.layers[editLayerName]) {
+        return;
+      }
+
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      if (!skeletonData) return;
+
+      // Deep clone for manipulation
+      const originalSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+      const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+      // Create behaviors and apply delta
+      const useConstraint = event.altKey;
+      const behaviors = createSkeletonEditBehavior(
+        originalSkeletonData,
+        skeletonPointSelection,
+        useConstraint
+      );
+
+      for (const behavior of behaviors) {
+        const changes = behavior.applyDelta(delta);
+        const contour = workingSkeletonData.contours[behavior.contourIndex];
+        for (const { pointIndex, x, y } of changes) {
+          contour.points[pointIndex].x = x;
+          contour.points[pointIndex].y = y;
+        }
+      }
+
+      // Helper to regenerate outline
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.appendUnpackedContour(contour);
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      // Record changes
+      const changes = [];
+
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = workingSkeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        regenerateOutline(sg, workingSkeletonData);
+      });
+      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const combinedChange = new ChangeCollector().concat(...changes);
+      await sendIncrementalChange(combinedChange.change);
+
+      return {
+        changes: combinedChange,
+        undoLabel: translate("action.nudge-selection"),
+        broadcast: true,
+      };
+    });
   }
 
   setCursorForRotationHandle(handleName) {
@@ -248,9 +354,17 @@ export class PointerTool extends BaseTool {
         component: componentIndices,
         anchor: anchorIndices,
         guideline: guidelineIndices,
+        skeletonPoint: skeletonPointSelection,
         // TODO: Font Guidelines
         // fontGuideline: fontGuidelineIndices,
       } = parseSelection(sceneController.selection);
+
+      // Handle skeleton point double-click (toggle smooth/sharp)
+      if (skeletonPointSelection?.size) {
+        await this._handleSkeletonPointsDoubleClick(skeletonPointSelection);
+        return;
+      }
+
       if (componentIndices?.length && !pointIndices?.length && !anchorIndices?.length) {
         componentIndices.sort();
         sceneController.doubleClickedComponentIndices = componentIndices;
@@ -299,6 +413,94 @@ export class PointerTool extends BaseTool {
         newPointType = toggleSmooth(layerGlyph.path, pointIndices, newPointType);
       }
       return translate("edit-tools-pointer.undo.toggle-smooth");
+    });
+  }
+
+  /**
+   * Toggle smooth/sharp on skeleton points (double-click handler)
+   */
+  async _handleSkeletonPointsDoubleClick(skeletonPointSelection) {
+    const sceneController = this.sceneController;
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = sceneController.editingLayerNames?.[0];
+      if (!editLayerName || !glyph.layers[editLayerName]) {
+        return;
+      }
+
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      if (!skeletonData) return;
+
+      // Deep clone for manipulation
+      skeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+      // Determine new smooth value (toggle based on first selected on-curve point)
+      let newSmooth = null;
+
+      // Toggle smooth for all selected on-curve points
+      for (const selKey of skeletonPointSelection) {
+        const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+        const contour = skeletonData.contours?.[contourIdx];
+        if (!contour) continue;
+
+        const point = contour.points?.[pointIdx];
+        if (!point) continue;
+
+        // Only toggle on-curve points (not handles)
+        if (point.type === "cubic" || point.type === "quad") continue;
+
+        // Determine new value from first point
+        if (newSmooth === null) {
+          newSmooth = !point.smooth;
+        }
+
+        point.smooth = newSmooth;
+      }
+
+      if (newSmooth === null) return; // No on-curve points selected
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.appendUnpackedContour(contour);
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      // Record changes
+      const changes = [];
+
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        regenerateOutline(sg, skeletonData);
+      });
+      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const combinedChange = new ChangeCollector().concat(...changes);
+      await sendIncrementalChange(combinedChange.change);
+
+      return {
+        changes: combinedChange,
+        undoLabel: translate("edit-tools-pointer.undo.toggle-smooth"),
+      };
     });
   }
 
@@ -459,6 +661,7 @@ export class PointerTool extends BaseTool {
 
   /**
    * Handle dragging skeleton points with the Pointer Tool.
+   * Uses the rule-based SkeletonEditBehavior system.
    */
   async _handleDragSkeletonPoints(eventStream, initialEvent) {
     const sceneController = this.sceneController;
@@ -489,30 +692,15 @@ export class PointerTool extends BaseTool {
       let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
       if (!skeletonData) return;
 
-      // Deep clone for manipulation
-      skeletonData = JSON.parse(JSON.stringify(skeletonData));
+      // Deep clone for manipulation - this is our working copy
+      const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
 
-      // Collect original positions of selected skeleton points
-      const originalPositions = new Map();
-      for (const selKey of selectedSkeletonPoints) {
-        const [contourIdx, pointIdx] = selKey.split("/").map(Number);
-        const contour = skeletonData.contours?.[contourIdx];
-        if (contour) {
-          const point = contour.points?.[pointIdx];
-          if (point) {
-            originalPositions.set(selKey, { ...point });
-          }
-        }
-      }
-
-      if (originalPositions.size === 0) return;
+      // Store original skeleton data for reference
+      const originalSkeletonData = JSON.parse(JSON.stringify(skeletonData));
 
       // Helper function to regenerate outline contours
       const regenerateOutline = (staticGlyph, skelData) => {
-        // Get indices of previously generated contours
         const oldGeneratedIndices = skelData.generatedContourIndices || [];
-
-        // Remove old generated contours (in reverse order to maintain indices)
         const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
         for (const idx of sortedIndices) {
           if (idx < staticGlyph.path.numContours) {
@@ -520,20 +708,25 @@ export class PointerTool extends BaseTool {
           }
         }
 
-        // Generate new contours from skeleton
         const generatedContours = generateContoursFromSkeleton(skelData);
-
-        // Add new contours and track their indices
         const newGeneratedIndices = [];
         for (const contour of generatedContours) {
           const newIndex = staticGlyph.path.numContours;
           staticGlyph.path.appendUnpackedContour(contour);
           newGeneratedIndices.push(newIndex);
         }
-
-        // Update generated contour indices
         skelData.generatedContourIndices = newGeneratedIndices;
       };
+
+      // Track last used constraint state
+      let lastUseConstraint = initialEvent.shiftKey;
+
+      // Create initial behaviors
+      let behaviors = createSkeletonEditBehavior(
+        originalSkeletonData,
+        selectedSkeletonPoints,
+        lastUseConstraint
+      );
 
       // Drag loop
       for await (const event of eventStream) {
@@ -543,40 +736,52 @@ export class PointerTool extends BaseTool {
           y: currentLocalPoint.y - positionedGlyph.y,
         };
 
-        let delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+        const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+        const useConstraint = event.shiftKey;
 
-        if (event.shiftKey) {
-          delta = constrainHorVerDiag(delta);
+        // Recreate behaviors if constraint state changed
+        if (useConstraint !== lastUseConstraint) {
+          lastUseConstraint = useConstraint;
+          behaviors = createSkeletonEditBehavior(
+            originalSkeletonData,
+            selectedSkeletonPoints,
+            useConstraint
+          );
         }
 
-        // Update all selected skeleton points
-        for (const [selKey, originalPos] of originalPositions) {
-          const [contourIdx, pointIdx] = selKey.split("/").map(Number);
-          const contour = skeletonData.contours?.[contourIdx];
-          if (!contour) continue;
+        // Reset working data to original before applying changes
+        for (let ci = 0; ci < originalSkeletonData.contours.length; ci++) {
+          const origContour = originalSkeletonData.contours[ci];
+          const workContour = workingSkeletonData.contours[ci];
+          for (let pi = 0; pi < origContour.points.length; pi++) {
+            workContour.points[pi].x = origContour.points[pi].x;
+            workContour.points[pi].y = origContour.points[pi].y;
+          }
+        }
 
-          const point = contour.points?.[pointIdx];
-          if (!point) continue;
-
-          point.x = Math.round(originalPos.x + delta.x);
-          point.y = Math.round(originalPos.y + delta.y);
+        // Apply behavior changes
+        for (const behavior of behaviors) {
+          const changes = behavior.applyDelta(delta);
+          const contour = workingSkeletonData.contours[behavior.contourIndex];
+          for (const { pointIndex, x, y } of changes) {
+            contour.points[pointIndex].x = x;
+            contour.points[pointIndex].y = y;
+          }
         }
 
         // Record changes
         const changes = [];
 
-        // Update customData
         const customDataChange = recordChanges(layer, (l) => {
           l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
-            JSON.stringify(skeletonData)
+            JSON.stringify(workingSkeletonData)
           );
         });
         changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
-        // Regenerate path
         const staticGlyph = layer.glyph;
         const pathChange = recordChanges(staticGlyph, (sg) => {
-          regenerateOutline(sg, skeletonData);
+          regenerateOutline(sg, workingSkeletonData);
         });
         changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
@@ -588,13 +793,13 @@ export class PointerTool extends BaseTool {
       const finalChanges = [];
 
       const finalCustomDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = workingSkeletonData;
       });
       finalChanges.push(finalCustomDataChange.prefixed(["layers", editLayerName]));
 
       const staticGlyph = layer.glyph;
       const finalPathChange = recordChanges(staticGlyph, (sg) => {
-        regenerateOutline(sg, skeletonData);
+        regenerateOutline(sg, workingSkeletonData);
       });
       finalChanges.push(finalPathChange.prefixed(["layers", editLayerName, "glyph"]));
 
