@@ -197,7 +197,7 @@ class OTFBackend(WatchableBackend):
         return None  # Reload all
 
     def fileWatcherWasInstalled(self) -> None:
-        self.fileWatcher.setPaths([self.path])
+        self.fileWatcherSetPaths([self.path])
 
 
 class TTXBackend(OTFBackend):

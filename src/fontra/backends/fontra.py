@@ -339,7 +339,7 @@ class FontraBackend(WatchableBackend):
         self._backgroundTasksTask = asyncio.create_task(self.glyphDependencies)
 
     def fileWatcherWasInstalled(self):
-        self.fileWatcher.setPaths([self.path])
+        self.fileWatcherSetPaths([self.path])
 
     async def fileWatcherProcessChanges(
         self, changes: set[tuple[Change, str]]
