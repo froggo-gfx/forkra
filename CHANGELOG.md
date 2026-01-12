@@ -1,5 +1,10 @@
 # Changelog for Fontra
 
+## 2026-01-?? [version 2026.1.1]
+
+- Add read support for .ttx [PR 2372](https://github.com/fontra/fontra/pull/2372)
+- Implement automatic reload for .ttf/.otf/.woff/.woff2/.ttx [PR 2372](https://github.com/fontra/fontra/pull/2372)
+
 ## 2026-01-11 [version 2026.1.0]
 
 ### Font overview
