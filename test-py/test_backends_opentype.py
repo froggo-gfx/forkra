@@ -7,7 +7,7 @@ import pytest
 from fontTools.ttLib import TTFont
 
 from fontra.backends import getFileSystemBackend
-from fontra.core.classes import Axes, CrossAxisMapping, FontAxis
+from fontra.core.classes import Axes, CrossAxisMapping, FontAxis, VariableGlyph
 from fontra.core.fonthandler import FontHandler
 from fontra.filesystem.projectmanager import FileSystemProjectManager
 
@@ -182,3 +182,10 @@ async def test_externalChanges(tmpdir):
         modifiedGlyph = await handler.getGlyph("A")
 
         assert modifiedGlyph.layers["default"].glyph.xAdvance == 999
+
+
+async def test_readTTX():
+    path = dataDir / "mutatorsans" / "MutatorSans.subset.ttx"
+    font = getFileSystemBackend(path)
+    glyph = await font.getGlyph("A")
+    assert isinstance(glyph, VariableGlyph)

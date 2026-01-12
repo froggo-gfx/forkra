@@ -200,6 +200,13 @@ class OTFBackend(WatchableBackend):
         self.fileWatcher.setPaths([self.path])
 
 
+class TTXBackend(OTFBackend):
+    def _loadFontFromPath(self, path: PathLike) -> TTFont:
+        font = TTFont()
+        font.importXML(path)
+        return font
+
+
 def getLocationsFromVarstore(
     varDataIndex: int, varStore, fvarAxes
 ) -> Generator[dict[str, float], None, None]:
