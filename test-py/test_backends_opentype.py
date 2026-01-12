@@ -1,9 +1,15 @@
+import asyncio
 import pathlib
+import shutil
+from contextlib import aclosing
 
 import pytest
+from fontTools.ttLib import TTFont
 
 from fontra.backends import getFileSystemBackend
 from fontra.core.classes import Axes, CrossAxisMapping, FontAxis
+from fontra.core.fonthandler import FontHandler
+from fontra.filesystem.projectmanager import FileSystemProjectManager
 
 dataDir = pathlib.Path(__file__).resolve().parent / "data"
 
@@ -145,3 +151,34 @@ expectedAxesNLI = Axes(
 async def test_readAvar2NLI(testFontAvar2NLI):
     axes = await testFontAvar2NLI.getAxes()
     assert expectedAxesNLI == axes
+
+
+async def test_externalChanges(tmpdir):
+    tmpdir = pathlib.Path(tmpdir)
+    sourcePath = dataDir / "mutatorsans" / "MutatorSans.subset.ttf"
+    destPath = tmpdir / "testfont.ttf"
+    shutil.copy(sourcePath, destPath)
+
+    backend = getFileSystemBackend(destPath)
+    handler = FontHandler(
+        backend=backend,
+        projectIdentifier="test",
+        metaInfoProvider=FileSystemProjectManager(),
+    )
+
+    async with aclosing(handler):
+        await handler.startTasks()
+
+        glyph = await handler.getGlyph("A")
+        assert glyph.layers["default"].glyph.xAdvance == 396
+
+        ttFont = TTFont(destPath)
+        assert ttFont["hmtx"]["A"] == (396, 20)
+        ttFont["hmtx"]["A"] = (999, 20)
+        ttFont.save(destPath)
+
+        await asyncio.sleep(0.15)  # give the file watcher a moment to catch up
+
+        modifiedGlyph = await handler.getGlyph("A")
+
+        assert modifiedGlyph.layers["default"].glyph.xAdvance == 999
