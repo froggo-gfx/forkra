@@ -1034,6 +1034,7 @@ class DesignspaceBackend(WatchableBackend):
             glyphSet = ufoLayer.glyphSet
             if glyphName in glyphSet:
                 glyphSet.deleteGlyph(glyphName)
+                # FIXME: this is inefficient if we write many glyphs
                 glyphSet.writeContents()
                 if ufoLayer.isDefaultLayer:
                     self.ensureGlyphNotInGlyphOrder(ufoLayer, glyphName)
