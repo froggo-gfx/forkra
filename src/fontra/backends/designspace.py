@@ -1027,16 +1027,19 @@ class DesignspaceBackend(WatchableBackend):
 
     async def deleteGlyph(self, glyphName):
         if glyphName not in self.glyphMap:
-            raise KeyError(f"Glyph '{glyphName}' does not exist")
+            logger.debug(f"Can't delete unknown glyph '{glyphName}'")
+            return
+
         for ufoLayer in self.ufoLayers:
             glyphSet = ufoLayer.glyphSet
             if glyphName in glyphSet:
                 glyphSet.deleteGlyph(glyphName)
+                # FIXME: this is inefficient if we write many glyphs
                 glyphSet.writeContents()
                 if ufoLayer.isDefaultLayer:
                     self.ensureGlyphNotInGlyphOrder(ufoLayer, glyphName)
         del self.glyphMap[glyphName]
-        self.savedGlyphModificationTimes[glyphName] = None
+        self.savedGlyphModificationTimes[glyphName] = {None}
         if self._glyphDependencies is not None:
             self._glyphDependencies.update(glyphName, ())
 
@@ -1475,6 +1478,7 @@ class DesignspaceBackend(WatchableBackend):
             deletedGlyphs=set(),
             rebuildGlyphSetContents=False,
         )
+
         for change, path in sorted(changes):
             fileName = os.path.basename(path)
             _, fileSuffix = os.path.splitext(fileName)
@@ -1516,27 +1520,28 @@ class DesignspaceBackend(WatchableBackend):
     def _analyzeExternalGlyphChanges(self, change, path, changedItems):
         fileName = os.path.basename(path)
         glyphName = self.glifFileNames.get(fileName)
+        glyphWasDeleted = False
+        glyphIsNew = False
+        rebuildGlyphSetContents = False
 
         if change == Change.deleted:
             # Deleted glyph
-            changedItems.rebuildGlyphSetContents = True
+            rebuildGlyphSetContents = True
             if path.startswith(os.path.join(self.dsDoc.default.path, "glyphs/")):
                 # The glyph was deleted from the default source,
                 # do a full delete
-                del self.glifFileNames[fileName]
-                changedItems.deletedGlyphs.add(glyphName)
+                glyphWasDeleted = True
             # else:
             # The glyph was deleted from a non-default source,
             # just reload.
         elif change == Change.added:
             # New glyph
-            changedItems.rebuildGlyphSetContents = True
+            rebuildGlyphSetContents = True
             if glyphName is None:
                 with open(path, "rb") as f:
                     glyphName, _ = extractGlyphNameAndCodePoints(f.read())
-                self.glifFileNames[fileName] = glyphName
-                changedItems.newGlyphs.add(glyphName)
-                return
+
+                glyphIsNew = True
         else:
             # Changed glyph
             assert change == Change.modified
@@ -1553,9 +1558,18 @@ class DesignspaceBackend(WatchableBackend):
             mtime = datetime.fromtimestamp(mtime).timestamp()
         else:
             mtime = None
+
         savedMTimes = self.savedGlyphModificationTimes.get(glyphName, ())
-        if savedMTimes is not None and mtime not in savedMTimes:
+        if savedMTimes is None or mtime not in savedMTimes:
             logger.info(f"external change '{glyphName}'")
+            if glyphWasDeleted:
+                del self.glifFileNames[fileName]
+                changedItems.deletedGlyphs.add(glyphName)
+            elif glyphIsNew:
+                self.glifFileNames[fileName] = glyphName
+                changedItems.newGlyphs.add(glyphName)
+            if rebuildGlyphSetContents:
+                changedItems.rebuildGlyphSetContents = True
             changedItems.changedGlyphs.add(glyphName)
 
 

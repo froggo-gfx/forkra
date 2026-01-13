@@ -234,7 +234,7 @@ async def test_fontHandler_setData(testFontHandler, caplog):
 
         glyphMap = await testFontHandler.getData("glyphMap")
         assert [97] == glyphMap["A"]
-    assert "write glyphMap to backend" == caplog.records[0].message
+    assert "write to backend -- _putData glyphMap" == caplog.records[0].message
 
 
 @pytest.mark.asyncio
@@ -264,7 +264,7 @@ async def test_fontHandler_setData_unitsPerEm(testFontHandler, caplog):
         assert 2000 == unitsPerEm
 
     assert 2000 == await testFontHandler.backend.getUnitsPerEm()
-    assert "write unitsPerEm to backend" == caplog.records[0].message
+    assert "write to backend -- _putData unitsPerEm" == caplog.records[0].message
 
 
 @pytest.mark.asyncio

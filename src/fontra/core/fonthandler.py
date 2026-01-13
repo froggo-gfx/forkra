@@ -131,7 +131,7 @@ class FontHandler:
             writeKey, (writeFunc, connection, reloadPattern) = popFirstItem(
                 self._dataScheduledForWriting
             )
-            logger.info(f"write {writeKey} to backend")
+            logger.info(f"write to backend -- {funcName(writeFunc)} {writeKey}")
             try:
                 await writeFunc()
             except Exception as e:
@@ -700,3 +700,12 @@ def makeGlyphMapChange(glyphMapUpdates):
         glyphMapChange["c"] = changes
 
     return glyphMapChange
+
+
+def funcName(f, fallback="unknown"):
+    if hasattr(f, "func"):
+        f = f.func
+    try:
+        return f.__name__
+    except AttributeError:
+        return fallback

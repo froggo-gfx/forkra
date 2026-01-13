@@ -151,7 +151,9 @@ class FontraBackend(WatchableBackend):
 
     async def deleteGlyph(self, glyphName: str) -> None:
         if glyphName not in self.glyphMap:
-            raise KeyError(f"Glyph '{glyphName}' does not exist")
+            logger.debug(f"Can't delete unknown glyph '{glyphName}'")
+            return
+
         filePath = self.getGlyphFilePath(glyphName)
         filePath.unlink()
         self.fileWatcherIgnoreNextChange(filePath)
