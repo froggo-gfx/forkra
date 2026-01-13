@@ -767,10 +767,12 @@ async def test_deleteGlyph_addGlyph(writableTestFont):
         assert beforeGlyphOrder == afterGlyphOrder
 
 
-async def test_deleteGlyphRaisesKeyError(writableTestFont):
+async def test_deleteUnknownGlyph(writableTestFont):
     glyphName = "A.doesnotexist"
-    with pytest.raises(KeyError, match="Glyph 'A.doesnotexist' does not exist"):
-        await writableTestFont.deleteGlyph(glyphName)
+    glyphMap = await writableTestFont.getGlyphMap()
+    assert glyphName not in glyphMap
+    # .deleteGlyph() should *not* raise an error if glyphName doesn't exist
+    await writableTestFont.deleteGlyph(glyphName)
 
 
 async def test_findGlyphsThatUseGlyph(writableTestFont):
