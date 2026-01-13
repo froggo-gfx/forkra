@@ -2,7 +2,7 @@
 
 ## 2026-01-?? [version 2026.1.2]
 
-- [designspace] Fix a synchronization problem when doing Undo/Redo faster than the backend handles writing the changed glyphs. This would be most noticable with complex designspaces, where each glyph is represented by many .glif files on dissk. [PR 2374](https://github.com/fontra/fontra/pull/2374)
+- [designspace] Fix a synchronization problem when doing Undo/Redo faster than the backend handles writing the changed glyphs. This would be most noticable with a multiple-glyph selection in the font overview and a complex designspace, where each glyph is represented by many .glif files on disk. [PR 2374](https://github.com/fontra/fontra/pull/2374)
 
 ## 2026-01-12 [version 2026.1.1]
 
