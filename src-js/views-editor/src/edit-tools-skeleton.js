@@ -1,3 +1,4 @@
+import { Bezier } from "bezier-js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { ChangeCollector, consolidateChanges, applyChange } from "@fontra/core/changes.js";
 import { translate } from "@fontra/core/localization.js";
@@ -151,6 +152,41 @@ export class SkeletonPenTool extends BaseTool {
     const skeletonHit = this._hitTestSkeletonPoints(initialEvent);
 
     if (skeletonHit) {
+      // Check if clicking on first point should close the contour
+      const { skeletonPoint: selectedSkeletonPoints } = parseSelection(
+        this.sceneController.selection
+      );
+
+      if (selectedSkeletonPoints?.size === 1) {
+        const selectedKey = [...selectedSkeletonPoints][0];
+        const [selectedContourIdx, selectedPointIdx] = selectedKey.split("/").map(Number);
+
+        // Check if we should close the contour
+        if (selectedContourIdx === skeletonHit.contourIndex) {
+          const skeletonData = this._getSkeletonData();
+          if (skeletonData) {
+            const contour = skeletonData.contours[selectedContourIdx];
+            if (contour && !contour.isClosed && contour.points.length >= 2) {
+              const lastPointIdx = contour.points.length - 1;
+              const clickedOnFirst = skeletonHit.pointIndex === 0;
+              const clickedOnLast = skeletonHit.pointIndex === lastPointIdx;
+              const selectedFirst = selectedPointIdx === 0;
+              const selectedLast = selectedPointIdx === lastPointIdx;
+
+              // Close contour if: (selected last and clicked first) or (selected first and clicked last)
+              if ((selectedLast && clickedOnFirst) || (selectedFirst && clickedOnLast)) {
+                await this._handleCloseSkeletonContour(
+                  eventStream,
+                  initialEvent,
+                  selectedContourIdx
+                );
+                return;
+              }
+            }
+          }
+        }
+      }
+
       // Select the clicked skeleton point
       this.sceneController.selection = new Set([
         `skeletonPoint/${skeletonHit.contourIndex}/${skeletonHit.pointIndex}`,
@@ -315,9 +351,25 @@ export class SkeletonPenTool extends BaseTool {
               point: hitResult.point,
             };
           }
+        } else {
+          // Bezier curve - collect control points and do bezier hit testing
+          const bezierPoints = [startPoint];
+          for (let j = startIdx + 1; j < endIdx; j++) {
+            bezierPoints.push(points[j]);
+          }
+          bezierPoints.push(endPoint);
+
+          const hitResult = this._pointToBezierDistance(glyphPoint, bezierPoints);
+          if (hitResult && hitResult.distance <= margin) {
+            return {
+              contourIndex,
+              segmentStartIndex: startIdx,
+              segmentEndIndex: endIdx,
+              t: hitResult.t,
+              point: hitResult.point,
+            };
+          }
         }
-        // For curves with off-curve points, we'd need bezier hit testing
-        // For now, skip curve segments for insertion
       }
 
       // For closed contours, also test the closing segment
@@ -377,6 +429,59 @@ export class SkeletonPenTool extends BaseTool {
     const distance = vector.distance(point, closestPoint);
 
     return { distance, t, point: closestPoint };
+  }
+
+  /**
+   * Calculate distance from a point to a bezier curve.
+   * Returns { distance, t, point } where t is the parameter along the curve
+   * and point is the closest point on the curve.
+   */
+  _pointToBezierDistance(point, bezierPoints) {
+    if (bezierPoints.length < 2) return null;
+
+    let bezier;
+    if (bezierPoints.length === 2) {
+      // Line - use line segment distance
+      return this._pointToLineSegmentDistance(point, bezierPoints[0], bezierPoints[1]);
+    } else if (bezierPoints.length === 3) {
+      // Quadratic bezier
+      bezier = new Bezier(
+        bezierPoints[0].x,
+        bezierPoints[0].y,
+        bezierPoints[1].x,
+        bezierPoints[1].y,
+        bezierPoints[2].x,
+        bezierPoints[2].y
+      );
+    } else if (bezierPoints.length === 4) {
+      // Cubic bezier
+      bezier = new Bezier(
+        bezierPoints[0].x,
+        bezierPoints[0].y,
+        bezierPoints[1].x,
+        bezierPoints[1].y,
+        bezierPoints[2].x,
+        bezierPoints[2].y,
+        bezierPoints[3].x,
+        bezierPoints[3].y
+      );
+    } else {
+      // More than 4 points - approximate with cubic
+      const p0 = bezierPoints[0];
+      const p3 = bezierPoints[bezierPoints.length - 1];
+      const p1 = bezierPoints[1];
+      const p2 = bezierPoints[bezierPoints.length - 2];
+      bezier = new Bezier(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
+    }
+
+    // Find closest point on bezier using bezier-js project method
+    const projected = bezier.project(point);
+
+    return {
+      distance: projected.d,
+      t: projected.t,
+      point: { x: projected.x, y: projected.y },
+    };
   }
 
   /**
@@ -484,18 +589,124 @@ export class SkeletonPenTool extends BaseTool {
       const contour = skeletonData.contours[centerlineHit.contourIndex];
       if (!contour) return;
 
-      // Determine insert position
-      // For a segment from startIdx to endIdx, insert after startIdx
+      // Determine insert position and handle bezier splitting
+      const startIdx = centerlineHit.segmentStartIndex;
+      const endIdx = centerlineHit.segmentEndIndex;
+      const hasOffCurve = centerlineHit.isClosingSegment
+        ? false // Closing segments are always lines for now
+        : endIdx - startIdx > 1;
+
       let insertIndex;
+      let pointsToRemove = 0;
+      let pointsToInsert = [insertPoint];
+
       if (centerlineHit.isClosingSegment) {
         // For closing segment, insert at the end
         insertIndex = contour.points.length;
+      } else if (!hasOffCurve) {
+        // Line segment - simple insert after startIdx
+        insertIndex = startIdx + 1;
       } else {
-        insertIndex = centerlineHit.segmentStartIndex + 1;
+        // Bezier curve - need to split the curve
+        const bezierPoints = [contour.points[startIdx]];
+        for (let j = startIdx + 1; j < endIdx; j++) {
+          bezierPoints.push(contour.points[j]);
+        }
+        bezierPoints.push(contour.points[endIdx]);
+
+        // Create bezier and split it
+        let bezier;
+        if (bezierPoints.length === 3) {
+          bezier = new Bezier(
+            bezierPoints[0].x, bezierPoints[0].y,
+            bezierPoints[1].x, bezierPoints[1].y,
+            bezierPoints[2].x, bezierPoints[2].y
+          );
+        } else if (bezierPoints.length === 4) {
+          bezier = new Bezier(
+            bezierPoints[0].x, bezierPoints[0].y,
+            bezierPoints[1].x, bezierPoints[1].y,
+            bezierPoints[2].x, bezierPoints[2].y,
+            bezierPoints[3].x, bezierPoints[3].y
+          );
+        } else {
+          // Approximate as cubic
+          bezier = new Bezier(
+            bezierPoints[0].x, bezierPoints[0].y,
+            bezierPoints[1].x, bezierPoints[1].y,
+            bezierPoints[bezierPoints.length - 2].x, bezierPoints[bezierPoints.length - 2].y,
+            bezierPoints[bezierPoints.length - 1].x, bezierPoints[bezierPoints.length - 1].y
+          );
+        }
+
+        // Split the bezier at t
+        const split = bezier.split(centerlineHit.t);
+        const left = split.left;
+        const right = split.right;
+
+        // Build new points array
+        // Remove old off-curve points (between startIdx+1 and endIdx-1)
+        insertIndex = startIdx + 1;
+        pointsToRemove = endIdx - startIdx - 1;
+
+        // Create new points: left handles, new on-curve, right handles
+        pointsToInsert = [];
+
+        // Left segment control points (skip first which is startPoint)
+        if (bezierPoints.length === 3) {
+          // Quadratic: left.points = [p0, cp, split_point]
+          pointsToInsert.push({
+            x: Math.round(left.points[1].x),
+            y: Math.round(left.points[1].y),
+            type: "cubic",
+          });
+        } else {
+          // Cubic: left.points = [p0, cp1, cp2, split_point]
+          pointsToInsert.push({
+            x: Math.round(left.points[1].x),
+            y: Math.round(left.points[1].y),
+            type: "cubic",
+          });
+          pointsToInsert.push({
+            x: Math.round(left.points[2].x),
+            y: Math.round(left.points[2].y),
+            type: "cubic",
+          });
+        }
+
+        // The new on-curve point
+        pointsToInsert.push({
+          x: Math.round(centerlineHit.point.x),
+          y: Math.round(centerlineHit.point.y),
+          type: null,
+          smooth: true, // Smooth since it's on a curve
+        });
+
+        // Right segment control points (skip first which is split_point and last which is endPoint)
+        if (bezierPoints.length === 3) {
+          // Quadratic: right.points = [split_point, cp, p2]
+          pointsToInsert.push({
+            x: Math.round(right.points[1].x),
+            y: Math.round(right.points[1].y),
+            type: "cubic",
+          });
+        } else {
+          // Cubic: right.points = [split_point, cp1, cp2, p3]
+          pointsToInsert.push({
+            x: Math.round(right.points[1].x),
+            y: Math.round(right.points[1].y),
+            type: "cubic",
+          });
+          pointsToInsert.push({
+            x: Math.round(right.points[2].x),
+            y: Math.round(right.points[2].y),
+            type: "cubic",
+          });
+        }
       }
 
-      // Insert the new point
-      contour.points.splice(insertIndex, 0, insertPoint);
+      // Insert the new point(s)
+      contour.points.splice(insertIndex, pointsToRemove, ...pointsToInsert);
 
       // Record changes
       const changes = [];
@@ -514,9 +725,20 @@ export class SkeletonPenTool extends BaseTool {
       const combinedChange = new ChangeCollector().concat(...changes);
       await sendIncrementalChange(combinedChange.change);
 
-      // Select the new point
+      // Select the new on-curve point
+      // For bezier splits, the on-curve is after the left segment control points
+      let newOnCurveIndex = insertIndex;
+      if (hasOffCurve && !centerlineHit.isClosingSegment) {
+        // Find the on-curve point in pointsToInsert
+        for (let i = 0; i < pointsToInsert.length; i++) {
+          if (pointsToInsert[i].type === null) {
+            newOnCurveIndex = insertIndex + i;
+            break;
+          }
+        }
+      }
       this.sceneController.selection = new Set([
-        `skeletonPoint/${centerlineHit.contourIndex}/${insertIndex}`,
+        `skeletonPoint/${centerlineHit.contourIndex}/${newOnCurveIndex}`,
       ]);
 
       return {
@@ -729,6 +951,61 @@ export class SkeletonPenTool extends BaseTool {
         broadcast: true,
       };
     });
+  }
+
+  /**
+   * Close a skeleton contour by setting isClosed to true.
+   */
+  async _handleCloseSkeletonContour(eventStream, initialEvent, contourIndex) {
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = this.sceneController.editingLayerNames?.[0];
+      if (!editLayerName || !glyph.layers[editLayerName]) {
+        return;
+      }
+
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      if (!skeletonData) return;
+
+      // Deep clone
+      skeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+      const contour = skeletonData.contours[contourIndex];
+      if (!contour) return;
+
+      // Close the contour
+      contour.isClosed = true;
+
+      // Record changes
+      const changes = [];
+
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        this._regenerateOutlineContours(sg, skeletonData);
+      });
+      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const combinedChange = new ChangeCollector().concat(...changes);
+      await sendIncrementalChange(combinedChange.change);
+
+      // Select the first point
+      this.sceneController.selection = new Set([
+        `skeletonPoint/${contourIndex}/0`,
+      ]);
+
+      return {
+        changes: combinedChange,
+        undoLabel: "Close skeleton contour",
+        broadcast: true,
+      };
+    });
+
+    eventStream.done();
   }
 
   _regenerateOutlineContours(staticGlyph, skeletonData) {

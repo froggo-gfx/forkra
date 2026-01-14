@@ -219,13 +219,16 @@ function generateOffsetPointsForSegment(
           ? normal
           : calculateCornerNormal(prevSegment, segment, halfWidth);
 
+      // Copy smooth property from skeleton point
       left.push({
         x: segment.startPoint.x + startNormal.x * halfWidth,
         y: segment.startPoint.y + startNormal.y * halfWidth,
+        smooth: segment.startPoint.smooth,
       });
       right.push({
         x: segment.startPoint.x - startNormal.x * halfWidth,
         y: segment.startPoint.y - startNormal.y * halfWidth,
+        smooth: segment.startPoint.smooth,
       });
     }
 
@@ -239,13 +242,16 @@ function generateOffsetPointsForSegment(
           ? normal
           : calculateCornerNormal(segment, nextSegment, halfWidth);
 
+      // Copy smooth property from skeleton point
       left.push({
         x: segment.endPoint.x + endNormal.x * halfWidth,
         y: segment.endPoint.y + endNormal.y * halfWidth,
+        smooth: segment.endPoint.smooth,
       });
       right.push({
         x: segment.endPoint.x - endNormal.x * halfWidth,
         y: segment.endPoint.y - endNormal.y * halfWidth,
+        smooth: segment.endPoint.smooth,
       });
     }
   } else {
@@ -277,18 +283,29 @@ function generateOffsetPointsForSegment(
       const normal = vector.rotateVector90CW(tangent);
 
       // Determine if this is an on-curve or off-curve point
-      const isEndpoint = i === 0 || i === numSamples;
+      const isStartEndpoint = i === 0;
+      const isEndEndpoint = i === numSamples;
+      const isEndpoint = isStartEndpoint || isEndEndpoint;
       const pointType = isEndpoint ? null : "cubic";
+
+      // Copy smooth from corresponding skeleton point for on-curve points
+      const smooth = isStartEndpoint
+        ? segment.startPoint.smooth
+        : isEndEndpoint
+          ? segment.endPoint.smooth
+          : undefined;
 
       left.push({
         x: point.x + normal.x * halfWidth,
         y: point.y + normal.y * halfWidth,
         type: pointType,
+        smooth,
       });
       right.push({
         x: point.x - normal.x * halfWidth,
         y: point.y - normal.y * halfWidth,
         type: pointType,
+        smooth,
       });
     }
   }
