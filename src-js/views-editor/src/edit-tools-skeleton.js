@@ -61,22 +61,50 @@ export class SkeletonPenTool extends BaseTool {
           if (skeletonData) {
             const contour = skeletonData.contours[centerlineHit.contourIndex];
             if (contour) {
-              const startPoint = contour.points[centerlineHit.segmentStartIndex];
-              const endPoint = contour.points[centerlineHit.segmentEndIndex];
-              if (startPoint && endPoint) {
-                const handle1 = {
-                  x: Math.round(startPoint.x + (endPoint.x - startPoint.x) / 3),
-                  y: Math.round(startPoint.y + (endPoint.y - startPoint.y) / 3),
-                };
-                const handle2 = {
-                  x: Math.round(startPoint.x + ((endPoint.x - startPoint.x) * 2) / 3),
-                  y: Math.round(startPoint.y + ((endPoint.y - startPoint.y) * 2) / 3),
-                };
-                newInsertHandles = {
-                  points: [handle1, handle2],
-                  startPoint: startPoint,
-                  endPoint: endPoint,
-                };
+              const startIdx = centerlineHit.segmentStartIndex;
+              const endIdx = centerlineHit.segmentEndIndex;
+
+              // Check if segment is a line (no existing off-curves)
+              let isLinearSegment = true;
+              if (centerlineHit.isClosingSegment) {
+                // Check wrapping
+                for (let j = startIdx + 1; j < contour.points.length; j++) {
+                  if (contour.points[j].type) {
+                    isLinearSegment = false;
+                    break;
+                  }
+                }
+                if (isLinearSegment) {
+                  for (let j = 0; j < endIdx; j++) {
+                    if (contour.points[j].type) {
+                      isLinearSegment = false;
+                      break;
+                    }
+                  }
+                }
+              } else {
+                isLinearSegment = endIdx - startIdx === 1;
+              }
+
+              // Only show preview for linear segments
+              if (isLinearSegment) {
+                const startPoint = contour.points[startIdx];
+                const endPoint = contour.points[endIdx];
+                if (startPoint && endPoint) {
+                  const handle1 = {
+                    x: Math.round(startPoint.x + (endPoint.x - startPoint.x) / 3),
+                    y: Math.round(startPoint.y + (endPoint.y - startPoint.y) / 3),
+                  };
+                  const handle2 = {
+                    x: Math.round(startPoint.x + ((endPoint.x - startPoint.x) * 2) / 3),
+                    y: Math.round(startPoint.y + ((endPoint.y - startPoint.y) * 2) / 3),
+                  };
+                  newInsertHandles = {
+                    points: [handle1, handle2],
+                    startPoint: startPoint,
+                    endPoint: endPoint,
+                  };
+                }
               }
             }
           }
@@ -379,12 +407,26 @@ export class SkeletonPenTool extends BaseTool {
         const startPoint = points[lastIdx];
         const endPoint = points[firstIdx];
 
-        const hitResult = this._pointToLineSegmentDistance(
-          glyphPoint,
-          startPoint,
-          endPoint
-        );
-        if (hitResult.distance <= margin) {
+        // Check for off-curve points in closing segment (wrapping around)
+        const closingOffCurves = [];
+        for (let j = lastIdx + 1; j < points.length; j++) {
+          if (points[j].type) closingOffCurves.push(points[j]);
+        }
+        for (let j = 0; j < firstIdx; j++) {
+          if (points[j].type) closingOffCurves.push(points[j]);
+        }
+
+        let hitResult;
+        if (closingOffCurves.length === 0) {
+          // Line segment
+          hitResult = this._pointToLineSegmentDistance(glyphPoint, startPoint, endPoint);
+        } else {
+          // Bezier curve
+          const bezierPoints = [startPoint, ...closingOffCurves, endPoint];
+          hitResult = this._pointToBezierDistance(glyphPoint, bezierPoints);
+        }
+
+        if (hitResult && hitResult.distance <= margin) {
           return {
             contourIndex,
             segmentStartIndex: lastIdx,
@@ -392,6 +434,7 @@ export class SkeletonPenTool extends BaseTool {
             t: hitResult.t,
             point: hitResult.point,
             isClosingSegment: true,
+            hasClosingOffCurves: closingOffCurves.length > 0,
           };
         }
       }
@@ -512,6 +555,39 @@ export class SkeletonPenTool extends BaseTool {
 
       if (!startPoint || !endPoint) return;
 
+      // Check if segment already has off-curve points - if so, don't add more
+      let hasExistingOffCurves = false;
+      if (centerlineHit.isClosingSegment) {
+        // Check wrapping from lastOnCurve to firstOnCurve
+        for (let j = startIdx + 1; j < contour.points.length; j++) {
+          if (contour.points[j].type) {
+            hasExistingOffCurves = true;
+            break;
+          }
+        }
+        if (!hasExistingOffCurves) {
+          for (let j = 0; j < endIdx; j++) {
+            if (contour.points[j].type) {
+              hasExistingOffCurves = true;
+              break;
+            }
+          }
+        }
+      } else {
+        // Normal segment - check between start and end
+        for (let j = startIdx + 1; j < endIdx; j++) {
+          if (contour.points[j].type) {
+            hasExistingOffCurves = true;
+            break;
+          }
+        }
+      }
+
+      if (hasExistingOffCurves) {
+        // Segment already has off-curves - silently ignore
+        return;
+      }
+
       // Calculate handle positions at 1/3 and 2/3 along the segment
       const handle1 = {
         x: Math.round(startPoint.x + (endPoint.x - startPoint.x) / 3),
@@ -592,17 +668,43 @@ export class SkeletonPenTool extends BaseTool {
       // Determine insert position and handle bezier splitting
       const startIdx = centerlineHit.segmentStartIndex;
       const endIdx = centerlineHit.segmentEndIndex;
-      const hasOffCurve = centerlineHit.isClosingSegment
-        ? false // Closing segments are always lines for now
-        : endIdx - startIdx > 1;
+
+      // Check for off-curve points (including in closing segments)
+      let hasOffCurve;
+      if (centerlineHit.isClosingSegment) {
+        // Use the hasClosingOffCurves flag from hit testing, or calculate it
+        hasOffCurve = centerlineHit.hasClosingOffCurves || false;
+        if (!centerlineHit.hasClosingOffCurves) {
+          // Double-check by counting off-curves
+          let offCurveCount = 0;
+          for (let j = startIdx + 1; j < contour.points.length; j++) {
+            if (contour.points[j].type) offCurveCount++;
+          }
+          for (let j = 0; j < endIdx; j++) {
+            if (contour.points[j].type) offCurveCount++;
+          }
+          hasOffCurve = offCurveCount > 0;
+        }
+      } else {
+        hasOffCurve = endIdx - startIdx > 1;
+      }
 
       let insertIndex;
       let pointsToRemove = 0;
       let pointsToInsert = [insertPoint];
 
-      if (centerlineHit.isClosingSegment) {
-        // For closing segment, insert at the end
+      if (centerlineHit.isClosingSegment && !hasOffCurve) {
+        // For closing segment line, insert at the end
         insertIndex = contour.points.length;
+      } else if (centerlineHit.isClosingSegment && hasOffCurve) {
+        // For closing segment with bezier, handle wrap-around splitting
+        const closingSegmentResult = this._splitClosingSegmentBezier(
+          contour, startIdx, endIdx, centerlineHit.t, centerlineHit.point
+        );
+        contour.points = closingSegmentResult.newPoints;
+        insertIndex = closingSegmentResult.newOnCurveIndex;
+        pointsToRemove = 0;
+        pointsToInsert = []; // Already handled in splitClosingSegmentBezier
       } else if (!hasOffCurve) {
         // Line segment - simple insert after startIdx
         insertIndex = startIdx + 1;
@@ -1034,5 +1136,93 @@ export class SkeletonPenTool extends BaseTool {
 
     // Update generated contour indices
     skeletonData.generatedContourIndices = newGeneratedIndices;
+  }
+
+  /**
+   * Split a closing segment bezier curve at parameter t.
+   * Handles the wrap-around case where off-curves span from lastIdx to firstIdx.
+   * @returns {{ newPoints: Array, newOnCurveIndex: number }}
+   */
+  _splitClosingSegmentBezier(contour, lastOnCurveIdx, firstOnCurveIdx, t, splitPoint) {
+    const points = contour.points;
+
+    // Collect the closing segment bezier points
+    const bezierPoints = [points[lastOnCurveIdx]];
+    for (let j = lastOnCurveIdx + 1; j < points.length; j++) {
+      bezierPoints.push(points[j]);
+    }
+    for (let j = 0; j < firstOnCurveIdx; j++) {
+      bezierPoints.push(points[j]);
+    }
+    bezierPoints.push(points[firstOnCurveIdx]);
+
+    // Create bezier from points
+    let bezier;
+    if (bezierPoints.length === 3) {
+      bezier = new Bezier(
+        bezierPoints[0].x, bezierPoints[0].y,
+        bezierPoints[1].x, bezierPoints[1].y,
+        bezierPoints[2].x, bezierPoints[2].y
+      );
+    } else if (bezierPoints.length === 4) {
+      bezier = new Bezier(
+        bezierPoints[0].x, bezierPoints[0].y,
+        bezierPoints[1].x, bezierPoints[1].y,
+        bezierPoints[2].x, bezierPoints[2].y,
+        bezierPoints[3].x, bezierPoints[3].y
+      );
+    } else {
+      // Approximate as cubic using first and last control points
+      bezier = new Bezier(
+        bezierPoints[0].x, bezierPoints[0].y,
+        bezierPoints[1].x, bezierPoints[1].y,
+        bezierPoints[bezierPoints.length - 2].x, bezierPoints[bezierPoints.length - 2].y,
+        bezierPoints[bezierPoints.length - 1].x, bezierPoints[bezierPoints.length - 1].y
+      );
+    }
+
+    // Split the bezier at t
+    const split = bezier.split(t);
+
+    // Build new points array:
+    // Keep on-curve points from firstOnCurve to lastOnCurve (the non-closing segments)
+    // Then add: left half handles, new on-curve, right half handles
+    const newPoints = [];
+
+    // Copy points from firstOnCurve to lastOnCurve (inclusive)
+    for (let j = firstOnCurveIdx; j <= lastOnCurveIdx; j++) {
+      newPoints.push({ ...points[j] });
+    }
+
+    // Add left half control points (from split.left, skip first which is lastOnCurve)
+    for (let k = 1; k < split.left.points.length - 1; k++) {
+      newPoints.push({
+        x: Math.round(split.left.points[k].x),
+        y: Math.round(split.left.points[k].y),
+        type: "cubic",
+        smooth: false,
+      });
+    }
+
+    // Add the new on-curve point
+    const newOnCurveIndex = newPoints.length;
+    newPoints.push({
+      x: Math.round(splitPoint.x),
+      y: Math.round(splitPoint.y),
+      type: null,
+      smooth: true,
+    });
+
+    // Add right half control points (from split.right, skip first which is the split point)
+    for (let k = 1; k < split.right.points.length - 1; k++) {
+      newPoints.push({
+        x: Math.round(split.right.points[k].x),
+        y: Math.round(split.right.points[k].y),
+        type: "cubic",
+        smooth: false,
+      });
+    }
+
+    return { newPoints, newOnCurveIndex };
   }
 }
