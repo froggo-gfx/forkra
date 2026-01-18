@@ -10,7 +10,7 @@ from ..core.classes import (
 )
 
 
-class BaseBackend:
+class ReadableBaseBackend:
 
     async def aclose(self) -> None:
         pass

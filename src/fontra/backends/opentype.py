@@ -26,12 +26,12 @@ from ..core.classes import (
 from ..core.path import PackedPath, PackedPathPointPen
 from ..core.protocols import ReadableFontBackend
 from ..core.varutils import locationToTuple
-from .base import BaseBackend
+from .base import ReadableBaseBackend
 from .filewatcher import Change
 from .watchable import WatchableBackend
 
 
-class OTFBackend(WatchableBackend, BaseBackend):
+class OTFBackend(WatchableBackend, ReadableBaseBackend):
     @classmethod
     def fromPath(cls, path: PathLike) -> ReadableFontBackend:
         return cls(path=path)
