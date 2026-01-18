@@ -28,6 +28,7 @@ from ..core.classes import (
 from ..core.glyphdependencies import GlyphDependencies
 from ..core.protocols import WritableFontBackend
 from ..core.subprocess import runInSubProcess
+from .base import BaseBackend
 from .filenames import fileNameToString, stringToFileName
 from .filewatcher import Change
 from .watchable import WatchableBackend
@@ -35,7 +36,7 @@ from .watchable import WatchableBackend
 logger = logging.getLogger(__name__)
 
 
-class FontraBackend(WatchableBackend):
+class FontraBackend(WatchableBackend, BaseBackend):
     glyphInfoFileName = "glyph-info.csv"
     fontDataFileName = "font-data.json"
     kerningFileName = "kerning.csv"
