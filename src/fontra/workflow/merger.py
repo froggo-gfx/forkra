@@ -33,9 +33,9 @@ class FontBackendMerger:
     inputB: ReadableFontBackend
     warnAboutDuplicates: bool = True
 
-    def __post_init__(self):
-        self._glyphNamesA = None
-        self._glyphNamesB = None
+    def __post_init__(self) -> None:
+        self._glyphNamesA: set[str] | None = None
+        self._glyphNamesB: set[str] | None = None
         self._glyphMap: dict[str, list[int]] | None = None
 
     async def aclose(self) -> None:
