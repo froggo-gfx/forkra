@@ -26,11 +26,12 @@ from ..core.classes import (
 from ..core.path import PackedPath, PackedPathPointPen
 from ..core.protocols import ReadableFontBackend
 from ..core.varutils import locationToTuple
+from .base import ReadableBaseBackend
 from .filewatcher import Change
 from .watchable import WatchableBackend
 
 
-class OTFBackend(WatchableBackend):
+class OTFBackend(WatchableBackend, ReadableBaseBackend):
     @classmethod
     def fromPath(cls, path: PathLike) -> ReadableFontBackend:
         return cls(path=path)
@@ -47,7 +48,7 @@ class OTFBackend(WatchableBackend):
     def _loadFontFromPath(self, path: PathLike) -> TTFont:
         return TTFont(path, lazy=True)
 
-    def _initialize(self):
+    def _initialize(self) -> None:
         self.axes = unpackAxes(self.font)
         gvar = self.font.get("gvar")
         self.gvarVariations = gvar.variations if gvar is not None else None
