@@ -11,6 +11,7 @@ from functools import cached_property
 from typing import Any, AsyncGenerator, ClassVar
 
 from ...backends import getFileSystemBackend, newFileSystemBackend
+from ...backends.base import ReadableBaseBackend
 from ...backends.copy import copyFont
 from ...backends.filenames import stringToFileName
 from ...backends.null import NullBackend
@@ -89,7 +90,7 @@ class FontraWrite:
 
 
 @dataclass(kw_only=True)
-class BaseFilter:
+class BaseFilter(ReadableBaseBackend):
     input: ReadableFontBackend = field(init=False, default=NullBackend())
     actionName: ClassVar[str]
 

@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any
 
+from ..backends.base import ReadableBaseBackend
 from ..backends.null import NullBackend
 from ..core.async_property import async_cached_property
 from ..core.classes import (
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(kw_only=True)
-class FontBackendMerger:
+class FontBackendMerger(ReadableBaseBackend):
     inputA: ReadableFontBackend
     inputB: ReadableFontBackend
     warnAboutDuplicates: bool = True
