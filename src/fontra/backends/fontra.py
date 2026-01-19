@@ -618,7 +618,7 @@ async def extractGlyphDependenciesFromFontra(
     glyphsDir: pathlib.Path,
 ) -> GlyphDependencies:
     componentInfo = await runInSubProcess(
-        partial(_extractComponentInfoFromUFO, glyphsDir)
+        partial(_extractComponentInfoFromFontra, glyphsDir)
     )
 
     dependencies = GlyphDependencies()
@@ -627,7 +627,7 @@ async def extractGlyphDependenciesFromFontra(
     return dependencies
 
 
-def _extractComponentInfoFromUFO(glyphsDir: pathlib.Path) -> dict[str, set[str]]:
+def _extractComponentInfoFromFontra(glyphsDir: pathlib.Path) -> dict[str, set[str]]:
     componentInfo = {}
     for glyphPath in glyphsDir.glob("*.json"):
         glyphName = fileNameToString(glyphPath.stem)
