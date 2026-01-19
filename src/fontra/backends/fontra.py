@@ -631,8 +631,14 @@ def _extractComponentInfoFromFontra(glyphsDir: pathlib.Path) -> dict[str, set[st
     componentInfo = {}
     for glyphPath in glyphsDir.glob("*.json"):
         glyphName = fileNameToString(glyphPath.stem)
-        glyphData = json.loads(glyphPath.read_text(encoding="utf-8"))
-        componentInfo[glyphName] = componentNamesFromGlyphData(glyphData)
+        try:
+            glyphData = json.loads(glyphPath.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            logger.error(
+                f"error while extracting component info from {glyphName}: {e!r}",
+            )
+        else:
+            componentInfo[glyphName] = componentNamesFromGlyphData(glyphData)
     return componentInfo
 
 
