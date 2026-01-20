@@ -2383,6 +2383,8 @@ def updateFontInfoFromFontSource(reader, fontSource):
         if ufoName is not None:
             setattr(fontInfo, ufoName, round(metric.value))
 
+    fontInfo.italicAngle = fontSource.italicAngle
+
     lib = reader.readLib()
 
     fontInfo.guidelines = packGuidelines(fontSource.guidelines, lib)

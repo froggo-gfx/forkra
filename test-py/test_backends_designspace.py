@@ -1350,6 +1350,17 @@ async def test_missingUFOError(writableTestFont):
         _ = getFileSystemBackend(dsPath)
 
 
+async def test_write_italicAngle(writableTestFont):
+    sources = await writableTestFont.getSources()
+    assert sources["light-condensed"].italicAngle == 0
+    sources["light-condensed"].italicAngle = -15
+    await writableTestFont.putSources(sources)
+
+    reopenedFont = getFileSystemBackend(writableTestFont.dsDoc.path)
+    reopenedSources = await reopenedFont.getSources()
+    assert reopenedSources["light-condensed"].italicAngle == -15
+
+
 def fileNamesFromDir(path):
     return sorted(p.name for p in path.iterdir())
 
