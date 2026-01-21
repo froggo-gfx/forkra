@@ -42,14 +42,17 @@ function chordLengthParametrize(points) {
  * Fit a cubic bezier to a set of points using least-squares.
  * Based on "An Algorithm for Automatically Fitting Digitized Curves" by Philip J. Schneider.
  * @param {Array} points - Array of {x, y} points (at least 2)
+ * @param {Object} fixedP0 - Optional fixed start point (if null, uses points[0])
+ * @param {Object} fixedP3 - Optional fixed end point (if null, uses points[n-1])
  * @returns {Object} - {p0, p1, p2, p3} control points, or null if fitting failed
  */
-function fitCubicBezier(points) {
+function fitCubicBezier(points, fixedP0 = null, fixedP3 = null) {
   if (!points || points.length < 2) return null;
 
   const n = points.length;
-  const p0 = points[0];
-  const p3 = points[n - 1];
+  // Use fixed endpoints if provided, otherwise use sampled endpoints
+  const p0 = fixedP0 || points[0];
+  const p3 = fixedP3 || points[n - 1];
 
   if (n === 2) {
     // Two points - create a line as cubic bezier
@@ -486,7 +489,47 @@ function generateOffsetPointsForSegment(
     // Convert to bezier-js format
     const bezier = createBezierFromPoints(bezierPoints);
 
-    // Sample offset curve at regular intervals
+    // Calculate normals at endpoints
+    // Use bezier derivative for the curve's tangent direction
+    const startDeriv = bezier.derivative(0);
+    const startTangent = vector.normalizeVector({ x: startDeriv.x, y: startDeriv.y });
+    const bezierStartNormal = vector.rotateVector90CW(startTangent);
+
+    const endDeriv = bezier.derivative(1);
+    const endTangent = vector.normalizeVector({ x: endDeriv.x, y: endDeriv.y });
+    const bezierEndNormal = vector.rotateVector90CW(endTangent);
+
+    // For corners (non-smooth junctions), use averaged normal from calculateCornerNormal
+    // This ensures continuity between consecutive segments
+    const startNormal =
+      !prevSegment || (isFirst && !isClosed)
+        ? bezierStartNormal
+        : calculateCornerNormal(prevSegment, segment, halfWidth);
+
+    const endNormal =
+      !nextSegment || (isLast && !isClosed)
+        ? bezierEndNormal
+        : calculateCornerNormal(segment, nextSegment, halfWidth);
+
+    // Fixed endpoint positions (using corner-aware normals)
+    const fixedStartLeft = {
+      x: segment.startPoint.x + startNormal.x * halfWidth,
+      y: segment.startPoint.y + startNormal.y * halfWidth,
+    };
+    const fixedStartRight = {
+      x: segment.startPoint.x - startNormal.x * halfWidth,
+      y: segment.startPoint.y - startNormal.y * halfWidth,
+    };
+    const fixedEndLeft = {
+      x: segment.endPoint.x + endNormal.x * halfWidth,
+      y: segment.endPoint.y + endNormal.y * halfWidth,
+    };
+    const fixedEndRight = {
+      x: segment.endPoint.x - endNormal.x * halfWidth,
+      y: segment.endPoint.y - endNormal.y * halfWidth,
+    };
+
+    // Sample offset curve at regular intervals (for fitting)
     const numSamples = Math.max(16, segment.controlPoints.length * 8);
     const sampledLeft = [];
     const sampledRight = [];
@@ -509,24 +552,24 @@ function generateOffsetPointsForSegment(
       });
     }
 
-    // Fit cubic bezier to sampled points
-    const fittedLeft = fitCubicBezier(sampledLeft);
-    const fittedRight = fitCubicBezier(sampledRight);
+    // Fit cubic bezier to sampled points WITH FIXED ENDPOINTS
+    const fittedLeft = fitCubicBezier(sampledLeft, fixedStartLeft, fixedEndLeft);
+    const fittedRight = fitCubicBezier(sampledRight, fixedStartRight, fixedEndRight);
 
     // Determine which points to add based on closed/open and first/last
     const shouldAddStart = isClosed || isFirst;
     const shouldAddEnd = !isClosed;
 
     if (shouldAddStart && fittedLeft && fittedRight) {
-      // Add start on-curve point
+      // Add start on-curve point (using fixed position)
       left.push({
-        x: fittedLeft.p0.x,
-        y: fittedLeft.p0.y,
+        x: fixedStartLeft.x,
+        y: fixedStartLeft.y,
         smooth: segment.startPoint.smooth,
       });
       right.push({
-        x: fittedRight.p0.x,
-        y: fittedRight.p0.y,
+        x: fixedStartRight.x,
+        y: fixedStartRight.y,
         smooth: segment.startPoint.smooth,
       });
 
@@ -569,19 +612,20 @@ function generateOffsetPointsForSegment(
       });
 
       if (shouldAddEnd) {
-        // Add end on-curve point
+        // Add end on-curve point (using fixed position)
         left.push({
-          x: fittedLeft.p3.x,
-          y: fittedLeft.p3.y,
+          x: fixedEndLeft.x,
+          y: fixedEndLeft.y,
           smooth: segment.endPoint.smooth,
         });
         right.push({
-          x: fittedRight.p3.x,
-          y: fittedRight.p3.y,
+          x: fixedEndRight.x,
+          y: fixedEndRight.y,
           smooth: segment.endPoint.smooth,
         });
       }
     }
+
   }
 
   return { left, right };
@@ -592,20 +636,47 @@ function generateOffsetPointsForSegment(
  * Uses miter join logic.
  */
 function calculateCornerNormal(segment1, segment2, halfWidth) {
-  const dir1 = vector.normalizeVector(
-    vector.subVectors(segment1.endPoint, segment1.startPoint)
-  );
-  const dir2 = vector.normalizeVector(
-    vector.subVectors(segment2.endPoint, segment2.startPoint)
-  );
+  // Get outgoing tangent from segment1 at its endpoint
+  let dir1;
+  if (segment1.controlPoints.length === 0) {
+    // Line segment - direction is constant
+    dir1 = vector.normalizeVector(
+      vector.subVectors(segment1.endPoint, segment1.startPoint)
+    );
+  } else {
+    // Bezier segment - use derivative at t=1
+    const bezier1 = createBezierFromPoints([
+      segment1.startPoint,
+      ...segment1.controlPoints,
+      segment1.endPoint,
+    ]);
+    const deriv1 = bezier1.derivative(1);
+    dir1 = vector.normalizeVector({ x: deriv1.x, y: deriv1.y });
+  }
+
+  // Get incoming tangent from segment2 at its start point
+  let dir2;
+  if (segment2.controlPoints.length === 0) {
+    // Line segment - direction is constant
+    dir2 = vector.normalizeVector(
+      vector.subVectors(segment2.endPoint, segment2.startPoint)
+    );
+  } else {
+    // Bezier segment - use derivative at t=0
+    const bezier2 = createBezierFromPoints([
+      segment2.startPoint,
+      ...segment2.controlPoints,
+      segment2.endPoint,
+    ]);
+    const deriv2 = bezier2.derivative(0);
+    dir2 = vector.normalizeVector({ x: deriv2.x, y: deriv2.y });
+  }
 
   const normal1 = vector.rotateVector90CW(dir1);
   const normal2 = vector.rotateVector90CW(dir2);
 
   // Average of the two normals
-  const avgNormal = vector.normalizeVector(
-    vector.addVectors(normal1, normal2)
-  );
+  const avgNormal = vector.normalizeVector(vector.addVectors(normal1, normal2));
 
   // Check for sharp corners (miter limit)
   const dot = vector.dotVector(normal1, normal2);
@@ -886,4 +957,84 @@ export function createSkeletonContour(isClosed = false) {
     defaultWidth: DEFAULT_WIDTH,
     capStyle: "round",
   };
+}
+
+/**
+ * Generate sampled offset points for visualization/debugging.
+ * Returns arrays of points along the left and right offset curves.
+ * @param {Object} skeletonContour - Skeleton contour data
+ * @returns {Object} - { left: [{x, y}, ...], right: [{x, y}, ...] }
+ */
+export function generateSampledOffsetPoints(skeletonContour) {
+  const { points, isClosed, defaultWidth = DEFAULT_WIDTH } = skeletonContour;
+
+  if (points.length < 2) {
+    return { left: [], right: [] };
+  }
+
+  const halfWidth = defaultWidth / 2;
+  const segments = buildSegmentsFromPoints(points, isClosed);
+  const sampledLeft = [];
+  const sampledRight = [];
+
+  for (const segment of segments) {
+    if (segment.controlPoints.length === 0) {
+      // Line segment - just add endpoints
+      const direction = vector.normalizeVector(
+        vector.subVectors(segment.endPoint, segment.startPoint)
+      );
+      const normal = vector.rotateVector90CW(direction);
+
+      sampledLeft.push({
+        x: segment.startPoint.x + normal.x * halfWidth,
+        y: segment.startPoint.y + normal.y * halfWidth,
+      });
+      sampledRight.push({
+        x: segment.startPoint.x - normal.x * halfWidth,
+        y: segment.startPoint.y - normal.y * halfWidth,
+      });
+
+      if (!isClosed) {
+        sampledLeft.push({
+          x: segment.endPoint.x + normal.x * halfWidth,
+          y: segment.endPoint.y + normal.y * halfWidth,
+        });
+        sampledRight.push({
+          x: segment.endPoint.x - normal.x * halfWidth,
+          y: segment.endPoint.y - normal.y * halfWidth,
+        });
+      }
+    } else {
+      // Bezier segment - sample at intervals
+      const bezierPoints = [
+        segment.startPoint,
+        ...segment.controlPoints,
+        segment.endPoint,
+      ];
+      const bezier = createBezierFromPoints(bezierPoints);
+      const numSamples = Math.max(16, segment.controlPoints.length * 8);
+
+      for (let i = 0; i <= numSamples; i++) {
+        // Skip last point for closed contours (next segment will add it)
+        if (isClosed && i === numSamples) continue;
+
+        const t = i / numSamples;
+        const point = bezier.get(t);
+        const derivative = bezier.derivative(t);
+        const tangent = vector.normalizeVector({ x: derivative.x, y: derivative.y });
+        const normal = vector.rotateVector90CW(tangent);
+
+        sampledLeft.push({
+          x: point.x + normal.x * halfWidth,
+          y: point.y + normal.y * halfWidth,
+        });
+        sampledRight.push({
+          x: point.x - normal.x * halfWidth,
+          y: point.y - normal.y * halfWidth,
+        });
+      }
+    }
+  }
+
+  return { left: sampledLeft, right: sampledRight };
 }
