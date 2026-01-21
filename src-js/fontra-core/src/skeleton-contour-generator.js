@@ -470,6 +470,7 @@ function generateOffsetPointsForSegment(
     // Note: curvature() can return NaN for degenerate curves, so we default to 0
     const rawCurvatureStart = bezier.curvature(0);
     const rawCurvatureEnd = bezier.curvature(1);
+    console.log('[curvature debug] raw:', rawCurvatureStart, rawCurvatureEnd, 'bezier order:', bezier.order, 'points:', bezierPoints.length);
     const curvatureStart = Number.isFinite(rawCurvatureStart) ? rawCurvatureStart : 0;
     const curvatureEnd = Number.isFinite(rawCurvatureEnd) ? rawCurvatureEnd : 0;
 
