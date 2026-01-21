@@ -117,7 +117,7 @@ export function generateContoursFromSkeleton(skeletonData) {
  *   - For closed skeleton: returns 2 contours (outer and inner)
  */
 export function generateOutlineFromSkeletonContour(skeletonContour) {
-  const { points, isClosed, defaultWidth = DEFAULT_WIDTH, capStyle = "round" } =
+  const { points, isClosed, defaultWidth = DEFAULT_WIDTH, capStyle = "butt" } =
     skeletonContour;
 
   if (points.length < 2) {
@@ -794,7 +794,7 @@ export function createSkeletonContour(isClosed = false) {
     isClosed,
     points: [],
     defaultWidth: DEFAULT_WIDTH,
-    capStyle: "round",
+    capStyle: "butt",
   };
 }
 
