@@ -392,9 +392,17 @@ function generateOffsetPointsForSegment(
     };
 
     // Helper to add offset curves to output array
-    // skipEndForButtCap: if true, skip control points and endpoint for the last curve (for butt cap ends)
-    const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd, skipEndForButtCap = false) => {
-      if (!curves || curves.length === 0) return;
+    const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd) => {
+      // Fallback: if bezier.offset() returns empty result, add straight line
+      if (!curves || curves.length === 0) {
+        if (shouldAddStart) {
+          output.push({ x: fixedStart.x, y: fixedStart.y, smooth: smoothStart });
+        }
+        if (shouldAddEnd) {
+          output.push({ x: fixedEnd.x, y: fixedEnd.y, smooth: smoothEnd });
+        }
+        return;
+      }
 
       for (let i = 0; i < curves.length; i++) {
         const curve = curves[i];
@@ -409,12 +417,6 @@ function generateOffsetPointsForSegment(
             y: fixedStart.y,
             smooth: smoothStart,
           });
-        }
-
-        // For butt cap at end: skip control points and endpoint of the last curve
-        // This allows the contour to connect directly to the other side with a straight line
-        if (isLastCurve && skipEndForButtCap) {
-          continue;
         }
 
         // Add control points based on curve type
@@ -452,8 +454,6 @@ function generateOffsetPointsForSegment(
     // Determine which points to add based on closed/open and first/last
     const shouldAddStart = isClosed || isFirst;
     const shouldAddEnd = !isClosed;
-    // For butt cap at end of last segment: skip control points and endpoint
-    const skipEndForButtCap = isLast && !isClosed && capStyle === "butt";
 
     addOffsetCurves(
       offsetLeftCurves,
@@ -463,8 +463,7 @@ function generateOffsetPointsForSegment(
       shouldAddStart,
       shouldAddEnd,
       segment.startPoint.smooth,
-      segment.endPoint.smooth,
-      skipEndForButtCap
+      segment.endPoint.smooth
     );
 
     addOffsetCurves(
@@ -475,8 +474,7 @@ function generateOffsetPointsForSegment(
       shouldAddStart,
       shouldAddEnd,
       segment.startPoint.smooth,
-      segment.endPoint.smooth,
-      skipEndForButtCap
+      segment.endPoint.smooth
     );
   }
 
