@@ -769,6 +769,12 @@ export class SceneModel {
         (point) => vector.distance(pathHit, point) > size
       )
     ) {
+      // Don't select segments from skeleton-generated contours
+      const firstPointIndex = pathHit.segment.parentPointIndices[0];
+      if (this.isGeneratedSkeletonPoint(firstPointIndex)) {
+        return { selection: new Set() };
+      }
+
       const selection = new Set(
         [
           pathHit.segment.parentPointIndices[0],
