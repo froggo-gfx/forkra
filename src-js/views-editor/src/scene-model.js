@@ -1049,7 +1049,12 @@ export class SceneModel {
       x: point.x - positionedGlyph.x,
       y: point.y - positionedGlyph.y,
     };
-    return positionedGlyph.glyph.pathHitTester.hitTest(glyphPoint, size / 2);
+    try {
+      return positionedGlyph.glyph.pathHitTester.hitTest(glyphPoint, size / 2);
+    } catch (e) {
+      // Can happen with malformed contours (e.g., empty contours)
+      return {};
+    }
   }
 
   glyphAtPoint(point, skipEditingGlyph = true) {
