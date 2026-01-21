@@ -807,7 +807,10 @@ export class PointerTool extends BaseTool {
         await sendIncrementalChange(combinedChange.change, true);
       }
 
-      // Return accumulated changes (no need to record again - state is already final)
+      // Final send without "may drop" flag (required for proper undo)
+      await sendIncrementalChange(accumulatedChanges.change);
+
+      // Return accumulated changes
       return {
         changes: accumulatedChanges,
         undoLabel: translate("edit-tools-pointer.undo.move-skeleton-points"),

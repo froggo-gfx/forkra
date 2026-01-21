@@ -1056,6 +1056,9 @@ export class SkeletonPenTool extends BaseTool {
         this.sceneController.selection = new Set([
           `skeletonPoint/${targetContourIndex}/${handleOutIndex}`,
         ]);
+
+        // Final send without "may drop" flag (required for proper undo)
+        await sendIncrementalChange(dragChanges.change);
       }
 
       // Combine all changes (following Pen Tool pattern)
