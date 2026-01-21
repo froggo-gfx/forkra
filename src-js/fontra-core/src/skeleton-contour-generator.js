@@ -39,13 +39,14 @@ function chordLengthParametrize(points) {
 }
 
 /**
- * Fit a cubic bezier to a set of points using least-squares.
- * Based on "An Algorithm for Automatically Fitting Digitized Curves" by Philip J. Schneider.
+ * Fit a cubic bezier to a set of points using curvature-based sizing.
  * @param {Array} points - Array of {x, y} points (at least 2)
  * @param {Object} fixedP0 - Optional fixed start point (if null, uses points[0])
  * @param {Object} fixedP3 - Optional fixed end point (if null, uses points[n-1])
  * @param {Object} tangentStart - Optional tangent direction at start (normalized)
  * @param {Object} tangentEnd - Optional tangent direction at end (normalized)
+ * @param {number} curvatureStart - Curvature at start point
+ * @param {number} curvatureEnd - Curvature at end point
  * @returns {Object} - {p0, p1, p2, p3} control points, or null if fitting failed
  */
 function fitCubicBezier(
@@ -53,7 +54,9 @@ function fitCubicBezier(
   fixedP0 = null,
   fixedP3 = null,
   tangentStart = null,
-  tangentEnd = null
+  tangentEnd = null,
+  curvatureStart = 0,
+  curvatureEnd = 0
 ) {
   if (!points || points.length < 2) return null;
 
@@ -82,24 +85,32 @@ function fitCubicBezier(
     arcLength += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
   }
 
-  // Use arc length based heuristic: control points at ~1/3 of arc length
-  // This is a simple but effective approximation
-  const alpha = arcLength / 3;
+  // Calculate control point lengths based on curvature
+  // Higher curvature = longer control point to achieve the bend
+  // For a cubic bezier, the relationship between handle length and curvature is:
+  // κ ≈ (2/3) * h / L² where h is handle length and L is chord length
+  // Solving for h: h ≈ (3/2) * κ * L²
+  // But we use arc length for better accuracy
 
-  console.log('[fitCubicBezier] n:', n, 'arcLength:', arcLength, 'alpha:', alpha);
-  console.log('[fitCubicBezier] t1:', t1, 't2:', t2);
-  console.log('[fitCubicBezier] p0:', p0, 'p3:', p3);
+  const baseAlpha = arcLength / 3;
+
+  // Scale based on curvature: higher curvature needs longer handles
+  // curvature has units 1/length, so curvature * arcLength is dimensionless
+  const curvatureFactor = 0.5; // Tuning parameter
+  const alpha1 = baseAlpha * (1 + Math.abs(curvatureStart) * arcLength * curvatureFactor);
+  const alpha2 = baseAlpha * (1 + Math.abs(curvatureEnd) * arcLength * curvatureFactor);
+
+  console.log('[fitCubicBezier] arcLength:', arcLength, 'curvatures:', curvatureStart, curvatureEnd);
+  console.log('[fitCubicBezier] alpha1:', alpha1, 'alpha2:', alpha2);
 
   const p1 = {
-    x: p0.x + alpha * t1.x,
-    y: p0.y + alpha * t1.y,
+    x: p0.x + alpha1 * t1.x,
+    y: p0.y + alpha1 * t1.y,
   };
   const p2 = {
-    x: p3.x - alpha * t2.x,
-    y: p3.y - alpha * t2.y,
+    x: p3.x - alpha2 * t2.x,
+    y: p3.y - alpha2 * t2.y,
   };
-
-  console.log('[fitCubicBezier] result p1:', p1, 'p2:', p2);
 
   return { p0, p1, p2, p3 };
 }
@@ -456,6 +467,10 @@ function generateOffsetPointsForSegment(
     const endTangent = vector.normalizeVector({ x: endDeriv.x, y: endDeriv.y });
     const bezierEndNormal = vector.rotateVector90CW(endTangent);
 
+    // Get curvature at endpoints for proper control point sizing
+    const curvatureStart = bezier.curvature(0);
+    const curvatureEnd = bezier.curvature(1);
+
     // For corners (non-smooth junctions), use averaged normal from calculateCornerNormal
     // This ensures continuity between consecutive segments
     const startNormal =
@@ -522,21 +537,24 @@ function generateOffsetPointsForSegment(
       });
     }
 
-    // Fit cubic bezier to sampled points WITH FIXED ENDPOINTS AND EXACT TANGENTS
-    // The tangent of the offset curve equals the tangent of the original bezier
+    // Fit cubic bezier to sampled points WITH FIXED ENDPOINTS, EXACT TANGENTS, AND CURVATURE
     const fittedLeft = fitCubicBezier(
       sampledLeft,
       fixedStartLeft,
       fixedEndLeft,
       startTangent,
-      endTangent
+      endTangent,
+      curvatureStart,
+      curvatureEnd
     );
     const fittedRight = fitCubicBezier(
       sampledRight,
       fixedStartRight,
       fixedEndRight,
       startTangent,
-      endTangent
+      endTangent,
+      curvatureStart,
+      curvatureEnd
     );
 
     // Determine which points to add based on closed/open and first/last
