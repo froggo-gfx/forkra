@@ -138,9 +138,17 @@ function fitCubicBezier(
   const segLength = Math.hypot(p3.x - p0.x, p3.y - p0.y);
   const epsilon = 1e-6 * segLength;
 
+  const originalAlpha1 = alpha1;
+  const originalAlpha2 = alpha2;
+
   if (alpha1 < epsilon || alpha2 < epsilon) {
     alpha1 = alpha2 = segLength / 3;
+    console.log('[fitCubicBezier] FALLBACK used! original alphas:', originalAlpha1, originalAlpha2, 'segLength:', segLength);
   }
+
+  console.log('[fitCubicBezier] n:', n, 'alpha1:', alpha1, 'alpha2:', alpha2, 'det:', det);
+  console.log('[fitCubicBezier] t1:', t1, 't2:', t2);
+  console.log('[fitCubicBezier] p0:', p0, 'p3:', p3);
 
   const p1 = {
     x: p0.x + alpha1 * t1.x,
@@ -150,6 +158,8 @@ function fitCubicBezier(
     x: p3.x - alpha2 * t2.x,
     y: p3.y - alpha2 * t2.y,
   };
+
+  console.log('[fitCubicBezier] result p1:', p1, 'p2:', p2);
 
   return { p0, p1, p2, p3 };
 }
