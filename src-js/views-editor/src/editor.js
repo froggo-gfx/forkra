@@ -2396,16 +2396,18 @@ export class EditorController extends ViewController {
       // Record changes
       const changes = [];
 
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
+      // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
       const staticGlyph = layer.glyph;
       const pathChange = recordChanges(staticGlyph, (sg) => {
         regenerateOutline(sg, skeletonData);
       });
       changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
       const combinedChange = new ChangeCollector().concat(...changes);
       await sendIncrementalChange(combinedChange.change);

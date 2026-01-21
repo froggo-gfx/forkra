@@ -610,16 +610,18 @@ export class SkeletonPenTool extends BaseTool {
       // Record changes
       const changes = [];
 
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
+      // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
       const staticGlyph = layer.glyph;
       const pathChange = recordChanges(staticGlyph, (sg) => {
         this._regenerateOutlineContours(sg, skeletonData);
       });
       changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
       const combinedChange = new ChangeCollector().concat(...changes);
       await sendIncrementalChange(combinedChange.change);
@@ -813,16 +815,18 @@ export class SkeletonPenTool extends BaseTool {
       // Record changes
       const changes = [];
 
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
+      // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
       const staticGlyph = layer.glyph;
       const pathChange = recordChanges(staticGlyph, (sg) => {
         this._regenerateOutlineContours(sg, skeletonData);
       });
       changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
       const combinedChange = new ChangeCollector().concat(...changes);
       await sendIncrementalChange(combinedChange.change);
@@ -926,20 +930,21 @@ export class SkeletonPenTool extends BaseTool {
       const sendChanges = async () => {
         const changes = [];
 
+        // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
         const customDataChange = recordChanges(layer, (l) => {
           if (!l.customData) {
             l.customData = {};
           }
           l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(skeletonData));
         });
-
         changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          this._regenerateOutlineContours(sg, skeletonData);
-        });
-        changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         return new ChangeCollector().concat(...changes);
       };
@@ -1081,16 +1086,18 @@ export class SkeletonPenTool extends BaseTool {
       // Record changes
       const changes = [];
 
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
+      // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
       const staticGlyph = layer.glyph;
       const pathChange = recordChanges(staticGlyph, (sg) => {
         this._regenerateOutlineContours(sg, skeletonData);
       });
       changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
       const combinedChange = new ChangeCollector().concat(...changes);
       await sendIncrementalChange(combinedChange.change);
