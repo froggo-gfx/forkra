@@ -543,6 +543,19 @@ function generateOffsetPointsForSegment(
 
     for (let i = 0; i <= numSamples; i++) {
       const t = i / numSamples;
+
+      // Use fixed positions for endpoints to ensure consistency with fitting
+      if (i === 0) {
+        sampledLeft.push({ x: fixedStartLeft.x, y: fixedStartLeft.y });
+        sampledRight.push({ x: fixedStartRight.x, y: fixedStartRight.y });
+        continue;
+      }
+      if (i === numSamples) {
+        sampledLeft.push({ x: fixedEndLeft.x, y: fixedEndLeft.y });
+        sampledRight.push({ x: fixedEndRight.x, y: fixedEndRight.y });
+        continue;
+      }
+
       const point = bezier.get(t);
       const derivative = bezier.derivative(t);
 
