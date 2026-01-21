@@ -358,9 +358,83 @@ const constrainRules = defaultRules.concat([
 
 ]);
 
+// prettier-ignore
+const alternateRules = [
+  //   prev3       prevPrev    prev        the point   next        nextNext    Constrain   Action
+
+  // Default rule: if no other rules apply, just move the selected point
+  [    ANY|NIL,    ANY|NIL,    ANY|NIL,    ANY|SEL,    ANY|NIL,    ANY|NIL,    false,      "Move"],
+
+  // Selected smooth before unselected off-curve
+  [    ANY|NIL,    ANY|NIL,    ANY|UNS,    SMO|SEL,    OFF,        ANY|NIL,    false,      "ConstrainMiddle"],
+  [    ANY|NIL,    OFF,        SMO|SEL,    SMO|SEL,    OFF|UNS,    ANY|NIL,    false,      "ConstrainMiddleTwo"],
+  [    ANY|NIL,    OFF|UNS,    SMO|SEL,    SMO|SEL,    OFF|SEL,    ANY|NIL,    false,      "ConstrainMiddleTwo"],
+  [    ANY|NIL,    SMO|SEL,    SMO|SEL,    OFF|SEL,    ANY|NIL,    ANY|NIL,    true,       "RotateNext"],
+  [    ANY|NIL,    SMO|SEL,    SMO|UNS,    OFF|SEL,    ANY|NIL,    ANY|NIL,    true,       "ConstrainPrevAngle"],
+  [    ANY|NIL,    SMO|UNS,    SMO|SEL,    OFF|SEL,    ANY|NIL,    ANY|NIL,    true,       "ConstrainPrevAngle"],
+
+  // Smooth with two selected neighbors
+  [    ANY|NIL,    ANY|NIL,    ANY|SEL,    SMO|SEL,    OFF|SEL,    ANY|NIL,    false,      "ConstrainMiddle"],
+
+  // Unselected smooth between sharp and off-curve, one of them selected
+  [    ANY|NIL,    ANY|NIL,    SHA|OFF|UNS,SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "Interpolate"],
+  [    ANY|NIL,    ANY|NIL,    SHA|OFF|SEL,SMO|UNS,    OFF|UNS,    ANY|NIL,    true,       "Interpolate"],
+
+  // Two unselected smooth points between two off-curves, one of them selected
+  [    ANY|NIL,    OFF|UNS,    SMO|UNS,    SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "InterpolatePrevPrevNext"],
+  [    ANY|NIL,    OFF|SEL,    SMO|UNS,    SMO|UNS,    OFF|UNS,    ANY|NIL,    true,       "InterpolatePrevPrevNext"],
+
+  // An unselected smooth point between two selected off-curves
+  [    ANY|NIL,    ANY|NIL,    OFF|SEL,    SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "Move"],
+
+  // Two unselected smooth points between two selected off-curves
+  [    ANY|NIL,    OFF|SEL,    SMO|UNS,    SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "Move"],
+
+  // Two selected points locked by angle
+  [    ANY|NIL,    ANY,        SHA|SEL,    SMO|SEL,    OFF|UNS,    OFF|SHA|NIL,false,      "ConstrainMiddle"],
+  [    ANY|NIL,    ANY,        SMO|SEL,    SHA|SEL,    ANY|NIL,    ANY|NIL,    false,      "ConstrainPrevAngle"],
+  [    ANY|NIL,    ANY,        SMO|SEL,    OFF|SEL,    ANY|NIL,    ANY|NIL,    false,      "ConstrainPrevAngle"],
+
+  // Selected off-curve locked between two selected smooth points
+  [    ANY|NIL,    ANY|NIL,    SMO|SEL,    OFF|SEL,    SMO|SEL,    ANY|NIL,    false,      "DontMove"],
+
+];
+
+// prettier-ignore
+const alternateConstrainRules = alternateRules.concat([
+
+  [    ANY|NIL,    SHA|OFF|UNS,SMO|UNS,    SHA|OFF|SEL,ANY|NIL,    ANY|NIL,    false,      "ConstrainAroundPrevPrev"],
+
+  // Two unselected smooth points between two off-curves, one of them selected
+  [    ANY|UNS,    SMO|UNS,    SMO|UNS,    OFF|SEL,    ANY|NIL,    ANY|NIL,    false,      "ConstrainAroundPrevPrevPrev"],
+
+]);
+
 // Build match trees
 const defaultMatchTree = buildPointMatchTree(defaultRules);
 const constrainMatchTree = buildPointMatchTree(constrainRules);
+const alternateMatchTree = buildPointMatchTree(alternateRules);
+const alternateConstrainMatchTree = buildPointMatchTree(alternateConstrainRules);
+
+// Behavior types mapping (same as edit-behavior.js)
+const behaviorTypes = {
+  default: {
+    matchTree: defaultMatchTree,
+    constrainDelta: null,
+  },
+  constrain: {
+    matchTree: constrainMatchTree,
+    constrainDelta: constrainHorVerDiag,
+  },
+  alternate: {
+    matchTree: alternateMatchTree,
+    constrainDelta: null,
+  },
+  "alternate-constrain": {
+    matchTree: alternateConstrainMatchTree,
+    constrainDelta: constrainHorVerDiag,
+  },
+};
 
 /**
  * SkeletonEditBehavior - manages editing of skeleton points
@@ -371,7 +445,7 @@ export class SkeletonEditBehavior {
     skeletonData,
     contourIndex,
     selectedPointIndices,
-    useConstraint = false,
+    behaviorName = "default",
     enableScalingEdit = false
   ) {
     this.skeletonData = skeletonData;
@@ -380,8 +454,11 @@ export class SkeletonEditBehavior {
     this.points = this.contour.points;
     this.isClosed = this.contour.isClosed;
     this.selectedIndices = new Set(selectedPointIndices);
-    this.matchTree = useConstraint ? constrainMatchTree : defaultMatchTree;
-    this.constrainDelta = useConstraint ? constrainHorVerDiag : (v) => v;
+
+    // Get behavior from behaviorTypes (same pattern as edit-behavior.js)
+    const behavior = behaviorTypes[behaviorName] || behaviorTypes["default"];
+    this.matchTree = behavior.matchTree;
+    this.constrainDelta = behavior.constrainDelta || ((v) => v);
     this.enableScalingEdit = enableScalingEdit;
 
     // Mark selected points
@@ -737,7 +814,7 @@ export class SkeletonEditBehavior {
 export function createSkeletonEditBehavior(
   skeletonData,
   selectedSkeletonPoints,
-  useConstraint = false
+  behaviorName = "default"
 ) {
   // Group selected points by contour
   const byContour = new Map();
@@ -755,10 +832,19 @@ export function createSkeletonEditBehavior(
   for (const [contourIdx, pointIndices] of byContour) {
     if (contourIdx < skeletonData.contours.length) {
       behaviors.push(
-        new SkeletonEditBehavior(skeletonData, contourIdx, pointIndices, useConstraint)
+        new SkeletonEditBehavior(skeletonData, contourIdx, pointIndices, behaviorName)
       );
     }
   }
 
   return behaviors;
+}
+
+/**
+ * Helper to get behavior name from event modifiers.
+ * Same logic as getBehaviorName in edit-tools-pointer.js
+ */
+export function getSkeletonBehaviorName(shiftKey, altKey) {
+  const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
+  return behaviorNames[(shiftKey ? 1 : 0) + (altKey ? 2 : 0)];
 }

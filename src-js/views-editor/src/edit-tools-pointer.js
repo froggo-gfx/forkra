@@ -34,7 +34,10 @@ import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
 import { VarPackedPath, packContour } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
 import { EditBehaviorFactory, constrainHorVerDiag } from "./edit-behavior.js";
-import { createSkeletonEditBehavior } from "./skeleton-edit-behavior.js";
+import {
+  createSkeletonEditBehavior,
+  getSkeletonBehaviorName,
+} from "./skeleton-edit-behavior.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
 import { getPinPoint } from "./panel-transformation.js";
 import { equalGlyphSelection } from "./scene-controller.js";
@@ -142,11 +145,12 @@ export class PointerTool extends BaseTool {
       const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
 
       // Create behaviors and apply delta
-      const useConstraint = event.altKey;
+      // For arrow keys: altKey enables constrain mode (horizontal/vertical)
+      const behaviorName = getSkeletonBehaviorName(false, event.altKey);
       const behaviors = createSkeletonEditBehavior(
         originalSkeletonData,
         skeletonPointSelection,
-        useConstraint
+        behaviorName
       );
 
       for (const behavior of behaviors) {
@@ -718,14 +722,17 @@ export class PointerTool extends BaseTool {
         skelData.generatedContourIndices = newGeneratedIndices;
       };
 
-      // Track last used constraint state
-      let lastUseConstraint = initialEvent.shiftKey;
+      // Track last used behavior name (based on shift + alt modifiers)
+      let lastBehaviorName = getSkeletonBehaviorName(
+        initialEvent.shiftKey,
+        initialEvent.altKey
+      );
 
       // Create initial behaviors
       let behaviors = createSkeletonEditBehavior(
         originalSkeletonData,
         selectedSkeletonPoints,
-        lastUseConstraint
+        lastBehaviorName
       );
 
       // Drag loop
@@ -737,15 +744,15 @@ export class PointerTool extends BaseTool {
         };
 
         const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
-        const useConstraint = event.shiftKey;
+        const behaviorName = getSkeletonBehaviorName(event.shiftKey, event.altKey);
 
-        // Recreate behaviors if constraint state changed
-        if (useConstraint !== lastUseConstraint) {
-          lastUseConstraint = useConstraint;
+        // Recreate behaviors if behavior changed (shift or alt state changed)
+        if (behaviorName !== lastBehaviorName) {
+          lastBehaviorName = behaviorName;
           behaviors = createSkeletonEditBehavior(
             originalSkeletonData,
             selectedSkeletonPoints,
-            useConstraint
+            behaviorName
           );
         }
 
