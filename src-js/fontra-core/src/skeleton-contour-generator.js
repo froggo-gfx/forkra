@@ -72,91 +72,31 @@ function fitCubicBezier(
     };
   }
 
-  // Chord-length parametrization
-  const t = chordLengthParametrize(points);
-
   // Use provided tangents or estimate from sampled points
   const t1 = tangentStart || vector.normalizeVector(vector.subVectors(points[1], points[0]));
   const t2 = tangentEnd || vector.normalizeVector(vector.subVectors(points[n - 1], points[n - 2]));
 
-  // Bezier basis functions
-  const B0 = (u) => (1 - u) * (1 - u) * (1 - u);
-  const B1 = (u) => 3 * u * (1 - u) * (1 - u);
-  const B2 = (u) => 3 * u * u * (1 - u);
-  const B3 = (u) => u * u * u;
-
-  // Set up the C and X matrices for least-squares
-  // We solve for alpha1 and alpha2 where:
-  // P1 = P0 + alpha1 * t1
-  // P2 = P3 - alpha2 * t2
-
-  let C00 = 0,
-    C01 = 0,
-    C10 = 0,
-    C11 = 0;
-  let X0 = 0,
-    X1 = 0;
-
-  for (let i = 0; i < n; i++) {
-    const u = t[i];
-    const b1 = B1(u);
-    const b2 = B2(u);
-
-    // A1[i] = t1 * B1(u), A2[i] = t2 * B2(u)
-    const a1x = t1.x * b1;
-    const a1y = t1.y * b1;
-    const a2x = t2.x * b2;
-    const a2y = t2.y * b2;
-
-    C00 += a1x * a1x + a1y * a1y;
-    C01 += a1x * a2x + a1y * a2y;
-    C10 = C01;
-    C11 += a2x * a2x + a2y * a2y;
-
-    // tmp = points[i] - B0(u)*p0 - B3(u)*p3
-    const tmpx = points[i].x - B0(u) * p0.x - B3(u) * p3.x;
-    const tmpy = points[i].y - B0(u) * p0.y - B3(u) * p3.y;
-
-    X0 += a1x * tmpx + a1y * tmpy;
-    X1 += a2x * tmpx + a2y * tmpy;
+  // Calculate the arc length of the sampled curve
+  let arcLength = 0;
+  for (let i = 1; i < n; i++) {
+    arcLength += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
   }
 
-  // Solve 2x2 linear system
-  const det = C00 * C11 - C01 * C10;
+  // Use arc length based heuristic: control points at ~1/3 of arc length
+  // This is a simple but effective approximation
+  const alpha = arcLength / 3;
 
-  let alpha1, alpha2;
-  if (Math.abs(det) < 1e-12) {
-    // Degenerate case - use simple heuristic
-    const dist = Math.hypot(p3.x - p0.x, p3.y - p0.y);
-    alpha1 = alpha2 = dist / 3;
-  } else {
-    alpha1 = (C11 * X0 - C01 * X1) / det;
-    alpha2 = (C00 * X1 - C10 * X0) / det;
-  }
-
-  // If alphas are negative or too small, use heuristic
-  const segLength = Math.hypot(p3.x - p0.x, p3.y - p0.y);
-  const epsilon = 1e-6 * segLength;
-
-  const originalAlpha1 = alpha1;
-  const originalAlpha2 = alpha2;
-
-  if (alpha1 < epsilon || alpha2 < epsilon) {
-    alpha1 = alpha2 = segLength / 3;
-    console.log('[fitCubicBezier] FALLBACK used! original alphas:', originalAlpha1, originalAlpha2, 'segLength:', segLength);
-  }
-
-  console.log('[fitCubicBezier] n:', n, 'alpha1:', alpha1, 'alpha2:', alpha2, 'det:', det);
+  console.log('[fitCubicBezier] n:', n, 'arcLength:', arcLength, 'alpha:', alpha);
   console.log('[fitCubicBezier] t1:', t1, 't2:', t2);
   console.log('[fitCubicBezier] p0:', p0, 'p3:', p3);
 
   const p1 = {
-    x: p0.x + alpha1 * t1.x,
-    y: p0.y + alpha1 * t1.y,
+    x: p0.x + alpha * t1.x,
+    y: p0.y + alpha * t1.y,
   };
   const p2 = {
-    x: p3.x - alpha2 * t2.x,
-    y: p3.y - alpha2 * t2.y,
+    x: p3.x - alpha * t2.x,
+    y: p3.y - alpha * t2.y,
   };
 
   console.log('[fitCubicBezier] result p1:', p1, 'p2:', p2);
