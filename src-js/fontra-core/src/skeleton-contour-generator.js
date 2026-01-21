@@ -367,8 +367,9 @@ function generateOffsetPointsForSegment(
         : calculateCornerNormal(segment, nextSegment, halfWidth);
 
     // Get offset curves from bezier-js (returns array of Bezier objects)
-    const offsetLeftCurves = bezier.offset(halfWidth);
-    const offsetRightCurves = bezier.offset(-halfWidth);
+    // Note: bezier-js uses CCW normal, our code uses CW normal, so signs are swapped
+    const offsetLeftCurves = bezier.offset(-halfWidth);
+    const offsetRightCurves = bezier.offset(halfWidth);
 
     // Fixed endpoint positions (using corner-aware normals)
     const fixedStartLeft = {
