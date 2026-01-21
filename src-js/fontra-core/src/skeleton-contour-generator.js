@@ -467,12 +467,12 @@ function generateOffsetPointsForSegment(
     const bezierEndNormal = vector.rotateVector90CW(endTangent);
 
     // Get curvature at endpoints for proper control point sizing
-    // Note: curvature() can return NaN for degenerate curves, so we default to 0
-    const rawCurvatureStart = bezier.curvature(0);
-    const rawCurvatureEnd = bezier.curvature(1);
-    console.log('[curvature debug] raw:', rawCurvatureStart, rawCurvatureEnd, 'bezier order:', bezier.order, 'points:', bezierPoints.length);
-    const curvatureStart = Number.isFinite(rawCurvatureStart) ? rawCurvatureStart : 0;
-    const curvatureEnd = Number.isFinite(rawCurvatureEnd) ? rawCurvatureEnd : 0;
+    // bezier.curvature() returns {k, r, dk, adk} where k is the curvature value
+    const curvatureObjStart = bezier.curvature(0);
+    const curvatureObjEnd = bezier.curvature(1);
+    const curvatureStart = Number.isFinite(curvatureObjStart?.k) ? curvatureObjStart.k : 0;
+    const curvatureEnd = Number.isFinite(curvatureObjEnd?.k) ? curvatureObjEnd.k : 0;
+    console.log('[curvature] start:', curvatureStart, 'end:', curvatureEnd);
 
     // For corners (non-smooth junctions), use averaged normal from calculateCornerNormal
     // This ensures continuity between consecutive segments
