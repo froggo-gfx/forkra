@@ -44,9 +44,17 @@ function chordLengthParametrize(points) {
  * @param {Array} points - Array of {x, y} points (at least 2)
  * @param {Object} fixedP0 - Optional fixed start point (if null, uses points[0])
  * @param {Object} fixedP3 - Optional fixed end point (if null, uses points[n-1])
+ * @param {Object} tangentStart - Optional tangent direction at start (normalized)
+ * @param {Object} tangentEnd - Optional tangent direction at end (normalized)
  * @returns {Object} - {p0, p1, p2, p3} control points, or null if fitting failed
  */
-function fitCubicBezier(points, fixedP0 = null, fixedP3 = null) {
+function fitCubicBezier(
+  points,
+  fixedP0 = null,
+  fixedP3 = null,
+  tangentStart = null,
+  tangentEnd = null
+) {
   if (!points || points.length < 2) return null;
 
   const n = points.length;
@@ -67,10 +75,9 @@ function fitCubicBezier(points, fixedP0 = null, fixedP3 = null) {
   // Chord-length parametrization
   const t = chordLengthParametrize(points);
 
-  // Compute tangent directions at endpoints from the data
-  // Use first/last few points to estimate tangent
-  const t1 = vector.normalizeVector(vector.subVectors(points[1], points[0]));
-  const t2 = vector.normalizeVector(vector.subVectors(points[n - 1], points[n - 2]));
+  // Use provided tangents or estimate from sampled points
+  const t1 = tangentStart || vector.normalizeVector(vector.subVectors(points[1], points[0]));
+  const t2 = tangentEnd || vector.normalizeVector(vector.subVectors(points[n - 1], points[n - 2]));
 
   // Bezier basis functions
   const B0 = (u) => (1 - u) * (1 - u) * (1 - u);
@@ -552,9 +559,22 @@ function generateOffsetPointsForSegment(
       });
     }
 
-    // Fit cubic bezier to sampled points WITH FIXED ENDPOINTS
-    const fittedLeft = fitCubicBezier(sampledLeft, fixedStartLeft, fixedEndLeft);
-    const fittedRight = fitCubicBezier(sampledRight, fixedStartRight, fixedEndRight);
+    // Fit cubic bezier to sampled points WITH FIXED ENDPOINTS AND EXACT TANGENTS
+    // The tangent of the offset curve equals the tangent of the original bezier
+    const fittedLeft = fitCubicBezier(
+      sampledLeft,
+      fixedStartLeft,
+      fixedEndLeft,
+      startTangent,
+      endTangent
+    );
+    const fittedRight = fitCubicBezier(
+      sampledRight,
+      fixedStartRight,
+      fixedEndRight,
+      startTangent,
+      endTangent
+    );
 
     // Determine which points to add based on closed/open and first/last
     const shouldAddStart = isClosed || isFirst;
