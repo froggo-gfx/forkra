@@ -1034,8 +1034,8 @@ export default class TransformationPanel extends Panel {
       const editChanges = [];
       const rollbackChanges = [];
       for (const [layerName, layerGlyph] of Object.entries(editLayerGlyphs)) {
-        const changePath = ["layers", layerName, "glyph"];
         const controller = staticGlyphControllers[layerName];
+        const layer = glyph.layers[layerName];
 
         const boundingBoxes = movableObjects.map((obj) =>
           obj.computeBounds(
@@ -1048,16 +1048,23 @@ export default class TransformationPanel extends Panel {
           this.transformParameters.customDistributionSpacing
         );
         for (const [delta, movableObject] of zip(deltas, movableObjects)) {
+          const isSkeletonObject = movableObject instanceof SkeletonMovableObject;
+          const targetObject = isSkeletonObject ? layer : layerGlyph;
+          const changePath = isSkeletonObject
+            ? ["layers", layerName]
+            : ["layers", layerName, "glyph"];
+
           const [editChange, rollbackChange] = movableObject.makeChangesForDelta(
             delta,
-            layerGlyph,
-            this.sceneController
+            targetObject,
+            this.sceneController,
+            layerName
           );
           // Skip empty changes (e.g., when skeleton data is not available)
           if (!editChange || Object.keys(editChange).length === 0) {
             continue;
           }
-          applyChange(layerGlyph, editChange);
+          applyChange(targetObject, editChange);
           editChanges.push(consolidateChanges(editChange, changePath));
           rollbackChanges.push(consolidateChanges(rollbackChange, changePath));
         }
@@ -1154,9 +1161,9 @@ class SkeletonMovableObject {
     };
   }
 
-  makeChangesForDelta(delta, layerGlyph, sceneController) {
-    const layer = layerGlyph;
-    const skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+  makeChangesForDelta(delta, layer, sceneController, layerName) {
+    // layer is the full layer object with glyph and customData
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
     if (!skeletonData) {
       return [{}, {}];
     }
@@ -1171,39 +1178,58 @@ class SkeletonMovableObject {
       return [{}, {}];
     }
 
-    // Use recordChanges to capture all modifications including path regeneration
-    const changes = recordChanges(layer, (layerProxy) => {
-      // Update skeleton point position
-      const skelData = layerProxy.customData[SKELETON_CUSTOM_DATA_KEY];
-      const skelContour = skelData.contours[this.contourIdx];
-      const skelPoint = skelContour.points[this.pointIdx];
-      skelPoint.x += delta.x;
-      skelPoint.y += delta.y;
+    // Deep clone skeleton data to modify
+    const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
 
-      // Regenerate outline contours
-      const staticGlyph = layerProxy.glyph;
-      const oldGeneratedIndices = skelData.generatedContourIndices || [];
+    // Update skeleton point position
+    const skelContour = newSkeletonData.contours[this.contourIdx];
+    const skelPoint = skelContour.points[this.pointIdx];
+    skelPoint.x += delta.x;
+    skelPoint.y += delta.y;
 
-      // Delete old generated contours (in reverse order to maintain indices)
+    // Get old generated indices before modification
+    const oldGeneratedIndices = newSkeletonData.generatedContourIndices || [];
+
+    // Generate new contours from skeleton
+    const generatedContours = generateContoursFromSkeleton(newSkeletonData);
+
+    // Record path changes on staticGlyph
+    const staticGlyph = layer.glyph;
+    const pathChange = recordChanges(staticGlyph, (sg) => {
+      // Remove old generated contours (in reverse order to maintain indices)
       const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
       for (const idx of sortedIndices) {
-        if (idx < staticGlyph.path.numContours) {
-          staticGlyph.path.deleteContour(idx);
+        if (idx < sg.path.numContours) {
+          sg.path.deleteContour(idx);
         }
       }
 
-      // Generate new contours
-      const generatedContours = generateContoursFromSkeleton(skelData);
+      // Add new contours
       const newGeneratedIndices = [];
-      for (const generatedContour of generatedContours) {
-        const newIndex = staticGlyph.path.numContours;
-        staticGlyph.path.insertContour(newIndex, packContour(generatedContour));
+      for (const contour of generatedContours) {
+        const newIndex = sg.path.numContours;
+        sg.path.insertContour(newIndex, packContour(contour));
         newGeneratedIndices.push(newIndex);
       }
-      skelData.generatedContourIndices = newGeneratedIndices;
+      newSkeletonData.generatedContourIndices = newGeneratedIndices;
     });
 
-    return [changes.change, changes.rollbackChange];
+    // Record custom data change on layer
+    const customDataChange = recordChanges(layer, (l) => {
+      l.customData[SKELETON_CUSTOM_DATA_KEY] = newSkeletonData;
+    });
+
+    // Combine changes with proper prefixes
+    const editChange = consolidateChanges([
+      consolidateChanges(pathChange.change, ["glyph"]),
+      customDataChange.change,
+    ]);
+    const rollbackChange = consolidateChanges([
+      consolidateChanges(pathChange.rollbackChange, ["glyph"]),
+      customDataChange.rollbackChange,
+    ]);
+
+    return [editChange, rollbackChange];
   }
 }
 
