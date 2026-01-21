@@ -984,7 +984,10 @@ export class SceneModel {
     selRect = offsetRect(selRect, -positionedGlyph.x, -positionedGlyph.y);
     for (const hit of positionedGlyph.glyph.path.iterPointsInRect(selRect)) {
       if (!pointFilterFunc || pointFilterFunc(hit)) {
-        selection.add(`point/${hit.pointIndex}`);
+        // Skip points from skeleton-generated contours
+        if (!this.isGeneratedSkeletonPoint(hit.pointIndex)) {
+          selection.add(`point/${hit.pointIndex}`);
+        }
       }
     }
     const components = positionedGlyph.glyph.components;
@@ -999,6 +1002,35 @@ export class SceneModel {
       // As long as we don't have multiple background images,
       // we can just add a single selection
       selection.add("backgroundImage/0");
+    }
+
+    // Add skeleton points within rectangle
+    const editLayerName =
+      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+    if (editLayerName && positionedGlyph.varGlyph?.glyph?.layers) {
+      const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+      const skeletonData = layer?.customData?.["fontra.skeleton"];
+      if (skeletonData?.contours?.length) {
+        for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
+          const contour = skeletonData.contours[contourIdx];
+          for (let pointIdx = 0; pointIdx < contour.points.length; pointIdx++) {
+            const point = contour.points[pointIdx];
+            // Apply the same filter: on-curve (!point.type) vs off-curve (point.type)
+            if (pointFilterFunc && !pointFilterFunc(point)) {
+              continue;
+            }
+            // Check if point is within rectangle
+            if (
+              point.x >= selRect.xMin &&
+              point.x <= selRect.xMax &&
+              point.y >= selRect.yMin &&
+              point.y <= selRect.yMax
+            ) {
+              selection.add(`skeletonPoint/${contourIdx}/${pointIdx}`);
+            }
+          }
+        }
+      }
     }
 
     return selection;

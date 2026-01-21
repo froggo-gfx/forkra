@@ -4,6 +4,7 @@ import {
   ChangeCollector,
   applyChange,
   consolidateChanges,
+  recordChanges,
 } from "@fontra/core/changes.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
@@ -12,6 +13,7 @@ import {
   getSelectionByContour,
 } from "@fontra/core/path-functions.js";
 import { rectCenter, rectSize } from "@fontra/core/rectangle.js";
+import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
 import { Transform } from "@fontra/core/transform.js";
 import {
   enumerate,
@@ -22,7 +24,7 @@ import {
   zip,
 } from "@fontra/core/utils.js";
 import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
-import { VarPackedPath } from "@fontra/core/var-path.js";
+import { packContour, VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import Panel from "./panel.js";
@@ -969,6 +971,37 @@ export default class TransformationPanel extends Panel {
       movableObjects.push(new MovableObject(individualSelection));
     }
 
+    // Add skeleton points
+    const { skeletonPoint: skeletonPoints } = parseSelection(
+      this.sceneController.selection
+    );
+    if (skeletonPoints?.size) {
+      // Get skeleton data from the editing layer
+      const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+      const editLayerName = this.sceneController.sceneSettings?.editLayerName ||
+        positionedGlyph?.glyph?.layerName;
+
+      if (editLayerName && positionedGlyph?.varGlyph?.glyph?.layers) {
+        const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+        const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+
+        if (skeletonData?.contours) {
+          for (const selKey of skeletonPoints) {
+            const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+            const contour = skeletonData.contours[contourIdx];
+            if (contour) {
+              const point = contour.points[pointIdx];
+              if (point) {
+                movableObjects.push(
+                  new SkeletonMovableObject(contourIdx, pointIdx, { x: point.x, y: point.y })
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+
     if (moveDescriptor.compareObjects) {
       movableObjects.sort((a, b) =>
         moveDescriptor.compareObjects(
@@ -1095,6 +1128,78 @@ class MovableObject {
     const editBehavior = behaviorFactory.getBehavior("default");
     const editChange = editBehavior.makeChangeForDelta(delta);
     return [editChange, editBehavior.rollbackChange];
+  }
+}
+
+const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
+
+class SkeletonMovableObject {
+  constructor(contourIdx, pointIdx, point) {
+    this.contourIdx = contourIdx;
+    this.pointIdx = pointIdx;
+    this.point = point; // {x, y}
+  }
+
+  computeBounds(staticGlyphController, getBackgroundImageBoundsFunc) {
+    // Return point position as bounds (point-sized bounding box)
+    return {
+      xMin: this.point.x,
+      yMin: this.point.y,
+      xMax: this.point.x,
+      yMax: this.point.y,
+    };
+  }
+
+  makeChangesForDelta(delta, layerGlyph, sceneController) {
+    const layer = layerGlyph;
+    const skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData) {
+      return [{}, {}];
+    }
+
+    const contour = skeletonData.contours?.[this.contourIdx];
+    if (!contour) {
+      return [{}, {}];
+    }
+
+    const point = contour.points?.[this.pointIdx];
+    if (!point) {
+      return [{}, {}];
+    }
+
+    // Use recordChanges to capture all modifications including path regeneration
+    const changes = recordChanges(layer, (layerProxy) => {
+      // Update skeleton point position
+      const skelData = layerProxy.customData[SKELETON_CUSTOM_DATA_KEY];
+      const skelContour = skelData.contours[this.contourIdx];
+      const skelPoint = skelContour.points[this.pointIdx];
+      skelPoint.x += delta.x;
+      skelPoint.y += delta.y;
+
+      // Regenerate outline contours
+      const staticGlyph = layerProxy.glyph;
+      const oldGeneratedIndices = skelData.generatedContourIndices || [];
+
+      // Delete old generated contours (in reverse order to maintain indices)
+      const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+      for (const idx of sortedIndices) {
+        if (idx < staticGlyph.path.numContours) {
+          staticGlyph.path.deleteContour(idx);
+        }
+      }
+
+      // Generate new contours
+      const generatedContours = generateContoursFromSkeleton(skelData);
+      const newGeneratedIndices = [];
+      for (const generatedContour of generatedContours) {
+        const newIndex = staticGlyph.path.numContours;
+        staticGlyph.path.insertContour(newIndex, packContour(generatedContour));
+        newGeneratedIndices.push(newIndex);
+      }
+      skelData.generatedContourIndices = newGeneratedIndices;
+    });
+
+    return [changes.change, changes.rollbackChange];
   }
 }
 
