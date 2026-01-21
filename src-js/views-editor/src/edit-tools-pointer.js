@@ -739,6 +739,9 @@ export class PointerTool extends BaseTool {
         lastBehaviorName
       );
 
+      // Accumulate changes (following Pen Tool pattern)
+      let accumulatedChanges = new ChangeCollector();
+
       // Drag loop
       for await (const event of eventStream) {
         const currentLocalPoint = sceneController.localPoint(event);
@@ -799,29 +802,14 @@ export class PointerTool extends BaseTool {
         changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
         const combinedChange = new ChangeCollector().concat(...changes);
+        // Accumulate changes for proper undo/redo
+        accumulatedChanges = accumulatedChanges.concat(combinedChange);
         await sendIncrementalChange(combinedChange.change, true);
       }
 
-      // Final change
-      const finalChanges = [];
-
-      // 1. FIRST: Generate outline contours
-      const staticGlyph = layer.glyph;
-      const finalPathChange = recordChanges(staticGlyph, (sg) => {
-        regenerateOutline(sg, workingSkeletonData);
-      });
-      finalChanges.push(finalPathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-      // 2. THEN: Save skeletonData to customData
-      const finalCustomDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = workingSkeletonData;
-      });
-      finalChanges.push(finalCustomDataChange.prefixed(["layers", editLayerName]));
-
-      const finalCombinedChange = new ChangeCollector().concat(...finalChanges);
-
+      // Return accumulated changes (no need to record again - state is already final)
       return {
-        changes: finalCombinedChange,
+        changes: accumulatedChanges,
         undoLabel: translate("edit-tools-pointer.undo.move-skeleton-points"),
         broadcast: true,
       };
