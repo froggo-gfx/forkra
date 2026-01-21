@@ -5,120 +5,6 @@ import { VarPackedPath } from "./var-path.js";
 const DEFAULT_WIDTH = 20;
 
 /**
- * Chord-length parametrization for curve fitting.
- * @param {Array} points - Array of {x, y} points
- * @returns {Array} - Array of t values [0, ..., 1]
- */
-function chordLengthParametrize(points) {
-  const n = points.length;
-  const t = new Array(n);
-  t[0] = 0;
-
-  if (n < 2) return t;
-
-  let totalLength = 0;
-  for (let i = 1; i < n; i++) {
-    totalLength += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
-  }
-
-  if (totalLength < 0.0001) {
-    // Degenerate case - all points are the same
-    for (let i = 1; i < n; i++) {
-      t[i] = i / (n - 1);
-    }
-    return t;
-  }
-
-  let cumLength = 0;
-  for (let i = 1; i < n; i++) {
-    cumLength += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
-    t[i] = cumLength / totalLength;
-  }
-
-  return t;
-}
-
-/**
- * Fit a cubic bezier to a set of points using curvature-based sizing.
- * @param {Array} points - Array of {x, y} points (at least 2)
- * @param {Object} fixedP0 - Optional fixed start point (if null, uses points[0])
- * @param {Object} fixedP3 - Optional fixed end point (if null, uses points[n-1])
- * @param {Object} tangentStart - Optional tangent direction at start (normalized)
- * @param {Object} tangentEnd - Optional tangent direction at end (normalized)
- * @param {number} curvatureStart - Curvature at start point
- * @param {number} curvatureEnd - Curvature at end point
- * @returns {Object} - {p0, p1, p2, p3} control points, or null if fitting failed
- */
-function fitCubicBezier(
-  points,
-  fixedP0 = null,
-  fixedP3 = null,
-  tangentStart = null,
-  tangentEnd = null,
-  curvatureStart = 0,
-  curvatureEnd = 0
-) {
-  if (!points || points.length < 2) return null;
-
-  const n = points.length;
-  // Use fixed endpoints if provided, otherwise use sampled endpoints
-  const p0 = fixedP0 || points[0];
-  const p3 = fixedP3 || points[n - 1];
-
-  if (n === 2) {
-    // Two points - create a line as cubic bezier
-    return {
-      p0,
-      p1: { x: p0.x + (p3.x - p0.x) / 3, y: p0.y + (p3.y - p0.y) / 3 },
-      p2: { x: p0.x + (2 * (p3.x - p0.x)) / 3, y: p0.y + (2 * (p3.y - p0.y)) / 3 },
-      p3,
-    };
-  }
-
-  // Use provided tangents or estimate from sampled points
-  const t1 = tangentStart || vector.normalizeVector(vector.subVectors(points[1], points[0]));
-  const t2 = tangentEnd || vector.normalizeVector(vector.subVectors(points[n - 1], points[n - 2]));
-
-  // Calculate the arc length of the sampled curve
-  let arcLength = 0;
-  for (let i = 1; i < n; i++) {
-    arcLength += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
-  }
-
-  // Calculate control point lengths based on curvature
-  // Higher curvature = longer control point to achieve the bend
-  const baseAlpha = arcLength / 3;
-
-  // Validate curvature values (can be NaN/undefined for degenerate cases)
-  const validCurvatureStart = Number.isFinite(curvatureStart) ? curvatureStart : 0;
-  const validCurvatureEnd = Number.isFinite(curvatureEnd) ? curvatureEnd : 0;
-
-  // Scale based on curvature: higher curvature needs longer handles
-  // curvature has units 1/length, so curvature * arcLength is dimensionless
-  // Clamp the multiplier to avoid extreme values (1.0 to 2.0 range)
-  const curvatureFactor = 0.1; // Tuning parameter
-  const maxMultiplier = 2.0;
-  const mult1 = Math.min(maxMultiplier, 1 + Math.abs(validCurvatureStart) * arcLength * curvatureFactor);
-  const mult2 = Math.min(maxMultiplier, 1 + Math.abs(validCurvatureEnd) * arcLength * curvatureFactor);
-  const alpha1 = baseAlpha * mult1;
-  const alpha2 = baseAlpha * mult2;
-
-  console.log('[fitCubicBezier] arcLength:', arcLength, 'curvatures:', validCurvatureStart, validCurvatureEnd);
-  console.log('[fitCubicBezier] alpha1:', alpha1, 'alpha2:', alpha2);
-
-  const p1 = {
-    x: p0.x + alpha1 * t1.x,
-    y: p0.y + alpha1 * t1.y,
-  };
-  const p2 = {
-    x: p3.x - alpha2 * t2.x,
-    y: p3.y - alpha2 * t2.y,
-  };
-
-  return { p0, p1, p2, p3 };
-}
-
-/**
  * Enforce colinearity for smooth points in a contour.
  * For each on-curve smooth point with two adjacent off-curve handles,
  * adjusts the handles to be colinear while preserving their lengths.
@@ -450,7 +336,7 @@ function generateOffsetPointsForSegment(
       });
     }
   } else {
-    // Bezier segment - sample offset positions and fit cubic bezier
+    // Bezier segment - use bezier.offset() for mathematically correct offset
     const bezierPoints = [
       segment.startPoint,
       ...segment.controlPoints,
@@ -460,8 +346,7 @@ function generateOffsetPointsForSegment(
     // Convert to bezier-js format
     const bezier = createBezierFromPoints(bezierPoints);
 
-    // Calculate normals at endpoints
-    // Use bezier derivative for the curve's tangent direction
+    // Calculate normals at endpoints for corner handling
     const startDeriv = bezier.derivative(0);
     const startTangent = vector.normalizeVector({ x: startDeriv.x, y: startDeriv.y });
     const bezierStartNormal = vector.rotateVector90CW(startTangent);
@@ -470,16 +355,7 @@ function generateOffsetPointsForSegment(
     const endTangent = vector.normalizeVector({ x: endDeriv.x, y: endDeriv.y });
     const bezierEndNormal = vector.rotateVector90CW(endTangent);
 
-    // Get curvature at endpoints for proper control point sizing
-    // bezier.curvature() returns {k, r, dk, adk} where k is the curvature value
-    const curvatureObjStart = bezier.curvature(0);
-    const curvatureObjEnd = bezier.curvature(1);
-    const curvatureStart = Number.isFinite(curvatureObjStart?.k) ? curvatureObjStart.k : 0;
-    const curvatureEnd = Number.isFinite(curvatureObjEnd?.k) ? curvatureObjEnd.k : 0;
-    console.log('[curvature] start:', curvatureStart, 'end:', curvatureEnd);
-
-    // For corners (non-smooth junctions), use averaged normal from calculateCornerNormal
-    // This ensures continuity between consecutive segments
+    // For corners (non-smooth junctions), use averaged normal
     const startNormal =
       !prevSegment || (isFirst && !isClosed)
         ? bezierStartNormal
@@ -489,6 +365,10 @@ function generateOffsetPointsForSegment(
       !nextSegment || (isLast && !isClosed)
         ? bezierEndNormal
         : calculateCornerNormal(segment, nextSegment, halfWidth);
+
+    // Get offset curves from bezier-js (returns array of Bezier objects)
+    const offsetLeftCurves = bezier.offset(halfWidth);
+    const offsetRightCurves = bezier.offset(-halfWidth);
 
     // Fixed endpoint positions (using corner-aware normals)
     const fixedStartLeft = {
@@ -508,132 +388,82 @@ function generateOffsetPointsForSegment(
       y: segment.endPoint.y - endNormal.y * halfWidth,
     };
 
-    // Sample offset curve at regular intervals (for fitting)
-    const numSamples = Math.max(16, segment.controlPoints.length * 8);
-    const sampledLeft = [];
-    const sampledRight = [];
+    // Helper to add offset curves to output array
+    const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd) => {
+      if (!curves || curves.length === 0) return;
 
-    for (let i = 0; i <= numSamples; i++) {
-      const t = i / numSamples;
+      for (let i = 0; i < curves.length; i++) {
+        const curve = curves[i];
+        const pts = curve.points;
+        const isFirstCurve = i === 0;
+        const isLastCurve = i === curves.length - 1;
 
-      // Use fixed positions for endpoints to ensure consistency with fitting
-      if (i === 0) {
-        sampledLeft.push({ x: fixedStartLeft.x, y: fixedStartLeft.y });
-        sampledRight.push({ x: fixedStartRight.x, y: fixedStartRight.y });
-        continue;
+        // Add start point only for first curve if shouldAddStart
+        if (isFirstCurve && shouldAddStart) {
+          output.push({
+            x: fixedStart.x,
+            y: fixedStart.y,
+            smooth: smoothStart,
+          });
+        }
+
+        // Add control points based on curve type
+        if (pts.length === 4) {
+          // Cubic bezier
+          output.push({ x: pts[1].x, y: pts[1].y, type: "cubic" });
+          output.push({ x: pts[2].x, y: pts[2].y, type: "cubic" });
+        } else if (pts.length === 3) {
+          // Quadratic bezier
+          output.push({ x: pts[1].x, y: pts[1].y, type: "quad" });
+        }
+        // Linear (2 points) - no control points needed
+
+        // Add endpoint
+        if (isLastCurve) {
+          // Last curve - use fixed end position if shouldAddEnd
+          if (shouldAddEnd) {
+            output.push({
+              x: fixedEnd.x,
+              y: fixedEnd.y,
+              smooth: smoothEnd,
+            });
+          }
+        } else {
+          // Intermediate curve - add endpoint (it becomes next curve's start)
+          output.push({
+            x: pts[pts.length - 1].x,
+            y: pts[pts.length - 1].y,
+            smooth: true, // intermediate points are smooth
+          });
+        }
       }
-      if (i === numSamples) {
-        sampledLeft.push({ x: fixedEndLeft.x, y: fixedEndLeft.y });
-        sampledRight.push({ x: fixedEndRight.x, y: fixedEndRight.y });
-        continue;
-      }
-
-      const point = bezier.get(t);
-      const derivative = bezier.derivative(t);
-
-      const tangent = vector.normalizeVector({ x: derivative.x, y: derivative.y });
-      const normal = vector.rotateVector90CW(tangent);
-
-      sampledLeft.push({
-        x: point.x + normal.x * halfWidth,
-        y: point.y + normal.y * halfWidth,
-      });
-      sampledRight.push({
-        x: point.x - normal.x * halfWidth,
-        y: point.y - normal.y * halfWidth,
-      });
-    }
-
-    // Fit cubic bezier to sampled points WITH FIXED ENDPOINTS, EXACT TANGENTS, AND CURVATURE
-    const fittedLeft = fitCubicBezier(
-      sampledLeft,
-      fixedStartLeft,
-      fixedEndLeft,
-      startTangent,
-      endTangent,
-      curvatureStart,
-      curvatureEnd
-    );
-    const fittedRight = fitCubicBezier(
-      sampledRight,
-      fixedStartRight,
-      fixedEndRight,
-      startTangent,
-      endTangent,
-      curvatureStart,
-      curvatureEnd
-    );
+    };
 
     // Determine which points to add based on closed/open and first/last
     const shouldAddStart = isClosed || isFirst;
     const shouldAddEnd = !isClosed;
 
-    if (shouldAddStart && fittedLeft && fittedRight) {
-      // Add start on-curve point (using fixed position)
-      left.push({
-        x: fixedStartLeft.x,
-        y: fixedStartLeft.y,
-        smooth: segment.startPoint.smooth,
-      });
-      right.push({
-        x: fixedStartRight.x,
-        y: fixedStartRight.y,
-        smooth: segment.startPoint.smooth,
-      });
+    addOffsetCurves(
+      offsetLeftCurves,
+      left,
+      fixedStartLeft,
+      fixedEndLeft,
+      shouldAddStart,
+      shouldAddEnd,
+      segment.startPoint.smooth,
+      segment.endPoint.smooth
+    );
 
-      // Add first control point (off-curve)
-      left.push({
-        x: fittedLeft.p1.x,
-        y: fittedLeft.p1.y,
-        type: "cubic",
-      });
-      right.push({
-        x: fittedRight.p1.x,
-        y: fittedRight.p1.y,
-        type: "cubic",
-      });
-    } else if (fittedLeft && fittedRight) {
-      // Only add the first control point (previous segment added start)
-      left.push({
-        x: fittedLeft.p1.x,
-        y: fittedLeft.p1.y,
-        type: "cubic",
-      });
-      right.push({
-        x: fittedRight.p1.x,
-        y: fittedRight.p1.y,
-        type: "cubic",
-      });
-    }
-
-    if (fittedLeft && fittedRight) {
-      // Add second control point (off-curve)
-      left.push({
-        x: fittedLeft.p2.x,
-        y: fittedLeft.p2.y,
-        type: "cubic",
-      });
-      right.push({
-        x: fittedRight.p2.x,
-        y: fittedRight.p2.y,
-        type: "cubic",
-      });
-
-      if (shouldAddEnd) {
-        // Add end on-curve point (using fixed position)
-        left.push({
-          x: fixedEndLeft.x,
-          y: fixedEndLeft.y,
-          smooth: segment.endPoint.smooth,
-        });
-        right.push({
-          x: fixedEndRight.x,
-          y: fixedEndRight.y,
-          smooth: segment.endPoint.smooth,
-        });
-      }
-    }
-
+    addOffsetCurves(
+      offsetRightCurves,
+      right,
+      fixedStartRight,
+      fixedEndRight,
+      shouldAddStart,
+      shouldAddEnd,
+      segment.startPoint.smooth,
+      segment.endPoint.smooth
+    );
   }
 
   return { left, right };
