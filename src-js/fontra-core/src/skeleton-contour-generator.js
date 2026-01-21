@@ -95,9 +95,13 @@ function fitCubicBezier(
 
   // Scale based on curvature: higher curvature needs longer handles
   // curvature has units 1/length, so curvature * arcLength is dimensionless
-  const curvatureFactor = 0.5; // Tuning parameter
-  const alpha1 = baseAlpha * (1 + Math.abs(validCurvatureStart) * arcLength * curvatureFactor);
-  const alpha2 = baseAlpha * (1 + Math.abs(validCurvatureEnd) * arcLength * curvatureFactor);
+  // Clamp the multiplier to avoid extreme values (1.0 to 2.0 range)
+  const curvatureFactor = 0.1; // Tuning parameter
+  const maxMultiplier = 2.0;
+  const mult1 = Math.min(maxMultiplier, 1 + Math.abs(validCurvatureStart) * arcLength * curvatureFactor);
+  const mult2 = Math.min(maxMultiplier, 1 + Math.abs(validCurvatureEnd) * arcLength * curvatureFactor);
+  const alpha1 = baseAlpha * mult1;
+  const alpha2 = baseAlpha * mult2;
 
   console.log('[fitCubicBezier] arcLength:', arcLength, 'curvatures:', validCurvatureStart, validCurvatureEnd);
   console.log('[fitCubicBezier] alpha1:', alpha1, 'alpha2:', alpha2);
