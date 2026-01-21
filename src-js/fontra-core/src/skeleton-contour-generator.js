@@ -21,9 +21,11 @@ export function generateContoursFromSkeleton(skeletonData) {
       continue;
     }
 
-    const outlineContour = generateOutlineFromSkeletonContour(skeletonContour);
-    if (outlineContour) {
-      generatedContours.push(outlineContour);
+    const outlineContours = generateOutlineFromSkeletonContour(skeletonContour);
+    // generateOutlineFromSkeletonContour now returns an array of contours
+    // (1 for open skeleton, 2 for closed skeleton)
+    if (outlineContours?.length) {
+      generatedContours.push(...outlineContours);
     }
   }
 
@@ -31,16 +33,18 @@ export function generateContoursFromSkeleton(skeletonData) {
 }
 
 /**
- * Generates a closed outline contour from a single skeleton contour.
+ * Generates closed outline contour(s) from a single skeleton contour.
  * @param {Object} skeletonContour - Single skeleton contour with points array
- * @returns {Object} Unpacked contour {points: [...], isClosed: true}
+ * @returns {Array} Array of unpacked contours [{points: [...], isClosed: true}, ...]
+ *   - For open skeleton: returns 1 contour (stroke with caps)
+ *   - For closed skeleton: returns 2 contours (outer and inner)
  */
 export function generateOutlineFromSkeletonContour(skeletonContour) {
   const { points, isClosed, defaultWidth = DEFAULT_WIDTH, capStyle = "round" } =
     skeletonContour;
 
   if (points.length < 2) {
-    return null;
+    return [];
   }
 
   // Separate on-curve and off-curve points, build segments
@@ -75,15 +79,16 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     rightSide.push(...offsetPoints.right);
   }
 
-  // Combine left and right sides into closed contour
-  const outlinePoints = [];
-
   if (isClosed) {
-    // For closed skeleton: left side forward, right side backward
-    outlinePoints.push(...leftSide);
-    outlinePoints.push(...rightSide.reverse());
+    // For closed skeleton: TWO separate contours (outer and inner)
+    // The inner contour needs to be reversed for correct winding direction
+    // (outer = counter-clockwise, inner = clockwise for proper fill)
+    return [
+      { points: leftSide, isClosed: true },
+      { points: [...rightSide].reverse(), isClosed: true },
+    ];
   } else {
-    // For open skeleton: add caps at ends
+    // For open skeleton: ONE contour with caps at ends
     const startCap = generateCap(
       points[0],
       segments[0],
@@ -99,6 +104,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
       "end"
     );
 
+    const outlinePoints = [];
     // Left side forward
     outlinePoints.push(...leftSide);
     // End cap
@@ -107,12 +113,9 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     outlinePoints.push(...rightSide.reverse());
     // Start cap
     outlinePoints.push(...startCap);
-  }
 
-  return {
-    points: outlinePoints,
-    isClosed: true,
-  };
+    return [{ points: outlinePoints, isClosed: true }];
+  }
 }
 
 /**
