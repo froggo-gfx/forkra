@@ -4,8 +4,8 @@ import {
   ChangeCollector,
   applyChange,
   consolidateChanges,
-  recordChanges,
 } from "@fontra/core/changes.js";
+import { recordChanges } from "@fontra/core/change-recorder.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import {
