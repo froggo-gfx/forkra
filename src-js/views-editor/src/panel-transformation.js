@@ -28,6 +28,7 @@ import { packContour, VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import Panel from "./panel.js";
+import { SkeletonEditBehavior } from "./skeleton-edit-behavior.js";
 
 export default class TransformationPanel extends Panel {
   identifier = "selection-transformation";
@@ -1181,11 +1182,21 @@ class SkeletonMovableObject {
     // Deep clone skeleton data to modify
     const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
 
-    // Update skeleton point position
+    // Use SkeletonEditBehavior to properly move the point and its adjacent handles
+    const behavior = new SkeletonEditBehavior(
+      newSkeletonData,
+      this.contourIdx,
+      [this.pointIdx],
+      "default"
+    );
+    const changes = behavior.applyDelta(delta);
+
+    // Apply changes to the skeleton data
     const skelContour = newSkeletonData.contours[this.contourIdx];
-    const skelPoint = skelContour.points[this.pointIdx];
-    skelPoint.x += delta.x;
-    skelPoint.y += delta.y;
+    for (const { pointIndex, x, y } of changes) {
+      skelContour.points[pointIndex].x = x;
+      skelContour.points[pointIndex].y = y;
+    }
 
     // Get old generated indices before modification
     const oldGeneratedIndices = newSkeletonData.generatedContourIndices || [];
