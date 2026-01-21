@@ -127,6 +127,11 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
   // Separate on-curve and off-curve points, build segments
   const segments = buildSegmentsFromPoints(points, isClosed);
 
+  // If no valid segments (e.g., less than 2 on-curve points), return empty
+  if (segments.length === 0) {
+    return [];
+  }
+
   // Generate left and right offset points
   const leftSide = [];
   const rightSide = [];
