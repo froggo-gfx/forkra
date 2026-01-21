@@ -5,6 +5,223 @@ import { VarPackedPath } from "./var-path.js";
 const DEFAULT_WIDTH = 20;
 
 /**
+ * Chord-length parametrization for curve fitting.
+ * @param {Array} points - Array of {x, y} points
+ * @returns {Array} - Array of t values [0, ..., 1]
+ */
+function chordLengthParametrize(points) {
+  const n = points.length;
+  const t = new Array(n);
+  t[0] = 0;
+
+  if (n < 2) return t;
+
+  let totalLength = 0;
+  for (let i = 1; i < n; i++) {
+    totalLength += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+  }
+
+  if (totalLength < 0.0001) {
+    // Degenerate case - all points are the same
+    for (let i = 1; i < n; i++) {
+      t[i] = i / (n - 1);
+    }
+    return t;
+  }
+
+  let cumLength = 0;
+  for (let i = 1; i < n; i++) {
+    cumLength += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+    t[i] = cumLength / totalLength;
+  }
+
+  return t;
+}
+
+/**
+ * Fit a cubic bezier to a set of points using least-squares.
+ * Based on "An Algorithm for Automatically Fitting Digitized Curves" by Philip J. Schneider.
+ * @param {Array} points - Array of {x, y} points (at least 2)
+ * @returns {Object} - {p0, p1, p2, p3} control points, or null if fitting failed
+ */
+function fitCubicBezier(points) {
+  if (!points || points.length < 2) return null;
+
+  const n = points.length;
+  const p0 = points[0];
+  const p3 = points[n - 1];
+
+  if (n === 2) {
+    // Two points - create a line as cubic bezier
+    return {
+      p0,
+      p1: { x: p0.x + (p3.x - p0.x) / 3, y: p0.y + (p3.y - p0.y) / 3 },
+      p2: { x: p0.x + (2 * (p3.x - p0.x)) / 3, y: p0.y + (2 * (p3.y - p0.y)) / 3 },
+      p3,
+    };
+  }
+
+  // Chord-length parametrization
+  const t = chordLengthParametrize(points);
+
+  // Compute tangent directions at endpoints from the data
+  // Use first/last few points to estimate tangent
+  const t1 = vector.normalizeVector(vector.subVectors(points[1], points[0]));
+  const t2 = vector.normalizeVector(vector.subVectors(points[n - 1], points[n - 2]));
+
+  // Bezier basis functions
+  const B0 = (u) => (1 - u) * (1 - u) * (1 - u);
+  const B1 = (u) => 3 * u * (1 - u) * (1 - u);
+  const B2 = (u) => 3 * u * u * (1 - u);
+  const B3 = (u) => u * u * u;
+
+  // Set up the C and X matrices for least-squares
+  // We solve for alpha1 and alpha2 where:
+  // P1 = P0 + alpha1 * t1
+  // P2 = P3 - alpha2 * t2
+
+  let C00 = 0,
+    C01 = 0,
+    C10 = 0,
+    C11 = 0;
+  let X0 = 0,
+    X1 = 0;
+
+  for (let i = 0; i < n; i++) {
+    const u = t[i];
+    const b1 = B1(u);
+    const b2 = B2(u);
+
+    // A1[i] = t1 * B1(u), A2[i] = t2 * B2(u)
+    const a1x = t1.x * b1;
+    const a1y = t1.y * b1;
+    const a2x = t2.x * b2;
+    const a2y = t2.y * b2;
+
+    C00 += a1x * a1x + a1y * a1y;
+    C01 += a1x * a2x + a1y * a2y;
+    C10 = C01;
+    C11 += a2x * a2x + a2y * a2y;
+
+    // tmp = points[i] - B0(u)*p0 - B3(u)*p3
+    const tmpx = points[i].x - B0(u) * p0.x - B3(u) * p3.x;
+    const tmpy = points[i].y - B0(u) * p0.y - B3(u) * p3.y;
+
+    X0 += a1x * tmpx + a1y * tmpy;
+    X1 += a2x * tmpx + a2y * tmpy;
+  }
+
+  // Solve 2x2 linear system
+  const det = C00 * C11 - C01 * C10;
+
+  let alpha1, alpha2;
+  if (Math.abs(det) < 1e-12) {
+    // Degenerate case - use simple heuristic
+    const dist = Math.hypot(p3.x - p0.x, p3.y - p0.y);
+    alpha1 = alpha2 = dist / 3;
+  } else {
+    alpha1 = (C11 * X0 - C01 * X1) / det;
+    alpha2 = (C00 * X1 - C10 * X0) / det;
+  }
+
+  // If alphas are negative or too small, use heuristic
+  const segLength = Math.hypot(p3.x - p0.x, p3.y - p0.y);
+  const epsilon = 1e-6 * segLength;
+
+  if (alpha1 < epsilon || alpha2 < epsilon) {
+    alpha1 = alpha2 = segLength / 3;
+  }
+
+  const p1 = {
+    x: p0.x + alpha1 * t1.x,
+    y: p0.y + alpha1 * t1.y,
+  };
+  const p2 = {
+    x: p3.x - alpha2 * t2.x,
+    y: p3.y - alpha2 * t2.y,
+  };
+
+  return { p0, p1, p2, p3 };
+}
+
+/**
+ * Enforce colinearity for smooth points in a contour.
+ * For each on-curve smooth point with two adjacent off-curve handles,
+ * adjusts the handles to be colinear while preserving their lengths.
+ * @param {Array} points - Array of contour points
+ * @param {boolean} isClosed - Whether the contour is closed
+ * @returns {Array} - Modified points array
+ */
+function enforceSmoothColinearity(points, isClosed) {
+  if (!points || points.length < 3) return points;
+
+  const numPoints = points.length;
+
+  for (let i = 0; i < numPoints; i++) {
+    const point = points[i];
+
+    // Only process on-curve smooth points
+    if (point.type || !point.smooth) continue;
+
+    // Find adjacent off-curve handles
+    const prevIdx = (i - 1 + numPoints) % numPoints;
+    const nextIdx = (i + 1) % numPoints;
+
+    // For open contours, skip endpoints
+    if (!isClosed && (i === 0 || i === numPoints - 1)) continue;
+
+    const prevPoint = points[prevIdx];
+    const nextPoint = points[nextIdx];
+
+    // Both neighbors must be off-curve for this to apply
+    if (!prevPoint?.type || !nextPoint?.type) continue;
+
+    // Calculate vectors from center to handles
+    const vecIn = { x: prevPoint.x - point.x, y: prevPoint.y - point.y };
+    const vecOut = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
+
+    const lenIn = Math.hypot(vecIn.x, vecIn.y);
+    const lenOut = Math.hypot(vecOut.x, vecOut.y);
+
+    // Skip if handles are too short
+    if (lenIn < 0.001 || lenOut < 0.001) continue;
+
+    // Normalize directions
+    const dirIn = { x: vecIn.x / lenIn, y: vecIn.y / lenIn };
+    const dirOut = { x: vecOut.x / lenOut, y: vecOut.y / lenOut };
+
+    // Calculate average tangent direction
+    // We want the handles to be opposite, so we average dirIn and -dirOut
+    const avgDir = vector.normalizeVector({
+      x: dirIn.x - dirOut.x,
+      y: dirIn.y - dirOut.y,
+    });
+
+    // If directions are nearly opposite (already colinear), skip
+    const dot = dirIn.x * dirOut.x + dirIn.y * dirOut.y;
+    if (dot < -0.999) continue;
+
+    // If avgDir is zero (handles point same direction), use perpendicular
+    if (Math.hypot(avgDir.x, avgDir.y) < 0.001) continue;
+
+    // Adjust handle positions to be colinear through the on-curve point
+    points[prevIdx] = {
+      ...prevPoint,
+      x: point.x + avgDir.x * lenIn,
+      y: point.y + avgDir.y * lenIn,
+    };
+
+    points[nextIdx] = {
+      ...nextPoint,
+      x: point.x - avgDir.x * lenOut,
+      y: point.y - avgDir.y * lenOut,
+    };
+  }
+
+  return points;
+}
+
+/**
  * Generates outline contours from skeleton data.
  * @param {Object} skeletonData - The skeleton data from customData["fontra.skeleton"]
  * @returns {Array} Array of unpacked contours ready to add to path
@@ -83,9 +300,10 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // For closed skeleton: TWO separate contours (outer and inner)
     // The inner contour needs to be reversed for correct winding direction
     // (outer = counter-clockwise, inner = clockwise for proper fill)
+    const reversedRight = [...rightSide].reverse();
     return [
-      { points: leftSide, isClosed: true },
-      { points: [...rightSide].reverse(), isClosed: true },
+      { points: enforceSmoothColinearity(leftSide, true), isClosed: true },
+      { points: enforceSmoothColinearity(reversedRight, true), isClosed: true },
     ];
   } else {
     // For open skeleton: ONE contour with caps at ends
@@ -114,7 +332,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // Start cap
     outlinePoints.push(...startCap);
 
-    return [{ points: outlinePoints, isClosed: true }];
+    return [{ points: enforceSmoothColinearity(outlinePoints, true), isClosed: true }];
   }
 }
 
@@ -258,7 +476,7 @@ function generateOffsetPointsForSegment(
       });
     }
   } else {
-    // Bezier segment - sample and offset
+    // Bezier segment - sample offset positions and fit cubic bezier
     const bezierPoints = [
       segment.startPoint,
       ...segment.controlPoints,
@@ -268,16 +486,12 @@ function generateOffsetPointsForSegment(
     // Convert to bezier-js format
     const bezier = createBezierFromPoints(bezierPoints);
 
-    // Sample curve at regular intervals
-    const numSamples = Math.max(8, segment.controlPoints.length * 4);
+    // Sample offset curve at regular intervals
+    const numSamples = Math.max(16, segment.controlPoints.length * 8);
+    const sampledLeft = [];
+    const sampledRight = [];
 
-    // Determine start/end indices to avoid duplicate samples
-    // - For open skeletons: first segment starts at 0, all end at numSamples
-    // - For closed skeletons: all start at 0, don't include final sample (next segment's start)
-    const startSample = isClosed || isFirst ? 0 : 1; // Skip first sample if prev segment added it
-    const endSample = isClosed ? numSamples - 1 : numSamples; // Skip last for closed (next will add it)
-
-    for (let i = startSample; i <= endSample; i++) {
+    for (let i = 0; i <= numSamples; i++) {
       const t = i / numSamples;
       const point = bezier.get(t);
       const derivative = bezier.derivative(t);
@@ -285,31 +499,88 @@ function generateOffsetPointsForSegment(
       const tangent = vector.normalizeVector({ x: derivative.x, y: derivative.y });
       const normal = vector.rotateVector90CW(tangent);
 
-      // Determine if this is an on-curve or off-curve point
-      const isStartEndpoint = i === 0;
-      const isEndEndpoint = i === numSamples;
-      const isEndpoint = isStartEndpoint || isEndEndpoint;
-      const pointType = isEndpoint ? null : "cubic";
-
-      // Copy smooth from corresponding skeleton point for on-curve points
-      const smooth = isStartEndpoint
-        ? segment.startPoint.smooth
-        : isEndEndpoint
-          ? segment.endPoint.smooth
-          : undefined;
-
-      left.push({
+      sampledLeft.push({
         x: point.x + normal.x * halfWidth,
         y: point.y + normal.y * halfWidth,
-        type: pointType,
-        smooth,
       });
-      right.push({
+      sampledRight.push({
         x: point.x - normal.x * halfWidth,
         y: point.y - normal.y * halfWidth,
-        type: pointType,
-        smooth,
       });
+    }
+
+    // Fit cubic bezier to sampled points
+    const fittedLeft = fitCubicBezier(sampledLeft);
+    const fittedRight = fitCubicBezier(sampledRight);
+
+    // Determine which points to add based on closed/open and first/last
+    const shouldAddStart = isClosed || isFirst;
+    const shouldAddEnd = !isClosed;
+
+    if (shouldAddStart && fittedLeft && fittedRight) {
+      // Add start on-curve point
+      left.push({
+        x: fittedLeft.p0.x,
+        y: fittedLeft.p0.y,
+        smooth: segment.startPoint.smooth,
+      });
+      right.push({
+        x: fittedRight.p0.x,
+        y: fittedRight.p0.y,
+        smooth: segment.startPoint.smooth,
+      });
+
+      // Add first control point (off-curve)
+      left.push({
+        x: fittedLeft.p1.x,
+        y: fittedLeft.p1.y,
+        type: "cubic",
+      });
+      right.push({
+        x: fittedRight.p1.x,
+        y: fittedRight.p1.y,
+        type: "cubic",
+      });
+    } else if (fittedLeft && fittedRight) {
+      // Only add the first control point (previous segment added start)
+      left.push({
+        x: fittedLeft.p1.x,
+        y: fittedLeft.p1.y,
+        type: "cubic",
+      });
+      right.push({
+        x: fittedRight.p1.x,
+        y: fittedRight.p1.y,
+        type: "cubic",
+      });
+    }
+
+    if (fittedLeft && fittedRight) {
+      // Add second control point (off-curve)
+      left.push({
+        x: fittedLeft.p2.x,
+        y: fittedLeft.p2.y,
+        type: "cubic",
+      });
+      right.push({
+        x: fittedRight.p2.x,
+        y: fittedRight.p2.y,
+        type: "cubic",
+      });
+
+      if (shouldAddEnd) {
+        // Add end on-curve point
+        left.push({
+          x: fittedLeft.p3.x,
+          y: fittedLeft.p3.y,
+          smooth: segment.endPoint.smooth,
+        });
+        right.push({
+          x: fittedRight.p3.x,
+          y: fittedRight.p3.y,
+          smooth: segment.endPoint.smooth,
+        });
+      }
     }
   }
 
