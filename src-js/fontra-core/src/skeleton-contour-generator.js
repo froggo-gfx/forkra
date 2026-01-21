@@ -87,20 +87,19 @@ function fitCubicBezier(
 
   // Calculate control point lengths based on curvature
   // Higher curvature = longer control point to achieve the bend
-  // For a cubic bezier, the relationship between handle length and curvature is:
-  // κ ≈ (2/3) * h / L² where h is handle length and L is chord length
-  // Solving for h: h ≈ (3/2) * κ * L²
-  // But we use arc length for better accuracy
-
   const baseAlpha = arcLength / 3;
+
+  // Validate curvature values (can be NaN/undefined for degenerate cases)
+  const validCurvatureStart = Number.isFinite(curvatureStart) ? curvatureStart : 0;
+  const validCurvatureEnd = Number.isFinite(curvatureEnd) ? curvatureEnd : 0;
 
   // Scale based on curvature: higher curvature needs longer handles
   // curvature has units 1/length, so curvature * arcLength is dimensionless
   const curvatureFactor = 0.5; // Tuning parameter
-  const alpha1 = baseAlpha * (1 + Math.abs(curvatureStart) * arcLength * curvatureFactor);
-  const alpha2 = baseAlpha * (1 + Math.abs(curvatureEnd) * arcLength * curvatureFactor);
+  const alpha1 = baseAlpha * (1 + Math.abs(validCurvatureStart) * arcLength * curvatureFactor);
+  const alpha2 = baseAlpha * (1 + Math.abs(validCurvatureEnd) * arcLength * curvatureFactor);
 
-  console.log('[fitCubicBezier] arcLength:', arcLength, 'curvatures:', curvatureStart, curvatureEnd);
+  console.log('[fitCubicBezier] arcLength:', arcLength, 'curvatures:', validCurvatureStart, validCurvatureEnd);
   console.log('[fitCubicBezier] alpha1:', alpha1, 'alpha2:', alpha2);
 
   const p1 = {
@@ -468,8 +467,11 @@ function generateOffsetPointsForSegment(
     const bezierEndNormal = vector.rotateVector90CW(endTangent);
 
     // Get curvature at endpoints for proper control point sizing
-    const curvatureStart = bezier.curvature(0);
-    const curvatureEnd = bezier.curvature(1);
+    // Note: curvature() can return NaN for degenerate curves, so we default to 0
+    const rawCurvatureStart = bezier.curvature(0);
+    const rawCurvatureEnd = bezier.curvature(1);
+    const curvatureStart = Number.isFinite(rawCurvatureStart) ? rawCurvatureStart : 0;
+    const curvatureEnd = Number.isFinite(rawCurvatureEnd) ? rawCurvatureEnd : 0;
 
     // For corners (non-smooth junctions), use averaged normal from calculateCornerNormal
     // This ensures continuity between consecutive segments
