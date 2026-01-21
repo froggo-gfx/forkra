@@ -926,64 +926,19 @@ export class SkeletonPenTool extends BaseTool {
         newPointIndex = 0;
       }
 
-      // Store original generated indices for final change
-      const originalGeneratedIndices = [...(skeletonData.generatedContourIndices || [])];
-
-      // Helper to update visualization without recordChanges (for live preview)
-      const updateVisualization = () => {
-        const staticGlyph = layer.glyph;
-        // Remove currently generated contours
-        const currentIndices = [...(skeletonData.generatedContourIndices || [])].sort((a, b) => b - a);
-        for (const idx of currentIndices) {
-          if (idx < staticGlyph.path.numContours) {
-            staticGlyph.path.deleteContour(idx);
-          }
-        }
-        // Generate new contours
-        const generatedContours = generateContoursFromSkeleton(skeletonData);
-        const newIndices = [];
-        for (const contour of generatedContours) {
-          const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.insertContour(newIndex, packContour(contour));
-          newIndices.push(newIndex);
-        }
-        skeletonData.generatedContourIndices = newIndices;
-        // Update customData directly for visualization
-        if (!layer.customData) {
-          layer.customData = {};
-        }
-        layer.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(skeletonData));
-        // Request canvas update
-        this.canvasController.requestUpdate();
-      };
-
-      // Create final change for persistence (uses originalGeneratedIndices)
-      const createFinalChange = () => {
+      // Helper to record skeleton changes (following Pen Tool pattern)
+      // Each call records INCREMENTAL changes from current state
+      const recordSkeletonChange = () => {
         const changes = [];
         const staticGlyph = layer.glyph;
 
-        // Record path change
+        // 1. Record path changes (regenerate outline contours)
         const pathChange = recordChanges(staticGlyph, (sg) => {
-          // Delete contours by original indices (in reverse order)
-          const sortedOriginal = [...originalGeneratedIndices].sort((a, b) => b - a);
-          for (const idx of sortedOriginal) {
-            if (idx < sg.path.numContours) {
-              sg.path.deleteContour(idx);
-            }
-          }
-          // Add current generated contours
-          const generatedContours = generateContoursFromSkeleton(skeletonData);
-          const newIndices = [];
-          for (const contour of generatedContours) {
-            const newIndex = sg.path.numContours;
-            sg.path.insertContour(newIndex, packContour(contour));
-            newIndices.push(newIndex);
-          }
-          skeletonData.generatedContourIndices = newIndices;
+          this._regenerateOutlineContours(sg, skeletonData);
         });
         changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
-        // Record customData change
+        // 2. Record customData change (save skeletonData)
         const customDataChange = recordChanges(layer, (l) => {
           if (!l.customData) {
             l.customData = {};
@@ -995,13 +950,18 @@ export class SkeletonPenTool extends BaseTool {
         return new ChangeCollector().concat(...changes);
       };
 
-      // Update visualization (live preview)
-      updateVisualization();
+      // === INITIAL CHANGE: Record adding on-curve point ===
+      const initialChanges = recordSkeletonChange();
+      await sendIncrementalChange(initialChanges.change);
 
       // Update selection to new point
       this.sceneController.selection = new Set([
         `skeletonPoint/${targetContourIndex}/${newPointIndex}`,
       ]);
+
+      // Initialize change collectors for subsequent phases
+      let preDragChanges = new ChangeCollector();
+      let dragChanges = new ChangeCollector();
 
       // Check if user drags to create handles
       if (await shouldInitiateDrag(eventStream, initialEvent)) {
@@ -1054,7 +1014,9 @@ export class SkeletonPenTool extends BaseTool {
           }
         }
 
-        updateVisualization();
+        // === PRE-DRAG CHANGE: Record adding handles ===
+        preDragChanges = recordSkeletonChange();
+        await sendIncrementalChange(preDragChanges.change);
 
         // Drag loop - update handle positions
         for await (const event of eventStream) {
@@ -1085,7 +1047,9 @@ export class SkeletonPenTool extends BaseTool {
             handleInPoint.y = Math.round(opposite.y);
           }
 
-          updateVisualization();
+          // === DRAG CHANGE: Record handle position updates ===
+          dragChanges = recordSkeletonChange();
+          await sendIncrementalChange(dragChanges.change, true); // true = may drop
         }
 
         // Select the outgoing handle
@@ -1094,11 +1058,11 @@ export class SkeletonPenTool extends BaseTool {
         ]);
       }
 
-      // Create final change for persistence
-      const combinedChange = createFinalChange();
+      // Combine all changes (following Pen Tool pattern)
+      const finalChanges = initialChanges.concat(preDragChanges, dragChanges);
 
       return {
-        changes: combinedChange,
+        changes: finalChanges,
         undoLabel: "Add skeleton point",
         broadcast: true,
       };
