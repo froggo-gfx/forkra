@@ -378,10 +378,23 @@ export class SceneController {
       const generatedIndices = skeletonData.generatedContourIndices || [];
       const pathNumContours = layer.glyph?.path?.numContours || 0;
 
-      // If generatedContourIndices is empty or points to invalid contours, regenerate
+      // Check for empty contours (can cause rendering errors)
+      let hasEmptyContours = false;
+      if (layer.glyph?.path) {
+        for (let i = 0; i < pathNumContours; i++) {
+          const contour = layer.glyph.path.getContour(i);
+          if (!contour.coordinates || contour.coordinates.length === 0) {
+            hasEmptyContours = true;
+            break;
+          }
+        }
+      }
+
+      // If generatedContourIndices is empty, points to invalid contours, or there are empty contours, regenerate
       const needsInit =
         generatedIndices.length === 0 ||
-        generatedIndices.some((idx) => idx >= pathNumContours);
+        generatedIndices.some((idx) => idx >= pathNumContours) ||
+        hasEmptyContours;
 
       if (!needsInit) {
         continue;
@@ -410,8 +423,31 @@ export class SceneController {
         // Record path changes - delete old contours and insert new ones
         const staticGlyph = editLayer.glyph;
         const pathChange = recordChanges(staticGlyph, (sg) => {
+          // First, find and remove empty contours (contours with no points)
+          // These can cause rendering errors
+          const emptyContourIndices = [];
+          for (let i = 0; i < sg.path.numContours; i++) {
+            const contour = sg.path.getContour(i);
+            if (!contour.coordinates || contour.coordinates.length === 0) {
+              emptyContourIndices.push(i);
+            }
+          }
+          // Remove empty contours in reverse order
+          for (const idx of emptyContourIndices.reverse()) {
+            sg.path.deleteContour(idx);
+          }
+
+          // Update oldGeneratedIndices to account for removed empty contours
+          const adjustedOldIndices = oldGeneratedIndices
+            .filter((idx) => !emptyContourIndices.includes(idx))
+            .map((idx) => {
+              // Adjust index based on how many empty contours were before it
+              const removedBefore = emptyContourIndices.filter((e) => e < idx).length;
+              return idx - removedBefore;
+            });
+
           // Remove old generated contours (in reverse order to maintain indices)
-          const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+          const sortedIndices = [...adjustedOldIndices].sort((a, b) => b - a);
           for (const idx of sortedIndices) {
             if (idx < sg.path.numContours) {
               sg.path.deleteContour(idx);
