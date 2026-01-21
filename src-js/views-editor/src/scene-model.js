@@ -771,7 +771,8 @@ export class SceneModel {
     ) {
       // Don't select segments from skeleton-generated contours
       const firstPointIndex = pathHit.segment.parentPointIndices[0];
-      if (this.isGeneratedSkeletonPoint(firstPointIndex)) {
+      const positionedGlyph = this.getSelectedPositionedGlyph();
+      if (positionedGlyph && this._isPointInSkeletonGeneratedContour(positionedGlyph, firstPointIndex)) {
         return { selection: new Set() };
       }
 
@@ -985,7 +986,7 @@ export class SceneModel {
     for (const hit of positionedGlyph.glyph.path.iterPointsInRect(selRect)) {
       if (!pointFilterFunc || pointFilterFunc(hit)) {
         // Skip points from skeleton-generated contours
-        if (!this.isGeneratedSkeletonPoint(hit.pointIndex)) {
+        if (!this._isPointInSkeletonGeneratedContour(positionedGlyph, hit.pointIndex)) {
           selection.add(`point/${hit.pointIndex}`);
         }
       }

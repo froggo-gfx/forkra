@@ -1053,6 +1053,10 @@ export default class TransformationPanel extends Panel {
             layerGlyph,
             this.sceneController
           );
+          // Skip empty changes (e.g., when skeleton data is not available)
+          if (!editChange || Object.keys(editChange).length === 0) {
+            continue;
+          }
           applyChange(layerGlyph, editChange);
           editChanges.push(consolidateChanges(editChange, changePath));
           rollbackChanges.push(consolidateChanges(rollbackChange, changePath));
