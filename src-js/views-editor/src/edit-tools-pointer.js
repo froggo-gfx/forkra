@@ -462,6 +462,52 @@ export class PointerTool extends BaseTool {
         }
 
         point.smooth = newSmooth;
+
+        // If switching to smooth, align the handles to be collinear
+        if (newSmooth) {
+          const points = contour.points;
+          const numPoints = points.length;
+
+          // Find adjacent off-curve handles
+          const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
+          const nextIdx = (pointIdx + 1) % numPoints;
+          const prevPoint = points[prevIdx];
+          const nextPoint = points[nextIdx];
+
+          // Check if we have handles on both sides
+          const hasPrevHandle = prevPoint?.type === "cubic" || prevPoint?.type === "quad";
+          const hasNextHandle = nextPoint?.type === "cubic" || nextPoint?.type === "quad";
+
+          if (hasPrevHandle && hasNextHandle) {
+            // Calculate distances from on-curve to handles
+            const prevDx = prevPoint.x - point.x;
+            const prevDy = prevPoint.y - point.y;
+            const nextDx = nextPoint.x - point.x;
+            const nextDy = nextPoint.y - point.y;
+
+            const prevDist = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
+            const nextDist = Math.sqrt(nextDx * nextDx + nextDy * nextDy);
+
+            if (prevDist > 0 && nextDist > 0) {
+              // Calculate average direction (biased by handle distances)
+              // Use vector from prev handle through point to next handle
+              const avgDx = nextDx / nextDist - prevDx / prevDist;
+              const avgDy = nextDy / nextDist - prevDy / prevDist;
+              const avgLen = Math.sqrt(avgDx * avgDx + avgDy * avgDy);
+
+              if (avgLen > 0) {
+                const dirX = avgDx / avgLen;
+                const dirY = avgDy / avgLen;
+
+                // Set handles to be collinear, preserving distances
+                prevPoint.x = point.x - dirX * prevDist;
+                prevPoint.y = point.y - dirY * prevDist;
+                nextPoint.x = point.x + dirX * nextDist;
+                nextPoint.y = point.y + dirY * nextDist;
+              }
+            }
+          }
+        }
       }
 
       if (newSmooth === null) return; // No on-curve points selected

@@ -2341,9 +2341,45 @@ export class EditorController extends ViewController {
       // Deep clone for manipulation
       skeletonData = JSON.parse(JSON.stringify(skeletonData));
 
+      // Expand selection to include paired off-curve handles
+      // A segment can't have just one handle - if one is deleted, both must be deleted
+      const expandedSelection = new Set(skeletonPointSelection);
+
+      for (const selKey of skeletonPointSelection) {
+        const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+        const contour = skeletonData.contours?.[contourIdx];
+        if (!contour) continue;
+
+        const point = contour.points?.[pointIdx];
+        if (!point) continue;
+
+        // Only process off-curve points
+        if (point.type !== "cubic" && point.type !== "quad") continue;
+
+        const points = contour.points;
+        const numPoints = points.length;
+        const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
+        const nextIdx = (pointIdx + 1) % numPoints;
+        const prevPoint = points[prevIdx];
+        const nextPoint = points[nextIdx];
+
+        // Find the paired handle
+        // If prev is on-curve and next is off-curve: this is outgoing handle, pair is next
+        if (!prevPoint?.type && (nextPoint?.type === "cubic" || nextPoint?.type === "quad")) {
+          expandedSelection.add(`${contourIdx}/${nextIdx}`);
+        }
+        // If prev is off-curve and next is on-curve: this is incoming handle, pair is prev
+        else if (
+          (prevPoint?.type === "cubic" || prevPoint?.type === "quad") &&
+          !nextPoint?.type
+        ) {
+          expandedSelection.add(`${contourIdx}/${prevIdx}`);
+        }
+      }
+
       // Group selected points by contour and sort in descending order
       const pointsByContour = new Map();
-      for (const selKey of skeletonPointSelection) {
+      for (const selKey of expandedSelection) {
         const [contourIdx, pointIdx] = selKey.split("/").map(Number);
         if (!pointsByContour.has(contourIdx)) {
           pointsByContour.set(contourIdx, []);
