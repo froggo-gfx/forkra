@@ -37,7 +37,7 @@ export default class SkeletonParametersPanel extends Panel {
 
     // Listen to source (editing layer) changes to update Default Width
     this.sceneController.sceneSettingsController.addKeyListener(
-      ["editingLayerNames"],
+      ["editingLayers"],
       () => this.update()
     );
   }
@@ -215,7 +215,7 @@ export default class SkeletonParametersPanel extends Panel {
    * @returns {number} The default width value
    */
   _getCurrentDefaultWidth() {
-    const sourceIdentifier = this.sceneController.sceneSettings.editingLayerNames?.[0];
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
     if (!sourceIdentifier) return DEFAULT_WIDTH;
 
     const source = this.fontController.sources[sourceIdentifier];
@@ -227,7 +227,7 @@ export default class SkeletonParametersPanel extends Panel {
    * @param {number} value - The new default width value
    */
   async _setDefaultSkeletonWidth(value) {
-    const sourceIdentifier = this.sceneController.sceneSettings.editingLayerNames?.[0];
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
     if (!sourceIdentifier) return;
 
     const root = { sources: this.fontController.sources };
