@@ -1244,12 +1244,14 @@ export class PointerTool extends BaseTool {
       y: localPoint.y - positionedGlyph.y,
     };
 
-    // Check if point is in asymmetric mode
+    // Check if point is in asymmetric mode (leftWidth and rightWidth exist AND are different)
     const editLayerNameForCheck = sceneController.editingLayerNames?.[0];
     const layerForCheck = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerNameForCheck];
     const skeletonDataForCheck = layerForCheck?.customData?.[SKELETON_CUSTOM_DATA_KEY];
     const pointForCheck = skeletonDataForCheck?.contours?.[ribHit.contourIndex]?.points?.[ribHit.pointIndex];
-    const isAsymmetric = pointForCheck?.leftWidth !== undefined || pointForCheck?.rightWidth !== undefined;
+    const isAsymmetric = pointForCheck?.leftWidth !== undefined &&
+                         pointForCheck?.rightWidth !== undefined &&
+                         pointForCheck.leftWidth !== pointForCheck.rightWidth;
 
     // Set selection based on mode
     const leftKey = `skeletonRibPoint/${ribHit.contourIndex}/${ribHit.pointIndex}/left`;

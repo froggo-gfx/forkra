@@ -488,11 +488,20 @@ export default class SkeletonParametersPanel extends Panel {
 
   /**
    * Check if a point has asymmetric widths.
+   * Returns true only if leftWidth and rightWidth exist AND are different.
    * @param {Object} point - The skeleton point
    * @returns {boolean} True if asymmetric
    */
   _isAsymmetric(point) {
-    return point.leftWidth !== undefined || point.rightWidth !== undefined;
+    if (point.leftWidth === undefined && point.rightWidth === undefined) {
+      return false;
+    }
+    // If both exist, check if they're different
+    if (point.leftWidth !== undefined && point.rightWidth !== undefined) {
+      return point.leftWidth !== point.rightWidth;
+    }
+    // Only one exists - treat as asymmetric
+    return true;
   }
 
   /**
