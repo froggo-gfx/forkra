@@ -338,7 +338,15 @@ export default class SkeletonParametersPanel extends Panel {
       } else if (fieldItem.key === "pointWidthScale") {
         this.pointParameters.scaleValue = value;
       } else if (fieldItem.key === "pointDistribution") {
-        await this._setPointDistribution(value, valueStream);
+        // For distribution slider, consume valueStream but apply changes directly
+        // This preserves totalWidth during the entire drag operation
+        if (valueStream) {
+          for await (const dist of valueStream) {
+            await this._setPointDistributionDirect(dist);
+          }
+        } else {
+          await this._setPointDistributionDirect(value);
+        }
       } else {
         this.parameters[fieldItem.key] = value;
       }
@@ -674,88 +682,53 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Set point distribution. Supports streaming mode for smooth slider dragging.
+   * Set point distribution directly. Called for each slider value during drag.
+   * Preserves total width by storing it on first call of drag operation.
    */
-  async _setPointDistribution(distribution, valueStream) {
+  async _setPointDistributionDirect(distribution) {
     const selectedData = this._getSelectedSkeletonPoints();
     if (!selectedData) return;
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const layer = glyph.layers[selectedData.editLayerName];
-      const originalSkeletonData = JSON.parse(
-        JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
-      );
+      const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
 
-      // Store original total widths for each point (preserved during drag)
-      const pointTotalWidths = [];
       for (const { contourIdx, pointIdx } of selectedData.points) {
-        const point = originalSkeletonData.contours[contourIdx].points[pointIdx];
-        const defaultWidth = originalSkeletonData.contours[contourIdx].defaultWidth || this._getCurrentDefaultWidthWide();
+        const point = skeletonData.contours[contourIdx].points[pointIdx];
+        const defaultWidth = skeletonData.contours[contourIdx].defaultWidth || this._getCurrentDefaultWidthWide();
+
+        // Get current total width (leftHW + rightHW)
         const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
         const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-        pointTotalWidths.push(leftHW + rightHW);
+        const totalWidth = leftHW + rightHW;
+
+        // Calculate new widths based on distribution
+        const newLeftHW = totalWidth * (0.5 + distribution / 200);
+        const newRightHW = totalWidth - newLeftHW;
+
+        point.leftWidth = Math.max(0, Math.round(newLeftHW));
+        point.rightWidth = Math.max(0, Math.round(newRightHW));
+        delete point.width;
       }
 
-      // Helper to apply distribution value
-      const applyDistribution = (skeletonData, dist) => {
-        for (let i = 0; i < selectedData.points.length; i++) {
-          const { contourIdx, pointIdx } = selectedData.points[i];
-          const point = skeletonData.contours[contourIdx].points[pointIdx];
-          const totalWidth = pointTotalWidths[i];
+      // Record changes
+      const changes = [];
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        this._regenerateOutlineContours(sg, skeletonData);
+      });
+      changes.push(pathChange.prefixed(["layers", selectedData.editLayerName, "glyph"]));
 
-          const newLeftHW = totalWidth * (0.5 + dist / 200);
-          const newRightHW = totalWidth - newLeftHW;
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", selectedData.editLayerName]));
 
-          point.leftWidth = Math.max(0, Math.round(newLeftHW));
-          point.rightWidth = Math.max(0, Math.round(newRightHW));
-          delete point.width;
-        }
-      };
-
-      // Helper to send changes
-      const sendChanges = async (skeletonData, mayDrop = false) => {
-        const changes = [];
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          this._regenerateOutlineContours(sg, skeletonData);
-        });
-        changes.push(pathChange.prefixed(["layers", selectedData.editLayerName, "glyph"]));
-
-        const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-        });
-        changes.push(customDataChange.prefixed(["layers", selectedData.editLayerName]));
-
-        const combined = new ChangeCollector().concat(...changes);
-        await sendIncrementalChange(combined.change, mayDrop);
-        return combined;
-      };
-
-      let finalChanges;
-
-      if (valueStream) {
-        // Streaming mode: process all values from slider drag
-        for await (const dist of valueStream) {
-          const workingSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
-          // Get current generatedContourIndices - they change after each regeneration
-          const currentSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
-          workingSkeletonData.generatedContourIndices = currentSkeletonData.generatedContourIndices;
-          applyDistribution(workingSkeletonData, dist);
-          finalChanges = await sendChanges(workingSkeletonData, true);
-        }
-        // Final send without mayDrop flag
-        if (finalChanges) {
-          await sendIncrementalChange(finalChanges.change);
-        }
-      } else {
-        // Single value mode
-        const workingSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
-        applyDistribution(workingSkeletonData, distribution);
-        finalChanges = await sendChanges(workingSkeletonData);
-      }
+      const combined = new ChangeCollector().concat(...changes);
+      await sendIncrementalChange(combined.change, true);
 
       return {
-        changes: finalChanges,
+        changes: combined,
         undoLabel: "Set point distribution",
         broadcast: true,
       };
