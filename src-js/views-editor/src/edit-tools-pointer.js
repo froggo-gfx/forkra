@@ -516,36 +516,75 @@ export class PointerTool extends BaseTool {
 
         point.smooth = newSmooth;
 
-        // If switching to smooth, align the handles to be collinear (only if both handles exist)
-        if (newSmooth && hasPrevHandle && hasNextHandle) {
-          const prevPoint = points[prevIdx];
-          const nextPoint = points[nextIdx];
+        // If switching to smooth, align handle(s) to be collinear
+        if (newSmooth) {
+          if (hasPrevHandle && hasNextHandle) {
+            // Both handles exist - align them to be collinear with each other
+            const prevPoint = points[prevIdx];
+            const nextPoint = points[nextIdx];
 
-          // Calculate distances from on-curve to handles
-          const prevDx = prevPoint.x - point.x;
-          const prevDy = prevPoint.y - point.y;
-          const nextDx = nextPoint.x - point.x;
-          const nextDy = nextPoint.y - point.y;
+            const prevDx = prevPoint.x - point.x;
+            const prevDy = prevPoint.y - point.y;
+            const nextDx = nextPoint.x - point.x;
+            const nextDy = nextPoint.y - point.y;
 
-          const prevDist = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
-          const nextDist = Math.sqrt(nextDx * nextDx + nextDy * nextDy);
+            const prevDist = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
+            const nextDist = Math.sqrt(nextDx * nextDx + nextDy * nextDy);
 
-          if (prevDist > 0 && nextDist > 0) {
-            // Calculate average direction (biased by handle distances)
-            // Use vector from prev handle through point to next handle
-            const avgDx = nextDx / nextDist - prevDx / prevDist;
-            const avgDy = nextDy / nextDist - prevDy / prevDist;
-            const avgLen = Math.sqrt(avgDx * avgDx + avgDy * avgDy);
+            if (prevDist > 0 && nextDist > 0) {
+              const avgDx = nextDx / nextDist - prevDx / prevDist;
+              const avgDy = nextDy / nextDist - prevDy / prevDist;
+              const avgLen = Math.sqrt(avgDx * avgDx + avgDy * avgDy);
 
-            if (avgLen > 0) {
-              const dirX = avgDx / avgLen;
-              const dirY = avgDy / avgLen;
+              if (avgLen > 0) {
+                const dirX = avgDx / avgLen;
+                const dirY = avgDy / avgLen;
 
-              // Set handles to be collinear, preserving distances
-              prevPoint.x = point.x - dirX * prevDist;
-              prevPoint.y = point.y - dirY * prevDist;
-              nextPoint.x = point.x + dirX * nextDist;
-              nextPoint.y = point.y + dirY * nextDist;
+                prevPoint.x = point.x - dirX * prevDist;
+                prevPoint.y = point.y - dirY * prevDist;
+                nextPoint.x = point.x + dirX * nextDist;
+                nextPoint.y = point.y + dirY * nextDist;
+              }
+            }
+          } else if (hasPrevHandle || hasNextHandle) {
+            // Only one handle - align it with the line segment on the other side
+            const handleIdx = hasPrevHandle ? prevIdx : nextIdx;
+            const handlePoint = points[handleIdx];
+
+            // Find the on-curve point on the other side (for line direction)
+            const otherSideIdx = hasPrevHandle ? nextIdx : prevIdx;
+            let lineEndIdx = otherSideIdx;
+
+            // Skip any off-curve points to find the next on-curve
+            while (points[lineEndIdx]?.type) {
+              lineEndIdx = hasPrevHandle
+                ? (lineEndIdx + 1) % numPoints
+                : (lineEndIdx - 1 + numPoints) % numPoints;
+              if (lineEndIdx === pointIdx) break; // Safety
+            }
+
+            const lineEnd = points[lineEndIdx];
+            if (lineEnd && !lineEnd.type) {
+              // Direction from point to line end
+              const lineDx = lineEnd.x - point.x;
+              const lineDy = lineEnd.y - point.y;
+              const lineLen = Math.sqrt(lineDx * lineDx + lineDy * lineDy);
+
+              if (lineLen > 0) {
+                const lineDirX = lineDx / lineLen;
+                const lineDirY = lineDy / lineLen;
+
+                // Handle distance
+                const handleDx = handlePoint.x - point.x;
+                const handleDy = handlePoint.y - point.y;
+                const handleDist = Math.sqrt(handleDx * handleDx + handleDy * handleDy);
+
+                if (handleDist > 0) {
+                  // Align handle opposite to line direction
+                  handlePoint.x = point.x - lineDirX * handleDist;
+                  handlePoint.y = point.y - lineDirY * handleDist;
+                }
+              }
             }
           }
         }
