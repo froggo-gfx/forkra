@@ -622,17 +622,23 @@ function calculateCornerNormal(segment1, segment2, halfWidth) {
   const normal1 = vector.rotateVector90CW(dir1);
   const normal2 = vector.rotateVector90CW(dir2);
 
-  // Average of the two normals
-  const avgNormal = vector.normalizeVector(vector.addVectors(normal1, normal2));
+  // Check for sharp corners using the sum of normals
+  const sumNormals = vector.addVectors(normal1, normal2);
+  const sumLength = Math.hypot(sumNormals.x, sumNormals.y);
 
-  // Check for sharp corners (miter limit)
-  const dot = vector.dotVector(normal1, normal2);
-  if (dot < 0.2) {
-    // Very sharp corner, use bevel (just return first normal)
-    return normal1;
+  // If sum is too short (normals nearly opposite), use chord normal
+  // sumLength < 1.0 corresponds to angle > 120° between normals (corner < 60°)
+  // sumLength < 1.4 corresponds to angle > 90° between normals (corner < 90°)
+  if (sumLength < 1.0) {
+    // Use chord normal: perpendicular to line from P1 to P3
+    const chordDir = vector.normalizeVector(
+      vector.subVectors(segment2.endPoint, segment1.startPoint)
+    );
+    return vector.rotateVector90CW(chordDir);
   }
 
-  return avgNormal;
+  // Normal case: average the two normals
+  return vector.mulVectorScalar(sumNormals, 1 / sumLength);
 }
 
 /**
