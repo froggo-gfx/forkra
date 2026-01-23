@@ -1771,7 +1771,10 @@ export class EditorController extends ViewController {
 
       // Collect skeleton data if skeleton points are selected
       if (hasSkeletonSelection) {
-        const skeletonData = layer.customData?.["fontra.skeleton"];
+        // Get skeleton data from the full layer object, not the glyph
+        const fullLayer = varGlyph.layers[layerName];
+        const skeletonData = fullLayer?.customData?.["fontra.skeleton"];
+        console.log("[COPY] Layer", layerName, "fullLayer:", fullLayer, "skeletonData:", skeletonData);
         if (skeletonData?.contours?.length) {
           // Copy only selected contours
           const copiedContours = [];
