@@ -55,6 +55,34 @@ export default class SkeletonParametersPanel extends Panel {
   async update() {
     const formContents = [];
 
+    // === SOURCE WIDTHS ===
+    formContents.push({
+      type: "header",
+      label: "Source Widths",
+    });
+
+    formContents.push({
+      type: "edit-number",
+      key: "defaultSkeletonWidthWide",
+      label: "Wide",
+      value: this._getCurrentDefaultWidthWide(),
+      minValue: 1,
+    });
+
+    formContents.push({
+      type: "edit-number",
+      key: "defaultSkeletonWidthNarrow",
+      label: "Narrow",
+      value: this._getCurrentDefaultWidthNarrow(),
+      minValue: 1,
+    });
+
+    // Divider
+    formContents.push({
+      type: "auxiliaryElement",
+      auxiliaryElement: html.hr({ style: "border: none; border-top: 1px solid #ccc; margin: 1em 0;" }),
+    });
+
     // === ALIGN ===
     formContents.push({
       type: "header",
@@ -184,29 +212,6 @@ export default class SkeletonParametersPanel extends Panel {
         ),
         "data-tooltipposition": "top-right",
       },
-    });
-
-    // === DEFAULT WIDTHS ===
-    formContents.push({ type: "spacer" });
-    formContents.push({
-      type: "header",
-      label: "Default Widths",
-    });
-
-    formContents.push({
-      type: "edit-number",
-      key: "defaultSkeletonWidthWide",
-      label: "Wide",
-      value: this._getCurrentDefaultWidthWide(),
-      minValue: 1,
-    });
-
-    formContents.push({
-      type: "edit-number",
-      key: "defaultSkeletonWidthNarrow",
-      label: "Narrow",
-      value: this._getCurrentDefaultWidthNarrow(),
-      minValue: 1,
     });
 
     this.infoForm.setFieldDescriptions(formContents);
