@@ -343,7 +343,19 @@ export default class SkeletonParametersPanel extends Panel {
       } else if (fieldItem.key === "pointWidthLeft" || fieldItem.key === "pointWidthRight") {
         await this._setPointWidth(fieldItem.key, value);
       } else if (fieldItem.key === "pointWidthScale") {
-        this.pointParameters.scaleValue = value;
+        // Protect scale slider from form rebuilds during drag
+        if (valueStream) {
+          this._isDraggingSlider = true;
+          try {
+            for await (const v of valueStream) {
+              this.pointParameters.scaleValue = v;
+            }
+          } finally {
+            this._isDraggingSlider = false;
+          }
+        } else {
+          this.pointParameters.scaleValue = value;
+        }
       } else if (fieldItem.key === "pointDistribution") {
         // For distribution slider, consume valueStream but apply changes directly
         // This preserves totalWidth during the entire drag operation
