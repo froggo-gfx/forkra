@@ -831,44 +831,87 @@ export function calculateNormalAtSkeletonPoint(skeletonContour, pointIndex) {
     return { x: 0, y: 1 };
   }
 
-  // Find neighboring on-curve points
-  let prevOnCurve = null;
-  let nextOnCurve = null;
+  // Build segments to get proper tangent directions
+  const segments = buildSegmentsFromPoints(points, isClosed);
+  if (segments.length === 0) {
+    return { x: 0, y: 1 };
+  }
 
-  // Look backward for previous on-curve
-  for (let i = 1; i < numPoints; i++) {
-    const idx = (pointIndex - i + numPoints) % numPoints;
-    if (!points[idx].type) {
-      prevOnCurve = points[idx];
-      break;
+  // Find segments that end at or start from this point
+  let incomingSegment = null;
+  let outgoingSegment = null;
+
+  for (const segment of segments) {
+    if (segment.endPoint === point) {
+      incomingSegment = segment;
     }
-    if (!isClosed && idx === 0) break;
-  }
-
-  // Look forward for next on-curve
-  for (let i = 1; i < numPoints; i++) {
-    const idx = (pointIndex + i) % numPoints;
-    if (!points[idx].type) {
-      nextOnCurve = points[idx];
-      break;
+    if (segment.startPoint === point) {
+      outgoingSegment = segment;
     }
-    if (!isClosed && idx === numPoints - 1) break;
   }
 
-  // Calculate tangent direction
-  let tangent;
-  if (prevOnCurve && nextOnCurve) {
-    tangent = vector.normalizeVector(vector.subVectors(nextOnCurve, prevOnCurve));
-  } else if (nextOnCurve) {
-    tangent = vector.normalizeVector(vector.subVectors(nextOnCurve, point));
-  } else if (prevOnCurve) {
-    tangent = vector.normalizeVector(vector.subVectors(point, prevOnCurve));
-  } else {
-    tangent = { x: 1, y: 0 };
+  // Calculate tangent directions using the same method as contour generation
+  let dir1 = null; // incoming direction
+  let dir2 = null; // outgoing direction
+
+  if (incomingSegment) {
+    if (incomingSegment.controlPoints.length === 0) {
+      dir1 = vector.normalizeVector(
+        vector.subVectors(incomingSegment.endPoint, incomingSegment.startPoint)
+      );
+    } else {
+      const bezier = createBezierFromPoints([
+        incomingSegment.startPoint,
+        ...incomingSegment.controlPoints,
+        incomingSegment.endPoint,
+      ]);
+      const deriv = bezier.derivative(1);
+      dir1 = vector.normalizeVector({ x: deriv.x, y: deriv.y });
+    }
   }
 
-  // Normal is perpendicular to tangent
-  return vector.rotateVector90CW(tangent);
+  if (outgoingSegment) {
+    if (outgoingSegment.controlPoints.length === 0) {
+      dir2 = vector.normalizeVector(
+        vector.subVectors(outgoingSegment.endPoint, outgoingSegment.startPoint)
+      );
+    } else {
+      const bezier = createBezierFromPoints([
+        outgoingSegment.startPoint,
+        ...outgoingSegment.controlPoints,
+        outgoingSegment.endPoint,
+      ]);
+      const deriv = bezier.derivative(0);
+      dir2 = vector.normalizeVector({ x: deriv.x, y: deriv.y });
+    }
+  }
+
+  // Handle endpoints of open contours
+  if (!dir1 && dir2) {
+    return vector.rotateVector90CW(dir2);
+  }
+  if (dir1 && !dir2) {
+    return vector.rotateVector90CW(dir1);
+  }
+  if (!dir1 && !dir2) {
+    return { x: 0, y: 1 };
+  }
+
+  // Use atan2-based angle bisector (same as calculateCornerNormal)
+  const dot = dir1.x * dir2.x + dir1.y * dir2.y;
+  const cross = dir1.x * dir2.y - dir1.y * dir2.x;
+  const angle = Math.atan2(cross, dot);
+  const halfAngle = angle / 2;
+  const cosH = Math.cos(halfAngle);
+  const sinH = Math.sin(halfAngle);
+
+  const bisector = {
+    x: dir1.x * cosH - dir1.y * sinH,
+    y: dir1.x * sinH + dir1.y * cosH,
+  };
+
+  // Normal is perpendicular to bisector (rotated 90° CW)
+  return { x: bisector.y, y: -bisector.x };
 }
 
 /**
