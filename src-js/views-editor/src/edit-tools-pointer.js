@@ -294,17 +294,26 @@ export class PointerTool extends BaseTool {
     const modeFunc = getSelectModeFunction(event);
     const newSelection = modeFunc(sceneController.selection, selection);
     const cleanSel = selection;
+
+    // Check if clicking on skeleton segment whose contour is already selected
+    const clickedSkeletonSegmentOfSelectedContour =
+      this._isClickOnSelectedSkeletonContourSegment(cleanSel, sceneController.selection);
+
     if (
       !selection.size ||
       event.shiftKey ||
       event.altKey ||
-      !isSuperset(sceneController.selection, cleanSel)
+      (!isSuperset(sceneController.selection, cleanSel) &&
+        !clickedSkeletonSegmentOfSelectedContour)
     ) {
       this._selectionBeforeSingleClick = sceneController.selection;
       sceneController.selection = newSelection;
     }
 
-    if (isSuperset(sceneController.selection, cleanSel)) {
+    if (
+      isSuperset(sceneController.selection, cleanSel) ||
+      clickedSkeletonSegmentOfSelectedContour
+    ) {
       initiateDrag = true;
     }
     if (!selection.size) {
@@ -608,6 +617,33 @@ export class PointerTool extends BaseTool {
     this._selectionBeforeSingleClick = undefined;
     const modeFunc = getSelectModeFunction(event);
     sceneController.selection = modeFunc(selection, newSelection);
+  }
+
+  /**
+   * Check if the clicked selection is a skeleton segment whose contour
+   * already has points selected in the current selection.
+   */
+  _isClickOnSelectedSkeletonContourSegment(clickedSelection, currentSelection) {
+    const { skeletonSegment: clickedSegments } = parseSelection(clickedSelection);
+    if (!clickedSegments?.size) return false;
+
+    const { skeletonPoint: selectedPoints } = parseSelection(currentSelection);
+    if (!selectedPoints?.size) return false;
+
+    // Get the contour index from the clicked segment
+    for (const segmentKey of clickedSegments) {
+      const [contourIdx] = segmentKey.split("/").map(Number);
+
+      // Check if any point from this contour is selected
+      for (const pointKey of selectedPoints) {
+        const [pointContourIdx] = pointKey.split("/").map(Number);
+        if (pointContourIdx === contourIdx) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   async handleRectSelect(eventStream, initialEvent, initialSelection) {
