@@ -2262,13 +2262,16 @@ export class EditorController extends ViewController {
         if (defaultSkeletonData?.contours?.length) {
           const existingSkeletonData = firstLayer?.customData?.["fontra.skeleton"];
           const startContourIndex = existingSkeletonData?.contours?.length || 0;
+          console.log("[PASTE] Building skeleton selection, startContourIndex:", startContourIndex);
 
           for (let ci = 0; ci < defaultSkeletonData.contours.length; ci++) {
             const contour = defaultSkeletonData.contours[ci];
             for (let pi = 0; pi < contour.points.length; pi++) {
               if (!contour.points[pi].type) {
                 // on-curve point
-                selection.add(`skeletonPoint/${startContourIndex + ci}/${pi}`);
+                const selKey = `skeletonPoint/${startContourIndex + ci}/${pi}`;
+                selection.add(selKey);
+                console.log("[PASTE] Added skeleton selection:", selKey);
               }
             }
           }
@@ -2332,6 +2335,7 @@ export class EditorController extends ViewController {
             }
           }
         }
+        console.log("[PASTE] Final selection:", [...selection]);
         this.sceneController.selection = selection;
         return "Paste";
       },

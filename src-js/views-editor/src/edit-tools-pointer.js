@@ -393,6 +393,10 @@ export class PointerTool extends BaseTool {
         sceneController._dispatchEvent("doubleClickedGuidelines");
       } else if (pointIndices?.length && !sceneController.hoverPathHit) {
         await this.handlePointsDoubleClick(pointIndices);
+      } else if (this._hasHoveredSkeletonSegment()) {
+        // Double-click on skeleton segment - select entire skeleton contour
+        await this._handleSkeletonSegmentDoubleClick(event);
+        return;
       } else if (sceneController.hoverPathHit) {
         const contourIndex = sceneController.hoverPathHit.contourIndex;
         const startPoint = instance.path.getAbsolutePointIndex(contourIndex, 0);
@@ -556,6 +560,54 @@ export class PointerTool extends BaseTool {
         undoLabel: translate("edit-tools-pointer.undo.toggle-smooth"),
       };
     });
+  }
+
+  /**
+   * Check if there's a hovered skeleton segment (for double-click handling)
+   */
+  _hasHoveredSkeletonSegment() {
+    const { skeletonSegment } = parseSelection(this.sceneController.hoverSelection);
+    return skeletonSegment?.size > 0;
+  }
+
+  /**
+   * Handle double-click on skeleton segment - select entire skeleton contour
+   */
+  async _handleSkeletonSegmentDoubleClick(event) {
+    const sceneController = this.sceneController;
+    const { skeletonSegment } = parseSelection(sceneController.hoverSelection);
+
+    if (!skeletonSegment?.size) return;
+
+    // Get the contour index from the hovered segment
+    const segmentKey = [...skeletonSegment][0]; // e.g., "0/2"
+    const [contourIdx] = segmentKey.split("/").map(Number);
+
+    // Get skeleton data to find all on-curve points in this contour
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[
+      sceneController.editingLayerNames?.[0]
+    ];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+
+    if (!skeletonData?.contours?.[contourIdx]) return;
+
+    const contour = skeletonData.contours[contourIdx];
+    const newSelection = new Set();
+
+    // Add all on-curve points of this skeleton contour
+    for (let pi = 0; pi < contour.points.length; pi++) {
+      if (!contour.points[pi].type) {
+        // on-curve point
+        newSelection.add(`skeletonPoint/${contourIdx}/${pi}`);
+      }
+    }
+
+    // Apply selection with modifier support (shift to add, etc.)
+    const selection = this._selectionBeforeSingleClick || sceneController.selection;
+    this._selectionBeforeSingleClick = undefined;
+    const modeFunc = getSelectModeFunction(event);
+    sceneController.selection = modeFunc(selection, newSelection);
   }
 
   async handleRectSelect(eventStream, initialEvent, initialSelection) {
