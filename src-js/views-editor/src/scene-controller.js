@@ -1598,7 +1598,19 @@ export class SceneController {
 
         // Rotate points so pointIdx becomes the start
         const points = contour.points;
-        contour.points = [...points.slice(pointIdx), ...points.slice(0, pointIdx)];
+        const rotatedPoints = [...points.slice(pointIdx), ...points.slice(0, pointIdx)];
+
+        // Remove trailing off-curve points (handles that were going back to start)
+        while (rotatedPoints.length > 0 && rotatedPoints[rotatedPoints.length - 1].type) {
+          rotatedPoints.pop();
+        }
+
+        // Remove leading off-curve points (shouldn't happen, but safety check)
+        while (rotatedPoints.length > 0 && rotatedPoints[0].type) {
+          rotatedPoints.shift();
+        }
+
+        contour.points = rotatedPoints;
         contour.isClosed = false;
         numBroken++;
       }

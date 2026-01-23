@@ -2482,8 +2482,9 @@ export class EditorController extends ViewController {
       // Deep clone for manipulation
       skeletonData = JSON.parse(JSON.stringify(skeletonData));
 
-      // Expand selection to include paired off-curve handles
-      // A segment can't have just one handle - if one is deleted, both must be deleted
+      // Expand selection to include:
+      // 1. Paired off-curve handles (a segment can't have just one handle)
+      // 2. Adjacent handles when deleting on-curve points (to avoid orphan handles)
       const expandedSelection = new Set(skeletonPointSelection);
 
       for (const selKey of skeletonPointSelection) {
@@ -2494,17 +2495,46 @@ export class EditorController extends ViewController {
         const point = contour.points?.[pointIdx];
         if (!point) continue;
 
-        // Only process off-curve points
-        if (point.type !== "cubic" && point.type !== "quad") continue;
-
         const points = contour.points;
         const numPoints = points.length;
+        const isClosed = contour.isClosed;
+
+        // For on-curve points: delete adjacent handles to avoid orphans
+        if (!point.type) {
+          // Look backward for adjacent handles
+          for (let i = 1; i < numPoints; i++) {
+            const idx = (pointIdx - i + numPoints) % numPoints;
+            if (!isClosed && idx > pointIdx) break; // Don't wrap in open contours
+            const p = points[idx];
+            if (p.type === "cubic" || p.type === "quad") {
+              expandedSelection.add(`${contourIdx}/${idx}`);
+            } else {
+              break; // Stop at next on-curve
+            }
+          }
+
+          // Look forward for adjacent handles
+          for (let i = 1; i < numPoints; i++) {
+            const idx = (pointIdx + i) % numPoints;
+            if (!isClosed && idx < pointIdx) break; // Don't wrap in open contours
+            const p = points[idx];
+            if (p.type === "cubic" || p.type === "quad") {
+              expandedSelection.add(`${contourIdx}/${idx}`);
+            } else {
+              break; // Stop at next on-curve
+            }
+          }
+          continue;
+        }
+
+        // For off-curve points: find paired handle
+        if (point.type !== "cubic" && point.type !== "quad") continue;
+
         const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
         const nextIdx = (pointIdx + 1) % numPoints;
         const prevPoint = points[prevIdx];
         const nextPoint = points[nextIdx];
 
-        // Find the paired handle
         // If prev is on-curve and next is off-curve: this is outgoing handle, pair is next
         if (!prevPoint?.type && (nextPoint?.type === "cubic" || nextPoint?.type === "quad")) {
           expandedSelection.add(`${contourIdx}/${nextIdx}`);
