@@ -305,6 +305,7 @@ export default class SkeletonParametersPanel extends Panel {
         minValue: -100,
         defaultValue: 0,
         maxValue: 100,
+        step: 2,
       });
     }
 
@@ -317,7 +318,7 @@ export default class SkeletonParametersPanel extends Panel {
       minValue: 0.2,
       defaultValue: 1.0,
       maxValue: 2.0,
-      step: 0.1,
+      step: 0.2,
     });
 
     // Apply Scale button
