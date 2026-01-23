@@ -317,6 +317,7 @@ export default class SkeletonParametersPanel extends Panel {
       minValue: 0.2,
       defaultValue: 1.0,
       maxValue: 2.0,
+      step: 0.1,
     });
 
     // Apply Scale button
@@ -664,6 +665,7 @@ export default class SkeletonParametersPanel extends Panel {
    */
   async _applyScaleToSelectedPoints() {
     const scale = this.pointParameters.scaleValue;
+    console.log("Applying scale:", scale);
     if (scale === 1.0) return;
 
     // Get fresh selection data
@@ -700,20 +702,30 @@ export default class SkeletonParametersPanel extends Panel {
         const point = contour?.points[pointIdx];
         if (!point || point.type) continue; // Skip off-curve points
 
-        // Simply multiply existing values by scale
-        if (point.width !== undefined) {
-          point.width = Math.round(point.width * scale);
-        } else if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
-          if (point.leftWidth !== undefined) {
-            point.leftWidth = Math.round(point.leftWidth * scale);
-          }
-          if (point.rightWidth !== undefined) {
-            point.rightWidth = Math.round(point.rightWidth * scale);
-          }
+        // Get current effective widths using the same logic as UI display
+        const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
+        const currentLeft = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+        const currentRight = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+
+        console.log(`Point ${key}: defaultWidth=${defaultWidth}, point.width=${point.width}, point.leftWidth=${point.leftWidth}, point.rightWidth=${point.rightWidth}`);
+        console.log(`  currentLeft=${currentLeft}, currentRight=${currentRight}`);
+
+        // Apply scale
+        const newLeft = Math.round(currentLeft * scale);
+        const newRight = Math.round(currentRight * scale);
+        console.log(`  newLeft=${newLeft}, newRight=${newRight}`);
+
+        // Store result - preserve symmetric/asymmetric mode
+        if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
+          // Was asymmetric - keep asymmetric
+          point.leftWidth = newLeft;
+          point.rightWidth = newRight;
+          delete point.width;
         } else {
-          // Point uses default width - set explicit width
-          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
-          point.width = Math.round(defaultWidth * scale);
+          // Was symmetric (or default) - keep symmetric
+          point.width = newLeft + newRight;
+          delete point.leftWidth;
+          delete point.rightWidth;
         }
       }
 
