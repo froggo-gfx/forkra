@@ -596,10 +596,14 @@ export class PointerTool extends BaseTool {
     this._selectionBeforeSingleClick = undefined;
     const sceneController = this.sceneController;
 
-    // Check if we're dragging skeleton points or segments
+    // Parse selection to check what types of objects are selected
     const {
       skeletonPoint: skeletonPointSelection,
       skeletonSegment: skeletonSegmentSelection,
+      point: pointSelection,
+      component: componentSelection,
+      anchor: anchorSelection,
+      guideline: guidelineSelection,
     } = parseSelection(sceneController.selection);
 
     // Convert skeleton segment selection to point selection
@@ -611,7 +615,15 @@ export class PointerTool extends BaseTool {
       );
     }
 
-    if (effectiveSkeletonPointSelection?.size) {
+    const hasSkeletonSelection = effectiveSkeletonPointSelection?.size > 0;
+    const hasRegularSelection =
+      pointSelection?.length > 0 ||
+      componentSelection?.length > 0 ||
+      anchorSelection?.length > 0 ||
+      guidelineSelection?.length > 0;
+
+    // If only skeleton selection, use dedicated handler
+    if (hasSkeletonSelection && !hasRegularSelection) {
       await this._handleDragSkeletonPoints(
         eventStream,
         initialEvent,
@@ -621,10 +633,13 @@ export class PointerTool extends BaseTool {
       return;
     }
 
+    // Handle regular selection (with optional skeleton selection)
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const initialPoint = sceneController.localPoint(initialEvent);
+      const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
       let behaviorName = getBehaviorName(initialEvent);
 
+      // Setup for regular point editing
       const layerInfo = Object.entries(
         sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
       ).map(([layerName, layerGlyph]) => {
@@ -646,15 +661,41 @@ export class PointerTool extends BaseTool {
       });
 
       assert(layerInfo.length >= 1, "no layer to edit");
-
       layerInfo[0].isPrimaryLayer = true;
+
+      // Setup for skeleton editing (if we have skeleton selection too)
+      let skeletonEditState = null;
+      if (hasSkeletonSelection) {
+        const editLayerName = sceneController.editingLayerNames?.[0];
+        const layer = editLayerName ? glyph.layers[editLayerName] : null;
+        const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+
+        if (skeletonData) {
+          skeletonEditState = {
+            editLayerName,
+            layer,
+            originalSkeletonData: JSON.parse(JSON.stringify(skeletonData)),
+            workingSkeletonData: JSON.parse(JSON.stringify(skeletonData)),
+            behaviors: createSkeletonEditBehavior(
+              JSON.parse(JSON.stringify(skeletonData)),
+              effectiveSkeletonPointSelection,
+              getSkeletonBehaviorName(initialEvent.shiftKey, initialEvent.altKey)
+            ),
+            lastBehaviorName: getSkeletonBehaviorName(
+              initialEvent.shiftKey,
+              initialEvent.altKey
+            ),
+          };
+        }
+      }
 
       let editChange;
 
       for await (const event of eventStream) {
         const newEditBehaviorName = getBehaviorName(event);
+
+        // Handle behavior change for regular points
         if (behaviorName !== newEditBehaviorName) {
-          // Behavior changed, undo current changes
           behaviorName = newEditBehaviorName;
           const rollbackChanges = [];
           for (const layer of layerInfo) {
@@ -666,6 +707,23 @@ export class PointerTool extends BaseTool {
           }
           await sendIncrementalChange(consolidateChanges(rollbackChanges));
         }
+
+        // Handle behavior change for skeleton points
+        if (skeletonEditState) {
+          const newSkeletonBehaviorName = getSkeletonBehaviorName(
+            event.shiftKey,
+            event.altKey
+          );
+          if (newSkeletonBehaviorName !== skeletonEditState.lastBehaviorName) {
+            skeletonEditState.lastBehaviorName = newSkeletonBehaviorName;
+            skeletonEditState.behaviors = createSkeletonEditBehavior(
+              skeletonEditState.originalSkeletonData,
+              effectiveSkeletonPointSelection,
+              newSkeletonBehaviorName
+            );
+          }
+        }
+
         const currentPoint = sceneController.localPoint(event);
         const delta = {
           x: currentPoint.x - initialPoint.x,
@@ -673,18 +731,76 @@ export class PointerTool extends BaseTool {
         };
 
         const deepEditChanges = [];
+
+        // Apply regular point changes
         for (const layer of layerInfo) {
-          const editChange = layer.editBehavior.makeChangeForDelta(delta);
-          applyChange(layer.layerGlyph, editChange);
-          deepEditChanges.push(consolidateChanges(editChange, layer.changePath));
-          layer.shouldConnect = layer.connectDetector.shouldConnect(
-            layer.isPrimaryLayer
-          );
+          const layerEditChange = layer.editBehavior.makeChangeForDelta(delta);
+          applyChange(layer.layerGlyph, layerEditChange);
+          deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
+          layer.shouldConnect = layer.connectDetector.shouldConnect(layer.isPrimaryLayer);
+        }
+
+        // Apply skeleton changes
+        if (skeletonEditState) {
+          const { originalSkeletonData, workingSkeletonData, behaviors, layer, editLayerName } =
+            skeletonEditState;
+
+          // Reset working data to original
+          for (let ci = 0; ci < originalSkeletonData.contours.length; ci++) {
+            const origContour = originalSkeletonData.contours[ci];
+            const workContour = workingSkeletonData.contours[ci];
+            for (let pi = 0; pi < origContour.points.length; pi++) {
+              workContour.points[pi].x = origContour.points[pi].x;
+              workContour.points[pi].y = origContour.points[pi].y;
+            }
+          }
+
+          // Apply behavior changes
+          for (const behavior of behaviors) {
+            const changes = behavior.applyDelta(delta);
+            const contour = workingSkeletonData.contours[behavior.contourIndex];
+            for (const { pointIndex, x, y } of changes) {
+              contour.points[pointIndex].x = x;
+              contour.points[pointIndex].y = y;
+            }
+          }
+
+          // Regenerate outline and update customData
+          const staticGlyph = layer.glyph;
+          const skeletonChanges = recordChanges(staticGlyph, (sg) => {
+            // Remove old generated contours
+            const oldGeneratedIndices = workingSkeletonData.generatedContourIndices || [];
+            const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+            for (const idx of sortedIndices) {
+              if (idx < sg.path.numContours) {
+                sg.path.deleteContour(idx);
+              }
+            }
+            // Generate new contours
+            const generatedContours = generateContoursFromSkeleton(workingSkeletonData);
+            const newGeneratedIndices = [];
+            for (const contour of generatedContours) {
+              const newIndex = sg.path.numContours;
+              sg.path.insertContour(sg.path.numContours, packContour(contour));
+              newGeneratedIndices.push(newIndex);
+            }
+            workingSkeletonData.generatedContourIndices = newGeneratedIndices;
+          });
+          deepEditChanges.push(skeletonChanges.prefixed(["layers", editLayerName, "glyph"]));
+
+          // Update customData
+          const customDataChange = recordChanges(layer, (l) => {
+            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+              JSON.stringify(workingSkeletonData)
+            );
+          });
+          deepEditChanges.push(customDataChange.prefixed(["layers", editLayerName]));
         }
 
         editChange = consolidateChanges(deepEditChanges);
-        await sendIncrementalChange(editChange, true); // true: "may drop"
+        await sendIncrementalChange(editChange, true);
       }
+
       let changes = ChangeCollector.fromChanges(
         editChange,
         consolidateChanges(
@@ -693,6 +809,7 @@ export class PointerTool extends BaseTool {
           )
         )
       );
+
       let shouldConnect;
       for (const layer of layerInfo) {
         if (!layer.shouldConnect) {
@@ -717,6 +834,7 @@ export class PointerTool extends BaseTool {
           changes = changes.concat(connectChanges.prefixed(layer.changePath));
         }
       }
+
       return {
         undoLabel: shouldConnect
           ? translate("edit-tools-pointer.undo.drag-selection-and-connect-contours")
