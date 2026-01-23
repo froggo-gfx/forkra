@@ -365,6 +365,18 @@ export class PointerTool extends BaseTool {
       }
     } else {
       const instance = this.sceneModel.getSelectedPositionedGlyph().glyph.instance;
+
+      // Parse the CLICKED selection (what was clicked, not current selection)
+      const { skeletonSegment: clickedSkeletonSegment } = parseSelection(selection);
+
+      // Handle skeleton segment double-click FIRST - select entire contour
+      // This takes priority over toggling smooth on already-selected points
+      if (clickedSkeletonSegment?.size) {
+        console.log("[DBLCLICK] Clicked on skeleton segment, selecting contour");
+        await this._handleSkeletonSegmentDoubleClick(event, clickedSkeletonSegment);
+        return;
+      }
+
       const {
         point: pointIndices,
         component: componentIndices,
@@ -405,11 +417,6 @@ export class PointerTool extends BaseTool {
       } else if (pointIndices?.length && !sceneController.hoverPathHit) {
         console.log("[DBLCLICK] Regular points, toggling smooth");
         await this.handlePointsDoubleClick(pointIndices);
-      } else if (this._hasHoveredSkeletonSegment()) {
-        // Double-click on skeleton segment - select entire skeleton contour
-        console.log("[DBLCLICK] Skeleton segment detected, selecting contour");
-        await this._handleSkeletonSegmentDoubleClick(event);
-        return;
       } else if (sceneController.hoverPathHit) {
         console.log("[DBLCLICK] Regular path hit, selecting contour");
         const contourIndex = sceneController.hoverPathHit.contourIndex;
@@ -577,24 +584,17 @@ export class PointerTool extends BaseTool {
   }
 
   /**
-   * Check if there's a hovered skeleton segment (for double-click handling)
-   */
-  _hasHoveredSkeletonSegment() {
-    const { skeletonSegment } = parseSelection(this.sceneController.hoverSelection);
-    return skeletonSegment?.size > 0;
-  }
-
-  /**
    * Handle double-click on skeleton segment - select entire skeleton contour
+   * @param {Event} event - The mouse event
+   * @param {Set} clickedSkeletonSegment - The clicked skeleton segment selection
    */
-  async _handleSkeletonSegmentDoubleClick(event) {
+  async _handleSkeletonSegmentDoubleClick(event, clickedSkeletonSegment) {
     const sceneController = this.sceneController;
-    const { skeletonSegment } = parseSelection(sceneController.hoverSelection);
 
-    if (!skeletonSegment?.size) return;
+    if (!clickedSkeletonSegment?.size) return;
 
-    // Get the contour index from the hovered segment
-    const segmentKey = [...skeletonSegment][0]; // e.g., "0/2"
+    // Get the contour index from the clicked segment
+    const segmentKey = [...clickedSkeletonSegment][0]; // e.g., "0/2"
     const [contourIdx] = segmentKey.split("/").map(Number);
 
     // Get skeleton data to find all on-curve points in this contour
