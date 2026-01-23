@@ -261,14 +261,6 @@ export class PointerTool extends BaseTool {
     const sceneController = this.sceneController;
     const initialSelection = sceneController.selection;
 
-    // Check for rib point hit first (before other interactions)
-    const ribHit = this._hitTestRibPoints(initialEvent);
-    if (ribHit) {
-      await this._handleDragRibPoint(eventStream, initialEvent, ribHit);
-      initialEvent.preventDefault();
-      return;
-    }
-
     const resizeHandle = this.getResizeHandle(initialEvent, initialSelection);
     const rotationHandle = this.getRotationHandle(initialEvent, initialSelection);
     if (resizeHandle || rotationHandle) {
@@ -294,6 +286,18 @@ export class PointerTool extends BaseTool {
       sceneController.hoverSelection,
       initialEvent.altKey
     );
+
+    // Check for rib point hit - but only if no skeleton point is under cursor
+    // (skeleton points have priority over rib points when they overlap)
+    const { skeletonPoint: clickedSkeletonPoint } = parseSelection(selection);
+    const hasSkeletonPointUnderCursor = clickedSkeletonPoint?.size > 0;
+
+    const ribHit = this._hitTestRibPoints(initialEvent);
+    if (ribHit && !hasSkeletonPointUnderCursor) {
+      await this._handleDragRibPoint(eventStream, initialEvent, ribHit);
+      initialEvent.preventDefault();
+      return;
+    }
     let initialClickedPointIndex;
     if (!pathHit) {
       const { point: pointIndices } = parseSelection(selection);
