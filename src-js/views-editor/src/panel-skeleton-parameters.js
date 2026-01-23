@@ -4,7 +4,7 @@ import { ChangeCollector } from "@fontra/core/changes.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
-import { parseSelection } from "@fontra/core/utils.js";
+import { parseSelection, scheduleCalls } from "@fontra/core/utils.js";
 import { packContour } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
@@ -55,9 +55,11 @@ export default class SkeletonParametersPanel extends Panel {
     );
 
     // Listen to glyph changes (e.g., rib editing through canvas)
+    // Use debounced update to avoid excessive redraws during drag
+    this._debouncedUpdate = scheduleCalls(() => this.update(), 50);
     this.sceneController.sceneSettingsController.addKeyListener(
       "positionedLines",
-      () => this.update()
+      () => this._debouncedUpdate()
     );
   }
 
@@ -336,7 +338,7 @@ export default class SkeletonParametersPanel extends Panel {
       } else if (fieldItem.key === "pointWidthScale") {
         this.pointParameters.scaleValue = value;
       } else if (fieldItem.key === "pointDistribution") {
-        await this._setPointDistribution(value);
+        await this._setPointDistribution(value, valueStream);
       } else {
         this.parameters[fieldItem.key] = value;
       }
@@ -672,64 +674,89 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Set point distribution.
+   * Set point distribution. Supports streaming mode for smooth slider dragging.
    */
-  async _setPointDistribution(distribution) {
+  async _setPointDistribution(distribution, valueStream) {
     const selectedData = this._getSelectedSkeletonPoints();
     if (!selectedData) return;
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const layer = glyph.layers[selectedData.editLayerName];
-      const skeletonData = JSON.parse(
+      const originalSkeletonData = JSON.parse(
         JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
       );
 
+      // Store original total widths for each point (preserved during drag)
+      const pointTotalWidths = [];
       for (const { contourIdx, pointIdx } of selectedData.points) {
-        const point = skeletonData.contours[contourIdx].points[pointIdx];
-        const defaultWidth = skeletonData.contours[contourIdx].defaultWidth || this._getCurrentDefaultWidthWide();
-
-        // Get current total width
+        const point = originalSkeletonData.contours[contourIdx].points[pointIdx];
+        const defaultWidth = originalSkeletonData.contours[contourIdx].defaultWidth || this._getCurrentDefaultWidthWide();
         const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
         const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-        const totalWidth = leftHW + rightHW;
-
-        // Calculate new widths based on distribution
-        // distribution: -100..+100
-        // At distribution = 0: leftHW = rightHW = totalWidth / 2
-        // At distribution = 100: leftHW = totalWidth, rightHW = 0
-        // At distribution = -100: leftHW = 0, rightHW = totalWidth
-        const newLeftHW = totalWidth * (0.5 + distribution / 200);
-        const newRightHW = totalWidth - newLeftHW;
-
-        point.leftWidth = Math.max(0, Math.round(newLeftHW));
-        point.rightWidth = Math.max(0, Math.round(newRightHW));
-        delete point.width;
+        pointTotalWidths.push(leftHW + rightHW);
       }
 
-      // Record changes
-      const changes = [];
-      const staticGlyph = layer.glyph;
-      const pathChange = recordChanges(staticGlyph, (sg) => {
-        this._regenerateOutlineContours(sg, skeletonData);
-      });
-      changes.push(pathChange.prefixed(["layers", selectedData.editLayerName, "glyph"]));
+      // Helper to apply distribution value
+      const applyDistribution = (skeletonData, dist) => {
+        for (let i = 0; i < selectedData.points.length; i++) {
+          const { contourIdx, pointIdx } = selectedData.points[i];
+          const point = skeletonData.contours[contourIdx].points[pointIdx];
+          const totalWidth = pointTotalWidths[i];
 
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", selectedData.editLayerName]));
+          const newLeftHW = totalWidth * (0.5 + dist / 200);
+          const newRightHW = totalWidth - newLeftHW;
 
-      const combined = new ChangeCollector().concat(...changes);
-      await sendIncrementalChange(combined.change);
+          point.leftWidth = Math.max(0, Math.round(newLeftHW));
+          point.rightWidth = Math.max(0, Math.round(newRightHW));
+          delete point.width;
+        }
+      };
+
+      // Helper to send changes
+      const sendChanges = async (skeletonData, mayDrop = false) => {
+        const changes = [];
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        changes.push(pathChange.prefixed(["layers", selectedData.editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        changes.push(customDataChange.prefixed(["layers", selectedData.editLayerName]));
+
+        const combined = new ChangeCollector().concat(...changes);
+        await sendIncrementalChange(combined.change, mayDrop);
+        return combined;
+      };
+
+      let finalChanges;
+
+      if (valueStream) {
+        // Streaming mode: process all values from slider drag
+        for await (const dist of valueStream) {
+          const workingSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
+          applyDistribution(workingSkeletonData, dist);
+          finalChanges = await sendChanges(workingSkeletonData, true);
+        }
+        // Final send without mayDrop flag
+        if (finalChanges) {
+          await sendIncrementalChange(finalChanges.change);
+        }
+      } else {
+        // Single value mode
+        const workingSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
+        applyDistribution(workingSkeletonData, distribution);
+        finalChanges = await sendChanges(workingSkeletonData);
+      }
 
       return {
-        changes: combined,
+        changes: finalChanges,
         undoLabel: "Set point distribution",
         broadcast: true,
       };
     });
-
-    this.update();
   }
 }
 
