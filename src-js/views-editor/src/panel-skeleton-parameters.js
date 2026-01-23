@@ -4,7 +4,7 @@ import { ChangeCollector } from "@fontra/core/changes.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
-import { parseSelection, scheduleCalls } from "@fontra/core/utils.js";
+import { parseSelection } from "@fontra/core/utils.js";
 import { packContour } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
@@ -58,15 +58,14 @@ export default class SkeletonParametersPanel extends Panel {
     );
 
     // Listen to glyph changes (e.g., rib editing through canvas)
-    // Use debounced update to avoid excessive redraws during drag
-    this._debouncedUpdate = scheduleCalls(() => {
-      if (!this._isDraggingSlider) {
-        this.update();
-      }
-    }, 50);
+    // Skip update if dragging slider to prevent form rebuild interrupting drag
     this.sceneController.sceneSettingsController.addKeyListener(
       "positionedLines",
-      () => this._debouncedUpdate()
+      () => {
+        if (!this._isDraggingSlider) {
+          this.update();
+        }
+      }
     );
   }
 
