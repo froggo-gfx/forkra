@@ -42,6 +42,9 @@ export default class SkeletonParametersPanel extends Panel {
       scaleValue: 1.0,
     };
 
+    // Flag to prevent form rebuild during slider drag
+    this._isDraggingSlider = false;
+
     // Listen to selection changes to update UI
     this.sceneController.sceneSettingsController.addKeyListener(
       ["selectedGlyph", "selectedGlyphName", "selection"],
@@ -56,7 +59,11 @@ export default class SkeletonParametersPanel extends Panel {
 
     // Listen to glyph changes (e.g., rib editing through canvas)
     // Use debounced update to avoid excessive redraws during drag
-    this._debouncedUpdate = scheduleCalls(() => this.update(), 50);
+    this._debouncedUpdate = scheduleCalls(() => {
+      if (!this._isDraggingSlider) {
+        this.update();
+      }
+    }, 50);
     this.sceneController.sceneSettingsController.addKeyListener(
       "positionedLines",
       () => this._debouncedUpdate()
@@ -341,8 +348,14 @@ export default class SkeletonParametersPanel extends Panel {
         // For distribution slider, consume valueStream but apply changes directly
         // This preserves totalWidth during the entire drag operation
         if (valueStream) {
-          for await (const dist of valueStream) {
-            await this._setPointDistributionDirect(dist);
+          this._isDraggingSlider = true;
+          try {
+            for await (const dist of valueStream) {
+              await this._setPointDistributionDirect(dist);
+            }
+          } finally {
+            this._isDraggingSlider = false;
+            this.update(); // Update form after drag ends
           }
         } else {
           await this._setPointDistributionDirect(value);
