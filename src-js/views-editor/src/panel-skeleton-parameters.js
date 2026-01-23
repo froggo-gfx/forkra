@@ -19,6 +19,11 @@ export default class SkeletonParametersPanel extends Panel {
     );
     this.sceneController = this.editorController.sceneController;
 
+    // Shared parameters (customDistributionSpacing is used by TransformationPanel's action)
+    this.parameters = {
+      customDistributionSpacing: null,
+    };
+
     // Listen to selection changes to update UI
     this.sceneController.sceneSettingsController.addKeyListener(
       ["selectedGlyph", "selectedGlyphName", "selection"],
@@ -40,7 +45,7 @@ export default class SkeletonParametersPanel extends Panel {
     // === ALIGN ===
     formContents.push({
       type: "header",
-      label: translate("sidebar.selection-transformation.align"),
+      label: "Align Skeleton Points",
     });
 
     // Row 1: Left, Center, Right
@@ -123,7 +128,7 @@ export default class SkeletonParametersPanel extends Panel {
     formContents.push({ type: "spacer" });
     formContents.push({
       type: "header",
-      label: translate("sidebar.selection-transformation.distribute"),
+      label: "Distribute Skeleton Points",
     });
 
     formContents.push({
@@ -157,13 +162,22 @@ export default class SkeletonParametersPanel extends Panel {
         }),
       },
       field3: {
-        type: "text",
-        key: "placeholder",
-        value: "",
+        type: "edit-number",
+        key: "customDistributionSpacing",
+        value: this.parameters.customDistributionSpacing,
+        allowEmptyField: true,
+        "data-tooltip": translate(
+          "sidebar.selection-transformation.distribute.distance-in-units"
+        ),
+        "data-tooltipposition": "top-right",
       },
     });
 
     this.infoForm.setFieldDescriptions(formContents);
+
+    this.infoForm.onFieldChange = (fieldItem, value, valueStream) => {
+      this.parameters[fieldItem.key] = value;
+    };
   }
 }
 
