@@ -222,8 +222,8 @@ registerVisualizationLayerDefinition({
   defaultOn: true,
   zIndex: 453,
   screenParameters: {
-    pointSize: 5,
-    strokeWidth: 1.5,
+    pointSize: 7,
+    strokeWidth: 2,
   },
   colors: {
     strokeColor: "rgba(220, 60, 120, 0.7)",
