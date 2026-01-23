@@ -296,23 +296,16 @@ export class PointerTool extends BaseTool {
     const newSelection = modeFunc(sceneController.selection, selection);
     const cleanSel = selection;
 
-    // Check if clicking on skeleton segment while skeleton points are selected
-    const clickedSkeletonSegmentWithPointsSelected =
-      this._isClickOnSelectedSkeletonContourSegment(cleanSel, sceneController.selection);
-
-    // If clicking on skeleton segment while points are selected, select the segment instead
-    if (clickedSkeletonSegmentWithPointsSelected) {
-      this._selectionBeforeSingleClick = sceneController.selection;
-      sceneController.selection = selection; // Select the clicked segment
-      // Don't initiate drag
-      return;
-    }
+    // Check if clicking on skeleton segment (for immediate drag support)
+    const { skeletonSegment: clickedSkeletonSegment } = parseSelection(cleanSel);
+    const clickingOnSkeletonSegment = clickedSkeletonSegment?.size > 0;
 
     if (
       !selection.size ||
       event.shiftKey ||
       event.altKey ||
-      !isSuperset(sceneController.selection, cleanSel)
+      !isSuperset(sceneController.selection, cleanSel) ||
+      clickingOnSkeletonSegment // Always update selection when clicking on skeleton segment
     ) {
       this._selectionBeforeSingleClick = sceneController.selection;
       sceneController.selection = newSelection;
@@ -681,33 +674,6 @@ export class PointerTool extends BaseTool {
     this._selectionBeforeSingleClick = undefined;
     const modeFunc = getSelectModeFunction(event);
     sceneController.selection = modeFunc(selection, newSelection);
-  }
-
-  /**
-   * Check if the clicked selection is a skeleton segment whose contour
-   * already has points selected in the current selection.
-   */
-  _isClickOnSelectedSkeletonContourSegment(clickedSelection, currentSelection) {
-    const { skeletonSegment: clickedSegments } = parseSelection(clickedSelection);
-    if (!clickedSegments?.size) return false;
-
-    const { skeletonPoint: selectedPoints } = parseSelection(currentSelection);
-    if (!selectedPoints?.size) return false;
-
-    // Get the contour index from the clicked segment
-    for (const segmentKey of clickedSegments) {
-      const [contourIdx] = segmentKey.split("/").map(Number);
-
-      // Check if any point from this contour is selected
-      for (const pointKey of selectedPoints) {
-        const [pointContourIdx] = pointKey.split("/").map(Number);
-        if (pointContourIdx === contourIdx) {
-          return true;
-        }
-      }
-    }
-
-    return false;
   }
 
   async handleRectSelect(eventStream, initialEvent, initialSelection) {
