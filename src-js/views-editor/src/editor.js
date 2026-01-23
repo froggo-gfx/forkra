@@ -73,7 +73,6 @@ import { PowerRulerTool } from "./edit-tools-power-ruler.js";
 import { ShapeTool } from "./edit-tools-shape.js";
 import { SkeletonPenTool } from "./edit-tools-skeleton.js";
 import {
-  deleteSkeletonPoints,
   generateContoursFromSkeleton,
   getSkeletonData,
 } from "@fontra/core/skeleton-contour-generator.js";
@@ -2483,9 +2482,103 @@ export class EditorController extends ViewController {
       // Deep clone for manipulation
       skeletonData = JSON.parse(JSON.stringify(skeletonData));
 
-      // Delete points with shape preservation (logic in skeleton-contour-generator.js)
-      const result = deleteSkeletonPoints(skeletonData, skeletonPointSelection);
-      if (!result.modified) return;
+      // Expand selection to include:
+      // 1. Paired off-curve handles (a segment can't have just one handle)
+      // 2. Adjacent handles when deleting on-curve points (to avoid orphan handles)
+      const expandedSelection = new Set(skeletonPointSelection);
+
+      for (const selKey of skeletonPointSelection) {
+        const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+        const contour = skeletonData.contours?.[contourIdx];
+        if (!contour) continue;
+
+        const point = contour.points?.[pointIdx];
+        if (!point) continue;
+
+        const points = contour.points;
+        const numPoints = points.length;
+        const isClosed = contour.isClosed;
+
+        // For on-curve points: delete adjacent handles to avoid orphans
+        if (!point.type) {
+          // Look backward for adjacent handles
+          for (let i = 1; i < numPoints; i++) {
+            const idx = (pointIdx - i + numPoints) % numPoints;
+            if (!isClosed && idx > pointIdx) break; // Don't wrap in open contours
+            const p = points[idx];
+            if (p.type === "cubic" || p.type === "quad") {
+              expandedSelection.add(`${contourIdx}/${idx}`);
+            } else {
+              break; // Stop at next on-curve
+            }
+          }
+
+          // Look forward for adjacent handles
+          for (let i = 1; i < numPoints; i++) {
+            const idx = (pointIdx + i) % numPoints;
+            if (!isClosed && idx < pointIdx) break; // Don't wrap in open contours
+            const p = points[idx];
+            if (p.type === "cubic" || p.type === "quad") {
+              expandedSelection.add(`${contourIdx}/${idx}`);
+            } else {
+              break; // Stop at next on-curve
+            }
+          }
+          continue;
+        }
+
+        // For off-curve points: find paired handle
+        if (point.type !== "cubic" && point.type !== "quad") continue;
+
+        const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
+        const nextIdx = (pointIdx + 1) % numPoints;
+        const prevPoint = points[prevIdx];
+        const nextPoint = points[nextIdx];
+
+        // If prev is on-curve and next is off-curve: this is outgoing handle, pair is next
+        if (!prevPoint?.type && (nextPoint?.type === "cubic" || nextPoint?.type === "quad")) {
+          expandedSelection.add(`${contourIdx}/${nextIdx}`);
+        }
+        // If prev is off-curve and next is on-curve: this is incoming handle, pair is prev
+        else if (
+          (prevPoint?.type === "cubic" || prevPoint?.type === "quad") &&
+          !nextPoint?.type
+        ) {
+          expandedSelection.add(`${contourIdx}/${prevIdx}`);
+        }
+      }
+
+      // Group selected points by contour and sort in descending order
+      const pointsByContour = new Map();
+      for (const selKey of expandedSelection) {
+        const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+        if (!pointsByContour.has(contourIdx)) {
+          pointsByContour.set(contourIdx, []);
+        }
+        pointsByContour.get(contourIdx).push(pointIdx);
+      }
+
+      // Sort contour indices in descending order
+      const contourIndices = [...pointsByContour.keys()].sort((a, b) => b - a);
+
+      // Delete points from each contour (in reverse order to maintain indices)
+      for (const contourIdx of contourIndices) {
+        const contour = skeletonData.contours?.[contourIdx];
+        if (!contour) continue;
+
+        const pointIndices = pointsByContour.get(contourIdx).sort((a, b) => b - a);
+        for (const pointIdx of pointIndices) {
+          if (pointIdx < contour.points.length) {
+            contour.points.splice(pointIdx, 1);
+          }
+        }
+
+        // If contour has no on-curve points left, remove the entire contour
+        const hasOnCurve = contour.points.some((p) => !p.type);
+        if (!hasOnCurve || contour.points.length === 0) {
+          skeletonData.contours.splice(contourIdx, 1);
+        }
+      }
 
       // Helper function to regenerate outline contours
       const regenerateOutline = (staticGlyph, skelData) => {
