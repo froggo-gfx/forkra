@@ -183,12 +183,13 @@ registerVisualizationLayerDefinition({
 
         const normal = calculateNormalAtSkeletonPoint(contour, i);
 
+        // Quantize to UPM grid (same as generated contour points)
         strokeLine(
           context,
-          point.x - normal.x * halfWidth,
-          point.y - normal.y * halfWidth,
-          point.x + normal.x * halfWidth,
-          point.y + normal.y * halfWidth
+          Math.round(point.x - normal.x * halfWidth),
+          Math.round(point.y - normal.y * halfWidth),
+          Math.round(point.x + normal.x * halfWidth),
+          Math.round(point.y + normal.y * halfWidth)
         );
       }
     }
