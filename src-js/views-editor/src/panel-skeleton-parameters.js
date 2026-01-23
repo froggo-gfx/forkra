@@ -53,6 +53,12 @@ export default class SkeletonParametersPanel extends Panel {
       ["editingLayers"],
       () => this.update()
     );
+
+    // Listen to glyph changes (e.g., rib editing through canvas)
+    this.sceneController.sceneSettingsController.addKeyListener(
+      "positionedLines",
+      () => this.update()
+    );
   }
 
   getContentElement() {
@@ -229,22 +235,25 @@ export default class SkeletonParametersPanel extends Panel {
     const hasSelection = selectedData && selectedData.points.length > 0;
 
     // Get values: from selected point or defaults
-    let left, right, isAsym;
+    let left, right;
     if (hasSelection) {
       const { point } = selectedData.points[0];
       const defaultWidth = this._getCurrentDefaultWidthWide();
       const widths = this._getPointWidths(point, defaultWidth);
       left = widths.left;
       right = widths.right;
-      // Asymmetric state is determined by point data
-      isAsym = this._isAsymmetric(point);
+      // If point has asymmetric data, sync UI state to true
+      if (this._isAsymmetric(point)) {
+        this.pointParameters.asymmetrical = true;
+      }
     } else {
       // No selection - show Source Width / 2
       const defaultWide = this._getCurrentDefaultWidthWide();
       left = defaultWide / 2;
       right = defaultWide / 2;
-      isAsym = false;
     }
+    // Use persistent UI state for toggle
+    const isAsym = this.pointParameters.asymmetrical;
 
     // Header with Asymmetrical toggle
     formContents.push({
@@ -596,6 +605,8 @@ export default class SkeletonParametersPanel extends Panel {
         broadcast: true,
       };
     });
+
+    this.update();
   }
 
   /**
@@ -717,6 +728,8 @@ export default class SkeletonParametersPanel extends Panel {
         broadcast: true,
       };
     });
+
+    this.update();
   }
 }
 
