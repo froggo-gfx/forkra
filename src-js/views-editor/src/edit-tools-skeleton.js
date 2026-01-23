@@ -640,97 +640,85 @@ export class SkeletonPenTool extends BaseTool {
    */
   async _handleInsertSkeletonHandles(eventStream, initialEvent, centerlineHit) {
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const editLayerName = this.sceneController.editingLayerNames?.[0];
-      if (!editLayerName || !glyph.layers[editLayerName]) {
-        return;
-      }
-
-      const layer = glyph.layers[editLayerName];
-      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
-      if (!skeletonData) return;
-
-      skeletonData = JSON.parse(JSON.stringify(skeletonData));
-
-      const contour = skeletonData.contours[centerlineHit.contourIndex];
-      if (!contour) return;
-
+      const allChanges = [];
       const startIdx = centerlineHit.segmentStartIndex;
-      const endIdx = centerlineHit.segmentEndIndex;
 
-      const startPoint = contour.points[startIdx];
-      const endPoint = contour.points[endIdx];
+      // Apply changes to ALL editable layers (multi-source editing support)
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
 
-      if (!startPoint || !endPoint) return;
+        let skeletonData = JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
 
-      // Check if segment already has off-curve points - if so, don't add more
-      let hasExistingOffCurves = false;
-      if (centerlineHit.isClosingSegment) {
-        // Check wrapping from lastOnCurve to firstOnCurve
-        for (let j = startIdx + 1; j < contour.points.length; j++) {
-          if (contour.points[j].type) {
-            hasExistingOffCurves = true;
-            break;
+        const contour = skeletonData.contours[centerlineHit.contourIndex];
+        if (!contour) continue;
+
+        const endIdx = centerlineHit.segmentEndIndex;
+        const startPoint = contour.points[startIdx];
+        const endPoint = contour.points[endIdx];
+
+        if (!startPoint || !endPoint) continue;
+
+        // Check if segment already has off-curve points - if so, don't add more
+        let hasExistingOffCurves = false;
+        if (centerlineHit.isClosingSegment) {
+          for (let j = startIdx + 1; j < contour.points.length; j++) {
+            if (contour.points[j].type) {
+              hasExistingOffCurves = true;
+              break;
+            }
           }
-        }
-        if (!hasExistingOffCurves) {
-          for (let j = 0; j < endIdx; j++) {
+          if (!hasExistingOffCurves) {
+            for (let j = 0; j < endIdx; j++) {
+              if (contour.points[j].type) {
+                hasExistingOffCurves = true;
+                break;
+              }
+            }
+          }
+        } else {
+          for (let j = startIdx + 1; j < endIdx; j++) {
             if (contour.points[j].type) {
               hasExistingOffCurves = true;
               break;
             }
           }
         }
-      } else {
-        // Normal segment - check between start and end
-        for (let j = startIdx + 1; j < endIdx; j++) {
-          if (contour.points[j].type) {
-            hasExistingOffCurves = true;
-            break;
-          }
-        }
+
+        if (hasExistingOffCurves) continue;
+
+        // Calculate handle positions at 1/3 and 2/3 along the segment
+        const handle1 = {
+          x: Math.round(startPoint.x + (endPoint.x - startPoint.x) / 3),
+          y: Math.round(startPoint.y + (endPoint.y - startPoint.y) / 3),
+          type: "cubic",
+          smooth: false,
+        };
+        const handle2 = {
+          x: Math.round(startPoint.x + ((endPoint.x - startPoint.x) * 2) / 3),
+          y: Math.round(startPoint.y + ((endPoint.y - startPoint.y) * 2) / 3),
+          type: "cubic",
+          smooth: false,
+        };
+
+        contour.points.splice(startIdx + 1, 0, handle1, handle2);
+
+        // Record changes for this layer
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
 
-      if (hasExistingOffCurves) {
-        // Segment already has off-curves - silently ignore
-        return;
-      }
+      if (allChanges.length === 0) return;
 
-      // Calculate handle positions at 1/3 and 2/3 along the segment
-      const handle1 = {
-        x: Math.round(startPoint.x + (endPoint.x - startPoint.x) / 3),
-        y: Math.round(startPoint.y + (endPoint.y - startPoint.y) / 3),
-        type: "cubic",
-        smooth: false,
-      };
-      const handle2 = {
-        x: Math.round(startPoint.x + ((endPoint.x - startPoint.x) * 2) / 3),
-        y: Math.round(startPoint.y + ((endPoint.y - startPoint.y) * 2) / 3),
-        type: "cubic",
-        smooth: false,
-      };
-
-      // Insert handles between the two on-curve points
-      // Insert in order: startPoint, handle1, handle2, endPoint
-      // So we insert handle2 first at startIdx + 1, then handle1 at startIdx + 1
-      contour.points.splice(startIdx + 1, 0, handle1, handle2);
-
-      // Record changes
-      const changes = [];
-
-      // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
-      const staticGlyph = layer.glyph;
-      const pathChange = recordChanges(staticGlyph, (sg) => {
-        this._regenerateOutlineContours(sg, skeletonData);
-      });
-      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-      // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
-      const combinedChange = new ChangeCollector().concat(...changes);
+      const combinedChange = new ChangeCollector().concat(...allChanges);
       await sendIncrementalChange(combinedChange.change);
 
       // Select both handles
@@ -751,207 +739,185 @@ export class SkeletonPenTool extends BaseTool {
    * Insert a point on a skeleton centerline segment.
    */
   async _handleInsertSkeletonPoint(eventStream, initialEvent, centerlineHit) {
-    // New points without off-curve handles should be angle (not smooth)
-    const insertPoint = {
-      x: Math.round(centerlineHit.point.x),
-      y: Math.round(centerlineHit.point.y),
-      type: null,
-      smooth: false,
-    };
-
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const editLayerName = this.sceneController.editingLayerNames?.[0];
-      if (!editLayerName || !glyph.layers[editLayerName]) {
-        return;
-      }
-
-      const layer = glyph.layers[editLayerName];
-      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
-      if (!skeletonData) return;
-
-      skeletonData = JSON.parse(JSON.stringify(skeletonData));
-
-      const contour = skeletonData.contours[centerlineHit.contourIndex];
-      if (!contour) return;
-
-      // Determine insert position and handle bezier splitting
+      const allChanges = [];
       const startIdx = centerlineHit.segmentStartIndex;
       const endIdx = centerlineHit.segmentEndIndex;
+      let finalInsertIndex = startIdx + 1; // Will be updated for selection
 
-      // Check for off-curve points (including in closing segments)
-      let hasOffCurve;
-      if (centerlineHit.isClosingSegment) {
-        // Use the hasClosingOffCurves flag from hit testing, or calculate it
-        hasOffCurve = centerlineHit.hasClosingOffCurves || false;
-        if (!centerlineHit.hasClosingOffCurves) {
-          // Double-check by counting off-curves
-          let offCurveCount = 0;
-          for (let j = startIdx + 1; j < contour.points.length; j++) {
-            if (contour.points[j].type) offCurveCount++;
+      // Apply changes to ALL editable layers (multi-source editing support)
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        let skeletonData = JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+
+        const contour = skeletonData.contours[centerlineHit.contourIndex];
+        if (!contour) continue;
+
+        // Check for off-curve points (including in closing segments)
+        let hasOffCurve;
+        if (centerlineHit.isClosingSegment) {
+          hasOffCurve = centerlineHit.hasClosingOffCurves || false;
+          if (!centerlineHit.hasClosingOffCurves) {
+            let offCurveCount = 0;
+            for (let j = startIdx + 1; j < contour.points.length; j++) {
+              if (contour.points[j].type) offCurveCount++;
+            }
+            for (let j = 0; j < endIdx; j++) {
+              if (contour.points[j].type) offCurveCount++;
+            }
+            hasOffCurve = offCurveCount > 0;
           }
-          for (let j = 0; j < endIdx; j++) {
-            if (contour.points[j].type) offCurveCount++;
-          }
-          hasOffCurve = offCurveCount > 0;
-        }
-      } else {
-        hasOffCurve = endIdx - startIdx > 1;
-      }
-
-      let insertIndex;
-      let pointsToRemove = 0;
-      let pointsToInsert = [insertPoint];
-
-      if (centerlineHit.isClosingSegment && !hasOffCurve) {
-        // For closing segment line, insert at the end
-        insertIndex = contour.points.length;
-      } else if (centerlineHit.isClosingSegment && hasOffCurve) {
-        // For closing segment with bezier, handle wrap-around splitting
-        const closingSegmentResult = this._splitClosingSegmentBezier(
-          contour, startIdx, endIdx, centerlineHit.t, centerlineHit.point
-        );
-        contour.points = closingSegmentResult.newPoints;
-        insertIndex = closingSegmentResult.newOnCurveIndex;
-        pointsToRemove = 0;
-        pointsToInsert = []; // Already handled in splitClosingSegmentBezier
-      } else if (!hasOffCurve) {
-        // Line segment - simple insert after startIdx
-        insertIndex = startIdx + 1;
-      } else {
-        // Bezier curve - need to split the curve
-        const bezierPoints = [contour.points[startIdx]];
-        for (let j = startIdx + 1; j < endIdx; j++) {
-          bezierPoints.push(contour.points[j]);
-        }
-        bezierPoints.push(contour.points[endIdx]);
-
-        // Create bezier and split it
-        let bezier;
-        if (bezierPoints.length === 3) {
-          bezier = new Bezier(
-            bezierPoints[0].x, bezierPoints[0].y,
-            bezierPoints[1].x, bezierPoints[1].y,
-            bezierPoints[2].x, bezierPoints[2].y
-          );
-        } else if (bezierPoints.length === 4) {
-          bezier = new Bezier(
-            bezierPoints[0].x, bezierPoints[0].y,
-            bezierPoints[1].x, bezierPoints[1].y,
-            bezierPoints[2].x, bezierPoints[2].y,
-            bezierPoints[3].x, bezierPoints[3].y
-          );
         } else {
-          // Approximate as cubic
-          bezier = new Bezier(
-            bezierPoints[0].x, bezierPoints[0].y,
-            bezierPoints[1].x, bezierPoints[1].y,
-            bezierPoints[bezierPoints.length - 2].x, bezierPoints[bezierPoints.length - 2].y,
-            bezierPoints[bezierPoints.length - 1].x, bezierPoints[bezierPoints.length - 1].y
-          );
+          hasOffCurve = endIdx - startIdx > 1;
         }
 
-        // Split the bezier at t
-        const split = bezier.split(centerlineHit.t);
-        const left = split.left;
-        const right = split.right;
-
-        // Build new points array
-        // Remove old off-curve points (between startIdx+1 and endIdx-1)
-        insertIndex = startIdx + 1;
-        pointsToRemove = endIdx - startIdx - 1;
-
-        // Create new points: left handles, new on-curve, right handles
-        pointsToInsert = [];
-
-        // Left segment control points (skip first which is startPoint)
-        if (bezierPoints.length === 3) {
-          // Quadratic: left.points = [p0, cp, split_point]
-          pointsToInsert.push({
-            x: Math.round(left.points[1].x),
-            y: Math.round(left.points[1].y),
-            type: "cubic",
-          });
-        } else {
-          // Cubic: left.points = [p0, cp1, cp2, split_point]
-          pointsToInsert.push({
-            x: Math.round(left.points[1].x),
-            y: Math.round(left.points[1].y),
-            type: "cubic",
-          });
-          pointsToInsert.push({
-            x: Math.round(left.points[2].x),
-            y: Math.round(left.points[2].y),
-            type: "cubic",
-          });
-        }
-
-        // The new on-curve point
-        pointsToInsert.push({
+        let insertIndex;
+        let pointsToRemove = 0;
+        let pointsToInsert = [{
           x: Math.round(centerlineHit.point.x),
           y: Math.round(centerlineHit.point.y),
           type: null,
-          smooth: true, // Smooth since it's on a curve
-        });
+          smooth: false,
+        }];
 
-        // Right segment control points (skip first which is split_point and last which is endPoint)
-        if (bezierPoints.length === 3) {
-          // Quadratic: right.points = [split_point, cp, p2]
-          pointsToInsert.push({
-            x: Math.round(right.points[1].x),
-            y: Math.round(right.points[1].y),
-            type: "cubic",
-          });
+        if (centerlineHit.isClosingSegment && !hasOffCurve) {
+          insertIndex = contour.points.length;
+        } else if (centerlineHit.isClosingSegment && hasOffCurve) {
+          const closingSegmentResult = this._splitClosingSegmentBezier(
+            contour, startIdx, endIdx, centerlineHit.t, centerlineHit.point
+          );
+          contour.points = closingSegmentResult.newPoints;
+          insertIndex = closingSegmentResult.newOnCurveIndex;
+          pointsToRemove = 0;
+          pointsToInsert = [];
+        } else if (!hasOffCurve) {
+          insertIndex = startIdx + 1;
         } else {
-          // Cubic: right.points = [split_point, cp1, cp2, p3]
+          // Bezier curve - need to split the curve using this layer's actual points
+          const bezierPoints = [contour.points[startIdx]];
+          for (let j = startIdx + 1; j < endIdx; j++) {
+            bezierPoints.push(contour.points[j]);
+          }
+          bezierPoints.push(contour.points[endIdx]);
+
+          let bezier;
+          if (bezierPoints.length === 3) {
+            bezier = new Bezier(
+              bezierPoints[0].x, bezierPoints[0].y,
+              bezierPoints[1].x, bezierPoints[1].y,
+              bezierPoints[2].x, bezierPoints[2].y
+            );
+          } else if (bezierPoints.length === 4) {
+            bezier = new Bezier(
+              bezierPoints[0].x, bezierPoints[0].y,
+              bezierPoints[1].x, bezierPoints[1].y,
+              bezierPoints[2].x, bezierPoints[2].y,
+              bezierPoints[3].x, bezierPoints[3].y
+            );
+          } else {
+            bezier = new Bezier(
+              bezierPoints[0].x, bezierPoints[0].y,
+              bezierPoints[1].x, bezierPoints[1].y,
+              bezierPoints[bezierPoints.length - 2].x, bezierPoints[bezierPoints.length - 2].y,
+              bezierPoints[bezierPoints.length - 1].x, bezierPoints[bezierPoints.length - 1].y
+            );
+          }
+
+          const split = bezier.split(centerlineHit.t);
+          const left = split.left;
+          const right = split.right;
+
+          insertIndex = startIdx + 1;
+          pointsToRemove = endIdx - startIdx - 1;
+          pointsToInsert = [];
+
+          if (bezierPoints.length === 3) {
+            pointsToInsert.push({
+              x: Math.round(left.points[1].x),
+              y: Math.round(left.points[1].y),
+              type: "cubic",
+            });
+          } else {
+            pointsToInsert.push({
+              x: Math.round(left.points[1].x),
+              y: Math.round(left.points[1].y),
+              type: "cubic",
+            });
+            pointsToInsert.push({
+              x: Math.round(left.points[2].x),
+              y: Math.round(left.points[2].y),
+              type: "cubic",
+            });
+          }
+
+          // The split point position for this layer
+          const splitPoint = bezier.get(centerlineHit.t);
           pointsToInsert.push({
-            x: Math.round(right.points[1].x),
-            y: Math.round(right.points[1].y),
-            type: "cubic",
+            x: Math.round(splitPoint.x),
+            y: Math.round(splitPoint.y),
+            type: null,
+            smooth: true,
           });
-          pointsToInsert.push({
-            x: Math.round(right.points[2].x),
-            y: Math.round(right.points[2].y),
-            type: "cubic",
-          });
-        }
-      }
 
-      // Insert the new point(s)
-      contour.points.splice(insertIndex, pointsToRemove, ...pointsToInsert);
-
-      // Record changes
-      const changes = [];
-
-      // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
-      const staticGlyph = layer.glyph;
-      const pathChange = recordChanges(staticGlyph, (sg) => {
-        this._regenerateOutlineContours(sg, skeletonData);
-      });
-      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-      // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
-      const combinedChange = new ChangeCollector().concat(...changes);
-      await sendIncrementalChange(combinedChange.change);
-
-      // Select the new on-curve point
-      // For bezier splits, the on-curve is after the left segment control points
-      let newOnCurveIndex = insertIndex;
-      if (hasOffCurve && !centerlineHit.isClosingSegment) {
-        // Find the on-curve point in pointsToInsert
-        for (let i = 0; i < pointsToInsert.length; i++) {
-          if (pointsToInsert[i].type === null) {
-            newOnCurveIndex = insertIndex + i;
-            break;
+          if (bezierPoints.length === 3) {
+            pointsToInsert.push({
+              x: Math.round(right.points[1].x),
+              y: Math.round(right.points[1].y),
+              type: "cubic",
+            });
+          } else {
+            pointsToInsert.push({
+              x: Math.round(right.points[1].x),
+              y: Math.round(right.points[1].y),
+              type: "cubic",
+            });
+            pointsToInsert.push({
+              x: Math.round(right.points[2].x),
+              y: Math.round(right.points[2].y),
+              type: "cubic",
+            });
           }
         }
+
+        if (pointsToInsert.length > 0) {
+          contour.points.splice(insertIndex, pointsToRemove, ...pointsToInsert);
+        }
+
+        // Track insert index for selection (from first layer)
+        if (allChanges.length === 0) {
+          finalInsertIndex = insertIndex;
+          if (hasOffCurve && !centerlineHit.isClosingSegment) {
+            for (let i = 0; i < pointsToInsert.length; i++) {
+              if (pointsToInsert[i].type === null) {
+                finalInsertIndex = insertIndex + i;
+                break;
+              }
+            }
+          }
+        }
+
+        // Record changes for this layer
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
+
+      if (allChanges.length === 0) return;
+
+      const combinedChange = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combinedChange.change);
+
       this.sceneController.selection = new Set([
-        `skeletonPoint/${centerlineHit.contourIndex}/${newOnCurveIndex}`,
+        `skeletonPoint/${centerlineHit.contourIndex}/${finalInsertIndex}`,
       ]);
 
       return {
@@ -975,19 +941,14 @@ export class SkeletonPenTool extends BaseTool {
     };
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const editLayerName = this.sceneController.editingLayerNames?.[0];
-      if (!editLayerName || !glyph.layers[editLayerName]) {
+      // First, determine target contour from first layer (for selection logic)
+      const firstLayerName = this.sceneController.editingLayerNames?.[0];
+      if (!firstLayerName || !glyph.layers[firstLayerName]) {
         return;
       }
 
-      // Get current skeleton data from layer
-      const layer = glyph.layers[editLayerName];
-      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
-      if (!skeletonData) {
-        skeletonData = createEmptySkeletonData();
-      } else {
-        skeletonData = JSON.parse(JSON.stringify(skeletonData));
-      }
+      const firstLayer = glyph.layers[firstLayerName];
+      const firstSkeletonData = firstLayer.customData?.[SKELETON_CUSTOM_DATA_KEY];
 
       // Determine which contour to add to based on selection
       const { skeletonPoint: selectedSkeletonPoints } = parseSelection(
@@ -996,67 +957,92 @@ export class SkeletonPenTool extends BaseTool {
 
       let targetContourIndex = -1;
       let insertAtEnd = true;
+      let creatingNewContour = false;
 
-      if (selectedSkeletonPoints?.size === 1) {
+      if (selectedSkeletonPoints?.size === 1 && firstSkeletonData) {
         const selectedKey = [...selectedSkeletonPoints][0];
         const [contourIdx, pointIdx] = selectedKey.split("/").map(Number);
 
-        if (contourIdx < skeletonData.contours.length) {
+        if (contourIdx < firstSkeletonData.contours.length) {
           targetContourIndex = contourIdx;
-          const contour = skeletonData.contours[targetContourIndex];
+          const contour = firstSkeletonData.contours[targetContourIndex];
           if (contour && !contour.isClosed) {
             insertAtEnd = pointIdx === contour.points.length - 1;
           }
         }
       }
 
-      // Add point to skeleton
-      let newPointIndex;
-      if (targetContourIndex >= 0 && targetContourIndex < skeletonData.contours.length) {
-        const contour = skeletonData.contours[targetContourIndex];
-        if (insertAtEnd) {
-          contour.points.push({ ...newOnCurve });
-          newPointIndex = contour.points.length - 1;
-        } else {
-          contour.points.unshift({ ...newOnCurve });
-          newPointIndex = 0;
-        }
-      } else {
-        // Create new contour with default width from source
-        const defaultWidth = this._getDefaultSkeletonWidth();
-        const newContour = createSkeletonContour(false, defaultWidth);
-        newContour.points.push({ ...newOnCurve });
-        skeletonData.contours.push(newContour);
-        targetContourIndex = skeletonData.contours.length - 1;
-        newPointIndex = 0;
+      if (targetContourIndex < 0 || (firstSkeletonData && targetContourIndex >= firstSkeletonData.contours.length)) {
+        creatingNewContour = true;
+        targetContourIndex = firstSkeletonData ? firstSkeletonData.contours.length : 0;
       }
 
-      // Helper to record skeleton changes (following Pen Tool pattern)
-      // Each call records INCREMENTAL changes from current state
-      const recordSkeletonChange = () => {
-        const changes = [];
-        const staticGlyph = layer.glyph;
+      // Now apply to all editable layers
+      const layersData = {};
+      let newPointIndex = 0;
 
-        // 1. Record path changes (regenerate outline contours)
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          this._regenerateOutlineContours(sg, skeletonData);
-        });
-        changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer) continue;
 
-        // 2. Record customData change (save skeletonData)
-        const customDataChange = recordChanges(layer, (l) => {
-          if (!l.customData) {
-            l.customData = {};
+        let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+        if (!skeletonData) {
+          skeletonData = createEmptySkeletonData();
+        } else {
+          skeletonData = JSON.parse(JSON.stringify(skeletonData));
+        }
+
+        // Add point to skeleton
+        if (!creatingNewContour && targetContourIndex < skeletonData.contours.length) {
+          const contour = skeletonData.contours[targetContourIndex];
+          if (insertAtEnd) {
+            contour.points.push({ ...newOnCurve });
+            newPointIndex = contour.points.length - 1;
+          } else {
+            contour.points.unshift({ ...newOnCurve });
+            newPointIndex = 0;
           }
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(skeletonData));
-        });
-        changes.push(customDataChange.prefixed(["layers", editLayerName]));
+        } else {
+          // Create new contour with default width from source
+          const defaultWidth = this._getDefaultSkeletonWidth(skeletonData);
+          const newContour = createSkeletonContour(false, defaultWidth);
+          newContour.points.push({ ...newOnCurve });
+          skeletonData.contours.push(newContour);
+          newPointIndex = 0;
+        }
 
-        return new ChangeCollector().concat(...changes);
+        layersData[editLayerName] = { layer, skeletonData };
+      }
+
+      if (Object.keys(layersData).length === 0) return;
+
+      // Helper to record skeleton changes for all layers
+      const recordAllLayersChange = () => {
+        const allChanges = [];
+        for (const [editLayerName, data] of Object.entries(layersData)) {
+          const { layer, skeletonData } = data;
+          const staticGlyph = layer.glyph;
+
+          // 1. Record path changes (regenerate outline contours)
+          const pathChange = recordChanges(staticGlyph, (sg) => {
+            this._regenerateOutlineContours(sg, skeletonData);
+          });
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+          // 2. Record customData change (save skeletonData)
+          const customDataChange = recordChanges(layer, (l) => {
+            if (!l.customData) {
+              l.customData = {};
+            }
+            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(skeletonData));
+          });
+          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+        }
+        return new ChangeCollector().concat(...allChanges);
       };
 
       // === INITIAL CHANGE: Record adding on-curve point ===
-      const initialChanges = recordSkeletonChange();
+      const initialChanges = recordAllLayersChange();
       await sendIncrementalChange(initialChanges.change);
 
       // Update selection to new point
@@ -1088,41 +1074,43 @@ export class SkeletonPenTool extends BaseTool {
    */
   async _handleCloseSkeletonContour(eventStream, initialEvent, contourIndex) {
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const editLayerName = this.sceneController.editingLayerNames?.[0];
-      if (!editLayerName || !glyph.layers[editLayerName]) {
-        return;
+      const allChanges = [];
+
+      // Apply to all editable layers
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer) continue;
+
+        let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+        if (!skeletonData) continue;
+
+        // Deep clone
+        skeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+        const contour = skeletonData.contours[contourIndex];
+        if (!contour) continue;
+
+        // Close the contour
+        contour.isClosed = true;
+
+        // Record changes for this layer
+        // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
 
-      const layer = glyph.layers[editLayerName];
-      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
-      if (!skeletonData) return;
+      if (allChanges.length === 0) return;
 
-      // Deep clone
-      skeletonData = JSON.parse(JSON.stringify(skeletonData));
-
-      const contour = skeletonData.contours[contourIndex];
-      if (!contour) return;
-
-      // Close the contour
-      contour.isClosed = true;
-
-      // Record changes
-      const changes = [];
-
-      // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
-      const staticGlyph = layer.glyph;
-      const pathChange = recordChanges(staticGlyph, (sg) => {
-        this._regenerateOutlineContours(sg, skeletonData);
-      });
-      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-      // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
-      const combinedChange = new ChangeCollector().concat(...changes);
+      const combinedChange = new ChangeCollector().concat(...allChanges);
       await sendIncrementalChange(combinedChange.change);
 
       // Select the first point
