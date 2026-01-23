@@ -233,15 +233,38 @@ export function valueInRange(min, v, max) {
 export function parseSelection(selection) {
   const result = {};
   for (const item of selection) {
-    const [tp, index] = item.split("/");
+    const parts = item.split("/");
+    const tp = parts[0];
+
     if (result[tp] === undefined) {
-      result[tp] = [];
+      result[tp] =
+        tp === "skeletonPoint" || tp === "skeletonHandle" || tp === "skeletonSegment" || tp === "skeletonRibPoint"
+          ? new Set()
+          : [];
     }
-    result[tp].push(parseInt(index));
+
+    if (tp === "skeletonPoint" && parts.length === 3) {
+      // Format: "skeletonPoint/contourIndex/pointIndex"
+      result[tp].add(`${parts[1]}/${parts[2]}`);
+    } else if (tp === "skeletonHandle" && parts.length === 4) {
+      // Format: "skeletonHandle/contourIndex/pointIndex/in|out"
+      result[tp].add(`${parts[1]}/${parts[2]}/${parts[3]}`);
+    } else if (tp === "skeletonSegment" && parts.length === 3) {
+      // Format: "skeletonSegment/contourIndex/segmentIndex"
+      result[tp].add(`${parts[1]}/${parts[2]}`);
+    } else if (tp === "skeletonRibPoint" && parts.length === 4) {
+      // Format: "skeletonRibPoint/contourIndex/pointIndex/left|right"
+      result[tp].add(`${parts[1]}/${parts[2]}/${parts[3]}`);
+    } else if (parts.length === 2) {
+      // Standard format: "type/index"
+      result[tp].push(parseInt(parts[1]));
+    }
   }
-  for (const indices of Object.values(result)) {
-    // Ensure indices are sorted
-    indices.sort((a, b) => a - b);
+  // Sort standard index arrays (not Sets)
+  for (const [key, indices] of Object.entries(result)) {
+    if (Array.isArray(indices)) {
+      indices.sort((a, b) => a - b);
+    }
   }
   return result;
 }

@@ -2197,7 +2197,7 @@ function strokeNode(context, pt, cornerNodeSize, smoothNodeSize, handleNodeSize)
   }
 }
 
-function fillSquareNode(context, pt, nodeSize) {
+export function fillSquareNode(context, pt, nodeSize) {
   context.fillRect(pt.x - nodeSize / 2, pt.y - nodeSize / 2, nodeSize, nodeSize);
 }
 

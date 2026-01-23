@@ -18,6 +18,7 @@ export const strings = {
   "action.add-guideline-between-points": "Add Guideline Between Points",
   "action.break-contour": "Break Contour",
   "action.break-contour.plural": "Break Contours",
+  "action.break-skeleton-contour": "Break Skeleton Contour",
   "action.close-contour": "Close %0 Contour",
   "action.close-contour.plural": "Close %0 Contours",
   "action.copy": "Copy",
@@ -313,6 +314,7 @@ export const strings = {
   "sidebar.designspace-navigation.warning.delete-source":
     "Are you sure you want to delete source %0?",
   "sidebar.font-overview.font-source": "Font source",
+  "sidebar.skeleton-parameters": "Skeleton Parameters",
   "sidebar.glyph-note": "Glyph Note",
   "sidebar.glyph-note.glyph-note-for-glyph": "Glyph Note for %0",
   "sidebar.glyph-note.no-glyph-selected": "(No glyph selected)",
