@@ -1033,3 +1033,338 @@ export function generateSampledOffsetPoints(skeletonContour) {
 
   return { left: sampledLeft, right: sampledRight };
 }
+
+/**
+ * Delete selected points from skeleton contours with shape preservation.
+ * Similar to deleteSelectedPoints in path-functions.js but for skeleton data.
+ *
+ * @param {Object} skeletonData - The skeleton data object (will be mutated)
+ * @param {Set<string>} pointSelection - Set of "contourIdx/pointIdx" strings
+ * @returns {Object} - { modified: boolean, contoursRemoved: number[] }
+ */
+export function deleteSkeletonPoints(skeletonData, pointSelection) {
+  if (!skeletonData?.contours || !pointSelection?.size) {
+    return { modified: false, contoursRemoved: [] };
+  }
+
+  // Expand selection to include paired handles and adjacent handles for on-curve points
+  const expandedSelection = expandSkeletonSelection(skeletonData, pointSelection);
+
+  // Group selected points by contour
+  const pointsByContour = new Map();
+  for (const selKey of expandedSelection) {
+    const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+    if (!pointsByContour.has(contourIdx)) {
+      pointsByContour.set(contourIdx, new Set());
+    }
+    pointsByContour.get(contourIdx).add(pointIdx);
+  }
+
+  // Process each contour - rebuild with shape preservation
+  const contoursToRemove = [];
+
+  for (const [contourIdx, selectedIndices] of pointsByContour) {
+    const contour = skeletonData.contours?.[contourIdx];
+    if (!contour) continue;
+
+    const points = contour.points;
+    const numPoints = points.length;
+    const isClosed = contour.isClosed;
+
+    // Find on-curve points being deleted (for shape preservation)
+    const deletedOnCurves = new Set();
+    for (const idx of selectedIndices) {
+      if (!points[idx]?.type) {
+        deletedOnCurves.add(idx);
+      }
+    }
+
+    // Rebuild contour points with shape preservation
+    const newPoints = rebuildContourWithShapePreservation(
+      points,
+      selectedIndices,
+      deletedOnCurves,
+      isClosed
+    );
+
+    // Check if contour still has on-curve points
+    const hasOnCurve = newPoints.some((p) => !p.type);
+    if (!hasOnCurve || newPoints.length === 0) {
+      contoursToRemove.push(contourIdx);
+    } else {
+      contour.points = newPoints;
+    }
+  }
+
+  // Remove empty contours (in reverse order)
+  contoursToRemove.sort((a, b) => b - a);
+  for (const idx of contoursToRemove) {
+    skeletonData.contours.splice(idx, 1);
+  }
+
+  return {
+    modified: pointsByContour.size > 0,
+    contoursRemoved: contoursToRemove,
+  };
+}
+
+/**
+ * Expand selection to include paired handles and adjacent handles for on-curve deletions.
+ */
+function expandSkeletonSelection(skeletonData, pointSelection) {
+  const expandedSelection = new Set(pointSelection);
+
+  for (const selKey of pointSelection) {
+    const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+    const contour = skeletonData.contours?.[contourIdx];
+    if (!contour) continue;
+
+    const point = contour.points?.[pointIdx];
+    if (!point) continue;
+
+    const points = contour.points;
+    const numPoints = points.length;
+    const isClosed = contour.isClosed;
+
+    // For on-curve points: delete adjacent handles to avoid orphans
+    if (!point.type) {
+      // Look backward for adjacent handles
+      for (let i = 1; i < numPoints; i++) {
+        const idx = (pointIdx - i + numPoints) % numPoints;
+        if (!isClosed && idx > pointIdx) break;
+        const p = points[idx];
+        if (p.type === "cubic" || p.type === "quad") {
+          expandedSelection.add(`${contourIdx}/${idx}`);
+        } else {
+          break;
+        }
+      }
+
+      // Look forward for adjacent handles
+      for (let i = 1; i < numPoints; i++) {
+        const idx = (pointIdx + i) % numPoints;
+        if (!isClosed && idx < pointIdx) break;
+        const p = points[idx];
+        if (p.type === "cubic" || p.type === "quad") {
+          expandedSelection.add(`${contourIdx}/${idx}`);
+        } else {
+          break;
+        }
+      }
+      continue;
+    }
+
+    // For off-curve points: find paired handle
+    if (point.type !== "cubic" && point.type !== "quad") continue;
+
+    const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
+    const nextIdx = (pointIdx + 1) % numPoints;
+    const prevPoint = points[prevIdx];
+    const nextPoint = points[nextIdx];
+
+    // If prev is on-curve and next is off-curve: pair is next
+    if (!prevPoint?.type && (nextPoint?.type === "cubic" || nextPoint?.type === "quad")) {
+      expandedSelection.add(`${contourIdx}/${nextIdx}`);
+    }
+    // If prev is off-curve and next is on-curve: pair is prev
+    else if (
+      (prevPoint?.type === "cubic" || prevPoint?.type === "quad") &&
+      !nextPoint?.type
+    ) {
+      expandedSelection.add(`${contourIdx}/${prevIdx}`);
+    }
+  }
+
+  return expandedSelection;
+}
+
+/**
+ * Rebuild contour points, preserving shape when on-curve points are deleted.
+ */
+function rebuildContourWithShapePreservation(
+  points,
+  selectedIndices,
+  deletedOnCurves,
+  isClosed
+) {
+  const numPoints = points.length;
+  const newPoints = [];
+  let i = 0;
+
+  while (i < numPoints) {
+    const point = points[i];
+
+    if (!selectedIndices.has(i)) {
+      // Keep this point
+      newPoints.push({ ...point });
+      i++;
+      continue;
+    }
+
+    // Point is selected for deletion
+    if (point.type) {
+      // Off-curve point: just skip
+      i++;
+      continue;
+    }
+
+    // On-curve point being deleted: need to preserve shape
+    // Find prev and next on-curve points that are NOT being deleted
+    let prevOnCurveIdx = null;
+    let nextOnCurveIdx = null;
+
+    // Search backward for prev on-curve
+    for (let j = 1; j < numPoints; j++) {
+      const idx = (i - j + numPoints) % numPoints;
+      if (!isClosed && idx > i) break;
+      if (!points[idx].type && !deletedOnCurves.has(idx)) {
+        prevOnCurveIdx = idx;
+        break;
+      }
+    }
+
+    // Search forward for next on-curve
+    for (let j = 1; j < numPoints; j++) {
+      const idx = (i + j) % numPoints;
+      if (!isClosed && idx < i) break;
+      if (!points[idx].type && !deletedOnCurves.has(idx)) {
+        nextOnCurveIdx = idx;
+        break;
+      }
+    }
+
+    // If we have both neighbors, compute fitted handles
+    if (prevOnCurveIdx !== null && nextOnCurveIdx !== null) {
+      // Collect all points from prev to next (for sampling)
+      const segmentPoints = [];
+      let idx = prevOnCurveIdx;
+      while (true) {
+        segmentPoints.push(points[idx]);
+        if (idx === nextOnCurveIdx) break;
+        idx = (idx + 1) % numPoints;
+        if (segmentPoints.length > numPoints) break; // Safety
+      }
+
+      // Sample points along the curve and fit new handles
+      if (segmentPoints.length >= 2) {
+        const samplePoints = sampleSkeletonSegmentForFit(segmentPoints);
+
+        if (samplePoints.length >= 2) {
+          // Compute tangents at endpoints
+          const leftTangent = computeEndTangentForFit(segmentPoints, true);
+          const rightTangent = computeEndTangentForFit(segmentPoints, false);
+
+          // Fit cubic bezier
+          const bezier = fitCubic(samplePoints, leftTangent, rightTangent, 1.0);
+
+          if (bezier && bezier.points.length === 4) {
+            // Find prev in newPoints and add handles after it
+            const prevInNew = newPoints.findIndex(
+              (p) =>
+                p.x === points[prevOnCurveIdx].x &&
+                p.y === points[prevOnCurveIdx].y &&
+                !p.type
+            );
+            if (prevInNew >= 0) {
+              const h1 = { x: bezier.points[1].x, y: bezier.points[1].y, type: "cubic" };
+              const h2 = { x: bezier.points[2].x, y: bezier.points[2].y, type: "cubic" };
+              newPoints.splice(prevInNew + 1, 0, h1, h2);
+            }
+          }
+        }
+      }
+    }
+
+    i++;
+  }
+
+  return newPoints;
+}
+
+/**
+ * Sample points along skeleton segment for curve fitting.
+ */
+function sampleSkeletonSegmentForFit(points) {
+  const samples = [{ x: points[0].x, y: points[0].y }];
+
+  let i = 0;
+  while (i < points.length - 1) {
+    const startPt = points[i];
+    // Find next on-curve
+    let j = i + 1;
+    while (j < points.length && points[j].type) j++;
+    if (j >= points.length) break;
+
+    const endPt = points[j];
+    const handles = points.slice(i + 1, j);
+
+    if (handles.length === 0) {
+      // Line segment
+      samples.push({ x: endPt.x, y: endPt.y });
+    } else if (handles.length === 1) {
+      // Quadratic bezier
+      const bez = new Bezier(
+        startPt.x,
+        startPt.y,
+        handles[0].x,
+        handles[0].y,
+        endPt.x,
+        endPt.y
+      );
+      for (const t of [0.25, 0.5, 0.75]) {
+        const pt = bez.compute(t);
+        samples.push({ x: pt.x, y: pt.y });
+      }
+      samples.push({ x: endPt.x, y: endPt.y });
+    } else {
+      // Cubic bezier
+      const bez = new Bezier(
+        startPt.x,
+        startPt.y,
+        handles[0].x,
+        handles[0].y,
+        handles[handles.length - 1].x,
+        handles[handles.length - 1].y,
+        endPt.x,
+        endPt.y
+      );
+      for (const t of [0.2, 0.4, 0.6, 0.8]) {
+        const pt = bez.compute(t);
+        samples.push({ x: pt.x, y: pt.y });
+      }
+      samples.push({ x: endPt.x, y: endPt.y });
+    }
+
+    i = j;
+  }
+
+  return samples;
+}
+
+/**
+ * Compute tangent at endpoint of segment for curve fitting.
+ */
+function computeEndTangentForFit(points, isStart) {
+  if (points.length < 2) return { x: 1, y: 0 };
+
+  let p1, p2;
+  if (isStart) {
+    p1 = points[0];
+    p2 = points[1].type ? points[1] : points[Math.min(1, points.length - 1)];
+  } else {
+    p1 = points[points.length - 1];
+    const prevIdx = points.length - 2;
+    p2 = points[prevIdx].type ? points[prevIdx] : points[Math.max(0, prevIdx)];
+  }
+
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-10) return { x: 1, y: 0 };
+
+  if (isStart) {
+    return { x: dx / len, y: dy / len };
+  } else {
+    return { x: -dx / len, y: -dy / len };
+  }
+}
