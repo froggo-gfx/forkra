@@ -236,15 +236,14 @@ export default class SkeletonParametersPanel extends Panel {
       const widths = this._getPointWidths(point, defaultWidth);
       left = widths.left;
       right = widths.right;
+      // Asymmetric state is determined by point data
       isAsym = this._isAsymmetric(point);
-      // Sync UI state with point state
-      this.pointParameters.asymmetrical = isAsym;
     } else {
       // No selection - show Source Width / 2
       const defaultWide = this._getCurrentDefaultWidthWide();
       left = defaultWide / 2;
       right = defaultWide / 2;
-      isAsym = this.pointParameters.asymmetrical;
+      isAsym = false;
     }
 
     // Header with Asymmetrical toggle

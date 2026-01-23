@@ -1244,10 +1244,24 @@ export class PointerTool extends BaseTool {
       y: localPoint.y - positionedGlyph.y,
     };
 
-    // Set selection to both rib points (symmetric mode)
+    // Check if point is in asymmetric mode
+    const editLayerNameForCheck = sceneController.editingLayerNames?.[0];
+    const layerForCheck = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerNameForCheck];
+    const skeletonDataForCheck = layerForCheck?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const pointForCheck = skeletonDataForCheck?.contours?.[ribHit.contourIndex]?.points?.[ribHit.pointIndex];
+    const isAsymmetric = pointForCheck?.leftWidth !== undefined || pointForCheck?.rightWidth !== undefined;
+
+    // Set selection based on mode
     const leftKey = `skeletonRibPoint/${ribHit.contourIndex}/${ribHit.pointIndex}/left`;
     const rightKey = `skeletonRibPoint/${ribHit.contourIndex}/${ribHit.pointIndex}/right`;
-    sceneController.selection = new Set([leftKey, rightKey]);
+    if (isAsymmetric) {
+      // Asymmetric mode: select only the dragged side
+      const draggedKey = ribHit.side === "left" ? leftKey : rightKey;
+      sceneController.selection = new Set([draggedKey]);
+    } else {
+      // Symmetric mode: select both sides
+      sceneController.selection = new Set([leftKey, rightKey]);
+    }
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const editLayerName = sceneController.editingLayerNames?.[0];
@@ -1305,12 +1319,22 @@ export class PointerTool extends BaseTool {
         const contour = workingSkeletonData.contours[widthChange.contourIndex];
         const point = contour.points[widthChange.pointIndex];
 
-        // Symmetric mode: update width property (affects both sides)
-        // The halfWidth from behavior is the new half-width, so full width = halfWidth * 2
-        point.width = widthChange.halfWidth * 2;
-        // Clear any asymmetric widths to ensure symmetric behavior
-        delete point.leftWidth;
-        delete point.rightWidth;
+        if (isAsymmetric) {
+          // Asymmetric mode: update only the dragged side
+          if (ribHit.side === "left") {
+            point.leftWidth = widthChange.halfWidth;
+          } else {
+            point.rightWidth = widthChange.halfWidth;
+          }
+          delete point.width;
+        } else {
+          // Symmetric mode: update width property (affects both sides)
+          // The halfWidth from behavior is the new half-width, so full width = halfWidth * 2
+          point.width = widthChange.halfWidth * 2;
+          // Clear any asymmetric widths to ensure symmetric behavior
+          delete point.leftWidth;
+          delete point.rightWidth;
+        }
 
         // Record changes
         const changes = [];
