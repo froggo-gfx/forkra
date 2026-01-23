@@ -1,8 +1,18 @@
 import { Bezier } from "bezier-js";
 import * as vector from "./vector.js";
 import { VarPackedPath } from "./var-path.js";
+import { fitCubic, chordLengthParameterize, computeMaxError } from "./fit-cubic.js";
 
 const DEFAULT_WIDTH = 20;
+
+// Constants for offset curve simplification
+const SIMPLIFY_OFFSET_CURVES = true;
+const SAMPLES_PER_CURVE = 5;
+
+// Adaptive error threshold (% of halfWidth)
+const MIN_ERROR_PERCENT = 0.02; // 2% — initial strict threshold
+const MAX_ERROR_PERCENT = 0.15; // 15% — maximum allowed
+const ERROR_STEP_PERCENT = 0.02; // 2% — step increase
 
 /**
  * Enforce colinearity for smooth points in a contour.
@@ -272,6 +282,62 @@ function buildSegmentsFromPoints(points, isClosed) {
 }
 
 /**
+ * Try to simplify multiple offset curves into a single cubic bezier.
+ * Uses fitCubic for approximation with adaptive error tolerance.
+ * @param {Array} offsetCurves - Array of Bezier objects from bezier.offset()
+ * @param {number} halfWidth - Half of the stroke width
+ * @returns {Bezier|null} - Simplified Bezier or null if simplification is disabled/not needed
+ */
+function simplifyOffsetCurves(offsetCurves, halfWidth) {
+  if (!SIMPLIFY_OFFSET_CURVES || !offsetCurves || offsetCurves.length === 0) {
+    return null;
+  }
+
+  // If only one curve with 4 points (cubic), no simplification needed
+  if (offsetCurves.length === 1 && offsetCurves[0].points.length === 4) {
+    return null;
+  }
+
+  // 1. Sample points on all offset curves
+  const samplePoints = [];
+  for (let i = 0; i < offsetCurves.length; i++) {
+    const curve = offsetCurves[i];
+    const isLast = i === offsetCurves.length - 1;
+    for (let j = 0; j <= SAMPLES_PER_CURVE; j++) {
+      if (j === SAMPLES_PER_CURVE && !isLast) continue; // avoid duplicates at junctions
+      samplePoints.push(curve.get(j / SAMPLES_PER_CURVE));
+    }
+  }
+
+  // 2. Get tangents from the ends
+  const startDeriv = offsetCurves[0].derivative(0);
+  const leftTangent = vector.normalizeVector(startDeriv);
+
+  const endDeriv = offsetCurves.at(-1).derivative(1);
+  const rightTangent = vector.normalizeVector({ x: -endDeriv.x, y: -endDeriv.y });
+
+  // 3. Parameterization
+  const params = chordLengthParameterize(samplePoints);
+
+  // 4. Adaptive search — from strict threshold to lenient
+  const minError = halfWidth * MIN_ERROR_PERCENT;
+  const maxError = halfWidth * MAX_ERROR_PERCENT;
+  const step = halfWidth * ERROR_STEP_PERCENT;
+
+  for (let errorThreshold = minError; errorThreshold <= maxError; errorThreshold += step) {
+    const bezier = fitCubic(samplePoints, leftTangent, rightTangent, errorThreshold);
+    const [actualError] = computeMaxError(samplePoints, bezier, params);
+    if (actualError < errorThreshold) {
+      return bezier; // fits within current threshold
+    }
+  }
+
+  // Even maxError didn't help — return the last result anyway
+  // One curve is better than many segments
+  return fitCubic(samplePoints, leftTangent, rightTangent, maxError);
+}
+
+/**
  * Generate offset points for a segment.
  * For open skeletons: first segment adds start, all segments add end
  * For closed skeletons: all segments add start (end connects to next start)
@@ -409,6 +475,32 @@ function generateOffsetPointsForSegment(
         return;
       }
 
+      // Try to simplify multiple offset curves into a single cubic bezier
+      const simplifiedCurve = simplifyOffsetCurves(curves, halfWidth);
+      if (simplifiedCurve) {
+        // Use the simplified curve
+        const pts = simplifiedCurve.points;
+        if (shouldAddStart) {
+          output.push({
+            x: fixedStart.x,
+            y: fixedStart.y,
+            smooth: smoothStart,
+          });
+        }
+        // Add control points (cubic bezier)
+        output.push({ x: pts[1].x, y: pts[1].y, type: "cubic" });
+        output.push({ x: pts[2].x, y: pts[2].y, type: "cubic" });
+        if (shouldAddEnd) {
+          output.push({
+            x: fixedEnd.x,
+            y: fixedEnd.y,
+            smooth: smoothEnd,
+          });
+        }
+        return;
+      }
+
+      // Fallback: use original curves without simplification
       for (let i = 0; i < curves.length; i++) {
         const curve = curves[i];
         const pts = curve.points;
