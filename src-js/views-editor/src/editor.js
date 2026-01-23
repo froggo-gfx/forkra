@@ -1656,9 +1656,6 @@ export class EditorController extends ViewController {
     }
     if (skeletonDataByLayer && !isObjectEmpty(skeletonDataByLayer)) {
       jsonObject.skeletonDataByLayer = skeletonDataByLayer;
-      console.log("[WRITE] Writing skeletonDataByLayer to clipboard:", skeletonDataByLayer);
-    } else {
-      console.log("[WRITE] No skeletonDataByLayer to write");
     }
     const jsonString = JSON.stringify(jsonObject);
 
@@ -1728,8 +1725,6 @@ export class EditorController extends ViewController {
       this.sceneController.selection
     );
     const hasSkeletonSelection = skeletonPointSelection?.size > 0;
-    console.log("[COPY] Selection:", [...this.sceneController.selection]);
-    console.log("[COPY] hasSkeletonSelection:", hasSkeletonSelection, "skeletonPointSelection:", skeletonPointSelection);
 
     // Collect skeleton contour indices from selection
     const selectedSkeletonContours = new Set();
@@ -1774,7 +1769,6 @@ export class EditorController extends ViewController {
         // Get skeleton data from the full layer object, not the glyph
         const fullLayer = varGlyph.layers[layerName];
         const skeletonData = fullLayer?.customData?.["fontra.skeleton"];
-        console.log("[COPY] Layer", layerName, "fullLayer:", fullLayer, "skeletonData:", skeletonData);
         if (skeletonData?.contours?.length) {
           // Copy only selected contours
           const copiedContours = [];
@@ -1787,12 +1781,10 @@ export class EditorController extends ViewController {
             skeletonDataByLayer[layerName] = {
               contours: copiedContours,
             };
-            console.log("[COPY] Collected skeleton for layer", layerName, ":", copiedContours.length, "contours");
           }
         }
       }
     }
-    console.log("[COPY] Final skeletonDataByLayer:", skeletonDataByLayer);
     if (!layerGlyphs.length && !doCut) {
       const { instance, flattenedPath: instancePath } = this._prepareCopyOrCut(
         undefined,
@@ -2103,7 +2095,6 @@ export class EditorController extends ViewController {
         }
         backgroundImageData = clipboardObject.backgroundImageData;
         skeletonDataByLayer = clipboardObject.skeletonDataByLayer;
-        console.log("[UNPACK] Parsed clipboard, skeletonDataByLayer:", skeletonDataByLayer);
       } catch (error) {
         console.log("couldn't paste from JSON:", error.toString());
       }
@@ -2113,7 +2104,6 @@ export class EditorController extends ViewController {
         pasteLayerGlyphs = [{ glyph }];
       }
     }
-    console.log("[UNPACK] Returning skeletonDataByLayer:", skeletonDataByLayer);
     return { pasteVarGlyph, pasteLayerGlyphs, backgroundImageData, skeletonDataByLayer };
   }
 
@@ -2202,9 +2192,6 @@ export class EditorController extends ViewController {
     let defaultSkeletonData = null;
     if (skeletonDataByLayer) {
       defaultSkeletonData = Object.values(skeletonDataByLayer)[0];
-      console.log("[PASTE] Has skeletonDataByLayer, defaultSkeletonData:", defaultSkeletonData);
-    } else {
-      console.log("[PASTE] No skeletonDataByLayer received");
     }
 
     const varGlyphController =
@@ -2265,7 +2252,6 @@ export class EditorController extends ViewController {
           const existingSkeletonData =
             glyph.layers[firstEditLayerName]?.customData?.["fontra.skeleton"];
           const startContourIndex = existingSkeletonData?.contours?.length || 0;
-          console.log("[PASTE] Building skeleton selection, firstEditLayerName:", firstEditLayerName, "startContourIndex:", startContourIndex);
 
           for (let ci = 0; ci < defaultSkeletonData.contours.length; ci++) {
             const contour = defaultSkeletonData.contours[ci];
@@ -2274,7 +2260,6 @@ export class EditorController extends ViewController {
                 // on-curve point
                 const selKey = `skeletonPoint/${startContourIndex + ci}/${pi}`;
                 selection.add(selKey);
-                console.log("[PASTE] Added skeleton selection:", selKey);
               }
             }
           }
@@ -2300,22 +2285,17 @@ export class EditorController extends ViewController {
 
           // Paste skeleton data
           if (skeletonDataByLayer) {
-            console.log("[PASTE] Processing skeleton for layer:", layerName);
             const pasteSkeletonData =
               skeletonDataByLayer[layerName] || defaultSkeletonData;
-            console.log("[PASTE] pasteSkeletonData:", pasteSkeletonData);
             if (pasteSkeletonData?.contours?.length) {
               const layer = glyph.layers[layerName];
-              console.log("[PASTE] layer found:", !!layer);
               if (layer) {
                 if (!layer.customData) {
                   layer.customData = {};
                 }
                 const existingSkeleton = layer.customData["fontra.skeleton"];
-                console.log("[PASTE] existingSkeleton:", existingSkeleton);
                 if (existingSkeleton?.contours?.length) {
                   // Append to existing skeleton
-                  console.log("[PASTE] Appending to existing skeleton");
                   existingSkeleton.contours.push(
                     ...pasteSkeletonData.contours.map((c) => JSON.parse(JSON.stringify(c)))
                   );
@@ -2323,7 +2303,6 @@ export class EditorController extends ViewController {
                   this._regenerateSkeletonOutline(layer, existingSkeleton, layerGlyph);
                 } else {
                   // Create new skeleton
-                  console.log("[PASTE] Creating new skeleton");
                   const newSkeletonData = {
                     contours: pasteSkeletonData.contours.map((c) =>
                       JSON.parse(JSON.stringify(c))
@@ -2338,7 +2317,6 @@ export class EditorController extends ViewController {
             }
           }
         }
-        console.log("[PASTE] Final selection:", [...selection]);
         this.sceneController.selection = selection;
         return "Paste";
       },
@@ -2348,7 +2326,6 @@ export class EditorController extends ViewController {
   }
 
   _regenerateSkeletonOutline(layer, skeletonData, layerGlyph) {
-    console.log("[REGEN] Called with skeletonData:", skeletonData);
     // Remove old generated contours
     const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
     const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);

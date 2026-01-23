@@ -352,7 +352,6 @@ export class PointerTool extends BaseTool {
 
   async handleDoubleClick(selection, point, event) {
     const sceneController = this.sceneController;
-    console.log("[DBLCLICK] selection:", [...selection], "hoverSelection:", [...(sceneController.hoverSelection || [])], "hoverPathHit:", sceneController.hoverPathHit);
     if (!sceneController.hoverPathHit && (!selection || !selection.size)) {
       const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
       if (positionedGlyph?.isUndefined) {
@@ -372,7 +371,6 @@ export class PointerTool extends BaseTool {
       // Handle skeleton segment double-click FIRST - select entire contour
       // This takes priority over toggling smooth on already-selected points
       if (clickedSkeletonSegment?.size) {
-        console.log("[DBLCLICK] Clicked on skeleton segment, selecting contour");
         await this._handleSkeletonSegmentDoubleClick(event, clickedSkeletonSegment);
         return;
       }
@@ -389,7 +387,6 @@ export class PointerTool extends BaseTool {
 
       // Handle skeleton point double-click (toggle smooth/sharp)
       if (skeletonPointSelection?.size) {
-        console.log("[DBLCLICK] Skeleton points in selection, toggling smooth");
         await this._handleSkeletonPointsDoubleClick(skeletonPointSelection);
         return;
       }
@@ -415,10 +412,8 @@ export class PointerTool extends BaseTool {
         sceneController.doubleClickedGuidelineIndices = guidelineIndices;
         sceneController._dispatchEvent("doubleClickedGuidelines");
       } else if (pointIndices?.length && !sceneController.hoverPathHit) {
-        console.log("[DBLCLICK] Regular points, toggling smooth");
         await this.handlePointsDoubleClick(pointIndices);
       } else if (sceneController.hoverPathHit) {
-        console.log("[DBLCLICK] Regular path hit, selecting contour");
         const contourIndex = sceneController.hoverPathHit.contourIndex;
         const startPoint = instance.path.getAbsolutePointIndex(contourIndex, 0);
         const endPoint = instance.path.contourInfo[contourIndex].endPoint;
@@ -1177,6 +1172,158 @@ export class PointerTool extends BaseTool {
     });
   }
 
+  /**
+   * Handle bounding box transforms (scale/rotate) for skeleton points only.
+   */
+  async _handleSkeletonBoundsTransform(selection, eventStream, initialEvent, rotation) {
+    const sceneController = this.sceneController;
+    const { skeletonPoint: skeletonPointSelection } = parseSelection(selection);
+
+    if (!skeletonPointSelection?.size) return;
+
+    const clickedHandle = sceneController.sceneModel.clickedTransformSelectionHandle;
+
+    // Calculate origin (opposite corner from clicked handle)
+    const [handlePositionY, handlePositionX] = clickedHandle.split("-");
+    const origin = { x: handlePositionX, y: handlePositionY };
+    if (handlePositionX === "left") origin.x = "right";
+    else if (handlePositionX === "right") origin.x = "left";
+    if (handlePositionY === "top") origin.y = "bottom";
+    else if (handlePositionY === "bottom") origin.y = "top";
+
+    const fixDragLeftValue = clickedHandle.includes("left") ? -1 : 1;
+    const fixDragBottomValue = clickedHandle.includes("bottom") ? -1 : 1;
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = sceneController.editingLayerNames?.[0];
+      if (!editLayerName || !glyph.layers[editLayerName]) return;
+
+      const layer = glyph.layers[editLayerName];
+      const originalSkeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      if (!originalSkeletonData) return;
+
+      const layerGlyph = layer.glyph;
+
+      // Calculate bounds and pin point
+      const bounds = getSkeletonSelectionBounds(selection, originalSkeletonData);
+      if (!bounds) return;
+
+      const pinPoint = getPinPoint(bounds, origin.x, origin.y);
+      const selectionWidth = bounds.xMax - bounds.xMin;
+      const selectionHeight = bounds.yMax - bounds.yMin;
+
+      const initialPoint = sceneController.selectedGlyphPoint(initialEvent);
+
+      // For rotation, we need a consistent pin point
+      const rotationPinPoint = getPinPoint(bounds, origin.x, origin.y);
+      const altRotationPinPoint = getPinPoint(bounds, undefined, undefined);
+
+      let accumulatedChanges = new ChangeCollector();
+
+      for await (const event of eventStream) {
+        const currentPoint = sceneController.selectedGlyphPoint(event);
+
+        // Calculate transformation
+        let transformation;
+        if (rotation) {
+          sceneController.sceneModel.showTransformSelection = false;
+          const usePinPoint = event.altKey ? altRotationPinPoint : rotationPinPoint;
+          const angle = Math.atan2(
+            usePinPoint.y - currentPoint.y,
+            usePinPoint.x - currentPoint.x
+          );
+          const angleInitial = Math.atan2(
+            usePinPoint.y - initialPoint.y,
+            usePinPoint.x - initialPoint.x
+          );
+          const rotationAngle = !event.shiftKey
+            ? angle - angleInitial
+            : Math.round((angle - angleInitial) / (Math.PI / 4)) * (Math.PI / 4);
+          transformation = new Transform().rotate(rotationAngle);
+        } else {
+          // Scale
+          const delta = {
+            x: (currentPoint.x - initialPoint.x) * fixDragLeftValue,
+            y: (currentPoint.y - initialPoint.y) * fixDragBottomValue,
+          };
+
+          let scaleX = selectionWidth > 0 ? (selectionWidth + delta.x) / selectionWidth : 1;
+          let scaleY = selectionHeight > 0 ? (selectionHeight + delta.y) / selectionHeight : 1;
+
+          if (clickedHandle.includes("middle")) {
+            scaleY = event.shiftKey ? scaleX : 1;
+          } else if (clickedHandle.includes("center")) {
+            scaleX = event.shiftKey ? scaleY : 1;
+          } else if (event.shiftKey) {
+            scaleX = scaleY = Math.max(scaleX, scaleY);
+          }
+          transformation = new Transform().scale(scaleX, scaleY);
+        }
+
+        const usePinPoint = event.altKey
+          ? getPinPoint(bounds, undefined, undefined)
+          : pinPoint;
+
+        const pinnedTransformation = new Transform()
+          .translate(usePinPoint.x, usePinPoint.y)
+          .transform(transformation)
+          .translate(-usePinPoint.x, -usePinPoint.y);
+
+        // Deep clone original skeleton data and apply transform
+        const workingSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
+        transformSkeletonPoints(workingSkeletonData, skeletonPointSelection, pinnedTransformation);
+
+        // Regenerate outline
+        const regenerateOutline = (staticGlyph, skelData) => {
+          const oldGeneratedIndices = skelData.generatedContourIndices || [];
+          const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+          for (const idx of sortedIndices) {
+            if (idx < staticGlyph.path.numContours) {
+              staticGlyph.path.deleteContour(idx);
+            }
+          }
+
+          const generatedContours = generateContoursFromSkeleton(skelData);
+          const newGeneratedIndices = [];
+          for (const contour of generatedContours) {
+            const newIndex = staticGlyph.path.numContours;
+            staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
+            newGeneratedIndices.push(newIndex);
+          }
+          skelData.generatedContourIndices = newGeneratedIndices;
+        };
+
+        // Record changes
+        const changes = [];
+
+        const pathChange = recordChanges(layerGlyph, (sg) => {
+          regenerateOutline(sg, workingSkeletonData);
+        });
+        changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = workingSkeletonData;
+        });
+        changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+        const combinedChange = new ChangeCollector().concat(...changes);
+        accumulatedChanges = accumulatedChanges.concat(combinedChange);
+        await sendIncrementalChange(combinedChange.change, true);
+      }
+
+      // Final send without "may drop" flag
+      await sendIncrementalChange(accumulatedChanges.change);
+
+      return {
+        changes: accumulatedChanges,
+        undoLabel: rotation
+          ? translate("edit-tools-pointer.undo.rotate-skeleton")
+          : translate("edit-tools-pointer.undo.scale-skeleton"),
+        broadcast: true,
+      };
+    });
+  }
+
   async handleBoundsTransformSelection(
     selection,
     eventStream,
@@ -1184,6 +1331,23 @@ export class PointerTool extends BaseTool {
     rotation = false
   ) {
     const sceneController = this.sceneController;
+
+    // Check selection type - skeleton transforms are handled separately
+    const selectionType = getSelectionType(selection);
+    if (selectionType === "mixed") {
+      // Should not happen (no bounding box for mixed), but safety check
+      return;
+    }
+    if (selectionType === "skeleton") {
+      await this._handleSkeletonBoundsTransform(
+        selection,
+        eventStream,
+        initialEvent,
+        rotation
+      );
+      return;
+    }
+
     const clickedHandle = sceneController.sceneModel.clickedTransformSelectionHandle;
 
     // The following may seem wrong, but it's correct, because we say
@@ -1355,16 +1519,25 @@ export class PointerTool extends BaseTool {
     if (!selection.size) {
       return undefined;
     }
-    const glyph = this.sceneController.sceneModel.getSelectedPositionedGlyph()?.glyph;
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    const glyph = positionedGlyph?.glyph;
     if (!glyph) {
       return undefined;
     }
+
+    // Get skeleton data for bounds calculation
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[
+      this.sceneController.editingLayerNames?.[0]
+    ];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+
     const bounds = getTransformSelectionBounds(
       glyph,
       selection,
-      this.editor.fontController.getBackgroundImageBoundsFunc
+      this.editor.fontController.getBackgroundImageBoundsFunc,
+      skeletonData
     );
-    // bounds can be undefined if for example only one point is selected
+    // bounds can be undefined if for example only one point is selected or mixed selection
     if (!bounds) {
       return undefined;
     }
@@ -1563,7 +1736,129 @@ function getTransformHandles(transformBounds, margin) {
   return handles;
 }
 
-function getTransformSelectionBounds(glyph, selection, getBackgroundImageBoundsFunc) {
+/**
+ * Determine the type of selection for bounding box purposes.
+ * @returns "regular" | "skeleton" | "mixed" | "none"
+ */
+function getSelectionType(selection) {
+  const {
+    point,
+    component,
+    anchor,
+    backgroundImage,
+    guideline,
+    skeletonPoint,
+  } = parseSelection(selection);
+
+  const hasRegular =
+    point?.length > 0 ||
+    component?.length > 0 ||
+    anchor?.length > 0 ||
+    backgroundImage?.length > 0 ||
+    guideline?.length > 0;
+  const hasSkeleton = skeletonPoint?.size > 0;
+
+  if (hasRegular && hasSkeleton) return "mixed"; // NO bounding box
+  if (hasSkeleton) return "skeleton";
+  if (hasRegular) return "regular";
+  return "none";
+}
+
+/**
+ * Transform selected skeleton points (and their handles) by applying a transformation matrix.
+ */
+function transformSkeletonPoints(skeletonData, skeletonPointSelection, transform) {
+  // Collect all points to transform (on-curves + their handles)
+  const pointsToTransform = new Set();
+
+  for (const selKey of skeletonPointSelection) {
+    const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+    const contour = skeletonData.contours[contourIdx];
+    if (!contour) continue;
+
+    const numPoints = contour.points.length;
+
+    // Add the on-curve point
+    pointsToTransform.add(`${contourIdx}/${pointIdx}`);
+
+    // Add adjacent handles
+    const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
+    const nextIdx = (pointIdx + 1) % numPoints;
+
+    if (contour.points[prevIdx]?.type === "cubic") {
+      pointsToTransform.add(`${contourIdx}/${prevIdx}`);
+    }
+    if (contour.points[nextIdx]?.type === "cubic") {
+      pointsToTransform.add(`${contourIdx}/${nextIdx}`);
+    }
+  }
+
+  // Transform all collected points
+  for (const key of pointsToTransform) {
+    const [contourIdx, pointIdx] = key.split("/").map(Number);
+    const point = skeletonData.contours[contourIdx]?.points[pointIdx];
+    if (point) {
+      const [newX, newY] = transform.transformPoint(point.x, point.y);
+      point.x = newX;
+      point.y = newY;
+    }
+  }
+}
+
+/**
+ * Calculate bounds for selected skeleton points only.
+ */
+function getSkeletonSelectionBounds(selection, skeletonData) {
+  const { skeletonPoint: skeletonPointSelection } = parseSelection(selection);
+  if (!skeletonPointSelection?.size || !skeletonData?.contours) {
+    return null;
+  }
+
+  let xMin = Infinity,
+    yMin = Infinity,
+    xMax = -Infinity,
+    yMax = -Infinity;
+
+  for (const selKey of skeletonPointSelection) {
+    const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+    const point = skeletonData.contours[contourIdx]?.points[pointIdx];
+    if (point) {
+      xMin = Math.min(xMin, point.x);
+      yMin = Math.min(yMin, point.y);
+      xMax = Math.max(xMax, point.x);
+      yMax = Math.max(yMax, point.y);
+    }
+  }
+
+  if (xMin === Infinity) return null;
+  return { xMin, yMin, xMax, yMax };
+}
+
+function getTransformSelectionBounds(
+  glyph,
+  selection,
+  getBackgroundImageBoundsFunc,
+  skeletonData
+) {
+  const selectionType = getSelectionType(selection);
+
+  // No bounding box for mixed selection
+  if (selectionType === "mixed") {
+    return undefined;
+  }
+
+  // Skeleton-only selection
+  if (selectionType === "skeleton") {
+    const skeletonBounds = getSkeletonSelectionBounds(selection, skeletonData);
+    if (!skeletonBounds) return undefined;
+    const { xMin, yMin, xMax, yMax } = skeletonBounds;
+    const width = xMax - xMin;
+    const height = yMax - yMin;
+    if (width == 0 && height == 0) return undefined;
+    return skeletonBounds;
+  }
+
+  // Regular selection - existing logic
   if (selection.size == 1 && parseSelection(selection).point?.length == 1) {
     // Return if only a single point is selected, as in that case the "selection bounds"
     // is not really useful for the user, and is distracting instead.
