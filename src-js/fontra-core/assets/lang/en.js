@@ -313,6 +313,7 @@ export const strings = {
   "sidebar.designspace-navigation.warning.delete-source":
     "Are you sure you want to delete source %0?",
   "sidebar.font-overview.font-source": "Font source",
+  "sidebar.skeleton-parameters": "Skeleton Parameters",
   "sidebar.glyph-note": "Glyph Note",
   "sidebar.glyph-note.glyph-note-for-glyph": "Glyph Note for %0",
   "sidebar.glyph-note.no-glyph-selected": "(No glyph selected)",
