@@ -115,6 +115,10 @@ export class ChangeCollector {
   }
 }
 
+export function joinChanges(...changes) {
+  return new ChangeCollector().concat(...changes);
+}
+
 export function consolidateChanges(changes, prefixPath) {
   let change;
   let path;

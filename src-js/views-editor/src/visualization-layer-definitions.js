@@ -126,34 +126,49 @@ registerVisualizationLayerDefinition({
   identifier: "fontra.undefined.glyph",
   name: "Undefined glyph",
   selectionFunc: glyphSelector("all"),
-  selectionFilter: (positionedGlyph) => positionedGlyph.isUndefined,
+  selectionFilter: (positionedGlyph) =>
+    positionedGlyph.isUndefined ||
+    (positionedGlyph.isEmpty && !positionedGlyph.isEditing),
   zIndex: 500,
   colors: {
     fillColor: "#0006",
+    emptyFillColor: "#0002",
   },
   colorsDarkMode: {
     fillColor: "#FFF6",
+    emptyFillColor: "#FFF2",
   },
   draw: (context, positionedGlyph, parameters, model, controller) => {
-    context.fillStyle = parameters.fillColor;
+    context.fillStyle = positionedGlyph.isUndefined
+      ? parameters.fillColor
+      : parameters.emptyFillColor;
     context.textAlign = "center";
     const lineDistance = 1.2;
 
     const glyphNameFontSize = 0.1 * positionedGlyph.glyph.xAdvance;
     const placeholderFontSize = 0.75 * positionedGlyph.glyph.xAdvance;
-    context.font = `${glyphNameFontSize}px fontra-ui-regular, sans-serif`;
+
     context.scale(1, -1);
-    context.fillText(positionedGlyph.glyphName, positionedGlyph.glyph.xAdvance / 2, 0);
-    if (positionedGlyph.character) {
-      const uniStr = makeUPlusStringFromCodePoint(
-        positionedGlyph.character.codePointAt(0)
-      );
+
+    if (positionedGlyph.isUndefined) {
+      context.font = `${glyphNameFontSize}px fontra-ui-regular, sans-serif`;
       context.fillText(
-        uniStr,
+        positionedGlyph.glyphName,
         positionedGlyph.glyph.xAdvance / 2,
-        -lineDistance * glyphNameFontSize
+        0
       );
+      if (positionedGlyph.character) {
+        const uniStr = makeUPlusStringFromCodePoint(
+          positionedGlyph.character.codePointAt(0)
+        );
+        context.fillText(
+          uniStr,
+          positionedGlyph.glyph.xAdvance / 2,
+          -lineDistance * glyphNameFontSize
+        );
+      }
     }
+
     const codePoint = positionedGlyph.character?.codePointAt(0);
     const { glyphString, direction } = guessGlyphPlaceholderString(
       codePoint ? [codePoint] : [],

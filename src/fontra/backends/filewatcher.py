@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Iterable
 
@@ -15,6 +16,9 @@ class FileWatcher:
     paths: set[str] = field(init=False, default_factory=set)
     _stopEvent: asyncio.Event = field(init=False, default=asyncio.Event())
     _task: asyncio.Task | None = field(init=False, default=None)
+    _ignorePaths: dict[str, set[float | None]] = field(
+        init=False, default_factory=lambda: defaultdict(set)
+    )
 
     async def aclose(self) -> None:
         if self._task is None:
@@ -23,8 +27,10 @@ class FileWatcher:
         self._task.cancel()
 
     def setPaths(self, paths: Iterable[os.PathLike | str]) -> None:
-        self.paths = set([os.fspath(p) for p in paths])
-        self._startWatching()
+        fspaths = set([os.fspath(p) for p in paths])
+        if self.paths != fspaths:
+            self.paths = fspaths
+            self._startWatching()
 
     def addPaths(self, paths: Iterable[os.PathLike | str]) -> None:
         self.paths.update([os.fspath(p) for p in paths])
@@ -35,22 +41,50 @@ class FileWatcher:
             self.paths.discard(os.fspath(path))
         self._startWatching()
 
-    def _startWatching(self):
-        self._stopEvent.set()
+    def ignoreNextChange(self, path: os.PathLike | str):
+        path = os.fspath(path)
+        mtime = os.stat(path).st_mtime if os.path.exists(path) else None
+        self._ignorePaths[path].add(mtime)
+
+    def _startWatching(self) -> None:
+        # Stop the current loop after a delay, so that it can process pending changes.
+        # The delay relates to the `step` argument of `awatch`, which defaults to 50ms.
+        self._setEventTask = asyncio.create_task(setEventAfterDelay(self._stopEvent))
         self._task = asyncio.create_task(self._watchFiles()) if self.paths else None
 
     async def _watchFiles(self) -> None:
         self._stopEvent = asyncio.Event()
         async for changes in awatch(*sorted(self.paths), stop_event=self._stopEvent):
             changes = cleanupWatchFilesChanges(changes)
-            try:
-                await self.callback(changes)
-            except Exception:
-                logger.exception("exception in FileWatcher callback")
+            changes = self._filterIgnores(changes)
+            if changes:
+                try:
+                    await self.callback(changes)
+                except Exception:
+                    logger.exception("exception in FileWatcher callback")
+
+    def _filterIgnores(
+        self, changes: set[tuple[Change, str]]
+    ) -> set[tuple[Change, str]]:
+        filteredChanges = set()
+
+        for change, path in changes:
+            mtimes = self._ignorePaths.get(path)
+            if mtimes is not None:
+                mtime = os.stat(path).st_mtime if os.path.exists(path) else None
+                if mtime in mtimes:
+                    mtimes.remove(mtime)
+                    if not mtimes:
+                        del self._ignorePaths[path]
+                    continue
+
+            filteredChanges.add((change, path))
+
+        return filteredChanges
 
 
 def cleanupWatchFilesChanges(
-    changes: set[tuple[Change, str]]
+    changes: set[tuple[Change, str]],
 ) -> set[tuple[Change, str]]:
     # If a path is mentioned with more than one event type, we pick the most
     # appropriate one among them:
@@ -66,3 +100,8 @@ def cleanupWatchFilesChanges(
         else:
             perPath[path] = change
     return {(change, path) for path, change in perPath.items()}
+
+
+async def setEventAfterDelay(event, delay=0.1) -> None:
+    await asyncio.sleep(delay)
+    event.set()

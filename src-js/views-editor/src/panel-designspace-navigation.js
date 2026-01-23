@@ -35,6 +35,7 @@ import {
 import { GlyphSource, Layer, StaticGlyph } from "@fontra/core/var-glyph.js";
 import {
   isLocationAtDefault,
+  locationToName,
   locationToString,
   makeSparseLocation,
   mapAxesFromUserSpaceToSourceSpace,
@@ -112,7 +113,7 @@ export default class DesignspaceNavigationPanel extends Panel {
         "action.glyph.delete-source",
         { topic },
         () => this.removeSource(),
-        () => this.sourcesList.getSelectedItemIndex() !== undefined
+        () => this.canRemoveSource()
       );
 
       registerAction(
@@ -924,6 +925,13 @@ export default class DesignspaceNavigationPanel extends Panel {
           this.sceneController.scrollAdjustBehavior =
             this.getScrollAdjustBehavior("pin-glyph-center");
 
+          if (
+            !event.newValue &&
+            glyph.sources.filter((source) => !source.inactive).length < 2
+          ) {
+            return; // Don't deactivate the last active source or bad things will happen
+          }
+
           glyph.sources[index].inactive = !event.newValue;
 
           return translate(
@@ -1136,7 +1144,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     );
   }
 
-  async goToNearestSource() {
+  async goToNearestSource(allowSparseSource = true) {
     const glyphController = await this.sceneModel.getSelectedVariableGlyphController();
     if (!glyphController) {
       this.sceneController.scrollAdjustBehavior =
@@ -1148,7 +1156,9 @@ export default class DesignspaceNavigationPanel extends Panel {
         ...defaultLocation,
         ...this.sceneSettings.fontLocationSourceMapped,
       };
-      const sourceIdentifiers = this.fontController.getSortedSourceIdentifiers();
+      const sourceIdentifiers = this.fontController.getSortedSourceIdentifiers(
+        !allowSparseSource
+      );
       if (sourceIdentifiers.length) {
         const locations = sourceIdentifiers.map((sourceIdentifier) => ({
           ...defaultLocation,
@@ -1216,9 +1226,7 @@ export default class DesignspaceNavigationPanel extends Panel {
   }
 
   _updateRemoveSourceButtonState() {
-    const sourceItem = this.sourcesList.getSelectedItem();
-    this.addRemoveSourceButtons.disableRemoveButton =
-      !sourceItem || !!sourceItem.isFontSource;
+    this.addRemoveSourceButtons.disableRemoveButton = !this.canRemoveSource();
   }
 
   _updateRemoveSourceLayerButtonState() {
@@ -1289,11 +1297,26 @@ export default class DesignspaceNavigationPanel extends Panel {
     this.sceneSettings.editingLayers = editingLayers;
   }
 
-  async removeSource() {
+  canRemoveSource() {
     const sourceItem = this.sourcesList.getSelectedItem();
-    if (!sourceItem) {
+    const numActiveSources = this.sourcesList.items.reduce(
+      (total, item) => total + (item.active ? 1 : 0),
+      0
+    );
+
+    return (
+      sourceItem &&
+      !sourceItem.isFontSource &&
+      (!sourceItem.active || numActiveSources > 1)
+    );
+  }
+
+  async removeSource() {
+    if (!this.canRemoveSource()) {
       return;
     }
+
+    const sourceItem = this.sourcesList.getSelectedItem();
     const sourceIndex = sourceItem.sourceIndex;
 
     const glyphController = await this.sceneModel.getSelectedVariableGlyphController();
@@ -1572,7 +1595,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     const suggestedSourceName =
       fontSourceName && !hasGlyphLocation
         ? fontSourceName
-        : suggestedSourceNameFromLocation(makeSparseLocation(location, locationAxes));
+        : locationToName(makeSparseLocation(location, locationAxes));
     const suggestedLayerName =
       locationBase && !hasGlyphLocation
         ? locationBase
@@ -1623,7 +1646,7 @@ export default class DesignspaceNavigationPanel extends Panel {
       }
       nameController.model.sourceName = "";
 
-      const suggestedSourceName = suggestedSourceNameFromLocation(
+      const suggestedSourceName = locationToName(
         makeSparseLocation(locationController.model, locationAxes)
       );
 
@@ -1644,7 +1667,7 @@ export default class DesignspaceNavigationPanel extends Panel {
       }
 
       if (!nameController.model.locationBase || isGlyphAxisChange) {
-        const suggestedSourceName = suggestedSourceNameFromLocation(
+        const suggestedSourceName = locationToName(
           makeSparseLocation(locationController.model, locationAxes)
         );
         if (
@@ -2116,17 +2139,6 @@ function foldNLIAxes(axes) {
     axisInfo[baseName] = { ...axis, name: baseName };
   }
   return Object.values(axisInfo);
-}
-
-function suggestedSourceNameFromLocation(location) {
-  return (
-    Object.entries(location)
-      .map(([name, value]) => {
-        value = round(value, 1);
-        return `${name}=${value}`;
-      })
-      .join(",") || "default"
-  );
 }
 
 function getGlyphAxisNamesSet(glyph) {

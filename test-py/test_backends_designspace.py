@@ -224,6 +224,45 @@ async def test_addNewDenseSource(writableTestFont):
     )
 
 
+async def test_makeSourceDense(writableTestFont):
+    sources = await writableTestFont.getSources()
+
+    for sourceIdentifier, source in sources.items():
+        if source.isSparse:
+            source.isSparse = False
+            break
+
+    with pytest.raises(ValueError, match="cannot be made not sparse"):
+        await writableTestFont.putSources(sources)
+
+
+async def test_makeSourceSparse(writableTestFont):
+    oldDSDoc = DesignSpaceDocument.fromfile(writableTestFont.dsDoc.path)
+    [dsSource] = [
+        dsSource for dsSource in oldDSDoc.sources if dsSource.name == "bold-wide"
+    ]
+    assert dsSource.layerName is None
+
+    sources = await writableTestFont.getSources()
+
+    source = sources["bold-wide"]
+    assert not source.isSparse
+    source.isSparse = True
+
+    await writableTestFont.putSources(sources)
+
+    reopenedBackend = getFileSystemBackend(writableTestFont.dsDoc.path)
+    reopenedFontSources = await reopenedBackend.getSources()
+    reopenedSource = reopenedFontSources["bold-wide"]
+    assert reopenedSource.isSparse
+
+    newDSDoc = DesignSpaceDocument.fromfile(writableTestFont.dsDoc.path)
+    [dsSource] = [
+        dsSource for dsSource in newDSDoc.sources if dsSource.name == "bold-wide"
+    ]
+    assert dsSource.layerName == "foreground"
+
+
 async def test_addLocalAxis(writableTestFont):
     glyphName = "period"
     glyphMap = await writableTestFont.getGlyphMap()
@@ -697,10 +736,43 @@ async def test_deleteGlyph(writableTestFont):
         assert glyphName not in lib.get("public.glyphOrder", [])
 
 
-async def test_deleteGlyphRaisesKeyError(writableTestFont):
+async def test_deleteGlyph_addGlyph(writableTestFont):
+    # Test that the public.glyphOrder is unchanged after we delete a glyph and
+    # then re-add it.
+
+    beforeGlyphOrders = [
+        dsSource.layer.reader.readLib().get("public.glyphOrder")
+        for dsSource in writableTestFont.dsSources
+    ]
+
+    glyphName = "A"
+    glyphMap = await writableTestFont.getGlyphMap()
+    glyph = await writableTestFont.getGlyph(glyphName)
+    await writableTestFont.deleteGlyph(glyphName)
+    assert await writableTestFont.getGlyph(glyphName) is None
+
+    await writableTestFont.putGlyph(glyphName, glyph, glyphMap[glyphName])
+
+    afterGlyphOrders = [
+        dsSource.layer.reader.readLib().get("public.glyphOrder")
+        for dsSource in writableTestFont.dsSources
+    ]
+
+    for beforeGlyphOrder, afterGlyphOrder in zip(
+        beforeGlyphOrders, afterGlyphOrders, strict=True
+    ):
+        if beforeGlyphOrder is not None:
+            assert glyphName in beforeGlyphOrder
+            assert glyphName in afterGlyphOrder
+        assert beforeGlyphOrder == afterGlyphOrder
+
+
+async def test_deleteUnknownGlyph(writableTestFont):
     glyphName = "A.doesnotexist"
-    with pytest.raises(KeyError, match="Glyph 'A.doesnotexist' does not exist"):
-        await writableTestFont.deleteGlyph(glyphName)
+    glyphMap = await writableTestFont.getGlyphMap()
+    assert glyphName not in glyphMap
+    # .deleteGlyph() should *not* raise an error if glyphName doesn't exist
+    await writableTestFont.deleteGlyph(glyphName)
 
 
 async def test_findGlyphsThatUseGlyph(writableTestFont):
@@ -1266,6 +1338,27 @@ async def test_uniqueFontSourceIdentifiers(writableTestFont):
     backend = getFileSystemBackend(dsPath)
     sources = await backend.getSources()
     assert len(sources) == len(dsDoc.sources)
+
+
+async def test_missingUFOError(writableTestFont):
+    dsDoc = writableTestFont.dsDoc
+    dsPath = dsDoc.path
+    dsDoc.sources[0].path += ".invalid"
+    dsDoc.write(dsPath)
+
+    with pytest.raises(FileNotFoundError, match=r".*\.invalid$"):
+        _ = getFileSystemBackend(dsPath)
+
+
+async def test_write_italicAngle(writableTestFont):
+    sources = await writableTestFont.getSources()
+    assert sources["light-condensed"].italicAngle == 0
+    sources["light-condensed"].italicAngle = -15
+    await writableTestFont.putSources(sources)
+
+    reopenedFont = getFileSystemBackend(writableTestFont.dsDoc.path)
+    reopenedSources = await reopenedFont.getSources()
+    assert reopenedSources["light-condensed"].italicAngle == -15
 
 
 def fileNamesFromDir(path):

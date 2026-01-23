@@ -384,7 +384,7 @@ export default class TransformationPanel extends Panel {
         const doScaleY = this.transformParameters.dimensionHeight != height;
 
         if (doScaleX || doScaleY) {
-          this.transformSelection((layerGlyphController, selectionBounds) => {
+          this.transformSelection((selectionBounds) => {
             const { width, height } = rectSize(selectionBounds);
             const newWidth = this.transformParameters.dimensionWidth || width;
             const newHeight = this.transformParameters.dimensionHeight || height;
@@ -746,6 +746,16 @@ export default class TransformationPanel extends Panel {
       positionedGlyph.varGlyph.glyph.layers
     );
 
+    if (!positionedGlyph.glyph.layerName) {
+      const newLayerName =
+        this.fontController.fontSourcesInstancer.getSourceIdentifierForLocation(
+          this.sceneController.sceneSettings.fontLocationSourceMapped
+        );
+      if (newLayerName) {
+        editLayerGlyphs[newLayerName] = positionedGlyph.glyph.instance;
+      }
+    }
+
     const layerPaths = await mapObjectValuesAsync(
       editLayerGlyphs,
       async (layerGlyph) => {
@@ -811,6 +821,8 @@ export default class TransformationPanel extends Panel {
       return;
     }
 
+    const glyphController =
+      await this.sceneController.sceneModel.getSelectedStaticGlyphController();
     const staticGlyphControllers =
       await this.sceneController.getStaticGlyphControllers();
 
@@ -826,19 +838,25 @@ export default class TransformationPanel extends Panel {
         return {
           layerName,
           changePath: ["layers", layerName, "glyph"],
-          layerGlyphController: staticGlyphControllers[layerName],
+          layerGlyph: layerGlyph,
+          selectionBounds: (
+            staticGlyphControllers[layerName] || glyphController
+          ).getSelectionBounds(
+            this.sceneController.selection,
+            this.fontController.getBackgroundImageBoundsFunc
+          ),
           editBehavior: behaviorFactory.getTransformBehavior("default"),
         };
       });
 
       const editChanges = [];
       const rollbackChanges = [];
-      for (const { changePath, editBehavior, layerGlyphController } of layerInfo) {
-        const layerGlyph = layerGlyphController.instance;
-        const selectionBounds = layerGlyphController.getSelectionBounds(
-          this.sceneController.selection,
-          this.fontController.getBackgroundImageBoundsFunc
-        );
+      for (const {
+        changePath,
+        editBehavior,
+        selectionBounds,
+        layerGlyph,
+      } of layerInfo) {
         const pinPoint = getPinPoint(
           selectionBounds,
           this.transformParameters.originX,
@@ -847,7 +865,7 @@ export default class TransformationPanel extends Panel {
 
         const pinnedTransformation = new Transform()
           .translate(pinPoint.x, pinPoint.y)
-          .transform(transformationForLayer(layerGlyphController, selectionBounds))
+          .transform(transformationForLayer(selectionBounds))
           .translate(-pinPoint.x, -pinPoint.y);
 
         const editChange =
@@ -1036,7 +1054,8 @@ export default class TransformationPanel extends Panel {
       const rollbackChanges = [];
 
       for (const [layerName, layerGlyph] of Object.entries(editLayerGlyphs)) {
-        const controller = staticGlyphControllers[layerName];
+        const changePath = ["layers", layerName, "glyph"];
+        const controller = staticGlyphControllers[layerName] || glyphController;
         const layer = glyph.layers[layerName];
 
         const boundingBoxes = movableObjects.map((obj) =>
