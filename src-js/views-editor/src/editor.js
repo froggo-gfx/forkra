@@ -72,7 +72,10 @@ import { PointerTools } from "./edit-tools-pointer.js";
 import { PowerRulerTool } from "./edit-tools-power-ruler.js";
 import { ShapeTool } from "./edit-tools-shape.js";
 import { SkeletonPenTool } from "./edit-tools-skeleton.js";
-import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
+import {
+  generateContoursFromSkeleton,
+  getSkeletonData,
+} from "@fontra/core/skeleton-contour-generator.js";
 import { SceneController } from "./scene-controller.js";
 import { MIN_SIDEBAR_WIDTH, Sidebar } from "./sidebar.js";
 import {
@@ -2987,6 +2990,7 @@ export class EditorController extends ViewController {
       component: componentIndices,
       anchor: anchorIndices,
       guideline: guidelineIndices,
+      skeletonPoint: skeletonPointSelection,
       //fontGuideline: fontGuidelineIndices,
     } = parseSelection(this.sceneController.selection);
     pointIndices = pointIndices || [];
@@ -3000,28 +3004,74 @@ export class EditorController extends ViewController {
     let selectGuidelines = false;
 
     const instance = positionedGlyph.glyph.instance;
+
+    // Get skeleton data to identify generated contours
+    const editLayerName =
+      this.sceneController.sceneSettings?.editLayerName ||
+      positionedGlyph.glyph?.layerName;
+    const layer = editLayerName
+      ? positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName]
+      : null;
+    const skeletonData = layer ? getSkeletonData(layer) : null;
+    const generatedContourIndices = new Set(skeletonData?.generatedContourIndices || []);
+
+    // Collect skeleton on-curve points
+    const skeletonOnCurvePoints = [];
+    if (skeletonData?.contours?.length) {
+      for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
+        const contour = skeletonData.contours[contourIdx];
+        for (let pointIdx = 0; pointIdx < contour.points.length; pointIdx++) {
+          const point = contour.points[pointIdx];
+          if (!point.type) {
+            // on-curve point
+            skeletonOnCurvePoints.push({ contourIdx, pointIdx });
+          }
+        }
+      }
+    }
+
+    const hasSkeletonPoints = skeletonOnCurvePoints.length > 0;
     const hasObjects =
       instance.components.length > 0 || instance.path.pointTypes.length > 0;
     const hasAnchors = instance.anchors.length > 0;
     const hasGuidelines = instance.guidelines.length > 0;
 
+    // Collect on-curve points from non-generated contours only
     const glyphPath = positionedGlyph.glyph.path;
     let onCurvePoints = [];
     for (const [pointIndex, pointType] of enumerate(glyphPath.pointTypes)) {
       if ((pointType & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE) {
-        onCurvePoints.push(pointIndex);
+        // Check if this point belongs to a skeleton-generated contour
+        const contourIndex = glyphPath.getContourIndex(pointIndex);
+        if (!generatedContourIndices.has(contourIndex)) {
+          onCurvePoints.push(pointIndex);
+        }
       }
     }
 
     const allOnCurvePointsSelected = isSuperset(new Set(pointIndices), onCurvePoints);
+
+    // Check if all skeleton on-curve points are selected
+    const allSkeletonPointsSelected =
+      skeletonOnCurvePoints.length > 0 &&
+      skeletonPointSelection?.size >= skeletonOnCurvePoints.length &&
+      skeletonOnCurvePoints.every((p) =>
+        skeletonPointSelection.has(`${p.contourIdx}/${p.pointIdx}`)
+      );
+
+    // Consider objects selected if both regular and skeleton points are selected
+    const objectsFullySelected =
+      (allOnCurvePointsSelected || onCurvePoints.length === 0) &&
+      (allSkeletonPointsSelected || skeletonOnCurvePoints.length === 0) &&
+      componentIndices.length >= instance.components.length;
+
     if (
-      (!allOnCurvePointsSelected ||
-        componentIndices.length < instance.components.length) &&
+      !objectsFullySelected &&
       !anchorIndices.length &&
       !guidelineIndices.length
       //&& !fontGuidelineIndices.length
     ) {
-      if (hasObjects) {
+      if (hasObjects || hasSkeletonPoints) {
         selectObjects = true;
       } else if (hasAnchors) {
         selectAnchors = true;
@@ -3031,8 +3081,7 @@ export class EditorController extends ViewController {
     }
 
     if (
-      allOnCurvePointsSelected &&
-      componentIndices.length == instance.components.length &&
+      objectsFullySelected &&
       !anchorIndices.length &&
       !guidelineIndices.length
       //&& !fontGuidelineIndices.length
@@ -3071,8 +3120,13 @@ export class EditorController extends ViewController {
     let newSelection = new Set();
 
     if (selectObjects) {
+      // Add regular path on-curve points (excluding skeleton-generated contours)
       for (const pointIndex of onCurvePoints) {
         newSelection.add(`point/${pointIndex}`);
+      }
+      // Add skeleton on-curve points
+      for (const { contourIdx, pointIdx } of skeletonOnCurvePoints) {
+        newSelection.add(`skeletonPoint/${contourIdx}/${pointIdx}`);
       }
       for (const componentIndex of range(positionedGlyph.glyph.components.length)) {
         newSelection.add(`component/${componentIndex}`);
