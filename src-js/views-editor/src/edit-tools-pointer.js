@@ -477,6 +477,38 @@ export class PointerTool extends BaseTool {
         // Only toggle on-curve points (not handles)
         if (point.type === "cubic" || point.type === "quad") continue;
 
+        const points = contour.points;
+        const numPoints = points.length;
+        const isClosed = contour.isClosed;
+
+        // Check if this is an endpoint of an open contour
+        if (!isClosed) {
+          // Find first and last on-curve indices
+          let firstOnCurve = -1;
+          let lastOnCurve = -1;
+          for (let i = 0; i < numPoints; i++) {
+            if (!points[i].type) {
+              if (firstOnCurve === -1) firstOnCurve = i;
+              lastOnCurve = i;
+            }
+          }
+          // Endpoints cannot be smooth
+          if (pointIdx === firstOnCurve || pointIdx === lastOnCurve) {
+            continue;
+          }
+        }
+
+        // Check if point has at least one adjacent handle
+        const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
+        const nextIdx = (pointIdx + 1) % numPoints;
+        const hasPrevHandle = points[prevIdx]?.type === "cubic" || points[prevIdx]?.type === "quad";
+        const hasNextHandle = points[nextIdx]?.type === "cubic" || points[nextIdx]?.type === "quad";
+
+        // Points without any handles cannot be smooth (corner between two lines)
+        if (!hasPrevHandle && !hasNextHandle) {
+          continue;
+        }
+
         // Determine new value from first point
         if (newSmooth === null) {
           newSmooth = !point.smooth;
@@ -484,48 +516,36 @@ export class PointerTool extends BaseTool {
 
         point.smooth = newSmooth;
 
-        // If switching to smooth, align the handles to be collinear
-        if (newSmooth) {
-          const points = contour.points;
-          const numPoints = points.length;
-
-          // Find adjacent off-curve handles
-          const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
-          const nextIdx = (pointIdx + 1) % numPoints;
+        // If switching to smooth, align the handles to be collinear (only if both handles exist)
+        if (newSmooth && hasPrevHandle && hasNextHandle) {
           const prevPoint = points[prevIdx];
           const nextPoint = points[nextIdx];
 
-          // Check if we have handles on both sides
-          const hasPrevHandle = prevPoint?.type === "cubic" || prevPoint?.type === "quad";
-          const hasNextHandle = nextPoint?.type === "cubic" || nextPoint?.type === "quad";
+          // Calculate distances from on-curve to handles
+          const prevDx = prevPoint.x - point.x;
+          const prevDy = prevPoint.y - point.y;
+          const nextDx = nextPoint.x - point.x;
+          const nextDy = nextPoint.y - point.y;
 
-          if (hasPrevHandle && hasNextHandle) {
-            // Calculate distances from on-curve to handles
-            const prevDx = prevPoint.x - point.x;
-            const prevDy = prevPoint.y - point.y;
-            const nextDx = nextPoint.x - point.x;
-            const nextDy = nextPoint.y - point.y;
+          const prevDist = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
+          const nextDist = Math.sqrt(nextDx * nextDx + nextDy * nextDy);
 
-            const prevDist = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
-            const nextDist = Math.sqrt(nextDx * nextDx + nextDy * nextDy);
+          if (prevDist > 0 && nextDist > 0) {
+            // Calculate average direction (biased by handle distances)
+            // Use vector from prev handle through point to next handle
+            const avgDx = nextDx / nextDist - prevDx / prevDist;
+            const avgDy = nextDy / nextDist - prevDy / prevDist;
+            const avgLen = Math.sqrt(avgDx * avgDx + avgDy * avgDy);
 
-            if (prevDist > 0 && nextDist > 0) {
-              // Calculate average direction (biased by handle distances)
-              // Use vector from prev handle through point to next handle
-              const avgDx = nextDx / nextDist - prevDx / prevDist;
-              const avgDy = nextDy / nextDist - prevDy / prevDist;
-              const avgLen = Math.sqrt(avgDx * avgDx + avgDy * avgDy);
+            if (avgLen > 0) {
+              const dirX = avgDx / avgLen;
+              const dirY = avgDy / avgLen;
 
-              if (avgLen > 0) {
-                const dirX = avgDx / avgLen;
-                const dirY = avgDy / avgLen;
-
-                // Set handles to be collinear, preserving distances
-                prevPoint.x = point.x - dirX * prevDist;
-                prevPoint.y = point.y - dirY * prevDist;
-                nextPoint.x = point.x + dirX * nextDist;
-                nextPoint.y = point.y + dirY * nextDist;
-              }
+              // Set handles to be collinear, preserving distances
+              prevPoint.x = point.x - dirX * prevDist;
+              prevPoint.y = point.y - dirY * prevDist;
+              nextPoint.x = point.x + dirX * nextDist;
+              nextPoint.y = point.y + dirY * nextDist;
             }
           }
         }
