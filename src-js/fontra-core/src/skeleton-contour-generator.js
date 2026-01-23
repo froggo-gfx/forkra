@@ -619,26 +619,25 @@ function calculateCornerNormal(segment1, segment2, halfWidth) {
     dir2 = vector.normalizeVector({ x: deriv2.x, y: deriv2.y });
   }
 
-  const normal1 = vector.rotateVector90CW(dir1);
-  const normal2 = vector.rotateVector90CW(dir2);
+  // Compute angle bisector using atan2 (numerically stable for all angles)
+  const dot = dir1.x * dir2.x + dir1.y * dir2.y;
+  const cross = dir1.x * dir2.y - dir1.y * dir2.x;
 
-  // Check for sharp corners using the sum of normals
-  const sumNormals = vector.addVectors(normal1, normal2);
-  const sumLength = Math.hypot(sumNormals.x, sumNormals.y);
+  // Angle from dir1 to dir2 (signed)
+  const angle = Math.atan2(cross, dot);
 
-  // If sum is too short (normals nearly opposite), use chord normal
-  // sumLength < 1.0 corresponds to angle > 120° between normals (corner < 60°)
-  // sumLength < 1.4 corresponds to angle > 90° between normals (corner < 90°)
-  if (sumLength < 1.0) {
-    // Use chord normal: perpendicular to line from P1 to P3
-    const chordDir = vector.normalizeVector(
-      vector.subVectors(segment2.endPoint, segment1.startPoint)
-    );
-    return vector.rotateVector90CW(chordDir);
-  }
+  // Bisector = dir1 rotated by angle/2
+  const halfAngle = angle / 2;
+  const cosH = Math.cos(halfAngle);
+  const sinH = Math.sin(halfAngle);
 
-  // Normal case: average the two normals
-  return vector.mulVectorScalar(sumNormals, 1 / sumLength);
+  const bisector = {
+    x: dir1.x * cosH - dir1.y * sinH,
+    y: dir1.x * sinH + dir1.y * cosH,
+  };
+
+  // Normal is perpendicular to bisector (rotated 90° CW)
+  return { x: bisector.y, y: -bisector.x };
 }
 
 /**
