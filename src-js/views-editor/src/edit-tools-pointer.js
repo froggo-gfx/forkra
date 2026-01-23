@@ -296,25 +296,29 @@ export class PointerTool extends BaseTool {
     const newSelection = modeFunc(sceneController.selection, selection);
     const cleanSel = selection;
 
-    // Check if clicking on skeleton segment whose contour is already selected
-    const clickedSkeletonSegmentOfSelectedContour =
+    // Check if clicking on skeleton segment while skeleton points are selected
+    const clickedSkeletonSegmentWithPointsSelected =
       this._isClickOnSelectedSkeletonContourSegment(cleanSel, sceneController.selection);
+
+    // If clicking on skeleton segment while points are selected, clear selection
+    if (clickedSkeletonSegmentWithPointsSelected) {
+      this._selectionBeforeSingleClick = sceneController.selection;
+      sceneController.selection = new Set();
+      // Don't initiate drag - just clear selection
+      return;
+    }
 
     if (
       !selection.size ||
       event.shiftKey ||
       event.altKey ||
-      (!isSuperset(sceneController.selection, cleanSel) &&
-        !clickedSkeletonSegmentOfSelectedContour)
+      !isSuperset(sceneController.selection, cleanSel)
     ) {
       this._selectionBeforeSingleClick = sceneController.selection;
       sceneController.selection = newSelection;
     }
 
-    if (
-      isSuperset(sceneController.selection, cleanSel) ||
-      clickedSkeletonSegmentOfSelectedContour
-    ) {
+    if (isSuperset(sceneController.selection, cleanSel)) {
       initiateDrag = true;
     }
     if (!selection.size) {
