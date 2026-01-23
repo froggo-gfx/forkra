@@ -17,7 +17,7 @@ import {
 /**
  * Get skeleton data from a positioned glyph's editing layer.
  */
-function getSkeletonDataFromGlyph(positionedGlyph, model) {
+export function getSkeletonDataFromGlyph(positionedGlyph, model) {
   if (!positionedGlyph?.varGlyph?.glyph?.layers) {
     return null;
   }

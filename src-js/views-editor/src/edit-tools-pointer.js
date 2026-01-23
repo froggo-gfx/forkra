@@ -38,6 +38,7 @@ import {
   createSkeletonEditBehavior,
   getSkeletonBehaviorName,
 } from "./skeleton-edit-behavior.js";
+import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
 import { getPinPoint } from "./panel-transformation.js";
 import { equalGlyphSelection } from "./scene-controller.js";
@@ -1641,10 +1642,12 @@ registerVisualizationLayerDefinition({
     if (!model.showTransformSelection) {
       return;
     }
+    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
     const transformBounds = getTransformSelectionBounds(
       positionedGlyph.glyph,
       model.selection,
-      model.fontController.getBackgroundImageBoundsFunc
+      model.fontController.getBackgroundImageBoundsFunc,
+      skeletonData
     );
     if (!transformBounds) {
       return;
