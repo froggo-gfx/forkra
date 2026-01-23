@@ -476,32 +476,32 @@ export class PointerTool extends BaseTool {
     const sceneController = this.sceneController;
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const editLayerName = sceneController.editingLayerNames?.[0];
-      if (!editLayerName || !glyph.layers[editLayerName]) {
-        return;
+      // Setup data for ALL editable layers (multi-source editing support)
+      const layersData = {};
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        layersData[editLayerName] = {
+          layer,
+          skeletonData: JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])),
+        };
       }
 
-      const layer = glyph.layers[editLayerName];
-      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
-      if (!skeletonData) return;
+      if (Object.keys(layersData).length === 0) return;
 
-      // Deep clone for manipulation
-      skeletonData = JSON.parse(JSON.stringify(skeletonData));
-
-      // Determine new smooth value (toggle based on first selected on-curve point)
+      // Determine new smooth value from first layer (all layers should have same structure)
+      const firstLayerData = Object.values(layersData)[0];
       let newSmooth = null;
 
-      // Toggle smooth for all selected on-curve points
+      // Find newSmooth value from first layer
       for (const selKey of skeletonPointSelection) {
         const [contourIdx, pointIdx] = selKey.split("/").map(Number);
-        const contour = skeletonData.contours?.[contourIdx];
+        const contour = firstLayerData.skeletonData.contours?.[contourIdx];
         if (!contour) continue;
 
         const point = contour.points?.[pointIdx];
-        if (!point) continue;
-
-        // Only toggle on-curve points (not handles)
-        if (point.type === "cubic" || point.type === "quad") continue;
+        if (!point || point.type === "cubic" || point.type === "quad") continue;
 
         const points = contour.points;
         const numPoints = points.length;
@@ -509,7 +509,6 @@ export class PointerTool extends BaseTool {
 
         // Check if this is an endpoint of an open contour
         if (!isClosed) {
-          // Find first and last on-curve indices
           let firstOnCurve = -1;
           let lastOnCurve = -1;
           for (let i = 0; i < numPoints; i++) {
@@ -518,105 +517,124 @@ export class PointerTool extends BaseTool {
               lastOnCurve = i;
             }
           }
-          // Endpoints cannot be smooth
-          if (pointIdx === firstOnCurve || pointIdx === lastOnCurve) {
-            continue;
-          }
+          if (pointIdx === firstOnCurve || pointIdx === lastOnCurve) continue;
         }
 
-        // Check if point has at least one adjacent handle
         const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
         const nextIdx = (pointIdx + 1) % numPoints;
         const hasPrevHandle = points[prevIdx]?.type === "cubic" || points[prevIdx]?.type === "quad";
         const hasNextHandle = points[nextIdx]?.type === "cubic" || points[nextIdx]?.type === "quad";
 
-        // Points without any handles cannot be smooth (corner between two lines)
-        if (!hasPrevHandle && !hasNextHandle) {
-          continue;
-        }
+        if (!hasPrevHandle && !hasNextHandle) continue;
 
-        // Determine new value from first point
-        if (newSmooth === null) {
-          newSmooth = !point.smooth;
-        }
+        newSmooth = !point.smooth;
+        break;
+      }
 
-        point.smooth = newSmooth;
+      if (newSmooth === null) return; // No valid on-curve points selected
 
-        // If switching to smooth, align handle(s) to be collinear
-        if (newSmooth) {
-          if (hasPrevHandle && hasNextHandle) {
-            // Both handles exist - align them to be collinear with each other
-            const prevPoint = points[prevIdx];
-            const nextPoint = points[nextIdx];
+      // Helper to apply smooth toggle to skeleton data
+      const applySmoothToggle = (skeletonData) => {
+        for (const selKey of skeletonPointSelection) {
+          const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+          const contour = skeletonData.contours?.[contourIdx];
+          if (!contour) continue;
 
-            const prevDx = prevPoint.x - point.x;
-            const prevDy = prevPoint.y - point.y;
-            const nextDx = nextPoint.x - point.x;
-            const nextDy = nextPoint.y - point.y;
+          const point = contour.points?.[pointIdx];
+          if (!point || point.type === "cubic" || point.type === "quad") continue;
 
-            const prevDist = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
-            const nextDist = Math.sqrt(nextDx * nextDx + nextDy * nextDy);
+          const points = contour.points;
+          const numPoints = points.length;
+          const isClosed = contour.isClosed;
 
-            if (prevDist > 0 && nextDist > 0) {
-              const avgDx = nextDx / nextDist - prevDx / prevDist;
-              const avgDy = nextDy / nextDist - prevDy / prevDist;
-              const avgLen = Math.sqrt(avgDx * avgDx + avgDy * avgDy);
-
-              if (avgLen > 0) {
-                const dirX = avgDx / avgLen;
-                const dirY = avgDy / avgLen;
-
-                prevPoint.x = point.x - dirX * prevDist;
-                prevPoint.y = point.y - dirY * prevDist;
-                nextPoint.x = point.x + dirX * nextDist;
-                nextPoint.y = point.y + dirY * nextDist;
+          if (!isClosed) {
+            let firstOnCurve = -1;
+            let lastOnCurve = -1;
+            for (let i = 0; i < numPoints; i++) {
+              if (!points[i].type) {
+                if (firstOnCurve === -1) firstOnCurve = i;
+                lastOnCurve = i;
               }
             }
-          } else if (hasPrevHandle || hasNextHandle) {
-            // Only one handle - align it with the line segment on the other side
-            const handleIdx = hasPrevHandle ? prevIdx : nextIdx;
-            const handlePoint = points[handleIdx];
+            if (pointIdx === firstOnCurve || pointIdx === lastOnCurve) continue;
+          }
 
-            // Find the on-curve point on the other side (for line direction)
-            const otherSideIdx = hasPrevHandle ? nextIdx : prevIdx;
-            let lineEndIdx = otherSideIdx;
+          const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
+          const nextIdx = (pointIdx + 1) % numPoints;
+          const hasPrevHandle = points[prevIdx]?.type === "cubic" || points[prevIdx]?.type === "quad";
+          const hasNextHandle = points[nextIdx]?.type === "cubic" || points[nextIdx]?.type === "quad";
 
-            // Skip any off-curve points to find the next on-curve
-            while (points[lineEndIdx]?.type) {
-              lineEndIdx = hasPrevHandle
-                ? (lineEndIdx + 1) % numPoints
-                : (lineEndIdx - 1 + numPoints) % numPoints;
-              if (lineEndIdx === pointIdx) break; // Safety
-            }
+          if (!hasPrevHandle && !hasNextHandle) continue;
 
-            const lineEnd = points[lineEndIdx];
-            if (lineEnd && !lineEnd.type) {
-              // Direction from point to line end
-              const lineDx = lineEnd.x - point.x;
-              const lineDy = lineEnd.y - point.y;
-              const lineLen = Math.sqrt(lineDx * lineDx + lineDy * lineDy);
+          point.smooth = newSmooth;
 
-              if (lineLen > 0) {
-                const lineDirX = lineDx / lineLen;
-                const lineDirY = lineDy / lineLen;
+          // If switching to smooth, align handle(s) to be collinear
+          if (newSmooth) {
+            if (hasPrevHandle && hasNextHandle) {
+              const prevPoint = points[prevIdx];
+              const nextPoint = points[nextIdx];
 
-                // Handle distance
-                const handleDx = handlePoint.x - point.x;
-                const handleDy = handlePoint.y - point.y;
-                const handleDist = Math.sqrt(handleDx * handleDx + handleDy * handleDy);
+              const prevDx = prevPoint.x - point.x;
+              const prevDy = prevPoint.y - point.y;
+              const nextDx = nextPoint.x - point.x;
+              const nextDy = nextPoint.y - point.y;
 
-                if (handleDist > 0) {
-                  // Align handle opposite to line direction
-                  handlePoint.x = point.x - lineDirX * handleDist;
-                  handlePoint.y = point.y - lineDirY * handleDist;
+              const prevDist = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
+              const nextDist = Math.sqrt(nextDx * nextDx + nextDy * nextDy);
+
+              if (prevDist > 0 && nextDist > 0) {
+                const avgDx = nextDx / nextDist - prevDx / prevDist;
+                const avgDy = nextDy / nextDist - prevDy / prevDist;
+                const avgLen = Math.sqrt(avgDx * avgDx + avgDy * avgDy);
+
+                if (avgLen > 0) {
+                  const dirX = avgDx / avgLen;
+                  const dirY = avgDy / avgLen;
+
+                  prevPoint.x = point.x - dirX * prevDist;
+                  prevPoint.y = point.y - dirY * prevDist;
+                  nextPoint.x = point.x + dirX * nextDist;
+                  nextPoint.y = point.y + dirY * nextDist;
+                }
+              }
+            } else if (hasPrevHandle || hasNextHandle) {
+              const handleIdx = hasPrevHandle ? prevIdx : nextIdx;
+              const handlePoint = points[handleIdx];
+
+              const otherSideIdx = hasPrevHandle ? nextIdx : prevIdx;
+              let lineEndIdx = otherSideIdx;
+
+              while (points[lineEndIdx]?.type) {
+                lineEndIdx = hasPrevHandle
+                  ? (lineEndIdx + 1) % numPoints
+                  : (lineEndIdx - 1 + numPoints) % numPoints;
+                if (lineEndIdx === pointIdx) break;
+              }
+
+              const lineEnd = points[lineEndIdx];
+              if (lineEnd && !lineEnd.type) {
+                const lineDx = lineEnd.x - point.x;
+                const lineDy = lineEnd.y - point.y;
+                const lineLen = Math.sqrt(lineDx * lineDx + lineDy * lineDy);
+
+                if (lineLen > 0) {
+                  const lineDirX = lineDx / lineLen;
+                  const lineDirY = lineDy / lineLen;
+
+                  const handleDx = handlePoint.x - point.x;
+                  const handleDy = handlePoint.y - point.y;
+                  const handleDist = Math.sqrt(handleDx * handleDx + handleDy * handleDy);
+
+                  if (handleDist > 0) {
+                    handlePoint.x = point.x - lineDirX * handleDist;
+                    handlePoint.y = point.y - lineDirY * handleDist;
+                  }
                 }
               }
             }
           }
         }
-      }
-
-      if (newSmooth === null) return; // No on-curve points selected
+      };
 
       // Helper function to regenerate outline contours
       const regenerateOutline = (staticGlyph, skelData) => {
@@ -638,23 +656,29 @@ export class PointerTool extends BaseTool {
         skelData.generatedContourIndices = newGeneratedIndices;
       };
 
-      // Record changes
-      const changes = [];
+      const allChanges = [];
 
-      // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
-      const staticGlyph = layer.glyph;
-      const pathChange = recordChanges(staticGlyph, (sg) => {
-        regenerateOutline(sg, skeletonData);
-      });
-      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+      // Apply changes to ALL editable layers
+      for (const [editLayerName, data] of Object.entries(layersData)) {
+        const { layer, skeletonData } = data;
 
-      // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+        // Apply the smooth toggle to this layer's skeleton data
+        applySmoothToggle(skeletonData);
 
-      const combinedChange = new ChangeCollector().concat(...changes);
+        // Record changes for this layer
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          regenerateOutline(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      const combinedChange = new ChangeCollector().concat(...allChanges);
       await sendIncrementalChange(combinedChange.change);
 
       return {
@@ -1103,20 +1127,22 @@ export class PointerTool extends BaseTool {
     if (!selectedSkeletonPoints?.size) return;
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const editLayerName = sceneController.editingLayerNames?.[0];
-      if (!editLayerName || !glyph.layers[editLayerName]) {
-        return;
+      // Setup data for ALL editable layers (multi-source editing support)
+      const layersData = {};
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        layersData[editLayerName] = {
+          layer,
+          original: JSON.parse(JSON.stringify(skeletonData)),
+          working: JSON.parse(JSON.stringify(skeletonData)),
+          behaviors: null, // Will be created below
+        };
       }
 
-      const layer = glyph.layers[editLayerName];
-      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
-      if (!skeletonData) return;
-
-      // Deep clone for manipulation - this is our working copy
-      const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
-
-      // Store original skeleton data for reference
-      const originalSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+      if (Object.keys(layersData).length === 0) return;
 
       // Helper function to regenerate outline contours
       const regenerateOutline = (staticGlyph, skelData) => {
@@ -1144,12 +1170,14 @@ export class PointerTool extends BaseTool {
         initialEvent.altKey
       );
 
-      // Create initial behaviors
-      let behaviors = createSkeletonEditBehavior(
-        originalSkeletonData,
-        selectedSkeletonPoints,
-        lastBehaviorName
-      );
+      // Create initial behaviors for each layer
+      for (const data of Object.values(layersData)) {
+        data.behaviors = createSkeletonEditBehavior(
+          data.original,
+          selectedSkeletonPoints,
+          lastBehaviorName
+        );
+      }
 
       // Accumulate changes (following Pen Tool pattern)
       let accumulatedChanges = new ChangeCollector();
@@ -1168,52 +1196,57 @@ export class PointerTool extends BaseTool {
         // Recreate behaviors if behavior changed (shift or alt state changed)
         if (behaviorName !== lastBehaviorName) {
           lastBehaviorName = behaviorName;
-          behaviors = createSkeletonEditBehavior(
-            originalSkeletonData,
-            selectedSkeletonPoints,
-            behaviorName
-          );
-        }
-
-        // Reset working data to original before applying changes
-        for (let ci = 0; ci < originalSkeletonData.contours.length; ci++) {
-          const origContour = originalSkeletonData.contours[ci];
-          const workContour = workingSkeletonData.contours[ci];
-          for (let pi = 0; pi < origContour.points.length; pi++) {
-            workContour.points[pi].x = origContour.points[pi].x;
-            workContour.points[pi].y = origContour.points[pi].y;
+          for (const data of Object.values(layersData)) {
+            data.behaviors = createSkeletonEditBehavior(
+              data.original,
+              selectedSkeletonPoints,
+              behaviorName
+            );
           }
         }
 
-        // Apply behavior changes
-        for (const behavior of behaviors) {
-          const changes = behavior.applyDelta(delta);
-          const contour = workingSkeletonData.contours[behavior.contourIndex];
-          for (const { pointIndex, x, y } of changes) {
-            contour.points[pointIndex].x = x;
-            contour.points[pointIndex].y = y;
+        const allChanges = [];
+
+        // Apply changes to ALL editable layers
+        for (const [editLayerName, data] of Object.entries(layersData)) {
+          const { layer, original, working, behaviors } = data;
+
+          // Reset working data to original before applying changes
+          for (let ci = 0; ci < original.contours.length; ci++) {
+            const origContour = original.contours[ci];
+            const workContour = working.contours[ci];
+            for (let pi = 0; pi < origContour.points.length; pi++) {
+              workContour.points[pi].x = origContour.points[pi].x;
+              workContour.points[pi].y = origContour.points[pi].y;
+            }
           }
+
+          // Apply behavior changes
+          for (const behavior of behaviors) {
+            const changes = behavior.applyDelta(delta);
+            const contour = working.contours[behavior.contourIndex];
+            for (const { pointIndex, x, y } of changes) {
+              contour.points[pointIndex].x = x;
+              contour.points[pointIndex].y = y;
+            }
+          }
+
+          // Record changes for this layer
+          // 1. FIRST: Generate outline contours
+          const staticGlyph = layer.glyph;
+          const pathChange = recordChanges(staticGlyph, (sg) => {
+            regenerateOutline(sg, working);
+          });
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+          // 2. THEN: Save skeletonData to customData
+          const customDataChange = recordChanges(layer, (l) => {
+            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+          });
+          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
         }
 
-        // Record changes
-        const changes = [];
-
-        // 1. FIRST: Generate outline contours
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          regenerateOutline(sg, workingSkeletonData);
-        });
-        changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-        // 2. THEN: Save skeletonData to customData
-        const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
-            JSON.stringify(workingSkeletonData)
-          );
-        });
-        changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
-        const combinedChange = new ChangeCollector().concat(...changes);
+        const combinedChange = new ChangeCollector().concat(...allChanges);
         // Accumulate changes for proper undo/redo
         accumulatedChanges = accumulatedChanges.concat(combinedChange);
         await sendIncrementalChange(combinedChange.change, true);
@@ -1249,6 +1282,7 @@ export class PointerTool extends BaseTool {
     };
 
     // Check if point is in asymmetric mode (leftWidth and rightWidth exist AND are different)
+    // Use first layer for check - all layers should have same structure
     const editLayerNameForCheck = sceneController.editingLayerNames?.[0];
     const layerForCheck = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerNameForCheck];
     const skeletonDataForCheck = layerForCheck?.customData?.[SKELETON_CUSTOM_DATA_KEY];
@@ -1270,21 +1304,27 @@ export class PointerTool extends BaseTool {
     }
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const editLayerName = sceneController.editingLayerNames?.[0];
-      if (!editLayerName || !glyph.layers[editLayerName]) {
-        return;
+      // Setup data for ALL editable layers (multi-source editing support)
+      const layersData = {};
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        layersData[editLayerName] = {
+          layer,
+          original: JSON.parse(JSON.stringify(skeletonData)),
+          working: JSON.parse(JSON.stringify(skeletonData)),
+          ribBehavior: null, // Will be created below
+        };
       }
 
-      const layer = glyph.layers[editLayerName];
-      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
-      if (!skeletonData) return;
+      if (Object.keys(layersData).length === 0) return;
 
-      // Deep clone for manipulation
-      const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
-      const originalSkeletonData = JSON.parse(JSON.stringify(skeletonData));
-
-      // Create rib edit behavior
-      const ribBehavior = createRibEditBehavior(originalSkeletonData, ribHit);
+      // Create rib edit behavior for each layer
+      for (const data of Object.values(layersData)) {
+        data.ribBehavior = createRibEditBehavior(data.original, ribHit);
+      }
 
       // Helper function to regenerate outline contours
       const regenerateOutline = (staticGlyph, skelData) => {
@@ -1318,49 +1358,52 @@ export class PointerTool extends BaseTool {
 
         const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
 
-        // Apply behavior to get new width
-        const widthChange = ribBehavior.applyDelta(delta);
+        const allChanges = [];
 
-        // Update working skeleton data with new width
-        const contour = workingSkeletonData.contours[widthChange.contourIndex];
-        const point = contour.points[widthChange.pointIndex];
+        // Apply changes to ALL editable layers
+        for (const [editLayerName, data] of Object.entries(layersData)) {
+          const { layer, working, ribBehavior } = data;
 
-        if (isAsymmetric) {
-          // Asymmetric mode: update only the dragged side
-          if (ribHit.side === "left") {
-            point.leftWidth = widthChange.halfWidth;
+          // Apply behavior to get new width (each layer has its own behavior based on its data)
+          const widthChange = ribBehavior.applyDelta(delta);
+
+          // Update working skeleton data with new width
+          const contour = working.contours[widthChange.contourIndex];
+          const point = contour.points[widthChange.pointIndex];
+
+          if (isAsymmetric) {
+            // Asymmetric mode: update only the dragged side
+            if (ribHit.side === "left") {
+              point.leftWidth = widthChange.halfWidth;
+            } else {
+              point.rightWidth = widthChange.halfWidth;
+            }
+            delete point.width;
           } else {
-            point.rightWidth = widthChange.halfWidth;
+            // Symmetric mode: update width property (affects both sides)
+            // The halfWidth from behavior is the new half-width, so full width = halfWidth * 2
+            point.width = widthChange.halfWidth * 2;
+            // Clear any asymmetric widths to ensure symmetric behavior
+            delete point.leftWidth;
+            delete point.rightWidth;
           }
-          delete point.width;
-        } else {
-          // Symmetric mode: update width property (affects both sides)
-          // The halfWidth from behavior is the new half-width, so full width = halfWidth * 2
-          point.width = widthChange.halfWidth * 2;
-          // Clear any asymmetric widths to ensure symmetric behavior
-          delete point.leftWidth;
-          delete point.rightWidth;
+
+          // Record changes for this layer
+          // 1. FIRST: Generate outline contours
+          const staticGlyph = layer.glyph;
+          const pathChange = recordChanges(staticGlyph, (sg) => {
+            regenerateOutline(sg, working);
+          });
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+          // 2. THEN: Save skeletonData to customData
+          const customDataChange = recordChanges(layer, (l) => {
+            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+          });
+          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
         }
 
-        // Record changes
-        const changes = [];
-
-        // 1. FIRST: Generate outline contours
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          regenerateOutline(sg, workingSkeletonData);
-        });
-        changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-        // 2. THEN: Save skeletonData to customData
-        const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
-            JSON.stringify(workingSkeletonData)
-          );
-        });
-        changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
-        const combinedChange = new ChangeCollector().concat(...changes);
+        const combinedChange = new ChangeCollector().concat(...allChanges);
         accumulatedChanges = accumulatedChanges.concat(combinedChange);
         await sendIncrementalChange(combinedChange.change, true);
       }

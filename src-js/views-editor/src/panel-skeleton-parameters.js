@@ -616,51 +616,63 @@ export default class SkeletonParametersPanel extends Panel {
     const isAsym = this.pointParameters.asymmetrical;
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const layer = glyph.layers[selectedData.editLayerName];
-      const skeletonData = JSON.parse(
-        JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
-      );
+      const allChanges = [];
 
-      for (const { contourIdx, pointIdx } of selectedData.points) {
-        const point = skeletonData.contours[contourIdx].points[pointIdx];
-        const defaultWidth = skeletonData.contours[contourIdx].defaultWidth || this._getCurrentDefaultWidthWide();
+      // Apply changes to ALL editable layers (multi-source editing support)
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
 
-        if (isAsym) {
-          // Asymmetric mode - edit individual sides
-          if (isLeft) {
-            point.leftWidth = value;
-            if (point.rightWidth === undefined) {
-              point.rightWidth = point.width ? point.width / 2 : value;
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
+
+          if (isAsym) {
+            // Asymmetric mode - edit individual sides
+            if (isLeft) {
+              point.leftWidth = value;
+              if (point.rightWidth === undefined) {
+                point.rightWidth = point.width ? point.width / 2 : value;
+              }
+            } else {
+              point.rightWidth = value;
+              if (point.leftWidth === undefined) {
+                point.leftWidth = point.width ? point.width / 2 : value;
+              }
             }
+            delete point.width;
           } else {
-            point.rightWidth = value;
-            if (point.leftWidth === undefined) {
-              point.leftWidth = point.width ? point.width / 2 : value;
-            }
+            // Symmetric mode - change both sides together
+            point.width = value * 2;
+            delete point.leftWidth;
+            delete point.rightWidth;
           }
-          delete point.width;
-        } else {
-          // Symmetric mode - change both sides together
-          point.width = value * 2;
-          delete point.leftWidth;
-          delete point.rightWidth;
         }
+
+        // Record changes for this layer
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
 
-      // Record changes
-      const changes = [];
-      const staticGlyph = layer.glyph;
-      const pathChange = recordChanges(staticGlyph, (sg) => {
-        this._regenerateOutlineContours(sg, skeletonData);
-      });
-      changes.push(pathChange.prefixed(["layers", selectedData.editLayerName, "glyph"]));
+      if (allChanges.length === 0) return;
 
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", selectedData.editLayerName]));
-
-      const combined = new ChangeCollector().concat(...changes);
+      const combined = new ChangeCollector().concat(...allChanges);
       await sendIncrementalChange(combined.change);
 
       return {
@@ -683,8 +695,7 @@ export default class SkeletonParametersPanel extends Panel {
 
     // Get fresh selection data
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
-    const editLayerName = this.sceneController.editingLayerNames?.[0];
-    if (!editLayerName || !positionedGlyph) return;
+    if (!positionedGlyph) return;
 
     const { skeletonPoint, skeletonRibPoint } = parseSelection(this.sceneController.selection);
 
@@ -702,60 +713,62 @@ export default class SkeletonParametersPanel extends Panel {
     if (pointKeys.size === 0) return;
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const layer = glyph.layers[editLayerName];
-      const originalSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
-      if (!originalSkeletonData) return;
+      const allChanges = [];
 
-      // Clone skeleton data for modification
-      const newSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
+      // Apply changes to ALL editable layers (multi-source editing support)
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        const originalSkeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+        if (!originalSkeletonData) continue;
 
-      for (const key of pointKeys) {
-        const [contourIdx, pointIdx] = key.split("/").map(Number);
-        const contour = newSkeletonData.contours[contourIdx];
-        const point = contour?.points[pointIdx];
-        if (!point || point.type) continue; // Skip off-curve points
+        // Clone skeleton data for modification
+        const newSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
 
-        // Get current effective widths using the same logic as UI display
-        const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
-        const currentLeft = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-        const currentRight = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+        for (const key of pointKeys) {
+          const [contourIdx, pointIdx] = key.split("/").map(Number);
+          const contour = newSkeletonData.contours[contourIdx];
+          const point = contour?.points[pointIdx];
+          if (!point || point.type) continue; // Skip off-curve points
 
-        console.log(`Point ${key}: defaultWidth=${defaultWidth}, point.width=${point.width}, point.leftWidth=${point.leftWidth}, point.rightWidth=${point.rightWidth}`);
-        console.log(`  currentLeft=${currentLeft}, currentRight=${currentRight}`);
+          // Get current effective widths using the same logic as UI display
+          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
+          const currentLeft = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+          const currentRight = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
 
-        // Apply scale
-        const newLeft = Math.round(currentLeft * scale);
-        const newRight = Math.round(currentRight * scale);
-        console.log(`  newLeft=${newLeft}, newRight=${newRight}`);
+          // Apply scale
+          const newLeft = Math.round(currentLeft * scale);
+          const newRight = Math.round(currentRight * scale);
 
-        // Store result - preserve symmetric/asymmetric mode
-        if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
-          // Was asymmetric - keep asymmetric
-          point.leftWidth = newLeft;
-          point.rightWidth = newRight;
-          delete point.width;
-        } else {
-          // Was symmetric (or default) - keep symmetric
-          point.width = newLeft + newRight;
-          delete point.leftWidth;
-          delete point.rightWidth;
+          // Store result - preserve symmetric/asymmetric mode
+          if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
+            // Was asymmetric - keep asymmetric
+            point.leftWidth = newLeft;
+            point.rightWidth = newRight;
+            delete point.width;
+          } else {
+            // Was symmetric (or default) - keep symmetric
+            point.width = newLeft + newRight;
+            delete point.leftWidth;
+            delete point.rightWidth;
+          }
         }
+
+        // Record changes for this layer
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, newSkeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = newSkeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
 
-      // Record changes
-      const changes = [];
-      const staticGlyph = layer.glyph;
-      const pathChange = recordChanges(staticGlyph, (sg) => {
-        this._regenerateOutlineContours(sg, newSkeletonData);
-      });
-      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+      if (allChanges.length === 0) return;
 
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = newSkeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
-      const combined = new ChangeCollector().concat(...changes);
+      const combined = new ChangeCollector().concat(...allChanges);
       await sendIncrementalChange(combined.change);
 
       return {
@@ -779,41 +792,52 @@ export default class SkeletonParametersPanel extends Panel {
     if (!selectedData) return;
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const layer = glyph.layers[selectedData.editLayerName];
-      const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+      const allChanges = [];
 
-      for (const { contourIdx, pointIdx } of selectedData.points) {
-        const point = skeletonData.contours[contourIdx].points[pointIdx];
-        const defaultWidth = skeletonData.contours[contourIdx].defaultWidth || this._getCurrentDefaultWidthWide();
+      // Apply changes to ALL editable layers (multi-source editing support)
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+        if (!skeletonData) continue;
 
-        // Get current total width (leftHW + rightHW)
-        const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-        const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-        const totalWidth = leftHW + rightHW;
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
 
-        // Calculate new widths based on distribution
-        const newLeftHW = totalWidth * (0.5 + distribution / 200);
-        const newRightHW = totalWidth - newLeftHW;
+          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
 
-        point.leftWidth = Math.max(0, Math.round(newLeftHW));
-        point.rightWidth = Math.max(0, Math.round(newRightHW));
-        delete point.width;
+          // Get current total width (leftHW + rightHW)
+          const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+          const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+          const totalWidth = leftHW + rightHW;
+
+          // Calculate new widths based on distribution
+          const newLeftHW = totalWidth * (0.5 + distribution / 200);
+          const newRightHW = totalWidth - newLeftHW;
+
+          point.leftWidth = Math.max(0, Math.round(newLeftHW));
+          point.rightWidth = Math.max(0, Math.round(newRightHW));
+          delete point.width;
+        }
+
+        // Record changes for this layer
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
 
-      // Record changes
-      const changes = [];
-      const staticGlyph = layer.glyph;
-      const pathChange = recordChanges(staticGlyph, (sg) => {
-        this._regenerateOutlineContours(sg, skeletonData);
-      });
-      changes.push(pathChange.prefixed(["layers", selectedData.editLayerName, "glyph"]));
+      if (allChanges.length === 0) return;
 
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", selectedData.editLayerName]));
-
-      const combined = new ChangeCollector().concat(...changes);
+      const combined = new ChangeCollector().concat(...allChanges);
       await sendIncrementalChange(combined.change, true);
 
       return {
