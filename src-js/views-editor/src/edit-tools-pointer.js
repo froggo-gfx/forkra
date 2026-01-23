@@ -596,12 +596,27 @@ export class PointerTool extends BaseTool {
     this._selectionBeforeSingleClick = undefined;
     const sceneController = this.sceneController;
 
-    // Check if we're dragging skeleton points
-    const { skeletonPoint: skeletonPointSelection } = parseSelection(
-      sceneController.selection
-    );
-    if (skeletonPointSelection?.size) {
-      await this._handleDragSkeletonPoints(eventStream, initialEvent);
+    // Check if we're dragging skeleton points or segments
+    const {
+      skeletonPoint: skeletonPointSelection,
+      skeletonSegment: skeletonSegmentSelection,
+    } = parseSelection(sceneController.selection);
+
+    // Convert skeleton segment selection to point selection
+    let effectiveSkeletonPointSelection = skeletonPointSelection;
+    if (skeletonSegmentSelection?.size) {
+      effectiveSkeletonPointSelection = this._convertSegmentSelectionToPoints(
+        skeletonSegmentSelection,
+        skeletonPointSelection
+      );
+    }
+
+    if (effectiveSkeletonPointSelection?.size) {
+      await this._handleDragSkeletonPoints(
+        eventStream,
+        initialEvent,
+        effectiveSkeletonPointSelection
+      );
       this.sceneController.sceneModel.showTransformSelection = true;
       return;
     }
@@ -714,10 +729,94 @@ export class PointerTool extends BaseTool {
   }
 
   /**
+   * Convert skeleton segment selection to point selection.
+   * Returns a Set of point keys ("contourIdx/pointIdx") for all points in selected segments.
+   */
+  _convertSegmentSelectionToPoints(segmentSelection, existingPointSelection) {
+    const result = new Set(existingPointSelection || []);
+
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+      return result;
+    }
+
+    const editLayerName =
+      this.sceneController.sceneSettings?.editLayerName ||
+      positionedGlyph.glyph?.layerName;
+    if (!editLayerName) {
+      return result;
+    }
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData?.contours?.length) {
+      return result;
+    }
+
+    for (const selKey of segmentSelection) {
+      const [contourIdx, segmentIdx] = selKey.split("/").map(Number);
+      const contour = skeletonData.contours[contourIdx];
+      if (!contour) continue;
+
+      // Find on-curve indices
+      const onCurveIndices = [];
+      for (let i = 0; i < contour.points.length; i++) {
+        if (!contour.points[i].type) {
+          onCurveIndices.push(i);
+        }
+      }
+
+      if (segmentIdx >= onCurveIndices.length) continue;
+
+      // Determine segment start and end indices
+      let startIdx, endIdx;
+      const isClosingSegment =
+        contour.isClosed && segmentIdx === onCurveIndices.length - 1;
+
+      if (isClosingSegment) {
+        startIdx = onCurveIndices[onCurveIndices.length - 1];
+        endIdx = onCurveIndices[0];
+      } else {
+        startIdx = onCurveIndices[segmentIdx];
+        endIdx = onCurveIndices[segmentIdx + 1];
+      }
+
+      // Add start and end on-curve points
+      result.add(`${contourIdx}/${startIdx}`);
+      result.add(`${contourIdx}/${endIdx}`);
+
+      // Add off-curve points between them
+      if (isClosingSegment) {
+        for (let j = startIdx + 1; j < contour.points.length; j++) {
+          if (contour.points[j].type) {
+            result.add(`${contourIdx}/${j}`);
+          }
+        }
+        for (let j = 0; j < endIdx; j++) {
+          if (contour.points[j].type) {
+            result.add(`${contourIdx}/${j}`);
+          }
+        }
+      } else {
+        for (let j = startIdx + 1; j < endIdx; j++) {
+          if (contour.points[j].type) {
+            result.add(`${contourIdx}/${j}`);
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Handle dragging skeleton points with the Pointer Tool.
    * Uses the rule-based SkeletonEditBehavior system.
+   * @param {AsyncIterable} eventStream - Event stream for drag
+   * @param {Event} initialEvent - Initial mouse event
+   * @param {Set} [overrideSelection] - Optional selection to use instead of parsing from sceneController
    */
-  async _handleDragSkeletonPoints(eventStream, initialEvent) {
+  async _handleDragSkeletonPoints(eventStream, initialEvent, overrideSelection) {
     const sceneController = this.sceneController;
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
 
@@ -730,10 +829,12 @@ export class PointerTool extends BaseTool {
       y: localPoint.y - positionedGlyph.y,
     };
 
-    // Parse skeleton point selection
-    const { skeletonPoint: selectedSkeletonPoints } = parseSelection(
-      sceneController.selection
-    );
+    // Use override selection or parse from sceneController
+    let selectedSkeletonPoints = overrideSelection;
+    if (!selectedSkeletonPoints) {
+      const parsed = parseSelection(sceneController.selection);
+      selectedSkeletonPoints = parsed.skeletonPoint;
+    }
     if (!selectedSkeletonPoints?.size) return;
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
