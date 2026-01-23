@@ -15,7 +15,7 @@ try:
     from importlib.resources.abc import Traversable
 except ImportError:
     # < 3.11
-    from importlib.abc import Traversable
+    from importlib.abc import Traversable  # type: ignore
 from importlib.metadata import entry_points
 from typing import Any, Optional
 

@@ -5,6 +5,7 @@ export const strings = {
   "action-topics.export-as": "Exporter sous",
   "action-topics.glyph-editor-appearance": "Glyphe édition apparence",
   "action-topics.menu.edit": "Édition",
+  "action-topics.menu.file": "Fichier",
   "action-topics.menu.glyph": "Glyphe",
   "action-topics.menu.view": "Affichage",
   "action-topics.reference-font": "Fonte de référence",
