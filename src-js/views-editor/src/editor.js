@@ -2260,9 +2260,12 @@ export class EditorController extends ViewController {
 
         // Add skeleton point selection if we're pasting skeleton data
         if (defaultSkeletonData?.contours?.length) {
-          const existingSkeletonData = firstLayer?.customData?.["fontra.skeleton"];
+          // Get the first editing layer name and access skeleton data directly from glyph.layers
+          const firstEditLayerName = Object.keys(editLayerGlyphs)[0];
+          const existingSkeletonData =
+            glyph.layers[firstEditLayerName]?.customData?.["fontra.skeleton"];
           const startContourIndex = existingSkeletonData?.contours?.length || 0;
-          console.log("[PASTE] Building skeleton selection, startContourIndex:", startContourIndex);
+          console.log("[PASTE] Building skeleton selection, firstEditLayerName:", firstEditLayerName, "startContourIndex:", startContourIndex);
 
           for (let ci = 0; ci < defaultSkeletonData.contours.length; ci++) {
             const contour = defaultSkeletonData.contours[ci];
