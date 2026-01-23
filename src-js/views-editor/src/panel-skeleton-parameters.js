@@ -419,11 +419,30 @@ export default class SkeletonParametersPanel extends Panel {
 
   /**
    * Get skeleton points that are currently selected.
+   * Also handles skeletonRibPoint selection (extracts parent skeleton point).
    * @returns {Object|null} Object with points array, skeletonData, layer, editLayerName or null
    */
   _getSelectedSkeletonPoints() {
-    const { skeletonPoint } = parseSelection(this.sceneController.selection);
-    if (!skeletonPoint || skeletonPoint.size === 0) return null;
+    const { skeletonPoint, skeletonRibPoint } = parseSelection(this.sceneController.selection);
+
+    // Collect unique point keys from both skeletonPoint and skeletonRibPoint
+    const pointKeys = new Set();
+
+    if (skeletonPoint) {
+      for (const key of skeletonPoint) {
+        pointKeys.add(key); // Format: "contourIdx/pointIdx"
+      }
+    }
+
+    if (skeletonRibPoint) {
+      for (const key of skeletonRibPoint) {
+        // Format: "contourIdx/pointIdx/side" - extract "contourIdx/pointIdx"
+        const parts = key.split("/");
+        pointKeys.add(`${parts[0]}/${parts[1]}`);
+      }
+    }
+
+    if (pointKeys.size === 0) return null;
 
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     const editLayerName = this.sceneController.editingLayerNames?.[0];
@@ -432,7 +451,7 @@ export default class SkeletonParametersPanel extends Panel {
     if (!skeletonData) return null;
 
     const points = [];
-    for (const key of skeletonPoint) {
+    for (const key of pointKeys) {
       const [contourIdx, pointIdx] = key.split("/").map(Number);
       const point = skeletonData.contours[contourIdx]?.points[pointIdx];
       if (point && !point.type) {
