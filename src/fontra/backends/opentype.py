@@ -9,8 +9,6 @@ from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables.otTables import NO_VARIATION_INDEX
 from fontTools.varLib.varStore import VarStoreInstancer
 
-from fontra.core.protocols import ReadableFontBackend
-
 from ..core.classes import (
     Axes,
     CrossAxisMapping,
@@ -26,17 +24,31 @@ from ..core.classes import (
     VariableGlyph,
 )
 from ..core.path import PackedPath, PackedPathPointPen
+from ..core.protocols import ReadableFontBackend
 from ..core.varutils import locationToTuple
+from .base import ReadableBaseBackend
+from .filewatcher import Change
+from .watchable import WatchableBackend
 
 
-class OTFBackend:
+class OTFBackend(WatchableBackend, ReadableBaseBackend):
     @classmethod
     def fromPath(cls, path: PathLike) -> ReadableFontBackend:
         return cls(path=path)
 
     def __init__(self, *, path: PathLike) -> None:
+        super().__init__()
+        self._initializeFromPath(path)
+
+    def _initializeFromPath(self, path: PathLike) -> None:
         self.path = path
-        self.font = TTFont(path, lazy=True)
+        self.font = self._loadFontFromPath(path)
+        self._initialize()
+
+    def _loadFontFromPath(self, path: PathLike) -> TTFont:
+        return TTFont(path, lazy=True)
+
+    def _initialize(self) -> None:
         self.axes = unpackAxes(self.font)
         gvar = self.font.get("gvar")
         self.gvarVariations = gvar.variations if gvar is not None else None
@@ -178,6 +190,22 @@ class OTFBackend:
 
     async def getCustomData(self) -> dict[str, Any]:
         return {}
+
+    async def fileWatcherProcessChanges(
+        self, changes: set[tuple[Change, str]]
+    ) -> dict[str, Any] | None:
+        self._initializeFromPath(self.path)
+        return None  # Reload all
+
+    def fileWatcherWasInstalled(self) -> None:
+        self.fileWatcherSetPaths([self.path])
+
+
+class TTXBackend(OTFBackend):
+    def _loadFontFromPath(self, path: PathLike) -> TTFont:
+        font = TTFont()
+        font.importXML(path)
+        return font
 
 
 def getLocationsFromVarstore(

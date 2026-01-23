@@ -50,7 +50,7 @@ def existingFolderOrFontFile(path):
     path = pathlib.Path(path).resolve()
     ext = path.suffix.lower()
     if ext not in fileExtensions and not path.is_dir():
-        raise argparse.ArgumentError("invalid path")
+        raise argparse.ArgumentError(None, "invalid path")
     return path
 
 
@@ -100,6 +100,7 @@ class FileSystemProjectManager:
             async def closeFontHandler():
                 logger.info(f"closing FontHandler for '{projectIdentifier}'")
                 del self.fontHandlers[projectIdentifier]
+                assert fontHandler is not None
                 await fontHandler.aclose()
                 if self.projectOpenListener is not None:
                     self.projectOpenListener.projectClosed(projectIdentifier)

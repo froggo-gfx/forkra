@@ -30,6 +30,7 @@ const cellObserver = new IntersectionObserver(
           cell.throttledUpdate
         );
         cell.throttledUpdate();
+        cell.visible = true;
       } else {
         if (cell._glyphInstanceRequestID) {
           cell.fontController.cancelGlyphInstanceRequest(cell._glyphInstanceRequestID);
@@ -43,6 +44,7 @@ const cellObserver = new IntersectionObserver(
           cell.glyphName,
           cell.throttledUpdate
         );
+        cell.visible = false;
       }
     });
   },
@@ -75,7 +77,7 @@ export class GlyphCell extends UnlitElement {
     --this-background-color: var(--cell-hover-color);
   }
 
-  #glyph-cell-container:active {
+  #glyph-cell-container:active:not(.dragging) {
     --this-background-color: var(--cell-active-color);
   }
 
@@ -288,6 +290,18 @@ export class GlyphCell extends UnlitElement {
 
   _updateSelectedState() {
     this._glyphCellContent?.classList.toggle("selected", this._selected);
+  }
+
+  setDragging(onOff) {
+    this._glyphCellContent?.classList.toggle("dragging", onOff);
+  }
+
+  get visible() {
+    return this.classList.contains("visible");
+  }
+
+  set visible(onOff) {
+    this.classList.toggle("visible", onOff);
   }
 }
 

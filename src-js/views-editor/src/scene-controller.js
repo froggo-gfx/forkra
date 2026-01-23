@@ -85,6 +85,7 @@ export class SceneController {
 
     this.selectedTool = undefined;
     this._currentGlyphChangeListeners = [];
+    this.contextMenuState = {};
 
     this.setupChangeListeners();
     this.setupSettingsListeners();

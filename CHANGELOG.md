@@ -1,7 +1,57 @@
 # Changelog for Fontra
 
-## 2025-12-?? [version 2025.12.4]
+## 2026-01-?? [version 2026.1.3]
 
+- [designspace] Fix writing the `italicAngle` property to source UFOs. [Issue 2386](https://github.com/fontra/fontra/issues/2386), [PR 2389](https://github.com/fontra/fontra/pull/2389)
+
+## 2026-01-15 [version 2026.1.2]
+
+- [designspace] Fix a synchronization problem when doing Undo/Redo faster than the backend handles writing the changed glyphs. This would be most noticable with a multiple-glyph selection in the font overview and a complex designspace, where each glyph is represented by many .glif files on disk. [PR 2374](https://github.com/fontra/fontra/pull/2374)
+
+## 2026-01-12 [version 2026.1.1]
+
+- Add read support for .ttx [PR 2372](https://github.com/fontra/fontra/pull/2372)
+- Implement automatic reload for .ttf/.otf/.woff/.woff2/.ttx [PR 2372](https://github.com/fontra/fontra/pull/2372)
+
+## 2026-01-11 [version 2026.1.0]
+
+### Font overview
+
+- Implement copy/paste, with multi-glyph selection. [Issue 2356](https://github.com/fontra/fontra/issues/2356), [PR 2366](https://github.com/fontra/fontra/pull/2366), [PR 2369](https://github.com/fontra/fontra/pull/2369), [PR 2367](https://github.com/fontra/fontra/pull/2367), [PR 2370](https://github.com/fontra/fontra/pull/2370)
+- Implement glyph deletion, added context menu, implement "select all" and "select none". [Issue 2354](https://github.com/fontra/fontra/issues/2354), [PR 2355](https://github.com/fontra/fontra/pull/2355)
+
+### Responding to external changes
+
+- [fontra-glyphs] Respond to external changes. [fontra-glyphs Issue 117](https://github.com/fontra/fontra-glyphs/issues/117), [fontra-glyphs PR 118](https://github.com/fontra/fontra-glyphs/pull/118), [fontra-glyphs PR 119](https://github.com/fontra/fontra-glyphs/pull/119).
+- [designspace] Respond to more external changes: font info, kerning, groups, features, encoding/cmap changes [Issue 2360](https://github.com/fontra/fontra/issues/2360), [Issue 2338](https://github.com/fontra/fontra/issues/2338), [PR 2361](https://github.com/fontra/fontra/pull/2361)
+- [.fontra backend] Respond to external changes. [Issue 1872](https://github.com/fontra/fontra/issues/1872), [PR 2364](https://github.com/fontra/fontra/pull/2364)
+- [.ufo .fontra] Reload when a .ufo or .fontra folder gets replaced externally. [PR 2368](https://github.com/fontra/fontra/pull/2368)
+
+### Miscellaneous
+
+- [editor] Reworked "paste" logic so it works better in Firefox and Safari. [Issue 2339](https://github.com/fontra/fontra/issues/2339), [PR 2367](https://github.com/fontra/fontra/pull/2367)
+- [designspace] Maintain glyph order when re-adding a previously deleted glyph. [PR 2357](https://github.com/fontra/fontra/pull/2357)
+- [fontra-glyphs] Maintain glyph order when re-adding a previously deleted glyph. [fontra-glyphs PR 115](https://github.com/fontra/fontra-glyphs/pull/115)
+- [fontra-glyphs] Fix kerning group behavior when deleting a glyph and re-adding it. [fontra-glyphs PR 116](https://github.com/fontra/fontra-glyphs/pull/116)
+- [editor] Moved the menu items that are also part of the context menu from the Edit menu to the Glyph menu, where they make more sense. This also fixes a menu redundancy. [Issue 1833](https://github.com/fontra/fontra/issues/1833), [PR 2371](https://github.com/fontra/fontra/pull/2371)
+
+## 2025-12-30 [version 2025.12.6]
+
+- [fontra pak] Fix update detection mechanism on MacOS.
+
+## 2025-12-30 [version 2025.12.5]
+
+- [font overview] Implement dragging in the glyph cell view to quickly select ranges. [PR 2350](https://github.com/fontra/fontra/pull/2350)
+- [font overview] Fix arrow key up/down behavior to not skip lines that are shorter than the current position. [PR 2351](https://github.com/fontra/fontra/pull/2351)
+- [opentype feature editor] Fix scrolling behavior in the OpenType feature editor. [Issue 2345](https://github.com/fontra/fontra/issues/2345)
+- [designspace] Write OpenType features only to the default source, write empty features to the other sources. When applicable, add a warning to the feature text to inform about Fontra's current destructive behavior when editing features. [PR 2346](https://github.com/fontra/fontra/pull/2346)
+
+## 2025-12-19 [version 2025.12.4]
+
+- Accept differently ordered anchor lists when interpolating. This matches fontmake's behavior. [PR 2344](https://github.com/fontra/fontra/pull/2344)
+- Fix buggy behavior when trying to add an axis to a UFO. [Issue 1142](https://github.com/fontra/fontra/issues/1142), [PR 2343](https://github.com/fontra/fontra/pull/2343)
+- Fix bad shortcut key repeat behavior [Issue 1930](https://github.com/fontra/fontra/issues/1930), [PR 2342](https://github.com/fontra/fontra/pull/2342)
+- [font overview] Fix odd selection behavior when using both shift-click and command-click. [Issue 2034](https://github.com/fontra/fontra/issues/2034), [PR 2341](https://github.com/fontra/fontra/pull/2341)
 - [fontra pak] When quitting, prompt the user if there are still open fonts. [fontra-pak Issue 195](https://github.com/fontra/fontra-pak/issues/195), [fontra-pak PR 206](https://github.com/fontra/fontra-pak/pull/206)
 
 ## 2025-12-13 [version 2025.12.3]

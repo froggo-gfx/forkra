@@ -13,7 +13,7 @@ from datetime import datetime
 from functools import cache, cached_property, partial, singledispatch
 from os import PathLike
 from types import SimpleNamespace
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
 from fontTools.designspaceLib import (
     AxisDescriptor,
@@ -25,7 +25,15 @@ from fontTools.designspaceLib import (
 from fontTools.misc.transform import DecomposedTransform, Transform
 from fontTools.pens.pointPen import AbstractPointPen
 from fontTools.pens.recordingPen import RecordingPointPen
-from fontTools.ufoLib import UFOLibError, UFOReader, UFOReaderWriter
+from fontTools.ufoLib import (
+    FEATURES_FILENAME,
+    FONTINFO_FILENAME,
+    GROUPS_FILENAME,
+    KERNING_FILENAME,
+    UFOLibError,
+    UFOReader,
+    UFOReaderWriter,
+)
 from fontTools.ufoLib.glifLib import GlyphSet
 
 from ..core.async_property import async_property
@@ -58,8 +66,10 @@ from ..core.path import PackedPathPointPen
 from ..core.protocols import WritableFontBackend
 from ..core.subprocess import runInSubProcess
 from ..core.varutils import locationToTuple, makeDenseLocation, makeSparseLocation
-from .filewatcher import Change, FileWatcher
+from .base import ReadableBaseBackend
+from .filewatcher import Change
 from .ufo_utils import extractGlyphNameAndCodePoints
+from .watchable import WatchableBackend
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +215,27 @@ ufoInfoAttributesToRoundTrip = [
 #     "postscriptNominalWidthX", # Nominal width for glyphs.
 
 
-class DesignspaceBackend:
+featuresWarning = """\
+#
+# FONTRA WARNING! Fontra had to alter the feature code when it was read from the UFO.
+#
+# If you are editing a .designspace/UFO project that was not originally authored with
+# Fontra, please beware of the following.
+#
+# Fontra is not a general purpose UFO features editor, and has limitations that affect
+# how the features are written back to the UFO(s) when edited:
+# - 'Included files' are resolved and are inlined
+# - Only the UFO at the default designspace location will contain features
+# - Variable GPOS features currently lose their variability, unless they use
+#   fonttools variable feature syntax: https://github.com/fontra/fontra/issues/2185
+#   In a future version of Fontra, variable GPOS features that are spread out over
+#   the source UFOs will likely be converted to single-file variable feature syntax.
+#
+
+"""
+
+
+class DesignspaceBackend(WatchableBackend, ReadableBaseBackend):
     @classmethod
     def fromPath(cls, path: PathLike) -> WritableFontBackend:
         return cls(DesignSpaceDocument.fromfile(path))
@@ -217,8 +247,7 @@ class DesignspaceBackend:
         return cls(dsDoc)
 
     def __init__(self, dsDoc: DesignSpaceDocument) -> None:
-        self.fileWatcher: FileWatcher | None = None
-        self.fileWatcherCallbacks: list[Callable[[Any], Awaitable[None]]] = []
+        super().__init__()
         self._glyphDependenciesTask: asyncio.Task[GlyphDependencies] | None = None
         self._glyphDependencies: GlyphDependencies | None = None
         self._backgroundTasksTask: asyncio.Task | None = None
@@ -234,11 +263,6 @@ class DesignspaceBackend:
     def _initialize(self, dsDoc: DesignSpaceDocument) -> None:
         self.dsDoc = ensureDSSourceNamesAreUnique(dsDoc)
 
-        # Keep track of the dsDoc's modification time so we can distinguish between
-        # external changes and internal changes
-        self.dsDocModTime = (
-            os.stat(self.dsDoc.path).st_mtime if self.dsDoc.path else None
-        )
         self.ufoManager = UFOManager()
         self.updateAxisInfo()
         self.loadUFOLayers()
@@ -285,7 +309,7 @@ class DesignspaceBackend:
     async def findGlyphsThatUseGlyph(self, glyphName):
         return sorted((await self.glyphDependencies).usedBy.get(glyphName, []))
 
-    def _reloadDesignSpaceFromFile(self):
+    def _reloadEverything(self) -> None:
         self._initialize(DesignSpaceDocument.fromfile(self.dsDoc.path))
 
     def updateAxisInfo(self):
@@ -315,8 +339,7 @@ class DesignspaceBackend:
         self.defaultLocation = defaultLocation
 
     async def aclose(self) -> None:
-        if self.fileWatcher is not None:
-            await self.fileWatcher.aclose()
+        await self.fileWatcherClose()
         if self._glyphDependenciesTask is not None:
             self._glyphDependenciesTask.cancel()
         if self._backgroundTasksTask is not None:
@@ -441,16 +464,27 @@ class DesignspaceBackend:
         for glyphName, fileName in glyphSet.contents.items():
             glifFileNames[fileName] = glyphName
 
-    def ensureGlyphInGlyphOrder(self, reader, glyphName):
+    def ensureGlyphInGlyphOrder(self, layer, glyphName):
+        reader = layer.reader
+        originalGlyphOrderMapping = layer.originalGlyphOrderMapping
         lib = reader.readLib()
         glyphOrder = lib.get("public.glyphOrder")
         if glyphOrder is not None and glyphName not in glyphOrder:
             glyphOrder.append(glyphName)
+            glyphOrder.sort(
+                key=lambda gn: originalGlyphOrderMapping.get(gn, 0xFFFFFFFF)
+            )
             reader.writeLib(lib)
 
-    def ensureGlyphNotInGlyphOrder(self, reader, glyphName):
+    def ensureGlyphNotInGlyphOrder(self, layer, glyphName):
+        reader = layer.reader
         lib = reader.readLib()
         glyphOrder = lib.get("public.glyphOrder")
+        if not layer.originalGlyphOrderMapping and glyphOrder is not None:
+            layer.originalGlyphOrderMapping.update(
+                {gn: i for i, gn in enumerate(glyphOrder)}
+            )
+
         if glyphOrder is not None and glyphName in glyphOrder:
             glyphOrder.remove(glyphName)
             reader.writeLib(lib)
@@ -736,7 +770,7 @@ class DesignspaceBackend:
             if writeGlyphSetContents:
                 # FIXME: this is inefficient if we write many glyphs
                 self.updateGlyphSetContents(glyphSet)
-                self.ensureGlyphInGlyphOrder(ufoLayer.reader, glyphName)
+                self.ensureGlyphInGlyphOrder(ufoLayer, glyphName)
 
             modTimes.add(glyphSet.getGLIFModificationTime(glyphName))
 
@@ -754,7 +788,7 @@ class DesignspaceBackend:
             # FIXME: this is inefficient if we write many glyphs
             self.updateGlyphSetContents(glyphSet)
             if ufoLayer.isDefaultLayer:
-                self.ensureGlyphNotInGlyphOrder(ufoLayer.reader, glyphName)
+                self.ensureGlyphNotInGlyphOrder(ufoLayer, glyphName)
             modTimes.add(None)
 
         self.savedGlyphModificationTimes[glyphName] = modTimes
@@ -994,16 +1028,19 @@ class DesignspaceBackend:
 
     async def deleteGlyph(self, glyphName):
         if glyphName not in self.glyphMap:
-            raise KeyError(f"Glyph '{glyphName}' does not exist")
+            logger.debug(f"Can't delete unknown glyph '{glyphName}'")
+            return
+
         for ufoLayer in self.ufoLayers:
             glyphSet = ufoLayer.glyphSet
             if glyphName in glyphSet:
                 glyphSet.deleteGlyph(glyphName)
+                # FIXME: this is inefficient if we write many glyphs
                 glyphSet.writeContents()
                 if ufoLayer.isDefaultLayer:
-                    self.ensureGlyphNotInGlyphOrder(ufoLayer.reader, glyphName)
+                    self.ensureGlyphNotInGlyphOrder(ufoLayer, glyphName)
         del self.glyphMap[glyphName]
-        self.savedGlyphModificationTimes[glyphName] = None
+        self.savedGlyphModificationTimes[glyphName] = {None}
         if self._glyphDependencies is not None:
             self._glyphDependencies.update(glyphName, ())
 
@@ -1142,6 +1179,9 @@ class DesignspaceBackend:
 
             if not dsSource.isSparse:
                 updateFontInfoFromFontSource(dsSource.layer.reader, fontSource)
+                self.fileWatcherIgnoreNextChange(
+                    os.path.join(dsSource.layer.path, FONTINFO_FILENAME)
+                )
 
             newDSSources.append(dsSource)
 
@@ -1174,7 +1214,7 @@ class DesignspaceBackend:
 
         self._writeDesignSpaceDocument()
 
-        await self._notifyWatcherCallbacks({"glyphs": None})
+        await self.fileWatcherNotifyCallbacks({"glyphs": None})
 
     async def getUnitsPerEm(self) -> int:
         return self.defaultFontInfo.unitsPerEm
@@ -1191,6 +1231,7 @@ class DesignspaceBackend:
             reader.readInfo(info)
             _updateFontInfoFromDict(info, infoDict)
             reader.writeInfo(info)
+            self.fileWatcherIgnoreNextChange(os.path.join(ufoPath, FONTINFO_FILENAME))
 
     async def getKerning(self) -> dict[str, Kerning]:
         groups: dict[str, list[str]] = {}
@@ -1279,6 +1320,12 @@ class DesignspaceBackend:
                     dsSource.layer.reader.writeGroups(groups)
                     ufoKerning = kerningPerSource.get(dsSource.identifier, {})
                     dsSource.layer.reader.writeKerning(ufoKerning)
+                    self.fileWatcherIgnoreNextChange(
+                        os.path.join(dsSource.layer.path, GROUPS_FILENAME)
+                    )
+                    self.fileWatcherIgnoreNextChange(
+                        os.path.join(dsSource.layer.path, KERNING_FILENAME)
+                    )
                 else:
                     # TODO: store in lib
                     logger.error(
@@ -1286,10 +1333,12 @@ class DesignspaceBackend:
                     )
 
     async def getFeatures(self) -> OpenTypeFeatures:
-        featureText = self.defaultReader.readFeatures()
+        ufoFeatureText = self.defaultReader.readFeatures()
         featureText = resolveFeatureIncludes(
-            featureText, self.ufoDir, set(self.glyphMap)
+            ufoFeatureText, self.ufoDir, set(self.glyphMap)
         )
+        if featureText != ufoFeatureText:
+            featureText = featuresWarning + featureText
         return OpenTypeFeatures(language="fea", text=featureText)
 
     async def putFeatures(self, features: OpenTypeFeatures) -> None:
@@ -1299,15 +1348,11 @@ class DesignspaceBackend:
             )
             return
 
-        # Once this https://github.com/googlefonts/ufo2ft/pull/833 gets merged:
-        # Write feature text to default UFO, write empty feature text to others
-        # Until then: write features to all UFOs
         paths = sorted(set(self.ufoLayers.iterAttrs("path")))
-        # defaultPath = self.defaultUFOLayer.path
+        defaultPath = self.defaultUFOLayer.path if paths else None
         for path in paths:
             writer = self.ufoManager.getReader(path)
-            # featureText = features.text if path == defaultPath else ""
-            featureText = features.text
+            featureText = features.text if path == defaultPath else ""
             writer.writeFeatures(featureText)
 
     async def getBackgroundImage(self, imageIdentifier: str) -> ImageData | None:
@@ -1367,67 +1412,48 @@ class DesignspaceBackend:
         for source in self.dsDoc.sources:
             source.location = {**self.defaultLocation, **source.location}
         self.dsDoc.write(self.dsDoc.path)
-        self.dsDocModTime = os.stat(self.dsDoc.path).st_mtime
+        self.fileWatcherIgnoreNextChange(self.dsDoc.path)
 
-    async def watchExternalChanges(
-        self, callback: Callable[[Any], Awaitable[None]]
-    ) -> None:
-        if self.fileWatcher is None:
-            self.fileWatcher = FileWatcher(self._fileWatcherCallback)
-            self._updatePathsToWatch()
-        self.fileWatcherCallbacks.append(callback)
+    def fileWatcherWasInstalled(self):
+        self._updatePathsToWatch()
 
     def _updatePathsToWatch(self):
-        if self.fileWatcher is None:
-            return
-
         paths = sorted(set(self.ufoLayers.iterAttrs("path")))
         if self.dsDoc.path:
             paths.append(self.dsDoc.path)
 
-        self.fileWatcher.setPaths(paths)
+        self.fileWatcherSetPaths(paths)
 
-    async def _fileWatcherCallback(self, changes: set[tuple[Change, str]]) -> None:
-        reloadPattern = await self.processExternalChanges(changes)
-        if reloadPattern is None:
-            self._reloadDesignSpaceFromFile()
-        if reloadPattern or reloadPattern is None:
-            await self._notifyWatcherCallbacks(reloadPattern)
-
-    async def _notifyWatcherCallbacks(self, reloadPattern):
-        for callback in self.fileWatcherCallbacks:
-            await callback(reloadPattern)
-
-    async def processExternalChanges(
+    async def fileWatcherProcessChanges(
         self, changes: set[tuple[Change, str]]
     ) -> dict[str, Any] | None:
         changedItems = await self._analyzeExternalChanges(changes)
         if changedItems is None:
-            # The .designspace file changed, reload all the things
+            # The .designspace file changed, or a .ufo was replaced: reload all the things
+            self._reloadEverything()
             return None
 
         glyphMapUpdates: dict[str, list[int] | None] = {}
 
         # TODO: update glyphMap for changed non-new glyphs
 
-        for glyphName in changedItems.newGlyphs:
+        for glyphName in changedItems.newGlyphs | changedItems.changedGlyphs:
             try:
                 glifData = self.defaultDSSource.layer.glyphSet.getGLIF(glyphName)
             except KeyError:
                 logger.info(f"new glyph '{glyphName}' not found in default source")
                 continue
             gn, codePoints = extractGlyphNameAndCodePoints(glifData)
-            glyphMapUpdates[glyphName] = codePoints
+            if self.glyphMap.get(glyphName) != codePoints:
+                glyphMapUpdates[glyphName] = codePoints
 
         for glyphName in changedItems.deletedGlyphs:
             if glyphName in self.glyphMap:
                 glyphMapUpdates[glyphName] = None
 
-        reloadPattern: dict[str, Any] = (
-            {"glyphs": dict.fromkeys(changedItems.changedGlyphs)}
-            if changedItems.changedGlyphs
-            else {}
-        )
+        reloadPattern = changedItems.reloadPattern
+        if changedItems.changedGlyphs:
+            reloadPattern["glyphs"] = dict.fromkeys(changedItems.changedGlyphs)
 
         if glyphMapUpdates:
             reloadPattern["glyphMap"] = None
@@ -1440,28 +1466,37 @@ class DesignspaceBackend:
         return reloadPattern
 
     async def _analyzeExternalChanges(self, changes) -> SimpleNamespace | None:
-        if any(os.path.splitext(path)[1] == ".designspace" for _, path in changes):
-            if (
-                self.dsDoc.path
-                and self.dsDocModTime != os.stat(self.dsDoc.path).st_mtime
-            ):
-                # .designspace changed externally, reload all the things
-                self.dsDocModTime = os.stat(self.dsDoc.path).st_mtime
-                return None
-            # else:
-            #     print("it was our own change, not an external one")
+        if any(
+            os.path.splitext(path)[1] in {".designspace", ".ufo"} for _, path in changes
+        ):
+            # .designspace or whole .ufo changed externally, reload all the things
+            return None
 
         changedItems = SimpleNamespace(
+            reloadPattern={},
             changedGlyphs=set(),
             newGlyphs=set(),
             deletedGlyphs=set(),
             rebuildGlyphSetContents=False,
         )
+
         for change, path in sorted(changes):
-            _, fileSuffix = os.path.splitext(path)
+            fileName = os.path.basename(path)
+            _, fileSuffix = os.path.splitext(fileName)
 
             if fileSuffix == ".glif":
                 self._analyzeExternalGlyphChanges(change, path, changedItems)
+
+            if fileName == FONTINFO_FILENAME:
+                changedItems.reloadPattern["fontInfo"] = None
+                changedItems.reloadPattern["sources"] = None
+                self._defaultFontInfo = None
+
+            if fileName in {KERNING_FILENAME, GROUPS_FILENAME}:
+                changedItems.reloadPattern["kerning"] = None
+
+            if fileName == FEATURES_FILENAME:
+                changedItems.reloadPattern["features"] = None
 
         if changedItems.rebuildGlyphSetContents:
             #
@@ -1486,27 +1521,28 @@ class DesignspaceBackend:
     def _analyzeExternalGlyphChanges(self, change, path, changedItems):
         fileName = os.path.basename(path)
         glyphName = self.glifFileNames.get(fileName)
+        glyphWasDeleted = False
+        glyphIsNew = False
+        rebuildGlyphSetContents = False
 
         if change == Change.deleted:
             # Deleted glyph
-            changedItems.rebuildGlyphSetContents = True
+            rebuildGlyphSetContents = True
             if path.startswith(os.path.join(self.dsDoc.default.path, "glyphs/")):
                 # The glyph was deleted from the default source,
                 # do a full delete
-                del self.glifFileNames[fileName]
-                changedItems.deletedGlyphs.add(glyphName)
+                glyphWasDeleted = True
             # else:
             # The glyph was deleted from a non-default source,
             # just reload.
         elif change == Change.added:
             # New glyph
-            changedItems.rebuildGlyphSetContents = True
+            rebuildGlyphSetContents = True
             if glyphName is None:
                 with open(path, "rb") as f:
                     glyphName, _ = extractGlyphNameAndCodePoints(f.read())
-                self.glifFileNames[fileName] = glyphName
-                changedItems.newGlyphs.add(glyphName)
-                return
+
+                glyphIsNew = True
         else:
             # Changed glyph
             assert change == Change.modified
@@ -1523,9 +1559,18 @@ class DesignspaceBackend:
             mtime = datetime.fromtimestamp(mtime).timestamp()
         else:
             mtime = None
+
         savedMTimes = self.savedGlyphModificationTimes.get(glyphName, ())
-        if savedMTimes is not None and mtime not in savedMTimes:
+        if savedMTimes is None or mtime not in savedMTimes:
             logger.info(f"external change '{glyphName}'")
+            if glyphWasDeleted:
+                del self.glifFileNames[fileName]
+                changedItems.deletedGlyphs.add(glyphName)
+            elif glyphIsNew:
+                self.glifFileNames[fileName] = glyphName
+                changedItems.newGlyphs.add(glyphName)
+            if rebuildGlyphSetContents:
+                changedItems.rebuildGlyphSetContents = True
             changedItems.changedGlyphs.add(glyphName)
 
 
@@ -1642,6 +1687,9 @@ class UFOBackend(DesignspaceBackend):
             path.unlink()
         dsDoc = createDSDocFromUFOPath(path, "default")
         return cls(dsDoc)
+
+    def _reloadEverything(self) -> None:
+        self._initialize(self.dsDoc)
 
     async def getCustomData(self) -> dict[str, Any]:
         return self.defaultReader.readLib()
@@ -1822,6 +1870,7 @@ class UFOLayer:
     path: str
     name: str
     fontraLayerName: str
+    originalGlyphOrderMapping: dict[str, int] = field(default_factory=dict)
 
     @cached_property
     def fileName(self) -> str:
@@ -2333,6 +2382,8 @@ def updateFontInfoFromFontSource(reader, fontSource):
         ufoName = lineMetricsVerMapping.get(name)
         if ufoName is not None:
             setattr(fontInfo, ufoName, round(metric.value))
+
+    fontInfo.italicAngle = fontSource.italicAngle
 
     lib = reader.readLib()
 

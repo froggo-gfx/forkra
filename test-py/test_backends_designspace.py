@@ -736,10 +736,43 @@ async def test_deleteGlyph(writableTestFont):
         assert glyphName not in lib.get("public.glyphOrder", [])
 
 
-async def test_deleteGlyphRaisesKeyError(writableTestFont):
+async def test_deleteGlyph_addGlyph(writableTestFont):
+    # Test that the public.glyphOrder is unchanged after we delete a glyph and
+    # then re-add it.
+
+    beforeGlyphOrders = [
+        dsSource.layer.reader.readLib().get("public.glyphOrder")
+        for dsSource in writableTestFont.dsSources
+    ]
+
+    glyphName = "A"
+    glyphMap = await writableTestFont.getGlyphMap()
+    glyph = await writableTestFont.getGlyph(glyphName)
+    await writableTestFont.deleteGlyph(glyphName)
+    assert await writableTestFont.getGlyph(glyphName) is None
+
+    await writableTestFont.putGlyph(glyphName, glyph, glyphMap[glyphName])
+
+    afterGlyphOrders = [
+        dsSource.layer.reader.readLib().get("public.glyphOrder")
+        for dsSource in writableTestFont.dsSources
+    ]
+
+    for beforeGlyphOrder, afterGlyphOrder in zip(
+        beforeGlyphOrders, afterGlyphOrders, strict=True
+    ):
+        if beforeGlyphOrder is not None:
+            assert glyphName in beforeGlyphOrder
+            assert glyphName in afterGlyphOrder
+        assert beforeGlyphOrder == afterGlyphOrder
+
+
+async def test_deleteUnknownGlyph(writableTestFont):
     glyphName = "A.doesnotexist"
-    with pytest.raises(KeyError, match="Glyph 'A.doesnotexist' does not exist"):
-        await writableTestFont.deleteGlyph(glyphName)
+    glyphMap = await writableTestFont.getGlyphMap()
+    assert glyphName not in glyphMap
+    # .deleteGlyph() should *not* raise an error if glyphName doesn't exist
+    await writableTestFont.deleteGlyph(glyphName)
 
 
 async def test_findGlyphsThatUseGlyph(writableTestFont):
@@ -1315,6 +1348,17 @@ async def test_missingUFOError(writableTestFont):
 
     with pytest.raises(FileNotFoundError, match=r".*\.invalid$"):
         _ = getFileSystemBackend(dsPath)
+
+
+async def test_write_italicAngle(writableTestFont):
+    sources = await writableTestFont.getSources()
+    assert sources["light-condensed"].italicAngle == 0
+    sources["light-condensed"].italicAngle = -15
+    await writableTestFont.putSources(sources)
+
+    reopenedFont = getFileSystemBackend(writableTestFont.dsDoc.path)
+    reopenedSources = await reopenedFont.getSources()
+    assert reopenedSources["light-condensed"].italicAngle == -15
 
 
 def fileNamesFromDir(path):
