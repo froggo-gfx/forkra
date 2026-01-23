@@ -3,6 +3,7 @@ import {
   getSkeletonData,
   calculateNormalAtSkeletonPoint,
   generateSampledOffsetPoints,
+  getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
 import {
   registerVisualizationLayerDefinition,
@@ -158,7 +159,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: true,
-  zIndex: 455,
+  zIndex: 452,
   screenParameters: { strokeWidth: 1 },
   colors: { strokeColor: "rgba(0, 128, 255, 0.4)" },
   colorsDarkMode: { strokeColor: "rgba(0, 191, 255, 0.4)" },
@@ -172,8 +173,7 @@ registerVisualizationLayerDefinition({
     context.lineWidth = parameters.strokeWidth;
 
     for (const contour of skeletonData.contours) {
-      const width = contour.defaultWidth || 20;
-      const halfWidth = width / 2;
+      const defaultWidth = contour.defaultWidth || 20;
 
       for (let i = 0; i < contour.points.length; i++) {
         const point = contour.points[i];
@@ -182,15 +182,118 @@ registerVisualizationLayerDefinition({
         if (point.type) continue;
 
         const normal = calculateNormalAtSkeletonPoint(contour, i);
+        // Use per-point half-widths
+        const leftHW = getPointHalfWidth(point, defaultWidth, "left");
+        const rightHW = getPointHalfWidth(point, defaultWidth, "right");
 
         // Quantize to UPM grid (same as generated contour points)
         strokeLine(
           context,
-          Math.round(point.x - normal.x * halfWidth),
-          Math.round(point.y - normal.y * halfWidth),
-          Math.round(point.x + normal.x * halfWidth),
-          Math.round(point.y + normal.y * halfWidth)
+          Math.round(point.x - normal.x * rightHW),
+          Math.round(point.y - normal.y * rightHW),
+          Math.round(point.x + normal.x * leftHW),
+          Math.round(point.y + normal.y * leftHW)
         );
+      }
+    }
+  },
+});
+
+/**
+ * Draw a diamond node (for rib points)
+ */
+function strokeDiamondNode(context, pt, size) {
+  const halfSize = size / 2;
+  context.beginPath();
+  context.moveTo(pt.x, pt.y - halfSize);
+  context.lineTo(pt.x + halfSize, pt.y);
+  context.lineTo(pt.x, pt.y + halfSize);
+  context.lineTo(pt.x - halfSize, pt.y);
+  context.closePath();
+  context.stroke();
+}
+
+// Skeleton rib points layer (draggable width control points)
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.rib.points",
+  name: "Skeleton Rib Points",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 453,
+  screenParameters: {
+    pointSize: 5,
+    strokeWidth: 1.5,
+  },
+  colors: {
+    strokeColor: "rgba(220, 60, 120, 0.7)",
+    hoveredColor: "rgba(220, 60, 120, 1.0)",
+    selectedColor: "rgba(255, 64, 0, 0.9)",
+  },
+  colorsDarkMode: {
+    strokeColor: "rgba(220, 100, 140, 0.7)",
+    hoveredColor: "rgba(220, 100, 140, 1.0)",
+    selectedColor: "rgba(255, 96, 64, 0.9)",
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
+    if (!skeletonData?.contours?.length) {
+      return;
+    }
+
+    // Parse selection and hover state for rib points
+    const { skeletonRibPoint: hoveredRibPoints } = parseSelection(model.hoverSelection);
+    const { skeletonRibPoint: selectedRibPoints } = parseSelection(model.selection);
+
+    context.lineWidth = parameters.strokeWidth;
+
+    for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
+      const contour = skeletonData.contours[contourIndex];
+      const defaultWidth = contour.defaultWidth || 20;
+
+      for (let pointIndex = 0; pointIndex < contour.points.length; pointIndex++) {
+        const point = contour.points[pointIndex];
+
+        // Only draw rib points at on-curve points
+        if (point.type) continue;
+
+        const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
+        const leftHW = getPointHalfWidth(point, defaultWidth, "left");
+        const rightHW = getPointHalfWidth(point, defaultWidth, "right");
+
+        // Calculate rib point positions
+        const leftRibPoint = {
+          x: point.x + normal.x * leftHW,
+          y: point.y + normal.y * leftHW,
+        };
+        const rightRibPoint = {
+          x: point.x - normal.x * rightHW,
+          y: point.y - normal.y * rightHW,
+        };
+
+        // Selection keys for this rib point pair
+        const leftKey = `${contourIndex}/${pointIndex}/left`;
+        const rightKey = `${contourIndex}/${pointIndex}/right`;
+
+        // Draw left rib point
+        if (selectedRibPoints?.has(leftKey)) {
+          context.strokeStyle = parameters.selectedColor;
+        } else if (hoveredRibPoints?.has(leftKey)) {
+          context.strokeStyle = parameters.hoveredColor;
+        } else {
+          context.strokeStyle = parameters.strokeColor;
+        }
+        strokeDiamondNode(context, leftRibPoint, parameters.pointSize);
+
+        // Draw right rib point
+        if (selectedRibPoints?.has(rightKey)) {
+          context.strokeStyle = parameters.selectedColor;
+        } else if (hoveredRibPoints?.has(rightKey)) {
+          context.strokeStyle = parameters.hoveredColor;
+        } else {
+          context.strokeStyle = parameters.strokeColor;
+        }
+        strokeDiamondNode(context, rightRibPoint, parameters.pointSize);
       }
     }
   },

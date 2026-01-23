@@ -6,7 +6,11 @@ import {
 } from "@fontra/core/changes.js";
 import { translate } from "@fontra/core/localization.js";
 import { connectContours, toggleSmooth } from "@fontra/core/path-functions.js";
-import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
+import {
+  generateContoursFromSkeleton,
+  calculateNormalAtSkeletonPoint,
+  getPointHalfWidth,
+} from "@fontra/core/skeleton-contour-generator.js";
 import {
   centeredRect,
   normalizeRect,
@@ -37,6 +41,7 @@ import { EditBehaviorFactory, constrainHorVerDiag } from "./edit-behavior.js";
 import {
   createSkeletonEditBehavior,
   getSkeletonBehaviorName,
+  createRibEditBehavior,
 } from "./skeleton-edit-behavior.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
@@ -75,7 +80,18 @@ export class PointerTool extends BaseTool {
       sceneController.hoverSelection,
       event.altKey
     );
-    sceneController.hoverSelection = selection;
+
+    // Check for rib point hover (before setting hoverSelection)
+    const ribHit = this._hitTestRibPoints(event);
+    let finalSelection = selection;
+    if (ribHit) {
+      // Add rib point to hover selection
+      const ribSelKey = `skeletonRibPoint/${ribHit.contourIndex}/${ribHit.pointIndex}/${ribHit.side}`;
+      finalSelection = new Set(selection);
+      finalSelection.add(ribSelKey);
+    }
+
+    sceneController.hoverSelection = finalSelection;
     sceneController.hoverPathHit = pathHit;
 
     if (!sceneController.hoverSelection.size && !sceneController.hoverPathHit) {
@@ -98,6 +114,9 @@ export class PointerTool extends BaseTool {
       this.setCursorForRotationHandle(rotationHandle);
     } else if (resizeHandle) {
       this.setCursorForResizeHandle(resizeHandle);
+    } else if (ribHit) {
+      // Set resize cursor for rib points
+      this.setCursor("ew-resize");
     } else {
       this.setCursor();
     }
@@ -244,6 +263,15 @@ export class PointerTool extends BaseTool {
   async handleDrag(eventStream, initialEvent) {
     const sceneController = this.sceneController;
     const initialSelection = sceneController.selection;
+
+    // Check for rib point hit first (before other interactions)
+    const ribHit = this._hitTestRibPoints(initialEvent);
+    if (ribHit) {
+      await this._handleDragRibPoint(eventStream, initialEvent, ribHit);
+      initialEvent.preventDefault();
+      return;
+    }
+
     const resizeHandle = this.getResizeHandle(initialEvent, initialSelection);
     const rotationHandle = this.getRotationHandle(initialEvent, initialSelection);
     if (resizeHandle || rotationHandle) {
@@ -1203,6 +1231,123 @@ export class PointerTool extends BaseTool {
   }
 
   /**
+   * Handle dragging a rib point (width control point).
+   * Constrains movement to the normal direction and updates point width.
+   */
+  async _handleDragRibPoint(eventStream, initialEvent, ribHit) {
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+
+    if (!positionedGlyph) return;
+
+    // Get initial point in glyph coordinates
+    const localPoint = sceneController.localPoint(initialEvent);
+    const startGlyphPoint = {
+      x: localPoint.x - positionedGlyph.x,
+      y: localPoint.y - positionedGlyph.y,
+    };
+
+    // Set selection to the rib point being dragged
+    const ribSelKey = `skeletonRibPoint/${ribHit.contourIndex}/${ribHit.pointIndex}/${ribHit.side}`;
+    sceneController.selection = new Set([ribSelKey]);
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = sceneController.editingLayerNames?.[0];
+      if (!editLayerName || !glyph.layers[editLayerName]) {
+        return;
+      }
+
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      if (!skeletonData) return;
+
+      // Deep clone for manipulation
+      const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+      const originalSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+      // Create rib edit behavior
+      const ribBehavior = createRibEditBehavior(originalSkeletonData, ribHit);
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      let accumulatedChanges = new ChangeCollector();
+
+      // Drag loop
+      for await (const event of eventStream) {
+        const currentLocalPoint = sceneController.localPoint(event);
+        const currentGlyphPoint = {
+          x: currentLocalPoint.x - positionedGlyph.x,
+          y: currentLocalPoint.y - positionedGlyph.y,
+        };
+
+        const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+
+        // Apply behavior to get new width
+        const widthChange = ribBehavior.applyDelta(delta);
+
+        // Update working skeleton data with new width
+        const contour = workingSkeletonData.contours[widthChange.contourIndex];
+        const point = contour.points[widthChange.pointIndex];
+
+        if (widthChange.side === "left") {
+          point.leftWidth = widthChange.halfWidth;
+        } else {
+          point.rightWidth = widthChange.halfWidth;
+        }
+
+        // Record changes
+        const changes = [];
+
+        // 1. FIRST: Generate outline contours
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          regenerateOutline(sg, workingSkeletonData);
+        });
+        changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        // 2. THEN: Save skeletonData to customData
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+            JSON.stringify(workingSkeletonData)
+          );
+        });
+        changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+        const combinedChange = new ChangeCollector().concat(...changes);
+        accumulatedChanges = accumulatedChanges.concat(combinedChange);
+        await sendIncrementalChange(combinedChange.change, true);
+      }
+
+      // Final send without "may drop" flag
+      await sendIncrementalChange(accumulatedChanges.change);
+
+      return {
+        changes: accumulatedChanges,
+        undoLabel: translate("edit-tools-pointer.undo.change-skeleton-width"),
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
    * Handle bounding box transforms (scale/rotate) for skeleton points only.
    */
   async _handleSkeletonBoundsTransform(selection, eventStream, initialEvent, rotation) {
@@ -1603,6 +1748,99 @@ export class PointerTool extends BaseTool {
       }
     }
     return undefined;
+  }
+
+  /**
+   * Hit test skeleton rib points (width control points).
+   * Returns { contourIndex, pointIndex, side, point, normal, onCurvePoint } if hit, null otherwise.
+   */
+  _hitTestRibPoints(event) {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.glyph?.canEdit) {
+      return null;
+    }
+
+    const varGlyph = positionedGlyph.varGlyph;
+    if (!varGlyph?.glyph?.layers) {
+      return null;
+    }
+
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    if (!editLayerName) {
+      return null;
+    }
+
+    const layer = varGlyph.glyph.layers[editLayerName];
+    if (!layer) {
+      return null;
+    }
+
+    const skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData?.contours?.length) {
+      return null;
+    }
+
+    const localPoint = this.sceneController.localPoint(event);
+    const glyphPoint = {
+      x: localPoint.x - positionedGlyph.x,
+      y: localPoint.y - positionedGlyph.y,
+    };
+
+    const margin = this.sceneController.mouseClickMargin;
+
+    for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
+      const contour = skeletonData.contours[contourIndex];
+      const defaultWidth = contour.defaultWidth || 20;
+
+      for (let pointIndex = 0; pointIndex < contour.points.length; pointIndex++) {
+        const skeletonPoint = contour.points[pointIndex];
+
+        // Only test on-curve points
+        if (skeletonPoint.type) continue;
+
+        const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
+        const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+        const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+
+        // Calculate rib point positions
+        const leftRibPoint = {
+          x: skeletonPoint.x + normal.x * leftHW,
+          y: skeletonPoint.y + normal.y * leftHW,
+        };
+        const rightRibPoint = {
+          x: skeletonPoint.x - normal.x * rightHW,
+          y: skeletonPoint.y - normal.y * rightHW,
+        };
+
+        // Check left rib point
+        const leftDist = vector.distance(glyphPoint, leftRibPoint);
+        if (leftDist <= margin) {
+          return {
+            contourIndex,
+            pointIndex,
+            side: "left",
+            point: leftRibPoint,
+            normal,
+            onCurvePoint: skeletonPoint,
+          };
+        }
+
+        // Check right rib point
+        const rightDist = vector.distance(glyphPoint, rightRibPoint);
+        if (rightDist <= margin) {
+          return {
+            contourIndex,
+            pointIndex,
+            side: "right",
+            point: rightRibPoint,
+            normal,
+            onCurvePoint: skeletonPoint,
+          };
+        }
+      }
+    }
+
+    return null;
   }
 
   get scalingEditBehavior() {

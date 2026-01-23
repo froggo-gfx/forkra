@@ -10,6 +10,8 @@ import {
   getSkeletonData,
   createEmptySkeletonData,
   createSkeletonContour,
+  calculateNormalAtSkeletonPoint,
+  getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { BaseTool } from "./edit-tools-base.js";
 
@@ -294,6 +296,96 @@ export class SkeletonPenTool extends BaseTool {
         const dist = vector.distance(glyphPoint, skeletonPoint);
         if (dist <= margin) {
           return { contourIndex, pointIndex, point: { ...skeletonPoint } };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Hit test skeleton rib points (width control points).
+   * Returns { contourIndex, pointIndex, side: "left"|"right", point } if hit, null otherwise.
+   */
+  _hitTestRibPoints(event) {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.glyph?.canEdit) {
+      return null;
+    }
+
+    const varGlyph = positionedGlyph.varGlyph;
+    if (!varGlyph?.glyph?.layers) {
+      return null;
+    }
+
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    if (!editLayerName) {
+      return null;
+    }
+
+    const layer = varGlyph.glyph.layers[editLayerName];
+    if (!layer) {
+      return null;
+    }
+
+    const skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData?.contours?.length) {
+      return null;
+    }
+
+    const glyphPoint = this._getGlyphPoint(event);
+    if (!glyphPoint) return null;
+
+    const margin = this.sceneController.mouseClickMargin;
+
+    for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
+      const contour = skeletonData.contours[contourIndex];
+      const defaultWidth = contour.defaultWidth || 20;
+
+      for (let pointIndex = 0; pointIndex < contour.points.length; pointIndex++) {
+        const skeletonPoint = contour.points[pointIndex];
+
+        // Only test on-curve points
+        if (skeletonPoint.type) continue;
+
+        const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
+        const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+        const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+
+        // Calculate rib point positions
+        const leftRibPoint = {
+          x: skeletonPoint.x + normal.x * leftHW,
+          y: skeletonPoint.y + normal.y * leftHW,
+        };
+        const rightRibPoint = {
+          x: skeletonPoint.x - normal.x * rightHW,
+          y: skeletonPoint.y - normal.y * rightHW,
+        };
+
+        // Check left rib point
+        const leftDist = vector.distance(glyphPoint, leftRibPoint);
+        if (leftDist <= margin) {
+          return {
+            contourIndex,
+            pointIndex,
+            side: "left",
+            point: leftRibPoint,
+            normal,
+            onCurvePoint: skeletonPoint,
+          };
+        }
+
+        // Check right rib point
+        const rightDist = vector.distance(glyphPoint, rightRibPoint);
+        if (rightDist <= margin) {
+          return {
+            contourIndex,
+            pointIndex,
+            side: "right",
+            point: rightRibPoint,
+            normal,
+            onCurvePoint: skeletonPoint,
+          };
         }
       }
     }

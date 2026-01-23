@@ -848,3 +848,118 @@ export function getSkeletonBehaviorName(shiftKey, altKey) {
   const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
   return behaviorNames[(shiftKey ? 1 : 0) + (altKey ? 2 : 0)];
 }
+
+/**
+ * RibEditBehavior - Handles dragging of rib points (width control points).
+ * Constrains movement to the normal direction and updates point width.
+ */
+export class RibEditBehavior {
+  /**
+   * @param {Object} skeletonData - The skeleton data
+   * @param {number} contourIndex - Index of the contour
+   * @param {number} pointIndex - Index of the on-curve point
+   * @param {string} side - "left" or "right"
+   * @param {Object} normal - The normal vector at this point
+   * @param {Object} onCurvePoint - The on-curve point position
+   */
+  constructor(skeletonData, contourIndex, pointIndex, side, normal, onCurvePoint) {
+    this.skeletonData = skeletonData;
+    this.contourIndex = contourIndex;
+    this.pointIndex = pointIndex;
+    this.side = side;
+    this.normal = normal;
+    this.onCurvePoint = onCurvePoint;
+
+    const contour = skeletonData.contours[contourIndex];
+    const point = contour.points[pointIndex];
+    const defaultWidth = contour.defaultWidth || 20;
+
+    // Store original half-widths
+    if (side === "left") {
+      this.originalHalfWidth = point.leftWidth !== undefined
+        ? point.leftWidth
+        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
+    } else {
+      this.originalHalfWidth = point.rightWidth !== undefined
+        ? point.rightWidth
+        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
+    }
+
+    // Minimum half-width (1 unit)
+    this.minHalfWidth = 1;
+  }
+
+  /**
+   * Constrain drag delta to the normal direction.
+   * @param {Object} delta - The drag delta {x, y}
+   * @returns {Object} Constrained delta projected onto normal
+   */
+  constrainToNormal(delta) {
+    // For left side, positive projection means wider
+    // For right side, negative projection means wider
+    const sign = this.side === "left" ? 1 : -1;
+    const dot = delta.x * this.normal.x + delta.y * this.normal.y;
+    return {
+      x: sign * dot * this.normal.x,
+      y: sign * dot * this.normal.y,
+    };
+  }
+
+  /**
+   * Apply drag delta and return the new half-width.
+   * @param {Object} delta - The drag delta {x, y}
+   * @returns {Object} { halfWidth, widthChange } - New half-width and width change object
+   */
+  applyDelta(delta) {
+    // Project delta onto normal
+    const sign = this.side === "left" ? 1 : -1;
+    const dot = delta.x * this.normal.x + delta.y * this.normal.y;
+    const projectedDelta = sign * dot;
+
+    // Calculate new half-width
+    let newHalfWidth = this.originalHalfWidth + projectedDelta;
+
+    // Clamp to minimum
+    if (newHalfWidth < this.minHalfWidth) {
+      newHalfWidth = this.minHalfWidth;
+    }
+
+    // Return the width change object
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: Math.round(newHalfWidth),
+    };
+  }
+
+  /**
+   * Get rollback data to restore original width.
+   */
+  getRollback() {
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: Math.round(this.originalHalfWidth),
+    };
+  }
+}
+
+/**
+ * Create a RibEditBehavior for the given rib point hit.
+ * @param {Object} skeletonData - The skeleton data
+ * @param {Object} ribHit - Hit test result from _hitTestRibPoints
+ * @returns {RibEditBehavior} The behavior instance
+ */
+export function createRibEditBehavior(skeletonData, ribHit) {
+  const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
+  return new RibEditBehavior(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint
+  );
+}

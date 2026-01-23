@@ -5,6 +5,46 @@ import { fitCubic, chordLengthParameterize, computeMaxError } from "./fit-cubic.
 
 const DEFAULT_WIDTH = 20;
 
+/**
+ * Get the width for a point, with support for asymmetric left/right widths.
+ * @param {Object} point - The skeleton point
+ * @param {number} defaultWidth - Fallback width if point has no width
+ * @param {string|null} side - "left", "right", or null for symmetric width
+ * @returns {number} The width for this point (full width, not half)
+ */
+export function getPointWidth(point, defaultWidth, side = null) {
+  if (side === "left" && point.leftWidth !== undefined) {
+    return point.leftWidth * 2; // leftWidth stores half-width, return full width
+  }
+  if (side === "right" && point.rightWidth !== undefined) {
+    return point.rightWidth * 2; // rightWidth stores half-width, return full width
+  }
+  if (point.width !== undefined) {
+    return point.width;
+  }
+  return defaultWidth;
+}
+
+/**
+ * Get the half-width for a specific side of a point.
+ * @param {Object} point - The skeleton point
+ * @param {number} defaultWidth - Fallback width if point has no width
+ * @param {string} side - "left" or "right"
+ * @returns {number} The half-width for this side
+ */
+export function getPointHalfWidth(point, defaultWidth, side) {
+  if (side === "left" && point.leftWidth !== undefined) {
+    return point.leftWidth;
+  }
+  if (side === "right" && point.rightWidth !== undefined) {
+    return point.rightWidth;
+  }
+  if (point.width !== undefined) {
+    return point.width / 2;
+  }
+  return defaultWidth / 2;
+}
+
 // Constants for offset curve simplification
 const SIMPLIFY_OFFSET_CURVES = true;
 const SAMPLES_PER_CURVE = 5;
@@ -157,6 +197,12 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     const isFirstSegment = i === 0;
     const isLastSegment = i === segments.length - 1;
 
+    // Get per-point widths for start and end of segment
+    const startLeftHalfWidth = getPointHalfWidth(segment.startPoint, defaultWidth, "left");
+    const startRightHalfWidth = getPointHalfWidth(segment.startPoint, defaultWidth, "right");
+    const endLeftHalfWidth = getPointHalfWidth(segment.endPoint, defaultWidth, "left");
+    const endRightHalfWidth = getPointHalfWidth(segment.endPoint, defaultWidth, "right");
+
     const offsetPoints = generateOffsetPointsForSegment(
       segment,
       prevSegment,
@@ -165,7 +211,11 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
       isFirstSegment,
       isLastSegment,
       isClosed,
-      capStyle
+      capStyle,
+      startLeftHalfWidth,
+      startRightHalfWidth,
+      endLeftHalfWidth,
+      endRightHalfWidth
     );
 
     leftSide.push(...offsetPoints.left);
@@ -183,19 +233,31 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     ];
   } else {
     // For open skeleton: ONE contour with caps at ends
+    // Get per-point widths for first and last on-curve points
+    const firstOnCurvePoint = segments[0].startPoint;
+    const lastOnCurvePoint = segments[segments.length - 1].endPoint;
+    const startCapLeftHW = getPointHalfWidth(firstOnCurvePoint, defaultWidth, "left");
+    const startCapRightHW = getPointHalfWidth(firstOnCurvePoint, defaultWidth, "right");
+    const endCapLeftHW = getPointHalfWidth(lastOnCurvePoint, defaultWidth, "left");
+    const endCapRightHW = getPointHalfWidth(lastOnCurvePoint, defaultWidth, "right");
+
     const startCap = generateCap(
-      points[0],
+      firstOnCurvePoint,
       segments[0],
       defaultWidth,
       capStyle,
-      "start"
+      "start",
+      startCapLeftHW,
+      startCapRightHW
     );
     const endCap = generateCap(
-      points[points.length - 1],
+      lastOnCurvePoint,
       segments[segments.length - 1],
       defaultWidth,
       capStyle,
-      "end"
+      "end",
+      endCapLeftHW,
+      endCapRightHW
     );
 
     const outlinePoints = [];
@@ -341,6 +403,18 @@ function simplifyOffsetCurves(offsetCurves, halfWidth) {
  * Generate offset points for a segment.
  * For open skeletons: first segment adds start, all segments add end
  * For closed skeletons: all segments add start (end connects to next start)
+ * @param {Object} segment - The segment to generate offsets for
+ * @param {Object|null} prevSegment - Previous segment (for corner normals)
+ * @param {Object|null} nextSegment - Next segment (for corner normals)
+ * @param {number} width - Default width (fallback)
+ * @param {boolean} isFirst - Is this the first segment
+ * @param {boolean} isLast - Is this the last segment
+ * @param {boolean} isClosed - Is the contour closed
+ * @param {string} capStyle - Cap style for open endpoints
+ * @param {number} startLeftHalfWidth - Half-width on left side at start point
+ * @param {number} startRightHalfWidth - Half-width on right side at start point
+ * @param {number} endLeftHalfWidth - Half-width on left side at end point
+ * @param {number} endRightHalfWidth - Half-width on right side at end point
  */
 function generateOffsetPointsForSegment(
   segment,
@@ -350,14 +424,24 @@ function generateOffsetPointsForSegment(
   isFirst,
   isLast,
   isClosed,
-  capStyle = "butt"
+  capStyle = "butt",
+  startLeftHalfWidth = null,
+  startRightHalfWidth = null,
+  endLeftHalfWidth = null,
+  endRightHalfWidth = null
 ) {
+  // Use provided half-widths or fall back to width/2
   const halfWidth = width / 2;
+  const startLeftHW = startLeftHalfWidth ?? halfWidth;
+  const startRightHW = startRightHalfWidth ?? halfWidth;
+  const endLeftHW = endLeftHalfWidth ?? halfWidth;
+  const endRightHW = endRightHalfWidth ?? halfWidth;
+
   const left = [];
   const right = [];
 
   if (segment.controlPoints.length === 0) {
-    // Line segment - simple offset
+    // Line segment - simple offset with per-point widths
     const direction = vector.normalizeVector(
       vector.subVectors(segment.endPoint, segment.startPoint)
     );
@@ -371,17 +455,18 @@ function generateOffsetPointsForSegment(
       const startNormal =
         !prevSegment || (isFirst && !isClosed)
           ? normal
-          : calculateCornerNormal(prevSegment, segment, halfWidth);
+          : calculateCornerNormal(prevSegment, segment, startLeftHW);
 
       // Copy smooth property from skeleton point, round to UPM grid
+      // Use per-point half-widths for left and right sides
       left.push({
-        x: Math.round(segment.startPoint.x + startNormal.x * halfWidth),
-        y: Math.round(segment.startPoint.y + startNormal.y * halfWidth),
+        x: Math.round(segment.startPoint.x + startNormal.x * startLeftHW),
+        y: Math.round(segment.startPoint.y + startNormal.y * startLeftHW),
         smooth: segment.startPoint.smooth,
       });
       right.push({
-        x: Math.round(segment.startPoint.x - startNormal.x * halfWidth),
-        y: Math.round(segment.startPoint.y - startNormal.y * halfWidth),
+        x: Math.round(segment.startPoint.x - startNormal.x * startRightHW),
+        y: Math.round(segment.startPoint.y - startNormal.y * startRightHW),
         smooth: segment.startPoint.smooth,
       });
     }
@@ -394,22 +479,25 @@ function generateOffsetPointsForSegment(
       const endNormal =
         !nextSegment || isLast
           ? normal
-          : calculateCornerNormal(segment, nextSegment, halfWidth);
+          : calculateCornerNormal(segment, nextSegment, endLeftHW);
 
       // Copy smooth property from skeleton point, round to UPM grid
+      // Use per-point half-widths for left and right sides
       left.push({
-        x: Math.round(segment.endPoint.x + endNormal.x * halfWidth),
-        y: Math.round(segment.endPoint.y + endNormal.y * halfWidth),
+        x: Math.round(segment.endPoint.x + endNormal.x * endLeftHW),
+        y: Math.round(segment.endPoint.y + endNormal.y * endLeftHW),
         smooth: segment.endPoint.smooth,
       });
       right.push({
-        x: Math.round(segment.endPoint.x - endNormal.x * halfWidth),
-        y: Math.round(segment.endPoint.y - endNormal.y * halfWidth),
+        x: Math.round(segment.endPoint.x - endNormal.x * endRightHW),
+        y: Math.round(segment.endPoint.y - endNormal.y * endRightHW),
         smooth: segment.endPoint.smooth,
       });
     }
   } else {
     // Bezier segment - use bezier.offset() for mathematically correct offset
+    // For variable-width segments, we use average width for offset curves
+    // and then fix endpoints to the exact per-point widths
     const bezierPoints = [
       segment.startPoint,
       ...segment.controlPoints,
@@ -432,38 +520,41 @@ function generateOffsetPointsForSegment(
     const startNormal =
       !prevSegment || (isFirst && !isClosed)
         ? bezierStartNormal
-        : calculateCornerNormal(prevSegment, segment, halfWidth);
+        : calculateCornerNormal(prevSegment, segment, startLeftHW);
 
     const endNormal =
       !nextSegment || (isLast && !isClosed)
         ? bezierEndNormal
-        : calculateCornerNormal(segment, nextSegment, halfWidth);
+        : calculateCornerNormal(segment, nextSegment, endLeftHW);
 
     // Get offset curves from bezier-js (returns array of Bezier objects)
     // Note: bezier-js uses CCW normal, our code uses CW normal, so signs are swapped
-    const offsetLeftCurves = bezier.offset(-halfWidth);
-    const offsetRightCurves = bezier.offset(halfWidth);
+    // Use average widths for the offset curve generation
+    const avgLeftHW = (startLeftHW + endLeftHW) / 2;
+    const avgRightHW = (startRightHW + endRightHW) / 2;
+    const offsetLeftCurves = bezier.offset(-avgLeftHW);
+    const offsetRightCurves = bezier.offset(avgRightHW);
 
-    // Fixed endpoint positions (using corner-aware normals), rounded to UPM grid
+    // Fixed endpoint positions (using corner-aware normals and per-point widths), rounded to UPM grid
     const fixedStartLeft = {
-      x: Math.round(segment.startPoint.x + startNormal.x * halfWidth),
-      y: Math.round(segment.startPoint.y + startNormal.y * halfWidth),
+      x: Math.round(segment.startPoint.x + startNormal.x * startLeftHW),
+      y: Math.round(segment.startPoint.y + startNormal.y * startLeftHW),
     };
     const fixedStartRight = {
-      x: Math.round(segment.startPoint.x - startNormal.x * halfWidth),
-      y: Math.round(segment.startPoint.y - startNormal.y * halfWidth),
+      x: Math.round(segment.startPoint.x - startNormal.x * startRightHW),
+      y: Math.round(segment.startPoint.y - startNormal.y * startRightHW),
     };
     const fixedEndLeft = {
-      x: Math.round(segment.endPoint.x + endNormal.x * halfWidth),
-      y: Math.round(segment.endPoint.y + endNormal.y * halfWidth),
+      x: Math.round(segment.endPoint.x + endNormal.x * endLeftHW),
+      y: Math.round(segment.endPoint.y + endNormal.y * endLeftHW),
     };
     const fixedEndRight = {
-      x: Math.round(segment.endPoint.x - endNormal.x * halfWidth),
-      y: Math.round(segment.endPoint.y - endNormal.y * halfWidth),
+      x: Math.round(segment.endPoint.x - endNormal.x * endRightHW),
+      y: Math.round(segment.endPoint.y - endNormal.y * endRightHW),
     };
 
     // Helper to add offset curves to output array
-    const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd) => {
+    const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd, sideHalfWidth) => {
       // Fallback: if bezier.offset() returns empty result, add straight line
       if (!curves || curves.length === 0) {
         if (shouldAddStart) {
@@ -476,7 +567,7 @@ function generateOffsetPointsForSegment(
       }
 
       // Try to simplify multiple offset curves into a single cubic bezier
-      const simplifiedCurve = simplifyOffsetCurves(curves, halfWidth);
+      const simplifiedCurve = simplifyOffsetCurves(curves, sideHalfWidth);
       if (simplifiedCurve) {
         // Use the simplified curve
         const pts = simplifiedCurve.points;
@@ -560,7 +651,8 @@ function generateOffsetPointsForSegment(
       shouldAddStart,
       shouldAddEnd,
       segment.startPoint.smooth,
-      segment.endPoint.smooth
+      segment.endPoint.smooth,
+      avgLeftHW
     );
 
     addOffsetCurves(
@@ -571,7 +663,8 @@ function generateOffsetPointsForSegment(
       shouldAddStart,
       shouldAddEnd,
       segment.startPoint.smooth,
-      segment.endPoint.smooth
+      segment.endPoint.smooth,
+      avgRightHW
     );
   }
 
@@ -687,9 +780,20 @@ function createBezierFromPoints(points) {
 
 /**
  * Generate cap points for open skeleton endpoints.
+ * @param {Object} point - The endpoint
+ * @param {Object} segment - The segment at this endpoint
+ * @param {number} width - Default width (fallback)
+ * @param {string} capStyle - Cap style ("butt", "round", "square")
+ * @param {string} position - "start" or "end"
+ * @param {number} leftHalfWidth - Half-width on left side
+ * @param {number} rightHalfWidth - Half-width on right side
  */
-function generateCap(point, segment, width, capStyle, position) {
+function generateCap(point, segment, width, capStyle, position, leftHalfWidth = null, rightHalfWidth = null) {
   const halfWidth = width / 2;
+  const leftHW = leftHalfWidth ?? halfWidth;
+  const rightHW = rightHalfWidth ?? halfWidth;
+  // For round caps, use average half-width for the tip point
+  const avgHW = (leftHW + rightHW) / 2;
   const capPoints = [];
 
   // Determine direction at this endpoint
@@ -708,102 +812,102 @@ function generateCap(point, segment, width, capStyle, position) {
 
   if (capStyle === "round") {
     // Semicircular cap using cubic bezier approximation
-    const numArcPoints = 4;
+    // Use per-point widths for left/right sides
     const kappa = 0.5522847498; // Bezier circle approximation constant
 
     if (position === "end") {
       // Arc from right side to left side (going "forward")
       const rightPoint = {
-        x: point.x - normal.x * halfWidth,
-        y: point.y - normal.y * halfWidth,
+        x: point.x - normal.x * rightHW,
+        y: point.y - normal.y * rightHW,
       };
       const leftPoint = {
-        x: point.x + normal.x * halfWidth,
-        y: point.y + normal.y * halfWidth,
+        x: point.x + normal.x * leftHW,
+        y: point.y + normal.y * leftHW,
       };
       const tipPoint = {
-        x: point.x + direction.x * halfWidth,
-        y: point.y + direction.y * halfWidth,
+        x: point.x + direction.x * avgHW,
+        y: point.y + direction.y * avgHW,
       };
 
       // Control points for quarter arcs
       capPoints.push({
-        x: rightPoint.x + direction.x * halfWidth * kappa,
-        y: rightPoint.y + direction.y * halfWidth * kappa,
+        x: rightPoint.x + direction.x * rightHW * kappa,
+        y: rightPoint.y + direction.y * rightHW * kappa,
         type: "cubic",
       });
       capPoints.push({
-        x: tipPoint.x - normal.x * halfWidth * kappa,
-        y: tipPoint.y - normal.y * halfWidth * kappa,
+        x: tipPoint.x - normal.x * rightHW * kappa,
+        y: tipPoint.y - normal.y * rightHW * kappa,
         type: "cubic",
       });
       capPoints.push(tipPoint);
       capPoints.push({
-        x: tipPoint.x + normal.x * halfWidth * kappa,
-        y: tipPoint.y + normal.y * halfWidth * kappa,
+        x: tipPoint.x + normal.x * leftHW * kappa,
+        y: tipPoint.y + normal.y * leftHW * kappa,
         type: "cubic",
       });
       capPoints.push({
-        x: leftPoint.x + direction.x * halfWidth * kappa,
-        y: leftPoint.y + direction.y * halfWidth * kappa,
+        x: leftPoint.x + direction.x * leftHW * kappa,
+        y: leftPoint.y + direction.y * leftHW * kappa,
         type: "cubic",
       });
     } else {
       // Start cap - arc from left to right (going "backward")
       const rightPoint = {
-        x: point.x - normal.x * halfWidth,
-        y: point.y - normal.y * halfWidth,
+        x: point.x - normal.x * rightHW,
+        y: point.y - normal.y * rightHW,
       };
       const leftPoint = {
-        x: point.x + normal.x * halfWidth,
-        y: point.y + normal.y * halfWidth,
+        x: point.x + normal.x * leftHW,
+        y: point.y + normal.y * leftHW,
       };
       const tipPoint = {
-        x: point.x - direction.x * halfWidth,
-        y: point.y - direction.y * halfWidth,
+        x: point.x - direction.x * avgHW,
+        y: point.y - direction.y * avgHW,
       };
 
       capPoints.push({
-        x: leftPoint.x - direction.x * halfWidth * kappa,
-        y: leftPoint.y - direction.y * halfWidth * kappa,
+        x: leftPoint.x - direction.x * leftHW * kappa,
+        y: leftPoint.y - direction.y * leftHW * kappa,
         type: "cubic",
       });
       capPoints.push({
-        x: tipPoint.x + normal.x * halfWidth * kappa,
-        y: tipPoint.y + normal.y * halfWidth * kappa,
+        x: tipPoint.x + normal.x * leftHW * kappa,
+        y: tipPoint.y + normal.y * leftHW * kappa,
         type: "cubic",
       });
       capPoints.push(tipPoint);
       capPoints.push({
-        x: tipPoint.x - normal.x * halfWidth * kappa,
-        y: tipPoint.y - normal.y * halfWidth * kappa,
+        x: tipPoint.x - normal.x * rightHW * kappa,
+        y: tipPoint.y - normal.y * rightHW * kappa,
         type: "cubic",
       });
       capPoints.push({
-        x: rightPoint.x - direction.x * halfWidth * kappa,
-        y: rightPoint.y - direction.y * halfWidth * kappa,
+        x: rightPoint.x - direction.x * rightHW * kappa,
+        y: rightPoint.y - direction.y * rightHW * kappa,
         type: "cubic",
       });
     }
   } else if (capStyle === "square") {
-    // Square cap - extend by halfWidth
+    // Square cap - extend by per-point half-widths
     if (position === "end") {
       capPoints.push({
-        x: point.x - normal.x * halfWidth + direction.x * halfWidth,
-        y: point.y - normal.y * halfWidth + direction.y * halfWidth,
+        x: point.x - normal.x * rightHW + direction.x * avgHW,
+        y: point.y - normal.y * rightHW + direction.y * avgHW,
       });
       capPoints.push({
-        x: point.x + normal.x * halfWidth + direction.x * halfWidth,
-        y: point.y + normal.y * halfWidth + direction.y * halfWidth,
+        x: point.x + normal.x * leftHW + direction.x * avgHW,
+        y: point.y + normal.y * leftHW + direction.y * avgHW,
       });
     } else {
       capPoints.push({
-        x: point.x + normal.x * halfWidth - direction.x * halfWidth,
-        y: point.y + normal.y * halfWidth - direction.y * halfWidth,
+        x: point.x + normal.x * leftHW - direction.x * avgHW,
+        y: point.y + normal.y * leftHW - direction.y * avgHW,
       });
       capPoints.push({
-        x: point.x - normal.x * halfWidth - direction.x * halfWidth,
-        y: point.y - normal.y * halfWidth - direction.y * halfWidth,
+        x: point.x - normal.x * rightHW - direction.x * avgHW,
+        y: point.y - normal.y * rightHW - direction.y * avgHW,
       });
     }
   }
