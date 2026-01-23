@@ -373,15 +373,15 @@ function generateOffsetPointsForSegment(
           ? normal
           : calculateCornerNormal(prevSegment, segment, halfWidth);
 
-      // Copy smooth property from skeleton point
+      // Copy smooth property from skeleton point, round to UPM grid
       left.push({
-        x: segment.startPoint.x + startNormal.x * halfWidth,
-        y: segment.startPoint.y + startNormal.y * halfWidth,
+        x: Math.round(segment.startPoint.x + startNormal.x * halfWidth),
+        y: Math.round(segment.startPoint.y + startNormal.y * halfWidth),
         smooth: segment.startPoint.smooth,
       });
       right.push({
-        x: segment.startPoint.x - startNormal.x * halfWidth,
-        y: segment.startPoint.y - startNormal.y * halfWidth,
+        x: Math.round(segment.startPoint.x - startNormal.x * halfWidth),
+        y: Math.round(segment.startPoint.y - startNormal.y * halfWidth),
         smooth: segment.startPoint.smooth,
       });
     }
@@ -396,15 +396,15 @@ function generateOffsetPointsForSegment(
           ? normal
           : calculateCornerNormal(segment, nextSegment, halfWidth);
 
-      // Copy smooth property from skeleton point
+      // Copy smooth property from skeleton point, round to UPM grid
       left.push({
-        x: segment.endPoint.x + endNormal.x * halfWidth,
-        y: segment.endPoint.y + endNormal.y * halfWidth,
+        x: Math.round(segment.endPoint.x + endNormal.x * halfWidth),
+        y: Math.round(segment.endPoint.y + endNormal.y * halfWidth),
         smooth: segment.endPoint.smooth,
       });
       right.push({
-        x: segment.endPoint.x - endNormal.x * halfWidth,
-        y: segment.endPoint.y - endNormal.y * halfWidth,
+        x: Math.round(segment.endPoint.x - endNormal.x * halfWidth),
+        y: Math.round(segment.endPoint.y - endNormal.y * halfWidth),
         smooth: segment.endPoint.smooth,
       });
     }
@@ -444,22 +444,22 @@ function generateOffsetPointsForSegment(
     const offsetLeftCurves = bezier.offset(-halfWidth);
     const offsetRightCurves = bezier.offset(halfWidth);
 
-    // Fixed endpoint positions (using corner-aware normals)
+    // Fixed endpoint positions (using corner-aware normals), rounded to UPM grid
     const fixedStartLeft = {
-      x: segment.startPoint.x + startNormal.x * halfWidth,
-      y: segment.startPoint.y + startNormal.y * halfWidth,
+      x: Math.round(segment.startPoint.x + startNormal.x * halfWidth),
+      y: Math.round(segment.startPoint.y + startNormal.y * halfWidth),
     };
     const fixedStartRight = {
-      x: segment.startPoint.x - startNormal.x * halfWidth,
-      y: segment.startPoint.y - startNormal.y * halfWidth,
+      x: Math.round(segment.startPoint.x - startNormal.x * halfWidth),
+      y: Math.round(segment.startPoint.y - startNormal.y * halfWidth),
     };
     const fixedEndLeft = {
-      x: segment.endPoint.x + endNormal.x * halfWidth,
-      y: segment.endPoint.y + endNormal.y * halfWidth,
+      x: Math.round(segment.endPoint.x + endNormal.x * halfWidth),
+      y: Math.round(segment.endPoint.y + endNormal.y * halfWidth),
     };
     const fixedEndRight = {
-      x: segment.endPoint.x - endNormal.x * halfWidth,
-      y: segment.endPoint.y - endNormal.y * halfWidth,
+      x: Math.round(segment.endPoint.x - endNormal.x * halfWidth),
+      y: Math.round(segment.endPoint.y - endNormal.y * halfWidth),
     };
 
     // Helper to add offset curves to output array
@@ -487,9 +487,9 @@ function generateOffsetPointsForSegment(
             smooth: smoothStart,
           });
         }
-        // Add control points (cubic bezier)
-        output.push({ x: pts[1].x, y: pts[1].y, type: "cubic" });
-        output.push({ x: pts[2].x, y: pts[2].y, type: "cubic" });
+        // Add control points (cubic bezier), rounded to UPM grid
+        output.push({ x: Math.round(pts[1].x), y: Math.round(pts[1].y), type: "cubic" });
+        output.push({ x: Math.round(pts[2].x), y: Math.round(pts[2].y), type: "cubic" });
         if (shouldAddEnd) {
           output.push({
             x: fixedEnd.x,
@@ -516,14 +516,14 @@ function generateOffsetPointsForSegment(
           });
         }
 
-        // Add control points based on curve type
+        // Add control points based on curve type, rounded to UPM grid
         if (pts.length === 4) {
           // Cubic bezier
-          output.push({ x: pts[1].x, y: pts[1].y, type: "cubic" });
-          output.push({ x: pts[2].x, y: pts[2].y, type: "cubic" });
+          output.push({ x: Math.round(pts[1].x), y: Math.round(pts[1].y), type: "cubic" });
+          output.push({ x: Math.round(pts[2].x), y: Math.round(pts[2].y), type: "cubic" });
         } else if (pts.length === 3) {
           // Quadratic bezier
-          output.push({ x: pts[1].x, y: pts[1].y, type: "quad" });
+          output.push({ x: Math.round(pts[1].x), y: Math.round(pts[1].y), type: "quad" });
         }
         // Linear (2 points) - no control points needed
 
@@ -538,10 +538,10 @@ function generateOffsetPointsForSegment(
             });
           }
         } else {
-          // Intermediate curve - add endpoint (it becomes next curve's start)
+          // Intermediate curve - add endpoint (it becomes next curve's start), rounded to UPM grid
           output.push({
-            x: pts[pts.length - 1].x,
-            y: pts[pts.length - 1].y,
+            x: Math.round(pts[pts.length - 1].x),
+            y: Math.round(pts[pts.length - 1].y),
             smooth: true, // intermediate points are smooth
           });
         }
