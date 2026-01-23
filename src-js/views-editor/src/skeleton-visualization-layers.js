@@ -395,6 +395,139 @@ registerVisualizationLayerDefinition({
   },
 });
 
+// Selected/hovered skeleton segments layer
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.selected.segments",
+  name: "Selected Skeleton Segments",
+  selectionFunc: glyphSelector("editing"),
+  zIndex: 448, // Just below centerline
+  screenParameters: {
+    strokeWidth: 4,
+  },
+  colors: {
+    hoveredColor: "rgba(0, 191, 255, 0.5)",
+    selectedColor: "rgba(255, 64, 0, 0.6)",
+  },
+  colorsDarkMode: {
+    hoveredColor: "rgba(0, 191, 255, 0.5)",
+    selectedColor: "rgba(255, 96, 64, 0.6)",
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
+    if (!skeletonData?.contours?.length) {
+      return;
+    }
+
+    const { skeletonSegment: hoveredSkeletonSegments } = parseSelection(
+      model.hoverSelection
+    );
+    const { skeletonSegment: selectedSkeletonSegments } = parseSelection(
+      model.selection
+    );
+
+    if (!hoveredSkeletonSegments?.size && !selectedSkeletonSegments?.size) {
+      return;
+    }
+
+    context.lineWidth = parameters.strokeWidth;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+
+    // Helper to draw a segment
+    const drawSegment = (contour, segmentIdx, isClosing = false) => {
+      const points = contour.points;
+
+      // Find on-curve indices
+      const onCurveIndices = [];
+      for (let i = 0; i < points.length; i++) {
+        if (!points[i].type) {
+          onCurveIndices.push(i);
+        }
+      }
+
+      if (segmentIdx >= onCurveIndices.length) return;
+
+      let startIdx, endIdx;
+      if (isClosing || segmentIdx === onCurveIndices.length - 1) {
+        startIdx = onCurveIndices[onCurveIndices.length - 1];
+        endIdx = onCurveIndices[0];
+      } else {
+        startIdx = onCurveIndices[segmentIdx];
+        endIdx = onCurveIndices[segmentIdx + 1];
+      }
+
+      const startPoint = points[startIdx];
+      const endPoint = points[endIdx];
+
+      // Collect off-curve points
+      const offCurves = [];
+      if (isClosing || segmentIdx === onCurveIndices.length - 1) {
+        for (let j = startIdx + 1; j < points.length; j++) {
+          if (points[j].type) offCurves.push(points[j]);
+        }
+        for (let j = 0; j < endIdx; j++) {
+          if (points[j].type) offCurves.push(points[j]);
+        }
+      } else {
+        for (let j = startIdx + 1; j < endIdx; j++) {
+          if (points[j].type) offCurves.push(points[j]);
+        }
+      }
+
+      // Build path
+      const path = new Path2D();
+      path.moveTo(startPoint.x, startPoint.y);
+
+      if (offCurves.length === 0) {
+        path.lineTo(endPoint.x, endPoint.y);
+      } else if (offCurves.length === 1) {
+        path.quadraticCurveTo(offCurves[0].x, offCurves[0].y, endPoint.x, endPoint.y);
+      } else if (offCurves.length === 2) {
+        path.bezierCurveTo(
+          offCurves[0].x,
+          offCurves[0].y,
+          offCurves[1].x,
+          offCurves[1].y,
+          endPoint.x,
+          endPoint.y
+        );
+      }
+
+      context.stroke(path);
+    };
+
+    // Draw selected segments
+    if (selectedSkeletonSegments?.size) {
+      context.strokeStyle = parameters.selectedColor;
+      for (const selKey of selectedSkeletonSegments) {
+        const [contourIdx, segmentIdx] = selKey.split("/").map(Number);
+        const contour = skeletonData.contours[contourIdx];
+        if (contour) {
+          // Find on-curve count to check if this is closing segment
+          const onCurveCount = contour.points.filter((p) => !p.type).length;
+          const isClosing = contour.isClosed && segmentIdx === onCurveCount - 1;
+          drawSegment(contour, segmentIdx, isClosing);
+        }
+      }
+    }
+
+    // Draw hovered segments (if not already selected)
+    if (hoveredSkeletonSegments?.size) {
+      context.strokeStyle = parameters.hoveredColor;
+      for (const selKey of hoveredSkeletonSegments) {
+        if (selectedSkeletonSegments?.has(selKey)) continue;
+        const [contourIdx, segmentIdx] = selKey.split("/").map(Number);
+        const contour = skeletonData.contours[contourIdx];
+        if (contour) {
+          const onCurveCount = contour.points.filter((p) => !p.type).length;
+          const isClosing = contour.isClosed && segmentIdx === onCurveCount - 1;
+          drawSegment(contour, segmentIdx, isClosing);
+        }
+      }
+    }
+  },
+});
+
 // Skeleton insert handles preview (shown when Alt+hovering over centerline)
 registerVisualizationLayerDefinition({
   identifier: "fontra.skeleton.insert.handles",

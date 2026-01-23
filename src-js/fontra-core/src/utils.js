@@ -232,7 +232,10 @@ export function parseSelection(selection) {
     const tp = parts[0];
 
     if (result[tp] === undefined) {
-      result[tp] = tp === "skeletonPoint" || tp === "skeletonHandle" ? new Set() : [];
+      result[tp] =
+        tp === "skeletonPoint" || tp === "skeletonHandle" || tp === "skeletonSegment"
+          ? new Set()
+          : [];
     }
 
     if (tp === "skeletonPoint" && parts.length === 3) {
@@ -241,6 +244,9 @@ export function parseSelection(selection) {
     } else if (tp === "skeletonHandle" && parts.length === 4) {
       // Format: "skeletonHandle/contourIndex/pointIndex/in|out"
       result[tp].add(`${parts[1]}/${parts[2]}/${parts[3]}`);
+    } else if (tp === "skeletonSegment" && parts.length === 3) {
+      // Format: "skeletonSegment/contourIndex/segmentIndex"
+      result[tp].add(`${parts[1]}/${parts[2]}`);
     } else if (parts.length === 2) {
       // Standard format: "type/index"
       result[tp].push(parseInt(parts[1]));
