@@ -3,7 +3,7 @@ import * as vector from "./vector.js";
 import { VarPackedPath } from "./var-path.js";
 import { fitCubic, chordLengthParameterize, computeMaxError } from "./fit-cubic.js";
 
-const DEFAULT_WIDTH = 20;
+const DEFAULT_WIDTH = 80;
 
 /**
  * Get the width for a point, with support for asymmetric left/right widths.

@@ -16,8 +16,8 @@ import {
 import { BaseTool } from "./edit-tools-base.js";
 
 const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
-const SKELETON_DEFAULT_WIDTH_KEY = "fontra.skeleton.defaultWidth";
-const DEFAULT_WIDTH = 20;
+const SKELETON_DEFAULT_WIDTH_WIDE_KEY = "fontra.skeleton.defaultWidthWide";
+const DEFAULT_WIDTH_WIDE = 80;
 
 export class SkeletonPenTool extends BaseTool {
   iconPath = "/images/skeleton-pen.svg";
@@ -139,16 +139,17 @@ export class SkeletonPenTool extends BaseTool {
   }
 
   /**
-   * Get the default skeleton width from the current source's customData.
-   * @returns {number} The default width value for new skeleton contours
+   * Get the default wide skeleton width from the current source's customData.
+   * New skeleton contours use the wide width by default.
+   * @returns {number} The default wide width value for new skeleton contours
    */
   _getDefaultSkeletonWidth() {
     const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
-    if (!sourceIdentifier) return DEFAULT_WIDTH;
+    if (!sourceIdentifier) return DEFAULT_WIDTH_WIDE;
 
     const fontController = this.sceneController.sceneModel.fontController;
     const source = fontController.sources[sourceIdentifier];
-    return source?.customData?.[SKELETON_DEFAULT_WIDTH_KEY] ?? DEFAULT_WIDTH;
+    return source?.customData?.[SKELETON_DEFAULT_WIDTH_WIDE_KEY] ?? DEFAULT_WIDTH_WIDE;
   }
 
   _insertHandlesEqual(a, b) {

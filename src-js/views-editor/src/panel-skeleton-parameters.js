@@ -5,8 +5,10 @@ import { translate } from "@fontra/core/localization.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
 
-const SKELETON_DEFAULT_WIDTH_KEY = "fontra.skeleton.defaultWidth";
-const DEFAULT_WIDTH = 20;
+const SKELETON_DEFAULT_WIDTH_WIDE_KEY = "fontra.skeleton.defaultWidthWide";
+const SKELETON_DEFAULT_WIDTH_NARROW_KEY = "fontra.skeleton.defaultWidthNarrow";
+const DEFAULT_WIDTH_WIDE = 80;
+const DEFAULT_WIDTH_NARROW = 40;
 
 export default class SkeletonParametersPanel extends Panel {
   identifier = "skeleton-parameters";
@@ -184,26 +186,36 @@ export default class SkeletonParametersPanel extends Panel {
       },
     });
 
-    // === DEFAULT SKELETON WIDTH ===
+    // === DEFAULT WIDTHS ===
     formContents.push({ type: "spacer" });
     formContents.push({
       type: "header",
-      label: "Default Skeleton Width",
+      label: "Default Widths",
     });
 
     formContents.push({
       type: "edit-number",
-      key: "defaultSkeletonWidth",
-      label: "Width",
-      value: this._getCurrentDefaultWidth(),
+      key: "defaultSkeletonWidthWide",
+      label: "Wide",
+      value: this._getCurrentDefaultWidthWide(),
+      minValue: 1,
+    });
+
+    formContents.push({
+      type: "edit-number",
+      key: "defaultSkeletonWidthNarrow",
+      label: "Narrow",
+      value: this._getCurrentDefaultWidthNarrow(),
       minValue: 1,
     });
 
     this.infoForm.setFieldDescriptions(formContents);
 
     this.infoForm.onFieldChange = async (fieldItem, value, valueStream) => {
-      if (fieldItem.key === "defaultSkeletonWidth") {
-        await this._setDefaultSkeletonWidth(value);
+      if (fieldItem.key === "defaultSkeletonWidthWide") {
+        await this._setDefaultSkeletonWidth(SKELETON_DEFAULT_WIDTH_WIDE_KEY, value);
+      } else if (fieldItem.key === "defaultSkeletonWidthNarrow") {
+        await this._setDefaultSkeletonWidth(SKELETON_DEFAULT_WIDTH_NARROW_KEY, value);
       } else {
         this.parameters[fieldItem.key] = value;
       }
@@ -211,22 +223,35 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Get the current default skeleton width from the active source's customData.
-   * @returns {number} The default width value
+   * Get the current default wide skeleton width from the active source's customData.
+   * @returns {number} The default wide width value
    */
-  _getCurrentDefaultWidth() {
+  _getCurrentDefaultWidthWide() {
     const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
-    if (!sourceIdentifier) return DEFAULT_WIDTH;
+    if (!sourceIdentifier) return DEFAULT_WIDTH_WIDE;
 
     const source = this.fontController.sources[sourceIdentifier];
-    return source?.customData?.[SKELETON_DEFAULT_WIDTH_KEY] ?? DEFAULT_WIDTH;
+    return source?.customData?.[SKELETON_DEFAULT_WIDTH_WIDE_KEY] ?? DEFAULT_WIDTH_WIDE;
   }
 
   /**
-   * Set the default skeleton width in the active source's customData.
+   * Get the current default narrow skeleton width from the active source's customData.
+   * @returns {number} The default narrow width value
+   */
+  _getCurrentDefaultWidthNarrow() {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return DEFAULT_WIDTH_NARROW;
+
+    const source = this.fontController.sources[sourceIdentifier];
+    return source?.customData?.[SKELETON_DEFAULT_WIDTH_NARROW_KEY] ?? DEFAULT_WIDTH_NARROW;
+  }
+
+  /**
+   * Set a default skeleton width in the active source's customData.
+   * @param {string} key - The customData key to set
    * @param {number} value - The new default width value
    */
-  async _setDefaultSkeletonWidth(value) {
+  async _setDefaultSkeletonWidth(key, value) {
     const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
     if (!sourceIdentifier) return;
 
@@ -235,7 +260,7 @@ export default class SkeletonParametersPanel extends Panel {
       if (!r.sources[sourceIdentifier].customData) {
         r.sources[sourceIdentifier].customData = {};
       }
-      r.sources[sourceIdentifier].customData[SKELETON_DEFAULT_WIDTH_KEY] = value;
+      r.sources[sourceIdentifier].customData[key] = value;
     });
 
     if (changes.hasChange) {
