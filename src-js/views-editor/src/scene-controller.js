@@ -614,6 +614,13 @@ export class SceneController {
     );
 
     registerAction(
+      "action.break-skeleton-contour",
+      { topic },
+      () => this.doBreakSkeletonContour(),
+      () => this._hasClosedSkeletonContourInSelection()
+    );
+
+    registerAction(
       "action.reverse-contour",
       { topic },
       () => this.doReverseSelectedContours(),
@@ -927,10 +934,14 @@ export class SceneController {
         relevantSelection = this.selection;
       }
     }
-    const { point: pointSelection, component: componentSelection } =
-      parseSelection(relevantSelection);
+    const {
+      point: pointSelection,
+      component: componentSelection,
+      skeletonPoint: skeletonPointSelection,
+    } = parseSelection(relevantSelection);
     this.contextMenuState.pointSelection = pointSelection;
     this.contextMenuState.componentSelection = componentSelection;
+    this.contextMenuState.skeletonPointSelection = skeletonPointSelection;
 
     const glyphController = this.sceneModel.getSelectedPositionedGlyph().glyph;
     this.contextMenuState.openContourSelection = glyphController.canEdit
@@ -957,6 +968,7 @@ export class SceneController {
         actionIdentifier: "action.join-contours",
       },
       { actionIdentifier: "action.break-contour" },
+      { actionIdentifier: "action.break-skeleton-contour" },
       { actionIdentifier: "action.reverse-contour" },
       { actionIdentifier: "action.set-contour-start" },
       {
@@ -1536,6 +1548,91 @@ export class SceneController {
       }
       this.selection = new Set();
       return translatePlural("action.break-contour", numSplits);
+    });
+  }
+
+  _hasClosedSkeletonContourInSelection() {
+    const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
+    if (!skeletonPointSel?.size) {
+      return false;
+    }
+
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const editLayerName = this.editingLayerNames?.[0];
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (!skeletonData?.contours) {
+      return false;
+    }
+
+    for (const selKey of skeletonPointSel) {
+      const [contourIdx] = selKey.split("/").map(Number);
+      if (skeletonData.contours[contourIdx]?.isClosed) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async doBreakSkeletonContour() {
+    const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
+    if (!skeletonPointSel?.size) {
+      return;
+    }
+
+    await this.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = this.editingLayerNames?.[0];
+      const layer = glyph.layers[editLayerName];
+      const skeletonData = layer?.customData?.["fontra.skeleton"];
+      if (!skeletonData?.contours) {
+        return;
+      }
+
+      let numBroken = 0;
+      for (const selKey of skeletonPointSel) {
+        const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+        const contour = skeletonData.contours[contourIdx];
+        if (!contour?.isClosed) {
+          continue;
+        }
+
+        // Rotate points so pointIdx becomes the start
+        const points = contour.points;
+        contour.points = [...points.slice(pointIdx), ...points.slice(0, pointIdx)];
+        contour.isClosed = false;
+        numBroken++;
+      }
+
+      if (numBroken === 0) {
+        return;
+      }
+
+      // Regenerate outlines for all skeleton contours
+      const { generateContoursFromSkeleton } = await import(
+        "@fontra/core/skeleton-contour-generator.js"
+      );
+
+      // Remove old generated contours
+      const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
+      const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+      for (const idx of sortedIndices) {
+        if (idx < layer.glyph.path.numContours) {
+          layer.glyph.path.deleteContour(idx);
+        }
+      }
+
+      // Generate new contours
+      const generatedContours = generateContoursFromSkeleton(skeletonData);
+      const newGeneratedIndices = [];
+      const insertIndex = layer.glyph.path.numContours;
+      for (let i = 0; i < generatedContours.length; i++) {
+        layer.glyph.path.insertContour(insertIndex + i, generatedContours[i]);
+        newGeneratedIndices.push(insertIndex + i);
+      }
+      skeletonData.generatedContourIndices = newGeneratedIndices;
+
+      this.selection = new Set();
+      return translate("action.break-skeleton-contour");
     });
   }
 

@@ -17,6 +17,7 @@ export const strings = {
   "action.add-guideline-between-points": "Add Guideline Between Points",
   "action.break-contour": "Break Contour",
   "action.break-contour.plural": "Break Contours",
+  "action.break-skeleton-contour": "Break Skeleton Contour",
   "action.close-contour": "Close %0 Contour",
   "action.close-contour.plural": "Close %0 Contours",
   "action.copy": "Copy",
