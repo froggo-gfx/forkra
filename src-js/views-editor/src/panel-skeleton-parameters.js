@@ -78,10 +78,7 @@ export default class SkeletonParametersPanel extends Panel {
     });
 
     // Divider
-    formContents.push({
-      type: "auxiliaryElement",
-      auxiliaryElement: html.hr({ style: "border: none; border-top: 1px solid #ccc; margin: 1em 0;" }),
-    });
+    formContents.push({ type: "divider" });
 
     // === ALIGN ===
     formContents.push({
