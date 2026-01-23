@@ -1,8 +1,12 @@
 import { doPerformAction } from "@fontra/core/actions.js";
+import { recordChanges } from "@fontra/core/change-recorder.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
+
+const SKELETON_DEFAULT_WIDTH_KEY = "fontra.skeleton.defaultWidth";
+const DEFAULT_WIDTH = 20;
 
 export default class SkeletonParametersPanel extends Panel {
   identifier = "skeleton-parameters";
@@ -18,6 +22,7 @@ export default class SkeletonParametersPanel extends Panel {
       )
     );
     this.sceneController = this.editorController.sceneController;
+    this.fontController = this.editorController.fontController;
 
     // Shared parameters (customDistributionSpacing is used by TransformationPanel's action)
     this.parameters = {
@@ -28,6 +33,12 @@ export default class SkeletonParametersPanel extends Panel {
     this.sceneController.sceneSettingsController.addKeyListener(
       ["selectedGlyph", "selectedGlyphName", "selection"],
       (event) => this.update()
+    );
+
+    // Listen to source (editing layer) changes to update Default Width
+    this.sceneController.sceneSettingsController.addKeyListener(
+      ["editingLayerNames"],
+      () => this.update()
     );
   }
 
@@ -173,11 +184,67 @@ export default class SkeletonParametersPanel extends Panel {
       },
     });
 
+    // === DEFAULT SKELETON WIDTH ===
+    formContents.push({ type: "spacer" });
+    formContents.push({
+      type: "header",
+      label: "Default Skeleton Width",
+    });
+
+    formContents.push({
+      type: "edit-number",
+      key: "defaultSkeletonWidth",
+      label: "Width",
+      value: this._getCurrentDefaultWidth(),
+      minValue: 1,
+    });
+
     this.infoForm.setFieldDescriptions(formContents);
 
-    this.infoForm.onFieldChange = (fieldItem, value, valueStream) => {
-      this.parameters[fieldItem.key] = value;
+    this.infoForm.onFieldChange = async (fieldItem, value, valueStream) => {
+      if (fieldItem.key === "defaultSkeletonWidth") {
+        await this._setDefaultSkeletonWidth(value);
+      } else {
+        this.parameters[fieldItem.key] = value;
+      }
     };
+  }
+
+  /**
+   * Get the current default skeleton width from the active source's customData.
+   * @returns {number} The default width value
+   */
+  _getCurrentDefaultWidth() {
+    const sourceIdentifier = this.sceneController.sceneSettings.editingLayerNames?.[0];
+    if (!sourceIdentifier) return DEFAULT_WIDTH;
+
+    const source = this.fontController.sources[sourceIdentifier];
+    return source?.customData?.[SKELETON_DEFAULT_WIDTH_KEY] ?? DEFAULT_WIDTH;
+  }
+
+  /**
+   * Set the default skeleton width in the active source's customData.
+   * @param {number} value - The new default width value
+   */
+  async _setDefaultSkeletonWidth(value) {
+    const sourceIdentifier = this.sceneController.sceneSettings.editingLayerNames?.[0];
+    if (!sourceIdentifier) return;
+
+    const root = { sources: this.fontController.sources };
+    const changes = recordChanges(root, (r) => {
+      if (!r.sources[sourceIdentifier].customData) {
+        r.sources[sourceIdentifier].customData = {};
+      }
+      r.sources[sourceIdentifier].customData[SKELETON_DEFAULT_WIDTH_KEY] = value;
+    });
+
+    if (changes.hasChange) {
+      await this.fontController.postChange(
+        changes.change,
+        changes.rollbackChange,
+        "Set default skeleton width"
+      );
+    }
   }
 }
 

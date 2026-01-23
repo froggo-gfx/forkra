@@ -16,6 +16,8 @@ import {
 import { BaseTool } from "./edit-tools-base.js";
 
 const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
+const SKELETON_DEFAULT_WIDTH_KEY = "fontra.skeleton.defaultWidth";
+const DEFAULT_WIDTH = 20;
 
 export class SkeletonPenTool extends BaseTool {
   iconPath = "/images/skeleton-pen.svg";
@@ -134,6 +136,19 @@ export class SkeletonPenTool extends BaseTool {
     if (!layer) return null;
 
     return layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+  }
+
+  /**
+   * Get the default skeleton width from the current source's customData.
+   * @returns {number} The default width value for new skeleton contours
+   */
+  _getDefaultSkeletonWidth() {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return DEFAULT_WIDTH;
+
+    const fontController = this.sceneController.sceneModel.fontController;
+    const source = fontController.sources[sourceIdentifier];
+    return source?.customData?.[SKELETON_DEFAULT_WIDTH_KEY] ?? DEFAULT_WIDTH;
   }
 
   _insertHandlesEqual(a, b) {
@@ -1006,8 +1021,9 @@ export class SkeletonPenTool extends BaseTool {
           newPointIndex = 0;
         }
       } else {
-        // Create new contour
-        const newContour = createSkeletonContour(false);
+        // Create new contour with default width from source
+        const defaultWidth = this._getDefaultSkeletonWidth();
+        const newContour = createSkeletonContour(false, defaultWidth);
         newContour.points.push({ ...newOnCurve });
         skeletonData.contours.push(newContour);
         targetContourIndex = skeletonData.contours.length - 1;

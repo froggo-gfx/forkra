@@ -1048,12 +1048,14 @@ export function createEmptySkeletonData() {
 
 /**
  * Create a new skeleton contour.
+ * @param {boolean} isClosed - Whether the contour is closed
+ * @param {number} defaultWidth - Default width for the contour (defaults to DEFAULT_WIDTH)
  */
-export function createSkeletonContour(isClosed = false) {
+export function createSkeletonContour(isClosed = false, defaultWidth = DEFAULT_WIDTH) {
   return {
     isClosed,
     points: [],
-    defaultWidth: DEFAULT_WIDTH,
+    defaultWidth,
     capStyle: "butt",
   };
 }
