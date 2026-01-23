@@ -300,11 +300,11 @@ export class PointerTool extends BaseTool {
     const clickedSkeletonSegmentWithPointsSelected =
       this._isClickOnSelectedSkeletonContourSegment(cleanSel, sceneController.selection);
 
-    // If clicking on skeleton segment while points are selected, clear selection
+    // If clicking on skeleton segment while points are selected, select the segment instead
     if (clickedSkeletonSegmentWithPointsSelected) {
       this._selectionBeforeSingleClick = sceneController.selection;
-      sceneController.selection = new Set();
-      // Don't initiate drag - just clear selection
+      sceneController.selection = selection; // Select the clicked segment
+      // Don't initiate drag
       return;
     }
 
