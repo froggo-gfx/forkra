@@ -737,6 +737,9 @@ export default class SkeletonParametersPanel extends Panel {
         // Streaming mode: process all values from slider drag
         for await (const dist of valueStream) {
           const workingSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
+          // Get current generatedContourIndices - they change after each regeneration
+          const currentSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+          workingSkeletonData.generatedContourIndices = currentSkeletonData.generatedContourIndices;
           applyDistribution(workingSkeletonData, dist);
           finalChanges = await sendChanges(workingSkeletonData, true);
         }
