@@ -11,8 +11,7 @@ import {
   createEmptySkeletonData,
   createSkeletonContour,
 } from "@fontra/core/skeleton-contour-generator.js";
-import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
-import { constrainHorVerDiag } from "./edit-behavior.js";
+import { BaseTool } from "./edit-tools-base.js";
 
 const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
 
@@ -889,7 +888,6 @@ export class SkeletonPenTool extends BaseTool {
 
       let targetContourIndex = -1;
       let insertAtEnd = true;
-      let prevSelectedPointIsOnCurve = true;
 
       if (selectedSkeletonPoints?.size === 1) {
         const selectedKey = [...selectedSkeletonPoints][0];
@@ -900,8 +898,6 @@ export class SkeletonPenTool extends BaseTool {
           const contour = skeletonData.contours[targetContourIndex];
           if (contour && !contour.isClosed) {
             insertAtEnd = pointIdx === contour.points.length - 1;
-            const selectedPoint = contour.points[pointIdx];
-            prevSelectedPointIsOnCurve = !selectedPoint?.type;
           }
         }
       }
@@ -959,110 +955,16 @@ export class SkeletonPenTool extends BaseTool {
         `skeletonPoint/${targetContourIndex}/${newPointIndex}`,
       ]);
 
-      // Initialize change collectors for subsequent phases
-      let preDragChanges = new ChangeCollector();
-      let dragChanges = new ChangeCollector();
+      // NOTE: Drag-to-curve is disabled for skeleton pen tool to avoid
+      // creating invalid segments with single control points.
+      // Users should add curves via converting points or inserting handles manually.
 
-      // Check if user drags to create handles
-      if (await shouldInitiateDrag(eventStream, initialEvent)) {
-        // User is dragging - add handle(s)
-        const contour = skeletonData.contours[targetContourIndex];
-
-        // Add outgoing handle (off-curve point after the anchor for append, before for prepend)
-        const handleOut = {
-          x: newOnCurve.x,
-          y: newOnCurve.y,
-          type: "cubic",
-          smooth: false,
-        };
-
-        // Determine handle position in the contour
-        let handleOutIndex;
-        if (insertAtEnd) {
-          // Insert handle after on-curve point
-          contour.points.push({ ...handleOut });
-          handleOutIndex = contour.points.length - 1;
-        } else {
-          // Insert handle before on-curve point (at position 0)
-          contour.points.unshift({ ...handleOut });
-          handleOutIndex = 0;
-          newPointIndex++; // The on-curve point moved
-        }
-
-        // If prev selected point was on-curve, add an "in" handle too for smooth connection
-        let handleInIndex;
-        if (prevSelectedPointIsOnCurve && contour.points.length >= 2) {
-          const handleIn = {
-            x: newOnCurve.x,
-            y: newOnCurve.y,
-            type: "cubic",
-            smooth: false,
-          };
-
-          if (insertAtEnd) {
-            // Insert handle before on-curve point
-            const insertPos = newPointIndex;
-            contour.points.splice(insertPos, 0, { ...handleIn });
-            handleInIndex = insertPos;
-            newPointIndex++;
-            handleOutIndex++;
-          } else {
-            // Insert handle after on-curve point
-            const insertPos = newPointIndex + 1;
-            contour.points.splice(insertPos, 0, { ...handleIn });
-            handleInIndex = insertPos;
-          }
-        }
-
-        // === PRE-DRAG CHANGE: Record adding handles ===
-        preDragChanges = recordSkeletonChange();
-        await sendIncrementalChange(preDragChanges.change);
-
-        // Drag loop - update handle positions
-        for await (const event of eventStream) {
-          let handlePos = this._getGlyphPoint(event);
-          if (!handlePos) continue;
-
-          if (event.shiftKey) {
-            // Constrain to horizontal/vertical/45°
-            const delta = constrainHorVerDiag(vector.subVectors(handlePos, newOnCurve));
-            handlePos = vector.addVectors(newOnCurve, delta);
-          }
-
-          handlePos = { x: Math.round(handlePos.x), y: Math.round(handlePos.y) };
-
-          // Update outgoing handle
-          const handleOutPoint = contour.points[handleOutIndex];
-          handleOutPoint.x = handlePos.x;
-          handleOutPoint.y = handlePos.y;
-
-          // Update incoming handle (opposite direction for smooth)
-          if (handleInIndex !== undefined) {
-            const handleInPoint = contour.points[handleInIndex];
-            const opposite = vector.addVectors(
-              newOnCurve,
-              vector.mulVectorScalar(vector.subVectors(handlePos, newOnCurve), -1)
-            );
-            handleInPoint.x = Math.round(opposite.x);
-            handleInPoint.y = Math.round(opposite.y);
-          }
-
-          // === DRAG CHANGE: Record handle position updates ===
-          dragChanges = recordSkeletonChange();
-          await sendIncrementalChange(dragChanges.change, true); // true = may drop
-        }
-
-        // Select the outgoing handle
-        this.sceneController.selection = new Set([
-          `skeletonPoint/${targetContourIndex}/${handleOutIndex}`,
-        ]);
-
-        // Final send without "may drop" flag (required for proper undo)
-        await sendIncrementalChange(dragChanges.change);
+      // Consume any remaining drag events without action
+      for await (const event of eventStream) {
+        // Just consume events
       }
 
-      // Combine all changes (following Pen Tool pattern)
-      const finalChanges = initialChanges.concat(preDragChanges, dragChanges);
+      const finalChanges = initialChanges;
 
       return {
         changes: finalChanges,
