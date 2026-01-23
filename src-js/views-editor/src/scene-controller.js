@@ -1583,10 +1583,13 @@ export class SceneController {
     await this.editGlyph(async (sendIncrementalChange, glyph) => {
       const editLayerName = this.editingLayerNames?.[0];
       const layer = glyph.layers[editLayerName];
-      const skeletonData = layer?.customData?.["fontra.skeleton"];
+      let skeletonData = layer?.customData?.["fontra.skeleton"];
       if (!skeletonData?.contours) {
         return;
       }
+
+      // Deep clone for manipulation
+      skeletonData = JSON.parse(JSON.stringify(skeletonData));
 
       let numBroken = 0;
       for (const selKey of skeletonPointSel) {
@@ -1619,32 +1622,51 @@ export class SceneController {
         return;
       }
 
-      // Regenerate outlines for all skeleton contours
-      const { generateContoursFromSkeleton } = await import(
-        "@fontra/core/skeleton-contour-generator.js"
-      );
-
-      // Remove old generated contours
-      const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
-      const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-      for (const idx of sortedIndices) {
-        if (idx < layer.glyph.path.numContours) {
-          layer.glyph.path.deleteContour(idx);
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
         }
-      }
 
-      // Generate new contours
-      const generatedContours = generateContoursFromSkeleton(skeletonData);
-      const newGeneratedIndices = [];
-      const insertIndex = layer.glyph.path.numContours;
-      for (let i = 0; i < generatedContours.length; i++) {
-        layer.glyph.path.insertContour(insertIndex + i, generatedContours[i]);
-        newGeneratedIndices.push(insertIndex + i);
-      }
-      skeletonData.generatedContourIndices = newGeneratedIndices;
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(newIndex, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      // Record changes using recordChanges pattern
+      const changes = [];
+
+      // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        regenerateOutline(sg, skeletonData);
+      });
+      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData["fontra.skeleton"] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+      const combinedChange = new ChangeCollector().concat(...changes);
+      await sendIncrementalChange(combinedChange.change);
 
       this.selection = new Set();
-      return translate("action.break-skeleton-contour");
+
+      return {
+        changes: combinedChange,
+        undoLabel: translate("action.break-skeleton-contour"),
+      };
     });
   }
 
