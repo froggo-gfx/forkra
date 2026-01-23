@@ -352,6 +352,7 @@ export class PointerTool extends BaseTool {
 
   async handleDoubleClick(selection, point, event) {
     const sceneController = this.sceneController;
+    console.log("[DBLCLICK] selection:", [...selection], "hoverSelection:", [...(sceneController.hoverSelection || [])], "hoverPathHit:", sceneController.hoverPathHit);
     if (!sceneController.hoverPathHit && (!selection || !selection.size)) {
       const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
       if (positionedGlyph?.isUndefined) {
@@ -376,6 +377,7 @@ export class PointerTool extends BaseTool {
 
       // Handle skeleton point double-click (toggle smooth/sharp)
       if (skeletonPointSelection?.size) {
+        console.log("[DBLCLICK] Skeleton points in selection, toggling smooth");
         await this._handleSkeletonPointsDoubleClick(skeletonPointSelection);
         return;
       }
@@ -401,12 +403,15 @@ export class PointerTool extends BaseTool {
         sceneController.doubleClickedGuidelineIndices = guidelineIndices;
         sceneController._dispatchEvent("doubleClickedGuidelines");
       } else if (pointIndices?.length && !sceneController.hoverPathHit) {
+        console.log("[DBLCLICK] Regular points, toggling smooth");
         await this.handlePointsDoubleClick(pointIndices);
       } else if (this._hasHoveredSkeletonSegment()) {
         // Double-click on skeleton segment - select entire skeleton contour
+        console.log("[DBLCLICK] Skeleton segment detected, selecting contour");
         await this._handleSkeletonSegmentDoubleClick(event);
         return;
       } else if (sceneController.hoverPathHit) {
+        console.log("[DBLCLICK] Regular path hit, selecting contour");
         const contourIndex = sceneController.hoverPathHit.contourIndex;
         const startPoint = instance.path.getAbsolutePointIndex(contourIndex, 0);
         const endPoint = instance.path.contourInfo[contourIndex].endPoint;
