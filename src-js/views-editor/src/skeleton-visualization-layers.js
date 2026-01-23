@@ -222,7 +222,7 @@ registerVisualizationLayerDefinition({
   defaultOn: true,
   zIndex: 453,
   screenParameters: {
-    pointSize: 7,
+    pointSize: 10,
     strokeWidth: 2,
   },
   colors: {
@@ -261,14 +261,14 @@ registerVisualizationLayerDefinition({
         const leftHW = getPointHalfWidth(point, defaultWidth, "left");
         const rightHW = getPointHalfWidth(point, defaultWidth, "right");
 
-        // Calculate rib point positions
+        // Calculate rib point positions (quantized to UPM grid like generated points)
         const leftRibPoint = {
-          x: point.x + normal.x * leftHW,
-          y: point.y + normal.y * leftHW,
+          x: Math.round(point.x + normal.x * leftHW),
+          y: Math.round(point.y + normal.y * leftHW),
         };
         const rightRibPoint = {
-          x: point.x - normal.x * rightHW,
-          y: point.y - normal.y * rightHW,
+          x: Math.round(point.x - normal.x * rightHW),
+          y: Math.round(point.y - normal.y * rightHW),
         };
 
         // Selection keys for this rib point pair

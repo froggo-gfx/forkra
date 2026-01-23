@@ -114,9 +114,6 @@ export class PointerTool extends BaseTool {
       this.setCursorForRotationHandle(rotationHandle);
     } else if (resizeHandle) {
       this.setCursorForResizeHandle(resizeHandle);
-    } else if (ribHit) {
-      // Set resize cursor for rib points
-      this.setCursor("ew-resize");
     } else {
       this.setCursor();
     }
