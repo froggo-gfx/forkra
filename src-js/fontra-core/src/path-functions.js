@@ -1446,8 +1446,8 @@ function computeHandlesForSkeletonSegment(points, prevIdx, nextIdx, isClosed) {
   const leftTangent = getSkeletonEndTangent(segment, true);
   const rightTangent = getSkeletonEndTangent(segment, false);
 
-  // Fit cubic bezier
-  const bezier = fitCubic(samples, leftTangent, rightTangent, 0.5);
+  // Fit cubic bezier (use tighter tolerance for better shape preservation)
+  const bezier = fitCubic(samples, leftTangent, rightTangent, 0.1);
   if (!bezier || bezier.points.length !== 4) return null;
 
   return [
@@ -1492,10 +1492,16 @@ function sampleSkeletonCurve(segment) {
     const handles = segment.slice(i + 1, j);
 
     if (handles.length === 0) {
-      // Line segment
+      // Line segment - sample intermediate points for better fitting
+      for (const t of [0.25, 0.5, 0.75]) {
+        samples.push({
+          x: startPt.x + (endPt.x - startPt.x) * t,
+          y: startPt.y + (endPt.y - startPt.y) * t,
+        });
+      }
       samples.push({ x: endPt.x, y: endPt.y });
     } else if (handles.length === 1) {
-      // Quadratic bezier
+      // Quadratic bezier - more samples for better accuracy
       const bez = new Bezier(
         startPt.x,
         startPt.y,
@@ -1504,13 +1510,13 @@ function sampleSkeletonCurve(segment) {
         endPt.x,
         endPt.y
       );
-      for (const t of [0.25, 0.5, 0.75]) {
+      for (const t of [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]) {
         const pt = bez.compute(t);
         samples.push({ x: pt.x, y: pt.y });
       }
       samples.push({ x: endPt.x, y: endPt.y });
     } else {
-      // Cubic bezier (use first and last handle)
+      // Cubic bezier (use first and last handle) - more samples for better accuracy
       const bez = new Bezier(
         startPt.x,
         startPt.y,
@@ -1521,7 +1527,7 @@ function sampleSkeletonCurve(segment) {
         endPt.x,
         endPt.y
       );
-      for (const t of [0.2, 0.4, 0.6, 0.8]) {
+      for (const t of [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]) {
         const pt = bez.compute(t);
         samples.push({ x: pt.x, y: pt.y });
       }
