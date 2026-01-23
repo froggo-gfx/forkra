@@ -1540,25 +1540,24 @@ function sampleSkeletonCurve(segment) {
 function getSkeletonEndTangent(segment, isStart) {
   if (segment.length < 2) return { x: 1, y: 0 };
 
-  let p1, p2;
+  // Match the logic of getEndTangent: points[1] - points[0] for start,
+  // points[-2] - points[-1] for end (direction from endpoint towards curve)
+  let from, to;
   if (isStart) {
-    p1 = segment[0];
-    // Use first handle if available, otherwise next on-curve
-    p2 = segment[1].type ? segment[1] : segment[Math.min(1, segment.length - 1)];
+    from = segment[0];
+    // Use first handle if available, otherwise next point
+    to = segment[1].type ? segment[1] : segment[Math.min(1, segment.length - 1)];
   } else {
-    p1 = segment[segment.length - 1];
+    from = segment[segment.length - 1];
     const prevIdx = segment.length - 2;
-    p2 = segment[prevIdx].type ? segment[prevIdx] : segment[Math.max(0, prevIdx)];
+    to = segment[prevIdx].type ? segment[prevIdx] : segment[Math.max(0, prevIdx)];
   }
 
-  const dx = p2.x - p1.x;
-  const dy = p2.y - p1.y;
+  // Direction from endpoint towards the curve (no extra negation needed)
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
   const len = Math.hypot(dx, dy);
   if (len < 1e-10) return { x: 1, y: 0 };
 
-  if (isStart) {
-    return { x: dx / len, y: dy / len };
-  } else {
-    return { x: -dx / len, y: -dy / len };
-  }
+  return { x: dx / len, y: dy / len };
 }
