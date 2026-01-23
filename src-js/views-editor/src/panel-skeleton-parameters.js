@@ -294,7 +294,21 @@ export default class SkeletonParametersPanel extends Panel {
       minValue: 1,
     });
 
-    // Scale slider
+    // Distribution slider (only in asymmetric mode)
+    if (isAsym) {
+      const distribution = this._calculateDistribution(left, right);
+      formContents.push({
+        type: "edit-number-slider",
+        key: "pointDistribution",
+        label: "Distribution",
+        value: distribution,
+        minValue: -100,
+        defaultValue: 0,
+        maxValue: 100,
+      });
+    }
+
+    // Scale slider (last)
     formContents.push({
       type: "edit-number-slider",
       key: "pointWidthScale",
@@ -317,20 +331,6 @@ export default class SkeletonParametersPanel extends Panel {
         "Apply Scale"
       ),
     });
-
-    // Distribution slider (only in asymmetric mode)
-    if (isAsym) {
-      const distribution = this._calculateDistribution(left, right);
-      formContents.push({
-        type: "edit-number-slider",
-        key: "pointDistribution",
-        label: "Distribution",
-        value: distribution,
-        minValue: -100,
-        defaultValue: 0,
-        maxValue: 100,
-      });
-    }
 
     this.infoForm.setFieldDescriptions(formContents);
 
@@ -660,36 +660,61 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Apply scale to selected points.
+   * Apply scale to selected points. Multiplies current width by scale factor.
    */
   async _applyScaleToSelectedPoints() {
     const scale = this.pointParameters.scaleValue;
     if (scale === 1.0) return;
 
-    const selectedData = this._getSelectedSkeletonPoints();
-    if (!selectedData) return;
+    // Get fresh selection data
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    if (!editLayerName || !positionedGlyph) return;
+
+    const { skeletonPoint, skeletonRibPoint } = parseSelection(this.sceneController.selection);
+
+    // Collect unique point keys
+    const pointKeys = new Set();
+    if (skeletonPoint) {
+      for (const key of skeletonPoint) pointKeys.add(key);
+    }
+    if (skeletonRibPoint) {
+      for (const key of skeletonRibPoint) {
+        const parts = key.split("/");
+        pointKeys.add(`${parts[0]}/${parts[1]}`);
+      }
+    }
+    if (pointKeys.size === 0) return;
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const layer = glyph.layers[selectedData.editLayerName];
-      const skeletonData = JSON.parse(
-        JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
-      );
+      const layer = glyph.layers[editLayerName];
+      const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+      if (!skeletonData) return;
 
-      for (const { contourIdx, pointIdx } of selectedData.points) {
-        const point = skeletonData.contours[contourIdx].points[pointIdx];
-        const defaultWidth = skeletonData.contours[contourIdx].defaultWidth || this._getCurrentDefaultWidthWide();
+      for (const key of pointKeys) {
+        const [contourIdx, pointIdx] = key.split("/").map(Number);
+        const contour = skeletonData.contours[contourIdx];
+        const point = contour?.points[pointIdx];
+        if (!point || point.type) continue; // Skip off-curve points
+
+        const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
+
+        // Get current widths
+        const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+        const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+
+        // Apply scale to both sides
+        const newLeftHW = Math.round(leftHW * scale);
+        const newRightHW = Math.round(rightHW * scale);
 
         if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
-          // Asymmetric
-          const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-          const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-          point.leftWidth = Math.round(leftHW * scale);
-          point.rightWidth = Math.round(rightHW * scale);
+          // Keep asymmetric format
+          point.leftWidth = newLeftHW;
+          point.rightWidth = newRightHW;
           delete point.width;
         } else {
-          // Symmetric
-          const width = point.width ?? defaultWidth;
-          point.width = Math.round(width * scale);
+          // Keep symmetric format
+          point.width = newLeftHW + newRightHW;
         }
       }
 
@@ -699,12 +724,12 @@ export default class SkeletonParametersPanel extends Panel {
       const pathChange = recordChanges(staticGlyph, (sg) => {
         this._regenerateOutlineContours(sg, skeletonData);
       });
-      changes.push(pathChange.prefixed(["layers", selectedData.editLayerName, "glyph"]));
+      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
       const customDataChange = recordChanges(layer, (l) => {
         l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
       });
-      changes.push(customDataChange.prefixed(["layers", selectedData.editLayerName]));
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
       const combined = new ChangeCollector().concat(...changes);
       await sendIncrementalChange(combined.change);
