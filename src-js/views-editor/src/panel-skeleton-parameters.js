@@ -700,24 +700,20 @@ export default class SkeletonParametersPanel extends Panel {
         const point = contour?.points[pointIdx];
         if (!point || point.type) continue; // Skip off-curve points
 
-        const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
-
-        // Get current widths
-        const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-        const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-
-        // Apply scale to both sides
-        const newLeftHW = Math.round(leftHW * scale);
-        const newRightHW = Math.round(rightHW * scale);
-
-        if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
-          // Keep asymmetric format
-          point.leftWidth = newLeftHW;
-          point.rightWidth = newRightHW;
-          delete point.width;
+        // Simply multiply existing values by scale
+        if (point.width !== undefined) {
+          point.width = Math.round(point.width * scale);
+        } else if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
+          if (point.leftWidth !== undefined) {
+            point.leftWidth = Math.round(point.leftWidth * scale);
+          }
+          if (point.rightWidth !== undefined) {
+            point.rightWidth = Math.round(point.rightWidth * scale);
+          }
         } else {
-          // Keep symmetric format
-          point.width = newLeftHW + newRightHW;
+          // Point uses default width - set explicit width
+          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
+          point.width = Math.round(defaultWidth * scale);
         }
       }
 
