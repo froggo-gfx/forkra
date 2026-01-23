@@ -688,12 +688,15 @@ export default class SkeletonParametersPanel extends Panel {
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const layer = glyph.layers[editLayerName];
-      const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
-      if (!skeletonData) return;
+      const originalSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+      if (!originalSkeletonData) return;
+
+      // Clone skeleton data for modification
+      const newSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
 
       for (const key of pointKeys) {
         const [contourIdx, pointIdx] = key.split("/").map(Number);
-        const contour = skeletonData.contours[contourIdx];
+        const contour = newSkeletonData.contours[contourIdx];
         const point = contour?.points[pointIdx];
         if (!point || point.type) continue; // Skip off-curve points
 
@@ -722,12 +725,12 @@ export default class SkeletonParametersPanel extends Panel {
       const changes = [];
       const staticGlyph = layer.glyph;
       const pathChange = recordChanges(staticGlyph, (sg) => {
-        this._regenerateOutlineContours(sg, skeletonData);
+        this._regenerateOutlineContours(sg, newSkeletonData);
       });
       changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
       const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = newSkeletonData;
       });
       changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
