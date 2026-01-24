@@ -691,6 +691,7 @@ class DesignspaceBackend(WatchableBackend, ReadableBaseBackend):
             localDS["sources"] = localSources
 
         revLayerNameMapping = reverseSparseDict(layerNameMapping)
+        assert len(revLayerNameMapping) == len(layerNameMapping)
 
         # Gather all UFO layers
         usedLayers = set()
@@ -780,8 +781,10 @@ class DesignspaceBackend(WatchableBackend, ReadableBaseBackend):
             for layer in self.ufoLayers
             if glyphName in layer.glyphSet
         )
+
         layersToDelete = relevantLayerNames - usedLayers
-        for layerName in layersToDelete:
+
+        for layerName in sorted(layersToDelete):
             ufoLayer = self.ufoLayers.findItem(fontraLayerName=layerName)
             glyphSet = ufoLayer.glyphSet
             glyphSet.deleteGlyph(glyphName)
@@ -927,7 +930,11 @@ class DesignspaceBackend(WatchableBackend, ReadableBaseBackend):
             # Assume sparse source, add new layer to existing UFO
             poleDSSource = self._findDSSourceForSparseSource(location)
             ufoLayer = self._createUFOLayer(
-                glyphName, poleDSSource.layer.path, layerName, sourceIdentifier
+                glyphName,
+                poleDSSource.layer.path,
+                layerName,
+                sourceIdentifier,
+                mustCreateNewLayer=True,
             )
         else:
             # New UFO
@@ -988,19 +995,28 @@ class DesignspaceBackend(WatchableBackend, ReadableBaseBackend):
         ufoPath: str,
         suggestedLayerName: str,
         fontraLayerName: str,
+        mustCreateNewLayer: bool = False,
     ) -> UFOLayer:
         reader = self.ufoManager.getReader(ufoPath)
         existingLayerNames = set(reader.getLayerNames())
         ufoLayerName = suggestedLayerName
         count = 0
-        # getGlyphSet() will create the layer if it doesn't already exist
-        while glyphName in self.ufoManager.getGlyphSet(ufoPath, ufoLayerName):
-            # TODO: THIS IS NOT COVERED BY TESTS
-            # The glyph already exists in the layer, which means there is
-            # a conflict. Let's make up a layer name in which the glyph
-            # does not exist.
-            count += 1
-            ufoLayerName = f"{suggestedLayerName}#{count}"
+
+        if mustCreateNewLayer:
+            while ufoLayerName in existingLayerNames:
+                count += 1
+                ufoLayerName = f"{suggestedLayerName}#{count}"
+            # This creates the layer
+            self.ufoManager.getGlyphSet(ufoPath, ufoLayerName)
+        else:
+            # getGlyphSet() will create the layer if it doesn't already exist
+            while glyphName in self.ufoManager.getGlyphSet(ufoPath, ufoLayerName):
+                # TODO: THIS IS NOT COVERED BY TESTS
+                # The glyph already exists in the layer, which means there is
+                # a conflict. Let's make up a layer name in which the glyph
+                # does not exist.
+                count += 1
+                ufoLayerName = f"{suggestedLayerName}#{count}"
 
         if ufoLayerName not in existingLayerNames:
             reader.writeLayerContents()
