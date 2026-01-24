@@ -217,6 +217,164 @@ function enforceSmoothColinearity(points, isClosed) {
 }
 
 /**
+ * Aligns handle directions in generated contours to match the directions of skeleton handles.
+ * @param {Array} points - Array of generated contour points
+ * @param {Array} segments - Original skeleton segments
+ * @param {boolean|null} isLeftSide - True for left side, false for right side, null for centerline (caps)
+ * @returns {Array} - Points with aligned handle directions
+ */
+function alignHandleDirections(points, segments, isLeftSide) {
+  if (!points || points.length === 0) return points;
+
+  const alignedPoints = [...points];
+
+  // For each point in the generated contour
+  for (let i = 0; i < alignedPoints.length; i++) {
+    const point = alignedPoints[i];
+
+    // Only process off-curve (control) points
+    if (!point.type) continue;
+
+    // Find the corresponding on-curve point (the one this control point relates to)
+    let nearestOnCurveIdx = -1;
+    let minDistance = Infinity;
+
+    // Look for the nearest on-curve point to this control point
+    for (let j = 0; j < alignedPoints.length; j++) {
+      if (!alignedPoints[j].type) { // on-curve point
+        const dist = Math.hypot(
+          alignedPoints[j].x - point.x,
+          alignedPoints[j].y - point.y
+        );
+        if (dist < minDistance) {
+          minDistance = dist;
+          nearestOnCurveIdx = j;
+        }
+      }
+    }
+
+    if (nearestOnCurveIdx !== -1) {
+      const nearestGenPoint = alignedPoints[nearestOnCurveIdx];
+
+      // Find the skeleton point that corresponds to this generated on-curve point
+      let bestMatchSkeletonPoint = null;
+      let minDistToSkeleton = Infinity;
+
+      // Find the skeleton point that corresponds to this generated point
+      for (const segment of segments) {
+        // Check start point
+        const startDist = Math.hypot(
+          segment.startPoint.x - nearestGenPoint.x,
+          segment.startPoint.y - nearestGenPoint.y
+        );
+        if (startDist < minDistToSkeleton) {
+          minDistToSkeleton = startDist;
+          bestMatchSkeletonPoint = segment.startPoint;
+        }
+
+        // Check end point
+        const endDist = Math.hypot(
+          segment.endPoint.x - nearestGenPoint.x,
+          segment.endPoint.y - nearestGenPoint.y
+        );
+        if (endDist < minDistToSkeleton) {
+          minDistToSkeleton = endDist;
+          bestMatchSkeletonPoint = segment.endPoint;
+        }
+      }
+
+      if (bestMatchSkeletonPoint) {
+        // Find the skeleton control points associated with this skeleton point
+        // We need to find the control points that belong to the same segment as the matched skeleton point
+        let skelCtrlPoints = [];
+        for (const segment of segments) {
+          // If this segment contains the matched skeleton point as start or end
+          if (segment.startPoint === bestMatchSkeletonPoint || segment.endPoint === bestMatchSkeletonPoint) {
+            // Add all control points from this segment
+            skelCtrlPoints = skelCtrlPoints.concat(segment.controlPoints);
+            break; // Found the segment, no need to continue
+          }
+        }
+
+        // Calculate the direction from the generated on-curve point to this generated control point
+        const genCtrlDir = {
+          x: point.x - nearestGenPoint.x,
+          y: point.y - nearestGenPoint.y
+        };
+        const genCtrlLength = Math.hypot(genCtrlDir.x, genCtrlDir.y);
+
+        if (genCtrlLength > 0.001 && skelCtrlPoints.length > 0) {
+          // Find the skeleton control point that is most geometrically similar
+          let bestSkelCtrlPoint = null;
+          let bestSimilarity = -Infinity;
+
+          for (const skelCtrlPoint of skelCtrlPoints) {
+            // Calculate the direction from skeleton on-curve to its control point
+            const skelCtrlDir = {
+              x: skelCtrlPoint.x - bestMatchSkeletonPoint.x,
+              y: skelCtrlPoint.y - bestMatchSkeletonPoint.y
+            };
+            const skelCtrlLength = Math.hypot(skelCtrlDir.x, skelCtrlDir.y);
+
+            if (skelCtrlLength > 0.001) {
+              // Normalize directions
+              const normSkelDir = {
+                x: skelCtrlDir.x / skelCtrlLength,
+                y: skelCtrlDir.y / skelCtrlLength
+              };
+              const normGenDir = {
+                x: genCtrlDir.x / genCtrlLength,
+                y: genCtrlDir.y / genCtrlLength
+              };
+
+              // Calculate dot product to measure direction similarity
+              const dotProduct = normSkelDir.x * normGenDir.x + normSkelDir.y * normGenDir.y;
+
+              // Choose the skeleton control point with the highest similarity score (absolute value)
+              if (Math.abs(dotProduct) > Math.abs(bestSimilarity)) {
+                bestSimilarity = dotProduct;
+                bestSkelCtrlPoint = skelCtrlPoint;
+              }
+            }
+          }
+
+          if (bestSkelCtrlPoint) {
+            // Calculate the direction from skeleton on-curve point to its control point
+            const skelHandleDir = {
+              x: bestSkelCtrlPoint.x - bestMatchSkeletonPoint.x,
+              y: bestSkelCtrlPoint.y - bestMatchSkeletonPoint.y
+            };
+            const skelHandleLength = Math.hypot(skelHandleDir.x, skelHandleDir.y);
+
+            if (skelHandleLength > 0.001) {
+              // Normalize skeleton handle direction
+              const normalizedSkelDir = {
+                x: skelHandleDir.x / skelHandleLength,
+                y: skelHandleDir.y / skelHandleLength
+              };
+
+              // Determine if we need to flip the direction based on the dot product
+              // If the best similarity was negative, it means the directions were opposite
+              // In that case, we should flip the direction to match the skeleton
+              const directionFlip = bestSimilarity < 0 ? -1 : 1;
+
+              // Apply the aligned direction to the generated point
+              alignedPoints[i] = {
+                ...point,
+                x: nearestGenPoint.x + normalizedSkelDir.x * genCtrlLength * directionFlip,
+                y: nearestGenPoint.y + normalizedSkelDir.y * genCtrlLength * directionFlip
+              };
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return alignedPoints;
+}
+
+/**
  * Generates outline contours from skeleton data.
  * @param {Object} skeletonData - The skeleton data from customData["fontra.skeleton"]
  * @returns {Array} Array of unpacked contours ready to add to path
@@ -312,9 +470,14 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // The inner contour needs to be reversed for correct winding direction
     // (outer = counter-clockwise, inner = clockwise for proper fill)
     const reversedRight = [...rightSide].reverse();
+
+    // Apply handle direction alignment to match skeleton handles
+    const alignedLeftSide = alignHandleDirections(leftSide, segments, true);
+    const alignedRightSide = alignHandleDirections(reversedRight, segments, false);
+
     return [
-      { points: enforceSmoothColinearity(leftSide, true), isClosed: true },
-      { points: enforceSmoothColinearity(reversedRight, true), isClosed: true },
+      { points: enforceSmoothColinearity(alignedLeftSide, true), isClosed: true },
+      { points: enforceSmoothColinearity(alignedRightSide, true), isClosed: true },
     ];
   } else {
     // For open skeleton: ONE contour with caps at ends
@@ -355,7 +518,10 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // Start cap
     outlinePoints.push(...startCap);
 
-    return [{ points: enforceSmoothColinearity(outlinePoints, true), isClosed: true }];
+    // Apply handle direction alignment to match skeleton handles
+    const alignedOutlinePoints = alignHandleDirections(outlinePoints, segments, null);
+
+    return [{ points: enforceSmoothColinearity(alignedOutlinePoints, true), isClosed: true }];
   }
 }
 
@@ -663,9 +829,44 @@ function generateOffsetPointsForSegment(
             smooth: smoothStart,
           });
         }
-        // Add control points (cubic bezier), rounded to UPM grid
-        output.push({ x: Math.round(pts[1].x), y: Math.round(pts[1].y), type: "cubic" });
-        output.push({ x: Math.round(pts[2].x), y: Math.round(pts[2].y), type: "cubic" });
+
+        // Get skeleton handle directions if available
+        let adjustedControl1, adjustedControl2;
+        if (pts.length >= 4) {
+          // Calculate original handle vectors
+          const origHandle1 = { x: pts[1].x - pts[0].x, y: pts[1].y - pts[0].y };
+          const origHandle2 = { x: pts[2].x - pts[3].x, y: pts[2].y - pts[3].y };
+
+          // Calculate lengths of original handles
+          const len1 = Math.hypot(origHandle1.x, origHandle1.y);
+          const len2 = Math.hypot(origHandle2.x, origHandle2.y);
+
+          // For now, we'll use the original directions but this is where we could
+          // incorporate skeleton handle directions if we had access to them
+          adjustedControl1 = {
+            x: Math.round(fixedStart.x + origHandle1.x * (len1 / Math.hypot(origHandle1.x, origHandle1.y))),
+            y: Math.round(fixedStart.y + origHandle1.y * (len1 / Math.hypot(origHandle1.x, origHandle1.y)))
+          };
+
+          adjustedControl2 = {
+            x: Math.round(fixedEnd.x + origHandle2.x * (len2 / Math.hypot(origHandle2.x, origHandle2.y))),
+            y: Math.round(fixedEnd.y + origHandle2.y * (len2 / Math.hypot(origHandle2.x, origHandle2.y)))
+          };
+        }
+
+        // Add control points (cubic bezier), using adjusted positions if available
+        if (adjustedControl1) {
+          output.push({ x: adjustedControl1.x, y: adjustedControl1.y, type: "cubic" });
+        } else {
+          output.push({ x: Math.round(pts[1].x), y: Math.round(pts[1].y), type: "cubic" });
+        }
+
+        if (adjustedControl2) {
+          output.push({ x: adjustedControl2.x, y: adjustedControl2.y, type: "cubic" });
+        } else {
+          output.push({ x: Math.round(pts[2].x), y: Math.round(pts[2].y), type: "cubic" });
+        }
+
         if (shouldAddEnd) {
           output.push({
             x: fixedEnd.x,
@@ -694,11 +895,11 @@ function generateOffsetPointsForSegment(
 
         // Add control points based on curve type, rounded to UPM grid
         if (pts.length === 4) {
-          // Cubic bezier
+          // Cubic bezier - we could adjust these based on skeleton handle directions
           output.push({ x: Math.round(pts[1].x), y: Math.round(pts[1].y), type: "cubic" });
           output.push({ x: Math.round(pts[2].x), y: Math.round(pts[2].y), type: "cubic" });
         } else if (pts.length === 3) {
-          // Quadratic bezier
+          // Quadratic bezier - we could adjust this too
           output.push({ x: Math.round(pts[1].x), y: Math.round(pts[1].y), type: "quad" });
         }
         // Linear (2 points) - no control points needed
