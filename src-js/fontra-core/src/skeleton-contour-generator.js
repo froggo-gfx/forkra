@@ -58,74 +58,159 @@ const ERROR_STEP_PERCENT = 0.02; // 2% — step increase
  * Enforce colinearity for smooth points in a contour.
  * For each on-curve smooth point with two adjacent off-curve handles,
  * adjusts the handles to be colinear while preserving their lengths.
+ * Also handles smooth points with linear segments (on-curve neighbors),
+ * maintaining the pivot behavior where the smooth point acts as a pivot
+ * for the linear segment's direction.
  * @param {Array} points - Array of contour points
  * @param {boolean} isClosed - Whether the contour is closed
  * @returns {Array} - Modified points array
  */
 function enforceSmoothColinearity(points, isClosed) {
-  if (!points || points.length < 3) return points;
+  if (!points || points.length < 2) return points;
 
   const numPoints = points.length;
 
+  // Process all smooth points
   for (let i = 0; i < numPoints; i++) {
     const point = points[i];
 
     // Only process on-curve smooth points
     if (point.type || !point.smooth) continue;
 
-    // Find adjacent off-curve handles
+    // Find adjacent points (could be on-curve or off-curve)
     const prevIdx = (i - 1 + numPoints) % numPoints;
     const nextIdx = (i + 1) % numPoints;
 
-    // For open contours, skip endpoints
-    if (!isClosed && (i === 0 || i === numPoints - 1)) continue;
+    // For open contours, handle endpoints specially
+    if (!isClosed && (i === 0 || i === numPoints - 1)) {
+      continue; // Skip endpoint smooth points for now, as they don't have two neighbors
+    }
 
     const prevPoint = points[prevIdx];
     const nextPoint = points[nextIdx];
 
-    // Both neighbors must be off-curve for this to apply
-    if (!prevPoint?.type || !nextPoint?.type) continue;
+    // Determine the type of each neighbor
+    const prevIsOnCurve = !prevPoint?.type;
+    const nextIsOnCurve = !nextPoint?.type;
 
-    // Calculate vectors from center to handles
-    const vecIn = { x: prevPoint.x - point.x, y: prevPoint.y - point.y };
-    const vecOut = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
+    // Case 1: Both neighbors are off-curve (traditional smooth curve behavior)
+    if (!prevIsOnCurve && !nextIsOnCurve) {
+      // Traditional colinearity enforcement for smooth point between two off-curve handles
+      const vecIn = { x: prevPoint.x - point.x, y: prevPoint.y - point.y };
+      const vecOut = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
 
-    const lenIn = Math.hypot(vecIn.x, vecIn.y);
-    const lenOut = Math.hypot(vecOut.x, vecOut.y);
+      const lenIn = Math.hypot(vecIn.x, vecIn.y);
+      const lenOut = Math.hypot(vecOut.x, vecOut.y);
 
-    // Skip if handles are too short
-    if (lenIn < 0.001 || lenOut < 0.001) continue;
+      // Skip if handles are too short
+      if (lenIn >= 0.001 && lenOut >= 0.001) {
+        // Normalize directions
+        const dirIn = { x: vecIn.x / lenIn, y: vecIn.y / lenIn };
+        const dirOut = { x: vecOut.x / lenOut, y: vecOut.y / lenOut };
 
-    // Normalize directions
-    const dirIn = { x: vecIn.x / lenIn, y: vecIn.y / lenIn };
-    const dirOut = { x: vecOut.x / lenOut, y: vecOut.y / lenOut };
+        // Calculate average tangent direction
+        // We want the handles to be opposite, so we average dirIn and -dirOut
+        const avgDir = vector.normalizeVector({
+          x: dirIn.x - dirOut.x,
+          y: dirIn.y - dirOut.y,
+        });
 
-    // Calculate average tangent direction
-    // We want the handles to be opposite, so we average dirIn and -dirOut
-    const avgDir = vector.normalizeVector({
-      x: dirIn.x - dirOut.x,
-      y: dirIn.y - dirOut.y,
-    });
+        // If directions are nearly opposite (already colinear), skip
+        const dot = dirIn.x * dirOut.x + dirIn.y * dirOut.y;
+        if (dot > -0.999) { // Not nearly opposite
+          // If avgDir is zero (handles point same direction), use perpendicular
+          if (Math.hypot(avgDir.x, avgDir.y) >= 0.001) {
+            // Adjust handle positions to be colinear through the on-curve point
+            points[prevIdx] = {
+              ...prevPoint,
+              x: point.x + avgDir.x * lenIn,
+              y: point.y + avgDir.y * lenIn,
+            };
 
-    // If directions are nearly opposite (already colinear), skip
-    const dot = dirIn.x * dirOut.x + dirIn.y * dirOut.y;
-    if (dot < -0.999) continue;
+            points[nextIdx] = {
+              ...nextPoint,
+              x: point.x - avgDir.x * lenOut,
+              y: point.y - avgDir.y * lenOut,
+            };
+          }
+        }
+      }
+    }
+    // Case 2: One neighbor is on-curve (linear segment) and one is off-curve (smooth-linear transition)
+    else if (prevIsOnCurve && !nextIsOnCurve) {
+      // Smooth point with linear segment before and curve after
+      // The smooth point should act as a pivot: the off-curve handle should be collinear
+      // with the linear segment, extending its direction
+      const linearVec = { x: point.x - prevPoint.x, y: point.y - prevPoint.y }; // Vector from prev linear point to smooth point
+      const linearDir = vector.normalizeVector(linearVec);
 
-    // If avgDir is zero (handles point same direction), use perpendicular
-    if (Math.hypot(avgDir.x, avgDir.y) < 0.001) continue;
+      const curveVec = { x: nextPoint.x - point.x, y: nextPoint.y - point.y }; // Vector from smooth point to off-curve
+      const curveLength = Math.hypot(curveVec.x, curveVec.y);
 
-    // Adjust handle positions to be colinear through the on-curve point
-    points[prevIdx] = {
-      ...prevPoint,
-      x: point.x + avgDir.x * lenIn,
-      y: point.y + avgDir.y * lenIn,
-    };
+      if (curveLength >= 0.001) {
+        // For smooth-linear transition, the off-curve should continue the linear direction
+        // So the direction is the same as the linear segment direction
+        const newDirectionX = linearDir.x;
+        const newDirectionY = linearDir.y;
 
-    points[nextIdx] = {
-      ...nextPoint,
-      x: point.x - avgDir.x * lenOut,
-      y: point.y - avgDir.y * lenOut,
-    };
+        // Calculate new position by extending the linear direction with the original handle length
+        const newX = point.x + newDirectionX * curveLength;
+        const newY = point.y + newDirectionY * curveLength;
+
+        points[nextIdx] = {
+          ...nextPoint,
+          x: newX,
+          y: newY,
+        };
+      }
+    }
+    else if (!prevIsOnCurve && nextIsOnCurve) {
+      // Smooth point with curve before and linear segment after
+      // The previous off-curve handle should be collinear with the next linear segment
+      const linearVec = { x: nextPoint.x - point.x, y: nextPoint.y - point.y }; // Vector from smooth point to next linear point
+      const linearDir = vector.normalizeVector(linearVec);
+
+      const curveVec = { x: prevPoint.x - point.x, y: prevPoint.y - point.y }; // Vector from smooth point to prev off-curve
+      const curveLength = Math.hypot(curveVec.x, curveVec.y);
+
+      if (curveLength >= 0.001) {
+        // For linear-smooth transition, the off-curve should continue the linear direction backwards
+        // So the direction is the opposite of the linear segment direction
+        const newDirectionX = -linearDir.x;
+        const newDirectionY = -linearDir.y;
+
+        // Calculate new position by extending in the opposite linear direction with the original handle length
+        const newX = point.x + newDirectionX * curveLength;
+        const newY = point.y + newDirectionY * curveLength;
+
+        points[prevIdx] = {
+          ...prevPoint,
+          x: newX,
+          y: newY,
+        };
+      }
+    }
+    // Case 3: Both neighbors are on-curve (smooth point between two linear segments)
+    else if (prevIsOnCurve && nextIsOnCurve) {
+      // This case typically shouldn't happen in generated contours from skeleton,
+      // but we handle it for completeness - smooth point between two linear segments
+      // In this case, the smooth point should maintain angle bisector behavior
+      const vecIn = { x: point.x - prevPoint.x, y: point.y - prevPoint.y };
+      const vecOut = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
+
+      // Normalize directions
+      const dirIn = vector.normalizeVector(vecIn);
+      const dirOut = vector.normalizeVector(vecOut);
+
+      // Calculate angle bisector
+      const bisector = vector.normalizeVector({
+        x: dirIn.x + dirOut.x,
+        y: dirIn.y + dirOut.y,
+      });
+
+      // The smooth point is already in the right position, just ensure it's marked as smooth
+      points[i] = { ...point, smooth: true };
+    }
   }
 
   return points;
