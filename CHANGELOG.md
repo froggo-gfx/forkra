@@ -1,6 +1,6 @@
 # Changelog for Fontra
 
-## 2026-01-?? [version 2026.1.3]
+## 2026-01-24 [version 2026.1.3]
 
 - [designspace] Fix a writing failure when multiple glyphs use the same lyaer name but for different locations. [Issue 2393](https://github.com/fontra/fontra/issues/2393), [PR 2394](https://github.com/fontra/fontra/pull/2394)
 - [designspace] Fix writing the `italicAngle` property to source UFOs. [Issue 2386](https://github.com/fontra/fontra/issues/2386), [PR 2389](https://github.com/fontra/fontra/pull/2389)
