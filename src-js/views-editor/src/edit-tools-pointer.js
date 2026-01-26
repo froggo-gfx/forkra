@@ -2228,51 +2228,25 @@ export class PointerTool extends BaseTool {
           // Get smooth point position (stays fixed)
           const smoothPt = workContour.points[smoothIndex];
 
-          // Calculate current dragged handle length based on cursor position
-          // The dragged point follows the cursor projected onto its original direction
-          const origDraggedPt = origContour.points[pointIndex];
-          const origDragDir = {
-            x: origDraggedPt.x - smoothPt.x,
-            y: origDraggedPt.y - smoothPt.y,
-          };
-          const origDragLen = Math.hypot(origDragDir.x, origDragDir.y);
-
-          if (origDragLen < 0.001) continue;
-
-          // Normalize direction
-          const dragDirNorm = {
-            x: origDragDir.x / origDragLen,
-            y: origDragDir.y / origDragLen,
-          };
-
-          // Project cursor onto the handle direction from smooth point
-          const cursorVec = {
+          // The dragged handle follows the cursor freely
+          const newDragVec = {
             x: currentGlyphPoint.x - smoothPt.x,
             y: currentGlyphPoint.y - smoothPt.y,
           };
-          const projectedLen = cursorVec.x * dragDirNorm.x + cursorVec.y * dragDirNorm.y;
-          const newDraggedLen = Math.max(1, projectedLen); // Minimum length of 1
+          const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
 
-          // Update dragged point position
-          workContour.points[pointIndex].x = smoothPt.x + dragDirNorm.x * newDraggedLen;
-          workContour.points[pointIndex].y = smoothPt.y + dragDirNorm.y * newDraggedLen;
-
-          // Update opposite point to match the new length
-          const oppPt = origContour.points[oppositeIndex];
-          const oppDir = {
-            x: oppPt.x - smoothPt.x,
-            y: oppPt.y - smoothPt.y,
-          };
-          const oppLen = Math.hypot(oppDir.x, oppDir.y);
-
-          if (oppLen > 0.001) {
-            const oppDirNorm = {
-              x: oppDir.x / oppLen,
-              y: oppDir.y / oppLen,
-            };
-            workContour.points[oppositeIndex].x = smoothPt.x + oppDirNorm.x * newDraggedLen;
-            workContour.points[oppositeIndex].y = smoothPt.y + oppDirNorm.y * newDraggedLen;
+          // Minimum length of 1
+          if (newDragLen < 1) {
+            continue;
           }
+
+          // Update dragged point to follow cursor
+          workContour.points[pointIndex].x = currentGlyphPoint.x;
+          workContour.points[pointIndex].y = currentGlyphPoint.y;
+
+          // Update opposite point: same length, opposite direction
+          workContour.points[oppositeIndex].x = smoothPt.x - newDragVec.x;
+          workContour.points[oppositeIndex].y = smoothPt.y - newDragVec.y;
 
           // Record changes for this layer
           const staticGlyph = layer.glyph;
