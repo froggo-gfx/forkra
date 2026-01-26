@@ -44,6 +44,15 @@ import {
   createRibEditBehavior,
 } from "./skeleton-edit-behavior.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
+import {
+  skeletonTunniHitTest,
+  calculateSkeletonControlPointsFromTunni,
+  calculateSkeletonOnCurveFromTunni,
+  calculateSkeletonEqualizedControlPoints,
+  areSkeletonTensionsEqualized,
+  calculateSkeletonTunniPoint,
+  calculateSkeletonTrueTunniPoint,
+} from "./skeleton-tunni-calculations.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
 import { getPinPoint } from "./panel-transformation.js";
 import { equalGlyphSelection } from "./scene-controller.js";
@@ -157,10 +166,37 @@ export class PointerTool extends BaseTool {
       this.sceneController.sceneModel.hoverResizeHandle = resizeHandle;
       this.canvasController.requestUpdate();
     }
+    // Check for skeleton Tunni point hover
+    let isHoveringSkeletonTunni = false;
+    let skeletonTunniType = null;
+    const isSkeletonTunniLayerActive =
+      this.editor?.visualizationLayersSettings?.model?.["fontra.skeleton.tunni"];
+    if (isSkeletonTunniLayerActive) {
+      const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+      if (positionedGlyph) {
+        const glyphPoint = {
+          x: point.x - positionedGlyph.x,
+          y: point.y - positionedGlyph.y,
+        };
+        const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
+        if (skeletonData) {
+          const tunniHit = skeletonTunniHitTest(glyphPoint, size, skeletonData);
+          if (tunniHit) {
+            isHoveringSkeletonTunni = true;
+            skeletonTunniType = tunniHit.type;
+          }
+        }
+      }
+    }
+
     if (rotationHandle) {
       this.setCursorForRotationHandle(rotationHandle);
     } else if (resizeHandle) {
       this.setCursorForResizeHandle(resizeHandle);
+    } else if (isHoveringSkeletonTunni) {
+      // Use different cursors for different Tunni point types
+      this.canvasController.canvas.style.cursor =
+        skeletonTunniType === "true-tunni" ? "crosshair" : "pointer";
     } else {
       this.setCursor();
     }
@@ -375,6 +411,29 @@ export class PointerTool extends BaseTool {
       initialEvent.preventDefault();
       return;
     }
+
+    // Check for skeleton Tunni point hit
+    const isSkeletonTunniLayerActive =
+      this.editor?.visualizationLayersSettings?.model?.["fontra.skeleton.tunni"];
+    if (isSkeletonTunniLayerActive && !hasSkeletonPointUnderCursor) {
+      const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+      if (positionedGlyph) {
+        const glyphPoint = {
+          x: point.x - positionedGlyph.x,
+          y: point.y - positionedGlyph.y,
+        };
+        const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
+        if (skeletonData) {
+          const tunniHit = skeletonTunniHitTest(glyphPoint, size, skeletonData);
+          if (tunniHit) {
+            await this._handleSkeletonTunniDrag(eventStream, initialEvent, tunniHit);
+            initialEvent.preventDefault();
+            return;
+          }
+        }
+      }
+    }
+
     let initialClickedPointIndex;
     let initialClickedSkeletonPoint;
     if (!pathHit) {
@@ -1565,6 +1624,191 @@ export class PointerTool extends BaseTool {
       return {
         changes: accumulatedChanges,
         undoLabel: translate("edit-tools-pointer.undo.change-skeleton-width"),
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Handle dragging a skeleton Tunni point.
+   * - Tunni Point (midpoint): changes curve tension by moving control points
+   * - True Tunni Point (intersection): moves on-curve points along projection lines
+   */
+  async _handleSkeletonTunniDrag(eventStream, initialEvent, tunniHit) {
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+
+    if (!positionedGlyph) return;
+
+    // Get initial point in glyph coordinates
+    const localPoint = sceneController.localPoint(initialEvent);
+    const startGlyphPoint = {
+      x: localPoint.x - positionedGlyph.x,
+      y: localPoint.y - positionedGlyph.y,
+    };
+
+    const { type, contourIndex, segment } = tunniHit;
+    const isTrueTunni = type === "true-tunni";
+
+    // Store original segment data for calculations
+    const originalSegment = {
+      startPoint: { ...segment.startPoint },
+      endPoint: { ...segment.endPoint },
+      controlPoints: segment.controlPoints.map((p) => ({ ...p })),
+      startIndex: segment.startIndex,
+      endIndex: segment.endIndex,
+      controlIndices: segment.controlIndices,
+    };
+
+    // Calculate original Tunni point position
+    const origTunniPoint = isTrueTunni
+      ? calculateSkeletonTrueTunniPoint(originalSegment)
+      : calculateSkeletonTunniPoint(originalSegment);
+
+    if (!origTunniPoint) return;
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      // Setup data for ALL editable layers (multi-source editing support)
+      const layersData = {};
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        layersData[editLayerName] = {
+          layer,
+          original: JSON.parse(JSON.stringify(skeletonData)),
+          working: JSON.parse(JSON.stringify(skeletonData)),
+        };
+      }
+
+      if (Object.keys(layersData).length === 0) return;
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      let accumulatedChanges = new ChangeCollector();
+
+      // Drag loop
+      for await (const event of eventStream) {
+        const currentLocalPoint = sceneController.localPoint(event);
+        const currentGlyphPoint = {
+          x: currentLocalPoint.x - positionedGlyph.x,
+          y: currentLocalPoint.y - positionedGlyph.y,
+        };
+
+        // Calculate new Tunni point position
+        const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+        const newTunniPoint = {
+          x: origTunniPoint.x + delta.x,
+          y: origTunniPoint.y + delta.y,
+        };
+
+        // Alt key disables equalized distances
+        const equalizeDistances = !event.altKey;
+
+        const allChanges = [];
+
+        // Apply changes to ALL editable layers
+        for (const [editLayerName, data] of Object.entries(layersData)) {
+          const { layer, original, working } = data;
+
+          // Reset working data to original
+          const origContour = original.contours[contourIndex];
+          const workContour = working.contours[contourIndex];
+          for (let pi = 0; pi < origContour.points.length; pi++) {
+            workContour.points[pi].x = origContour.points[pi].x;
+            workContour.points[pi].y = origContour.points[pi].y;
+          }
+
+          // Build segment from original data (for this layer)
+          const layerOriginalSegment = {
+            startPoint: { ...origContour.points[segment.startIndex] },
+            endPoint: { ...origContour.points[segment.endIndex] },
+            controlPoints: segment.controlIndices.map((i) => ({
+              ...origContour.points[i],
+            })),
+            startIndex: segment.startIndex,
+            endIndex: segment.endIndex,
+            controlIndices: segment.controlIndices,
+          };
+
+          if (isTrueTunni) {
+            // True Tunni: move on-curve points
+            const result = calculateSkeletonOnCurveFromTunni(
+              newTunniPoint,
+              layerOriginalSegment,
+              equalizeDistances
+            );
+
+            if (result) {
+              workContour.points[segment.startIndex].x = result.newStartPoint.x;
+              workContour.points[segment.startIndex].y = result.newStartPoint.y;
+              workContour.points[segment.endIndex].x = result.newEndPoint.x;
+              workContour.points[segment.endIndex].y = result.newEndPoint.y;
+            }
+          } else {
+            // Midpoint Tunni: move control points
+            const newCps = calculateSkeletonControlPointsFromTunni(
+              newTunniPoint,
+              layerOriginalSegment,
+              equalizeDistances
+            );
+
+            if (newCps) {
+              const [cp1Idx, cp2Idx] = segment.controlIndices;
+              workContour.points[cp1Idx].x = newCps[0].x;
+              workContour.points[cp1Idx].y = newCps[0].y;
+              workContour.points[cp2Idx].x = newCps[1].x;
+              workContour.points[cp2Idx].y = newCps[1].y;
+            }
+          }
+
+          // Record changes for this layer
+          // 1. FIRST: Generate outline contours
+          const staticGlyph = layer.glyph;
+          const pathChange = recordChanges(staticGlyph, (sg) => {
+            regenerateOutline(sg, working);
+          });
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+          // 2. THEN: Save skeletonData to customData
+          const customDataChange = recordChanges(layer, (l) => {
+            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+          });
+          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+        }
+
+        const combinedChange = new ChangeCollector().concat(...allChanges);
+        accumulatedChanges = accumulatedChanges.concat(combinedChange);
+        await sendIncrementalChange(combinedChange.change, true);
+      }
+
+      // Final send without "may drop" flag
+      await sendIncrementalChange(accumulatedChanges.change);
+
+      return {
+        changes: accumulatedChanges,
+        undoLabel: isTrueTunni
+          ? "Move Skeleton On-Curve Points (Tunni)"
+          : "Move Skeleton Control Points (Tunni)",
         broadcast: true,
       };
     });

@@ -13,6 +13,11 @@ import {
   fillRoundNode,
   fillSquareNode,
 } from "./visualization-layer-definitions.js";
+import {
+  buildSegmentsFromSkeletonPoints,
+  calculateSkeletonTunniPoint,
+  calculateSkeletonTrueTunniPoint,
+} from "./skeleton-tunni-calculations.js";
 
 /**
  * Get skeleton data from a positioned glyph's editing layer.
@@ -938,6 +943,99 @@ registerVisualizationLayerDefinition({
 
         // Draw label text offset from the handle point
         drawLabelText(context, point, labelText, 10, 0, parameters);
+      }
+    }
+  },
+});
+
+// ============================================================
+// Skeleton Tunni Lines and Points visualization
+// ============================================================
+
+/**
+ * Draw a filled diamond node.
+ */
+function fillDiamondNode(context, pt, size) {
+  const halfSize = size / 2;
+  context.beginPath();
+  context.moveTo(pt.x, pt.y - halfSize);
+  context.lineTo(pt.x + halfSize, pt.y);
+  context.lineTo(pt.x, pt.y + halfSize);
+  context.lineTo(pt.x - halfSize, pt.y);
+  context.closePath();
+  context.fill();
+}
+
+// Skeleton Tunni Lines and Points Layer
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.tunni",
+  name: "Skeleton Tunni Lines",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: false,
+  zIndex: 548, // Between handles (545) and nodes (550)
+  screenParameters: {
+    strokeWidth: 1,
+    dashPattern: [5, 5],
+    tunniPointSize: 5,
+    trueTunniPointSize: 4,
+  },
+  colors: {
+    lineColor: "#0000FF80", // Semi-transparent blue
+    tunniPointColor: "#0000FF", // Blue for midpoint
+    trueTunniPointColor: "#FF8C00", // Orange for intersection
+  },
+  colorsDarkMode: {
+    lineColor: "#00FFFF80", // Semi-transparent cyan
+    tunniPointColor: "#00FFFF", // Cyan for midpoint
+    trueTunniPointColor: "#FFA500", // Orange for intersection
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
+    if (!skeletonData?.contours?.length) {
+      return;
+    }
+
+    // Draw Tunni lines and points for each contour
+    for (const contour of skeletonData.contours) {
+      const segments = buildSegmentsFromSkeletonPoints(contour.points, contour.isClosed);
+
+      for (const segment of segments) {
+        // Only draw for cubic segments (2 control points)
+        if (segment.controlPoints.length !== 2) continue;
+
+        const [cp1, cp2] = segment.controlPoints;
+        const { startPoint, endPoint } = segment;
+
+        // Draw dashed lines from on-curve to off-curve points
+        context.strokeStyle = parameters.lineColor;
+        context.lineWidth = parameters.strokeWidth;
+        context.setLineDash(parameters.dashPattern);
+
+        // Line from start on-curve to first control point
+        strokeLine(context, startPoint.x, startPoint.y, cp1.x, cp1.y);
+
+        // Line from end on-curve to second control point
+        strokeLine(context, endPoint.x, endPoint.y, cp2.x, cp2.y);
+
+        // Line between control points
+        strokeLine(context, cp1.x, cp1.y, cp2.x, cp2.y);
+
+        context.setLineDash([]);
+
+        // Draw Tunni Point (midpoint) - blue circle
+        const tunniPt = calculateSkeletonTunniPoint(segment);
+        if (tunniPt) {
+          context.fillStyle = parameters.tunniPointColor;
+          fillRoundNode(context, tunniPt, parameters.tunniPointSize);
+        }
+
+        // Draw True Tunni Point (intersection) - orange diamond
+        const trueTunniPt = calculateSkeletonTrueTunniPoint(segment);
+        if (trueTunniPt) {
+          context.fillStyle = parameters.trueTunniPointColor;
+          fillDiamondNode(context, trueTunniPt, parameters.trueTunniPointSize);
+        }
       }
     }
   },
