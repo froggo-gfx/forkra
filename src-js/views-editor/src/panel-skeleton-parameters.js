@@ -378,11 +378,9 @@ export default class SkeletonParametersPanel extends Panel {
       allowEmptyField: rightMixed,
     });
 
-    // Distribution slider (only in asymmetric mode)
-    if (isAsym && !isIndeterminate) {
-      // When values are mixed, show slider at neutral (0) position
-      const distributionMixed = leftMixed || rightMixed;
-      const distribution = distributionMixed ? 0 : this._calculateDistribution(left, right);
+    // Distribution slider (only in asymmetric mode, single selection)
+    if (isAsym && !multiSelection && !isIndeterminate) {
+      const distribution = this._calculateDistribution(left, right);
       formContents.push({
         type: "edit-number-slider",
         key: "pointDistribution",
