@@ -410,7 +410,7 @@ export function generateContoursFromSkeleton(skeletonData) {
  *   - For closed skeleton: returns 2 contours (outer and inner)
  */
 export function generateOutlineFromSkeletonContour(skeletonContour) {
-  const { points, isClosed, defaultWidth = DEFAULT_WIDTH, capStyle = "butt" } =
+  const { points, isClosed, defaultWidth = DEFAULT_WIDTH, capStyle = "butt", reversed = false } =
     skeletonContour;
 
   if (points.length < 2) {
@@ -475,10 +475,17 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     const alignedLeftSide = alignHandleDirections(leftSide, segments, true);
     const alignedRightSide = alignHandleDirections(reversedRight, segments, false);
 
-    return [
+    let contours = [
       { points: enforceSmoothColinearity(alignedLeftSide, true), isClosed: true },
       { points: enforceSmoothColinearity(alignedRightSide, true), isClosed: true },
     ];
+
+    // Apply reverse if flag is set
+    if (reversed) {
+      contours = contours.map((c) => reverseContour(c));
+    }
+
+    return contours;
   } else {
     // For open skeleton: ONE contour with caps at ends
     // Get per-point widths for first and last on-curve points
@@ -521,8 +528,31 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // Apply handle direction alignment to match skeleton handles
     const alignedOutlinePoints = alignHandleDirections(outlinePoints, segments, null);
 
-    return [{ points: enforceSmoothColinearity(alignedOutlinePoints, true), isClosed: true }];
+    let contour = { points: enforceSmoothColinearity(alignedOutlinePoints, true), isClosed: true };
+
+    // Apply reverse if flag is set
+    if (reversed) {
+      contour = reverseContour(contour);
+    }
+
+    return [contour];
   }
+}
+
+/**
+ * Reverse a contour's point order.
+ * @param {Object} contour - Contour with points array and isClosed flag
+ * @returns {Object} New contour with reversed points
+ */
+function reverseContour(contour) {
+  const points = [...contour.points];
+  points.reverse();
+  if (contour.isClosed && points.length > 0) {
+    // For closed contours, rotate so start point stays consistent
+    const [lastPoint] = points.splice(-1, 1);
+    points.splice(0, 0, lastPoint);
+  }
+  return { ...contour, points };
 }
 
 /**
