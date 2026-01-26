@@ -133,13 +133,13 @@ export function calculateSkeletonTrueTunniPoint(segment) {
  * Calculate new control point positions when dragging the Tunni Point (midpoint).
  * The control points move along their original directions to maintain curve shape.
  *
- * @param {Object} newTunniPoint - New position for the Tunni point
+ * @param {Object} delta - Movement delta vector {x, y}
  * @param {Object} segment - Original segment
  * @param {boolean} equalizeDistances - If true, both control points move by same amount
  * @returns {Array|null} Array of [newCp1, newCp2] or null
  */
-export function calculateSkeletonControlPointsFromTunni(
-  newTunniPoint,
+export function calculateSkeletonControlPointsFromTunniDelta(
+  delta,
   segment,
   equalizeDistances = true
 ) {
@@ -154,21 +154,12 @@ export function calculateSkeletonControlPointsFromTunni(
   const dir1 = normalizeVector(subVectors(cp1, startPoint));
   const dir2 = normalizeVector(subVectors(cp2, endPoint));
 
-  // Calculate original tunni point (midpoint)
-  const origTunni = {
-    x: (cp1.x + cp2.x) / 2,
-    y: (cp1.y + cp2.y) / 2,
-  };
-
-  // Movement vector
-  const tunniDelta = subVectors(newTunniPoint, origTunni);
-
   // Calculate 45-degree vector (average of both directions)
   const fortyFiveVec = normalizeVector(addVectors(dir1, dir2));
 
   if (equalizeDistances) {
-    // Project tunni delta onto the 45-degree vector
-    const projection = tunniDelta.x * fortyFiveVec.x + tunniDelta.y * fortyFiveVec.y;
+    // Project delta onto the 45-degree vector
+    const projection = delta.x * fortyFiveVec.x + delta.y * fortyFiveVec.y;
 
     // Move both control points by same amount along their directions
     const newCp1 = {
@@ -183,8 +174,8 @@ export function calculateSkeletonControlPointsFromTunni(
     return [newCp1, newCp2];
   } else {
     // Each control point moves independently along its own direction
-    const projection1 = tunniDelta.x * dir1.x + tunniDelta.y * dir1.y;
-    const projection2 = tunniDelta.x * dir2.x + tunniDelta.y * dir2.y;
+    const projection1 = delta.x * dir1.x + delta.y * dir1.y;
+    const projection2 = delta.x * dir2.x + delta.y * dir2.y;
 
     const newCp1 = {
       x: cp1.x + dir1.x * projection1,
@@ -367,10 +358,6 @@ export function calculateSkeletonEqualizedControlPoints(segment) {
     y: endPoint.y + dir2.y * newDist2,
   };
 
-  console.log("[Equalize] tension1:", tension1, "tension2:", tension2, "target:", targetTension);
-  console.log("[Equalize] distStartToTunni:", distStartToTunni, "distEndToTunni:", distEndToTunni);
-  console.log("[Equalize] newDist1:", newDist1, "newDist2:", newDist2);
-
   return [newCp1, newCp2];
 }
 
@@ -383,7 +370,6 @@ export function calculateSkeletonEqualizedControlPoints(segment) {
  */
 export function areSkeletonTensionsEqualized(segment, tolerance = 0.01) {
   if (!segment.controlPoints || segment.controlPoints.length !== 2) {
-    console.log("[areEqualized] No control points, returning true");
     return true;
   }
 
@@ -392,7 +378,6 @@ export function areSkeletonTensionsEqualized(segment, tolerance = 0.01) {
 
   const trueTunni = calculateSkeletonTrueTunniPoint(segment);
   if (!trueTunni) {
-    console.log("[areEqualized] No trueTunni, returning true");
     return true; // Lines parallel, consider equalized
   }
 
@@ -400,14 +385,11 @@ export function areSkeletonTensionsEqualized(segment, tolerance = 0.01) {
   const distEndToTunni = distance(endPoint, trueTunni);
 
   if (distStartToTunni <= 0 || distEndToTunni <= 0) {
-    console.log("[areEqualized] Distance <= 0, returning true");
     return true;
   }
 
   const tension1 = distance(startPoint, cp1) / distStartToTunni;
   const tension2 = distance(endPoint, cp2) / distEndToTunni;
-  const diff = Math.abs(tension1 - tension2);
 
-  console.log("[areEqualized] tension1:", tension1, "tension2:", tension2, "diff:", diff, "tolerance:", tolerance);
-  return diff < tolerance;
+  return Math.abs(tension1 - tension2) < tolerance;
 }

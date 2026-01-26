@@ -46,7 +46,7 @@ import {
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import {
   skeletonTunniHitTest,
-  calculateSkeletonControlPointsFromTunni,
+  calculateSkeletonControlPointsFromTunniDelta,
   calculateSkeletonOnCurveFromTunni,
   calculateSkeletonEqualizedControlPoints,
   areSkeletonTensionsEqualized,
@@ -419,25 +419,19 @@ export class PointerTool extends BaseTool {
     // Ctrl+Shift+click: equalize tensions (works even without Tunni layer visible)
     // Only for midpoint Tunni, not for true Tunni (intersection)
     if (initialEvent.ctrlKey && initialEvent.shiftKey) {
-      console.log("[Skeleton Tunni] Ctrl+Shift+click detected");
       const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
-      console.log("[Skeleton Tunni] positionedGlyph:", !!positionedGlyph);
       if (positionedGlyph) {
         const glyphPoint = {
           x: point.x - positionedGlyph.x,
           y: point.y - positionedGlyph.y,
         };
-        console.log("[Skeleton Tunni] glyphPoint:", glyphPoint, "size:", size);
         const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
-        console.log("[Skeleton Tunni] skeletonData:", !!skeletonData, skeletonData?.contours?.length, "contours");
         if (skeletonData) {
           // Use larger hit margin and search only midpoint Tunni for equalize
           const tunniHit = skeletonTunniHitTest(glyphPoint, size * 2, skeletonData, {
             midpointOnly: true,
           });
-          console.log("[Skeleton Tunni] tunniHit:", tunniHit);
           if (tunniHit) {
-            console.log("[Skeleton Tunni] Calling _equalizeSkeletonTunniTensions");
             await this._equalizeSkeletonTunniTensions(tunniHit);
             initialEvent.preventDefault();
             eventStream.done();
@@ -1799,8 +1793,8 @@ export class PointerTool extends BaseTool {
             }
           } else {
             // Midpoint Tunni: move control points
-            const newCps = calculateSkeletonControlPointsFromTunni(
-              newTunniPoint,
+            const newCps = calculateSkeletonControlPointsFromTunniDelta(
+              delta,
               layerOriginalSegment,
               equalizeDistances
             );
@@ -1856,10 +1850,7 @@ export class PointerTool extends BaseTool {
     const { contourIndex, segment } = tunniHit;
 
     // Check if already equalized
-    const isEqualized = areSkeletonTensionsEqualized(segment);
-    console.log("[Equalize] areSkeletonTensionsEqualized:", isEqualized, "segment:", segment);
-    if (isEqualized) {
-      console.log("[Equalize] Already equalized, skipping");
+    if (areSkeletonTensionsEqualized(segment)) {
       return; // Already equalized, nothing to do
     }
 
