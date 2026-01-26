@@ -680,7 +680,7 @@ getGlyphTestData = [
                         "xAdvance": 170,
                     },
                 },
-                "wdth=1": {
+                "wdth=1000": {
                     "glyph": {
                         "path": {
                             "contourInfo": [{"endPoint": 3, "isClosed": True}],
@@ -690,7 +690,7 @@ getGlyphTestData = [
                         "xAdvance": 290,
                     },
                 },
-                "wdth=1,wght=1": {
+                "wdth=1000,wght=900": {
                     "glyph": {
                         "path": {
                             "contourInfo": [{"endPoint": 3, "isClosed": True}],
@@ -700,7 +700,7 @@ getGlyphTestData = [
                         "xAdvance": 310,
                     },
                 },
-                "wght=1": {
+                "wght=900": {
                     "glyph": {
                         "path": {
                             "contourInfo": [{"endPoint": 3, "isClosed": True}],
@@ -718,19 +718,19 @@ getGlyphTestData = [
                     "name": "default",
                 },
                 {
-                    "layerName": "wdth=1",
+                    "layerName": "wdth=1000",
                     "location": {"wdth": 1000, "wght": 100},
-                    "name": "wdth=1",
+                    "name": "wdth=1000",
                 },
                 {
-                    "layerName": "wdth=1,wght=1",
+                    "layerName": "wdth=1000,wght=900",
                     "location": {"wdth": 1000, "wght": 900},
-                    "name": "wdth=1,wght=1",
+                    "name": "wdth=1000,wght=900",
                 },
                 {
-                    "layerName": "wght=1",
+                    "layerName": "wght=900",
                     "location": {"wdth": 0, "wght": 900},
-                    "name": "wght=1",
+                    "name": "wght=900",
                 },
             ],
         },
@@ -750,7 +750,7 @@ getGlyphTestData = [
                         "xAdvance": 170,
                     },
                 },
-                "wdth=0.20001": {
+                "wdth=200.01221": {
                     "glyph": {
                         "path": {
                             "coordinates": [60, 0, 60, 120, 110, 120, 110, 0],
@@ -761,7 +761,7 @@ getGlyphTestData = [
                     },
                     "customData": {},
                 },
-                "wdth=1": {
+                "wdth=1000": {
                     "glyph": {
                         "path": {
                             "contourInfo": [{"endPoint": 3, "isClosed": True}],
@@ -779,14 +779,14 @@ getGlyphTestData = [
                     "name": "default",
                 },
                 {
-                    "layerName": "wdth=0.20001",
+                    "layerName": "wdth=200.01221",
                     "location": {"wdth": 200.01220703125, "wght": 100},
-                    "name": "wdth=0.20001",
+                    "name": "wdth=200.01221",
                 },
                 {
-                    "layerName": "wdth=1",
+                    "layerName": "wdth=1000",
                     "location": {"wdth": 1000, "wght": 100},
-                    "name": "wdth=1",
+                    "name": "wdth=1000",
                 },
             ],
         },
@@ -806,7 +806,7 @@ getGlyphTestData = [
                         "xAdvance": 170,
                     },
                 },
-                "wdth=1": {
+                "wdth=1000": {
                     "glyph": {
                         "path": {
                             "coordinates": [
@@ -825,7 +825,7 @@ getGlyphTestData = [
                         "xAdvance": 290.0,
                     },
                 },
-                "wdth=1,wght=1": {
+                "wdth=1000,wght=900": {
                     "glyph": {
                         "path": {
                             "coordinates": [
@@ -844,7 +844,7 @@ getGlyphTestData = [
                         "xAdvance": 310.0,
                     },
                 },
-                "wght=1": {
+                "wght=900": {
                     "glyph": {
                         "path": {
                             "coordinates": [
@@ -872,18 +872,18 @@ getGlyphTestData = [
                 },
                 {
                     "location": {"wdth": 1000.0, "wght": 100.0},
-                    "name": "wdth=1",
-                    "layerName": "wdth=1",
+                    "name": "wdth=1000",
+                    "layerName": "wdth=1000",
                 },
                 {
                     "location": {"wdth": 1000.0, "wght": 900.0},
-                    "name": "wdth=1,wght=1",
-                    "layerName": "wdth=1,wght=1",
+                    "name": "wdth=1000,wght=900",
+                    "layerName": "wdth=1000,wght=900",
                 },
                 {
                     "location": {"wdth": 0.0, "wght": 900.0},
-                    "name": "wght=1",
-                    "layerName": "wght=1",
+                    "name": "wght=900",
+                    "layerName": "wght=900",
                 },
             ],
         },
@@ -899,8 +899,8 @@ getGlyphTestData = [
                     "location": {"V000": 0, "V001": 0, "wdth": 0, "wght": 100},
                 },
                 {
-                    "name": "wght=1",
-                    "layerName": "wght=1",
+                    "name": "wght=900",
+                    "layerName": "wght=900",
                     "location": {"V000": 0, "V001": 0, "wdth": 0, "wght": 900},
                 },
             ],
@@ -951,7 +951,7 @@ getGlyphTestData = [
                         "xAdvance": 900,
                     }
                 },
-                "wght=1": {
+                "wght=900": {
                     "glyph": {
                         "components": [
                             {
