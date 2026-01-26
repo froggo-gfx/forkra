@@ -279,10 +279,11 @@ export default class SkeletonParametersPanel extends Panel {
       leftMixed = !allLeftSame;
       rightMixed = !allRightSame;
 
-      // Sync UI state from selection: only set to true if point has asymmetric data
-      // Don't reset to false - preserve user's toggle choice
-      if (asymStates.has(true)) {
-        this.pointParameters.asymmetrical = true;
+      // Sync UI state from selection
+      // If all points have same state, sync to that state
+      // If mixed, keep current UI state (will show indeterminate)
+      if (asymStates.size === 1) {
+        this.pointParameters.asymmetrical = asymStates.has(true);
       }
     } else {
       // No selection - show Source Width / 2
