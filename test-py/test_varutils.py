@@ -5,6 +5,7 @@ from fontra.core.varutils import (
     locationToTuple,
     makeSparseNormalizedLocation,
     mapAxesFromUserSpaceToSourceSpace,
+    unnormalizeLocation,
 )
 
 testAxes = [
@@ -94,3 +95,21 @@ def test_locationToTuple(location, expectedLocTuple):
 def test_makeSparseNormalizedLocation(location, expectedSparseLocation):
     sparseLocation = makeSparseNormalizedLocation(location)
     assert expectedSparseLocation == sparseLocation
+
+
+@pytest.mark.parametrize(
+    "normalizedLocation, expectedLocation",
+    [
+        ({}, {"NoMapping": 400, "Weight": 400}),
+        ({"Weight": -2}, {"NoMapping": 400, "Weight": 200}),
+        ({"Weight": -1}, {"NoMapping": 400, "Weight": 200}),
+        ({"Weight": -0.5}, {"NoMapping": 400, "Weight": 300}),
+        ({"Weight": 0}, {"NoMapping": 400, "Weight": 400}),
+        ({"Weight": 0.5}, {"NoMapping": 400, "Weight": 550}),
+        ({"Weight": 1}, {"NoMapping": 400, "Weight": 700}),
+        ({"Weight": 2}, {"NoMapping": 400, "Weight": 700}),
+    ],
+)
+def test_unnormalizeLocation(normalizedLocation, expectedLocation):
+    location = unnormalizeLocation(normalizedLocation, testAxes[:2])
+    assert expectedLocation == location
