@@ -2229,10 +2229,16 @@ export class PointerTool extends BaseTool {
           const smoothPt = workContour.points[smoothIndex];
 
           // The dragged handle follows the cursor freely
-          const newDragVec = {
+          let newDragVec = {
             x: currentGlyphPoint.x - smoothPt.x,
             y: currentGlyphPoint.y - smoothPt.y,
           };
+
+          // Shift constrains to horizontal/vertical/45-degree
+          if (event.shiftKey) {
+            newDragVec = constrainHorVerDiag(newDragVec);
+          }
+
           const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
 
           // Minimum length of 1
@@ -2240,9 +2246,9 @@ export class PointerTool extends BaseTool {
             continue;
           }
 
-          // Update dragged point to follow cursor
-          workContour.points[pointIndex].x = currentGlyphPoint.x;
-          workContour.points[pointIndex].y = currentGlyphPoint.y;
+          // Update dragged point
+          workContour.points[pointIndex].x = smoothPt.x + newDragVec.x;
+          workContour.points[pointIndex].y = smoothPt.y + newDragVec.y;
 
           // Update opposite point: same length, opposite direction
           workContour.points[oppositeIndex].x = smoothPt.x - newDragVec.x;
