@@ -622,6 +622,13 @@ export class SceneController {
     );
 
     registerAction(
+      "action.reverse-skeleton-contour",
+      { topic },
+      () => this.doReverseSkeletonContour(),
+      () => this._hasSkeletonContourInSelection()
+    );
+
+    registerAction(
       "action.reverse-contour",
       { topic },
       () => this.doReverseSelectedContours(),
@@ -970,6 +977,7 @@ export class SceneController {
       },
       { actionIdentifier: "action.break-contour" },
       { actionIdentifier: "action.break-skeleton-contour" },
+      { actionIdentifier: "action.reverse-skeleton-contour" },
       { actionIdentifier: "action.reverse-contour" },
       { actionIdentifier: "action.set-contour-start" },
       {
@@ -1575,6 +1583,11 @@ export class SceneController {
     return false;
   }
 
+  _hasSkeletonContourInSelection() {
+    const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
+    return skeletonPointSel?.size > 0;
+  }
+
   async doBreakSkeletonContour() {
     const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
     if (!skeletonPointSel?.size) {
@@ -1667,6 +1680,100 @@ export class SceneController {
       return {
         changes: combinedChange,
         undoLabel: translate("action.break-skeleton-contour"),
+      };
+    });
+  }
+
+  async doReverseSkeletonContour() {
+    const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
+    if (!skeletonPointSel?.size) {
+      return;
+    }
+
+    await this.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = this.editingLayerNames?.[0];
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = layer?.customData?.["fontra.skeleton"];
+      if (!skeletonData?.contours) {
+        return;
+      }
+
+      // Deep clone for manipulation
+      skeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+      // Collect unique contour indices from selection
+      const contourIndices = new Set();
+      for (const selKey of skeletonPointSel) {
+        const [contourIdx] = selKey.split("/").map(Number);
+        contourIndices.add(contourIdx);
+      }
+
+      let numReversed = 0;
+      for (const contourIdx of contourIndices) {
+        const contour = skeletonData.contours[contourIdx];
+        if (!contour) {
+          continue;
+        }
+
+        // Reverse the points array
+        contour.points.reverse();
+
+        // For closed contours, rotate so that first on-curve point stays first
+        if (contour.isClosed && contour.points.length > 0) {
+          // After reverse, last point becomes first - rotate to fix start
+          const [lastPoint] = contour.points.splice(-1, 1);
+          contour.points.splice(0, 0, lastPoint);
+        }
+
+        numReversed++;
+      }
+
+      if (numReversed === 0) {
+        return;
+      }
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(newIndex, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      // Record changes using recordChanges pattern
+      const changes = [];
+
+      // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        regenerateOutline(sg, skeletonData);
+      });
+      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData["fontra.skeleton"] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+      const combinedChange = new ChangeCollector().concat(...changes);
+      await sendIncrementalChange(combinedChange.change);
+
+      return {
+        changes: combinedChange,
+        undoLabel: translate("action.reverse-skeleton-contour"),
       };
     });
   }
