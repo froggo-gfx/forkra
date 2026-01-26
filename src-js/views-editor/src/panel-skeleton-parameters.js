@@ -679,7 +679,8 @@ export default class SkeletonParametersPanel extends Panel {
       const defaultWidth = this._getCurrentDefaultWidthWide();
       for (const { contourIdx, pointIdx, point } of selectedData.points) {
         const w = this._getPointWidths(point, defaultWidth);
-        parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)}`);
+        const isAsym = this._isAsymmetric(point);
+        parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)},${isAsym}`);
       }
     }
 
