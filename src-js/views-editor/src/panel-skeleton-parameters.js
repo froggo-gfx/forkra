@@ -123,27 +123,36 @@ export default class SkeletonParametersPanel extends Panel {
       minValue: 1,
     });
 
-    // Single-sided checkbox
-    formContents.push({
+    // Single-sided checkbox with direction dropdown
+    const singleSidedCheckbox = html.input({
       type: "checkbox",
-      key: "singleSided",
-      label: "Single-sided",
-      value: this._getCurrentSingleSided(),
+      id: "single-sided-toggle",
+      checked: this._getCurrentSingleSided(),
+      onchange: (e) => this._onSingleSidedToggle(e.target.checked),
     });
 
-    // Direction dropdown (only when single-sided is enabled)
+    const singleSidedElements = [
+      singleSidedCheckbox,
+      html.label({ for: "single-sided-toggle", style: "margin-left: 4px" }, "Single-sided"),
+    ];
+
+    // Add direction dropdown if single-sided is enabled
     if (this._getCurrentSingleSided()) {
-      formContents.push({
-        type: "dropdown",
-        key: "singleSidedDirection",
-        label: "Direction",
-        value: this._getCurrentSingleSidedDirection(),
-        options: [
-          { value: "left", label: "Left" },
-          { value: "right", label: "Right" },
-        ],
-      });
+      const directionSelect = html.select({
+        style: "margin-left: 8px",
+        onchange: (e) => this._onSingleSidedDirectionChange(e.target.value),
+      }, [
+        html.option({ value: "left", selected: this._getCurrentSingleSidedDirection() === "left" }, "Left"),
+        html.option({ value: "right", selected: this._getCurrentSingleSidedDirection() === "right" }, "Right"),
+      ]);
+      singleSidedElements.push(directionSelect);
     }
+
+    formContents.push({
+      type: "header",
+      label: "",
+      auxiliaryElement: html.span({}, singleSidedElements),
+    });
 
     // Divider
     formContents.push({ type: "divider" });
@@ -590,11 +599,6 @@ export default class SkeletonParametersPanel extends Panel {
         } else {
           await this._setPointDistributionDirect(value);
         }
-      } else if (fieldItem.key === "singleSided") {
-        await this._setSingleSided(value);
-        this.update(); // Rebuild form to show/hide direction dropdown
-      } else if (fieldItem.key === "singleSidedDirection") {
-        await this._setSingleSidedDirection(value);
       } else {
         this.parameters[fieldItem.key] = value;
       }
@@ -1011,6 +1015,21 @@ export default class SkeletonParametersPanel extends Panel {
     });
 
     this.update();
+  }
+
+  /**
+   * Handle single-sided toggle change.
+   */
+  async _onSingleSidedToggle(checked) {
+    await this._setSingleSided(checked);
+    this.update();
+  }
+
+  /**
+   * Handle single-sided direction change.
+   */
+  async _onSingleSidedDirectionChange(value) {
+    await this._setSingleSidedDirection(value);
   }
 
   /**
