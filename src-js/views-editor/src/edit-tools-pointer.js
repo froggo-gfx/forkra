@@ -68,10 +68,56 @@ export class PointerTool extends BaseTool {
   iconPath = "/images/pointer.svg";
   identifier = "pointer-tool";
 
+  // Measure mode (Q-key) properties
+  measureMode = false;
+  _boundKeyUp = null;
+
+  handleKeyDown(event) {
+    if (event.key === "q" || event.key === "Q") {
+      if (!this.measureMode) {
+        this.measureMode = true;
+        this.sceneModel.measureMode = true;
+        this.sceneModel.measureShowDirect = event.altKey;
+        this._boundKeyUp = (e) => this._handleMeasureKeyUp(e);
+        window.addEventListener("keyup", this._boundKeyUp);
+        this.canvasController.requestUpdate();
+      }
+      return;
+    }
+  }
+
+  _handleMeasureKeyUp(event) {
+    if (event.key === "q" || event.key === "Q") {
+      this.measureMode = false;
+      this.sceneModel.measureMode = false;
+      this.sceneModel.measureHoverSegment = null;
+      this.sceneModel.measureSelectedPoints = [];
+      if (this._boundKeyUp) {
+        window.removeEventListener("keyup", this._boundKeyUp);
+        this._boundKeyUp = null;
+      }
+      this.canvasController.requestUpdate();
+    }
+  }
+
   handleHover(event) {
     const sceneController = this.sceneController;
     const point = sceneController.localPoint(event);
     const size = sceneController.mouseClickMargin;
+
+    // Q-mode: find segment under cursor for measurement
+    if (this.measureMode) {
+      this.sceneModel.measureShowDirect = event.altKey;
+      const segmentHit = this._findSegmentForMeasure(point, size);
+      if (
+        !this._segmentsEqual(segmentHit, this.sceneModel.measureHoverSegment)
+      ) {
+        this.sceneModel.measureHoverSegment = segmentHit;
+        this.canvasController.requestUpdate();
+      }
+      return; // Don't do normal hover in measure mode
+    }
+
     const selRect = centeredRect(point.x, point.y, size);
     const { selection, pathHit } = this.sceneModel.selectionAtPoint(
       point,
@@ -265,6 +311,13 @@ export class PointerTool extends BaseTool {
   }
 
   async handleDrag(eventStream, initialEvent) {
+    // Handle measure mode (Q-key) clicks
+    if (this.measureMode) {
+      await this._handleMeasureClick(initialEvent);
+      initialEvent.preventDefault();
+      return;
+    }
+
     const sceneController = this.sceneController;
     const initialSelection = sceneController.selection;
 
@@ -2016,6 +2069,194 @@ export class PointerTool extends BaseTool {
     return null;
   }
 
+  /**
+   * Handle measure mode click - select point for distance measurement.
+   */
+  async _handleMeasureClick(event) {
+    const point = this.sceneController.localPoint(event);
+    const size = this.sceneController.mouseClickMargin;
+
+    // Find any point (regular, skeleton, or generated)
+    const measurePoint = this.sceneModel.measurePointAtPoint(point, size);
+
+    if (measurePoint) {
+      if (event.shiftKey) {
+        // Add to measure selection
+        this.sceneModel.measureSelectedPoints.push(measurePoint);
+      } else {
+        // Replace measure selection
+        this.sceneModel.measureSelectedPoints = [measurePoint];
+      }
+    } else {
+      // Click on empty space - clear selection
+      this.sceneModel.measureSelectedPoints = [];
+    }
+    this.canvasController.requestUpdate();
+  }
+
+  /**
+   * Find segment under cursor for measure mode.
+   * Returns { p1, p2, type } where p1 and p2 are on-curve endpoints.
+   */
+  _findSegmentForMeasure(point, size) {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.glyph?.path) {
+      return null;
+    }
+
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+
+    const path = positionedGlyph.glyph.path;
+    const margin = size * 1.5;
+
+    // Check path segments (including generated contours)
+    const segmentHit = this._findPathSegmentNear(path, glyphPoint, margin);
+    if (segmentHit) {
+      return segmentHit;
+    }
+
+    // Check skeleton segments
+    const skeletonSegmentHit = this._findSkeletonSegmentNear(
+      positionedGlyph,
+      glyphPoint,
+      margin
+    );
+    if (skeletonSegmentHit) {
+      return skeletonSegmentHit;
+    }
+
+    return null;
+  }
+
+  /**
+   * Find path segment near point.
+   */
+  _findPathSegmentNear(path, point, margin) {
+    const contourInfo = path.contourInfo;
+    if (!contourInfo?.length) return null;
+
+    for (let contourIdx = 0; contourIdx < contourInfo.length; contourIdx++) {
+      const info = contourInfo[contourIdx];
+      const startPoint = contourIdx === 0 ? 0 : contourInfo[contourIdx - 1].endPoint + 1;
+      const endPoint = info.endPoint;
+
+      // Find on-curve points in this contour
+      const onCurveIndices = [];
+      for (let i = startPoint; i <= endPoint; i++) {
+        const pt = path.getPoint(i);
+        if (!pt.type) {
+          onCurveIndices.push(i);
+        }
+      }
+
+      // Check each segment
+      for (let i = 0; i < onCurveIndices.length; i++) {
+        const idx1 = onCurveIndices[i];
+        const idx2 = onCurveIndices[(i + 1) % onCurveIndices.length];
+
+        // Skip closing segment if contour is open
+        if (!info.isClosed && i === onCurveIndices.length - 1) continue;
+
+        const p1 = path.getPoint(idx1);
+        const p2 = path.getPoint(idx2);
+
+        // Simple distance-to-line check
+        const dist = this._distanceToSegment(point, p1, p2);
+        if (dist <= margin) {
+          return { p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, type: "path" };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Find skeleton segment near point.
+   */
+  _findSkeletonSegmentNear(positionedGlyph, point, margin) {
+    const varGlyph = positionedGlyph.varGlyph;
+    if (!varGlyph?.glyph?.layers) return null;
+
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    if (!editLayerName) return null;
+
+    const layer = varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData?.contours?.length) return null;
+
+    for (const contour of skeletonData.contours) {
+      // Find on-curve points
+      const onCurvePoints = [];
+      for (const pt of contour.points) {
+        if (!pt.type) {
+          onCurvePoints.push(pt);
+        }
+      }
+
+      // Check each segment
+      for (let i = 0; i < onCurvePoints.length - 1; i++) {
+        const p1 = onCurvePoints[i];
+        const p2 = onCurvePoints[i + 1];
+
+        const dist = this._distanceToSegment(point, p1, p2);
+        if (dist <= margin) {
+          return { p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, type: "skeleton" };
+        }
+      }
+
+      // Check closing segment if closed
+      if (contour.isClosed && onCurvePoints.length >= 2) {
+        const p1 = onCurvePoints[onCurvePoints.length - 1];
+        const p2 = onCurvePoints[0];
+        const dist = this._distanceToSegment(point, p1, p2);
+        if (dist <= margin) {
+          return { p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, type: "skeleton" };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Calculate distance from point to line segment.
+   */
+  _distanceToSegment(point, p1, p2) {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const lengthSq = dx * dx + dy * dy;
+
+    if (lengthSq === 0) {
+      return Math.hypot(point.x - p1.x, point.y - p1.y);
+    }
+
+    let t = ((point.x - p1.x) * dx + (point.y - p1.y) * dy) / lengthSq;
+    t = Math.max(0, Math.min(1, t));
+
+    const projX = p1.x + t * dx;
+    const projY = p1.y + t * dy;
+
+    return Math.hypot(point.x - projX, point.y - projY);
+  }
+
+  /**
+   * Compare two segment objects for equality.
+   */
+  _segmentsEqual(seg1, seg2) {
+    if (seg1 === seg2) return true;
+    if (!seg1 || !seg2) return false;
+    return (
+      seg1.p1?.x === seg2.p1?.x &&
+      seg1.p1?.y === seg2.p1?.y &&
+      seg1.p2?.x === seg2.p2?.x &&
+      seg1.p2?.y === seg2.p2?.y
+    );
+  }
+
   get scalingEditBehavior() {
     return false;
   }
@@ -2029,6 +2270,17 @@ export class PointerTool extends BaseTool {
   deactivate() {
     super.deactivate();
     this.sceneController.sceneModel.showTransformSelection = false;
+    // Clean up measure mode if active
+    if (this.measureMode) {
+      this.measureMode = false;
+      this.sceneModel.measureMode = false;
+      this.sceneModel.measureHoverSegment = null;
+      this.sceneModel.measureSelectedPoints = [];
+      if (this._boundKeyUp) {
+        window.removeEventListener("keyup", this._boundKeyUp);
+        this._boundKeyUp = null;
+      }
+    }
     this.canvasController.requestUpdate();
   }
 }

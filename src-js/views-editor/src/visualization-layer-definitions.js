@@ -1682,6 +1682,137 @@ registerVisualizationLayerDefinition({
   },
 });
 
+// Measure overlay layer (Q-key measurement tool)
+registerVisualizationLayerDefinition({
+  identifier: "fontra.measure.overlay",
+  name: "Measure Overlay",
+  selectionFunc: glyphSelector("editing"),
+  zIndex: 650, // Above other layers
+  screenParameters: {
+    strokeWidth: 1,
+    fontSize: 11,
+    dashPattern: [4, 4],
+    pointRadius: 4,
+  },
+  colors: {
+    lineColor: "#FF6600",
+    textColor: "#333",
+    textBgColor: "#FFFFFFCC",
+    projectionColor: "#0088FF",
+    selectedPointColor: "#FF0066",
+  },
+  colorsDarkMode: {
+    lineColor: "#FF8833",
+    textColor: "#EEE",
+    textBgColor: "#333333CC",
+    projectionColor: "#44AAFF",
+    selectedPointColor: "#FF4488",
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    if (!model.measureMode) return;
+
+    const { measureHoverSegment, measureSelectedPoints, measureShowDirect } = model;
+
+    // 1. Draw segment hover measurement (Q+hover)
+    if (measureHoverSegment) {
+      const { p1, p2 } = measureHoverSegment;
+
+      if (measureShowDirect) {
+        // Alt+Q: direct distance line
+        const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        drawMeasureLine(context, p1, p2, dist.toFixed(1), parameters.lineColor, parameters);
+      } else {
+        // Q: projected distances (dx, dy)
+        const dx = Math.abs(p2.x - p1.x);
+        const dy = Math.abs(p2.y - p1.y);
+
+        // Determine corner point based on segment orientation
+        const cornerPoint = { x: p2.x, y: p1.y };
+
+        // Horizontal projection line (dx)
+        if (dx > 0.5) {
+          drawMeasureLine(
+            context,
+            p1,
+            cornerPoint,
+            dx.toFixed(1),
+            parameters.projectionColor,
+            parameters
+          );
+        }
+        // Vertical projection line (dy)
+        if (dy > 0.5) {
+          drawMeasureLine(
+            context,
+            cornerPoint,
+            p2,
+            dy.toFixed(1),
+            parameters.projectionColor,
+            parameters
+          );
+        }
+      }
+    }
+
+    // 2. Draw distances between selected measure points (Q-click)
+    if (measureSelectedPoints?.length >= 1) {
+      // Highlight selected points
+      context.fillStyle = parameters.selectedPointColor;
+      for (const pt of measureSelectedPoints) {
+        fillRoundNode(context, pt, parameters.pointRadius * 2);
+      }
+
+      // Draw lines between consecutive points
+      if (measureSelectedPoints.length >= 2) {
+        for (let i = 0; i < measureSelectedPoints.length - 1; i++) {
+          const pt1 = measureSelectedPoints[i];
+          const pt2 = measureSelectedPoints[i + 1];
+          const dist = Math.hypot(pt2.x - pt1.x, pt2.y - pt1.y);
+          drawMeasureLine(context, pt1, pt2, dist.toFixed(1), parameters.lineColor, parameters);
+        }
+      }
+    }
+  },
+});
+
+function drawMeasureLine(context, p1, p2, label, color, parameters) {
+  // Draw dashed line
+  context.strokeStyle = color;
+  context.lineWidth = parameters.strokeWidth;
+  context.setLineDash(parameters.dashPattern);
+  strokeLine(context, p1.x, p1.y, p2.x, p2.y);
+  context.setLineDash([]);
+
+  // Draw label at midpoint with background
+  const midX = (p1.x + p2.x) / 2;
+  const midY = (p1.y + p2.y) / 2;
+
+  context.save();
+  context.scale(1, -1);
+
+  context.font = `${parameters.fontSize}px fontra-ui-regular, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  // Measure text for background
+  const textWidth = context.measureText(label).width;
+  const padding = 3;
+
+  // Draw background
+  context.fillStyle = parameters.textBgColor;
+  context.fillRect(
+    midX - textWidth / 2 - padding,
+    -midY - parameters.fontSize / 2 - padding,
+    textWidth + padding * 2,
+    parameters.fontSize + padding * 2
+  );
+
+  // Draw text
+  context.fillStyle = parameters.textColor;
+  context.fillText(label, midX, -midY);
+  context.restore();
+}
+
 //
 // allGlyphsCleanVisualizationLayerDefinition is not registered, but used
 // separately for the "clean" display.
