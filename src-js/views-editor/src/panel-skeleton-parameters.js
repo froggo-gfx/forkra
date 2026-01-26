@@ -561,14 +561,31 @@ export default class SkeletonParametersPanel extends Panel {
               // Store skeleton state for Move Skeleton mode
               if (this.pointParameters.moveSkeleton) {
                 const skeletonContour = skeletonData.contours[contourIdx];
+                const numPoints = skeletonContour.points.length;
                 const normal = calculateNormalAtSkeletonPoint(skeletonContour, pointIdx);
                 const effectiveNormal = getEffectiveNormal(point, normal);
+
+                // Find adjacent handles (off-curve points)
+                const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
+                const nextIdx = (pointIdx + 1) % numPoints;
+                const prevPoint = skeletonContour.points[prevIdx];
+                const nextPoint = skeletonContour.points[nextIdx];
+
+                const handles = [];
+                if (prevPoint?.type === "cubic") {
+                  handles.push({ idx: prevIdx, x: prevPoint.x, y: prevPoint.y });
+                }
+                if (nextPoint?.type === "cubic") {
+                  handles.push({ idx: nextIdx, x: nextPoint.x, y: nextPoint.y });
+                }
+
                 initialSkeletonState.set(key, {
                   x: point.x,
                   y: point.y,
                   leftWidth: leftHW,
                   rightWidth: rightHW,
                   normal: effectiveNormal,
+                  handles: handles,
                 });
               }
             }
@@ -1229,6 +1246,17 @@ export default class SkeletonParametersPanel extends Panel {
             // Move skeleton point along normal
             point.x = Math.round(initialX + normal.x * offset);
             point.y = Math.round(initialY + normal.y * offset);
+
+            // Move adjacent handles (off-curve points) by the same offset
+            if (state.handles) {
+              for (const handle of state.handles) {
+                const handlePoint = contour.points[handle.idx];
+                if (handlePoint) {
+                  handlePoint.x = Math.round(handle.x + normal.x * offset);
+                  handlePoint.y = Math.round(handle.y + normal.y * offset);
+                }
+              }
+            }
 
             // Adjust widths to keep contour in place
             point.leftWidth = Math.max(0, Math.round(initialLeft - offset));
