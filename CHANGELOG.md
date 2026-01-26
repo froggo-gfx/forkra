@@ -1,5 +1,9 @@
 # Changelog for Fontra
 
+## 2026-01-?? [version 2026.1.4]
+
+- [opentype backend] When reading TrueType or OpenType, use the user-visible axis ranges instead of normalized values for glyph source locations. [PR 2398](https://github.com/fontra/fontra/pull/2398)
+
 ## 2026-01-24 [version 2026.1.3]
 
 - [designspace] Fix a writing failure when multiple glyphs use the same layer name but for different locations. [Issue 2393](https://github.com/fontra/fontra/issues/2393), [PR 2394](https://github.com/fontra/fontra/pull/2394)
