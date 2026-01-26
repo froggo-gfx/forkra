@@ -867,6 +867,22 @@ function generateOffsetPointsForSegment(
 
     // Helper to add offset curves to output array
     const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd, sideHalfWidth) => {
+      // When halfWidth is near zero, contour should exactly match skeleton
+      // Copy control points directly instead of using offset curves
+      if (sideHalfWidth < 0.5 && segment.controlPoints.length > 0) {
+        if (shouldAddStart) {
+          output.push({ x: fixedStart.x, y: fixedStart.y, smooth: smoothStart });
+        }
+        // Copy skeleton control points (they're already at the right positions since offset is ~0)
+        for (const cp of segment.controlPoints) {
+          output.push({ x: Math.round(cp.x), y: Math.round(cp.y), type: "cubic" });
+        }
+        if (shouldAddEnd) {
+          output.push({ x: fixedEnd.x, y: fixedEnd.y, smooth: smoothEnd });
+        }
+        return;
+      }
+
       // Fallback: if bezier.offset() returns empty result, add straight line
       if (!curves || curves.length === 0) {
         if (shouldAddStart) {
