@@ -539,7 +539,9 @@ export default class SkeletonParametersPanel extends Panel {
             for await (const dist of valueStream) {
               lastDist = dist;
               const now = Date.now();
-              if (now - lastProcessedTime < THROTTLE_MS) {
+              // Always apply extreme values immediately (skip throttle)
+              const isExtreme = dist >= 100 || dist <= -100;
+              if (!isExtreme && now - lastProcessedTime < THROTTLE_MS) {
                 continue;
               }
               lastProcessedTime = now;
