@@ -636,10 +636,9 @@ function simplifyOffsetCurves(offsetCurves, halfWidth) {
     return null;
   }
 
-  // Guard against zero halfWidth which would cause infinite loop
-  if (halfWidth <= 0) {
-    return null;
-  }
+  // Use minimum threshold for error calculation when halfWidth is very small
+  // This ensures simplification still works when one side collapses to skeleton
+  const effectiveHalfWidth = Math.max(halfWidth, 1);
 
   // If only one curve with 4 points (cubic), no simplification needed
   if (offsetCurves.length === 1 && offsetCurves[0].points.length === 4) {
@@ -668,9 +667,9 @@ function simplifyOffsetCurves(offsetCurves, halfWidth) {
   const params = chordLengthParameterize(samplePoints);
 
   // 4. Adaptive search — from strict threshold to lenient
-  const minError = halfWidth * MIN_ERROR_PERCENT;
-  const maxError = halfWidth * MAX_ERROR_PERCENT;
-  const step = halfWidth * ERROR_STEP_PERCENT;
+  const minError = effectiveHalfWidth * MIN_ERROR_PERCENT;
+  const maxError = effectiveHalfWidth * MAX_ERROR_PERCENT;
+  const step = effectiveHalfWidth * ERROR_STEP_PERCENT;
 
   for (let errorThreshold = minError; errorThreshold <= maxError; errorThreshold += step) {
     const bezier = fitCubic(samplePoints, leftTangent, rightTangent, errorThreshold);
