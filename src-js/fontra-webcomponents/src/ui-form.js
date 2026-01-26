@@ -112,6 +112,10 @@ export class Form extends SimpleElement {
       gap: 0.35rem;
     }
 
+    .ui-form-label.universal-row {
+      overflow: visible;
+    }
+
     .ui-form-value.slider-has-checkbox {
       display: grid;
       gap: 0.25em;
