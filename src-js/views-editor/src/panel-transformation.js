@@ -147,6 +147,18 @@ export default class TransformationPanel extends Panel {
       );
     }
 
+    // Register flip actions
+    registerAction(
+      "action.selection-transformation.flip.horizontally",
+      { topic, titleKey: "sidebar.selection-transformation.flip.horizontally" },
+      () => this.transformSelection(() => new Transform().scale(1, -1), "flip horizontally")
+    );
+    registerAction(
+      "action.selection-transformation.flip.vertically",
+      { topic, titleKey: "sidebar.selection-transformation.flip.vertically" },
+      () => this.transformSelection(() => new Transform().scale(-1, 1), "flip vertically")
+    );
+
     const pathActions = [
       ["union", this.pathOperations.unionPath],
       ["subtract", this.pathOperations.subtractPath],

@@ -196,6 +196,39 @@ export default class SkeletonParametersPanel extends Panel {
       },
     });
 
+    // === FLIP ===
+    formContents.push({ type: "spacer" });
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "text",
+        key: "LabelFlip",
+        value: "Flip",
+      },
+      field2: {
+        type: "auxiliaryElement",
+        key: "FlipHorizontally",
+        auxiliaryElement: html.createDomElement("icon-button", {
+          "src": "/tabler-icons/flip-horizontal.svg",
+          "onclick": () => doPerformAction("action.selection-transformation.flip.horizontally"),
+          "class": "ui-form-icon",
+          "data-tooltip": translate("sidebar.selection-transformation.flip.horizontally"),
+          "data-tooltipposition": "bottom",
+        }),
+      },
+      field3: {
+        type: "auxiliaryElement",
+        key: "FlipVertically",
+        auxiliaryElement: html.createDomElement("icon-button", {
+          "src": "/tabler-icons/flip-vertical.svg",
+          "onclick": () => doPerformAction("action.selection-transformation.flip.vertically"),
+          "class": "ui-form-icon",
+          "data-tooltip": translate("sidebar.selection-transformation.flip.vertically"),
+          "data-tooltipposition": "bottom-right",
+        }),
+      },
+    });
+
     // === DISTRIBUTE ===
     formContents.push({ type: "spacer" });
     formContents.push({
