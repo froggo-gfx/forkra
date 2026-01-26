@@ -120,7 +120,7 @@ export default class SkeletonParametersPanel extends Panel {
         auxiliaryElement: html.createDomElement("icon-button", {
           "src": "/tabler-icons/vertical-align-left.svg",
           "onclick": () => doPerformAction("action.selection-transformation.align.left"),
-          "class": "ui-form-icon",
+          "class": "ui-form-icon ui-form-icon-button",
           "data-tooltip": translate("sidebar.selection-transformation.align.left"),
           "data-tooltipposition": "bottom-left",
         }),
@@ -158,7 +158,7 @@ export default class SkeletonParametersPanel extends Panel {
         auxiliaryElement: html.createDomElement("icon-button", {
           "src": "/tabler-icons/horizontal-align-top.svg",
           "onclick": () => doPerformAction("action.selection-transformation.align.top"),
-          "class": "ui-form-icon",
+          "class": "ui-form-icon ui-form-icon-button",
           "data-tooltip": translate("sidebar.selection-transformation.align.top"),
           "data-tooltipposition": "bottom-left",
         }),
@@ -203,7 +203,7 @@ export default class SkeletonParametersPanel extends Panel {
           "src": "/tabler-icons/layout-distribute-vertical.svg",
           "onclick": () =>
             doPerformAction("action.selection-transformation.distribute.horizontally"),
-          "class": "ui-form-icon",
+          "class": "ui-form-icon ui-form-icon-button",
           "data-tooltip": translate(
             "sidebar.selection-transformation.distribute.horizontally"
           ),
