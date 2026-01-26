@@ -606,7 +606,11 @@ export default class SkeletonParametersPanel extends Panel {
               // transitioning out of extreme (to avoid "sticking")
               const isExtreme = dist >= 100 || dist <= -100;
               const isTransition = isExtreme !== lastWasExtreme;
-              if (!isExtreme && !isTransition && now - lastProcessedTime < THROTTLE_MS) {
+              const shouldSkip = !isExtreme && !isTransition && now - lastProcessedTime < THROTTLE_MS;
+
+              console.log(`Distribution: ${dist}, isExtreme: ${isExtreme}, isTransition: ${isTransition}, shouldSkip: ${shouldSkip}, moveSkeleton: ${this.pointParameters.moveSkeleton}, hasState: ${this._initialSkeletonState?.size > 0}`);
+
+              if (shouldSkip) {
                 continue;
               }
               lastProcessedTime = now;
@@ -1365,7 +1369,10 @@ export default class SkeletonParametersPanel extends Panel {
 
         // Skip contour regeneration in Move Skeleton mode during drag
         // (contour should stay fixed, only skeleton moves)
-        const skipRegeneration = this.pointParameters.moveSkeleton && this._isDraggingSlider;
+        // Check _initialSkeletonState existence as it's more reliable than _isDraggingSlider
+        const skipRegeneration = this.pointParameters.moveSkeleton &&
+          this._initialSkeletonState &&
+          this._initialSkeletonState.size > 0;
         if (!skipRegeneration) {
           const pathChange = recordChanges(staticGlyph, (sg) => {
             this._regenerateOutlineContours(sg, skeletonData);
