@@ -629,6 +629,13 @@ export class SceneController {
     );
 
     registerAction(
+      "action.close-skeleton-contour",
+      { topic },
+      () => this.doCloseSkeletonContour(),
+      () => this._getClosableSkeletonContour() !== null
+    );
+
+    registerAction(
       "action.reverse-skeleton-contour",
       { topic },
       () => this.doReverseSkeletonContour(),
@@ -994,6 +1001,7 @@ export class SceneController {
       { actionIdentifier: "action.break-contour" },
       { actionIdentifier: "action.break-skeleton-contour" },
       { actionIdentifier: "action.join-skeleton-contours" },
+      { actionIdentifier: "action.close-skeleton-contour" },
       { actionIdentifier: "action.reverse-skeleton-contour" },
       { actionIdentifier: "action.realize-skeleton-projection" },
       { actionIdentifier: "action.reverse-contour" },
@@ -1601,11 +1609,11 @@ export class SceneController {
     return false;
   }
 
-  _getJoinableSkeletonPoints() {
+  _getClosableSkeletonContour() {
+    // Check if we can close a single open skeleton contour
+    // (two endpoints selected from the same contour, at same coordinates)
     const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
-    console.log("Join check: skeletonPointSel =", skeletonPointSel);
     if (!skeletonPointSel || skeletonPointSel.size !== 2) {
-      console.log("Join check: FAIL - not exactly 2 points selected");
       return null;
     }
 
@@ -1614,7 +1622,6 @@ export class SceneController {
     const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
     const skeletonData = layer?.customData?.["fontra.skeleton"];
     if (!skeletonData?.contours) {
-      console.log("Join check: FAIL - no skeleton data");
       return null;
     }
 
@@ -1623,20 +1630,74 @@ export class SceneController {
       const [contourIdx, pointIdx] = selKey.split("/").map(Number);
       return { contourIdx, pointIdx, selKey };
     });
-    console.log("Join check: parsed =", parsed);
+
+    // Must be from the SAME contour
+    if (parsed[0].contourIdx !== parsed[1].contourIdx) {
+      return null;
+    }
+
+    const contourIdx = parsed[0].contourIdx;
+    const contour = skeletonData.contours[contourIdx];
+
+    // Contour must be open
+    if (!contour || contour.isClosed) {
+      return null;
+    }
+
+    // Both points must be endpoints (first and last)
+    const points = contour.points;
+    if (points.length < 2) {
+      return null;
+    }
+
+    const indices = [parsed[0].pointIdx, parsed[1].pointIdx].sort((a, b) => a - b);
+    if (indices[0] !== 0 || indices[1] !== points.length - 1) {
+      return null;
+    }
+
+    // Get the actual endpoint coordinates
+    const point0 = points[0];
+    const point1 = points[points.length - 1];
+
+    // Check if coordinates match
+    const tolerance = 5;
+    if (Math.abs(point0.x - point1.x) > tolerance || Math.abs(point0.y - point1.y) > tolerance) {
+      return null;
+    }
+
+    return { contourIdx, contour };
+  }
+
+  _getJoinableSkeletonPoints() {
+    // Check if we can join two different open skeleton contours
+    const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
+    if (!skeletonPointSel || skeletonPointSel.size !== 2) {
+      return null;
+    }
+
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const editLayerName = this.editingLayerNames?.[0];
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (!skeletonData?.contours) {
+      return null;
+    }
+
+    const selections = [...skeletonPointSel];
+    const parsed = selections.map((selKey) => {
+      const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+      return { contourIdx, pointIdx, selKey };
+    });
 
     // Must be from different contours
     if (parsed[0].contourIdx === parsed[1].contourIdx) {
-      console.log("Join check: FAIL - same contour");
       return null;
     }
 
     // Both contours must be open
     const contour0 = skeletonData.contours[parsed[0].contourIdx];
     const contour1 = skeletonData.contours[parsed[1].contourIdx];
-    console.log("Join check: contour0.isClosed =", contour0?.isClosed, "contour1.isClosed =", contour1?.isClosed);
     if (!contour0 || !contour1 || contour0.isClosed || contour1.isClosed) {
-      console.log("Join check: FAIL - contour missing or closed");
       return null;
     }
 
@@ -1647,33 +1708,23 @@ export class SceneController {
       return pointIdx === 0 || pointIdx === points.length - 1;
     };
 
-    console.log("Join check: contour0.points.length =", contour0.points.length, "parsed[0].pointIdx =", parsed[0].pointIdx);
-    console.log("Join check: contour1.points.length =", contour1.points.length, "parsed[1].pointIdx =", parsed[1].pointIdx);
     if (!isEndpoint(contour0, parsed[0].pointIdx) || !isEndpoint(contour1, parsed[1].pointIdx)) {
-      console.log("Join check: FAIL - not endpoints");
       return null;
     }
 
     // Get the actual points
     const point0 = contour0.points[parsed[0].pointIdx];
     const point1 = contour1.points[parsed[1].pointIdx];
-    console.log("Join check: point0 =", point0, "point1 =", point1);
     if (!point0 || !point1) {
-      console.log("Join check: FAIL - points not found");
       return null;
     }
 
-    // Check if coordinates match (with tolerance for floating point and user convenience)
+    // Check if coordinates match
     const tolerance = 5;
-    const dx = Math.abs(point0.x - point1.x);
-    const dy = Math.abs(point0.y - point1.y);
-    console.log("Join check: dx =", dx, "dy =", dy, "tolerance =", tolerance);
-    if (dx > tolerance || dy > tolerance) {
-      console.log("Join check: FAIL - coordinates don't match");
+    if (Math.abs(point0.x - point1.x) > tolerance || Math.abs(point0.y - point1.y) > tolerance) {
       return null;
     }
 
-    console.log("Join check: SUCCESS - can join!");
     return parsed;
   }
 
@@ -1888,6 +1939,77 @@ export class SceneController {
       return {
         changes: combinedChange,
         undoLabel: translate("action.join-skeleton-contours"),
+      };
+    });
+  }
+
+  async doCloseSkeletonContour() {
+    const closable = this._getClosableSkeletonContour();
+    if (!closable) {
+      return;
+    }
+
+    await this.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = this.editingLayerNames?.[0];
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = layer?.customData?.["fontra.skeleton"];
+      if (!skeletonData?.contours) {
+        return;
+      }
+
+      // Deep clone for manipulation
+      skeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+      const contour = skeletonData.contours[closable.contourIdx];
+
+      // Remove the last point (duplicate of the first)
+      contour.points.pop();
+
+      // Close the contour
+      contour.isClosed = true;
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(newIndex, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      // Record changes
+      const changes = [];
+
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        regenerateOutline(sg, skeletonData);
+      });
+      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData["fontra.skeleton"] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+      const combinedChange = new ChangeCollector().concat(...changes);
+      await sendIncrementalChange(combinedChange.change);
+
+      this.selection = new Set();
+
+      return {
+        changes: combinedChange,
+        undoLabel: translate("action.close-skeleton-contour"),
       };
     });
   }

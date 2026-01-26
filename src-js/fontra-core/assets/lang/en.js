@@ -20,6 +20,7 @@ export const strings = {
   "action.break-contour.plural": "Break Contours",
   "action.break-skeleton-contour": "Break Skeleton Contour",
   "action.join-skeleton-contours": "Join Skeleton Contours",
+  "action.close-skeleton-contour": "Close Skeleton Contour",
   "action.reverse-skeleton-contour": "Reverse Skeleton Contour Direction",
   "action.close-contour": "Close %0 Contour",
   "action.close-contour.plural": "Close %0 Contours",
