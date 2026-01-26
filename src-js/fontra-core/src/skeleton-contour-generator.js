@@ -58,77 +58,320 @@ const ERROR_STEP_PERCENT = 0.02; // 2% — step increase
  * Enforce colinearity for smooth points in a contour.
  * For each on-curve smooth point with two adjacent off-curve handles,
  * adjusts the handles to be colinear while preserving their lengths.
+ * Also handles smooth points with linear segments (on-curve neighbors),
+ * maintaining the pivot behavior where the smooth point acts as a pivot
+ * for the linear segment's direction.
  * @param {Array} points - Array of contour points
  * @param {boolean} isClosed - Whether the contour is closed
  * @returns {Array} - Modified points array
  */
 function enforceSmoothColinearity(points, isClosed) {
-  if (!points || points.length < 3) return points;
+  if (!points || points.length < 2) return points;
 
   const numPoints = points.length;
 
+  // Process all smooth points
   for (let i = 0; i < numPoints; i++) {
     const point = points[i];
 
     // Only process on-curve smooth points
     if (point.type || !point.smooth) continue;
 
-    // Find adjacent off-curve handles
+    // Find adjacent points (could be on-curve or off-curve)
     const prevIdx = (i - 1 + numPoints) % numPoints;
     const nextIdx = (i + 1) % numPoints;
 
-    // For open contours, skip endpoints
-    if (!isClosed && (i === 0 || i === numPoints - 1)) continue;
+    // For open contours, handle endpoints specially
+    if (!isClosed && (i === 0 || i === numPoints - 1)) {
+      continue; // Skip endpoint smooth points for now, as they don't have two neighbors
+    }
 
     const prevPoint = points[prevIdx];
     const nextPoint = points[nextIdx];
 
-    // Both neighbors must be off-curve for this to apply
-    if (!prevPoint?.type || !nextPoint?.type) continue;
+    // Determine the type of each neighbor
+    const prevIsOnCurve = !prevPoint?.type;
+    const nextIsOnCurve = !nextPoint?.type;
 
-    // Calculate vectors from center to handles
-    const vecIn = { x: prevPoint.x - point.x, y: prevPoint.y - point.y };
-    const vecOut = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
+    // Case 1: Both neighbors are off-curve (traditional smooth curve behavior)
+    if (!prevIsOnCurve && !nextIsOnCurve) {
+      // Traditional colinearity enforcement for smooth point between two off-curve handles
+      const vecIn = { x: prevPoint.x - point.x, y: prevPoint.y - point.y };
+      const vecOut = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
 
-    const lenIn = Math.hypot(vecIn.x, vecIn.y);
-    const lenOut = Math.hypot(vecOut.x, vecOut.y);
+      const lenIn = Math.hypot(vecIn.x, vecIn.y);
+      const lenOut = Math.hypot(vecOut.x, vecOut.y);
 
-    // Skip if handles are too short
-    if (lenIn < 0.001 || lenOut < 0.001) continue;
+      // Skip if handles are too short
+      if (lenIn >= 0.001 && lenOut >= 0.001) {
+        // Normalize directions
+        const dirIn = { x: vecIn.x / lenIn, y: vecIn.y / lenIn };
+        const dirOut = { x: vecOut.x / lenOut, y: vecOut.y / lenOut };
 
-    // Normalize directions
-    const dirIn = { x: vecIn.x / lenIn, y: vecIn.y / lenIn };
-    const dirOut = { x: vecOut.x / lenOut, y: vecOut.y / lenOut };
+        // Calculate average tangent direction
+        // We want the handles to be opposite, so we average dirIn and -dirOut
+        const avgDir = vector.normalizeVector({
+          x: dirIn.x - dirOut.x,
+          y: dirIn.y - dirOut.y,
+        });
 
-    // Calculate average tangent direction
-    // We want the handles to be opposite, so we average dirIn and -dirOut
-    const avgDir = vector.normalizeVector({
-      x: dirIn.x - dirOut.x,
-      y: dirIn.y - dirOut.y,
-    });
+        // If directions are nearly opposite (already colinear), skip
+        const dot = dirIn.x * dirOut.x + dirIn.y * dirOut.y;
+        if (dot > -0.999) { // Not nearly opposite
+          // If avgDir is zero (handles point same direction), use perpendicular
+          if (Math.hypot(avgDir.x, avgDir.y) >= 0.001) {
+            // Adjust handle positions to be colinear through the on-curve point
+            points[prevIdx] = {
+              ...prevPoint,
+              x: point.x + avgDir.x * lenIn,
+              y: point.y + avgDir.y * lenIn,
+            };
 
-    // If directions are nearly opposite (already colinear), skip
-    const dot = dirIn.x * dirOut.x + dirIn.y * dirOut.y;
-    if (dot < -0.999) continue;
+            points[nextIdx] = {
+              ...nextPoint,
+              x: point.x - avgDir.x * lenOut,
+              y: point.y - avgDir.y * lenOut,
+            };
+          }
+        }
+      }
+    }
+    // Case 2: One neighbor is on-curve (linear segment) and one is off-curve (smooth-linear transition)
+    else if (prevIsOnCurve && !nextIsOnCurve) {
+      // Smooth point with linear segment before and curve after
+      // The smooth point should act as a pivot: the off-curve handle should be collinear
+      // with the linear segment, extending its direction
+      const linearVec = { x: point.x - prevPoint.x, y: point.y - prevPoint.y }; // Vector from prev linear point to smooth point
+      const linearDir = vector.normalizeVector(linearVec);
 
-    // If avgDir is zero (handles point same direction), use perpendicular
-    if (Math.hypot(avgDir.x, avgDir.y) < 0.001) continue;
+      const curveVec = { x: nextPoint.x - point.x, y: nextPoint.y - point.y }; // Vector from smooth point to off-curve
+      const curveLength = Math.hypot(curveVec.x, curveVec.y);
 
-    // Adjust handle positions to be colinear through the on-curve point
-    points[prevIdx] = {
-      ...prevPoint,
-      x: point.x + avgDir.x * lenIn,
-      y: point.y + avgDir.y * lenIn,
-    };
+      if (curveLength >= 0.001) {
+        // For smooth-linear transition, the off-curve should continue the linear direction
+        // So the direction is the same as the linear segment direction
+        const newDirectionX = linearDir.x;
+        const newDirectionY = linearDir.y;
 
-    points[nextIdx] = {
-      ...nextPoint,
-      x: point.x - avgDir.x * lenOut,
-      y: point.y - avgDir.y * lenOut,
-    };
+        // Calculate new position by extending the linear direction with the original handle length
+        const newX = point.x + newDirectionX * curveLength;
+        const newY = point.y + newDirectionY * curveLength;
+
+        points[nextIdx] = {
+          ...nextPoint,
+          x: newX,
+          y: newY,
+        };
+      }
+    }
+    else if (!prevIsOnCurve && nextIsOnCurve) {
+      // Smooth point with curve before and linear segment after
+      // The previous off-curve handle should be collinear with the next linear segment
+      const linearVec = { x: nextPoint.x - point.x, y: nextPoint.y - point.y }; // Vector from smooth point to next linear point
+      const linearDir = vector.normalizeVector(linearVec);
+
+      const curveVec = { x: prevPoint.x - point.x, y: prevPoint.y - point.y }; // Vector from smooth point to prev off-curve
+      const curveLength = Math.hypot(curveVec.x, curveVec.y);
+
+      if (curveLength >= 0.001) {
+        // For linear-smooth transition, the off-curve should continue the linear direction backwards
+        // So the direction is the opposite of the linear segment direction
+        const newDirectionX = -linearDir.x;
+        const newDirectionY = -linearDir.y;
+
+        // Calculate new position by extending in the opposite linear direction with the original handle length
+        const newX = point.x + newDirectionX * curveLength;
+        const newY = point.y + newDirectionY * curveLength;
+
+        points[prevIdx] = {
+          ...prevPoint,
+          x: newX,
+          y: newY,
+        };
+      }
+    }
+    // Case 3: Both neighbors are on-curve (smooth point between two linear segments)
+    else if (prevIsOnCurve && nextIsOnCurve) {
+      // This case typically shouldn't happen in generated contours from skeleton,
+      // but we handle it for completeness - smooth point between two linear segments
+      // In this case, the smooth point should maintain angle bisector behavior
+      const vecIn = { x: point.x - prevPoint.x, y: point.y - prevPoint.y };
+      const vecOut = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
+
+      // Normalize directions
+      const dirIn = vector.normalizeVector(vecIn);
+      const dirOut = vector.normalizeVector(vecOut);
+
+      // Calculate angle bisector
+      const bisector = vector.normalizeVector({
+        x: dirIn.x + dirOut.x,
+        y: dirIn.y + dirOut.y,
+      });
+
+      // The smooth point is already in the right position, just ensure it's marked as smooth
+      points[i] = { ...point, smooth: true };
+    }
   }
 
   return points;
+}
+
+/**
+ * Aligns handle directions in generated contours to match the directions of skeleton handles.
+ * @param {Array} points - Array of generated contour points
+ * @param {Array} segments - Original skeleton segments
+ * @param {boolean|null} isLeftSide - True for left side, false for right side, null for centerline (caps)
+ * @returns {Array} - Points with aligned handle directions
+ */
+function alignHandleDirections(points, segments, isLeftSide) {
+  if (!points || points.length === 0) return points;
+
+  const alignedPoints = [...points];
+
+  // For each point in the generated contour
+  for (let i = 0; i < alignedPoints.length; i++) {
+    const point = alignedPoints[i];
+
+    // Only process off-curve (control) points
+    if (!point.type) continue;
+
+    // Find the corresponding on-curve point (the one this control point relates to)
+    let nearestOnCurveIdx = -1;
+    let minDistance = Infinity;
+
+    // Look for the nearest on-curve point to this control point
+    for (let j = 0; j < alignedPoints.length; j++) {
+      if (!alignedPoints[j].type) { // on-curve point
+        const dist = Math.hypot(
+          alignedPoints[j].x - point.x,
+          alignedPoints[j].y - point.y
+        );
+        if (dist < minDistance) {
+          minDistance = dist;
+          nearestOnCurveIdx = j;
+        }
+      }
+    }
+
+    if (nearestOnCurveIdx !== -1) {
+      const nearestGenPoint = alignedPoints[nearestOnCurveIdx];
+
+      // Find the skeleton point that corresponds to this generated on-curve point
+      let bestMatchSkeletonPoint = null;
+      let minDistToSkeleton = Infinity;
+
+      // Find the skeleton point that corresponds to this generated point
+      for (const segment of segments) {
+        // Check start point
+        const startDist = Math.hypot(
+          segment.startPoint.x - nearestGenPoint.x,
+          segment.startPoint.y - nearestGenPoint.y
+        );
+        if (startDist < minDistToSkeleton) {
+          minDistToSkeleton = startDist;
+          bestMatchSkeletonPoint = segment.startPoint;
+        }
+
+        // Check end point
+        const endDist = Math.hypot(
+          segment.endPoint.x - nearestGenPoint.x,
+          segment.endPoint.y - nearestGenPoint.y
+        );
+        if (endDist < minDistToSkeleton) {
+          minDistToSkeleton = endDist;
+          bestMatchSkeletonPoint = segment.endPoint;
+        }
+      }
+
+      if (bestMatchSkeletonPoint) {
+        // Find the skeleton control points associated with this skeleton point
+        // We need to find the control points that belong to the same segment as the matched skeleton point
+        let skelCtrlPoints = [];
+        for (const segment of segments) {
+          // If this segment contains the matched skeleton point as start or end
+          if (segment.startPoint === bestMatchSkeletonPoint || segment.endPoint === bestMatchSkeletonPoint) {
+            // Add all control points from this segment
+            skelCtrlPoints = skelCtrlPoints.concat(segment.controlPoints);
+            break; // Found the segment, no need to continue
+          }
+        }
+
+        // Calculate the direction from the generated on-curve point to this generated control point
+        const genCtrlDir = {
+          x: point.x - nearestGenPoint.x,
+          y: point.y - nearestGenPoint.y
+        };
+        const genCtrlLength = Math.hypot(genCtrlDir.x, genCtrlDir.y);
+
+        if (genCtrlLength > 0.001 && skelCtrlPoints.length > 0) {
+          // Find the skeleton control point that is most geometrically similar
+          let bestSkelCtrlPoint = null;
+          let bestSimilarity = -Infinity;
+
+          for (const skelCtrlPoint of skelCtrlPoints) {
+            // Calculate the direction from skeleton on-curve to its control point
+            const skelCtrlDir = {
+              x: skelCtrlPoint.x - bestMatchSkeletonPoint.x,
+              y: skelCtrlPoint.y - bestMatchSkeletonPoint.y
+            };
+            const skelCtrlLength = Math.hypot(skelCtrlDir.x, skelCtrlDir.y);
+
+            if (skelCtrlLength > 0.001) {
+              // Normalize directions
+              const normSkelDir = {
+                x: skelCtrlDir.x / skelCtrlLength,
+                y: skelCtrlDir.y / skelCtrlLength
+              };
+              const normGenDir = {
+                x: genCtrlDir.x / genCtrlLength,
+                y: genCtrlDir.y / genCtrlLength
+              };
+
+              // Calculate dot product to measure direction similarity
+              const dotProduct = normSkelDir.x * normGenDir.x + normSkelDir.y * normGenDir.y;
+
+              // Choose the skeleton control point with the highest similarity score (absolute value)
+              if (Math.abs(dotProduct) > Math.abs(bestSimilarity)) {
+                bestSimilarity = dotProduct;
+                bestSkelCtrlPoint = skelCtrlPoint;
+              }
+            }
+          }
+
+          if (bestSkelCtrlPoint) {
+            // Calculate the direction from skeleton on-curve point to its control point
+            const skelHandleDir = {
+              x: bestSkelCtrlPoint.x - bestMatchSkeletonPoint.x,
+              y: bestSkelCtrlPoint.y - bestMatchSkeletonPoint.y
+            };
+            const skelHandleLength = Math.hypot(skelHandleDir.x, skelHandleDir.y);
+
+            if (skelHandleLength > 0.001) {
+              // Normalize skeleton handle direction
+              const normalizedSkelDir = {
+                x: skelHandleDir.x / skelHandleLength,
+                y: skelHandleDir.y / skelHandleLength
+              };
+
+              // Determine if we need to flip the direction based on the dot product
+              // If the best similarity was negative, it means the directions were opposite
+              // In that case, we should flip the direction to match the skeleton
+              const directionFlip = bestSimilarity < 0 ? -1 : 1;
+
+              // Apply the aligned direction to the generated point
+              alignedPoints[i] = {
+                ...point,
+                x: nearestGenPoint.x + normalizedSkelDir.x * genCtrlLength * directionFlip,
+                y: nearestGenPoint.y + normalizedSkelDir.y * genCtrlLength * directionFlip
+              };
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return alignedPoints;
 }
 
 /**
@@ -167,8 +410,15 @@ export function generateContoursFromSkeleton(skeletonData) {
  *   - For closed skeleton: returns 2 contours (outer and inner)
  */
 export function generateOutlineFromSkeletonContour(skeletonContour) {
-  const { points, isClosed, defaultWidth = DEFAULT_WIDTH, capStyle = "butt" } =
-    skeletonContour;
+  const {
+    points,
+    isClosed,
+    defaultWidth = DEFAULT_WIDTH,
+    capStyle = "butt",
+    reversed = false,
+    singleSided = false,
+    singleSidedDirection = "left",
+  } = skeletonContour;
 
   if (points.length < 2) {
     return [];
@@ -198,10 +448,30 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     const isLastSegment = i === segments.length - 1;
 
     // Get per-point widths for start and end of segment
-    const startLeftHalfWidth = getPointHalfWidth(segment.startPoint, defaultWidth, "left");
-    const startRightHalfWidth = getPointHalfWidth(segment.startPoint, defaultWidth, "right");
-    const endLeftHalfWidth = getPointHalfWidth(segment.endPoint, defaultWidth, "left");
-    const endRightHalfWidth = getPointHalfWidth(segment.endPoint, defaultWidth, "right");
+    let startLeftHalfWidth = getPointHalfWidth(segment.startPoint, defaultWidth, "left");
+    let startRightHalfWidth = getPointHalfWidth(segment.startPoint, defaultWidth, "right");
+    let endLeftHalfWidth = getPointHalfWidth(segment.endPoint, defaultWidth, "left");
+    let endRightHalfWidth = getPointHalfWidth(segment.endPoint, defaultWidth, "right");
+
+    // Single-sided mode: redirect all width to one side
+    if (singleSided) {
+      const startTotal = startLeftHalfWidth + startRightHalfWidth;
+      const endTotal = endLeftHalfWidth + endRightHalfWidth;
+
+      if (singleSidedDirection === "left") {
+        // All width goes to the left side
+        startLeftHalfWidth = startTotal;
+        startRightHalfWidth = 0;
+        endLeftHalfWidth = endTotal;
+        endRightHalfWidth = 0;
+      } else {
+        // All width goes to the right side
+        startLeftHalfWidth = 0;
+        startRightHalfWidth = startTotal;
+        endLeftHalfWidth = 0;
+        endRightHalfWidth = endTotal;
+      }
+    }
 
     const offsetPoints = generateOffsetPointsForSegment(
       segment,
@@ -227,19 +497,49 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // The inner contour needs to be reversed for correct winding direction
     // (outer = counter-clockwise, inner = clockwise for proper fill)
     const reversedRight = [...rightSide].reverse();
-    return [
+
+    // DISABLED for performance testing - alignHandleDirections is O(n³)
+    // const alignedLeftSide = alignHandleDirections(leftSide, segments, true);
+    // const alignedRightSide = alignHandleDirections(reversedRight, segments, false);
+
+    let contours = [
       { points: enforceSmoothColinearity(leftSide, true), isClosed: true },
       { points: enforceSmoothColinearity(reversedRight, true), isClosed: true },
     ];
+
+    // Apply reverse if flag is set
+    if (reversed) {
+      contours = contours.map((c) => reverseContour(c));
+    }
+
+    return contours;
   } else {
     // For open skeleton: ONE contour with caps at ends
     // Get per-point widths for first and last on-curve points
     const firstOnCurvePoint = segments[0].startPoint;
     const lastOnCurvePoint = segments[segments.length - 1].endPoint;
-    const startCapLeftHW = getPointHalfWidth(firstOnCurvePoint, defaultWidth, "left");
-    const startCapRightHW = getPointHalfWidth(firstOnCurvePoint, defaultWidth, "right");
-    const endCapLeftHW = getPointHalfWidth(lastOnCurvePoint, defaultWidth, "left");
-    const endCapRightHW = getPointHalfWidth(lastOnCurvePoint, defaultWidth, "right");
+    let startCapLeftHW = getPointHalfWidth(firstOnCurvePoint, defaultWidth, "left");
+    let startCapRightHW = getPointHalfWidth(firstOnCurvePoint, defaultWidth, "right");
+    let endCapLeftHW = getPointHalfWidth(lastOnCurvePoint, defaultWidth, "left");
+    let endCapRightHW = getPointHalfWidth(lastOnCurvePoint, defaultWidth, "right");
+
+    // Single-sided mode: redirect all width to one side for caps too
+    if (singleSided) {
+      const startTotal = startCapLeftHW + startCapRightHW;
+      const endTotal = endCapLeftHW + endCapRightHW;
+
+      if (singleSidedDirection === "left") {
+        startCapLeftHW = startTotal;
+        startCapRightHW = 0;
+        endCapLeftHW = endTotal;
+        endCapRightHW = 0;
+      } else {
+        startCapLeftHW = 0;
+        startCapRightHW = startTotal;
+        endCapLeftHW = 0;
+        endCapRightHW = endTotal;
+      }
+    }
 
     const startCap = generateCap(
       firstOnCurvePoint,
@@ -270,8 +570,34 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // Start cap
     outlinePoints.push(...startCap);
 
-    return [{ points: enforceSmoothColinearity(outlinePoints, true), isClosed: true }];
+    // DISABLED for performance testing - alignHandleDirections is O(n³)
+    // const alignedOutlinePoints = alignHandleDirections(outlinePoints, segments, null);
+
+    let contour = { points: enforceSmoothColinearity(outlinePoints, true), isClosed: true };
+
+    // Apply reverse if flag is set
+    if (reversed) {
+      contour = reverseContour(contour);
+    }
+
+    return [contour];
   }
+}
+
+/**
+ * Reverse a contour's point order.
+ * @param {Object} contour - Contour with points array and isClosed flag
+ * @returns {Object} New contour with reversed points
+ */
+function reverseContour(contour) {
+  const points = [...contour.points];
+  points.reverse();
+  if (contour.isClosed && points.length > 0) {
+    // For closed contours, rotate so start point stays consistent
+    const [lastPoint] = points.splice(-1, 1);
+    points.splice(0, 0, lastPoint);
+  }
+  return { ...contour, points };
 }
 
 /**
@@ -355,6 +681,10 @@ function simplifyOffsetCurves(offsetCurves, halfWidth) {
     return null;
   }
 
+  // Use minimum threshold for error calculation when halfWidth is very small
+  // This ensures simplification still works when one side collapses to skeleton
+  const effectiveHalfWidth = Math.max(halfWidth, 1);
+
   // If only one curve with 4 points (cubic), no simplification needed
   if (offsetCurves.length === 1 && offsetCurves[0].points.length === 4) {
     return null;
@@ -382,9 +712,9 @@ function simplifyOffsetCurves(offsetCurves, halfWidth) {
   const params = chordLengthParameterize(samplePoints);
 
   // 4. Adaptive search — from strict threshold to lenient
-  const minError = halfWidth * MIN_ERROR_PERCENT;
-  const maxError = halfWidth * MAX_ERROR_PERCENT;
-  const step = halfWidth * ERROR_STEP_PERCENT;
+  const minError = effectiveHalfWidth * MIN_ERROR_PERCENT;
+  const maxError = effectiveHalfWidth * MAX_ERROR_PERCENT;
+  const step = effectiveHalfWidth * ERROR_STEP_PERCENT;
 
   for (let errorThreshold = minError; errorThreshold <= maxError; errorThreshold += step) {
     const bezier = fitCubic(samplePoints, leftTangent, rightTangent, errorThreshold);
@@ -397,6 +727,25 @@ function simplifyOffsetCurves(offsetCurves, halfWidth) {
   // Even maxError didn't help — return the last result anyway
   // One curve is better than many segments
   return fitCubic(samplePoints, leftTangent, rightTangent, maxError);
+}
+
+/**
+ * Apply angle override to a calculated normal if the point has forceHorizontal or forceVertical set.
+ * Preserves the sign (direction) of the original normal to maintain left/right orientation.
+ * @param {Object} point - The skeleton point
+ * @param {Object} calculatedNormal - The normal calculated from curve geometry {x, y}
+ * @returns {Object} The effective normal (possibly overridden)
+ */
+export function getEffectiveNormal(point, calculatedNormal) {
+  if (point.forceHorizontal) {
+    // Horizontal ribs: normal points up or down based on original sign
+    return { x: 0, y: calculatedNormal.y >= 0 ? 1 : -1 };
+  }
+  if (point.forceVertical) {
+    // Vertical ribs: normal points left or right based on original sign
+    return { x: calculatedNormal.x >= 0 ? 1 : -1, y: 0 };
+  }
+  return calculatedNormal;
 }
 
 /**
@@ -452,10 +801,12 @@ function generateOffsetPointsForSegment(
     // - For closed skeletons: for all segments (each adds its start)
     const shouldAddStart = isClosed || isFirst;
     if (shouldAddStart) {
-      const startNormal =
+      let startNormal =
         !prevSegment || (isFirst && !isClosed)
           ? normal
           : calculateCornerNormal(prevSegment, segment, startLeftHW);
+      // Apply angle override if set on the point
+      startNormal = getEffectiveNormal(segment.startPoint, startNormal);
 
       // Copy smooth property from skeleton point, round to UPM grid
       // Use per-point half-widths for left and right sides
@@ -476,10 +827,12 @@ function generateOffsetPointsForSegment(
     // - For closed skeletons: don't add (next segment's start is this end)
     const shouldAddEnd = !isClosed;
     if (shouldAddEnd) {
-      const endNormal =
+      let endNormal =
         !nextSegment || isLast
           ? normal
           : calculateCornerNormal(segment, nextSegment, endLeftHW);
+      // Apply angle override if set on the point
+      endNormal = getEffectiveNormal(segment.endPoint, endNormal);
 
       // Copy smooth property from skeleton point, round to UPM grid
       // Use per-point half-widths for left and right sides
@@ -517,15 +870,19 @@ function generateOffsetPointsForSegment(
     const bezierEndNormal = vector.rotateVector90CW(endTangent);
 
     // For corners (non-smooth junctions), use averaged normal
-    const startNormal =
+    let startNormal =
       !prevSegment || (isFirst && !isClosed)
         ? bezierStartNormal
         : calculateCornerNormal(prevSegment, segment, startLeftHW);
+    // Apply angle override if set on the point
+    startNormal = getEffectiveNormal(segment.startPoint, startNormal);
 
-    const endNormal =
+    let endNormal =
       !nextSegment || (isLast && !isClosed)
         ? bezierEndNormal
         : calculateCornerNormal(segment, nextSegment, endLeftHW);
+    // Apply angle override if set on the point
+    endNormal = getEffectiveNormal(segment.endPoint, endNormal);
 
     // Get offset curves from bezier-js (returns array of Bezier objects)
     // Note: bezier-js uses CCW normal, our code uses CW normal, so signs are swapped
@@ -555,6 +912,22 @@ function generateOffsetPointsForSegment(
 
     // Helper to add offset curves to output array
     const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd, sideHalfWidth) => {
+      // When halfWidth is near zero, contour should exactly match skeleton
+      // Copy control points directly instead of using offset curves
+      if (sideHalfWidth < 0.5 && segment.controlPoints.length > 0) {
+        if (shouldAddStart) {
+          output.push({ x: fixedStart.x, y: fixedStart.y, smooth: smoothStart });
+        }
+        // Copy skeleton control points (they're already at the right positions since offset is ~0)
+        for (const cp of segment.controlPoints) {
+          output.push({ x: Math.round(cp.x), y: Math.round(cp.y), type: "cubic" });
+        }
+        if (shouldAddEnd) {
+          output.push({ x: fixedEnd.x, y: fixedEnd.y, smooth: smoothEnd });
+        }
+        return;
+      }
+
       // Fallback: if bezier.offset() returns empty result, add straight line
       if (!curves || curves.length === 0) {
         if (shouldAddStart) {
@@ -578,9 +951,31 @@ function generateOffsetPointsForSegment(
             smooth: smoothStart,
           });
         }
-        // Add control points (cubic bezier), rounded to UPM grid
-        output.push({ x: Math.round(pts[1].x), y: Math.round(pts[1].y), type: "cubic" });
-        output.push({ x: Math.round(pts[2].x), y: Math.round(pts[2].y), type: "cubic" });
+        // Adjust control points to match the fixed endpoints
+        // The offset curve was generated with average width, but endpoints use real widths
+        // Scale handles proportionally to maintain curve shape
+        const origStart = pts[0];
+        const origEnd = pts[3];
+        const handle1 = pts[1];
+        const handle2 = pts[2];
+
+        // Vector from original start to handle1
+        const h1Offset = { x: handle1.x - origStart.x, y: handle1.y - origStart.y };
+        // Vector from original end to handle2
+        const h2Offset = { x: handle2.x - origEnd.x, y: handle2.y - origEnd.y };
+
+        // Apply handles relative to fixed positions
+        const adjustedHandle1 = {
+          x: Math.round(fixedStart.x + h1Offset.x),
+          y: Math.round(fixedStart.y + h1Offset.y),
+        };
+        const adjustedHandle2 = {
+          x: Math.round(fixedEnd.x + h2Offset.x),
+          y: Math.round(fixedEnd.y + h2Offset.y),
+        };
+
+        output.push({ x: adjustedHandle1.x, y: adjustedHandle1.y, type: "cubic" });
+        output.push({ x: adjustedHandle2.x, y: adjustedHandle2.y, type: "cubic" });
         if (shouldAddEnd) {
           output.push({
             x: fixedEnd.x,
@@ -592,11 +987,19 @@ function generateOffsetPointsForSegment(
       }
 
       // Fallback: use original curves without simplification
+      // Track actual start position for each curve (for handle adjustment)
+      let currentStart = fixedStart;
+
       for (let i = 0; i < curves.length; i++) {
         const curve = curves[i];
         const pts = curve.points;
         const isFirstCurve = i === 0;
         const isLastCurve = i === curves.length - 1;
+
+        // Determine actual end position for this curve
+        const currentEnd = isLastCurve
+          ? fixedEnd
+          : { x: Math.round(pts[pts.length - 1].x), y: Math.round(pts[pts.length - 1].y) };
 
         // Add start point only for first curve if shouldAddStart
         if (isFirstCurve && shouldAddStart) {
@@ -607,14 +1010,47 @@ function generateOffsetPointsForSegment(
           });
         }
 
-        // Add control points based on curve type, rounded to UPM grid
+        // Add control points based on curve type, adjusted for fixed endpoints
         if (pts.length === 4) {
-          // Cubic bezier
-          output.push({ x: Math.round(pts[1].x), y: Math.round(pts[1].y), type: "cubic" });
-          output.push({ x: Math.round(pts[2].x), y: Math.round(pts[2].y), type: "cubic" });
+          // Cubic bezier - adjust handles relative to fixed endpoints
+          const origStart = pts[0];
+          const origEnd = pts[3];
+          const handle1 = pts[1];
+          const handle2 = pts[2];
+
+          // Vector from original start to handle1
+          const h1Offset = { x: handle1.x - origStart.x, y: handle1.y - origStart.y };
+          // Vector from original end to handle2
+          const h2Offset = { x: handle2.x - origEnd.x, y: handle2.y - origEnd.y };
+
+          // Apply handles relative to actual positions
+          output.push({
+            x: Math.round(currentStart.x + h1Offset.x),
+            y: Math.round(currentStart.y + h1Offset.y),
+            type: "cubic",
+          });
+          output.push({
+            x: Math.round(currentEnd.x + h2Offset.x),
+            y: Math.round(currentEnd.y + h2Offset.y),
+            type: "cubic",
+          });
         } else if (pts.length === 3) {
-          // Quadratic bezier
-          output.push({ x: Math.round(pts[1].x), y: Math.round(pts[1].y), type: "quad" });
+          // Quadratic bezier - adjust handle relative to midpoint
+          const origStart = pts[0];
+          const origEnd = pts[2];
+          const handle = pts[1];
+
+          // Calculate handle offset from midpoint of original curve
+          const origMid = { x: (origStart.x + origEnd.x) / 2, y: (origStart.y + origEnd.y) / 2 };
+          const hOffset = { x: handle.x - origMid.x, y: handle.y - origMid.y };
+
+          // Apply handle relative to midpoint of actual positions
+          const actualMid = { x: (currentStart.x + currentEnd.x) / 2, y: (currentStart.y + currentEnd.y) / 2 };
+          output.push({
+            x: Math.round(actualMid.x + hOffset.x),
+            y: Math.round(actualMid.y + hOffset.y),
+            type: "quad",
+          });
         }
         // Linear (2 points) - no control points needed
 
@@ -629,13 +1065,16 @@ function generateOffsetPointsForSegment(
             });
           }
         } else {
-          // Intermediate curve - add endpoint (it becomes next curve's start), rounded to UPM grid
+          // Intermediate curve - add endpoint (it becomes next curve's start)
           output.push({
-            x: Math.round(pts[pts.length - 1].x),
-            y: Math.round(pts[pts.length - 1].y),
+            x: currentEnd.x,
+            y: currentEnd.y,
             smooth: true, // intermediate points are smooth
           });
         }
+
+        // Update currentStart for next curve
+        currentStart = currentEnd;
       }
     };
 
@@ -992,13 +1431,15 @@ export function calculateNormalAtSkeletonPoint(skeletonContour, pointIndex) {
 
   // Handle endpoints of open contours
   if (!dir1 && dir2) {
-    return vector.rotateVector90CW(dir2);
+    const normal = vector.rotateVector90CW(dir2);
+    return getEffectiveNormal(point, normal);
   }
   if (dir1 && !dir2) {
-    return vector.rotateVector90CW(dir1);
+    const normal = vector.rotateVector90CW(dir1);
+    return getEffectiveNormal(point, normal);
   }
   if (!dir1 && !dir2) {
-    return { x: 0, y: 1 };
+    return getEffectiveNormal(point, { x: 0, y: 1 });
   }
 
   // Use atan2-based angle bisector (same as calculateCornerNormal)
@@ -1015,7 +1456,8 @@ export function calculateNormalAtSkeletonPoint(skeletonContour, pointIndex) {
   };
 
   // Normal is perpendicular to bisector (rotated 90° CW)
-  return { x: bisector.y, y: -bisector.x };
+  const normal = { x: bisector.y, y: -bisector.x };
+  return getEffectiveNormal(point, normal);
 }
 
 /**
@@ -1033,6 +1475,25 @@ export function outlineContourToPackedPath(outlineContour) {
 export function getSkeletonData(layerOrCustomData) {
   const customData = layerOrCustomData?.customData ?? layerOrCustomData;
   return customData?.["fontra.skeleton"] ?? null;
+}
+
+/**
+ * Move all skeleton points by dx, dy.
+ * Modifies the skeletonData object in place.
+ * @param {Object} skeletonData - The skeleton data object
+ * @param {number} dx - X offset
+ * @param {number} dy - Y offset
+ */
+export function moveSkeletonData(skeletonData, dx, dy) {
+  if (!skeletonData?.contours) return;
+
+  for (const contour of skeletonData.contours) {
+    if (!contour.points) continue;
+    for (const point of contour.points) {
+      point.x += dx;
+      point.y += dy;
+    }
+  }
 }
 
 /**

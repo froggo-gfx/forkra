@@ -15,45 +15,6 @@ import {
   withSavedState,
 } from "@fontra/core/utils.js";
 import { subVectors } from "@fontra/core/vector.js";
-import { calculateTunniPoint, calculateTrueTunniPoint } from "@fontra/core/tunni-calculations.js";
-import {
-  calculateCurvatureForSegment,
-  calculateCurvatureForQuadraticSegment,
-  findCurvatureRange,
-  curvatureToColor,
-  solveCubicBezier,
-  solveQuadraticBezier
-} from "@fontra/core/curvature.js"; 
-import { VarPackedPath } from "@fontra/core/var-path.js";
-import {
-  unitVectorFromTo,
-  calculateDistanceAndAngle,
-  calculateBadgeDimensions,
-  calculateBadgePosition,
-  formatDistanceAndAngle,
-  calculateDistancesFromPoint,
-  drawDistanceAngleVisualization,
-  drawManhattanDistanceVisualization,
-  drawOffCurveDistanceVisualization,
-  calculateTension,
-  calculateOffCurveAngle,
-  formatDistanceTensionAngle,
-  calculateTunniPointz,
-  calculateControlHandleDistance,
-  drawTunniLabels,
-  DISTANCE_ANGLE_COLOR,
-  DISTANCE_ANGLE_BADGE_COLOR,
-  DISTANCE_ANGLE_TEXT_COLOR,
-  DISTANCE_ANGLE_BADGE_PADDING,
-  DISTANCE_ANGLE_BADGE_RADIUS,
-  DISTANCE_ANGLE_FONT_SIZE,
-  OFFCURVE_DISTANCE_COLOR,
-  OFFCURVE_DISTANCE_BADGE_COLOR,
-  OFFCURVE_DISTANCE_TEXT_COLOR,
-  OFFCURVE_DISTANCE_BADGE_PADDING,
-  OFFCURVE_DISTANCE_BADGE_RADIUS,
-  OFFCURVE_DISTANCE_FONT_SIZE
-} from "@fontra/core/distance-angle.js";
 
 export const visualizationLayerDefinitions = [];
 
@@ -807,11 +768,30 @@ registerVisualizationLayerDefinition({
   colors: { strokeColor: "#8888" },
   colorsDarkMode: { strokeColor: "#AAA8" },
   draw: (context, positionedGlyph, parameters, model, controller) => {
+    let x, y;
+
     const pointIndex = model.initialClickedPointIndex;
-    if (pointIndex === undefined) {
+    const skeletonPoint = model.initialClickedSkeletonPoint;
+
+    if (pointIndex !== undefined) {
+      // Regular path point
+      ({ x, y } = positionedGlyph.glyph.path.getPoint(pointIndex));
+    } else if (skeletonPoint) {
+      // Skeleton point - get coordinates from skeleton data
+      const editLayerName =
+        model.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+      const layer = positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName];
+      const skeletonData = layer?.customData?.["fontra.skeleton"];
+      const point = skeletonData?.contours?.[skeletonPoint.contourIdx]?.points?.[skeletonPoint.pointIdx];
+      if (point) {
+        ({ x, y } = point);
+      }
+    }
+
+    if (x === undefined || y === undefined) {
       return;
     }
-    const { x, y } = positionedGlyph.glyph.path.getPoint(pointIndex);
+
     context.strokeStyle = parameters.strokeColor;
     context.lineWidth = parameters.strokeWidth;
     context.setLineDash(parameters.lineDash);
@@ -1702,461 +1682,168 @@ registerVisualizationLayerDefinition({
   },
 });
 
-//// speedpunk
-// Add new functions before the main draw function
-function calculateSegmentBudget(numCurves, zoomFactor, baseSegments = 400, minSegmentsPerCurve = 5) {
-  // Apply zoom-based scaling: increase budget at higher zoom for smoother ribbons
-  const zoomAdjustedBudget = Math.ceil(baseSegments * Math.sqrt(zoomFactor));
-  
-  // Divide budget among curves, respecting minimum
- const stepsPerSegment = Math.max(
-    Math.floor(zoomAdjustedBudget / Math.max(numCurves, 1)),
-    minSegmentsPerCurve
-  );
-  
-  return stepsPerSegment;
-}
+// Measure overlay layer (Q-key measurement tool)
+registerVisualizationLayerDefinition({
+  identifier: "fontra.measure.overlay",
+  name: "Measure Overlay",
+  selectionFunc: glyphSelector("editing"),
+  zIndex: 650, // Above other layers
+  screenParameters: {
+    strokeWidth: 1,
+    fontSize: 11,
+    dashPattern: [4, 4],
+    pointRadius: 4,
+  },
+  colors: {
+    lineColor: "#FF6600",
+    textColor: "#333",
+    textBgColor: "#FFFFFFCC",
+    projectionColor: "#0088FF",
+    selectedPointColor: "#FF0066",
+  },
+  colorsDarkMode: {
+    lineColor: "#FF8833",
+    textColor: "#EEE",
+    textBgColor: "#333333CC",
+    projectionColor: "#44AAFF",
+    selectedPointColor: "#FF4488",
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    if (!model.measureMode) return;
 
-function estimateCurveLength(p1, p2, p3, p4 = null) {
- // Simple linear approximation for quick estimate
- if (p4) {
-   // Cubic: sum of control polygon
-   return (
-     Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) +
-     Math.hypot(p3[0] - p2[0], p3[1] - p2[1]) +
-     Math.hypot(p4[0] - p3[0], p4[1] - p3[1])
-   );
- } else {
-   // Quadratic
-   return (
-     Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) +
-     Math.hypot(p3[0] - p2[0], p3[1] - p2[1])
-   );
- }
-}
+    const { measureHoverSegment, measureSelectedPoints, measureShowDirect, measureClickDirect } = model;
 
-function adjustStepsForCurve(baseSteps, curveLength, averageLength, maxAdjustment = 2.0) {
- if (averageLength === 0) return baseSteps;
- 
- // Increase steps for longer curves, decrease for shorter
- const ratio = curveLength / averageLength;
- const adjustment = Math.min(Math.max(ratio, 1.0 / maxAdjustment), maxAdjustment);
- 
- return Math.max(Math.floor(baseSteps * adjustment), 3);
-}
+    // 1. Draw segment hover measurement (Q+hover)
+    if (measureHoverSegment) {
+      const { p1, p2 } = measureHoverSegment;
 
-function countCurveSegments(path) {
-  let count = 0;
-  
-  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
-    const contour = path.getContour(contourIndex);
-    const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
-    const numPoints = contour.pointTypes.length;
-    
-    for (let i = 0; i < numPoints; i++) {
-      const pointIndex = startPoint + i;
-      const pointType = path.pointTypes[pointIndex];
-      
-      if ((pointType & VarPackedPath.POINT_TYPE_MASK) !== VarPackedPath.ON_CURVE) {
-        continue;
-      }
-      
-      const next1 = path.getAbsolutePointIndex(contourIndex, (i + 1) % numPoints);
-      const next2 = path.getAbsolutePointIndex(contourIndex, (i + 2) % numPoints);
-      const next3 = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
-      
-      const t1 = path.pointTypes[next1];
-      const t2 = path.pointTypes[next2];
-      const t3 = path.pointTypes[next3];
-      
-      // Check for cubic
-      const isCubic =
-        (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
-        (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
-        (t3 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
-      
-      // Check for quadratic
-      const isQuadratic =
-        (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD &&
-        (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
-      
-      if (isCubic || isQuadratic) {
-        count++;
+      if (measureShowDirect) {
+        // Alt+Q: direct distance line
+        const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        drawMeasureLine(context, p1, p2, dist.toFixed(1), parameters.lineColor, parameters);
+      } else {
+        // Q: projected distances (dx, dy)
+        const dx = Math.abs(p2.x - p1.x);
+        const dy = Math.abs(p2.y - p1.y);
+
+        // Determine corner point based on segment orientation
+        const cornerPoint = { x: p2.x, y: p1.y };
+
+        // Horizontal projection line (dx)
+        if (dx > 0.5) {
+          drawMeasureLine(
+            context,
+            p1,
+            cornerPoint,
+            dx.toFixed(1),
+            parameters.projectionColor,
+            parameters
+          );
+        }
+        // Vertical projection line (dy)
+        if (dy > 0.5) {
+          drawMeasureLine(
+            context,
+            cornerPoint,
+            p2,
+            dy.toFixed(1),
+            parameters.projectionColor,
+            parameters
+          );
+        }
       }
     }
-  }
-  
-  return count;
-}
 
-// --- SpeedPunk / curvature visualization (replace existing fontra.curvature block) ---
-registerVisualizationLayerDefinition({
- identifier: "fontra.curvature",
-   name: "SpeedPunk",
-   selectionFunc: glyphSelector("editing"),
-   userSwitchable: true,
-   defaultOn: false,
-   zIndex: 490, // Draw on top
-   screenParameters: {
-     drawfactor: 0.01,
-     baseUnitsPerEm: 1000,
-     curveGain: 1.0,
-     baseSegmentBudget: 400,        // NEW: Total segment budget (original: 400)
-     minSegmentsPerCurve: 5,        // NEW: Minimum per curve (original: 5)
-     colorStops: ["#8b939c", "#f29400", "#e3004f"],
-     illustrationPosition: "outsideOfCurve",
-     ribbonThickness: 20, // Add ribbonThickness parameter
-     globalColorNormalization: false,  // NEW: Use global vs per-segment normalization
-     adaptStepsToCurveLength: false,  // NEW: Optional length-based adaptation
-   },
-   draw: (context, positionedGlyph, parameters, model, controller) => {
-     // Use the path object consistently (other layers use positionedGlyph.glyph.path)
-     const path = positionedGlyph.glyph?.path;
-     if (!path) return;
+    // 2. Draw distances between selected measure points (Q-click)
+    if (measureSelectedPoints?.length >= 1) {
+      // Highlight selected points
+      context.fillStyle = parameters.selectedPointColor;
+      for (const pt of measureSelectedPoints) {
+        fillRoundNode(context, pt, parameters.pointRadius * 2);
+      }
 
-     context.save();
-     context.lineCap = 'round';
-     context.lineJoin = 'round';
-     context.globalAlpha = 0.5;
+      // Draw lines between consecutive points
+      if (measureSelectedPoints.length >= 2) {
+        for (let i = 0; i < measureSelectedPoints.length - 1; i++) {
+          const pt1 = measureSelectedPoints[i];
+          const pt2 = measureSelectedPoints[i + 1];
 
-     const zoomFactor = controller.magnification || 1.0;
-     const dampeningFactor = Math.pow(zoomFactor, +(parameters.zoomDampening || 1.2));
-     const heightMultiplier = (parameters.drawfactor || 5.0) *
-                              (parameters.curveGain || 1.0) *
-                              dampeningFactor;
-     //const heightMultiplier = (parameters.drawfactor || 10.0) * (parameters.curveGain || 1.0);
-     
-     // Count total curve segments in the glyph
-     const totalCurveCount = countCurveSegments(path);
+          if (measureClickDirect) {
+            // Alt+Q-click: direct distance
+            const dist = Math.hypot(pt2.x - pt1.x, pt2.y - pt1.y);
+            drawMeasureLine(context, pt1, pt2, dist.toFixed(1), parameters.lineColor, parameters);
+          } else {
+            // Q-click: projected distances (dx, dy)
+            const dx = Math.abs(pt2.x - pt1.x);
+            const dy = Math.abs(pt2.y - pt1.y);
+            const cornerPoint = { x: pt2.x, y: pt1.y };
 
-     // Calculate adaptive segment budget
-     const stepsPerSegment = calculateSegmentBudget(
-       totalCurveCount,
-       zoomFactor,
-       parameters.baseSegmentBudget || 400,
-       parameters.minSegmentsPerCurve || 5
-     );
-
-     // Optional: Log for debugging (remove in production)
-     // console.log(`Zoom: ${zoomFactor.toFixed(2)}, Curves: ${totalCurveCount}, Steps: ${stepsPerSegment}`);
-
-     const colorStops = parameters.colorStops || ["#8b939c", "#f29400", "#e3004f"];
-     const illustrationPosition = parameters.illustrationPosition || "outsideOfCurve";
-     const useGlobalNormalization = parameters.globalColorNormalization || false;
-     const adaptToCurveLength = parameters.adaptStepsToCurveLength || false;
-
-     // Calculate average curve length if adaptive sampling enabled
-     let averageCurveLength = 0;
-     if (adaptToCurveLength) {
-       let totalLength = 0;
-       let curveCount = 0;
-       
-       for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
-         const contour = path.getContour(contourIndex);
-         const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
-         const numPoints = contour.pointTypes.length;
-         
-         for (let i = 0; i < numPoints; i++) {
-           const pointIndex = startPoint + i;
-           const pointType = path.pointTypes[pointIndex];
-           
-           if ((pointType & VarPackedPath.POINT_TYPE_MASK) !== VarPackedPath.ON_CURVE) continue;
-           
-           const next1 = path.getAbsolutePointIndex(contourIndex, (i + 1) % numPoints);
-           const next2 = path.getAbsolutePointIndex(contourIndex, (i + 2) % numPoints);
-           const next3 = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
-           
-           const t1 = path.pointTypes[next1];
-           const t2 = path.pointTypes[next2];
-           const t3 = path.pointTypes[next3];
-           
-           const isCubic =
-             (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
-             (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
-             (t3 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
-           
-           const isQuadratic =
-             (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD &&
-             (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
-           
-           if (isCubic) {
-             const p1 = path.getPoint(pointIndex);
-             const p2 = path.getPoint(next1);
-             const p3 = path.getPoint(next2);
-             const p4 = path.getPoint(next3);
-             totalLength += estimateCurveLength([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y]);
-             curveCount++;
-           } else if (isQuadratic) {
-             const p1 = path.getPoint(pointIndex);
-             const p2 = path.getPoint(next1);
-             const p3 = path.getPoint(next2);
-             totalLength += estimateCurveLength([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y]);
-             curveCount++;
-           }
-         }
-       }
-       
-       averageCurveLength = curveCount > 0 ? totalLength / curveCount : 0;
-     }
-
-     // First pass: collect global curvature range if needed
-     let globalMinAbs = Infinity;
-     let globalMaxAbs = -Infinity;
-     
-     if (useGlobalNormalization) {
-       for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
-         const contour = path.getContour(contourIndex);
-         const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
-         const numPoints = contour.pointTypes.length;
-         
-         for (let i = 0; i < numPoints; i++) {
-           const pointIndex = startPoint + i;
-           const pointType = path.pointTypes[pointIndex];
-           
-           if ((pointType & VarPackedPath.POINT_TYPE_MASK) !== VarPackedPath.ON_CURVE) {
-             continue;
-           }
-           
-           const next1 = path.getAbsolutePointIndex(contourIndex, (i + 1) % numPoints);
-           const next2 = path.getAbsolutePointIndex(contourIndex, (i + 2) % numPoints);
-           const next3 = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
-           
-           const t1 = path.pointTypes[next1];
-           const t2 = path.pointTypes[next2];
-           const t3 = path.pointTypes[next3];
-           
-           // Check cubic
-           const isCubic =
-             (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
-             (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
-             (t3 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
-           
-           if (isCubic) {
-             const p1 = path.getPoint(pointIndex);
-             const p2 = path.getPoint(next1);
-             const p3 = path.getPoint(next2);
-             const p4 = path.getPoint(next3);
-             
-             // Estimate curve length and adjust steps if enabled
-             let adjustedSteps = stepsPerSegment;
-             
-             if (adaptToCurveLength) {
-               const curveLength = estimateCurveLength([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y]);
-               adjustedSteps = adjustStepsForCurve(stepsPerSegment, curveLength, averageCurveLength);
-             }
-             
-             const samples = calculateCurvatureForSegment(
-               [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y],
-               adjustedSteps  // Use adjusted steps
-             );
-             
-             for (const sample of samples) {
-               const absK = Math.abs(sample.curvature);
-               globalMinAbs = Math.min(globalMinAbs, absK);
-               globalMaxAbs = Math.max(globalMaxAbs, absK);
-             }
-             continue;
-           }
-           
-           // Check quadratic
-           const isQuadratic =
-             (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD &&
-             (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
-           
-           if (isQuadratic) {
-             const p1 = path.getPoint(pointIndex);
-             const p2 = path.getPoint(next1);
-             const p3 = path.getPoint(next2);
-             
-             // Estimate curve length and adjust steps if enabled
-             let adjustedSteps = stepsPerSegment;
-             
-             if (adaptToCurveLength) {
-               const curveLength = estimateCurveLength([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y]);
-               adjustedSteps = adjustStepsForCurve(stepsPerSegment, curveLength, averageCurveLength);
-             }
-             
-             const samples = calculateCurvatureForQuadraticSegment(
-               [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y],
-               adjustedSteps  // Use adjusted steps
-             );
-             
-             for (const sample of samples) {
-               const absK = Math.abs(sample.curvature);
-               globalMinAbs = Math.min(globalMinAbs, absK);
-               globalMaxAbs = Math.max(globalMaxAbs, absK);
-             }
-           }
-         }
-       }
-       
-       // Handle degenerate case
-       if (globalMinAbs === Infinity) {
-         globalMinAbs = 0;
-         globalMaxAbs = 1;
-       }
-     }
-
-     for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
-         const contour = path.getContour(contourIndex);
-         const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
-         const numPoints = contour.pointTypes.length;
-
-         for (let i = 0; i < numPoints; i++) {
-             const pointIndex = startPoint + i;
-             const pointType = path.pointTypes[pointIndex];
-         if ((pointType & VarPackedPath.POINT_TYPE_MASK) !== VarPackedPath.ON_CURVE) continue;
-
-         const next1 = path.getAbsolutePointIndex(contourIndex, (i + 1) % numPoints);
-         const next2 = path.getAbsolutePointIndex(contourIndex, (i + 2) % numPoints);
-         const next3 = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
-
-         const t1 = path.pointTypes[next1];
-         const t2 = path.pointTypes[next2];
-         const t3 = path.pointTypes[next3];
-
-         // cubic: ON - OFFc - OFFc - ON
-         const isCubicSeg =
-           (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
-           (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
-           (t3 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
-
-         if (isCubicSeg) {
-                     const p1 = path.getPoint(pointIndex);
-           const p2 = path.getPoint(next1);
-           const p3 = path.getPoint(next2);
-           const p4 = path.getPoint(next3);
-
-           // Estimate curve length and adjust steps if enabled
-           let adjustedSteps = stepsPerSegment;
-           
-           if (adaptToCurveLength) {
-             const curveLength = estimateCurveLength([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y]);
-             adjustedSteps = adjustStepsForCurve(stepsPerSegment, curveLength, averageCurveLength);
-           }
-           
-           const samples = calculateCurvatureForSegment(
-             [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y],
-             adjustedSteps  // Use adjusted steps
-                     );
-
-           // NORMALIZE PER SEGMENT (key fix)
-           const absVals = samples.map(s => Math.abs(s.curvature));
-           const minAbsSegment = Math.min(...absVals);
-           const maxAbsSegment = Math.max(...absVals);
-
-           // Use global or per-segment normalization
-           const minAbs = useGlobalNormalization ? globalMinAbs : minAbsSegment;
-           const maxAbs = useGlobalNormalization ? globalMaxAbs : maxAbsSegment;
-
-           // Build geometry and draw
-           const onCurve = [];
-           const offCurve = [];
-           for (let s = 0; s < samples.length; s++) {
-             const t = samples[s].t;
-             const { r, r1 } = solveCubicBezier([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y], t);
-             const [x, y] = r;
-             onCurve.push({ x, y, r1, k: samples[s].curvature });
-
-             // normal (choose orientation)
-             let nx = illustrationPosition === "outsideOfCurve" ? -r1[1] : r1[1];
-             let ny = illustrationPosition === "outsideOfCurve" ? r1[0] : -r1[0];
-             const mag = Math.hypot(nx, ny) || 1;
-             nx /= mag; ny /= mag;
-
-             // use signed height if desired; curvature in file is absolute, so sign=1.
-             const h = Math.sign(samples[s].curvature) * Math.abs(samples[s].curvature) * heightMultiplier * -180000;
-             offCurve.push({ x: x + nx * h, y: y + ny * h });
-           }
-
-           // draw quads and color by per-segment normalization
-           for (let s = 0; s < onCurve.length - 1; s++) {
-             const a = onCurve[s], b = onCurve[s + 1];
-             const quad = new Path2D();
-             quad.moveTo(a.x, a.y);
-             quad.lineTo(b.x, b.y);
-             quad.lineTo(offCurve[s + 1].x, offCurve[s + 1].y);
-             quad.lineTo(offCurve[s].x, offCurve[s].y);
-             quad.closePath();
-
-             // pass per-segment min/max and colorStops (NEW API)
-             const color = curvatureToColor(Math.abs(a.k), minAbs, maxAbs, colorStops);
-             context.fillStyle = color;
-             context.fill(quad);
-           }
-
-           continue;
-         }
-
-         // quadratic: ON - OFFq - ON
-         const isQuadSeg =
-           (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD &&
-           (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
-
-         if (isQuadSeg) {
-           const p1 = path.getPoint(pointIndex);
-           const p2 = path.getPoint(next1);
-           const p3 = path.getPoint(next2);
-
-           // Estimate curve length and adjust steps if enabled
-           let adjustedSteps = stepsPerSegment;
-           
-           if (adaptToCurveLength) {
-             const curveLength = estimateCurveLength([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y]);
-             adjustedSteps = adjustStepsForCurve(stepsPerSegment, curveLength, averageCurveLength);
-           }
-           
-           const samples = calculateCurvatureForQuadraticSegment(
-             [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y],
-             adjustedSteps  // Use adjusted steps
-           );
-
-           const absVals = samples.map(s => Math.abs(s.curvature));
-           const minAbsSegment = Math.min(...absVals);
-           const maxAbsSegment = Math.max(...absVals);
-
-           // Use global or per-segment normalization
-           const minAbs = useGlobalNormalization ? globalMinAbs : minAbsSegment;
-           const maxAbs = useGlobalNormalization ? globalMaxAbs : maxAbsSegment;
-
-           const onCurveQ = [];
-           const offCurveQ = [];
-           for (let s = 0; s < samples.length; s++) {
-             const t = samples[s].t;
-             const { r, r1 } = solveQuadraticBezier([p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], t);
-             const [x, y] = r;
-             onCurveQ.push({ x, y, r1, k: samples[s].curvature });
-
-             let nx = illustrationPosition === "outsideOfCurve" ? -r1[1] : r1[1];
-             let ny = illustrationPosition === "outsideOfCurve" ? r1[0] : -r1[0];
-             const mag = Math.hypot(nx, ny) || 1;
-             nx /= mag; ny /= mag;
-
-             const h = Math.sign(samples[s].curvature) * Math.abs(samples[s].curvature) * heightMultiplier * -48000;
-             offCurveQ.push({ x: x + nx * h, y: y + ny * h });
-         }
-
-           for (let s = 0; s < onCurveQ.length - 1; s++) {
-             const quad = new Path2D();
-             quad.moveTo(onCurveQ[s].x, onCurveQ[s].y);
-             quad.lineTo(onCurveQ[s + 1].x, onCurveQ[s + 1].y);
-             quad.lineTo(offCurveQ[s + 1].x, offCurveQ[s + 1].y);
-             quad.lineTo(offCurveQ[s].x, offCurveQ[s].y);
-             quad.closePath();
-                 
-             const color = curvatureToColor(Math.abs(onCurveQ[s].k), minAbs, maxAbs, colorStops);
-                 context.fillStyle = color;
-             context.fill(quad);
-             }
-         }
-     }
-     }
-
-     context.restore();
-   }
+            // Horizontal projection line (dx)
+            if (dx > 0.5) {
+              drawMeasureLine(
+                context,
+                pt1,
+                cornerPoint,
+                dx.toFixed(1),
+                parameters.projectionColor,
+                parameters
+              );
+            }
+            // Vertical projection line (dy)
+            if (dy > 0.5) {
+              drawMeasureLine(
+                context,
+                cornerPoint,
+                pt2,
+                dy.toFixed(1),
+                parameters.projectionColor,
+                parameters
+              );
+            }
+          }
+        }
+      }
+    }
+  },
 });
 
+function drawMeasureLine(context, p1, p2, label, color, parameters) {
+  // Draw dashed line
+  context.strokeStyle = color;
+  context.lineWidth = parameters.strokeWidth;
+  context.setLineDash(parameters.dashPattern);
+  strokeLine(context, p1.x, p1.y, p2.x, p2.y);
+  context.setLineDash([]);
 
+  // Draw label at midpoint with background
+  const midX = (p1.x + p2.x) / 2;
+  const midY = (p1.y + p2.y) / 2;
+
+  context.save();
+  context.scale(1, -1);
+
+  context.font = `${parameters.fontSize}px fontra-ui-regular, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  // Measure text for background
+  const textWidth = context.measureText(label).width;
+  const padding = 3;
+
+  // Draw background
+  context.fillStyle = parameters.textBgColor;
+  context.fillRect(
+    midX - textWidth / 2 - padding,
+    -midY - parameters.fontSize / 2 - padding,
+    textWidth + padding * 2,
+    parameters.fontSize + padding * 2
+  );
+
+  // Draw text
+  context.fillStyle = parameters.textColor;
+  context.fillText(label, midX, -midY);
+  context.restore();
+}
 
 //
 // allGlyphsCleanVisualizationLayerDefinition is not registered, but used
@@ -2354,242 +2041,3 @@ function getTextVerticalCenter(context, text) {
   const metrics = context.measureText(text);
   return (metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
 }
-
-registerVisualizationLayerDefinition({
-  identifier: "fontra.coarse.grid",
-  name: "Coarse Grid",
-  userSwitchable: true,
-  zIndex: 1 ,
-  selectionFunc: glyphSelector("editing"),
-  screenParameters: {
-    strokeWidth: 0.25,
-    strokeColor: "#00000020",
-    coarseStrokeWidth: 0.5,
-    coarseStrokeColor: "#00000040",
-  },
-  draw: (ctx, positionedGlyph, params, model, controller) => {
-    const { strokeWidth, strokeColor, coarseStrokeWidth, coarseStrokeColor } = params;
-    const coarseSpacing = model.sceneSettings.coarseGridSpacing;
-    let { xMin, yMin, xMax, yMax } = controller.getViewBox();
-
-    // convert view-box to glyph-local coordinates
-    xMin -= positionedGlyph.x;
-    xMax -= positionedGlyph.x;
-    yMin -= positionedGlyph.y;
-    yMax -= positionedGlyph.y;
-
-    // dotted coarse grid
-    //ctx.setLineDash([2, 2]);
-    ctx.lineWidth = coarseStrokeWidth;
-    ctx.strokeStyle = coarseStrokeColor;
-
-    for (let x = Math.floor(xMin / coarseSpacing) * coarseSpacing;
-         x <= Math.ceil(xMax / coarseSpacing) * coarseSpacing;
-         x += coarseSpacing) {
-      strokeLine(ctx, x, yMin, x, yMax);
-    }
-    for (let y = Math.floor(yMin / coarseSpacing) * coarseSpacing;
-         y <= Math.ceil(yMax / coarseSpacing) * coarseSpacing;
-         y += coarseSpacing) {
-      strokeLine(ctx, xMin, y, xMax, y);
-    }
-
-    ctx.setLineDash([]);
-  },
-});
-
-registerVisualizationLayerDefinition({
-  identifier: "fontra.tunni.combined",
-  name: "TUNNI Lines and Points",
-  selectionFunc: glyphSelector("editing"),
-  userSwitchable: true,
-  defaultOn: false,
-  zIndex: 50,
-  screenParameters: {
-    strokeWidth: 1,
-    dashPattern: [5, 5],
-    tunniPointSize: 4
-  },
-  colors: {
-    tunniLineColor: "#0000FF80",  // Semi-transparent blue
-    tunniPointColor: "#0000FF"    // Blue color
-  },
-  colorsDarkMode: {
-    tunniLineColor: "#00FFFF80",  // Semi-transparent light blue
-    tunniPointColor: "#00FFFF"    // Light blue in dark mode
-  },
-  draw: drawTunniCombined
-});
-
-function drawTunniCombined(context, positionedGlyph, parameters, model, controller) {
-  const path = positionedGlyph.glyph.path;
-  
-  // Draw the Tunni lines
-  context.strokeStyle = parameters.tunniLineColor;
- context.lineWidth = parameters.strokeWidth;
-  context.setLineDash(parameters.dashPattern);
-  
-  // Iterate through all contours
- for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
-    // Iterate through all segments in the contour
-    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
-      if (segment.points.length === 4) {
-        // Check if it's a cubic segment
-        const pointTypes = segment.parentPointIndices.map(
-          index => path.pointTypes[index]
-        );
-        
-        // Both control points must be cubic
-        if (pointTypes[1] === 2 && pointTypes[2] === 2) {
-          const [p1, p2, p3, p4] = segment.points;
-          
-          // Draw lines from start to first control and from second control to end
-          // These represent the on-curve to off-curve vectors
-          context.beginPath();
-          context.moveTo(p1.x, p1.y);
-          context.lineTo(p2.x, p2.y);
-          context.stroke();
-          
-          context.beginPath();
-          context.moveTo(p4.x, p4.y);
-          context.lineTo(p3.x, p3.y);
-          context.stroke();
-          
-          // Draw line between control points (the current handle line)
-          context.beginPath();
-          context.moveTo(p2.x, p2.y);
-          context.lineTo(p3.x, p3.y);
-          context.stroke();
-        }
-      }
-    }
- }
-  
-  context.setLineDash([]);
-  
-  // Draw the visual Tunni points
-  context.fillStyle = parameters.tunniPointColor;
-  
-  // Iterate through all contours
- for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
-    // Iterate through all segments in the contour
-    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
-      if (segment.points.length === 4) {
-        // Check if it's a cubic segment
-        const pointTypes = segment.parentPointIndices.map(
-          index => path.pointTypes[index]
-        );
-        
-        // Both control points must be cubic
-        if (pointTypes[1] === 2 && pointTypes[2] === 2) {
-          // Draw the current Tunni point (midpoint between control points)
-          const tunniPoint = calculateTunniPoint(segment.points);
-          if (tunniPoint) {
-            context.beginPath();
-            context.arc(tunniPoint.x, tunniPoint.y, parameters.tunniPointSize, 0, 2 * Math.PI);
-            context.fill();
-          }
-        }
-      }
-    }
-  }
-}
-
-// Register the Actual TUNNI Points visualization layer
-registerVisualizationLayerDefinition({
-  identifier: "fontra.tunni.actual.points",
-  name: "Actual TUNNI Points",
-  selectionFunc: glyphSelector("editing"),
-  userSwitchable: true,
-  defaultOn: false,
-  zIndex: 56,  // Highest of the TUNNI layers for visibility
-  screenParameters: {
-    tunniPointSize: 4
-  },
-  colors: {
-    tunniPointColor: "#FF8C00"  // Orange color
-  },
-  colorsDarkMode: {
-    tunniPointColor: "#FFA500"  // Lighter orange in dark mode
-  },
-  draw: drawActualTunniPoints
-});
-
-function drawActualTunniPoints(context, positionedGlyph, parameters, model, controller) {
-  const path = positionedGlyph.glyph.path;
-  
-  context.fillStyle = parameters.tunniPointColor;
-  
-  // Iterate through all contours
- for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
-    // Iterate through all segments in the contour
-    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
-      if (segment.points.length === 4) {
-        // Check if it's a cubic segment
-        const pointTypes = segment.parentPointIndices.map(
-          index => path.pointTypes[index]
-        );
-        
-        // Both control points must be cubic
-        if (pointTypes[1] === 2 && pointTypes[2] === 2) {
-          // Draw the true Tunni point (intersection of on-curve to off-curve vectors)
-          const trueTunniPoint = calculateTrueTunniPoint(segment.points);
-          if (trueTunniPoint) {
-            context.beginPath();
-            // Draw as a square/diamond shape to distinguish from visual points
-            const size = parameters.tunniPointSize;
-            context.rect(trueTunniPoint.x - size/2, trueTunniPoint.y - size/2, size, size);
-            context.fill();
-          }
-        }
-      }
-    }
-  }
-  
-  context.setLineDash([]);
-}
-
-registerVisualizationLayerDefinition({
-  identifier: "fontra.distance-angle",
-  name: "Distance & Angle",
-  selectionFunc: glyphSelector("editing"),
-  userSwitchable: true,
-  defaultOn: true,
-  zIndex: 500,
-  screenParameters: {
-    strokeWidth: 1,
-  },
-  colors: { strokeColor: "rgba(0, 153, 255, 0.75)" },
-  colorsDarkMode: { strokeColor: "rgba(0, 153, 255, 0.75)" },
-  draw: drawDistanceAngleVisualization,
-});
-
-registerVisualizationLayerDefinition({
-  identifier: "fontra.manhattan-distance",
-  name: "Manhattan Distance",
-  selectionFunc: glyphSelector("editing"),
-  userSwitchable: true,
-  defaultOn: true,
-  zIndex: 500,
-  screenParameters: {
-    strokeWidth: 1,
-  },
-  colors: { strokeColor: "rgba(0, 153, 255, 0.75)" },
-  colorsDarkMode: { strokeColor: "rgba(0, 153, 255, 0.75)" },
-  draw: drawManhattanDistanceVisualization,
-});
-
-registerVisualizationLayerDefinition({
-  identifier: "fontra.tunni.labels",
-  name: "Tunni Labels",
-  selectionFunc: glyphSelector("editing"),
-  userSwitchable: true,
-  defaultOn: true,
-  zIndex: 500,
-  screenParameters: {
-    strokeWidth: 1,
-  },
-  colors: { strokeColor: "rgba(44, 28, 44, 1)", badgeColor: "#FF00FF", textColor: "white" },
-  colorsDarkMode: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
-  draw: drawTunniLabels,
-});

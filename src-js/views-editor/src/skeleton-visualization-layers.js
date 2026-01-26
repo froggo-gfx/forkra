@@ -2,7 +2,6 @@ import { parseSelection, withSavedState } from "@fontra/core/utils.js";
 import {
   getSkeletonData,
   calculateNormalAtSkeletonPoint,
-  generateSampledOffsetPoints,
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
 import {
@@ -14,6 +13,11 @@ import {
   fillRoundNode,
   fillSquareNode,
 } from "./visualization-layer-definitions.js";
+import {
+  buildSegmentsFromSkeletonPoints,
+  calculateSkeletonTunniPoint,
+  calculateSkeletonTrueTunniPoint,
+} from "./skeleton-tunni-calculations.js";
 
 /**
  * Get skeleton data from a positioned glyph's editing layer.
@@ -174,6 +178,8 @@ registerVisualizationLayerDefinition({
 
     for (const contour of skeletonData.contours) {
       const defaultWidth = contour.defaultWidth || 20;
+      const singleSided = contour.singleSided ?? false;
+      const singleSidedDirection = contour.singleSidedDirection ?? "left";
 
       for (let i = 0; i < contour.points.length; i++) {
         const point = contour.points[i];
@@ -186,14 +192,36 @@ registerVisualizationLayerDefinition({
         const leftHW = getPointHalfWidth(point, defaultWidth, "left");
         const rightHW = getPointHalfWidth(point, defaultWidth, "right");
 
-        // Quantize to UPM grid (same as generated contour points)
-        strokeLine(
-          context,
-          Math.round(point.x - normal.x * rightHW),
-          Math.round(point.y - normal.y * rightHW),
-          Math.round(point.x + normal.x * leftHW),
-          Math.round(point.y + normal.y * leftHW)
-        );
+        if (singleSided) {
+          // Single-sided: line from skeleton point to contour edge
+          const totalWidth = leftHW + rightHW;
+          if (singleSidedDirection === "left") {
+            strokeLine(
+              context,
+              Math.round(point.x),
+              Math.round(point.y),
+              Math.round(point.x + normal.x * totalWidth),
+              Math.round(point.y + normal.y * totalWidth)
+            );
+          } else {
+            strokeLine(
+              context,
+              Math.round(point.x),
+              Math.round(point.y),
+              Math.round(point.x - normal.x * totalWidth),
+              Math.round(point.y - normal.y * totalWidth)
+            );
+          }
+        } else {
+          // Normal mode: line across both sides
+          strokeLine(
+            context,
+            Math.round(point.x - normal.x * rightHW),
+            Math.round(point.y - normal.y * rightHW),
+            Math.round(point.x + normal.x * leftHW),
+            Math.round(point.y + normal.y * leftHW)
+          );
+        }
       }
     }
   },
@@ -250,6 +278,8 @@ registerVisualizationLayerDefinition({
     for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
       const contour = skeletonData.contours[contourIndex];
       const defaultWidth = contour.defaultWidth || 20;
+      const singleSided = contour.singleSided ?? false;
+      const singleSidedDirection = contour.singleSidedDirection ?? "left";
 
       for (let pointIndex = 0; pointIndex < contour.points.length; pointIndex++) {
         const point = contour.points[pointIndex];
@@ -261,39 +291,68 @@ registerVisualizationLayerDefinition({
         const leftHW = getPointHalfWidth(point, defaultWidth, "left");
         const rightHW = getPointHalfWidth(point, defaultWidth, "right");
 
-        // Calculate rib point positions (quantized to UPM grid like generated points)
-        const leftRibPoint = {
-          x: Math.round(point.x + normal.x * leftHW),
-          y: Math.round(point.y + normal.y * leftHW),
-        };
-        const rightRibPoint = {
-          x: Math.round(point.x - normal.x * rightHW),
-          y: Math.round(point.y - normal.y * rightHW),
-        };
-
         // Selection keys for this rib point pair
         const leftKey = `${contourIndex}/${pointIndex}/left`;
         const rightKey = `${contourIndex}/${pointIndex}/right`;
 
-        // Draw left rib point
-        if (selectedRibPoints?.has(leftKey)) {
-          context.strokeStyle = parameters.selectedColor;
-        } else if (hoveredRibPoints?.has(leftKey)) {
-          context.strokeStyle = parameters.hoveredColor;
-        } else {
-          context.strokeStyle = parameters.strokeColor;
-        }
-        strokeDiamondNode(context, leftRibPoint, parameters.pointSize);
+        if (singleSided) {
+          // Single-sided mode: only one rib point at total width
+          const totalWidth = leftHW + rightHW;
+          let ribPoint, ribKey;
 
-        // Draw right rib point
-        if (selectedRibPoints?.has(rightKey)) {
-          context.strokeStyle = parameters.selectedColor;
-        } else if (hoveredRibPoints?.has(rightKey)) {
-          context.strokeStyle = parameters.hoveredColor;
+          if (singleSidedDirection === "left") {
+            ribPoint = {
+              x: Math.round(point.x + normal.x * totalWidth),
+              y: Math.round(point.y + normal.y * totalWidth),
+            };
+            ribKey = leftKey;
+          } else {
+            ribPoint = {
+              x: Math.round(point.x - normal.x * totalWidth),
+              y: Math.round(point.y - normal.y * totalWidth),
+            };
+            ribKey = rightKey;
+          }
+
+          if (selectedRibPoints?.has(ribKey)) {
+            context.strokeStyle = parameters.selectedColor;
+          } else if (hoveredRibPoints?.has(ribKey)) {
+            context.strokeStyle = parameters.hoveredColor;
+          } else {
+            context.strokeStyle = parameters.strokeColor;
+          }
+          strokeDiamondNode(context, ribPoint, parameters.pointSize);
         } else {
-          context.strokeStyle = parameters.strokeColor;
+          // Normal mode: two rib points
+          const leftRibPoint = {
+            x: Math.round(point.x + normal.x * leftHW),
+            y: Math.round(point.y + normal.y * leftHW),
+          };
+          const rightRibPoint = {
+            x: Math.round(point.x - normal.x * rightHW),
+            y: Math.round(point.y - normal.y * rightHW),
+          };
+
+          // Draw left rib point
+          if (selectedRibPoints?.has(leftKey)) {
+            context.strokeStyle = parameters.selectedColor;
+          } else if (hoveredRibPoints?.has(leftKey)) {
+            context.strokeStyle = parameters.hoveredColor;
+          } else {
+            context.strokeStyle = parameters.strokeColor;
+          }
+          strokeDiamondNode(context, leftRibPoint, parameters.pointSize);
+
+          // Draw right rib point
+          if (selectedRibPoints?.has(rightKey)) {
+            context.strokeStyle = parameters.selectedColor;
+          } else if (hoveredRibPoints?.has(rightKey)) {
+            context.strokeStyle = parameters.hoveredColor;
+          } else {
+            context.strokeStyle = parameters.strokeColor;
+          }
+          strokeDiamondNode(context, rightRibPoint, parameters.pointSize);
         }
-        strokeDiamondNode(context, rightRibPoint, parameters.pointSize);
       }
     }
   },
@@ -687,24 +746,104 @@ registerVisualizationLayerDefinition({
   },
 });
 
-// Sampled offset points layer (for debugging/comparison)
+// ============================================================
+// Skeleton Handle Labels - distance, angle, tension visualization
+// ============================================================
+
+const SKELETON_LABEL_FONT_SIZE = 6;
+const SKELETON_LABEL_PADDING = 3;
+
+/**
+ * Calculate distance and angle between two points.
+ * Angle is normalized to 0-90° relative to horizontal baseline.
+ */
+function calculateDistanceAndAngle(point1, point2) {
+  const dx = point2.x - point1.x;
+  const dy = point2.y - point1.y;
+  const dist = Math.hypot(dx, dy);
+
+  // Calculate angle from horizontal, normalized to 0-90°
+  let angle = Math.abs(Math.atan2(dy, dx) * (180 / Math.PI));
+  if (angle > 90) {
+    angle = 180 - angle;
+  }
+
+  return { distance: dist, angle };
+}
+
+/**
+ * Calculate tension for a cubic bezier handle.
+ * Tension = distance(onCurve, offCurve) / distance(onCurve, tunniPoint)
+ */
+function calculateTension(onCurveA, offCurveA, offCurveB, onCurveB) {
+  // Calculate intersection of lines (onCurveA->offCurveA) and (onCurveB->offCurveB)
+  const dx1 = offCurveA.x - onCurveA.x;
+  const dy1 = offCurveA.y - onCurveA.y;
+  const dx2 = offCurveB.x - onCurveB.x;
+  const dy2 = offCurveB.y - onCurveB.y;
+
+  const det = dx1 * dy2 - dy1 * dx2;
+  if (Math.abs(det) < 1e-10) {
+    // Lines are parallel, use simple ratio
+    const distA = Math.hypot(dx1, dy1);
+    const distTotal = Math.hypot(onCurveB.x - onCurveA.x, onCurveB.y - onCurveA.y);
+    return distTotal > 0 ? (distA / distTotal) * 2 : 0;
+  }
+
+  // Calculate tunni point (intersection)
+  const dx3 = onCurveA.x - onCurveB.x;
+  const dy3 = onCurveA.y - onCurveB.y;
+  const t = (dy3 * dx2 - dx3 * dy2) / det;
+
+  const tunniX = onCurveA.x + t * dx1;
+  const tunniY = onCurveA.y + t * dy1;
+
+  const distToOffCurve = Math.hypot(offCurveA.x - onCurveA.x, offCurveA.y - onCurveA.y);
+  const distToTunni = Math.hypot(tunniX - onCurveA.x, tunniY - onCurveA.y);
+
+  return distToTunni > 0 ? distToOffCurve / distToTunni : 0;
+}
+
+/**
+ * Draw label text near a point (no background badge).
+ */
+function drawLabelText(context, point, text, offsetX, offsetY, parameters) {
+  if (!text) return;
+
+  const lines = text.split("\n");
+  const lineHeight = SKELETON_LABEL_FONT_SIZE + 2;
+
+  const x = point.x + offsetX;
+  const y = point.y + offsetY;
+
+  // Draw text directly (dark color, no background)
+  context.save();
+  context.fillStyle = parameters.textColor;
+  context.font = `${SKELETON_LABEL_FONT_SIZE}px fontra-ui-regular, sans-serif`;
+  context.textAlign = "left";
+  context.textBaseline = "middle";
+  context.scale(1, -1); // Flip for canvas coordinate system
+
+  for (let i = 0; i < lines.length; i++) {
+    const textY = -(y + (i - (lines.length - 1) / 2) * lineHeight);
+    context.fillText(lines[i], x + SKELETON_LABEL_PADDING, textY);
+  }
+  context.restore();
+}
+
+// Skeleton handle labels layer
 registerVisualizationLayerDefinition({
-  identifier: "fontra.skeleton.sampled.offset",
-  name: "Skeleton Sampled Offset Points",
+  identifier: "fontra.skeleton.handle.labels",
+  name: "Skeleton Handle Labels",
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
-  defaultOn: true,
-  zIndex: 440, // Below centerline but visible
-  screenParameters: {
-    pointRadius: 2,
-  },
+  defaultOn: false,
+  zIndex: 560,
   colors: {
-    leftColor: "rgba(128, 128, 128, 0.5)",
-    rightColor: "rgba(128, 128, 128, 0.5)",
+    textColor: "rgba(40, 40, 80, 0.9)",
   },
   colorsDarkMode: {
-    leftColor: "rgba(180, 180, 180, 0.5)",
-    rightColor: "rgba(180, 180, 180, 0.5)",
+    textColor: "rgba(200, 200, 240, 0.9)",
   },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
@@ -712,20 +851,193 @@ registerVisualizationLayerDefinition({
       return;
     }
 
-    for (const contour of skeletonData.contours) {
-      const sampledPoints = generateSampledOffsetPoints(contour);
+    // Get visibility settings from model
+    const showDistance = model.sceneSettings?.showSkeletonHandleDistance ?? true;
+    const showTension = model.sceneSettings?.showSkeletonHandleTension ?? true;
+    const showAngle = model.sceneSettings?.showSkeletonHandleAngle ?? true;
 
-      // Draw left side sampled points
-      context.fillStyle = parameters.leftColor;
-      for (const point of sampledPoints.left) {
-        fillRoundNode(context, point, parameters.pointRadius);
-      }
+    // If nothing is enabled, skip
+    if (!showDistance && !showTension && !showAngle) {
+      return;
+    }
 
-      // Draw right side sampled points
-      context.fillStyle = parameters.rightColor;
-      for (const point of sampledPoints.right) {
-        fillRoundNode(context, point, parameters.pointRadius);
+    for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
+      const contour = skeletonData.contours[contourIdx];
+      const points = contour.points;
+      const numPoints = points.length;
+      const isClosed = contour.isClosed;
+
+      for (let i = 0; i < numPoints; i++) {
+        const point = points[i];
+
+        // Only process off-curve (handle) points
+        if (!point.type) continue;
+
+        // Find the connected on-curve point
+        // Check previous and next points
+        const prevIdx = (i - 1 + numPoints) % numPoints;
+        const nextIdx = (i + 1) % numPoints;
+        const prevPoint = points[prevIdx];
+        const nextPoint = points[nextIdx];
+
+        let onCurvePoint = null;
+        let otherOffCurve = null;
+        let otherOnCurve = null;
+
+        // Determine which on-curve this handle belongs to
+        if (prevPoint && !prevPoint.type) {
+          // Previous point is on-curve - this is an outgoing handle
+          onCurvePoint = prevPoint;
+          // Look for the paired off-curve and next on-curve
+          if (nextPoint?.type && points[(i + 2) % numPoints] && !points[(i + 2) % numPoints].type) {
+            otherOffCurve = nextPoint;
+            otherOnCurve = points[(i + 2) % numPoints];
+          }
+        } else if (nextPoint && !nextPoint.type) {
+          // Next point is on-curve - this is an incoming handle
+          onCurvePoint = nextPoint;
+          // The paired off-curve is previous
+          if (prevPoint?.type) {
+            const prevPrevIdx = (i - 2 + numPoints) % numPoints;
+            if (points[prevPrevIdx] && !points[prevPrevIdx].type) {
+              otherOffCurve = prevPoint;
+              otherOnCurve = points[prevPrevIdx];
+            }
+          }
+        } else {
+          // Fallback: find nearest on-curve
+          for (let j = 1; j < numPoints; j++) {
+            const idx = (i - j + numPoints) % numPoints;
+            if (!points[idx].type) {
+              onCurvePoint = points[idx];
+              break;
+            }
+          }
+        }
+
+        if (!onCurvePoint) continue;
+
+        // Calculate metrics
+        const { distance, angle } = calculateDistanceAndAngle(onCurvePoint, point);
+
+        // Build label text based on visibility settings
+        const labelParts = [];
+
+        if (showDistance) {
+          labelParts.push(distance.toFixed(1));
+        }
+
+        // Calculate tension if we have a full cubic segment and tension is enabled
+        if (showTension && otherOffCurve && otherOnCurve) {
+          const tension = calculateTension(onCurvePoint, point, otherOffCurve, otherOnCurve);
+          labelParts.push(tension.toFixed(2));
+        }
+
+        if (showAngle) {
+          labelParts.push(`${angle.toFixed(1)}°`);
+        }
+
+        if (labelParts.length === 0) continue;
+
+        const labelText = labelParts.join("\n");
+
+        // Draw label text offset from the handle point
+        drawLabelText(context, point, labelText, 10, 0, parameters);
       }
     }
   },
 });
+
+// ============================================================
+// Skeleton Tunni Lines and Points visualization
+// ============================================================
+
+/**
+ * Draw a filled diamond node.
+ */
+function fillDiamondNode(context, pt, size) {
+  const halfSize = size / 2;
+  context.beginPath();
+  context.moveTo(pt.x, pt.y - halfSize);
+  context.lineTo(pt.x + halfSize, pt.y);
+  context.lineTo(pt.x, pt.y + halfSize);
+  context.lineTo(pt.x - halfSize, pt.y);
+  context.closePath();
+  context.fill();
+}
+
+// Skeleton Tunni Lines and Points Layer
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.tunni",
+  name: "Skeleton Tunni Lines",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: false,
+  zIndex: 548, // Between handles (545) and nodes (550)
+  screenParameters: {
+    strokeWidth: 1,
+    dashPattern: [5, 5],
+    tunniPointSize: 5,
+    trueTunniPointSize: 4,
+  },
+  colors: {
+    lineColor: "#0000FF80", // Semi-transparent blue
+    tunniPointColor: "#0000FF", // Blue for midpoint
+    trueTunniPointColor: "#FF8C00", // Orange for intersection
+  },
+  colorsDarkMode: {
+    lineColor: "#00FFFF80", // Semi-transparent cyan
+    tunniPointColor: "#00FFFF", // Cyan for midpoint
+    trueTunniPointColor: "#FFA500", // Orange for intersection
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
+    if (!skeletonData?.contours?.length) {
+      return;
+    }
+
+    // Draw Tunni lines and points for each contour
+    for (const contour of skeletonData.contours) {
+      const segments = buildSegmentsFromSkeletonPoints(contour.points, contour.isClosed);
+
+      for (const segment of segments) {
+        // Only draw for cubic segments (2 control points)
+        if (segment.controlPoints.length !== 2) continue;
+
+        const [cp1, cp2] = segment.controlPoints;
+        const { startPoint, endPoint } = segment;
+
+        // Draw dashed lines from on-curve to off-curve points
+        context.strokeStyle = parameters.lineColor;
+        context.lineWidth = parameters.strokeWidth;
+        context.setLineDash(parameters.dashPattern);
+
+        // Line from start on-curve to first control point
+        strokeLine(context, startPoint.x, startPoint.y, cp1.x, cp1.y);
+
+        // Line from end on-curve to second control point
+        strokeLine(context, endPoint.x, endPoint.y, cp2.x, cp2.y);
+
+        // Line between control points
+        strokeLine(context, cp1.x, cp1.y, cp2.x, cp2.y);
+
+        context.setLineDash([]);
+
+        // Draw Tunni Point (midpoint) - blue circle
+        const tunniPt = calculateSkeletonTunniPoint(segment);
+        if (tunniPt) {
+          context.fillStyle = parameters.tunniPointColor;
+          fillRoundNode(context, tunniPt, parameters.tunniPointSize);
+        }
+
+        // Draw True Tunni Point (intersection) - orange diamond
+        const trueTunniPt = calculateSkeletonTrueTunniPoint(segment);
+        if (trueTunniPt) {
+          context.fillStyle = parameters.trueTunniPointColor;
+          fillDiamondNode(context, trueTunniPt, parameters.trueTunniPointSize);
+        }
+      }
+    }
+  },
+});
+

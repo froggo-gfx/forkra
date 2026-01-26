@@ -15,7 +15,6 @@ import { translate, translatePlural } from "@fontra/core/localization.js";
 import { MouseTracker } from "@fontra/core/mouse-tracker.js";
 import { ObservableController } from "@fontra/core/observable-object.js";
 import {
-  addOverlapToPath,
   connectContours,
   scalePoint,
   splitPathAtPointIndices,
@@ -51,8 +50,6 @@ import * as vector from "@fontra/core/vector.js";
 import { dialog, message } from "@fontra/web-components/modal-dialog.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import { SceneModel, getSelectedGlyphName } from "./scene-model.js";
-//// grid
-import { toggleMagneticSnap } from "./edit-behavior.js";
 
 export class SceneController {
   constructor(
@@ -67,8 +64,6 @@ export class SceneController {
     this.autoViewBox = true;
 
     this.setupSceneSettings();
-    //// grid
-    this.sceneSettingsController.setItem("coarseGridSpacing", 10);
     this.sceneSettings = this.sceneSettingsController.model;
     this.visualizationLayersSettings = visualizationLayersSettings;
 
@@ -119,10 +114,6 @@ export class SceneController {
       backgroundImagesAreLocked: true,
       backgroundLayers: {},
       editingLayers: {},
-      gridSnapEnabled: true,  // Default to enabled
-      showTunniDistance: true,
-      showTunniTension: true,
-      showTunniAngle: false,
     });
     this.sceneSettings = this.sceneSettingsController.model;
 
@@ -521,16 +512,6 @@ export class SceneController {
   }
 
   setupSettingsListeners() {
-    //// grid
-    this.sceneSettingsController.addKeyListener("coarseGridSpacing", () =>
-    this.canvasController.requestUpdate()
-    );
-
-    window.coarseGridSpacing = this.sceneSettings.coarseGridSpacing || 1;
-    this.sceneSettingsController.addKeyListener("coarseGridSpacing", (event) => {
-    window.coarseGridSpacing = event.newValue;
-    });
-
     this.sceneSettingsController.addKeyListener("selectedGlyph", (event) => {
       this._resetStoredGlyphPosition();
     });
@@ -607,31 +588,6 @@ export class SceneController {
   setupContextMenuActions() {
     const topic = "0030-action-topics.menu.edit";
 
-    //// grid
-    registerAction(
-        "action.decrease-coarse-grid",
-        { titleKey: "action.decrease-coarse-grid", defaultShortCuts: [{ baseKey: "f" }] },
-        () => {
-        const v = this.sceneSettings.coarseGridSpacing;
-        if (v > 5) this.sceneSettingsController.setItem("coarseGridSpacing", v - 5);
-        }
-        );
-    
-        registerAction(
-        "action.increase-coarse-grid",
-        { titleKey: "action.increase-coarse-grid", defaultShortCuts: [{ baseKey: "g" }] },
-        () => {
-        const v = this.sceneSettings.coarseGridSpacing;
-        if (v < 40) this.sceneSettingsController.setItem("coarseGridSpacing", v + 5);
-        }
-        );
-    
-        registerAction(
-      "action.toggle-magnetic-snap",
-      { titleKey: "action.toggle-magnetic-snap", defaultShortCuts: [{ baseKey: "g", shiftKey: true }] },
-      () => toggleMagneticSnap()
-    );
-
     registerAction(
       "action.join-contours",
       {
@@ -666,6 +622,34 @@ export class SceneController {
     );
 
     registerAction(
+      "action.join-skeleton-contours",
+      { topic },
+      () => this.doJoinSkeletonContours(),
+      () => this._getJoinableSkeletonPoints() !== null
+    );
+
+    registerAction(
+      "action.close-skeleton-contour",
+      { topic },
+      () => this.doCloseSkeletonContour(),
+      () => this._getClosableSkeletonContour() !== null
+    );
+
+    registerAction(
+      "action.reverse-skeleton-contour",
+      { topic },
+      () => this.doReverseSkeletonContour(),
+      () => this._hasSkeletonContourInSelection()
+    );
+
+    registerAction(
+      "action.realize-skeleton-projection",
+      { topic },
+      () => this.doRealizeSkeletonProjection(),
+      () => this._hasSkeletonDataInGlyph()
+    );
+
+    registerAction(
       "action.reverse-contour",
       { topic },
       () => this.doReverseSelectedContours(),
@@ -697,16 +681,6 @@ export class SceneController {
         this.visualizationLayersSettings.model["fontra.background-image"] = true;
       }
     });
-
-    registerAction(
-      "action.add-overlap",
-      {
-        topic,
-        defaultShortCuts: [{ baseKey: "o", commandKey: true, shiftKey: true }],
-      },
-      () => this.doAddOverlap(),
-      () => this.contextMenuState.pointSelection?.length
-    );
   }
 
   setAutoViewBox() {
@@ -888,8 +862,6 @@ export class SceneController {
       const layerInfo = Object.entries(
         this.getEditingLayerFromGlyphLayers(glyph.layers)
       ).map(([layerName, layerGlyph]) => {
-        //// grid
-        window._sceneController = this;   // <-- add this
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           this.selection,
@@ -995,10 +967,12 @@ export class SceneController {
       point: pointSelection,
       component: componentSelection,
       skeletonPoint: skeletonPointSelection,
+      skeletonSegment: skeletonSegmentSelection,
     } = parseSelection(relevantSelection);
     this.contextMenuState.pointSelection = pointSelection;
     this.contextMenuState.componentSelection = componentSelection;
     this.contextMenuState.skeletonPointSelection = skeletonPointSelection;
+    this.contextMenuState.skeletonSegmentSelection = skeletonSegmentSelection;
 
     const glyphController = this.sceneModel.getSelectedPositionedGlyph().glyph;
     this.contextMenuState.openContourSelection = glyphController.canEdit
@@ -1026,6 +1000,10 @@ export class SceneController {
       },
       { actionIdentifier: "action.break-contour" },
       { actionIdentifier: "action.break-skeleton-contour" },
+      { actionIdentifier: "action.join-skeleton-contours" },
+      { actionIdentifier: "action.close-skeleton-contour" },
+      { actionIdentifier: "action.reverse-skeleton-contour" },
+      { actionIdentifier: "action.realize-skeleton-projection" },
       { actionIdentifier: "action.reverse-contour" },
       { actionIdentifier: "action.set-contour-start" },
       {
@@ -1389,7 +1367,6 @@ export class SceneController {
         glyphLocation: this.sceneSettings.glyphLocation,
         editingLayers: this.sceneSettings.editingLayers,
         editLayerName: this.sceneSettings.editLayerName,
-        gridSnapEnabled: this.sceneSettings.gridSnapEnabled,
       };
       if (!this._cancelGlyphEditing) {
         editContext.editFinal(
@@ -1488,9 +1465,6 @@ export class SceneController {
         this.sceneSettings.glyphLocation = { ...undoInfo.glyphLocation };
         this.sceneSettings.editingLayers = undoInfo.editingLayers;
         this.sceneSettings.editLayerName = undoInfo.editLayerName;
-        if (undoInfo.gridSnapEnabled !== undefined) {
-          this.sceneSettings.gridSnapEnabled = undoInfo.gridSnapEnabled;
-        }
       }
       await this.sceneModel.updateScene();
       this.canvasController.requestUpdate();
@@ -1635,6 +1609,137 @@ export class SceneController {
     return false;
   }
 
+  _getClosableSkeletonContour() {
+    // Check if we can close a single open skeleton contour
+    // (two endpoints selected from the same contour, at same coordinates)
+    const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
+    if (!skeletonPointSel || skeletonPointSel.size !== 2) {
+      return null;
+    }
+
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const editLayerName = this.editingLayerNames?.[0];
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (!skeletonData?.contours) {
+      return null;
+    }
+
+    const selections = [...skeletonPointSel];
+    const parsed = selections.map((selKey) => {
+      const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+      return { contourIdx, pointIdx, selKey };
+    });
+
+    // Must be from the SAME contour
+    if (parsed[0].contourIdx !== parsed[1].contourIdx) {
+      return null;
+    }
+
+    const contourIdx = parsed[0].contourIdx;
+    const contour = skeletonData.contours[contourIdx];
+
+    // Contour must be open
+    if (!contour || contour.isClosed) {
+      return null;
+    }
+
+    // Both points must be endpoints (first and last)
+    const points = contour.points;
+    if (points.length < 2) {
+      return null;
+    }
+
+    const indices = [parsed[0].pointIdx, parsed[1].pointIdx].sort((a, b) => a - b);
+    if (indices[0] !== 0 || indices[1] !== points.length - 1) {
+      return null;
+    }
+
+    // Get the actual endpoint coordinates
+    const point0 = points[0];
+    const point1 = points[points.length - 1];
+
+    // Check if coordinates match
+    const tolerance = 5;
+    if (Math.abs(point0.x - point1.x) > tolerance || Math.abs(point0.y - point1.y) > tolerance) {
+      return null;
+    }
+
+    return { contourIdx, contour };
+  }
+
+  _getJoinableSkeletonPoints() {
+    // Check if we can join two different open skeleton contours
+    const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
+    if (!skeletonPointSel || skeletonPointSel.size !== 2) {
+      return null;
+    }
+
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const editLayerName = this.editingLayerNames?.[0];
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (!skeletonData?.contours) {
+      return null;
+    }
+
+    const selections = [...skeletonPointSel];
+    const parsed = selections.map((selKey) => {
+      const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+      return { contourIdx, pointIdx, selKey };
+    });
+
+    // Must be from different contours
+    if (parsed[0].contourIdx === parsed[1].contourIdx) {
+      return null;
+    }
+
+    // Both contours must be open
+    const contour0 = skeletonData.contours[parsed[0].contourIdx];
+    const contour1 = skeletonData.contours[parsed[1].contourIdx];
+    if (!contour0 || !contour1 || contour0.isClosed || contour1.isClosed) {
+      return null;
+    }
+
+    // Both points must be endpoints (first or last point of open contour)
+    const isEndpoint = (contour, pointIdx) => {
+      const points = contour.points;
+      if (points.length === 0) return false;
+      return pointIdx === 0 || pointIdx === points.length - 1;
+    };
+
+    if (!isEndpoint(contour0, parsed[0].pointIdx) || !isEndpoint(contour1, parsed[1].pointIdx)) {
+      return null;
+    }
+
+    // Get the actual points
+    const point0 = contour0.points[parsed[0].pointIdx];
+    const point1 = contour1.points[parsed[1].pointIdx];
+    if (!point0 || !point1) {
+      return null;
+    }
+
+    // Check if coordinates match
+    const tolerance = 5;
+    if (Math.abs(point0.x - point1.x) > tolerance || Math.abs(point0.y - point1.y) > tolerance) {
+      return null;
+    }
+
+    return parsed;
+  }
+
+  _hasSkeletonContourInSelection() {
+    const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
+    const skeletonSegmentSel = this.contextMenuState.skeletonSegmentSelection;
+    return skeletonPointSel?.size > 0 || skeletonSegmentSel?.size > 0;
+  }
+
+  _hasSkeletonDataInGlyph() {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[this.editingLayerNames?.[0]];
+    return !!layer?.customData?.["fontra.skeleton"];
+  }
+
   async doBreakSkeletonContour() {
     const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
     if (!skeletonPointSel?.size) {
@@ -1664,14 +1769,17 @@ export class SceneController {
         const points = contour.points;
         const rotatedPoints = [...points.slice(pointIdx), ...points.slice(0, pointIdx)];
 
-        // Remove trailing off-curve points (handles that were going back to start)
-        while (rotatedPoints.length > 0 && rotatedPoints[rotatedPoints.length - 1].type) {
-          rotatedPoints.pop();
-        }
-
-        // Remove leading off-curve points (shouldn't happen, but safety check)
-        while (rotatedPoints.length > 0 && rotatedPoints[0].type) {
-          rotatedPoints.shift();
+        // Add a copy of the break point at the end to preserve all segments.
+        // The closed contour's segment from the last on-curve point back to
+        // the break point needs to connect to a physical endpoint.
+        const breakPoint = rotatedPoints[0];
+        if (!breakPoint.type) {
+          // Deep copy the break point for the end
+          const endPoint = JSON.parse(JSON.stringify(breakPoint));
+          // Reset smooth on endpoints - open contour endpoints don't have continuity on both sides
+          delete rotatedPoints[0].smooth;
+          delete endPoint.smooth;
+          rotatedPoints.push(endPoint);
         }
 
         contour.points = rotatedPoints;
@@ -1727,6 +1835,270 @@ export class SceneController {
       return {
         changes: combinedChange,
         undoLabel: translate("action.break-skeleton-contour"),
+      };
+    });
+  }
+
+  async doJoinSkeletonContours() {
+    const joinablePoints = this._getJoinableSkeletonPoints();
+    if (!joinablePoints) {
+      return;
+    }
+
+    await this.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = this.editingLayerNames?.[0];
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = layer?.customData?.["fontra.skeleton"];
+      if (!skeletonData?.contours) {
+        return;
+      }
+
+      // Deep clone for manipulation
+      skeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+      // Sort so we process the higher index first (to avoid index shifting issues)
+      const sorted = [...joinablePoints].sort((a, b) => b.contourIdx - a.contourIdx);
+      const [second, first] = sorted; // second has higher index
+
+      const contour1 = skeletonData.contours[first.contourIdx];
+      const contour2 = skeletonData.contours[second.contourIdx];
+
+      // Determine if points are at start or end of their contours
+      const isAtStart = (contour, pointIdx) => {
+        return pointIdx === 0;
+      };
+
+      const point1AtStart = isAtStart(contour1, first.pointIdx);
+      const point2AtStart = isAtStart(contour2, second.pointIdx);
+
+      // Prepare points arrays for joining
+      let points1 = [...contour1.points];
+      let points2 = [...contour2.points];
+
+      // If point1 is at start, reverse contour1 so the join point is at the end
+      if (point1AtStart) {
+        points1.reverse();
+      }
+
+      // If point2 is at end, reverse contour2 so the join point is at the start
+      if (!point2AtStart) {
+        points2.reverse();
+      }
+
+      // Remove the duplicate point from contour2 (the first point which matches the last of contour1)
+      points2.shift();
+
+      // Merge: contour1's points + contour2's points (without the duplicate)
+      const mergedPoints = [...points1, ...points2];
+
+      // Update contour1 with merged points
+      contour1.points = mergedPoints;
+
+      // Remove contour2
+      skeletonData.contours.splice(second.contourIdx, 1);
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(newIndex, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      // Record changes
+      const changes = [];
+
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        regenerateOutline(sg, skeletonData);
+      });
+      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData["fontra.skeleton"] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+      const combinedChange = new ChangeCollector().concat(...changes);
+      await sendIncrementalChange(combinedChange.change);
+
+      this.selection = new Set();
+
+      return {
+        changes: combinedChange,
+        undoLabel: translate("action.join-skeleton-contours"),
+      };
+    });
+  }
+
+  async doCloseSkeletonContour() {
+    const closable = this._getClosableSkeletonContour();
+    if (!closable) {
+      return;
+    }
+
+    await this.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = this.editingLayerNames?.[0];
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = layer?.customData?.["fontra.skeleton"];
+      if (!skeletonData?.contours) {
+        return;
+      }
+
+      // Deep clone for manipulation
+      skeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+      const contour = skeletonData.contours[closable.contourIdx];
+
+      // Remove the last point (duplicate of the first)
+      contour.points.pop();
+
+      // Close the contour
+      contour.isClosed = true;
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(newIndex, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      // Record changes
+      const changes = [];
+
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        regenerateOutline(sg, skeletonData);
+      });
+      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData["fontra.skeleton"] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+      const combinedChange = new ChangeCollector().concat(...changes);
+      await sendIncrementalChange(combinedChange.change);
+
+      this.selection = new Set();
+
+      return {
+        changes: combinedChange,
+        undoLabel: translate("action.close-skeleton-contour"),
+      };
+    });
+  }
+
+  async doReverseSkeletonContour() {
+    const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
+    const skeletonSegmentSel = this.contextMenuState.skeletonSegmentSelection;
+    if (!skeletonPointSel?.size && !skeletonSegmentSel?.size) {
+      return;
+    }
+
+    await this.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = this.editingLayerNames?.[0];
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = layer?.customData?.["fontra.skeleton"];
+      if (!skeletonData?.contours) {
+        return;
+      }
+
+      // Deep clone for manipulation
+      skeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+      // Collect unique skeleton contour indices from point and segment selection
+      const skeletonContourIndices = new Set();
+      if (skeletonPointSel) {
+        for (const selKey of skeletonPointSel) {
+          const [contourIdx] = selKey.split("/").map(Number);
+          skeletonContourIndices.add(contourIdx);
+        }
+      }
+      if (skeletonSegmentSel) {
+        for (const selKey of skeletonSegmentSel) {
+          const [contourIdx] = selKey.split("/").map(Number);
+          skeletonContourIndices.add(contourIdx);
+        }
+      }
+
+      if (skeletonContourIndices.size === 0) {
+        return;
+      }
+
+      // Toggle reversed flag on selected skeleton contours
+      for (const contourIdx of skeletonContourIndices) {
+        const contour = skeletonData.contours[contourIdx];
+        if (contour) {
+          contour.reversed = !contour.reversed;
+        }
+      }
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(newIndex, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      // Record changes
+      const changes = [];
+
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        regenerateOutline(sg, skeletonData);
+      });
+      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData["fontra.skeleton"] = skeletonData;
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+      const combinedChange = new ChangeCollector().concat(...changes);
+      await sendIncrementalChange(combinedChange.change);
+
+      return {
+        changes: combinedChange,
+        undoLabel: translate("action.reverse-skeleton-contour"),
       };
     });
   }
@@ -1795,68 +2167,109 @@ export class SceneController {
     });
   }
 
-  async doAddOverlap() {
-    const { point: pointSelection } = parseSelection(this.selection);
-    await this.editLayersAndRecordChanges((layerGlyphs) => {
-      for (const layerGlyph of Object.values(layerGlyphs)) {
-        // Debugging: Log what we're working with
-        console.log('Processing layerGlyph:', layerGlyph);
-        console.log('Layer name:', layerGlyph.name);
-        console.log('Path object:', layerGlyph.path);
-        
-        const path = layerGlyph.path;
-        // Validate that path is a VarPackedPath instance with all required methods
-        if (!path || typeof path !== 'object') {
-          console.warn('Invalid path object for addOverlap, skipping - not an object');
-          continue;
+  async doRealizeSkeletonProjection() {
+    // Get selected skeleton contour indices
+    const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
+    const skeletonSegmentSel = this.contextMenuState.skeletonSegmentSelection;
+
+    const skeletonContourIndicesToRealize = new Set();
+    if (skeletonPointSel) {
+      for (const selKey of skeletonPointSel) {
+        const [contourIdx] = selKey.split("/").map(Number);
+        skeletonContourIndicesToRealize.add(contourIdx);
+      }
+    }
+    if (skeletonSegmentSel) {
+      for (const selKey of skeletonSegmentSel) {
+        const [contourIdx] = selKey.split("/").map(Number);
+        skeletonContourIndicesToRealize.add(contourIdx);
+      }
+    }
+
+    if (skeletonContourIndicesToRealize.size === 0) {
+      return;
+    }
+
+    await this.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        let skeletonData = layer?.customData?.["fontra.skeleton"];
+        if (!skeletonData?.contours) continue;
+
+        // Deep clone for manipulation
+        skeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+        const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
+
+        // Build mapping: skeleton contour index -> generated contour indices
+        // Each skeleton contour generates 1 contour (open) or 2 contours (closed)
+        const skeletonToGeneratedMap = [];
+        let genIdx = 0;
+        for (let i = 0; i < skeletonData.contours.length; i++) {
+          const skelContour = skeletonData.contours[i];
+          const numGenerated = skelContour.isClosed ? 2 : 1;
+          const indices = [];
+          for (let j = 0; j < numGenerated && genIdx < oldGeneratedIndices.length; j++) {
+            indices.push(oldGeneratedIndices[genIdx]);
+            genIdx++;
+          }
+          skeletonToGeneratedMap.push(indices);
         }
-        if (!(path instanceof VarPackedPath)) {
-          console.warn('Invalid path object for addOverlap, skipping - not a VarPackedPath instance');
-          continue;
-        }
-        
-        const requiredMethods = ['copy', 'getPoint', 'getAbsolutePointIndex', 'getNumPointsOfContour', 'setPointPosition', 'insertPoint'];
-        let hasAllMethods = true;
-        for (const method of requiredMethods) {
-          if (typeof path[method] !== 'function') {
-            console.warn(`Invalid path object for addOverlap, skipping - missing method: ${method}`);
-            hasAllMethods = false;
-            break;
+
+        // Find generated indices to "realize" (remove from tracking, keep in path)
+        const indicesToRealize = new Set();
+        for (const skelIdx of skeletonContourIndicesToRealize) {
+          if (skelIdx < skeletonToGeneratedMap.length) {
+            for (const genContourIdx of skeletonToGeneratedMap[skelIdx]) {
+              indicesToRealize.add(genContourIdx);
+            }
           }
         }
-        
-        // Additional check for getPoint method specifically
-        if (typeof path.getPoint !== 'function') {
-          console.warn('Invalid path object for addOverlap, skipping - missing getPoint method');
-          continue;
+
+        // New generatedContourIndices = old indices minus realized ones
+        const newGeneratedIndices = oldGeneratedIndices.filter(
+          (idx) => !indicesToRealize.has(idx)
+        );
+
+        // Remove skeleton contours (in reverse order to maintain indices)
+        const sortedContourIndices = [...skeletonContourIndicesToRealize].sort(
+          (a, b) => b - a
+        );
+        for (const contourIdx of sortedContourIndices) {
+          if (contourIdx < skeletonData.contours.length) {
+            skeletonData.contours.splice(contourIdx, 1);
+          }
         }
-        
-        if (!hasAllMethods) {
-          continue;
-        }
-        
-        if (typeof path.numContours === 'undefined') {
-          console.warn('Invalid path object for addOverlap, skipping - missing numContours property');
-          continue;
-        }
-        
-        try {
-          // Debugging: Log the parameters we're passing to addOverlap
-          console.log('Calling addOverlapToPath with path:', path);
-          console.log('Point selection:', pointSelection);
-          
-          // Create a copy of the path with overlap added
-          const newPath = addOverlapToPath(path, pointSelection);
-          // Replace the path with the new path that has overlap
-          layerGlyph.path = newPath;
-        } catch (error) {
-          console.warn('Error while adding overlap:', error);
-          console.warn('Error stack:', error.stack);
-        }
+
+        // Update generatedContourIndices
+        skeletonData.generatedContourIndices = newGeneratedIndices;
+
+        // Update or remove skeleton data (no path changes needed!)
+        const customDataChange = recordChanges(layer, (l) => {
+          if (skeletonData.contours.length === 0) {
+            delete l.customData["fontra.skeleton"];
+          } else {
+            l.customData["fontra.skeleton"] = skeletonData;
+          }
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
-      // Clear the selection after adding overlap
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      // Clear skeleton-related selection
       this.selection = new Set();
-      return translate("action.add-overlap");
+
+      return {
+        changes: combined,
+        undoLabel: "Realize skeleton projection",
+        broadcast: true,
+      };
     });
   }
 
