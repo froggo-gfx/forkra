@@ -320,10 +320,17 @@ export class PointerTool extends BaseTool {
       return;
     }
     let initialClickedPointIndex;
+    let initialClickedSkeletonPoint;
     if (!pathHit) {
-      const { point: pointIndices } = parseSelection(selection);
+      const { point: pointIndices, skeletonPoint: skeletonPoints } = parseSelection(selection);
       if (pointIndices?.length) {
         initialClickedPointIndex = pointIndices[0];
+      }
+      if (skeletonPoints?.size) {
+        // Get first skeleton point coordinates
+        const firstKey = skeletonPoints.values().next().value;
+        const [contourIdx, pointIdx] = firstKey.split("/").map(Number);
+        initialClickedSkeletonPoint = { contourIdx, pointIdx };
       }
     }
     if (initialEvent.detail == 2 || initialEvent.myTapCount == 2) {
@@ -392,8 +399,11 @@ export class PointerTool extends BaseTool {
     } else if (initiateDrag) {
       this.sceneController.sceneModel.initialClickedPointIndex =
         initialClickedPointIndex;
+      this.sceneController.sceneModel.initialClickedSkeletonPoint =
+        initialClickedSkeletonPoint;
       const result = await this.handleDragSelection(eventStream, initialEvent);
       delete this.sceneController.sceneModel.initialClickedPointIndex;
+      delete this.sceneController.sceneModel.initialClickedSkeletonPoint;
       return result;
     }
   }

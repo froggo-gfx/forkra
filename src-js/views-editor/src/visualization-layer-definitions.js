@@ -768,11 +768,30 @@ registerVisualizationLayerDefinition({
   colors: { strokeColor: "#8888" },
   colorsDarkMode: { strokeColor: "#AAA8" },
   draw: (context, positionedGlyph, parameters, model, controller) => {
+    let x, y;
+
     const pointIndex = model.initialClickedPointIndex;
-    if (pointIndex === undefined) {
+    const skeletonPoint = model.initialClickedSkeletonPoint;
+
+    if (pointIndex !== undefined) {
+      // Regular path point
+      ({ x, y } = positionedGlyph.glyph.path.getPoint(pointIndex));
+    } else if (skeletonPoint) {
+      // Skeleton point - get coordinates from skeleton data
+      const editLayerName =
+        model.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+      const layer = positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName];
+      const skeletonData = layer?.customData?.["fontra.skeleton"];
+      const point = skeletonData?.contours?.[skeletonPoint.contourIdx]?.points?.[skeletonPoint.pointIdx];
+      if (point) {
+        ({ x, y } = point);
+      }
+    }
+
+    if (x === undefined || y === undefined) {
       return;
     }
-    const { x, y } = positionedGlyph.glyph.path.getPoint(pointIndex);
+
     context.strokeStyle = parameters.strokeColor;
     context.lineWidth = parameters.strokeWidth;
     context.setLineDash(parameters.lineDash);
