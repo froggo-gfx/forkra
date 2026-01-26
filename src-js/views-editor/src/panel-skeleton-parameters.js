@@ -1080,13 +1080,16 @@ export default class SkeletonParametersPanel extends Panel {
     }
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      let accumulatedChanges = new ChangeCollector();
+      let lastChange = null;
+      let lastProcessedTime = 0;
+      let lastDistribution = null;
+      let processedDistribution = null;
+      const THROTTLE_MS = 50; // Process at most every 50ms
 
-      // Process all values from the stream
-      for await (const distribution of valueStream) {
+      // Helper to apply distribution and return change
+      const applyDistribution = (distribution) => {
         const allChanges = [];
 
-        // Apply changes to ALL editable layers
         for (const editLayerName of this.sceneController.editingLayerNames) {
           const layer = glyph.layers[editLayerName];
           if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
@@ -1101,11 +1104,9 @@ export default class SkeletonParametersPanel extends Panel {
             const point = contour.points[pointIdx];
             if (!point) continue;
 
-            // Use stored total width to preserve it during drag
             const key = `${contourIdx}/${pointIdx}`;
             const totalWidth = initialTotalWidths.get(key);
 
-            // Calculate new widths based on distribution
             const newLeftHW = totalWidth * (0.5 + distribution / 200);
             const newRightHW = totalWidth - newLeftHW;
 
@@ -1114,7 +1115,6 @@ export default class SkeletonParametersPanel extends Panel {
             delete point.width;
           }
 
-          // Record changes for this layer
           const staticGlyph = layer.glyph;
           const pathChange = recordChanges(staticGlyph, (sg) => {
             this._regenerateOutlineContours(sg, skeletonData);
@@ -1127,22 +1127,45 @@ export default class SkeletonParametersPanel extends Panel {
           allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
         }
 
-        if (allChanges.length === 0) continue;
+        if (allChanges.length === 0) return null;
+        return new ChangeCollector().concat(...allChanges);
+      };
 
-        const combinedChange = new ChangeCollector().concat(...allChanges);
-        accumulatedChanges = accumulatedChanges.concat(combinedChange);
-        // Send with "may drop" flag - intermediate changes can be discarded
-        await sendIncrementalChange(combinedChange.change, true);
+      // Process values from the stream with throttling
+      for await (const distribution of valueStream) {
+        lastDistribution = distribution;
+        const now = Date.now();
+
+        // Skip if we processed recently (throttle)
+        if (now - lastProcessedTime < THROTTLE_MS) {
+          continue;
+        }
+        lastProcessedTime = now;
+        processedDistribution = distribution;
+
+        lastChange = applyDistribution(distribution);
+        if (lastChange) {
+          await sendIncrementalChange(lastChange.change, true);
+        }
+      }
+
+      // Process final value if it was skipped
+      if (lastDistribution !== null && lastDistribution !== processedDistribution) {
+        lastChange = applyDistribution(lastDistribution);
+        if (lastChange) {
+          await sendIncrementalChange(lastChange.change, true);
+        }
       }
 
       // Final send without "may drop" flag (creates the undo entry)
-      await sendIncrementalChange(accumulatedChanges.change);
-
-      return {
-        changes: accumulatedChanges,
-        undoLabel: "Set point distribution",
-        broadcast: true,
-      };
+      if (lastChange) {
+        await sendIncrementalChange(lastChange.change);
+        return {
+          changes: lastChange,
+          undoLabel: "Set point distribution",
+          broadcast: true,
+        };
+      }
     });
   }
 
