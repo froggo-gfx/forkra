@@ -699,19 +699,18 @@ export default class SkeletonParametersPanel extends Panel {
           }
         }
 
+        // Regenerate contours
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
         // Update skeleton data
         const customDataChange = recordChanges(layer, (l) => {
           l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-
-        // Regenerate contours
-        await this._regenerateOutlineContours(
-          glyph,
-          editLayerName,
-          skeletonData,
-          allChanges
-        );
       }
 
       if (allChanges.length === 0) return;
@@ -757,19 +756,18 @@ export default class SkeletonParametersPanel extends Panel {
           }
         }
 
+        // Regenerate contours
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
         // Update skeleton data
         const customDataChange = recordChanges(layer, (l) => {
           l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-
-        // Regenerate contours
-        await this._regenerateOutlineContours(
-          glyph,
-          editLayerName,
-          skeletonData,
-          allChanges
-        );
       }
 
       if (allChanges.length === 0) return;
@@ -1035,10 +1033,11 @@ export default class SkeletonParametersPanel extends Panel {
   async _onSingleSidedToggle(checked) {
     // Update local state immediately for UI
     this._singleSidedState.enabled = checked;
-    this._lastStateSignature = null; // Force rebuild
-    this.update();
-    // Then persist to skeleton data
+    // Persist to skeleton data and regenerate contours
     await this._setSingleSided(checked);
+    // Then rebuild UI
+    this._lastStateSignature = null;
+    this.update();
   }
 
   /**
@@ -1047,10 +1046,11 @@ export default class SkeletonParametersPanel extends Panel {
   async _onSingleSidedDirectionChange(value) {
     // Update local state immediately for UI
     this._singleSidedState.direction = value;
-    this._lastStateSignature = null; // Force rebuild
-    this.update();
-    // Then persist to skeleton data
+    // Persist to skeleton data and regenerate contours
     await this._setSingleSidedDirection(value);
+    // Then rebuild UI
+    this._lastStateSignature = null;
+    this.update();
   }
 
   /**
