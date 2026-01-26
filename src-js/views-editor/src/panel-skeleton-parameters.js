@@ -199,24 +199,24 @@ export default class SkeletonParametersPanel extends Panel {
     // === FLIP ===
     formContents.push({ type: "spacer" });
     formContents.push({
+      type: "header",
+      label: "Flip Skeleton Points",
+    });
+
+    formContents.push({
       type: "universal-row",
       field1: {
-        type: "text",
-        key: "LabelFlip",
-        value: "Flip",
-      },
-      field2: {
         type: "auxiliaryElement",
         key: "FlipHorizontally",
         auxiliaryElement: html.createDomElement("icon-button", {
           "src": "/tabler-icons/flip-horizontal.svg",
           "onclick": () => doPerformAction("action.selection-transformation.flip.horizontally"),
-          "class": "ui-form-icon",
+          "class": "ui-form-icon ui-form-icon-button",
           "data-tooltip": translate("sidebar.selection-transformation.flip.horizontally"),
-          "data-tooltipposition": "bottom",
+          "data-tooltipposition": "bottom-left",
         }),
       },
-      field3: {
+      field2: {
         type: "auxiliaryElement",
         key: "FlipVertically",
         auxiliaryElement: html.createDomElement("icon-button", {
@@ -224,7 +224,7 @@ export default class SkeletonParametersPanel extends Panel {
           "onclick": () => doPerformAction("action.selection-transformation.flip.vertically"),
           "class": "ui-form-icon",
           "data-tooltip": translate("sidebar.selection-transformation.flip.vertically"),
-          "data-tooltipposition": "bottom-right",
+          "data-tooltipposition": "bottom",
         }),
       },
     });
