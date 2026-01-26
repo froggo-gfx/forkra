@@ -469,7 +469,7 @@ export class PointerTool extends BaseTool {
       }
     }
 
-    // X+click: equalize skeleton handles (make opposite handle same length)
+    // X+drag: equalize skeleton handles in real-time while dragging
     if (this.equalizeMode && hasSkeletonPointUnderCursor) {
       const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
       if (positionedGlyph) {
@@ -483,9 +483,15 @@ export class PointerTool extends BaseTool {
 
           // Only works on off-curve points (type === "cubic")
           if (clickedPt?.type === "cubic") {
-            await this._equalizeSkeletonHandles(contourIdx, pointIdx, skeletonData);
+            await this._handleEqualizeHandlesDrag(
+              eventStream,
+              initialEvent,
+              contourIdx,
+              pointIdx,
+              skeletonData,
+              positionedGlyph
+            );
             initialEvent.preventDefault();
-            eventStream.done();
             return;
           }
         }
@@ -2103,6 +2109,194 @@ export class PointerTool extends BaseTool {
 
       return {
         changes: combinedChange,
+        undoLabel: "Equalize Skeleton Handles",
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Handle X+drag for equalizing skeleton handles in real-time.
+   * The opposite handle mirrors the dragged handle's length while maintaining its direction.
+   */
+  async _handleEqualizeHandlesDrag(
+    eventStream,
+    initialEvent,
+    contourIndex,
+    pointIndex,
+    skeletonData,
+    positionedGlyph
+  ) {
+    const sceneController = this.sceneController;
+    const contour = skeletonData.contours[contourIndex];
+    const numPoints = contour.points.length;
+
+    // Find adjacent smooth point and opposite off-curve
+    let smoothIndex = null;
+    let oppositeIndex = null;
+
+    const prevIndex = (pointIndex - 1 + numPoints) % numPoints;
+    const nextIndex = (pointIndex + 1) % numPoints;
+    const prevPoint = contour.points[prevIndex];
+    const nextPoint = contour.points[nextIndex];
+
+    // Check if prev is smooth (on-curve without type)
+    if (!prevPoint?.type) {
+      const prevPrevIndex = (prevIndex - 1 + numPoints) % numPoints;
+      const prevPrevPoint = contour.points[prevPrevIndex];
+      if (prevPrevPoint?.type === "cubic") {
+        smoothIndex = prevIndex;
+        oppositeIndex = prevPrevIndex;
+      }
+    }
+
+    // Check if next is smooth (on-curve without type)
+    if (smoothIndex === null && !nextPoint?.type) {
+      const nextNextIndex = (nextIndex + 1) % numPoints;
+      const nextNextPoint = contour.points[nextNextIndex];
+      if (nextNextPoint?.type === "cubic") {
+        smoothIndex = nextIndex;
+        oppositeIndex = nextNextIndex;
+      }
+    }
+
+    if (smoothIndex === null || oppositeIndex === null) {
+      return; // No valid smooth point with opposite off-curve found
+    }
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      // Setup data for ALL editable layers
+      const layersData = {};
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const layerSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        layersData[editLayerName] = {
+          layer,
+          original: JSON.parse(JSON.stringify(layerSkeletonData)),
+          working: JSON.parse(JSON.stringify(layerSkeletonData)),
+        };
+      }
+
+      if (Object.keys(layersData).length === 0) return;
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const generatedContour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(generatedContour));
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      let accumulatedChanges = new ChangeCollector();
+
+      // Drag loop
+      for await (const event of eventStream) {
+        const currentLocalPoint = sceneController.localPoint(event);
+        const currentGlyphPoint = {
+          x: currentLocalPoint.x - positionedGlyph.x,
+          y: currentLocalPoint.y - positionedGlyph.y,
+        };
+
+        const allChanges = [];
+
+        // Apply changes to ALL editable layers
+        for (const [editLayerName, data] of Object.entries(layersData)) {
+          const { layer, original, working } = data;
+
+          // Reset working data to original
+          const origContour = original.contours[contourIndex];
+          const workContour = working.contours[contourIndex];
+          for (let pi = 0; pi < origContour.points.length; pi++) {
+            workContour.points[pi].x = origContour.points[pi].x;
+            workContour.points[pi].y = origContour.points[pi].y;
+          }
+
+          // Get smooth point position (stays fixed)
+          const smoothPt = workContour.points[smoothIndex];
+
+          // Calculate current dragged handle length based on cursor position
+          // The dragged point follows the cursor projected onto its original direction
+          const origDraggedPt = origContour.points[pointIndex];
+          const origDragDir = {
+            x: origDraggedPt.x - smoothPt.x,
+            y: origDraggedPt.y - smoothPt.y,
+          };
+          const origDragLen = Math.hypot(origDragDir.x, origDragDir.y);
+
+          if (origDragLen < 0.001) continue;
+
+          // Normalize direction
+          const dragDirNorm = {
+            x: origDragDir.x / origDragLen,
+            y: origDragDir.y / origDragLen,
+          };
+
+          // Project cursor onto the handle direction from smooth point
+          const cursorVec = {
+            x: currentGlyphPoint.x - smoothPt.x,
+            y: currentGlyphPoint.y - smoothPt.y,
+          };
+          const projectedLen = cursorVec.x * dragDirNorm.x + cursorVec.y * dragDirNorm.y;
+          const newDraggedLen = Math.max(1, projectedLen); // Minimum length of 1
+
+          // Update dragged point position
+          workContour.points[pointIndex].x = smoothPt.x + dragDirNorm.x * newDraggedLen;
+          workContour.points[pointIndex].y = smoothPt.y + dragDirNorm.y * newDraggedLen;
+
+          // Update opposite point to match the new length
+          const oppPt = origContour.points[oppositeIndex];
+          const oppDir = {
+            x: oppPt.x - smoothPt.x,
+            y: oppPt.y - smoothPt.y,
+          };
+          const oppLen = Math.hypot(oppDir.x, oppDir.y);
+
+          if (oppLen > 0.001) {
+            const oppDirNorm = {
+              x: oppDir.x / oppLen,
+              y: oppDir.y / oppLen,
+            };
+            workContour.points[oppositeIndex].x = smoothPt.x + oppDirNorm.x * newDraggedLen;
+            workContour.points[oppositeIndex].y = smoothPt.y + oppDirNorm.y * newDraggedLen;
+          }
+
+          // Record changes for this layer
+          const staticGlyph = layer.glyph;
+          const pathChange = recordChanges(staticGlyph, (sg) => {
+            regenerateOutline(sg, working);
+          });
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+          const customDataChange = recordChanges(layer, (l) => {
+            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+          });
+          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+        }
+
+        const combinedChange = new ChangeCollector().concat(...allChanges);
+        accumulatedChanges = accumulatedChanges.concat(combinedChange);
+        await sendIncrementalChange(combinedChange.change, true);
+      }
+
+      // Final send without "may drop" flag
+      await sendIncrementalChange(accumulatedChanges.change);
+
+      return {
+        changes: accumulatedChanges,
         undoLabel: "Equalize Skeleton Handles",
         broadcast: true,
       };
