@@ -460,7 +460,7 @@ export default class SkeletonParametersPanel extends Panel {
         key: "forceHorizontal",
         auxiliaryElement: html.span({}, [
           forceHorizontalCheckbox,
-          html.label({ for: "force-horizontal-toggle", style: "margin-left: 4px" }, "Horizontal"),
+          html.label({ for: "force-horizontal-toggle", style: "margin-left: 4px" }, "Vertical"),
         ]),
       },
       field2: {
@@ -468,7 +468,7 @@ export default class SkeletonParametersPanel extends Panel {
         key: "forceVertical",
         auxiliaryElement: html.span({}, [
           forceVerticalCheckbox,
-          html.label({ for: "force-vertical-toggle", style: "margin-left: 4px" }, "Vertical"),
+          html.label({ for: "force-vertical-toggle", style: "margin-left: 4px" }, "Horizontal"),
         ]),
       },
       field3: {

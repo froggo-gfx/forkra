@@ -651,6 +651,25 @@ function simplifyOffsetCurves(offsetCurves, halfWidth) {
 }
 
 /**
+ * Apply angle override to a calculated normal if the point has forceHorizontal or forceVertical set.
+ * Preserves the sign (direction) of the original normal to maintain left/right orientation.
+ * @param {Object} point - The skeleton point
+ * @param {Object} calculatedNormal - The normal calculated from curve geometry {x, y}
+ * @returns {Object} The effective normal (possibly overridden)
+ */
+export function getEffectiveNormal(point, calculatedNormal) {
+  if (point.forceHorizontal) {
+    // Horizontal ribs: normal points up or down based on original sign
+    return { x: 0, y: calculatedNormal.y >= 0 ? 1 : -1 };
+  }
+  if (point.forceVertical) {
+    // Vertical ribs: normal points left or right based on original sign
+    return { x: calculatedNormal.x >= 0 ? 1 : -1, y: 0 };
+  }
+  return calculatedNormal;
+}
+
+/**
  * Generate offset points for a segment.
  * For open skeletons: first segment adds start, all segments add end
  * For closed skeletons: all segments add start (end connects to next start)
@@ -1239,25 +1258,6 @@ function generateCap(point, segment, width, capStyle, position, leftHalfWidth = 
   // "butt" style needs no extra points
 
   return capPoints;
-}
-
-/**
- * Apply angle override to a calculated normal if the point has forceHorizontal or forceVertical set.
- * Preserves the sign (direction) of the original normal to maintain left/right orientation.
- * @param {Object} point - The skeleton point
- * @param {Object} calculatedNormal - The normal calculated from curve geometry {x, y}
- * @returns {Object} The effective normal (possibly overridden)
- */
-export function getEffectiveNormal(point, calculatedNormal) {
-  if (point.forceHorizontal) {
-    // Horizontal ribs: normal points up or down based on original sign
-    return { x: 0, y: calculatedNormal.y >= 0 ? 1 : -1 };
-  }
-  if (point.forceVertical) {
-    // Vertical ribs: normal points left or right based on original sign
-    return { x: calculatedNormal.x >= 0 ? 1 : -1, y: 0 };
-  }
-  return calculatedNormal;
 }
 
 /**
