@@ -45,6 +45,9 @@ export default class SkeletonParametersPanel extends Panel {
     // Flag to prevent form rebuild during slider drag
     this._isDraggingSlider = false;
 
+    // Cache for avoiding unnecessary form rebuilds
+    this._lastStateSignature = null;
+
     // Listen to selection changes to update UI
     // Skip update if dragging slider to prevent form rebuild interrupting drag
     this.sceneController.sceneSettingsController.addKeyListener(
@@ -87,6 +90,15 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   async update() {
+    // Skip rebuild if state hasn't changed (but not during slider drag)
+    if (!this._isDraggingSlider) {
+      const signature = this._computeStateSignature();
+      if (signature === this._lastStateSignature) {
+        return;
+      }
+      this._lastStateSignature = signature;
+    }
+
     const formContents = [];
 
     // === SOURCE WIDTHS ===
@@ -645,6 +657,33 @@ export default class SkeletonParametersPanel extends Panel {
       }
     }
     return points.length > 0 ? { points, skeletonData, layer, editLayerName } : null;
+  }
+
+  /**
+   * Compute a signature representing current panel state.
+   * Used to skip unnecessary form rebuilds.
+   */
+  _computeStateSignature() {
+    const parts = [];
+
+    // Source widths
+    parts.push(`w:${this._getCurrentDefaultWidthWide()},${this._getCurrentDefaultWidthNarrow()}`);
+
+    // Selection (just the string representation)
+    const sel = this.sceneController.selection;
+    parts.push(`s:${sel ? sel.size : 0}`);
+
+    // Selected skeleton points state
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (selectedData) {
+      const defaultWidth = this._getCurrentDefaultWidthWide();
+      for (const { contourIdx, pointIdx, point } of selectedData.points) {
+        const w = this._getPointWidths(point, defaultWidth);
+        parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)}`);
+      }
+    }
+
+    return parts.join("|");
   }
 
   /**
