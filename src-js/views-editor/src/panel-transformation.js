@@ -806,17 +806,20 @@ export default class TransformationPanel extends Panel {
       component: componentIndices,
       anchor: anchorIndices,
       backgroundImage: backgroundImageIndices,
+      skeletonPoint: skeletonPointSelection,
     } = parseSelection(this.sceneController.selection);
 
     pointIndices = pointIndices || [];
     componentIndices = componentIndices || [];
     anchorIndices = anchorIndices || [];
     backgroundImageIndices = backgroundImageIndices || [];
+    const hasSkeletonPoints = skeletonPointSelection?.size > 0;
     if (
       !pointIndices.length &&
       !componentIndices.length &&
       !anchorIndices.length &&
-      !backgroundImageIndices.length
+      !backgroundImageIndices.length &&
+      !hasSkeletonPoints
     ) {
       return;
     }
@@ -856,6 +859,7 @@ export default class TransformationPanel extends Panel {
         editBehavior,
         selectionBounds,
         layerGlyph,
+        layerName,
       } of layerInfo) {
         const pinPoint = getPinPoint(
           selectionBounds,
@@ -868,6 +872,7 @@ export default class TransformationPanel extends Panel {
           .transform(transformationForLayer(selectionBounds))
           .translate(-pinPoint.x, -pinPoint.y);
 
+        // Transform regular points, components, anchors, background images
         const editChange =
           editBehavior.makeChangeForTransformation(pinnedTransformation);
 
@@ -876,6 +881,60 @@ export default class TransformationPanel extends Panel {
         rollbackChanges.push(
           consolidateChanges(editBehavior.rollbackChange, changePath)
         );
+
+        // Transform skeleton points
+        if (hasSkeletonPoints) {
+          const layer = glyph.layers[layerName];
+          const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+          if (skeletonData?.contours) {
+            const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+            // Apply transformation to each selected skeleton point
+            for (const selKey of skeletonPointSelection) {
+              const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+              const contour = newSkeletonData.contours[contourIdx];
+              if (contour) {
+                const point = contour.points[pointIdx];
+                if (point) {
+                  const transformed = pinnedTransformation.transformPointObject(point);
+                  point.x = Math.round(transformed.x);
+                  point.y = Math.round(transformed.y);
+                }
+              }
+            }
+
+            // Regenerate contours
+            const staticGlyph = layer.glyph;
+            const pathChange = recordChanges(staticGlyph, (sg) => {
+              const oldGeneratedIndices = newSkeletonData.generatedContourIndices || [];
+              const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+              for (const idx of sortedIndices) {
+                if (idx < sg.path.numContours) {
+                  sg.path.deleteContour(idx);
+                }
+              }
+
+              const generatedContours = generateContoursFromSkeleton(newSkeletonData);
+              const newGeneratedIndices = [];
+              for (const contour of generatedContours) {
+                const newIndex = sg.path.numContours;
+                sg.path.insertContour(newIndex, packContour(contour));
+                newGeneratedIndices.push(newIndex);
+              }
+              newSkeletonData.generatedContourIndices = newGeneratedIndices;
+            });
+
+            // Record custom data change
+            const customDataChange = recordChanges(layer, (l) => {
+              l.customData[SKELETON_CUSTOM_DATA_KEY] = newSkeletonData;
+            });
+
+            editChanges.push(consolidateChanges(pathChange.change, changePath));
+            editChanges.push(consolidateChanges(customDataChange.change, ["layers", layerName]));
+            rollbackChanges.push(consolidateChanges(pathChange.rollbackChange, changePath));
+            rollbackChanges.push(consolidateChanges(customDataChange.rollbackChange, ["layers", layerName]));
+          }
+        }
       }
 
       let changes = ChangeCollector.fromChanges(
