@@ -45,9 +45,6 @@ export default class SkeletonParametersPanel extends Panel {
     // Flag to prevent form rebuild during slider drag
     this._isDraggingSlider = false;
 
-    // Cache for avoiding unnecessary form rebuilds
-    this._lastStateSignature = null;
-
     // Listen to selection changes to update UI
     // Skip update if dragging slider to prevent form rebuild interrupting drag
     this.sceneController.sceneSettingsController.addKeyListener(
@@ -90,16 +87,6 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   async update() {
-    // Skip caching during slider drag to avoid expensive computation
-    if (!this._isDraggingSlider) {
-      // Check if state actually changed to avoid unnecessary rebuilds
-      const stateSignature = this._computeStateSignature();
-      if (stateSignature === this._lastStateSignature) {
-        return; // No change, skip rebuild
-      }
-      this._lastStateSignature = stateSignature;
-    }
-
     const formContents = [];
 
     // === SOURCE WIDTHS ===
@@ -519,23 +506,9 @@ export default class SkeletonParametersPanel extends Panel {
         // This preserves totalWidth during the entire drag operation
         if (valueStream) {
           this._isDraggingSlider = true;
-          let isProcessing = false;
-          let lastValue = null;
           try {
             for await (const dist of valueStream) {
-              lastValue = dist;
-              // Skip if still processing previous value (throttle)
-              if (isProcessing) continue;
-              isProcessing = true;
-              try {
-                await this._setPointDistributionDirect(dist);
-              } finally {
-                isProcessing = false;
-              }
-            }
-            // Apply final value if we skipped it
-            if (lastValue !== null && !isProcessing) {
-              await this._setPointDistributionDirect(lastValue);
+              await this._setPointDistributionDirect(dist);
             }
           } finally {
             this._isDraggingSlider = false;
@@ -645,39 +618,6 @@ export default class SkeletonParametersPanel extends Panel {
       }
     }
     return points.length > 0 ? { points, skeletonData, layer, editLayerName } : null;
-  }
-
-  /**
-   * Compute a signature string representing the current state.
-   * Used to detect if form rebuild is actually needed.
-   * @returns {string} State signature
-   */
-  _computeStateSignature() {
-    const parts = [];
-
-    // Include source widths
-    parts.push(`wide:${this._getCurrentDefaultWidthWide()}`);
-    parts.push(`narrow:${this._getCurrentDefaultWidthNarrow()}`);
-
-    // Include selection
-    const selection = this.sceneController.selection;
-    parts.push(`sel:${selection ? [...selection].sort().join(",") : ""}`);
-
-    // Include selected point values
-    const selectedData = this._getSelectedSkeletonPoints();
-    if (selectedData) {
-      const defaultWidth = this._getCurrentDefaultWidthWide();
-      for (const { contourIdx, pointIdx, point } of selectedData.points) {
-        const widths = this._getPointWidths(point, defaultWidth);
-        parts.push(
-          `p${contourIdx}/${pointIdx}:` +
-            `${Math.round(widths.left)},${Math.round(widths.right)},` +
-            `${this._isAsymmetric(point)},${!!point.forceHorizontal},${!!point.forceVertical}`
-        );
-      }
-    }
-
-    return parts.join("|");
   }
 
   /**
@@ -1182,7 +1122,7 @@ export default class SkeletonParametersPanel extends Panel {
       if (allChanges.length === 0) return;
 
       const combined = new ChangeCollector().concat(...allChanges);
-      await sendIncrementalChange(combined.change, true);
+      await sendIncrementalChange(combined.change);
 
       return {
         changes: combined,
