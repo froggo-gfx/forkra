@@ -629,6 +629,13 @@ export class SceneController {
     );
 
     registerAction(
+      "action.realize-skeleton-projection",
+      { topic },
+      () => this.doRealizeSkeletonProjection(),
+      () => this._hasSkeletonDataInGlyph()
+    );
+
+    registerAction(
       "action.reverse-contour",
       { topic },
       () => this.doReverseSelectedContours(),
@@ -980,6 +987,7 @@ export class SceneController {
       { actionIdentifier: "action.break-contour" },
       { actionIdentifier: "action.break-skeleton-contour" },
       { actionIdentifier: "action.reverse-skeleton-contour" },
+      { actionIdentifier: "action.realize-skeleton-projection" },
       { actionIdentifier: "action.reverse-contour" },
       { actionIdentifier: "action.set-contour-start" },
       {
@@ -1591,6 +1599,12 @@ export class SceneController {
     return skeletonPointSel?.size > 0 || skeletonSegmentSel?.size > 0;
   }
 
+  _hasSkeletonDataInGlyph() {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[this.editingLayerNames?.[0]];
+    return !!layer?.customData?.["fontra.skeleton"];
+  }
+
   async doBreakSkeletonContour() {
     const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
     if (!skeletonPointSel?.size) {
@@ -1837,6 +1851,20 @@ export class SceneController {
       }
       this.selection = new Set();
       return translatePlural("action.decompose-component", componentSelection?.length);
+    });
+  }
+
+  async doRealizeSkeletonProjection() {
+    await this.editLayersAndRecordChanges((layerGlyphs) => {
+      for (const [layerName, layerGlyph] of Object.entries(layerGlyphs)) {
+        // Remove skeleton data - generated contours remain in path
+        if (layerGlyph.customData?.["fontra.skeleton"]) {
+          delete layerGlyph.customData["fontra.skeleton"];
+        }
+      }
+      // Clear skeleton-related selection
+      this.selection = new Set();
+      return "Realize skeleton projection";
     });
   }
 
