@@ -296,10 +296,11 @@ export default class SkeletonParametersPanel extends Panel {
     const isIndeterminate = asymStates.size > 1; // Mixed asym states
 
     // Header with Asymmetrical toggle
+    // When indeterminate, set checked=false so first click turns ON
     const checkbox = html.input({
       type: "checkbox",
       id: "asymmetrical-toggle",
-      checked: isAsym,
+      checked: isIndeterminate ? false : isAsym,
       onchange: (e) => this._onAsymmetricalToggle(e.target.checked),
     });
     // Set indeterminate state after creation (can't be set via attribute)
