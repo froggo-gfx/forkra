@@ -49,7 +49,8 @@ export class SceneModel {
 
     // Measure mode properties (Q-key measurement tool)
     this.measureMode = false;
-    this.measureShowDirect = false;
+    this.measureShowDirect = false; // For hover: Alt+Q shows direct distance
+    this.measureClickDirect = false; // For click: Alt+Q-click shows direct distance
     this.measureHoverSegment = null; // { p1, p2, contourIndex, segmentIndex }
     this.measureSelectedPoints = []; // [{x, y, type}]
 

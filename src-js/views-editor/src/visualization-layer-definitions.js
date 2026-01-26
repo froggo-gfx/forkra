@@ -1711,7 +1711,7 @@ registerVisualizationLayerDefinition({
   draw: (context, positionedGlyph, parameters, model, controller) => {
     if (!model.measureMode) return;
 
-    const { measureHoverSegment, measureSelectedPoints, measureShowDirect } = model;
+    const { measureHoverSegment, measureSelectedPoints, measureShowDirect, measureClickDirect } = model;
 
     // 1. Draw segment hover measurement (Q+hover)
     if (measureHoverSegment) {
@@ -1767,8 +1767,40 @@ registerVisualizationLayerDefinition({
         for (let i = 0; i < measureSelectedPoints.length - 1; i++) {
           const pt1 = measureSelectedPoints[i];
           const pt2 = measureSelectedPoints[i + 1];
-          const dist = Math.hypot(pt2.x - pt1.x, pt2.y - pt1.y);
-          drawMeasureLine(context, pt1, pt2, dist.toFixed(1), parameters.lineColor, parameters);
+
+          if (measureClickDirect) {
+            // Alt+Q-click: direct distance
+            const dist = Math.hypot(pt2.x - pt1.x, pt2.y - pt1.y);
+            drawMeasureLine(context, pt1, pt2, dist.toFixed(1), parameters.lineColor, parameters);
+          } else {
+            // Q-click: projected distances (dx, dy)
+            const dx = Math.abs(pt2.x - pt1.x);
+            const dy = Math.abs(pt2.y - pt1.y);
+            const cornerPoint = { x: pt2.x, y: pt1.y };
+
+            // Horizontal projection line (dx)
+            if (dx > 0.5) {
+              drawMeasureLine(
+                context,
+                pt1,
+                cornerPoint,
+                dx.toFixed(1),
+                parameters.projectionColor,
+                parameters
+              );
+            }
+            // Vertical projection line (dy)
+            if (dy > 0.5) {
+              drawMeasureLine(
+                context,
+                cornerPoint,
+                pt2,
+                dy.toFixed(1),
+                parameters.projectionColor,
+                parameters
+              );
+            }
+          }
         }
       }
     }

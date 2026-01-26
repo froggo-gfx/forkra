@@ -92,6 +92,7 @@ export class PointerTool extends BaseTool {
       this.sceneModel.measureMode = false;
       this.sceneModel.measureHoverSegment = null;
       this.sceneModel.measureSelectedPoints = [];
+      this.sceneModel.measureClickDirect = false;
       if (this._boundKeyUp) {
         window.removeEventListener("keyup", this._boundKeyUp);
         this._boundKeyUp = null;
@@ -2081,15 +2082,17 @@ export class PointerTool extends BaseTool {
 
     if (measurePoint) {
       if (event.shiftKey) {
-        // Add to measure selection
+        // Add to measure selection (keep existing direct mode)
         this.sceneModel.measureSelectedPoints.push(measurePoint);
       } else {
-        // Replace measure selection
+        // Replace measure selection, set direct mode based on Alt key
         this.sceneModel.measureSelectedPoints = [measurePoint];
+        this.sceneModel.measureClickDirect = event.altKey;
       }
     } else {
       // Click on empty space - clear selection
       this.sceneModel.measureSelectedPoints = [];
+      this.sceneModel.measureClickDirect = false;
     }
     this.canvasController.requestUpdate();
   }
@@ -2276,6 +2279,7 @@ export class PointerTool extends BaseTool {
       this.sceneModel.measureMode = false;
       this.sceneModel.measureHoverSegment = null;
       this.sceneModel.measureSelectedPoints = [];
+      this.sceneModel.measureClickDirect = false;
       if (this._boundKeyUp) {
         window.removeEventListener("keyup", this._boundKeyUp);
         this._boundKeyUp = null;
