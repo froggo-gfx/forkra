@@ -426,6 +426,13 @@ export class PointerTool extends BaseTool {
         if (skeletonData) {
           const tunniHit = skeletonTunniHitTest(glyphPoint, size, skeletonData);
           if (tunniHit) {
+            // Ctrl+Shift+click: equalize tensions
+            if (initialEvent.ctrlKey && initialEvent.shiftKey) {
+              await this._equalizeSkeletonTunniTensions(tunniHit);
+              initialEvent.preventDefault();
+              eventStream.done();
+              return;
+            }
             await this._handleSkeletonTunniDrag(eventStream, initialEvent, tunniHit);
             initialEvent.preventDefault();
             return;
@@ -1809,6 +1816,93 @@ export class PointerTool extends BaseTool {
         undoLabel: isTrueTunni
           ? "Move Skeleton On-Curve Points (Tunni)"
           : "Move Skeleton Control Points (Tunni)",
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Equalize tensions on a skeleton Tunni point (Ctrl+Shift+click).
+   * Makes both control points have the same tension relative to the true Tunni point.
+   */
+  async _equalizeSkeletonTunniTensions(tunniHit) {
+    const sceneController = this.sceneController;
+    const { contourIndex, segment } = tunniHit;
+
+    // Check if already equalized
+    if (areSkeletonTensionsEqualized(segment)) {
+      return; // Already equalized, nothing to do
+    }
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      // Apply changes to ALL editable layers
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const working = JSON.parse(JSON.stringify(skeletonData));
+        const contour = working.contours[contourIndex];
+
+        // Build segment from this layer's data
+        const layerSegment = {
+          startPoint: { ...contour.points[segment.startIndex] },
+          endPoint: { ...contour.points[segment.endIndex] },
+          controlPoints: segment.controlIndices.map((i) => ({
+            ...contour.points[i],
+          })),
+          startIndex: segment.startIndex,
+          endIndex: segment.endIndex,
+          controlIndices: segment.controlIndices,
+        };
+
+        // Calculate equalized control points
+        const newCps = calculateSkeletonEqualizedControlPoints(layerSegment);
+        if (newCps) {
+          const [cp1Idx, cp2Idx] = segment.controlIndices;
+          contour.points[cp1Idx].x = newCps[0].x;
+          contour.points[cp1Idx].y = newCps[0].y;
+          contour.points[cp2Idx].x = newCps[1].x;
+          contour.points[cp2Idx].y = newCps[1].y;
+        }
+
+        // Regenerate outline
+        const staticGlyph = layer.glyph;
+        const oldGeneratedIndices = working.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          for (const idx of sortedIndices) {
+            if (idx < sg.path.numContours) {
+              sg.path.deleteContour(idx);
+            }
+          }
+          const generatedContours = generateContoursFromSkeleton(working);
+          const newGeneratedIndices = [];
+          for (const generatedContour of generatedContours) {
+            const newIndex = sg.path.numContours;
+            sg.path.insertContour(sg.path.numContours, packContour(generatedContour));
+            newGeneratedIndices.push(newIndex);
+          }
+          working.generatedContourIndices = newGeneratedIndices;
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        // Update customData
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = working;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      const combinedChange = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combinedChange.change);
+
+      return {
+        changes: combinedChange,
+        undoLabel: "Equalize Skeleton Tunni Tensions",
         broadcast: true,
       };
     });
