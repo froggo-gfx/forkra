@@ -1633,20 +1633,11 @@ export class SceneController {
       return null;
     }
 
-    // Both points must be endpoints (first or last on-curve point)
+    // Both points must be endpoints (first or last point of open contour)
     const isEndpoint = (contour, pointIdx) => {
       const points = contour.points;
       if (points.length === 0) return false;
-      // Find first and last on-curve point indices
-      let firstOnCurve = 0;
-      while (firstOnCurve < points.length && points[firstOnCurve].type) {
-        firstOnCurve++;
-      }
-      let lastOnCurve = points.length - 1;
-      while (lastOnCurve >= 0 && points[lastOnCurve].type) {
-        lastOnCurve--;
-      }
-      return pointIdx === firstOnCurve || pointIdx === lastOnCurve;
+      return pointIdx === 0 || pointIdx === points.length - 1;
     };
 
     if (!isEndpoint(contour0, parsed[0].pointIdx) || !isEndpoint(contour1, parsed[1].pointIdx)) {
@@ -1660,8 +1651,8 @@ export class SceneController {
       return null;
     }
 
-    // Check if coordinates match (with small tolerance for floating point)
-    const tolerance = 0.5;
+    // Check if coordinates match (with tolerance for floating point and user convenience)
+    const tolerance = 5;
     if (Math.abs(point0.x - point1.x) > tolerance || Math.abs(point0.y - point1.y) > tolerance) {
       return null;
     }
@@ -1806,11 +1797,7 @@ export class SceneController {
 
       // Determine if points are at start or end of their contours
       const isAtStart = (contour, pointIdx) => {
-        let firstOnCurve = 0;
-        while (firstOnCurve < contour.points.length && contour.points[firstOnCurve].type) {
-          firstOnCurve++;
-        }
-        return pointIdx === firstOnCurve;
+        return pointIdx === 0;
       };
 
       const point1AtStart = isAtStart(contour1, first.pointIdx);
