@@ -946,10 +946,12 @@ export class SceneController {
       point: pointSelection,
       component: componentSelection,
       skeletonPoint: skeletonPointSelection,
+      skeletonSegment: skeletonSegmentSelection,
     } = parseSelection(relevantSelection);
     this.contextMenuState.pointSelection = pointSelection;
     this.contextMenuState.componentSelection = componentSelection;
     this.contextMenuState.skeletonPointSelection = skeletonPointSelection;
+    this.contextMenuState.skeletonSegmentSelection = skeletonSegmentSelection;
 
     const glyphController = this.sceneModel.getSelectedPositionedGlyph().glyph;
     this.contextMenuState.openContourSelection = glyphController.canEdit
@@ -1585,7 +1587,8 @@ export class SceneController {
 
   _hasSkeletonContourInSelection() {
     const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
-    return skeletonPointSel?.size > 0;
+    const skeletonSegmentSel = this.contextMenuState.skeletonSegmentSelection;
+    return skeletonPointSel?.size > 0 || skeletonSegmentSel?.size > 0;
   }
 
   async doBreakSkeletonContour() {
@@ -1686,88 +1689,88 @@ export class SceneController {
 
   async doReverseSkeletonContour() {
     const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
-    if (!skeletonPointSel?.size) {
+    const skeletonSegmentSel = this.contextMenuState.skeletonSegmentSelection;
+    if (!skeletonPointSel?.size && !skeletonSegmentSel?.size) {
       return;
     }
 
     await this.editGlyph(async (sendIncrementalChange, glyph) => {
       const editLayerName = this.editingLayerNames?.[0];
       const layer = glyph.layers[editLayerName];
-      let skeletonData = layer?.customData?.["fontra.skeleton"];
+      const skeletonData = layer?.customData?.["fontra.skeleton"];
       if (!skeletonData?.contours) {
         return;
       }
 
-      // Deep clone for manipulation
-      skeletonData = JSON.parse(JSON.stringify(skeletonData));
-
-      // Collect unique contour indices from selection
-      const contourIndices = new Set();
-      for (const selKey of skeletonPointSel) {
-        const [contourIdx] = selKey.split("/").map(Number);
-        contourIndices.add(contourIdx);
+      // Collect unique skeleton contour indices from point and segment selection
+      const skeletonContourIndices = new Set();
+      if (skeletonPointSel) {
+        for (const selKey of skeletonPointSel) {
+          const [contourIdx] = selKey.split("/").map(Number);
+          skeletonContourIndices.add(contourIdx);
+        }
+      }
+      if (skeletonSegmentSel) {
+        for (const selKey of skeletonSegmentSel) {
+          const [contourIdx] = selKey.split("/").map(Number);
+          skeletonContourIndices.add(contourIdx);
+        }
       }
 
-      let numReversed = 0;
-      for (const contourIdx of contourIndices) {
-        const contour = skeletonData.contours[contourIdx];
-        if (!contour) {
-          continue;
-        }
-
-        // Reverse the points array
-        contour.points.reverse();
-
-        // For closed contours, rotate so that first on-curve point stays first
-        if (contour.isClosed && contour.points.length > 0) {
-          // After reverse, last point becomes first - rotate to fix start
-          const [lastPoint] = contour.points.splice(-1, 1);
-          contour.points.splice(0, 0, lastPoint);
-        }
-
-        numReversed++;
-      }
-
-      if (numReversed === 0) {
+      if (skeletonContourIndices.size === 0) {
         return;
       }
 
-      // Helper function to regenerate outline contours
-      const regenerateOutline = (staticGlyph, skelData) => {
-        const oldGeneratedIndices = skelData.generatedContourIndices || [];
-        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-        for (const idx of sortedIndices) {
-          if (idx < staticGlyph.path.numContours) {
-            staticGlyph.path.deleteContour(idx);
+      // Build mapping: skeleton contour index -> generated contour indices
+      // Each skeleton contour generates 1 (open) or 2 (closed) outline contours
+      const generatedIndices = skeletonData.generatedContourIndices || [];
+      let genIdx = 0;
+      const skeletonToGeneratedMap = new Map();
+
+      for (let skelIdx = 0; skelIdx < skeletonData.contours.length; skelIdx++) {
+        const skelContour = skeletonData.contours[skelIdx];
+        if (!skelContour || skelContour.points.length < 2) {
+          continue;
+        }
+        const numGenerated = skelContour.isClosed ? 2 : 1;
+        const indices = [];
+        for (let i = 0; i < numGenerated && genIdx < generatedIndices.length; i++) {
+          indices.push(generatedIndices[genIdx]);
+          genIdx++;
+        }
+        skeletonToGeneratedMap.set(skelIdx, indices);
+      }
+
+      // Collect all generated contour indices to reverse
+      const generatedToReverse = [];
+      for (const skelIdx of skeletonContourIndices) {
+        const genIndices = skeletonToGeneratedMap.get(skelIdx);
+        if (genIndices) {
+          generatedToReverse.push(...genIndices);
+        }
+      }
+
+      if (generatedToReverse.length === 0) {
+        return;
+      }
+
+      // Reverse the generated contours in path
+      const path = layer.glyph.path;
+      const pathChange = recordChanges(layer.glyph, (staticGlyph) => {
+        for (const contourIndex of generatedToReverse) {
+          const contour = staticGlyph.path.getUnpackedContour(contourIndex);
+          contour.points.reverse();
+          if (contour.isClosed) {
+            const [lastPoint] = contour.points.splice(-1, 1);
+            contour.points.splice(0, 0, lastPoint);
           }
+          const packedContour = packContour(contour);
+          staticGlyph.path.deleteContour(contourIndex);
+          staticGlyph.path.insertContour(contourIndex, packedContour);
         }
-
-        const generatedContours = generateContoursFromSkeleton(skelData);
-        const newGeneratedIndices = [];
-        for (const contour of generatedContours) {
-          const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.insertContour(newIndex, packContour(contour));
-          newGeneratedIndices.push(newIndex);
-        }
-        skelData.generatedContourIndices = newGeneratedIndices;
-      };
-
-      // Record changes using recordChanges pattern
-      const changes = [];
-
-      // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
-      const staticGlyph = layer.glyph;
-      const pathChange = recordChanges(staticGlyph, (sg) => {
-        regenerateOutline(sg, skeletonData);
       });
-      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
-      // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData["fontra.skeleton"] = skeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
+      const changes = [pathChange.prefixed(["layers", editLayerName, "glyph"])];
       const combinedChange = new ChangeCollector().concat(...changes);
       await sendIncrementalChange(combinedChange.change);
 
