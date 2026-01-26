@@ -279,13 +279,27 @@ export class PointerTool extends BaseTool {
 
     const point = sceneController.localPoint(initialEvent);
     const size = sceneController.mouseClickMargin;
-    const { selection, pathHit } = this.sceneModel.selectionAtPoint(
+    let { selection, pathHit } = this.sceneModel.selectionAtPoint(
       point,
       size,
       sceneController.selection,
       sceneController.hoverSelection,
       initialEvent.altKey
     );
+
+    // Convert skeleton segment selection to on-curve point selection immediately
+    // (consistent with regular path segments selecting their on-curve points)
+    const { skeletonSegment: clickedSegment } = parseSelection(selection);
+    if (clickedSegment?.size) {
+      const onCurvePoints = this._getSegmentOnCurvePoints(clickedSegment);
+      // Replace skeletonSegment with skeletonPoint in selection
+      selection = new Set(
+        [...selection].filter((s) => !s.startsWith("skeletonSegment/"))
+      );
+      for (const pt of onCurvePoints) {
+        selection.add(`skeletonPoint/${pt}`);
+      }
+    }
 
     // Check for rib point hit - but only if no skeleton point is under cursor
     // (skeleton points have priority over rib points when they overlap)
@@ -1015,6 +1029,69 @@ export class PointerTool extends BaseTool {
       };
     });
     this.sceneController.sceneModel.showTransformSelection = true;
+  }
+
+  /**
+   * Get on-curve points for skeleton segment selection.
+   * Returns a Set of point keys ("contourIdx/pointIdx") for on-curve points only.
+   */
+  _getSegmentOnCurvePoints(segmentSelection) {
+    const result = new Set();
+
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+      return result;
+    }
+
+    const editLayerName =
+      this.sceneController.sceneSettings?.editLayerName ||
+      positionedGlyph.glyph?.layerName;
+    if (!editLayerName) {
+      return result;
+    }
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData?.contours?.length) {
+      return result;
+    }
+
+    for (const selKey of segmentSelection) {
+      const parts = selKey.split("/");
+      const contourIdx = parseInt(parts[1], 10);
+      const segmentIdx = parseInt(parts[2], 10);
+      const contour = skeletonData.contours[contourIdx];
+      if (!contour) continue;
+
+      // Find on-curve indices
+      const onCurveIndices = [];
+      for (let i = 0; i < contour.points.length; i++) {
+        if (!contour.points[i].type) {
+          onCurveIndices.push(i);
+        }
+      }
+
+      if (segmentIdx >= onCurveIndices.length) continue;
+
+      // Determine segment start and end on-curve indices
+      const isClosingSegment =
+        contour.isClosed && segmentIdx === onCurveIndices.length - 1;
+
+      let startIdx, endIdx;
+      if (isClosingSegment) {
+        startIdx = onCurveIndices[onCurveIndices.length - 1];
+        endIdx = onCurveIndices[0];
+      } else {
+        startIdx = onCurveIndices[segmentIdx];
+        endIdx = onCurveIndices[segmentIdx + 1];
+      }
+
+      // Add only on-curve points
+      result.add(`${contourIdx}/${startIdx}`);
+      result.add(`${contourIdx}/${endIdx}`);
+    }
+
+    return result;
   }
 
   /**
