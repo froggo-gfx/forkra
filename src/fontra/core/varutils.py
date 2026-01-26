@@ -82,16 +82,13 @@ def unnormalizeLocation(location, axisList):
     out = {}
     for axis in axisList:
         v = location.get(axis.name)
-        out[axis.name] = (
-            axis.defaultValue
-            if v is None
-            else unnormalizeValue(
+        if v is not None:
+            out[axis.name] = unnormalizeValue(
                 v,
                 axis.minValue,
                 clamp(axis.defaultValue, axis.minValue, axis.maxValue),
                 clamp(axis.maxValue, axis.minValue, axis.maxValue),
             )
-        )
 
     return out
 
