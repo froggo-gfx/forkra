@@ -126,12 +126,14 @@ export class PointerTool extends BaseTool {
   async handleArrowKeys(event) {
     const sceneController = this.sceneController;
 
-    // Check if we have skeleton points selected
-    const { skeletonPoint: skeletonPointSelection } = parseSelection(
-      sceneController.selection
-    );
+    // Check if we have skeleton points and/or regular points selected
+    const { skeletonPoint: skeletonPointSelection, point: regularPointSelection } =
+      parseSelection(sceneController.selection);
 
-    if (!skeletonPointSelection?.size) {
+    const hasSkeletonPoints = skeletonPointSelection?.size > 0;
+    const hasRegularPoints = regularPointSelection?.length > 0;
+
+    if (!hasSkeletonPoints) {
       // No skeleton points - use default handler
       return sceneController.handleArrowKeys(event);
     }
@@ -224,6 +226,11 @@ export class PointerTool extends BaseTool {
         broadcast: true,
       };
     });
+
+    // Also handle regular points if they are selected
+    if (hasRegularPoints) {
+      await sceneController.handleArrowKeys(event);
+    }
   }
 
   setCursorForRotationHandle(handleName) {
