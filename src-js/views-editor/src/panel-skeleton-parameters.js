@@ -90,12 +90,15 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   async update() {
-    // Check if state actually changed to avoid unnecessary rebuilds
-    const stateSignature = this._computeStateSignature();
-    if (stateSignature === this._lastStateSignature) {
-      return; // No change, skip rebuild
+    // Skip caching during slider drag to avoid expensive computation
+    if (!this._isDraggingSlider) {
+      // Check if state actually changed to avoid unnecessary rebuilds
+      const stateSignature = this._computeStateSignature();
+      if (stateSignature === this._lastStateSignature) {
+        return; // No change, skip rebuild
+      }
+      this._lastStateSignature = stateSignature;
     }
-    this._lastStateSignature = stateSignature;
 
     const formContents = [];
 
@@ -516,9 +519,23 @@ export default class SkeletonParametersPanel extends Panel {
         // This preserves totalWidth during the entire drag operation
         if (valueStream) {
           this._isDraggingSlider = true;
+          let isProcessing = false;
+          let lastValue = null;
           try {
             for await (const dist of valueStream) {
-              await this._setPointDistributionDirect(dist);
+              lastValue = dist;
+              // Skip if still processing previous value (throttle)
+              if (isProcessing) continue;
+              isProcessing = true;
+              try {
+                await this._setPointDistributionDirect(dist);
+              } finally {
+                isProcessing = false;
+              }
+            }
+            // Apply final value if we skipped it
+            if (lastValue !== null && !isProcessing) {
+              await this._setPointDistributionDirect(lastValue);
             }
           } finally {
             this._isDraggingSlider = false;
