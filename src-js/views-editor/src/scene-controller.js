@@ -1855,16 +1855,33 @@ export class SceneController {
   }
 
   async doRealizeSkeletonProjection() {
-    await this.editLayersAndRecordChanges((layerGlyphs) => {
-      for (const [layerName, layerGlyph] of Object.entries(layerGlyphs)) {
+    await this.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.["fontra.skeleton"]) continue;
+
         // Remove skeleton data - generated contours remain in path
-        if (layerGlyph.customData?.["fontra.skeleton"]) {
-          delete layerGlyph.customData["fontra.skeleton"];
-        }
+        const customDataChange = recordChanges(layer, (l) => {
+          delete l.customData["fontra.skeleton"];
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
       // Clear skeleton-related selection
       this.selection = new Set();
-      return "Realize skeleton projection";
+
+      return {
+        changes: combined,
+        undoLabel: "Realize skeleton projection",
+        broadcast: true,
+      };
     });
   }
 
