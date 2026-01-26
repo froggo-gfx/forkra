@@ -81,6 +81,10 @@ export class PointerTool extends BaseTool {
   measureMode = false;
   _boundKeyUp = null;
 
+  // Equalize handles mode (X-key) properties
+  equalizeMode = false;
+  _boundEqualizeKeyUp = null;
+
   handleKeyDown(event) {
     if (event.key === "q" || event.key === "Q") {
       if (!this.measureMode) {
@@ -90,6 +94,14 @@ export class PointerTool extends BaseTool {
         this._boundKeyUp = (e) => this._handleMeasureKeyUp(e);
         window.addEventListener("keyup", this._boundKeyUp);
         this.canvasController.requestUpdate();
+      }
+      return;
+    }
+    if (event.key === "x" || event.key === "X") {
+      if (!this.equalizeMode) {
+        this.equalizeMode = true;
+        this._boundEqualizeKeyUp = (e) => this._handleEqualizeKeyUp(e);
+        window.addEventListener("keyup", this._boundEqualizeKeyUp);
       }
       return;
     }
@@ -107,6 +119,16 @@ export class PointerTool extends BaseTool {
         this._boundKeyUp = null;
       }
       this.canvasController.requestUpdate();
+    }
+  }
+
+  _handleEqualizeKeyUp(event) {
+    if (event.key === "x" || event.key === "X") {
+      this.equalizeMode = false;
+      if (this._boundEqualizeKeyUp) {
+        window.removeEventListener("keyup", this._boundEqualizeKeyUp);
+        this._boundEqualizeKeyUp = null;
+      }
     }
   }
 
@@ -215,6 +237,12 @@ export class PointerTool extends BaseTool {
 
     const hasSkeletonPoints = skeletonPointSelection?.size > 0;
     const hasRegularPoints = regularPointSelection?.length > 0;
+
+    // X+arrows: equalize handles for selected off-curve skeleton points
+    if (this.equalizeMode && hasSkeletonPoints) {
+      await this._equalizeSelectedSkeletonHandles(skeletonPointSelection);
+      return;
+    }
 
     if (!hasSkeletonPoints) {
       // No skeleton points - use default handler
@@ -433,6 +461,29 @@ export class PointerTool extends BaseTool {
           });
           if (tunniHit) {
             await this._equalizeSkeletonTunniTensions(tunniHit);
+            initialEvent.preventDefault();
+            eventStream.done();
+            return;
+          }
+        }
+      }
+    }
+
+    // X+click: equalize skeleton handles (make opposite handle same length)
+    if (this.equalizeMode && hasSkeletonPointUnderCursor) {
+      const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+      if (positionedGlyph) {
+        const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
+        if (skeletonData) {
+          // Get clicked skeleton point
+          const firstKey = clickedSkeletonPoint.values().next().value;
+          const [contourIdx, pointIdx] = firstKey.split("/").map(Number);
+          const contour = skeletonData.contours[contourIdx];
+          const clickedPt = contour?.points[pointIdx];
+
+          // Only works on off-curve points (type === "cubic")
+          if (clickedPt?.type === "cubic") {
+            await this._equalizeSkeletonHandles(contourIdx, pointIdx, skeletonData);
             initialEvent.preventDefault();
             eventStream.done();
             return;
@@ -1926,6 +1977,175 @@ export class PointerTool extends BaseTool {
         broadcast: true,
       };
     });
+  }
+
+  /**
+   * Equalize skeleton handles (X+click).
+   * Makes the opposite off-curve handle the same length as the clicked one.
+   * @param {number} contourIndex - Index of the contour
+   * @param {number} pointIndex - Index of the clicked off-curve point
+   * @param {Object} skeletonData - The skeleton data
+   */
+  async _equalizeSkeletonHandles(contourIndex, pointIndex, skeletonData) {
+    const sceneController = this.sceneController;
+    const contour = skeletonData.contours[contourIndex];
+    const numPoints = contour.points.length;
+
+    // Find adjacent smooth point and opposite off-curve
+    // Off-curve can be before or after a smooth point
+    let smoothIndex = null;
+    let oppositeIndex = null;
+
+    const prevIndex = (pointIndex - 1 + numPoints) % numPoints;
+    const nextIndex = (pointIndex + 1) % numPoints;
+    const prevPoint = contour.points[prevIndex];
+    const nextPoint = contour.points[nextIndex];
+
+    // Check if prev is smooth (on-curve without type)
+    if (!prevPoint?.type) {
+      // prevPoint is on-curve, check if it's smooth and has off-curve on the other side
+      const prevPrevIndex = (prevIndex - 1 + numPoints) % numPoints;
+      const prevPrevPoint = contour.points[prevPrevIndex];
+      if (prevPrevPoint?.type === "cubic") {
+        smoothIndex = prevIndex;
+        oppositeIndex = prevPrevIndex;
+      }
+    }
+
+    // Check if next is smooth (on-curve without type)
+    if (smoothIndex === null && !nextPoint?.type) {
+      const nextNextIndex = (nextIndex + 1) % numPoints;
+      const nextNextPoint = contour.points[nextNextIndex];
+      if (nextNextPoint?.type === "cubic") {
+        smoothIndex = nextIndex;
+        oppositeIndex = nextNextIndex;
+      }
+    }
+
+    if (smoothIndex === null || oppositeIndex === null) {
+      return; // No valid smooth point with opposite off-curve found
+    }
+
+    // Calculate the length of the clicked handle
+    const clickedPoint = contour.points[pointIndex];
+    const smoothPoint = contour.points[smoothIndex];
+    const clickedLength = Math.hypot(
+      clickedPoint.x - smoothPoint.x,
+      clickedPoint.y - smoothPoint.y
+    );
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      // Apply changes to ALL editable layers
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const layerSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const working = JSON.parse(JSON.stringify(layerSkeletonData));
+        const workingContour = working.contours[contourIndex];
+
+        // Get this layer's points
+        const layerClickedPt = workingContour.points[pointIndex];
+        const layerSmoothPt = workingContour.points[smoothIndex];
+        const layerOppositePt = workingContour.points[oppositeIndex];
+
+        // Calculate this layer's clicked handle length
+        const layerClickedLength = Math.hypot(
+          layerClickedPt.x - layerSmoothPt.x,
+          layerClickedPt.y - layerSmoothPt.y
+        );
+
+        // Calculate opposite handle direction
+        const oppDirX = layerOppositePt.x - layerSmoothPt.x;
+        const oppDirY = layerOppositePt.y - layerSmoothPt.y;
+        const oppLength = Math.hypot(oppDirX, oppDirY);
+
+        if (oppLength > 0.001) {
+          // Normalize and scale to clicked length
+          const scale = layerClickedLength / oppLength;
+          workingContour.points[oppositeIndex].x = layerSmoothPt.x + oppDirX * scale;
+          workingContour.points[oppositeIndex].y = layerSmoothPt.y + oppDirY * scale;
+        }
+
+        // Regenerate outline
+        const staticGlyph = layer.glyph;
+        const oldGeneratedIndices = working.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          for (const idx of sortedIndices) {
+            if (idx < sg.path.numContours) {
+              sg.path.deleteContour(idx);
+            }
+          }
+          const generatedContours = generateContoursFromSkeleton(working);
+          const newGeneratedIndices = [];
+          for (const generatedContour of generatedContours) {
+            const newIndex = sg.path.numContours;
+            sg.path.insertContour(sg.path.numContours, packContour(generatedContour));
+            newGeneratedIndices.push(newIndex);
+          }
+          working.generatedContourIndices = newGeneratedIndices;
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        // Update customData
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = working;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      const combinedChange = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combinedChange.change);
+
+      return {
+        changes: combinedChange,
+        undoLabel: "Equalize Skeleton Handles",
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Equalize skeleton handles for all selected off-curve points (X+arrows).
+   * @param {Set} skeletonPointSelection - Set of selected skeleton point keys
+   */
+  async _equalizeSelectedSkeletonHandles(skeletonPointSelection) {
+    const sceneController = this.sceneController;
+    const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return;
+
+    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
+    if (!skeletonData) return;
+
+    // Collect all off-curve points from selection
+    const offCurvePoints = [];
+    for (const key of skeletonPointSelection) {
+      const [contourIdx, pointIdx] = key.split("/").map(Number);
+      const contour = skeletonData.contours[contourIdx];
+      const point = contour?.points[pointIdx];
+      if (point?.type === "cubic") {
+        offCurvePoints.push({ contourIdx, pointIdx });
+      }
+    }
+
+    if (offCurvePoints.length === 0) return;
+
+    // Process each off-curve point
+    for (const { contourIdx, pointIdx } of offCurvePoints) {
+      await this._equalizeSkeletonHandles(contourIdx, pointIdx, skeletonData);
+      // Re-fetch skeleton data after each change (it gets updated)
+      const newPositionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+      if (newPositionedGlyph) {
+        const newSkeletonData = getSkeletonDataFromGlyph(newPositionedGlyph, this.sceneModel);
+        if (newSkeletonData) {
+          Object.assign(skeletonData, newSkeletonData);
+        }
+      }
+    }
   }
 
   /**
