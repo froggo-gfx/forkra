@@ -12,7 +12,7 @@ import {
   filterPathByPointIndices,
   getSelectionByContour,
 } from "@fontra/core/path-functions.js";
-import { rectCenter, rectSize } from "@fontra/core/rectangle.js";
+import { rectCenter, rectSize, unionRect } from "@fontra/core/rectangle.js";
 import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
 import { Transform } from "@fontra/core/transform.js";
 import {
@@ -838,16 +838,40 @@ export default class TransformationPanel extends Panel {
           this.sceneController.selection,
           this.sceneController.selectedTool.scalingEditBehavior
         );
+
+        // Get bounds for regular selection
+        let selectionBounds = (
+          staticGlyphControllers[layerName] || glyphController
+        ).getSelectionBounds(
+          this.sceneController.selection,
+          this.fontController.getBackgroundImageBoundsFunc
+        );
+
+        // Add skeleton points bounds if present
+        if (hasSkeletonPoints) {
+          const layer = glyph.layers[layerName];
+          const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+          if (skeletonData?.contours) {
+            let skeletonBounds = null;
+            for (const selKey of skeletonPointSelection) {
+              const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+              const point = skeletonData.contours[contourIdx]?.points[pointIdx];
+              if (point) {
+                const pointBounds = { xMin: point.x, yMin: point.y, xMax: point.x, yMax: point.y };
+                skeletonBounds = skeletonBounds ? unionRect(skeletonBounds, pointBounds) : pointBounds;
+              }
+            }
+            if (skeletonBounds) {
+              selectionBounds = selectionBounds ? unionRect(selectionBounds, skeletonBounds) : skeletonBounds;
+            }
+          }
+        }
+
         return {
           layerName,
           changePath: ["layers", layerName, "glyph"],
           layerGlyph: layerGlyph,
-          selectionBounds: (
-            staticGlyphControllers[layerName] || glyphController
-          ).getSelectionBounds(
-            this.sceneController.selection,
-            this.fontController.getBackgroundImageBoundsFunc
-          ),
+          selectionBounds,
           editBehavior: behaviorFactory.getTransformBehavior("default"),
         };
       });
