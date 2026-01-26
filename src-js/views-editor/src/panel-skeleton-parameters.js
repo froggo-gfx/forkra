@@ -42,6 +42,12 @@ export default class SkeletonParametersPanel extends Panel {
       scaleValue: 1.0,
     };
 
+    // Contour parameters state (for immediate UI updates)
+    this._singleSidedState = {
+      enabled: false,
+      direction: "left",
+    };
+
     // Flag to prevent form rebuild during slider drag
     this._isDraggingSlider = false;
 
@@ -123,11 +129,14 @@ export default class SkeletonParametersPanel extends Panel {
       minValue: 1,
     });
 
+    // Sync single-sided state from skeleton data on form rebuild
+    this._syncSingleSidedState();
+
     // Single-sided checkbox with direction dropdown
     const singleSidedCheckbox = html.input({
       type: "checkbox",
       id: "single-sided-toggle",
-      checked: this._getCurrentSingleSided(),
+      checked: this._singleSidedState.enabled,
       onchange: (e) => this._onSingleSidedToggle(e.target.checked),
     });
 
@@ -137,13 +146,13 @@ export default class SkeletonParametersPanel extends Panel {
     ];
 
     // Add direction dropdown if single-sided is enabled
-    if (this._getCurrentSingleSided()) {
+    if (this._singleSidedState.enabled) {
       const directionSelect = html.select({
         style: "margin-left: 8px",
         onchange: (e) => this._onSingleSidedDirectionChange(e.target.value),
       }, [
-        html.option({ value: "left", selected: this._getCurrentSingleSidedDirection() === "left" }, "Left"),
-        html.option({ value: "right", selected: this._getCurrentSingleSidedDirection() === "right" }, "Right"),
+        html.option({ value: "left", selected: this._singleSidedState.direction === "left" }, "Left"),
+        html.option({ value: "right", selected: this._singleSidedState.direction === "right" }, "Right"),
       ]);
       singleSidedElements.push(directionSelect);
     }
@@ -1024,18 +1033,37 @@ export default class SkeletonParametersPanel extends Panel {
    * Handle single-sided toggle change.
    */
   async _onSingleSidedToggle(checked) {
-    await this._setSingleSided(checked);
+    // Update local state immediately for UI
+    this._singleSidedState.enabled = checked;
     this._lastStateSignature = null; // Force rebuild
     this.update();
+    // Then persist to skeleton data
+    await this._setSingleSided(checked);
   }
 
   /**
    * Handle single-sided direction change.
    */
   async _onSingleSidedDirectionChange(value) {
-    await this._setSingleSidedDirection(value);
+    // Update local state immediately for UI
+    this._singleSidedState.direction = value;
     this._lastStateSignature = null; // Force rebuild
     this.update();
+    // Then persist to skeleton data
+    await this._setSingleSidedDirection(value);
+  }
+
+  /**
+   * Sync single-sided state from skeleton data.
+   */
+  _syncSingleSidedState() {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (selectedData && selectedData.points.length > 0) {
+      const contourIdx = selectedData.points[0].contourIdx;
+      const contour = selectedData.skeletonData.contours[contourIdx];
+      this._singleSidedState.enabled = contour?.singleSided ?? false;
+      this._singleSidedState.direction = contour?.singleSidedDirection ?? "left";
+    }
   }
 
   /**
