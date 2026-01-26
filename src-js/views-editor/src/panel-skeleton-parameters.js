@@ -502,14 +502,30 @@ export default class SkeletonParametersPanel extends Panel {
           this.pointParameters.scaleValue = value;
         }
       } else if (fieldItem.key === "pointDistribution") {
-        // For distribution slider, use accumulation pattern like point dragging
+        // For distribution slider - simple approach
         if (valueStream) {
           this._isDraggingSlider = true;
+          // Store initial distributions for relative changes
+          const selectedData = this._getSelectedSkeletonPoints();
+          const initialDistributions = new Map();
+          if (selectedData && selectedData.points.length > 1) {
+            for (const { contourIdx, pointIdx, point } of selectedData.points) {
+              const key = `${contourIdx}/${pointIdx}`;
+              const defaultWidth = this._getCurrentDefaultWidthWide();
+              const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+              const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+              initialDistributions.set(key, this._calculateDistribution(leftHW, rightHW));
+            }
+          }
+          this._initialDistributions = initialDistributions;
           try {
-            await this._handleDistributionSliderDrag(valueStream);
+            for await (const dist of valueStream) {
+              await this._setPointDistributionDirect(dist);
+            }
           } finally {
             this._isDraggingSlider = false;
-            this.update(); // Update form after drag ends
+            this._initialDistributions = null;
+            this.update();
           }
         } else {
           await this._setPointDistributionDirect(value);
@@ -1062,128 +1078,8 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Handle distribution slider drag with proper change accumulation.
-   * For multi-selection: applies delta relative to each point's initial distribution.
-   */
-  async _handleDistributionSliderDrag(valueStream) {
-    const selectedData = this._getSelectedSkeletonPoints();
-    if (!selectedData) return;
-
-    const isMultiSelection = selectedData.points.length > 1;
-
-    // Store initial state for each point
-    const initialState = new Map();
-    for (const { contourIdx, pointIdx, point } of selectedData.points) {
-      const key = `${contourIdx}/${pointIdx}`;
-      const defaultWidth = this._getCurrentDefaultWidthWide();
-      const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-      const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-      const totalWidth = leftHW + rightHW;
-      const distribution = this._calculateDistribution(leftHW, rightHW);
-      initialState.set(key, { totalWidth, distribution });
-    }
-
-    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      let lastChange = null;
-      let lastProcessedTime = 0;
-      let lastSliderValue = null;
-      let processedSliderValue = null;
-      const THROTTLE_MS = 50;
-
-      // Helper to apply distribution delta and return change
-      const applyDistribution = (sliderValue) => {
-        const allChanges = [];
-
-        for (const editLayerName of this.sceneController.editingLayerNames) {
-          const layer = glyph.layers[editLayerName];
-          if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
-
-          const skeletonData = JSON.parse(
-            JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
-          );
-
-          for (const { contourIdx, pointIdx } of selectedData.points) {
-            const contour = skeletonData.contours[contourIdx];
-            if (!contour) continue;
-            const point = contour.points[pointIdx];
-            if (!point) continue;
-
-            const key = `${contourIdx}/${pointIdx}`;
-            const { totalWidth, distribution: initialDist } = initialState.get(key);
-
-            let newDistribution;
-            if (isMultiSelection) {
-              // Multi-selection: slider value is a DELTA from initial
-              // Clamp so result stays within [-100, 100]
-              newDistribution = Math.max(-100, Math.min(100, initialDist + sliderValue));
-            } else {
-              // Single selection: slider value is absolute
-              newDistribution = sliderValue;
-            }
-
-            const newLeftHW = totalWidth * (0.5 + newDistribution / 200);
-            const newRightHW = totalWidth - newLeftHW;
-
-            point.leftWidth = Math.max(0, Math.round(newLeftHW));
-            point.rightWidth = Math.max(0, Math.round(newRightHW));
-            delete point.width;
-          }
-
-          const staticGlyph = layer.glyph;
-          const pathChange = recordChanges(staticGlyph, (sg) => {
-            this._regenerateOutlineContours(sg, skeletonData);
-          });
-          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-          const customDataChange = recordChanges(layer, (l) => {
-            l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-          });
-          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-        }
-
-        if (allChanges.length === 0) return null;
-        return new ChangeCollector().concat(...allChanges);
-      };
-
-      // Process values from the stream with throttling
-      for await (const sliderValue of valueStream) {
-        lastSliderValue = sliderValue;
-        const now = Date.now();
-
-        if (now - lastProcessedTime < THROTTLE_MS) {
-          continue;
-        }
-        lastProcessedTime = now;
-        processedSliderValue = sliderValue;
-
-        lastChange = applyDistribution(sliderValue);
-        if (lastChange) {
-          await sendIncrementalChange(lastChange.change, true);
-        }
-      }
-
-      // Process final value if it was skipped
-      if (lastSliderValue !== null && lastSliderValue !== processedSliderValue) {
-        lastChange = applyDistribution(lastSliderValue);
-        if (lastChange) {
-          await sendIncrementalChange(lastChange.change, true);
-        }
-      }
-
-      // Final send without "may drop" flag
-      if (lastChange) {
-        await sendIncrementalChange(lastChange.change);
-        return {
-          changes: lastChange,
-          undoLabel: "Set point distribution",
-          broadcast: true,
-        };
-      }
-    });
-  }
-
-  /**
-   * Set point distribution directly. Called for single value changes (not drag).
+   * Set point distribution directly.
+   * For multi-selection during drag: uses _initialDistributions for relative changes.
    */
   async _setPointDistributionDirect(distribution) {
     const selectedData = this._getSelectedSkeletonPoints();
@@ -1214,8 +1110,17 @@ export default class SkeletonParametersPanel extends Panel {
           const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
           const totalWidth = leftHW + rightHW;
 
+          // Calculate effective distribution
+          let effectiveDistribution = distribution;
+          if (this._initialDistributions && this._initialDistributions.size > 0) {
+            // Multi-selection: slider value is a delta from initial
+            const key = `${contourIdx}/${pointIdx}`;
+            const initialDist = this._initialDistributions.get(key) || 0;
+            effectiveDistribution = Math.max(-100, Math.min(100, initialDist + distribution));
+          }
+
           // Calculate new widths based on distribution
-          const newLeftHW = totalWidth * (0.5 + distribution / 200);
+          const newLeftHW = totalWidth * (0.5 + effectiveDistribution / 200);
           const newRightHW = totalWidth - newLeftHW;
 
           point.leftWidth = Math.max(0, Math.round(newLeftHW));
