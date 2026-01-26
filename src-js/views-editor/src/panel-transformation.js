@@ -913,13 +913,18 @@ export default class TransformationPanel extends Panel {
           if (skeletonData?.contours) {
             const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
 
-            // Apply transformation to each selected skeleton point
+            // Collect affected contour indices
+            const affectedContours = new Set();
             for (const selKey of skeletonPointSelection) {
-              const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+              const [contourIdx] = selKey.split("/").map(Number);
+              affectedContours.add(contourIdx);
+            }
+
+            // Transform ALL points (on-curve and off-curve) of affected contours
+            for (const contourIdx of affectedContours) {
               const contour = newSkeletonData.contours[contourIdx];
-              if (contour) {
-                const point = contour.points[pointIdx];
-                if (point) {
+              if (contour?.points) {
+                for (const point of contour.points) {
                   const transformed = pinnedTransformation.transformPointObject(point);
                   point.x = Math.round(transformed.x);
                   point.y = Math.round(transformed.y);
