@@ -270,9 +270,10 @@ export default class SkeletonParametersPanel extends Panel {
       leftMixed = !allLeftSame;
       rightMixed = !allRightSame;
 
-      // Sync UI state from selection (only if all same)
-      if (asymStates.size === 1) {
-        this.pointParameters.asymmetrical = asymStates.has(true);
+      // Sync UI state from selection: only set to true if point has asymmetric data
+      // Don't reset to false - preserve user's toggle choice
+      if (asymStates.has(true)) {
+        this.pointParameters.asymmetrical = true;
       }
     } else {
       // No selection - show Source Width / 2
@@ -650,15 +651,13 @@ export default class SkeletonParametersPanel extends Panel {
 
   /**
    * Set point width (Left or Right).
-   * Respects each point's own asymmetric state:
-   * - Asymmetric points: only the specified side is changed
-   * - Symmetric points: both sides are changed to the same value
    */
   async _setPointWidth(key, value) {
     const selectedData = this._getSelectedSkeletonPoints();
     if (!selectedData) return;
 
     const isLeft = key === "pointWidthLeft";
+    const isAsym = this.pointParameters.asymmetrical;
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
@@ -678,19 +677,24 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          // Check THIS point's asymmetric state, not the UI toggle
-          const pointIsAsym = this._isAsymmetric(point);
+          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
 
-          if (pointIsAsym) {
-            // Asymmetric point - edit only the specified side
+          if (isAsym) {
+            // Asymmetric mode - edit individual sides
             if (isLeft) {
               point.leftWidth = value;
+              if (point.rightWidth === undefined) {
+                point.rightWidth = point.width ? point.width / 2 : value;
+              }
             } else {
               point.rightWidth = value;
+              if (point.leftWidth === undefined) {
+                point.leftWidth = point.width ? point.width / 2 : value;
+              }
             }
-            // Keep the other side as is (already has leftWidth/rightWidth)
+            delete point.width;
           } else {
-            // Symmetric point - change both sides together
+            // Symmetric mode - change both sides together
             point.width = value * 2;
             delete point.leftWidth;
             delete point.rightWidth;
