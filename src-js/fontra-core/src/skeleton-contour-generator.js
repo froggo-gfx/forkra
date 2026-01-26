@@ -471,13 +471,13 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // (outer = counter-clockwise, inner = clockwise for proper fill)
     const reversedRight = [...rightSide].reverse();
 
-    // Apply handle direction alignment to match skeleton handles
-    const alignedLeftSide = alignHandleDirections(leftSide, segments, true);
-    const alignedRightSide = alignHandleDirections(reversedRight, segments, false);
+    // DISABLED for performance testing - alignHandleDirections is O(n³)
+    // const alignedLeftSide = alignHandleDirections(leftSide, segments, true);
+    // const alignedRightSide = alignHandleDirections(reversedRight, segments, false);
 
     let contours = [
-      { points: enforceSmoothColinearity(alignedLeftSide, true), isClosed: true },
-      { points: enforceSmoothColinearity(alignedRightSide, true), isClosed: true },
+      { points: enforceSmoothColinearity(leftSide, true), isClosed: true },
+      { points: enforceSmoothColinearity(reversedRight, true), isClosed: true },
     ];
 
     // Apply reverse if flag is set
@@ -525,10 +525,10 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // Start cap
     outlinePoints.push(...startCap);
 
-    // Apply handle direction alignment to match skeleton handles
-    const alignedOutlinePoints = alignHandleDirections(outlinePoints, segments, null);
+    // DISABLED for performance testing - alignHandleDirections is O(n³)
+    // const alignedOutlinePoints = alignHandleDirections(outlinePoints, segments, null);
 
-    let contour = { points: enforceSmoothColinearity(alignedOutlinePoints, true), isClosed: true };
+    let contour = { points: enforceSmoothColinearity(outlinePoints, true), isClosed: true };
 
     // Apply reverse if flag is set
     if (reversed) {
