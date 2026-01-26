@@ -2,7 +2,6 @@ import { parseSelection, withSavedState } from "@fontra/core/utils.js";
 import {
   getSkeletonData,
   calculateNormalAtSkeletonPoint,
-  generateSampledOffsetPoints,
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
 import {
@@ -687,45 +686,3 @@ registerVisualizationLayerDefinition({
   },
 });
 
-// Sampled offset points layer (for debugging/comparison)
-registerVisualizationLayerDefinition({
-  identifier: "fontra.skeleton.sampled.offset",
-  name: "Skeleton Sampled Offset Points",
-  selectionFunc: glyphSelector("editing"),
-  userSwitchable: true,
-  defaultOn: true,
-  zIndex: 440, // Below centerline but visible
-  screenParameters: {
-    pointRadius: 2,
-  },
-  colors: {
-    leftColor: "rgba(128, 128, 128, 0.5)",
-    rightColor: "rgba(128, 128, 128, 0.5)",
-  },
-  colorsDarkMode: {
-    leftColor: "rgba(180, 180, 180, 0.5)",
-    rightColor: "rgba(180, 180, 180, 0.5)",
-  },
-  draw: (context, positionedGlyph, parameters, model, controller) => {
-    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
-    if (!skeletonData?.contours?.length) {
-      return;
-    }
-
-    for (const contour of skeletonData.contours) {
-      const sampledPoints = generateSampledOffsetPoints(contour);
-
-      // Draw left side sampled points
-      context.fillStyle = parameters.leftColor;
-      for (const point of sampledPoints.left) {
-        fillRoundNode(context, point, parameters.pointRadius);
-      }
-
-      // Draw right side sampled points
-      context.fillStyle = parameters.rightColor;
-      for (const point of sampledPoints.right) {
-        fillRoundNode(context, point, parameters.pointRadius);
-      }
-    }
-  },
-});
