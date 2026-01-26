@@ -829,9 +829,31 @@ function generateOffsetPointsForSegment(
             smooth: smoothStart,
           });
         }
-        // Add control points (cubic bezier), rounded to UPM grid
-        output.push({ x: Math.round(pts[1].x), y: Math.round(pts[1].y), type: "cubic" });
-        output.push({ x: Math.round(pts[2].x), y: Math.round(pts[2].y), type: "cubic" });
+        // Adjust control points to match the fixed endpoints
+        // The offset curve was generated with average width, but endpoints use real widths
+        // Scale handles proportionally to maintain curve shape
+        const origStart = pts[0];
+        const origEnd = pts[3];
+        const handle1 = pts[1];
+        const handle2 = pts[2];
+
+        // Vector from original start to handle1
+        const h1Offset = { x: handle1.x - origStart.x, y: handle1.y - origStart.y };
+        // Vector from original end to handle2
+        const h2Offset = { x: handle2.x - origEnd.x, y: handle2.y - origEnd.y };
+
+        // Apply handles relative to fixed positions
+        const adjustedHandle1 = {
+          x: Math.round(fixedStart.x + h1Offset.x),
+          y: Math.round(fixedStart.y + h1Offset.y),
+        };
+        const adjustedHandle2 = {
+          x: Math.round(fixedEnd.x + h2Offset.x),
+          y: Math.round(fixedEnd.y + h2Offset.y),
+        };
+
+        output.push({ x: adjustedHandle1.x, y: adjustedHandle1.y, type: "cubic" });
+        output.push({ x: adjustedHandle2.x, y: adjustedHandle2.y, type: "cubic" });
         if (shouldAddEnd) {
           output.push({
             x: fixedEnd.x,
@@ -843,11 +865,19 @@ function generateOffsetPointsForSegment(
       }
 
       // Fallback: use original curves without simplification
+      // Track actual start position for each curve (for handle adjustment)
+      let currentStart = fixedStart;
+
       for (let i = 0; i < curves.length; i++) {
         const curve = curves[i];
         const pts = curve.points;
         const isFirstCurve = i === 0;
         const isLastCurve = i === curves.length - 1;
+
+        // Determine actual end position for this curve
+        const currentEnd = isLastCurve
+          ? fixedEnd
+          : { x: Math.round(pts[pts.length - 1].x), y: Math.round(pts[pts.length - 1].y) };
 
         // Add start point only for first curve if shouldAddStart
         if (isFirstCurve && shouldAddStart) {
@@ -858,14 +888,47 @@ function generateOffsetPointsForSegment(
           });
         }
 
-        // Add control points based on curve type, rounded to UPM grid
+        // Add control points based on curve type, adjusted for fixed endpoints
         if (pts.length === 4) {
-          // Cubic bezier
-          output.push({ x: Math.round(pts[1].x), y: Math.round(pts[1].y), type: "cubic" });
-          output.push({ x: Math.round(pts[2].x), y: Math.round(pts[2].y), type: "cubic" });
+          // Cubic bezier - adjust handles relative to fixed endpoints
+          const origStart = pts[0];
+          const origEnd = pts[3];
+          const handle1 = pts[1];
+          const handle2 = pts[2];
+
+          // Vector from original start to handle1
+          const h1Offset = { x: handle1.x - origStart.x, y: handle1.y - origStart.y };
+          // Vector from original end to handle2
+          const h2Offset = { x: handle2.x - origEnd.x, y: handle2.y - origEnd.y };
+
+          // Apply handles relative to actual positions
+          output.push({
+            x: Math.round(currentStart.x + h1Offset.x),
+            y: Math.round(currentStart.y + h1Offset.y),
+            type: "cubic",
+          });
+          output.push({
+            x: Math.round(currentEnd.x + h2Offset.x),
+            y: Math.round(currentEnd.y + h2Offset.y),
+            type: "cubic",
+          });
         } else if (pts.length === 3) {
-          // Quadratic bezier
-          output.push({ x: Math.round(pts[1].x), y: Math.round(pts[1].y), type: "quad" });
+          // Quadratic bezier - adjust handle relative to midpoint
+          const origStart = pts[0];
+          const origEnd = pts[2];
+          const handle = pts[1];
+
+          // Calculate handle offset from midpoint of original curve
+          const origMid = { x: (origStart.x + origEnd.x) / 2, y: (origStart.y + origEnd.y) / 2 };
+          const hOffset = { x: handle.x - origMid.x, y: handle.y - origMid.y };
+
+          // Apply handle relative to midpoint of actual positions
+          const actualMid = { x: (currentStart.x + currentEnd.x) / 2, y: (currentStart.y + currentEnd.y) / 2 };
+          output.push({
+            x: Math.round(actualMid.x + hOffset.x),
+            y: Math.round(actualMid.y + hOffset.y),
+            type: "quad",
+          });
         }
         // Linear (2 points) - no control points needed
 
@@ -880,13 +943,16 @@ function generateOffsetPointsForSegment(
             });
           }
         } else {
-          // Intermediate curve - add endpoint (it becomes next curve's start), rounded to UPM grid
+          // Intermediate curve - add endpoint (it becomes next curve's start)
           output.push({
-            x: Math.round(pts[pts.length - 1].x),
-            y: Math.round(pts[pts.length - 1].y),
+            x: currentEnd.x,
+            y: currentEnd.y,
             smooth: true, // intermediate points are smooth
           });
         }
+
+        // Update currentStart for next curve
+        currentStart = currentEnd;
       }
     };
 
