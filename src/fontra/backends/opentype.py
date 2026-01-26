@@ -25,7 +25,7 @@ from ..core.classes import (
 )
 from ..core.path import PackedPath, PackedPathPointPen
 from ..core.protocols import ReadableFontBackend
-from ..core.varutils import locationToTuple
+from ..core.varutils import locationToTuple, unnormalizeLocation, unnormalizeValue
 from .base import ReadableBaseBackend
 from .filewatcher import Change
 from .watchable import WatchableBackend
@@ -82,10 +82,10 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
         glyph = VariableGlyph(name=glyphName)
         staticGlyph = buildStaticGlyph(self.glyphSet, glyphName)
         layers = {defaultLayerName: Layer(glyph=staticGlyph)}
-        defaultLocation = {axis.name: 0.0 for axis in self.axes.axes}
+        defaultLocation = {axis.name: 0 for axis in self.axes.axes}
         sources = [
             GlyphSource(
-                location=defaultLocation,
+                location=unnormalizeLocation(defaultLocation, self.axes.axes),
                 name=defaultLayerName,
                 layerName=defaultLayerName,
             )
@@ -100,7 +100,13 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
                 self.variationGlyphSets[locStr] = varGlyphSet
             varGlyph = buildStaticGlyph(varGlyphSet, glyphName)
             layers[locStr] = Layer(glyph=varGlyph)
-            sources.append(GlyphSource(location=fullLoc, name=locStr, layerName=locStr))
+            sources.append(
+                GlyphSource(
+                    location=unnormalizeLocation(fullLoc, self.axes.axes),
+                    name=locStr,
+                    layerName=locStr,
+                )
+            )
         if self.charStrings is not None:
             checkAndFixCFF2Compatibility(glyphName, layers)
         glyph.layers = layers
@@ -249,15 +255,16 @@ def unpackAxes(font: TTFont) -> Axes:
     for axis in fvar.axes:
         normMin = -1 if axis.minValue < axis.defaultValue else 0
         normMax = 1 if axis.maxValue > axis.defaultValue else 0
-        posExtent = axis.maxValue - axis.defaultValue
-        negExtent = axis.defaultValue - axis.minValue
         mapping = avarMapping.get(axis.axisTag, [])
         if mapping:
             mapping = [
                 [
-                    axis.defaultValue
-                    + (inValue * posExtent if inValue >= 0 else inValue * negExtent),
-                    outValue,
+                    unnormalizeValue(
+                        inValue, axis.minValue, axis.defaultValue, axis.maxValue
+                    ),
+                    unnormalizeValue(
+                        outValue, axis.minValue, axis.defaultValue, axis.maxValue
+                    ),
                 ]
                 for inValue, outValue in mapping
                 if normMin <= outValue <= normMax
@@ -268,6 +275,10 @@ def unpackAxes(font: TTFont) -> Axes:
                 [axis.defaultValue, 0],
                 [axis.maxValue, normMax],
             ]
+
+        if all([inValue == outValue for inValue, outValue in mapping]):
+            mapping = []
+
         axisNameRecord = nameTable.getName(axis.axisNameID, 3, 1, 0x409)
         axisName = (
             axisNameRecord.toUnicode() if axisNameRecord is not None else axis.axisTag
@@ -315,7 +326,8 @@ def unpackAxes(font: TTFont) -> Axes:
 
             mappings.append(
                 CrossAxisMapping(
-                    inputLocation=inputLocation, outputLocation=outputLocation
+                    inputLocation=unnormalizeLocation(inputLocation, axisList),
+                    outputLocation=unnormalizeLocation(outputLocation, axisList),
                 )
             )
 

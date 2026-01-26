@@ -100,14 +100,14 @@ def test_makeSparseNormalizedLocation(location, expectedSparseLocation):
 @pytest.mark.parametrize(
     "normalizedLocation, expectedLocation",
     [
-        ({}, {"NoMapping": 400, "Weight": 400}),
-        ({"Weight": -2}, {"NoMapping": 400, "Weight": 200}),
-        ({"Weight": -1}, {"NoMapping": 400, "Weight": 200}),
-        ({"Weight": -0.5}, {"NoMapping": 400, "Weight": 300}),
-        ({"Weight": 0}, {"NoMapping": 400, "Weight": 400}),
-        ({"Weight": 0.5}, {"NoMapping": 400, "Weight": 550}),
-        ({"Weight": 1}, {"NoMapping": 400, "Weight": 700}),
-        ({"Weight": 2}, {"NoMapping": 400, "Weight": 700}),
+        ({}, {}),
+        ({"Weight": -2}, {"Weight": 200}),
+        ({"Weight": -1}, {"Weight": 200}),
+        ({"Weight": -0.5}, {"Weight": 300}),
+        ({"Weight": 0}, {"Weight": 400}),
+        ({"Weight": 0.5}, {"Weight": 550}),
+        ({"Weight": 1}, {"Weight": 700}),
+        ({"Weight": 2}, {"Weight": 700}),
     ],
 )
 def test_unnormalizeLocation(normalizedLocation, expectedLocation):
