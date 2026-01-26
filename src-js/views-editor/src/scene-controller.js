@@ -1634,14 +1634,17 @@ export class SceneController {
         const points = contour.points;
         const rotatedPoints = [...points.slice(pointIdx), ...points.slice(0, pointIdx)];
 
-        // Remove trailing off-curve points (handles that were going back to start)
-        while (rotatedPoints.length > 0 && rotatedPoints[rotatedPoints.length - 1].type) {
-          rotatedPoints.pop();
-        }
-
-        // Remove leading off-curve points (shouldn't happen, but safety check)
-        while (rotatedPoints.length > 0 && rotatedPoints[0].type) {
-          rotatedPoints.shift();
+        // Add a copy of the break point at the end to preserve all segments.
+        // The closed contour's segment from the last on-curve point back to
+        // the break point needs to connect to a physical endpoint.
+        const breakPoint = rotatedPoints[0];
+        if (!breakPoint.type) {
+          // Deep copy the break point for the end
+          const endPoint = JSON.parse(JSON.stringify(breakPoint));
+          // Reset smooth on endpoints - open contour endpoints don't have continuity on both sides
+          delete rotatedPoints[0].smooth;
+          delete endPoint.smooth;
+          rotatedPoints.push(endPoint);
         }
 
         contour.points = rotatedPoints;
