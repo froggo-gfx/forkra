@@ -135,13 +135,13 @@ export function calculateSkeletonTrueTunniPoint(segment) {
  *
  * @param {Object} delta - Movement delta vector {x, y}
  * @param {Object} segment - Original segment
- * @param {boolean} equalizeDistances - If true, both control points move by same amount
+ * @param {boolean} preserveTensions - If true, move proportionally to preserve equal tensions
  * @returns {Array|null} Array of [newCp1, newCp2] or null
  */
 export function calculateSkeletonControlPointsFromTunniDelta(
   delta,
   segment,
-  equalizeDistances = true
+  preserveTensions = true
 ) {
   if (!segment.controlPoints || segment.controlPoints.length !== 2) {
     return null;
@@ -157,11 +157,41 @@ export function calculateSkeletonControlPointsFromTunniDelta(
   // Calculate 45-degree vector (average of both directions)
   const fortyFiveVec = normalizeVector(addVectors(dir1, dir2));
 
-  if (equalizeDistances) {
-    // Project delta onto the 45-degree vector
-    const projection = delta.x * fortyFiveVec.x + delta.y * fortyFiveVec.y;
+  // Project delta onto the 45-degree vector to get scalar movement
+  const projection = delta.x * fortyFiveVec.x + delta.y * fortyFiveVec.y;
 
-    // Move both control points by same amount along their directions
+  if (preserveTensions) {
+    // To preserve equal tensions, move control points PROPORTIONALLY
+    // to their distances to the True Tunni Point
+    const trueTunni = calculateSkeletonTrueTunniPoint(segment);
+
+    if (trueTunni) {
+      const distToTunni1 = distance(startPoint, trueTunni);
+      const distToTunni2 = distance(endPoint, trueTunni);
+
+      if (distToTunni1 > 0 && distToTunni2 > 0) {
+        // Calculate proportional movements
+        // k is chosen so that average movement equals projection
+        const totalDist = distToTunni1 + distToTunni2;
+        const k = (2 * projection) / totalDist;
+
+        const move1 = k * distToTunni1;
+        const move2 = k * distToTunni2;
+
+        const newCp1 = {
+          x: cp1.x + dir1.x * move1,
+          y: cp1.y + dir1.y * move1,
+        };
+        const newCp2 = {
+          x: cp2.x + dir2.x * move2,
+          y: cp2.y + dir2.y * move2,
+        };
+
+        return [newCp1, newCp2];
+      }
+    }
+
+    // Fallback: move by same amount (if no True Tunni point)
     const newCp1 = {
       x: cp1.x + dir1.x * projection,
       y: cp1.y + dir1.y * projection,
