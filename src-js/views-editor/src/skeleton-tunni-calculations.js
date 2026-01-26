@@ -383,6 +383,7 @@ export function calculateSkeletonEqualizedControlPoints(segment) {
  */
 export function areSkeletonTensionsEqualized(segment, tolerance = 0.01) {
   if (!segment.controlPoints || segment.controlPoints.length !== 2) {
+    console.log("[areEqualized] No control points, returning true");
     return true;
   }
 
@@ -391,6 +392,7 @@ export function areSkeletonTensionsEqualized(segment, tolerance = 0.01) {
 
   const trueTunni = calculateSkeletonTrueTunniPoint(segment);
   if (!trueTunni) {
+    console.log("[areEqualized] No trueTunni, returning true");
     return true; // Lines parallel, consider equalized
   }
 
@@ -398,11 +400,14 @@ export function areSkeletonTensionsEqualized(segment, tolerance = 0.01) {
   const distEndToTunni = distance(endPoint, trueTunni);
 
   if (distStartToTunni <= 0 || distEndToTunni <= 0) {
+    console.log("[areEqualized] Distance <= 0, returning true");
     return true;
   }
 
   const tension1 = distance(startPoint, cp1) / distStartToTunni;
   const tension2 = distance(endPoint, cp2) / distEndToTunni;
+  const diff = Math.abs(tension1 - tension2);
 
-  return Math.abs(tension1 - tension2) < tolerance;
+  console.log("[areEqualized] tension1:", tension1, "tension2:", tension2, "diff:", diff, "tolerance:", tolerance);
+  return diff < tolerance;
 }

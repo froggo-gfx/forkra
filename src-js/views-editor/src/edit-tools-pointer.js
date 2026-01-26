@@ -1856,7 +1856,10 @@ export class PointerTool extends BaseTool {
     const { contourIndex, segment } = tunniHit;
 
     // Check if already equalized
-    if (areSkeletonTensionsEqualized(segment)) {
+    const isEqualized = areSkeletonTensionsEqualized(segment);
+    console.log("[Equalize] areSkeletonTensionsEqualized:", isEqualized, "segment:", segment);
+    if (isEqualized) {
+      console.log("[Equalize] Already equalized, skipping");
       return; // Already equalized, nothing to do
     }
 
