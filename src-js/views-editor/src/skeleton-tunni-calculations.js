@@ -367,6 +367,10 @@ export function calculateSkeletonEqualizedControlPoints(segment) {
     y: endPoint.y + dir2.y * newDist2,
   };
 
+  console.log("[Equalize] tension1:", tension1, "tension2:", tension2, "target:", targetTension);
+  console.log("[Equalize] distStartToTunni:", distStartToTunni, "distEndToTunni:", distEndToTunni);
+  console.log("[Equalize] newDist1:", newDist1, "newDist2:", newDist2);
+
   return [newCp1, newCp2];
 }
 
