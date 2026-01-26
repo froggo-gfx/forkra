@@ -227,6 +227,9 @@ export default class SkeletonParametersPanel extends Panel {
           "data-tooltipposition": "bottom",
         }),
       },
+      field3: {
+        type: "spacer",
+      },
     });
 
     // === DISTRIBUTE ===
