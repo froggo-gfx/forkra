@@ -1378,7 +1378,51 @@ function rebuildSkeletonContour(points, deleteIndices, isClosed) {
     }
   }
 
+  // Fix smooth flags: a point can only be smooth if it has off-curve neighbors on both sides
+  fixSkeletonSmoothFlags(newPoints, isClosed);
+
   return newPoints;
+}
+
+/**
+ * Fix smooth flags after point deletion.
+ * A point can be smooth if it has at least one off-curve handle neighbor
+ * (for linear-curve transitions). If both neighbors are on-curve (no handles),
+ * smooth has no meaning and should be false.
+ */
+function fixSkeletonSmoothFlags(points, isClosed) {
+  const numPoints = points.length;
+  if (numPoints < 2) return;
+
+  for (let i = 0; i < numPoints; i++) {
+    const point = points[i];
+
+    // Only check on-curve points with smooth=true
+    if (point.type || !point.smooth) continue;
+
+    // Find previous and next points
+    const prevIdx = (i - 1 + numPoints) % numPoints;
+    const nextIdx = (i + 1) % numPoints;
+
+    // For open contours, endpoints can't be smooth in the traditional sense
+    if (!isClosed && (i === 0 || i === numPoints - 1)) {
+      point.smooth = false;
+      continue;
+    }
+
+    const prevPoint = points[prevIdx];
+    const nextPoint = points[nextIdx];
+
+    // Check if neighbors are off-curve (handles)
+    const prevIsHandle = prevPoint?.type === "cubic" || prevPoint?.type === "quad";
+    const nextIsHandle = nextPoint?.type === "cubic" || nextPoint?.type === "quad";
+
+    // If neither neighbor is a handle (both are on-curve), point cannot be smooth
+    // Smooth requires at least one handle for colinearity to have meaning
+    if (!prevIsHandle && !nextIsHandle) {
+      point.smooth = false;
+    }
+  }
 }
 
 /**
