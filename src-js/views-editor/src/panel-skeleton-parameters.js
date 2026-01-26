@@ -241,18 +241,38 @@ export default class SkeletonParametersPanel extends Panel {
 
     const selectedData = this._getSelectedSkeletonPoints();
     const hasSelection = selectedData && selectedData.points.length > 0;
+    const multiSelection = hasSelection && selectedData.points.length > 1;
 
-    // Get values: from selected point or defaults
-    let left, right;
+    // Get values: from selected points or defaults
+    let left, right, leftMixed = false, rightMixed = false;
+    let asymStates = new Set(); // Track asymmetric states across selection
+
     if (hasSelection) {
-      const { point } = selectedData.points[0];
       const defaultWidth = this._getCurrentDefaultWidthWide();
-      const widths = this._getPointWidths(point, defaultWidth);
-      left = widths.left;
-      right = widths.right;
-      // If point has asymmetric data, sync UI state to true
-      if (this._isAsymmetric(point)) {
-        this.pointParameters.asymmetrical = true;
+
+      // Collect all values from selected points
+      const leftValues = [];
+      const rightValues = [];
+
+      for (const { point } of selectedData.points) {
+        const widths = this._getPointWidths(point, defaultWidth);
+        leftValues.push(Math.round(widths.left));
+        rightValues.push(Math.round(widths.right));
+        asymStates.add(this._isAsymmetric(point));
+      }
+
+      // Check if values are mixed
+      const allLeftSame = leftValues.every(v => v === leftValues[0]);
+      const allRightSame = rightValues.every(v => v === rightValues[0]);
+
+      left = allLeftSame ? leftValues[0] : null;
+      right = allRightSame ? rightValues[0] : null;
+      leftMixed = !allLeftSame;
+      rightMixed = !allRightSame;
+
+      // Sync UI state from selection (only if all same)
+      if (asymStates.size === 1) {
+        this.pointParameters.asymmetrical = asymStates.has(true);
       }
     } else {
       // No selection - show Source Width / 2
@@ -260,42 +280,54 @@ export default class SkeletonParametersPanel extends Panel {
       left = defaultWide / 2;
       right = defaultWide / 2;
     }
-    // Use persistent UI state for toggle
+
+    // Determine checkbox state
     const isAsym = this.pointParameters.asymmetrical;
+    const isIndeterminate = asymStates.size > 1; // Mixed asym states
 
     // Header with Asymmetrical toggle
+    const checkbox = html.input({
+      type: "checkbox",
+      id: "asymmetrical-toggle",
+      checked: isAsym,
+      onchange: (e) => this._onAsymmetricalToggle(e.target.checked),
+    });
+    // Set indeterminate state after creation (can't be set via attribute)
+    if (isIndeterminate) {
+      checkbox.indeterminate = true;
+    }
+
     formContents.push({
       type: "header",
       label: "Point Parameters",
       auxiliaryElement: html.span({}, [
-        html.input({
-          type: "checkbox",
-          id: "asymmetrical-toggle",
-          checked: isAsym,
-          onchange: (e) => this._onAsymmetricalToggle(e.target.checked),
-        }),
+        checkbox,
         html.label({ for: "asymmetrical-toggle", style: "margin-left: 4px" }, "Asym"),
       ]),
     });
 
-    // Width fields (Left / Right)
+    // Width fields (Left / Right) - show "mixed" placeholder if values differ
     formContents.push({
       type: "edit-number",
       key: "pointWidthLeft",
       label: "Left",
-      value: Math.round(left),
+      value: leftMixed ? null : Math.round(left),
+      placeholder: leftMixed ? "mixed" : undefined,
       minValue: 1,
+      allowEmptyField: leftMixed,
     });
     formContents.push({
       type: "edit-number",
       key: "pointWidthRight",
       label: "Right",
-      value: Math.round(right),
+      value: rightMixed ? null : Math.round(right),
+      placeholder: rightMixed ? "mixed" : undefined,
       minValue: 1,
+      allowEmptyField: rightMixed,
     });
 
-    // Distribution slider (only in asymmetric mode)
-    if (isAsym) {
+    // Distribution slider (only in asymmetric mode and single selection)
+    if (isAsym && !multiSelection && !isIndeterminate) {
       const distribution = this._calculateDistribution(left, right);
       formContents.push({
         type: "edit-number-slider",
@@ -501,21 +533,16 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Check if a point has asymmetric widths.
-   * Returns true only if leftWidth and rightWidth exist AND are different.
+   * Check if a point is in asymmetric mode.
+   * Returns true if the point has separate leftWidth/rightWidth properties,
+   * regardless of whether they're equal or different.
    * @param {Object} point - The skeleton point
-   * @returns {boolean} True if asymmetric
+   * @returns {boolean} True if asymmetric mode
    */
   _isAsymmetric(point) {
-    if (point.leftWidth === undefined && point.rightWidth === undefined) {
-      return false;
-    }
-    // If both exist, check if they're different
-    if (point.leftWidth !== undefined && point.rightWidth !== undefined) {
-      return point.leftWidth !== point.rightWidth;
-    }
-    // Only one exists - treat as asymmetric
-    return true;
+    // Asymmetric mode = has leftWidth or rightWidth defined
+    // Symmetric mode = only has width (or no width, using default)
+    return point.leftWidth !== undefined || point.rightWidth !== undefined;
   }
 
   /**
@@ -542,6 +569,8 @@ export default class SkeletonParametersPanel extends Panel {
 
   /**
    * Handle asymmetrical toggle change.
+   * When clicked from indeterminate state (mixed asym flags), sets all to checked (asym).
+   * Then subsequent clicks toggle between all-asym and all-symmetric.
    */
   async _onAsymmetricalToggle(checked) {
     this.pointParameters.asymmetrical = checked;
@@ -553,68 +582,6 @@ export default class SkeletonParametersPanel extends Panel {
     }
 
     // Convert selected points to/from asymmetric mode
-    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const layer = glyph.layers[selectedData.editLayerName];
-      const skeletonData = JSON.parse(
-        JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
-      );
-
-      for (const { contourIdx, pointIdx } of selectedData.points) {
-        const point = skeletonData.contours[contourIdx].points[pointIdx];
-        const defaultWidth = skeletonData.contours[contourIdx].defaultWidth || this._getCurrentDefaultWidthWide();
-
-        if (checked) {
-          // Convert to asymmetric: split width into leftWidth/rightWidth
-          const halfWidth = (point.width ?? defaultWidth) / 2;
-          point.leftWidth = halfWidth;
-          point.rightWidth = halfWidth;
-          delete point.width;
-        } else {
-          // Convert to symmetric: combine leftWidth/rightWidth into width
-          const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-          const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-          point.width = leftHW + rightHW;
-          delete point.leftWidth;
-          delete point.rightWidth;
-        }
-      }
-
-      // Record changes
-      const changes = [];
-      const staticGlyph = layer.glyph;
-      const pathChange = recordChanges(staticGlyph, (sg) => {
-        this._regenerateOutlineContours(sg, skeletonData);
-      });
-      changes.push(pathChange.prefixed(["layers", selectedData.editLayerName, "glyph"]));
-
-      const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-      });
-      changes.push(customDataChange.prefixed(["layers", selectedData.editLayerName]));
-
-      const combined = new ChangeCollector().concat(...changes);
-      await sendIncrementalChange(combined.change);
-
-      return {
-        changes: combined,
-        undoLabel: checked ? "Enable asymmetric width" : "Disable asymmetric width",
-        broadcast: true,
-      };
-    });
-
-    this.update();
-  }
-
-  /**
-   * Set point width (Left or Right).
-   */
-  async _setPointWidth(key, value) {
-    const selectedData = this._getSelectedSkeletonPoints();
-    if (!selectedData) return;
-
-    const isLeft = key === "pointWidthLeft";
-    const isAsym = this.pointParameters.asymmetrical;
-
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
 
@@ -635,22 +602,95 @@ export default class SkeletonParametersPanel extends Panel {
 
           const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
 
-          if (isAsym) {
-            // Asymmetric mode - edit individual sides
-            if (isLeft) {
-              point.leftWidth = value;
-              if (point.rightWidth === undefined) {
-                point.rightWidth = point.width ? point.width / 2 : value;
-              }
-            } else {
-              point.rightWidth = value;
-              if (point.leftWidth === undefined) {
-                point.leftWidth = point.width ? point.width / 2 : value;
-              }
-            }
+          if (checked) {
+            // Convert to asymmetric: split width into leftWidth/rightWidth
+            // Preserve existing values if already asymmetric
+            const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+            const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+            point.leftWidth = leftHW;
+            point.rightWidth = rightHW;
             delete point.width;
           } else {
-            // Symmetric mode - change both sides together
+            // Convert to symmetric: combine leftWidth/rightWidth into width
+            const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+            const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+            point.width = leftHW + rightHW;
+            delete point.leftWidth;
+            delete point.rightWidth;
+          }
+        }
+
+        // Record changes for this layer
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: checked ? "Enable asymmetric width" : "Disable asymmetric width",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
+   * Set point width (Left or Right).
+   * Respects each point's own asymmetric state:
+   * - Asymmetric points: only the specified side is changed
+   * - Symmetric points: both sides are changed to the same value
+   */
+  async _setPointWidth(key, value) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) return;
+
+    const isLeft = key === "pointWidthLeft";
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      // Apply changes to ALL editable layers (multi-source editing support)
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          // Check THIS point's asymmetric state, not the UI toggle
+          const pointIsAsym = this._isAsymmetric(point);
+
+          if (pointIsAsym) {
+            // Asymmetric point - edit only the specified side
+            if (isLeft) {
+              point.leftWidth = value;
+            } else {
+              point.rightWidth = value;
+            }
+            // Keep the other side as is (already has leftWidth/rightWidth)
+          } else {
+            // Symmetric point - change both sides together
             point.width = value * 2;
             delete point.leftWidth;
             delete point.rightWidth;

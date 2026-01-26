@@ -288,12 +288,18 @@ export class Form extends SimpleElement {
     this._lastValidFieldValues[fieldItem.key] = fieldItem.value;
     const inputElement = document.createElement("input");
     inputElement.type = "number";
-    inputElement.value = maybeRound(fieldItem.value, fieldItem.numDigits);
+    // Set value to empty if null/undefined (for placeholder display)
+    inputElement.value =
+      fieldItem.value != null ? maybeRound(fieldItem.value, fieldItem.numDigits) : "";
 
     if (fieldItem["data-tooltip"]) {
       // data-tooltip doesn't work for input number,
       // default title is used
       inputElement.setAttribute("title", fieldItem["data-tooltip"]);
+    }
+
+    if (fieldItem.placeholder) {
+      inputElement.placeholder = fieldItem.placeholder;
     }
 
     if ("minValue" in fieldItem) {
