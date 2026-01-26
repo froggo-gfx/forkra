@@ -296,6 +296,8 @@ export class PointerTool extends BaseTool {
 
     // Convert skeleton segment selection to on-curve point selection immediately
     // (consistent with regular path segments selecting their on-curve points)
+    // But preserve original selection for double-click handling
+    const originalSelection = selection;
     const { skeletonSegment: clickedSegment } = parseSelection(selection);
     if (clickedSegment?.size) {
       const onCurvePoints = this._getSegmentOnCurvePoints(clickedSegment);
@@ -336,7 +338,8 @@ export class PointerTool extends BaseTool {
     if (initialEvent.detail == 2 || initialEvent.myTapCount == 2) {
       initialEvent.preventDefault(); // don't let our dbl click propagate to other elements
       eventStream.done();
-      await this.handleDoubleClick(selection, point, initialEvent);
+      // Use originalSelection to preserve skeletonSegment for double-click handling
+      await this.handleDoubleClick(originalSelection, point, initialEvent);
       return;
     }
 
