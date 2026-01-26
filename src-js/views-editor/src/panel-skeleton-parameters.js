@@ -596,17 +596,21 @@ export default class SkeletonParametersPanel extends Panel {
           try {
             let lastProcessedTime = 0;
             let lastDist = null;
+            let lastWasExtreme = false;
             const THROTTLE_MS = 32; // ~30fps
 
             for await (const dist of valueStream) {
               lastDist = dist;
               const now = Date.now();
-              // Always apply extreme values immediately (skip throttle)
+              // Always apply extreme values immediately, and also when
+              // transitioning out of extreme (to avoid "sticking")
               const isExtreme = dist >= 100 || dist <= -100;
-              if (!isExtreme && now - lastProcessedTime < THROTTLE_MS) {
+              const isTransition = isExtreme !== lastWasExtreme;
+              if (!isExtreme && !isTransition && now - lastProcessedTime < THROTTLE_MS) {
                 continue;
               }
               lastProcessedTime = now;
+              lastWasExtreme = isExtreme;
               await this._setPointDistributionDirect(dist);
             }
             // Apply final value if skipped
