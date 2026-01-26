@@ -636,6 +636,11 @@ function simplifyOffsetCurves(offsetCurves, halfWidth) {
     return null;
   }
 
+  // Guard against zero halfWidth which would cause infinite loop
+  if (halfWidth <= 0) {
+    return null;
+  }
+
   // If only one curve with 4 points (cubic), no simplification needed
   if (offsetCurves.length === 1 && offsetCurves[0].points.length === 4) {
     return null;
