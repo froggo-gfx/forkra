@@ -612,9 +612,17 @@ export default class SkeletonParametersPanel extends Panel {
               await this._setPointDistributionDirect(lastDist);
             }
           } finally {
+            // Regenerate contours if we were in Move Skeleton mode
+            // (we skipped regeneration during drag to keep contour fixed)
+            const needsRegeneration = this.pointParameters.moveSkeleton && this._initialSkeletonState;
+
             this._isDraggingSlider = false;
             this._initialDistributions = null;
             this._initialSkeletonState = null;
+
+            if (needsRegeneration) {
+              await this._regenerateContoursForAllLayers();
+            }
             this.update();
           }
         } else {
@@ -786,6 +794,47 @@ export default class SkeletonParametersPanel extends Panel {
     // Asymmetric mode = has leftWidth or rightWidth defined
     // Symmetric mode = only has width (or no width, using default)
     return point.leftWidth !== undefined || point.rightWidth !== undefined;
+  }
+
+  /**
+   * Regenerate contours for all editable layers.
+   * Called after Move Skeleton drag ends to sync contours with new skeleton positions.
+   */
+  async _regenerateContoursForAllLayers() {
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Regenerate contours",
+        broadcast: true,
+      };
+    });
   }
 
   /**
@@ -1238,33 +1287,27 @@ export default class SkeletonParametersPanel extends Panel {
             // At +100: skeleton at left contour (offset = initialLeft, leftWidth = 0)
             // At -100: skeleton at right contour (offset = -initialRight, rightWidth = 0)
             // At initialDistribution: no movement (offset = 0)
+
+            // Clamp distribution to valid range
+            const clampedDistribution = Math.max(-100, Math.min(100, distribution));
+            const delta = clampedDistribution - initialDistribution;
+
             let offset;
-
-            // Handle exact extreme values to avoid floating point issues
-            if (distribution >= 100) {
-              offset = initialLeft;
-            } else if (distribution <= -100) {
-              offset = -initialRight;
-            } else {
-              // Calculate delta from initial slider position
-              const delta = distribution - initialDistribution;
-
-              if (delta >= 0) {
-                // Moving towards +100 (left contour)
-                const availableRange = 100 - initialDistribution;
-                if (availableRange > 0) {
-                  offset = (delta / availableRange) * initialLeft;
-                } else {
-                  offset = initialLeft; // Already at +100
-                }
+            if (delta >= 0) {
+              // Moving towards +100 (left contour)
+              const availableRange = 100 - initialDistribution;
+              if (availableRange > 0) {
+                offset = (delta / availableRange) * initialLeft;
               } else {
-                // Moving towards -100 (right contour)
-                const availableRange = initialDistribution + 100;
-                if (availableRange > 0) {
-                  offset = (delta / availableRange) * initialRight;
-                } else {
-                  offset = -initialRight; // Already at -100
-                }
+                offset = 0;
+              }
+            } else {
+              // Moving towards -100 (right contour)
+              const availableRange = initialDistribution + 100;
+              if (availableRange > 0) {
+                offset = (delta / availableRange) * initialRight;
+              } else {
+                offset = 0;
               }
             }
 
@@ -1313,10 +1356,16 @@ export default class SkeletonParametersPanel extends Panel {
 
         // Record changes for this layer
         const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          this._regenerateOutlineContours(sg, skeletonData);
-        });
-        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        // Skip contour regeneration in Move Skeleton mode during drag
+        // (contour should stay fixed, only skeleton moves)
+        const skipRegeneration = this.pointParameters.moveSkeleton && this._isDraggingSlider;
+        if (!skipRegeneration) {
+          const pathChange = recordChanges(staticGlyph, (sg) => {
+            this._regenerateOutlineContours(sg, skeletonData);
+          });
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+        }
 
         const customDataChange = recordChanges(layer, (l) => {
           l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
