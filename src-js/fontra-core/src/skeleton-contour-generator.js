@@ -410,8 +410,15 @@ export function generateContoursFromSkeleton(skeletonData) {
  *   - For closed skeleton: returns 2 contours (outer and inner)
  */
 export function generateOutlineFromSkeletonContour(skeletonContour) {
-  const { points, isClosed, defaultWidth = DEFAULT_WIDTH, capStyle = "butt", reversed = false } =
-    skeletonContour;
+  const {
+    points,
+    isClosed,
+    defaultWidth = DEFAULT_WIDTH,
+    capStyle = "butt",
+    reversed = false,
+    singleSided = false,
+    singleSidedDirection = "left",
+  } = skeletonContour;
 
   if (points.length < 2) {
     return [];
@@ -441,10 +448,30 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     const isLastSegment = i === segments.length - 1;
 
     // Get per-point widths for start and end of segment
-    const startLeftHalfWidth = getPointHalfWidth(segment.startPoint, defaultWidth, "left");
-    const startRightHalfWidth = getPointHalfWidth(segment.startPoint, defaultWidth, "right");
-    const endLeftHalfWidth = getPointHalfWidth(segment.endPoint, defaultWidth, "left");
-    const endRightHalfWidth = getPointHalfWidth(segment.endPoint, defaultWidth, "right");
+    let startLeftHalfWidth = getPointHalfWidth(segment.startPoint, defaultWidth, "left");
+    let startRightHalfWidth = getPointHalfWidth(segment.startPoint, defaultWidth, "right");
+    let endLeftHalfWidth = getPointHalfWidth(segment.endPoint, defaultWidth, "left");
+    let endRightHalfWidth = getPointHalfWidth(segment.endPoint, defaultWidth, "right");
+
+    // Single-sided mode: redirect all width to one side
+    if (singleSided) {
+      const startTotal = startLeftHalfWidth + startRightHalfWidth;
+      const endTotal = endLeftHalfWidth + endRightHalfWidth;
+
+      if (singleSidedDirection === "left") {
+        // All width goes to the left side
+        startLeftHalfWidth = startTotal;
+        startRightHalfWidth = 0;
+        endLeftHalfWidth = endTotal;
+        endRightHalfWidth = 0;
+      } else {
+        // All width goes to the right side
+        startLeftHalfWidth = 0;
+        startRightHalfWidth = startTotal;
+        endLeftHalfWidth = 0;
+        endRightHalfWidth = endTotal;
+      }
+    }
 
     const offsetPoints = generateOffsetPointsForSegment(
       segment,
@@ -491,10 +518,28 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // Get per-point widths for first and last on-curve points
     const firstOnCurvePoint = segments[0].startPoint;
     const lastOnCurvePoint = segments[segments.length - 1].endPoint;
-    const startCapLeftHW = getPointHalfWidth(firstOnCurvePoint, defaultWidth, "left");
-    const startCapRightHW = getPointHalfWidth(firstOnCurvePoint, defaultWidth, "right");
-    const endCapLeftHW = getPointHalfWidth(lastOnCurvePoint, defaultWidth, "left");
-    const endCapRightHW = getPointHalfWidth(lastOnCurvePoint, defaultWidth, "right");
+    let startCapLeftHW = getPointHalfWidth(firstOnCurvePoint, defaultWidth, "left");
+    let startCapRightHW = getPointHalfWidth(firstOnCurvePoint, defaultWidth, "right");
+    let endCapLeftHW = getPointHalfWidth(lastOnCurvePoint, defaultWidth, "left");
+    let endCapRightHW = getPointHalfWidth(lastOnCurvePoint, defaultWidth, "right");
+
+    // Single-sided mode: redirect all width to one side for caps too
+    if (singleSided) {
+      const startTotal = startCapLeftHW + startCapRightHW;
+      const endTotal = endCapLeftHW + endCapRightHW;
+
+      if (singleSidedDirection === "left") {
+        startCapLeftHW = startTotal;
+        startCapRightHW = 0;
+        endCapLeftHW = endTotal;
+        endCapRightHW = 0;
+      } else {
+        startCapLeftHW = 0;
+        startCapRightHW = startTotal;
+        endCapLeftHW = 0;
+        endCapRightHW = endTotal;
+      }
+    }
 
     const startCap = generateCap(
       firstOnCurvePoint,

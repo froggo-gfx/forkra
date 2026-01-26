@@ -123,6 +123,28 @@ export default class SkeletonParametersPanel extends Panel {
       minValue: 1,
     });
 
+    // Single-sided checkbox
+    formContents.push({
+      type: "checkbox",
+      key: "singleSided",
+      label: "Single-sided",
+      value: this._getCurrentSingleSided(),
+    });
+
+    // Direction dropdown (only when single-sided is enabled)
+    if (this._getCurrentSingleSided()) {
+      formContents.push({
+        type: "dropdown",
+        key: "singleSidedDirection",
+        label: "Direction",
+        value: this._getCurrentSingleSidedDirection(),
+        options: [
+          { value: "left", label: "Left" },
+          { value: "right", label: "Right" },
+        ],
+      });
+    }
+
     // Divider
     formContents.push({ type: "divider" });
 
@@ -568,6 +590,11 @@ export default class SkeletonParametersPanel extends Panel {
         } else {
           await this._setPointDistributionDirect(value);
         }
+      } else if (fieldItem.key === "singleSided") {
+        await this._setSingleSided(value);
+        this.update(); // Rebuild form to show/hide direction dropdown
+      } else if (fieldItem.key === "singleSidedDirection") {
+        await this._setSingleSidedDirection(value);
       } else {
         this.parameters[fieldItem.key] = value;
       }
@@ -596,6 +623,153 @@ export default class SkeletonParametersPanel extends Panel {
 
     const source = this.fontController.sources[sourceIdentifier];
     return source?.customData?.[SKELETON_DEFAULT_WIDTH_NARROW_KEY] ?? DEFAULT_WIDTH_NARROW;
+  }
+
+  /**
+   * Get the single-sided mode from the first selected skeleton contour.
+   * @returns {boolean} Whether single-sided mode is enabled
+   */
+  _getCurrentSingleSided() {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (selectedData && selectedData.points.length > 0) {
+      const contourIdx = selectedData.points[0].contourIdx;
+      const contour = selectedData.skeletonData.contours[contourIdx];
+      return contour?.singleSided ?? false;
+    }
+    return false;
+  }
+
+  /**
+   * Get the single-sided direction from the first selected skeleton contour.
+   * @returns {string} The direction ("left" or "right")
+   */
+  _getCurrentSingleSidedDirection() {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (selectedData && selectedData.points.length > 0) {
+      const contourIdx = selectedData.points[0].contourIdx;
+      const contour = selectedData.skeletonData.contours[contourIdx];
+      return contour?.singleSidedDirection ?? "left";
+    }
+    return "left";
+  }
+
+  /**
+   * Set single-sided mode for selected skeleton contours.
+   * @param {boolean} value - Whether single-sided mode is enabled
+   */
+  async _setSingleSided(value) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) return;
+
+    // Get unique contour indices from selected points
+    const contourIndices = new Set(selectedData.points.map((p) => p.contourIdx));
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        // Update single-sided mode for each selected contour
+        for (const contourIdx of contourIndices) {
+          const contour = skeletonData.contours[contourIdx];
+          if (contour) {
+            contour.singleSided = value;
+            if (value && !contour.singleSidedDirection) {
+              contour.singleSidedDirection = "left"; // Default direction
+            }
+          }
+        }
+
+        // Update skeleton data
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+
+        // Regenerate contours
+        await this._regenerateOutlineContours(
+          glyph,
+          editLayerName,
+          skeletonData,
+          allChanges
+        );
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: value ? "Enable single-sided" : "Disable single-sided",
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Set single-sided direction for selected skeleton contours.
+   * @param {string} value - The direction ("left" or "right")
+   */
+  async _setSingleSidedDirection(value) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) return;
+
+    // Get unique contour indices from selected points
+    const contourIndices = new Set(selectedData.points.map((p) => p.contourIdx));
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        // Update direction for each selected contour
+        for (const contourIdx of contourIndices) {
+          const contour = skeletonData.contours[contourIdx];
+          if (contour) {
+            contour.singleSidedDirection = value;
+          }
+        }
+
+        // Update skeleton data
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+
+        // Regenerate contours
+        await this._regenerateOutlineContours(
+          glyph,
+          editLayerName,
+          skeletonData,
+          allChanges
+        );
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Set single-sided direction",
+        broadcast: true,
+      };
+    });
   }
 
   /**
