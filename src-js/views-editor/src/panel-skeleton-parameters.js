@@ -3,7 +3,11 @@ import { recordChanges } from "@fontra/core/change-recorder.js";
 import { ChangeCollector } from "@fontra/core/changes.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
+import {
+  generateContoursFromSkeleton,
+  calculateNormalAtSkeletonPoint,
+  getEffectiveNormal,
+} from "@fontra/core/skeleton-contour-generator.js";
 import { parseSelection } from "@fontra/core/utils.js";
 import { packContour } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
@@ -40,6 +44,7 @@ export default class SkeletonParametersPanel extends Panel {
     this.pointParameters = {
       asymmetrical: false,
       scaleValue: 1.0,
+      moveSkeleton: false,
     };
 
     // Flag to prevent form rebuild during slider drag
@@ -405,6 +410,24 @@ export default class SkeletonParametersPanel extends Panel {
         maxValue: 100,
         step: 2,
       });
+
+      // Move Skeleton checkbox
+      const moveSkeletonCheckbox = html.input({
+        type: "checkbox",
+        id: "move-skeleton-toggle",
+        checked: this.pointParameters.moveSkeleton,
+        onchange: (e) => {
+          this.pointParameters.moveSkeleton = e.target.checked;
+        },
+      });
+      formContents.push({
+        type: "header",
+        label: "",
+        auxiliaryElement: html.span({}, [
+          moveSkeletonCheckbox,
+          html.label({ for: "move-skeleton-toggle", style: "margin-left: 4px" }, "Move Skeleton"),
+        ]),
+      });
     }
 
     // Scale slider (last)
@@ -517,19 +540,41 @@ export default class SkeletonParametersPanel extends Panel {
         // For distribution slider - simple approach
         if (valueStream) {
           this._isDraggingSlider = true;
-          // Store initial distributions for relative changes
+          // Store initial state for relative changes
           const selectedData = this._getSelectedSkeletonPoints();
           const initialDistributions = new Map();
-          if (selectedData && selectedData.points.length > 1) {
+          const initialSkeletonState = new Map();
+
+          if (selectedData) {
+            const { skeletonData } = selectedData;
             for (const { contourIdx, pointIdx, point } of selectedData.points) {
               const key = `${contourIdx}/${pointIdx}`;
               const defaultWidth = this._getCurrentDefaultWidthWide();
               const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
               const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-              initialDistributions.set(key, this._calculateDistribution(leftHW, rightHW));
+
+              // Store distribution for multi-selection relative changes
+              if (selectedData.points.length > 1) {
+                initialDistributions.set(key, this._calculateDistribution(leftHW, rightHW));
+              }
+
+              // Store skeleton state for Move Skeleton mode
+              if (this.pointParameters.moveSkeleton) {
+                const skeletonContour = skeletonData.contours[contourIdx];
+                const normal = calculateNormalAtSkeletonPoint(skeletonContour, pointIdx);
+                const effectiveNormal = getEffectiveNormal(point, normal);
+                initialSkeletonState.set(key, {
+                  x: point.x,
+                  y: point.y,
+                  leftWidth: leftHW,
+                  rightWidth: rightHW,
+                  normal: effectiveNormal,
+                });
+              }
             }
           }
           this._initialDistributions = initialDistributions;
+          this._initialSkeletonState = initialSkeletonState;
           try {
             let lastProcessedTime = 0;
             let lastDist = null;
@@ -551,6 +596,7 @@ export default class SkeletonParametersPanel extends Panel {
           } finally {
             this._isDraggingSlider = false;
             this._initialDistributions = null;
+            this._initialSkeletonState = null;
             this.update();
           }
         } else {
@@ -1157,29 +1203,59 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
+          const key = `${contourIdx}/${pointIdx}`;
           const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
 
-          // Get current total width (leftHW + rightHW)
-          const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-          const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-          const totalWidth = leftHW + rightHW;
+          // Check if Move Skeleton mode is active
+          if (
+            this.pointParameters.moveSkeleton &&
+            this._initialSkeletonState &&
+            this._initialSkeletonState.has(key)
+          ) {
+            // Move Skeleton mode: move skeleton point, keep contour in place
+            const state = this._initialSkeletonState.get(key);
+            const { x: initialX, y: initialY, leftWidth: initialLeft, rightWidth: initialRight, normal } = state;
 
-          // Calculate effective distribution
-          let effectiveDistribution = distribution;
-          if (this._initialDistributions && this._initialDistributions.size > 0) {
-            // Multi-selection: slider value is a delta from initial
-            const key = `${contourIdx}/${pointIdx}`;
-            const initialDist = this._initialDistributions.get(key) || 0;
-            effectiveDistribution = Math.max(-100, Math.min(100, initialDist + distribution));
+            // Calculate offset based on distribution direction
+            // distribution > 0: move towards left contour (leftWidth decreases)
+            // distribution < 0: move towards right contour (rightWidth decreases)
+            let offset;
+            if (distribution >= 0) {
+              offset = (distribution / 100) * initialLeft;
+            } else {
+              offset = (distribution / 100) * initialRight;
+            }
+
+            // Move skeleton point along normal
+            point.x = Math.round(initialX + normal.x * offset);
+            point.y = Math.round(initialY + normal.y * offset);
+
+            // Adjust widths to keep contour in place
+            point.leftWidth = Math.max(0, Math.round(initialLeft - offset));
+            point.rightWidth = Math.max(0, Math.round(initialRight + offset));
+            delete point.width;
+          } else {
+            // Normal mode: change widths only, skeleton stays in place
+            const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+            const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+            const totalWidth = leftHW + rightHW;
+
+            // Calculate effective distribution
+            let effectiveDistribution = distribution;
+            if (this._initialDistributions && this._initialDistributions.size > 0) {
+              // Multi-selection: slider value is a delta from initial
+              const initialDist = this._initialDistributions.get(key) || 0;
+              effectiveDistribution = Math.max(-100, Math.min(100, initialDist + distribution));
+            }
+
+            // Calculate new widths based on distribution
+            const newLeftHW = totalWidth * (0.5 + effectiveDistribution / 200);
+            const newRightHW = totalWidth - newLeftHW;
+
+            point.leftWidth = Math.max(0, Math.round(newLeftHW));
+            point.rightWidth = Math.max(0, Math.round(newRightHW));
+            delete point.width;
           }
-
-          // Calculate new widths based on distribution
-          const newLeftHW = totalWidth * (0.5 + effectiveDistribution / 200);
-          const newRightHW = totalWidth - newLeftHW;
-
-          point.leftWidth = Math.max(0, Math.round(newLeftHW));
-          point.rightWidth = Math.max(0, Math.round(newRightHW));
-          delete point.width;
         }
 
         // Record changes for this layer
