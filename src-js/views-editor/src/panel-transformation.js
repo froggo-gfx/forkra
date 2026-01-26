@@ -108,7 +108,16 @@ export default class TransformationPanel extends Panel {
       customDistributionSpacing: null,
       dimensionWidth: null,
       dimensionHeight: null,
+      showSkeletonHandleDistance: true,
+      showSkeletonHandleTension: true,
+      showSkeletonHandleAngle: true,
     };
+
+    // Initialize scene settings for skeleton handle labels
+    this.sceneController.sceneSettingsController.setItem("showSkeletonHandleDistance", true);
+    this.sceneController.sceneSettingsController.setItem("showSkeletonHandleTension", true);
+    this.sceneController.sceneSettingsController.setItem("showSkeletonHandleAngle", true);
+
     this.registerActions();
 
     this.sceneController.sceneSettingsController.addKeyListener(
@@ -669,6 +678,60 @@ export default class TransformationPanel extends Panel {
       field3: {},
     });
 
+    // Skeleton Handle Labels section
+    formContents.push({ type: "divider" });
+    formContents.push({
+      type: "header",
+      label: "Skeleton Handle Labels",
+    });
+
+    // Create checkboxes for skeleton handle label parameters
+    const skeletonDistanceCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showSkeletonHandleDistance ?? true,
+    });
+    const skeletonTensionCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showSkeletonHandleTension ?? true,
+    });
+    const skeletonAngleCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showSkeletonHandleAngle ?? true,
+    });
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showSkeletonHandleDistance",
+        auxiliaryElement: skeletonDistanceCheckbox,
+      },
+      field2: { type: "text", value: "Distance" },
+      field3: {},
+    });
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showSkeletonHandleTension",
+        auxiliaryElement: skeletonTensionCheckbox,
+      },
+      field2: { type: "text", value: "Tension" },
+      field3: {},
+    });
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showSkeletonHandleAngle",
+        auxiliaryElement: skeletonAngleCheckbox,
+      },
+      field2: { type: "text", value: "Angle" },
+      field3: {},
+    });
+
     this.infoForm.setFieldDescriptions(formContents);
 
     this.infoForm.onFieldChange = async (fieldItem, value, valueStream) => {
@@ -684,6 +747,34 @@ export default class TransformationPanel extends Panel {
         });
       }
     };
+
+    // Add event listeners for skeleton handle label checkboxes
+    skeletonDistanceCheckbox.addEventListener("change", (event) => {
+      this.transformParameters.showSkeletonHandleDistance = event.target.checked;
+      this.sceneController.sceneSettingsController.setItem(
+        "showSkeletonHandleDistance",
+        event.target.checked
+      );
+      this.sceneController.canvasController.requestUpdate();
+    });
+
+    skeletonTensionCheckbox.addEventListener("change", (event) => {
+      this.transformParameters.showSkeletonHandleTension = event.target.checked;
+      this.sceneController.sceneSettingsController.setItem(
+        "showSkeletonHandleTension",
+        event.target.checked
+      );
+      this.sceneController.canvasController.requestUpdate();
+    });
+
+    skeletonAngleCheckbox.addEventListener("change", (event) => {
+      this.transformParameters.showSkeletonHandleAngle = event.target.checked;
+      this.sceneController.sceneSettingsController.setItem(
+        "showSkeletonHandleAngle",
+        event.target.checked
+      );
+      this.sceneController.canvasController.requestUpdate();
+    });
 
     this.updateDimensions();
   }

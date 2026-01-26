@@ -800,26 +800,18 @@ function calculateTension(onCurveA, offCurveA, offCurveB, onCurveB) {
 }
 
 /**
- * Draw a label badge with text near a point.
+ * Draw label text near a point (no background badge).
  */
-function drawLabelBadge(context, point, text, offsetX, offsetY, parameters) {
+function drawLabelText(context, point, text, offsetX, offsetY, parameters) {
   if (!text) return;
 
   const lines = text.split("\n");
   const lineHeight = SKELETON_LABEL_FONT_SIZE + 2;
-  const width = 40; // Approximate width
-  const height = lines.length * lineHeight + SKELETON_LABEL_PADDING * 2;
 
   const x = point.x + offsetX;
   const y = point.y + offsetY;
 
-  // Draw background badge
-  context.fillStyle = parameters.badgeColor;
-  context.beginPath();
-  context.roundRect(x, y - height / 2, width, height, 3);
-  context.fill();
-
-  // Draw text
+  // Draw text directly (dark color, no background)
   context.save();
   context.fillStyle = parameters.textColor;
   context.font = `${SKELETON_LABEL_FONT_SIZE}px fontra-ui-regular, sans-serif`;
@@ -843,16 +835,24 @@ registerVisualizationLayerDefinition({
   defaultOn: false,
   zIndex: 560,
   colors: {
-    badgeColor: "rgba(0, 100, 200, 0.85)",
-    textColor: "white",
+    textColor: "rgba(40, 40, 80, 0.9)",
   },
   colorsDarkMode: {
-    badgeColor: "rgba(40, 140, 255, 0.85)",
-    textColor: "white",
+    textColor: "rgba(200, 200, 240, 0.9)",
   },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
     if (!skeletonData?.contours?.length) {
+      return;
+    }
+
+    // Get visibility settings from model
+    const showDistance = model.sceneSettings?.showSkeletonHandleDistance ?? true;
+    const showTension = model.sceneSettings?.showSkeletonHandleTension ?? true;
+    const showAngle = model.sceneSettings?.showSkeletonHandleAngle ?? true;
+
+    // If nothing is enabled, skip
+    if (!showDistance && !showTension && !showAngle) {
       return;
     }
 
@@ -915,22 +915,29 @@ registerVisualizationLayerDefinition({
         // Calculate metrics
         const { distance, angle } = calculateDistanceAndAngle(onCurvePoint, point);
 
-        // Build label text
+        // Build label text based on visibility settings
         const labelParts = [];
-        labelParts.push(distance.toFixed(1));
 
-        // Calculate tension if we have a full cubic segment
-        if (otherOffCurve && otherOnCurve) {
+        if (showDistance) {
+          labelParts.push(distance.toFixed(1));
+        }
+
+        // Calculate tension if we have a full cubic segment and tension is enabled
+        if (showTension && otherOffCurve && otherOnCurve) {
           const tension = calculateTension(onCurvePoint, point, otherOffCurve, otherOnCurve);
           labelParts.push(tension.toFixed(2));
         }
 
-        labelParts.push(`${angle.toFixed(1)}°`);
+        if (showAngle) {
+          labelParts.push(`${angle.toFixed(1)}°`);
+        }
+
+        if (labelParts.length === 0) continue;
 
         const labelText = labelParts.join("\n");
 
-        // Draw label badge offset from the handle point
-        drawLabelBadge(context, point, labelText, 10, 0, parameters);
+        // Draw label text offset from the handle point
+        drawLabelText(context, point, labelText, 10, 0, parameters);
       }
     }
   },
