@@ -519,8 +519,22 @@ export default class SkeletonParametersPanel extends Panel {
           }
           this._initialDistributions = initialDistributions;
           try {
+            let lastProcessedTime = 0;
+            let lastDist = null;
+            const THROTTLE_MS = 32; // ~30fps
+
             for await (const dist of valueStream) {
+              lastDist = dist;
+              const now = Date.now();
+              if (now - lastProcessedTime < THROTTLE_MS) {
+                continue;
+              }
+              lastProcessedTime = now;
               await this._setPointDistributionDirect(dist);
+            }
+            // Apply final value if skipped
+            if (lastDist !== null) {
+              await this._setPointDistributionDirect(lastDist);
             }
           } finally {
             this._isDraggingSlider = false;
