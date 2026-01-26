@@ -1057,9 +1057,10 @@ export class PointerTool extends BaseTool {
     }
 
     for (const selKey of segmentSelection) {
+      // selKey format is "contourIdx/segmentIdx" (already parsed by parseSelection)
       const parts = selKey.split("/");
-      const contourIdx = parseInt(parts[1], 10);
-      const segmentIdx = parseInt(parts[2], 10);
+      const contourIdx = parseInt(parts[0], 10);
+      const segmentIdx = parseInt(parts[1], 10);
       const contour = skeletonData.contours[contourIdx];
       if (!contour) continue;
 
