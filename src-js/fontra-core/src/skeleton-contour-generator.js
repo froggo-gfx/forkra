@@ -1322,6 +1322,25 @@ export function getSkeletonData(layerOrCustomData) {
 }
 
 /**
+ * Move all skeleton points by dx, dy.
+ * Modifies the skeletonData object in place.
+ * @param {Object} skeletonData - The skeleton data object
+ * @param {number} dx - X offset
+ * @param {number} dy - Y offset
+ */
+export function moveSkeletonData(skeletonData, dx, dy) {
+  if (!skeletonData?.contours) return;
+
+  for (const contour of skeletonData.contours) {
+    if (!contour.points) continue;
+    for (const point of contour.points) {
+      point.x += dx;
+      point.y += dy;
+    }
+  }
+}
+
+/**
  * Create empty skeleton data structure.
  */
 export function createEmptySkeletonData() {
