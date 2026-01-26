@@ -1234,28 +1234,37 @@ export default class SkeletonParametersPanel extends Panel {
             const state = this._initialSkeletonState.get(key);
             const { x: initialX, y: initialY, leftWidth: initialLeft, rightWidth: initialRight, normal, initialDistribution } = state;
 
-            // Calculate delta from initial slider position
-            const delta = distribution - initialDistribution;
-
-            // Calculate offset based on delta direction
-            // delta > 0: move towards left contour (+100 = at left contour, leftWidth=0)
-            // delta < 0: move towards right contour (-100 = at right contour, rightWidth=0)
+            // Calculate offset based on distribution
+            // At +100: skeleton at left contour (offset = initialLeft, leftWidth = 0)
+            // At -100: skeleton at right contour (offset = -initialRight, rightWidth = 0)
+            // At initialDistribution: no movement (offset = 0)
             let offset;
-            if (delta >= 0) {
-              // Moving towards +100 (left contour)
-              const availableRange = 100 - initialDistribution;
-              if (availableRange > 0) {
-                offset = (delta / availableRange) * initialLeft;
-              } else {
-                offset = 0;
-              }
+
+            // Handle exact extreme values to avoid floating point issues
+            if (distribution >= 100) {
+              offset = initialLeft;
+            } else if (distribution <= -100) {
+              offset = -initialRight;
             } else {
-              // Moving towards -100 (right contour)
-              const availableRange = initialDistribution + 100;
-              if (availableRange > 0) {
-                offset = (delta / availableRange) * initialRight;
+              // Calculate delta from initial slider position
+              const delta = distribution - initialDistribution;
+
+              if (delta >= 0) {
+                // Moving towards +100 (left contour)
+                const availableRange = 100 - initialDistribution;
+                if (availableRange > 0) {
+                  offset = (delta / availableRange) * initialLeft;
+                } else {
+                  offset = initialLeft; // Already at +100
+                }
               } else {
-                offset = 0;
+                // Moving towards -100 (right contour)
+                const availableRange = initialDistribution + 100;
+                if (availableRange > 0) {
+                  offset = (delta / availableRange) * initialRight;
+                } else {
+                  offset = -initialRight; // Already at -100
+                }
               }
             }
 
