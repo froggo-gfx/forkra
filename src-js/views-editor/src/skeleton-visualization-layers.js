@@ -741,3 +741,198 @@ registerVisualizationLayerDefinition({
   },
 });
 
+// ============================================================
+// Skeleton Handle Labels - distance, angle, tension visualization
+// ============================================================
+
+const SKELETON_LABEL_FONT_SIZE = 6;
+const SKELETON_LABEL_PADDING = 3;
+
+/**
+ * Calculate distance and angle between two points.
+ * Angle is normalized to 0-90° relative to horizontal baseline.
+ */
+function calculateDistanceAndAngle(point1, point2) {
+  const dx = point2.x - point1.x;
+  const dy = point2.y - point1.y;
+  const dist = Math.hypot(dx, dy);
+
+  // Calculate angle from horizontal, normalized to 0-90°
+  let angle = Math.abs(Math.atan2(dy, dx) * (180 / Math.PI));
+  if (angle > 90) {
+    angle = 180 - angle;
+  }
+
+  return { distance: dist, angle };
+}
+
+/**
+ * Calculate tension for a cubic bezier handle.
+ * Tension = distance(onCurve, offCurve) / distance(onCurve, tunniPoint)
+ */
+function calculateTension(onCurveA, offCurveA, offCurveB, onCurveB) {
+  // Calculate intersection of lines (onCurveA->offCurveA) and (onCurveB->offCurveB)
+  const dx1 = offCurveA.x - onCurveA.x;
+  const dy1 = offCurveA.y - onCurveA.y;
+  const dx2 = offCurveB.x - onCurveB.x;
+  const dy2 = offCurveB.y - onCurveB.y;
+
+  const det = dx1 * dy2 - dy1 * dx2;
+  if (Math.abs(det) < 1e-10) {
+    // Lines are parallel, use simple ratio
+    const distA = Math.hypot(dx1, dy1);
+    const distTotal = Math.hypot(onCurveB.x - onCurveA.x, onCurveB.y - onCurveA.y);
+    return distTotal > 0 ? (distA / distTotal) * 2 : 0;
+  }
+
+  // Calculate tunni point (intersection)
+  const dx3 = onCurveA.x - onCurveB.x;
+  const dy3 = onCurveA.y - onCurveB.y;
+  const t = (dy3 * dx2 - dx3 * dy2) / det;
+
+  const tunniX = onCurveA.x + t * dx1;
+  const tunniY = onCurveA.y + t * dy1;
+
+  const distToOffCurve = Math.hypot(offCurveA.x - onCurveA.x, offCurveA.y - onCurveA.y);
+  const distToTunni = Math.hypot(tunniX - onCurveA.x, tunniY - onCurveA.y);
+
+  return distToTunni > 0 ? distToOffCurve / distToTunni : 0;
+}
+
+/**
+ * Draw a label badge with text near a point.
+ */
+function drawLabelBadge(context, point, text, offsetX, offsetY, parameters) {
+  if (!text) return;
+
+  const lines = text.split("\n");
+  const lineHeight = SKELETON_LABEL_FONT_SIZE + 2;
+  const width = 40; // Approximate width
+  const height = lines.length * lineHeight + SKELETON_LABEL_PADDING * 2;
+
+  const x = point.x + offsetX;
+  const y = point.y + offsetY;
+
+  // Draw background badge
+  context.fillStyle = parameters.badgeColor;
+  context.beginPath();
+  context.roundRect(x, y - height / 2, width, height, 3);
+  context.fill();
+
+  // Draw text
+  context.save();
+  context.fillStyle = parameters.textColor;
+  context.font = `${SKELETON_LABEL_FONT_SIZE}px fontra-ui-regular, sans-serif`;
+  context.textAlign = "left";
+  context.textBaseline = "middle";
+  context.scale(1, -1); // Flip for canvas coordinate system
+
+  for (let i = 0; i < lines.length; i++) {
+    const textY = -(y + (i - (lines.length - 1) / 2) * lineHeight);
+    context.fillText(lines[i], x + SKELETON_LABEL_PADDING, textY);
+  }
+  context.restore();
+}
+
+// Skeleton handle labels layer
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.handle.labels",
+  name: "Skeleton Handle Labels",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: false,
+  zIndex: 560,
+  colors: {
+    badgeColor: "rgba(0, 100, 200, 0.85)",
+    textColor: "white",
+  },
+  colorsDarkMode: {
+    badgeColor: "rgba(40, 140, 255, 0.85)",
+    textColor: "white",
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
+    if (!skeletonData?.contours?.length) {
+      return;
+    }
+
+    for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
+      const contour = skeletonData.contours[contourIdx];
+      const points = contour.points;
+      const numPoints = points.length;
+      const isClosed = contour.isClosed;
+
+      for (let i = 0; i < numPoints; i++) {
+        const point = points[i];
+
+        // Only process off-curve (handle) points
+        if (!point.type) continue;
+
+        // Find the connected on-curve point
+        // Check previous and next points
+        const prevIdx = (i - 1 + numPoints) % numPoints;
+        const nextIdx = (i + 1) % numPoints;
+        const prevPoint = points[prevIdx];
+        const nextPoint = points[nextIdx];
+
+        let onCurvePoint = null;
+        let otherOffCurve = null;
+        let otherOnCurve = null;
+
+        // Determine which on-curve this handle belongs to
+        if (prevPoint && !prevPoint.type) {
+          // Previous point is on-curve - this is an outgoing handle
+          onCurvePoint = prevPoint;
+          // Look for the paired off-curve and next on-curve
+          if (nextPoint?.type && points[(i + 2) % numPoints] && !points[(i + 2) % numPoints].type) {
+            otherOffCurve = nextPoint;
+            otherOnCurve = points[(i + 2) % numPoints];
+          }
+        } else if (nextPoint && !nextPoint.type) {
+          // Next point is on-curve - this is an incoming handle
+          onCurvePoint = nextPoint;
+          // The paired off-curve is previous
+          if (prevPoint?.type) {
+            const prevPrevIdx = (i - 2 + numPoints) % numPoints;
+            if (points[prevPrevIdx] && !points[prevPrevIdx].type) {
+              otherOffCurve = prevPoint;
+              otherOnCurve = points[prevPrevIdx];
+            }
+          }
+        } else {
+          // Fallback: find nearest on-curve
+          for (let j = 1; j < numPoints; j++) {
+            const idx = (i - j + numPoints) % numPoints;
+            if (!points[idx].type) {
+              onCurvePoint = points[idx];
+              break;
+            }
+          }
+        }
+
+        if (!onCurvePoint) continue;
+
+        // Calculate metrics
+        const { distance, angle } = calculateDistanceAndAngle(onCurvePoint, point);
+
+        // Build label text
+        const labelParts = [];
+        labelParts.push(distance.toFixed(1));
+
+        // Calculate tension if we have a full cubic segment
+        if (otherOffCurve && otherOnCurve) {
+          const tension = calculateTension(onCurvePoint, point, otherOffCurve, otherOnCurve);
+          labelParts.push(tension.toFixed(2));
+        }
+
+        labelParts.push(`${angle.toFixed(1)}°`);
+
+        const labelText = labelParts.join("\n");
+
+        // Draw label badge offset from the handle point
+        drawLabelBadge(context, point, labelText, 10, 0, parameters);
+      }
+    }
+  },
+});
+
