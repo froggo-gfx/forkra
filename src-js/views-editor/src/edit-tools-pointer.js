@@ -417,6 +417,7 @@ export class PointerTool extends BaseTool {
       this.editor?.visualizationLayersSettings?.model?.["fontra.skeleton.tunni"];
 
     // Ctrl+Shift+click: equalize tensions (works even without Tunni layer visible)
+    // Only for midpoint Tunni, not for true Tunni (intersection)
     if (initialEvent.ctrlKey && initialEvent.shiftKey) {
       const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
       if (positionedGlyph) {
@@ -426,7 +427,10 @@ export class PointerTool extends BaseTool {
         };
         const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
         if (skeletonData) {
-          const tunniHit = skeletonTunniHitTest(glyphPoint, size * 2, skeletonData);
+          // Use larger hit margin and search only midpoint Tunni for equalize
+          const tunniHit = skeletonTunniHitTest(glyphPoint, size * 2, skeletonData, {
+            midpointOnly: true,
+          });
           if (tunniHit) {
             await this._equalizeSkeletonTunniTensions(tunniHit);
             initialEvent.preventDefault();

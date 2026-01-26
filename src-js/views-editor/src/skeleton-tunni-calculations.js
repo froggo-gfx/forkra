@@ -268,12 +268,15 @@ export function calculateSkeletonOnCurveFromTunni(
  * @param {Object} point - Point to test (in glyph coordinates)
  * @param {number} size - Hit margin size
  * @param {Object} skeletonData - Skeleton data from customData
+ * @param {Object} options - Options: { midpointOnly: boolean }
  * @returns {Object|null} Hit result or null
  */
-export function skeletonTunniHitTest(point, size, skeletonData) {
+export function skeletonTunniHitTest(point, size, skeletonData, options = {}) {
   if (!skeletonData?.contours) {
     return null;
   }
+
+  const { midpointOnly = false } = options;
 
   for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
     const contour = skeletonData.contours[contourIndex];
@@ -282,16 +285,18 @@ export function skeletonTunniHitTest(point, size, skeletonData) {
     for (const segment of segments) {
       if (segment.controlPoints.length !== 2) continue;
 
-      // Check true tunni point first (intersection)
-      const trueTunniPt = calculateSkeletonTrueTunniPoint(segment);
-      if (trueTunniPt && distance(point, trueTunniPt) <= size) {
-        return {
-          type: "true-tunni",
-          contourIndex,
-          segmentIndex: segment.segmentIndex,
-          segment,
-          tunniPoint: trueTunniPt,
-        };
+      // Check true tunni point first (intersection) - unless midpointOnly
+      if (!midpointOnly) {
+        const trueTunniPt = calculateSkeletonTrueTunniPoint(segment);
+        if (trueTunniPt && distance(point, trueTunniPt) <= size) {
+          return {
+            type: "true-tunni",
+            contourIndex,
+            segmentIndex: segment.segmentIndex,
+            segment,
+            tunniPoint: trueTunniPt,
+          };
+        }
       }
 
       // Check midpoint tunni point
