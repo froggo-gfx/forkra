@@ -1025,6 +1025,7 @@ export default class SkeletonParametersPanel extends Panel {
    */
   async _onSingleSidedToggle(checked) {
     await this._setSingleSided(checked);
+    this._lastStateSignature = null; // Force rebuild
     this.update();
   }
 
@@ -1033,6 +1034,7 @@ export default class SkeletonParametersPanel extends Panel {
    */
   async _onSingleSidedDirectionChange(value) {
     await this._setSingleSidedDirection(value);
+    this._lastStateSignature = null; // Force rebuild
     this.update();
   }
 

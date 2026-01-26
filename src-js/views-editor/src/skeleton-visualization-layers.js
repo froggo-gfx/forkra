@@ -173,6 +173,8 @@ registerVisualizationLayerDefinition({
 
     for (const contour of skeletonData.contours) {
       const defaultWidth = contour.defaultWidth || 20;
+      const singleSided = contour.singleSided ?? false;
+      const singleSidedDirection = contour.singleSidedDirection ?? "left";
 
       for (let i = 0; i < contour.points.length; i++) {
         const point = contour.points[i];
@@ -185,14 +187,36 @@ registerVisualizationLayerDefinition({
         const leftHW = getPointHalfWidth(point, defaultWidth, "left");
         const rightHW = getPointHalfWidth(point, defaultWidth, "right");
 
-        // Quantize to UPM grid (same as generated contour points)
-        strokeLine(
-          context,
-          Math.round(point.x - normal.x * rightHW),
-          Math.round(point.y - normal.y * rightHW),
-          Math.round(point.x + normal.x * leftHW),
-          Math.round(point.y + normal.y * leftHW)
-        );
+        if (singleSided) {
+          // Single-sided: line from skeleton point to contour edge
+          const totalWidth = leftHW + rightHW;
+          if (singleSidedDirection === "left") {
+            strokeLine(
+              context,
+              Math.round(point.x),
+              Math.round(point.y),
+              Math.round(point.x + normal.x * totalWidth),
+              Math.round(point.y + normal.y * totalWidth)
+            );
+          } else {
+            strokeLine(
+              context,
+              Math.round(point.x),
+              Math.round(point.y),
+              Math.round(point.x - normal.x * totalWidth),
+              Math.round(point.y - normal.y * totalWidth)
+            );
+          }
+        } else {
+          // Normal mode: line across both sides
+          strokeLine(
+            context,
+            Math.round(point.x - normal.x * rightHW),
+            Math.round(point.y - normal.y * rightHW),
+            Math.round(point.x + normal.x * leftHW),
+            Math.round(point.y + normal.y * leftHW)
+          );
+        }
       }
     }
   },
@@ -249,6 +273,8 @@ registerVisualizationLayerDefinition({
     for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
       const contour = skeletonData.contours[contourIndex];
       const defaultWidth = contour.defaultWidth || 20;
+      const singleSided = contour.singleSided ?? false;
+      const singleSidedDirection = contour.singleSidedDirection ?? "left";
 
       for (let pointIndex = 0; pointIndex < contour.points.length; pointIndex++) {
         const point = contour.points[pointIndex];
@@ -260,39 +286,68 @@ registerVisualizationLayerDefinition({
         const leftHW = getPointHalfWidth(point, defaultWidth, "left");
         const rightHW = getPointHalfWidth(point, defaultWidth, "right");
 
-        // Calculate rib point positions (quantized to UPM grid like generated points)
-        const leftRibPoint = {
-          x: Math.round(point.x + normal.x * leftHW),
-          y: Math.round(point.y + normal.y * leftHW),
-        };
-        const rightRibPoint = {
-          x: Math.round(point.x - normal.x * rightHW),
-          y: Math.round(point.y - normal.y * rightHW),
-        };
-
         // Selection keys for this rib point pair
         const leftKey = `${contourIndex}/${pointIndex}/left`;
         const rightKey = `${contourIndex}/${pointIndex}/right`;
 
-        // Draw left rib point
-        if (selectedRibPoints?.has(leftKey)) {
-          context.strokeStyle = parameters.selectedColor;
-        } else if (hoveredRibPoints?.has(leftKey)) {
-          context.strokeStyle = parameters.hoveredColor;
-        } else {
-          context.strokeStyle = parameters.strokeColor;
-        }
-        strokeDiamondNode(context, leftRibPoint, parameters.pointSize);
+        if (singleSided) {
+          // Single-sided mode: only one rib point at total width
+          const totalWidth = leftHW + rightHW;
+          let ribPoint, ribKey;
 
-        // Draw right rib point
-        if (selectedRibPoints?.has(rightKey)) {
-          context.strokeStyle = parameters.selectedColor;
-        } else if (hoveredRibPoints?.has(rightKey)) {
-          context.strokeStyle = parameters.hoveredColor;
+          if (singleSidedDirection === "left") {
+            ribPoint = {
+              x: Math.round(point.x + normal.x * totalWidth),
+              y: Math.round(point.y + normal.y * totalWidth),
+            };
+            ribKey = leftKey;
+          } else {
+            ribPoint = {
+              x: Math.round(point.x - normal.x * totalWidth),
+              y: Math.round(point.y - normal.y * totalWidth),
+            };
+            ribKey = rightKey;
+          }
+
+          if (selectedRibPoints?.has(ribKey)) {
+            context.strokeStyle = parameters.selectedColor;
+          } else if (hoveredRibPoints?.has(ribKey)) {
+            context.strokeStyle = parameters.hoveredColor;
+          } else {
+            context.strokeStyle = parameters.strokeColor;
+          }
+          strokeDiamondNode(context, ribPoint, parameters.pointSize);
         } else {
-          context.strokeStyle = parameters.strokeColor;
+          // Normal mode: two rib points
+          const leftRibPoint = {
+            x: Math.round(point.x + normal.x * leftHW),
+            y: Math.round(point.y + normal.y * leftHW),
+          };
+          const rightRibPoint = {
+            x: Math.round(point.x - normal.x * rightHW),
+            y: Math.round(point.y - normal.y * rightHW),
+          };
+
+          // Draw left rib point
+          if (selectedRibPoints?.has(leftKey)) {
+            context.strokeStyle = parameters.selectedColor;
+          } else if (hoveredRibPoints?.has(leftKey)) {
+            context.strokeStyle = parameters.hoveredColor;
+          } else {
+            context.strokeStyle = parameters.strokeColor;
+          }
+          strokeDiamondNode(context, leftRibPoint, parameters.pointSize);
+
+          // Draw right rib point
+          if (selectedRibPoints?.has(rightKey)) {
+            context.strokeStyle = parameters.selectedColor;
+          } else if (hoveredRibPoints?.has(rightKey)) {
+            context.strokeStyle = parameters.hoveredColor;
+          } else {
+            context.strokeStyle = parameters.strokeColor;
+          }
+          strokeDiamondNode(context, rightRibPoint, parameters.pointSize);
         }
-        strokeDiamondNode(context, rightRibPoint, parameters.pointSize);
       }
     }
   },
