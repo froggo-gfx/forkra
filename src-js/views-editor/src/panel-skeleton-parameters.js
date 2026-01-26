@@ -3,11 +3,7 @@ import { recordChanges } from "@fontra/core/change-recorder.js";
 import { ChangeCollector } from "@fontra/core/changes.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import {
-  generateContoursFromSkeleton,
-  calculateNormalAtSkeletonPoint,
-  getEffectiveNormal,
-} from "@fontra/core/skeleton-contour-generator.js";
+import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
 import { parseSelection } from "@fontra/core/utils.js";
 import { packContour } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
@@ -44,7 +40,6 @@ export default class SkeletonParametersPanel extends Panel {
     this.pointParameters = {
       asymmetrical: false,
       scaleValue: 1.0,
-      moveSkeleton: false,
     };
 
     // Flag to prevent form rebuild during slider drag
@@ -410,24 +405,6 @@ export default class SkeletonParametersPanel extends Panel {
         maxValue: 100,
         step: 2,
       });
-
-      // Move Skeleton checkbox
-      const moveSkeletonCheckbox = html.input({
-        type: "checkbox",
-        id: "move-skeleton-toggle",
-        checked: this.pointParameters.moveSkeleton,
-        onchange: (e) => {
-          this.pointParameters.moveSkeleton = e.target.checked;
-        },
-      });
-      formContents.push({
-        type: "header",
-        label: "",
-        auxiliaryElement: html.span({}, [
-          moveSkeletonCheckbox,
-          html.label({ for: "move-skeleton-toggle", style: "margin-left: 4px" }, "Move Skeleton"),
-        ]),
-      });
     }
 
     // Scale slider (last)
@@ -537,84 +514,35 @@ export default class SkeletonParametersPanel extends Panel {
           this.pointParameters.scaleValue = value;
         }
       } else if (fieldItem.key === "pointDistribution") {
-        // For distribution slider - simple approach
+        // For distribution slider
         if (valueStream) {
           this._isDraggingSlider = true;
-          // Store initial state for relative changes
+          // Store initial distributions for multi-selection relative changes
           const selectedData = this._getSelectedSkeletonPoints();
           const initialDistributions = new Map();
-          const initialSkeletonState = new Map();
 
-          if (selectedData) {
-            const { skeletonData } = selectedData;
+          if (selectedData && selectedData.points.length > 1) {
             for (const { contourIdx, pointIdx, point } of selectedData.points) {
               const key = `${contourIdx}/${pointIdx}`;
               const defaultWidth = this._getCurrentDefaultWidthWide();
               const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
               const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-
-              // Store distribution for multi-selection relative changes
-              if (selectedData.points.length > 1) {
-                initialDistributions.set(key, this._calculateDistribution(leftHW, rightHW));
-              }
-
-              // Store skeleton state for Move Skeleton mode
-              if (this.pointParameters.moveSkeleton) {
-                const skeletonContour = skeletonData.contours[contourIdx];
-                const numPoints = skeletonContour.points.length;
-                const normal = calculateNormalAtSkeletonPoint(skeletonContour, pointIdx);
-                const effectiveNormal = getEffectiveNormal(point, normal);
-
-                // Find adjacent handles (off-curve points)
-                const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
-                const nextIdx = (pointIdx + 1) % numPoints;
-                const prevPoint = skeletonContour.points[prevIdx];
-                const nextPoint = skeletonContour.points[nextIdx];
-
-                const handles = [];
-                if (prevPoint?.type === "cubic") {
-                  handles.push({ idx: prevIdx, x: prevPoint.x, y: prevPoint.y });
-                }
-                if (nextPoint?.type === "cubic") {
-                  handles.push({ idx: nextIdx, x: nextPoint.x, y: nextPoint.y });
-                }
-
-                initialSkeletonState.set(key, {
-                  x: point.x,
-                  y: point.y,
-                  leftWidth: leftHW,
-                  rightWidth: rightHW,
-                  normal: effectiveNormal,
-                  handles: handles,
-                  initialDistribution: this._calculateDistribution(leftHW, rightHW),
-                });
-              }
+              initialDistributions.set(key, this._calculateDistribution(leftHW, rightHW));
             }
           }
           this._initialDistributions = initialDistributions;
-          this._initialSkeletonState = initialSkeletonState;
           try {
             let lastProcessedTime = 0;
             let lastDist = null;
-            let lastWasExtreme = false;
             const THROTTLE_MS = 32; // ~30fps
 
             for await (const dist of valueStream) {
               lastDist = dist;
               const now = Date.now();
-              // Always apply extreme values immediately, and also when
-              // transitioning out of extreme (to avoid "sticking")
-              const isExtreme = dist >= 100 || dist <= -100;
-              const isTransition = isExtreme !== lastWasExtreme;
-              const shouldSkip = !isExtreme && !isTransition && now - lastProcessedTime < THROTTLE_MS;
-
-              console.log(`Distribution: ${dist}, isExtreme: ${isExtreme}, isTransition: ${isTransition}, shouldSkip: ${shouldSkip}, moveSkeleton: ${this.pointParameters.moveSkeleton}, hasState: ${this._initialSkeletonState?.size > 0}`);
-
-              if (shouldSkip) {
+              if (now - lastProcessedTime < THROTTLE_MS) {
                 continue;
               }
               lastProcessedTime = now;
-              lastWasExtreme = isExtreme;
               await this._setPointDistributionDirect(dist);
             }
             // Apply final value if skipped
@@ -622,17 +550,8 @@ export default class SkeletonParametersPanel extends Panel {
               await this._setPointDistributionDirect(lastDist);
             }
           } finally {
-            // Regenerate contours if we were in Move Skeleton mode
-            // (we skipped regeneration during drag to keep contour fixed)
-            const needsRegeneration = this.pointParameters.moveSkeleton && this._initialSkeletonState;
-
             this._isDraggingSlider = false;
             this._initialDistributions = null;
-            this._initialSkeletonState = null;
-
-            if (needsRegeneration) {
-              await this._regenerateContoursForAllLayers();
-            }
             this.update();
           }
         } else {
@@ -804,47 +723,6 @@ export default class SkeletonParametersPanel extends Panel {
     // Asymmetric mode = has leftWidth or rightWidth defined
     // Symmetric mode = only has width (or no width, using default)
     return point.leftWidth !== undefined || point.rightWidth !== undefined;
-  }
-
-  /**
-   * Regenerate contours for all editable layers.
-   * Called after Move Skeleton drag ends to sync contours with new skeleton positions.
-   */
-  async _regenerateContoursForAllLayers() {
-    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const allChanges = [];
-
-      for (const editLayerName of this.sceneController.editingLayerNames) {
-        const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
-
-        const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
-        );
-
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          this._regenerateOutlineContours(sg, skeletonData);
-        });
-        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-        const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-        });
-        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-      }
-
-      if (allChanges.length === 0) return;
-
-      const combined = new ChangeCollector().concat(...allChanges);
-      await sendIncrementalChange(combined.change);
-
-      return {
-        changes: combined,
-        undoLabel: "Regenerate contours",
-        broadcast: true,
-      };
-    });
   }
 
   /**
@@ -1283,105 +1161,33 @@ export default class SkeletonParametersPanel extends Panel {
           const key = `${contourIdx}/${pointIdx}`;
           const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
 
-          // Check if Move Skeleton mode is active
-          if (
-            this.pointParameters.moveSkeleton &&
-            this._initialSkeletonState &&
-            this._initialSkeletonState.has(key)
-          ) {
-            // Move Skeleton mode: move skeleton point, keep contour in place
-            const state = this._initialSkeletonState.get(key);
-            const { x: initialX, y: initialY, leftWidth: initialLeft, rightWidth: initialRight, normal, initialDistribution } = state;
+          const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+          const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+          const totalWidth = leftHW + rightHW;
 
-            // Calculate offset based on distribution
-            // At +100: skeleton at left contour (offset = initialLeft, leftWidth = 0)
-            // At -100: skeleton at right contour (offset = -initialRight, rightWidth = 0)
-            // At initialDistribution: no movement (offset = 0)
-
-            // Clamp distribution to valid range
-            const clampedDistribution = Math.max(-100, Math.min(100, distribution));
-            const delta = clampedDistribution - initialDistribution;
-
-            let offset;
-            if (delta >= 0) {
-              // Moving towards +100 (left contour)
-              const availableRange = 100 - initialDistribution;
-              if (availableRange > 0) {
-                offset = (delta / availableRange) * initialLeft;
-              } else {
-                offset = 0;
-              }
-            } else {
-              // Moving towards -100 (right contour)
-              const availableRange = initialDistribution + 100;
-              if (availableRange > 0) {
-                offset = (delta / availableRange) * initialRight;
-              } else {
-                offset = 0;
-              }
-            }
-
-            // Move skeleton point along normal
-            point.x = Math.round(initialX + normal.x * offset);
-            point.y = Math.round(initialY + normal.y * offset);
-
-            // Move adjacent handles (off-curve points) by the same offset
-            if (state.handles) {
-              for (const handle of state.handles) {
-                const handlePoint = contour.points[handle.idx];
-                if (handlePoint) {
-                  handlePoint.x = Math.round(handle.x + normal.x * offset);
-                  handlePoint.y = Math.round(handle.y + normal.y * offset);
-                }
-              }
-            }
-
-            // Adjust widths to keep contour in place
-            point.leftWidth = Math.max(0, Math.round(initialLeft - offset));
-            point.rightWidth = Math.max(0, Math.round(initialRight + offset));
-            delete point.width;
-          } else {
-            // Normal mode: change widths only, skeleton stays in place
-            const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-            const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-            const totalWidth = leftHW + rightHW;
-
-            // Calculate effective distribution
-            let effectiveDistribution = distribution;
-            if (this._initialDistributions && this._initialDistributions.size > 0) {
-              // Multi-selection: slider value is a delta from initial
-              const initialDist = this._initialDistributions.get(key) || 0;
-              effectiveDistribution = Math.max(-100, Math.min(100, initialDist + distribution));
-            }
-
-            // Calculate new widths based on distribution
-            const newLeftHW = totalWidth * (0.5 + effectiveDistribution / 200);
-            const newRightHW = totalWidth - newLeftHW;
-
-            point.leftWidth = Math.max(0, Math.round(newLeftHW));
-            point.rightWidth = Math.max(0, Math.round(newRightHW));
-            delete point.width;
+          // Calculate effective distribution
+          let effectiveDistribution = distribution;
+          if (this._initialDistributions && this._initialDistributions.size > 0) {
+            // Multi-selection: slider value is a delta from initial
+            const initialDist = this._initialDistributions.get(key) || 0;
+            effectiveDistribution = Math.max(-100, Math.min(100, initialDist + distribution));
           }
+
+          // Calculate new widths based on distribution
+          const newLeftHW = totalWidth * (0.5 + effectiveDistribution / 200);
+          const newRightHW = totalWidth - newLeftHW;
+
+          point.leftWidth = Math.max(0, Math.round(newLeftHW));
+          point.rightWidth = Math.max(0, Math.round(newRightHW));
+          delete point.width;
         }
 
         // Record changes for this layer
         const staticGlyph = layer.glyph;
-
-        // Skip contour regeneration in Move Skeleton mode during drag
-        // (contour should stay fixed, only skeleton moves)
-        // Check _initialSkeletonState existence as it's more reliable than _isDraggingSlider
-        const skipRegeneration = this.pointParameters.moveSkeleton &&
-          this._initialSkeletonState &&
-          this._initialSkeletonState.size > 0;
-
-        console.log(`skipRegeneration: ${skipRegeneration}`);
-
-        if (!skipRegeneration) {
-          const pathChange = recordChanges(staticGlyph, (sg) => {
-            this._regenerateOutlineContours(sg, skeletonData);
-          });
-          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-        }
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
           l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
