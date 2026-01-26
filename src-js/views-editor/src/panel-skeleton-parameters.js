@@ -46,15 +46,24 @@ export default class SkeletonParametersPanel extends Panel {
     this._isDraggingSlider = false;
 
     // Listen to selection changes to update UI
+    // Skip update if dragging slider to prevent form rebuild interrupting drag
     this.sceneController.sceneSettingsController.addKeyListener(
       ["selectedGlyph", "selectedGlyphName", "selection"],
-      (event) => this.update()
+      (event) => {
+        if (!this._isDraggingSlider) {
+          this.update();
+        }
+      }
     );
 
     // Listen to source (editing layer) changes to update Default Width
     this.sceneController.sceneSettingsController.addKeyListener(
       ["editingLayers"],
-      () => this.update()
+      () => {
+        if (!this._isDraggingSlider) {
+          this.update();
+        }
+      }
     );
 
     // Listen to glyph changes (e.g., rib editing through canvas)
@@ -841,8 +850,11 @@ export default class SkeletonParametersPanel extends Panel {
       // Apply changes to ALL editable layers (multi-source editing support)
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
-        if (!skeletonData) continue;
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
 
         for (const { contourIdx, pointIdx } of selectedData.points) {
           const contour = skeletonData.contours[contourIdx];
