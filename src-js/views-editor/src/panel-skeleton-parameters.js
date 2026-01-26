@@ -1373,6 +1373,9 @@ export default class SkeletonParametersPanel extends Panel {
         const skipRegeneration = this.pointParameters.moveSkeleton &&
           this._initialSkeletonState &&
           this._initialSkeletonState.size > 0;
+
+        console.log(`skipRegeneration: ${skipRegeneration}`);
+
         if (!skipRegeneration) {
           const pathChange = recordChanges(staticGlyph, (sg) => {
             this._regenerateOutlineContours(sg, skeletonData);
