@@ -415,6 +415,29 @@ export class PointerTool extends BaseTool {
     // Check for skeleton Tunni point hit
     const isSkeletonTunniLayerActive =
       this.editor?.visualizationLayersSettings?.model?.["fontra.skeleton.tunni"];
+
+    // Ctrl+Shift+click: equalize tensions (works even without Tunni layer visible)
+    if (initialEvent.ctrlKey && initialEvent.shiftKey) {
+      const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+      if (positionedGlyph) {
+        const glyphPoint = {
+          x: point.x - positionedGlyph.x,
+          y: point.y - positionedGlyph.y,
+        };
+        const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
+        if (skeletonData) {
+          const tunniHit = skeletonTunniHitTest(glyphPoint, size * 2, skeletonData);
+          if (tunniHit) {
+            await this._equalizeSkeletonTunniTensions(tunniHit);
+            initialEvent.preventDefault();
+            eventStream.done();
+            return;
+          }
+        }
+      }
+    }
+
+    // Regular Tunni point drag (requires layer to be visible)
     if (isSkeletonTunniLayerActive && !hasSkeletonPointUnderCursor) {
       const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
       if (positionedGlyph) {
@@ -426,13 +449,6 @@ export class PointerTool extends BaseTool {
         if (skeletonData) {
           const tunniHit = skeletonTunniHitTest(glyphPoint, size, skeletonData);
           if (tunniHit) {
-            // Ctrl+Shift+click: equalize tensions
-            if (initialEvent.ctrlKey && initialEvent.shiftKey) {
-              await this._equalizeSkeletonTunniTensions(tunniHit);
-              initialEvent.preventDefault();
-              eventStream.done();
-              return;
-            }
             await this._handleSkeletonTunniDrag(eventStream, initialEvent, tunniHit);
             initialEvent.preventDefault();
             return;
