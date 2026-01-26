@@ -700,29 +700,6 @@ export function getEffectiveNormal(point, calculatedNormal) {
 }
 
 /**
- * Clamp a handle offset to prevent "flipped" handles.
- * A handle is considered flipped if it points in the opposite direction of the curve.
- * @param {Object} handleOffset - The offset vector from anchor to handle {x, y}
- * @param {Object} curveDirection - The direction vector of the curve at this point {x, y}
- * @param {boolean} isStartHandle - true for handle1 (should point along curve), false for handle2 (should point against curve)
- * @returns {Object} The clamped handle offset (zero if flipped)
- */
-function clampHandleOffset(handleOffset, curveDirection, isStartHandle) {
-  // Dot product to check if handle points in expected direction
-  const dot = handleOffset.x * curveDirection.x + handleOffset.y * curveDirection.y;
-
-  // For start handle: should have positive dot (points along curve)
-  // For end handle: should have negative dot (points against curve)
-  const isFlipped = isStartHandle ? dot < 0 : dot > 0;
-
-  if (isFlipped) {
-    // Handle is flipped - clamp to zero length
-    return { x: 0, y: 0 };
-  }
-  return handleOffset;
-}
-
-/**
  * Generate offset points for a segment.
  * For open skeletons: first segment adds start, all segments add end
  * For closed skeletons: all segments add start (end connects to next start)
@@ -918,19 +895,9 @@ function generateOffsetPointsForSegment(
         const handle2 = pts[2];
 
         // Vector from original start to handle1
-        let h1Offset = { x: handle1.x - origStart.x, y: handle1.y - origStart.y };
+        const h1Offset = { x: handle1.x - origStart.x, y: handle1.y - origStart.y };
         // Vector from original end to handle2
-        let h2Offset = { x: handle2.x - origEnd.x, y: handle2.y - origEnd.y };
-
-        // Curve direction for handle validation
-        const curveDir = {
-          x: fixedEnd.x - fixedStart.x,
-          y: fixedEnd.y - fixedStart.y,
-        };
-
-        // Clamp handles to prevent flipping
-        h1Offset = clampHandleOffset(h1Offset, curveDir, true);
-        h2Offset = clampHandleOffset(h2Offset, curveDir, false);
+        const h2Offset = { x: handle2.x - origEnd.x, y: handle2.y - origEnd.y };
 
         // Apply handles relative to fixed positions
         const adjustedHandle1 = {
@@ -987,19 +954,9 @@ function generateOffsetPointsForSegment(
           const handle2 = pts[2];
 
           // Vector from original start to handle1
-          let h1Offset = { x: handle1.x - origStart.x, y: handle1.y - origStart.y };
+          const h1Offset = { x: handle1.x - origStart.x, y: handle1.y - origStart.y };
           // Vector from original end to handle2
-          let h2Offset = { x: handle2.x - origEnd.x, y: handle2.y - origEnd.y };
-
-          // Curve direction for handle validation
-          const curveDir = {
-            x: currentEnd.x - currentStart.x,
-            y: currentEnd.y - currentStart.y,
-          };
-
-          // Clamp handles to prevent flipping
-          h1Offset = clampHandleOffset(h1Offset, curveDir, true);
-          h2Offset = clampHandleOffset(h2Offset, curveDir, false);
+          const h2Offset = { x: handle2.x - origEnd.x, y: handle2.y - origEnd.y };
 
           // Apply handles relative to actual positions
           output.push({
@@ -1020,14 +977,7 @@ function generateOffsetPointsForSegment(
 
           // Calculate handle offset from midpoint of original curve
           const origMid = { x: (origStart.x + origEnd.x) / 2, y: (origStart.y + origEnd.y) / 2 };
-          let hOffset = { x: handle.x - origMid.x, y: handle.y - origMid.y };
-
-          // Curve direction for handle validation (treat as start handle)
-          const curveDir = {
-            x: currentEnd.x - currentStart.x,
-            y: currentEnd.y - currentStart.y,
-          };
-          hOffset = clampHandleOffset(hOffset, curveDir, true);
+          const hOffset = { x: handle.x - origMid.x, y: handle.y - origMid.y };
 
           // Apply handle relative to midpoint of actual positions
           const actualMid = { x: (currentStart.x + currentEnd.x) / 2, y: (currentStart.y + currentEnd.y) / 2 };
