@@ -703,10 +703,12 @@ function generateOffsetPointsForSegment(
     // - For closed skeletons: for all segments (each adds its start)
     const shouldAddStart = isClosed || isFirst;
     if (shouldAddStart) {
-      const startNormal =
+      let startNormal =
         !prevSegment || (isFirst && !isClosed)
           ? normal
           : calculateCornerNormal(prevSegment, segment, startLeftHW);
+      // Apply angle override if set on the point
+      startNormal = getEffectiveNormal(segment.startPoint, startNormal);
 
       // Copy smooth property from skeleton point, round to UPM grid
       // Use per-point half-widths for left and right sides
@@ -727,10 +729,12 @@ function generateOffsetPointsForSegment(
     // - For closed skeletons: don't add (next segment's start is this end)
     const shouldAddEnd = !isClosed;
     if (shouldAddEnd) {
-      const endNormal =
+      let endNormal =
         !nextSegment || isLast
           ? normal
           : calculateCornerNormal(segment, nextSegment, endLeftHW);
+      // Apply angle override if set on the point
+      endNormal = getEffectiveNormal(segment.endPoint, endNormal);
 
       // Copy smooth property from skeleton point, round to UPM grid
       // Use per-point half-widths for left and right sides
@@ -768,15 +772,19 @@ function generateOffsetPointsForSegment(
     const bezierEndNormal = vector.rotateVector90CW(endTangent);
 
     // For corners (non-smooth junctions), use averaged normal
-    const startNormal =
+    let startNormal =
       !prevSegment || (isFirst && !isClosed)
         ? bezierStartNormal
         : calculateCornerNormal(prevSegment, segment, startLeftHW);
+    // Apply angle override if set on the point
+    startNormal = getEffectiveNormal(segment.startPoint, startNormal);
 
-    const endNormal =
+    let endNormal =
       !nextSegment || (isLast && !isClosed)
         ? bezierEndNormal
         : calculateCornerNormal(segment, nextSegment, endLeftHW);
+    // Apply angle override if set on the point
+    endNormal = getEffectiveNormal(segment.endPoint, endNormal);
 
     // Get offset curves from bezier-js (returns array of Bezier objects)
     // Note: bezier-js uses CCW normal, our code uses CW normal, so signs are swapped
@@ -1234,6 +1242,25 @@ function generateCap(point, segment, width, capStyle, position, leftHalfWidth = 
 }
 
 /**
+ * Apply angle override to a calculated normal if the point has forceHorizontal or forceVertical set.
+ * Preserves the sign (direction) of the original normal to maintain left/right orientation.
+ * @param {Object} point - The skeleton point
+ * @param {Object} calculatedNormal - The normal calculated from curve geometry {x, y}
+ * @returns {Object} The effective normal (possibly overridden)
+ */
+export function getEffectiveNormal(point, calculatedNormal) {
+  if (point.forceHorizontal) {
+    // Horizontal ribs: normal points up or down based on original sign
+    return { x: 0, y: calculatedNormal.y >= 0 ? 1 : -1 };
+  }
+  if (point.forceVertical) {
+    // Vertical ribs: normal points left or right based on original sign
+    return { x: calculatedNormal.x >= 0 ? 1 : -1, y: 0 };
+  }
+  return calculatedNormal;
+}
+
+/**
  * Calculate the normal vector at a specific point index in a skeleton contour.
  * Useful for visualization of ribs.
  */
@@ -1309,13 +1336,15 @@ export function calculateNormalAtSkeletonPoint(skeletonContour, pointIndex) {
 
   // Handle endpoints of open contours
   if (!dir1 && dir2) {
-    return vector.rotateVector90CW(dir2);
+    const normal = vector.rotateVector90CW(dir2);
+    return getEffectiveNormal(point, normal);
   }
   if (dir1 && !dir2) {
-    return vector.rotateVector90CW(dir1);
+    const normal = vector.rotateVector90CW(dir1);
+    return getEffectiveNormal(point, normal);
   }
   if (!dir1 && !dir2) {
-    return { x: 0, y: 1 };
+    return getEffectiveNormal(point, { x: 0, y: 1 });
   }
 
   // Use atan2-based angle bisector (same as calculateCornerNormal)
@@ -1332,7 +1361,8 @@ export function calculateNormalAtSkeletonPoint(skeletonContour, pointIndex) {
   };
 
   // Normal is perpendicular to bisector (rotated 90° CW)
-  return { x: bisector.y, y: -bisector.x };
+  const normal = { x: bisector.y, y: -bisector.x };
+  return getEffectiveNormal(point, normal);
 }
 
 /**

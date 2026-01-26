@@ -291,6 +291,8 @@ export default class SkeletonParametersPanel extends Panel {
     // Get values: from selected points or defaults
     let left, right, leftMixed = false, rightMixed = false;
     let asymStates = new Set(); // Track asymmetric states across selection
+    let forceHorizontalStates = new Set(); // Track forceHorizontal states
+    let forceVerticalStates = new Set(); // Track forceVertical states
 
     if (hasSelection) {
       const defaultWidth = this._getCurrentDefaultWidthWide();
@@ -304,6 +306,8 @@ export default class SkeletonParametersPanel extends Panel {
         leftValues.push(Math.round(widths.left));
         rightValues.push(Math.round(widths.right));
         asymStates.add(this._isAsymmetric(point));
+        forceHorizontalStates.add(!!point.forceHorizontal);
+        forceVerticalStates.add(!!point.forceVertical);
       }
 
       // Check if values are mixed
@@ -412,6 +416,64 @@ export default class SkeletonParametersPanel extends Panel {
         },
         "Apply Scale"
       ),
+    });
+
+    // === ANGLE OVERRIDE ===
+    formContents.push({ type: "spacer" });
+    formContents.push({
+      type: "header",
+      label: "Angle",
+    });
+
+    // Determine checkbox states for angle override
+    const isForceHorizontal = forceHorizontalStates.has(true) && forceHorizontalStates.size === 1;
+    const isForceVertical = forceVerticalStates.has(true) && forceVerticalStates.size === 1;
+    const isHorizontalIndeterminate = forceHorizontalStates.size > 1;
+    const isVerticalIndeterminate = forceVerticalStates.size > 1;
+
+    // Force Horizontal checkbox
+    const forceHorizontalCheckbox = html.input({
+      type: "checkbox",
+      id: "force-horizontal-toggle",
+      checked: isHorizontalIndeterminate ? false : isForceHorizontal,
+      onchange: (e) => this._onForceHorizontalToggle(e.target.checked),
+    });
+    if (isHorizontalIndeterminate) {
+      forceHorizontalCheckbox.indeterminate = true;
+    }
+
+    // Force Vertical checkbox
+    const forceVerticalCheckbox = html.input({
+      type: "checkbox",
+      id: "force-vertical-toggle",
+      checked: isVerticalIndeterminate ? false : isForceVertical,
+      onchange: (e) => this._onForceVerticalToggle(e.target.checked),
+    });
+    if (isVerticalIndeterminate) {
+      forceVerticalCheckbox.indeterminate = true;
+    }
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "forceHorizontal",
+        auxiliaryElement: html.span({}, [
+          forceHorizontalCheckbox,
+          html.label({ for: "force-horizontal-toggle", style: "margin-left: 4px" }, "Horizontal"),
+        ]),
+      },
+      field2: {
+        type: "auxiliaryElement",
+        key: "forceVertical",
+        auxiliaryElement: html.span({}, [
+          forceVerticalCheckbox,
+          html.label({ for: "force-vertical-toggle", style: "margin-left: 4px" }, "Vertical"),
+        ]),
+      },
+      field3: {
+        type: "spacer",
+      },
     });
 
     this.infoForm.setFieldDescriptions(formContents);
@@ -689,6 +751,132 @@ export default class SkeletonParametersPanel extends Panel {
       return {
         changes: combined,
         undoLabel: checked ? "Enable asymmetric width" : "Disable asymmetric width",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
+   * Toggle Force Horizontal angle override on selected skeleton points.
+   * When enabled, clears Force Vertical (mutually exclusive).
+   */
+  async _onForceHorizontalToggle(checked) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) {
+      this.update();
+      return;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          if (checked) {
+            point.forceHorizontal = true;
+            delete point.forceVertical; // Mutually exclusive
+          } else {
+            delete point.forceHorizontal;
+          }
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: checked ? "Enable force horizontal" : "Disable force horizontal",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
+   * Toggle Force Vertical angle override on selected skeleton points.
+   * When enabled, clears Force Horizontal (mutually exclusive).
+   */
+  async _onForceVerticalToggle(checked) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) {
+      this.update();
+      return;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          if (checked) {
+            point.forceVertical = true;
+            delete point.forceHorizontal; // Mutually exclusive
+          } else {
+            delete point.forceVertical;
+          }
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: checked ? "Enable force vertical" : "Disable force vertical",
         broadcast: true,
       };
     });
