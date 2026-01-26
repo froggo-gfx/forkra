@@ -378,9 +378,11 @@ export default class SkeletonParametersPanel extends Panel {
       allowEmptyField: rightMixed,
     });
 
-    // Distribution slider (only in asymmetric mode, single selection)
-    if (isAsym && !multiSelection && !isIndeterminate) {
-      const distribution = this._calculateDistribution(left, right);
+    // Distribution slider (only in asymmetric mode)
+    if (isAsym && !isIndeterminate) {
+      // When values are mixed, show slider at neutral (0) position
+      const distributionMixed = leftMixed || rightMixed;
+      const distribution = distributionMixed ? 0 : this._calculateDistribution(left, right);
       formContents.push({
         type: "edit-number-slider",
         key: "pointDistribution",
@@ -500,14 +502,11 @@ export default class SkeletonParametersPanel extends Panel {
           this.pointParameters.scaleValue = value;
         }
       } else if (fieldItem.key === "pointDistribution") {
-        // For distribution slider, consume valueStream but apply changes directly
-        // This preserves totalWidth during the entire drag operation
+        // For distribution slider, use accumulation pattern like point dragging
         if (valueStream) {
           this._isDraggingSlider = true;
           try {
-            for await (const dist of valueStream) {
-              await this._setPointDistributionDirect(dist);
-            }
+            await this._handleDistributionSliderDrag(valueStream);
           } finally {
             this._isDraggingSlider = false;
             this.update(); // Update form after drag ends
@@ -1063,8 +1062,92 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Set point distribution directly. Called for each slider value during drag.
-   * Preserves total width by storing it on first call of drag operation.
+   * Handle distribution slider drag with proper change accumulation.
+   * Uses the same pattern as point dragging to avoid creating many undo entries.
+   */
+  async _handleDistributionSliderDrag(valueStream) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) return;
+
+    // Store initial total widths to preserve them during drag
+    const initialTotalWidths = new Map();
+    for (const { contourIdx, pointIdx, point } of selectedData.points) {
+      const key = `${contourIdx}/${pointIdx}`;
+      const defaultWidth = this._getCurrentDefaultWidthWide();
+      const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+      const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+      initialTotalWidths.set(key, leftHW + rightHW);
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      let accumulatedChanges = new ChangeCollector();
+
+      // Process all values from the stream
+      for await (const distribution of valueStream) {
+        const allChanges = [];
+
+        // Apply changes to ALL editable layers
+        for (const editLayerName of this.sceneController.editingLayerNames) {
+          const layer = glyph.layers[editLayerName];
+          if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+          const skeletonData = JSON.parse(
+            JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          );
+
+          for (const { contourIdx, pointIdx } of selectedData.points) {
+            const contour = skeletonData.contours[contourIdx];
+            if (!contour) continue;
+            const point = contour.points[pointIdx];
+            if (!point) continue;
+
+            // Use stored total width to preserve it during drag
+            const key = `${contourIdx}/${pointIdx}`;
+            const totalWidth = initialTotalWidths.get(key);
+
+            // Calculate new widths based on distribution
+            const newLeftHW = totalWidth * (0.5 + distribution / 200);
+            const newRightHW = totalWidth - newLeftHW;
+
+            point.leftWidth = Math.max(0, Math.round(newLeftHW));
+            point.rightWidth = Math.max(0, Math.round(newRightHW));
+            delete point.width;
+          }
+
+          // Record changes for this layer
+          const staticGlyph = layer.glyph;
+          const pathChange = recordChanges(staticGlyph, (sg) => {
+            this._regenerateOutlineContours(sg, skeletonData);
+          });
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+          const customDataChange = recordChanges(layer, (l) => {
+            l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          });
+          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+        }
+
+        if (allChanges.length === 0) continue;
+
+        const combinedChange = new ChangeCollector().concat(...allChanges);
+        accumulatedChanges = accumulatedChanges.concat(combinedChange);
+        // Send with "may drop" flag - intermediate changes can be discarded
+        await sendIncrementalChange(combinedChange.change, true);
+      }
+
+      // Final send without "may drop" flag (creates the undo entry)
+      await sendIncrementalChange(accumulatedChanges.change);
+
+      return {
+        changes: accumulatedChanges,
+        undoLabel: "Set point distribution",
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Set point distribution directly. Called for single value changes (not drag).
    */
   async _setPointDistributionDirect(distribution) {
     const selectedData = this._getSelectedSkeletonPoints();
