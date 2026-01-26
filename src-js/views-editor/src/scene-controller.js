@@ -1603,7 +1603,9 @@ export class SceneController {
 
   _getJoinableSkeletonPoints() {
     const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
+    console.log("Join check: skeletonPointSel =", skeletonPointSel);
     if (!skeletonPointSel || skeletonPointSel.size !== 2) {
+      console.log("Join check: FAIL - not exactly 2 points selected");
       return null;
     }
 
@@ -1612,6 +1614,7 @@ export class SceneController {
     const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
     const skeletonData = layer?.customData?.["fontra.skeleton"];
     if (!skeletonData?.contours) {
+      console.log("Join check: FAIL - no skeleton data");
       return null;
     }
 
@@ -1620,16 +1623,20 @@ export class SceneController {
       const [contourIdx, pointIdx] = selKey.split("/").map(Number);
       return { contourIdx, pointIdx, selKey };
     });
+    console.log("Join check: parsed =", parsed);
 
     // Must be from different contours
     if (parsed[0].contourIdx === parsed[1].contourIdx) {
+      console.log("Join check: FAIL - same contour");
       return null;
     }
 
     // Both contours must be open
     const contour0 = skeletonData.contours[parsed[0].contourIdx];
     const contour1 = skeletonData.contours[parsed[1].contourIdx];
+    console.log("Join check: contour0.isClosed =", contour0?.isClosed, "contour1.isClosed =", contour1?.isClosed);
     if (!contour0 || !contour1 || contour0.isClosed || contour1.isClosed) {
+      console.log("Join check: FAIL - contour missing or closed");
       return null;
     }
 
@@ -1640,23 +1647,33 @@ export class SceneController {
       return pointIdx === 0 || pointIdx === points.length - 1;
     };
 
+    console.log("Join check: contour0.points.length =", contour0.points.length, "parsed[0].pointIdx =", parsed[0].pointIdx);
+    console.log("Join check: contour1.points.length =", contour1.points.length, "parsed[1].pointIdx =", parsed[1].pointIdx);
     if (!isEndpoint(contour0, parsed[0].pointIdx) || !isEndpoint(contour1, parsed[1].pointIdx)) {
+      console.log("Join check: FAIL - not endpoints");
       return null;
     }
 
     // Get the actual points
     const point0 = contour0.points[parsed[0].pointIdx];
     const point1 = contour1.points[parsed[1].pointIdx];
+    console.log("Join check: point0 =", point0, "point1 =", point1);
     if (!point0 || !point1) {
+      console.log("Join check: FAIL - points not found");
       return null;
     }
 
     // Check if coordinates match (with tolerance for floating point and user convenience)
     const tolerance = 5;
-    if (Math.abs(point0.x - point1.x) > tolerance || Math.abs(point0.y - point1.y) > tolerance) {
+    const dx = Math.abs(point0.x - point1.x);
+    const dy = Math.abs(point0.y - point1.y);
+    console.log("Join check: dx =", dx, "dy =", dy, "tolerance =", tolerance);
+    if (dx > tolerance || dy > tolerance) {
+      console.log("Join check: FAIL - coordinates don't match");
       return null;
     }
 
+    console.log("Join check: SUCCESS - can join!");
     return parsed;
   }
 
