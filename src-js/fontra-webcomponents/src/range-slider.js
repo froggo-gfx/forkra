@@ -247,6 +247,14 @@ export class RangeSlider extends html.UnlitElement {
   }
 
   get valueFormatted() {
+    // Derive decimal places from step if it's a number
+    if (this.step !== "any" && typeof this.step === "number") {
+      const stepStr = this.step.toString();
+      const decimalIndex = stepStr.indexOf(".");
+      const decimalPlaces = decimalIndex >= 0 ? stepStr.length - decimalIndex - 1 : 0;
+      return round(this.value, decimalPlaces);
+    }
+    // Fallback to range-based heuristic
     const minMaxRange = this.maxValue - this.minValue;
     const decimalPlaces = minMaxRange < 100 ? 3 : 2;
     return round(this.value, decimalPlaces);

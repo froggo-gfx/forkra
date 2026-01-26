@@ -20,6 +20,7 @@ import {
 import { showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialog } from "@fontra/web-components/modal-dialog.js";
 import { Form } from "@fontra/web-components/ui-form.js";
+import { moveSkeletonData } from "@fontra/core/skeleton-contour-generator.js";
 import Panel from "./panel.js";
 
 export default class SelectionInfoPanel extends Panel {
@@ -246,7 +247,7 @@ export default class SelectionInfoPanel extends Panel {
             getValue: (layerGlyph, layerGlyphController, fieldItem) => {
               return layerGlyphController.leftMargin;
             },
-            setValue: (layerGlyph, layerGlyphController, fieldItem, value) => {
+            setValue: (layerGlyph, layerGlyphController, fieldItem, value, layer) => {
               const translationX = maybeClampValue(
                 value - layerGlyphController.leftMargin,
                 -layerGlyph.xAdvance,
@@ -257,6 +258,13 @@ export default class SelectionInfoPanel extends Panel {
               }
               for (const compo of layerGlyph.components) {
                 compo.transformation.translateX += translationX;
+              }
+              // Move skeleton data if present
+              const skeletonData = layer?.customData?.["fontra.skeleton"];
+              if (skeletonData) {
+                const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+                moveSkeletonData(newSkeletonData, translationX, 0);
+                layer.customData["fontra.skeleton"] = newSkeletonData;
               }
               layerGlyph.xAdvance += translationX;
             },
@@ -1064,7 +1072,8 @@ function applyNewValue(glyph, layerInfo, value, fieldItem, absolute) {
           layers[layerName].glyph,
           layerGlyphController,
           fieldItem,
-          newValue
+          newValue,
+          layers[layerName]
         );
       }
     }

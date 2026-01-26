@@ -1057,9 +1057,11 @@ const decomposeSegmentFuncs = {
 
   *quad(segment) {
     if (segment.coordinates.length < 6) {
-      throw new Error(
-        `assert -- not enough coordinates for quad: ${segment.coordinates.length}`
+      // Skip malformed quad segments instead of crashing
+      console.warn(
+        `Skipping malformed quad segment: not enough coordinates (${segment.coordinates.length})`
       );
+      return;
     }
     const coordinates = segment.coordinates;
     const pointIndices = [...segment.pointIndices];

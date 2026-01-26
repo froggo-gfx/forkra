@@ -26,6 +26,7 @@ import {
   valueInRange,
 } from "@fontra/core/utils.js";
 import * as vector from "@fontra/core/vector.js";
+import { Bezier } from "bezier-js";
 
 export class SceneModel {
   constructor(
@@ -45,6 +46,13 @@ export class SceneModel {
     this.usedGlyphNames = new Set();
     this.cachedGlyphNames = new Set();
     this.updateSceneCancelSignal = {};
+
+    // Measure mode properties (Q-key measurement tool)
+    this.measureMode = false;
+    this.measureShowDirect = false; // For hover: Alt+Q shows direct distance
+    this.measureClickDirect = false; // For click: Alt+Q-click shows direct distance
+    this.measureHoverSegment = null; // { p1, p2, contourIndex, segmentIndex }
+    this.measureSelectedPoints = []; // [{x, y, type}]
 
     this.sceneSettingsController.addKeyListener(
       ["glyphLines", "align", "applyKerning", "selectedGlyph", "editLayerName"],
@@ -600,6 +608,26 @@ export class SceneModel {
       return { selection: pointSelection };
     }
 
+    // Check for skeleton points
+    const skeletonPointSelection = this.skeletonPointSelectionAtPoint(
+      point,
+      size,
+      parsedCurrentSelection
+    );
+    if (skeletonPointSelection.size) {
+      return { selection: skeletonPointSelection };
+    }
+
+    // Check for skeleton segments
+    const skeletonSegmentSelection = this.skeletonSegmentSelectionAtPoint(
+      point,
+      size,
+      parsedCurrentSelection
+    );
+    if (skeletonSegmentSelection.size) {
+      return { selection: skeletonSegmentSelection };
+    }
+
     const anchorSelection = this.anchorSelectionAtPoint(
       point,
       size,
@@ -649,10 +677,383 @@ export class SceneModel {
       pointIndex = positionedGlyph.glyph.path.pointIndexNearPoint(glyphPoint, size);
     }
     if (pointIndex !== undefined) {
+      // Check if this point belongs to a skeleton-generated contour
+      if (this._isPointInSkeletonGeneratedContour(positionedGlyph, pointIndex)) {
+        // Allow selection in measure mode (but return special key)
+        if (this.measureMode) {
+          return new Set([`measurePoint/${pointIndex}`]);
+        }
+        // Skip skeleton-generated outline points - they shouldn't be directly editable
+        return new Set();
+      }
       return new Set([`point/${pointIndex}`]);
     }
 
     return new Set();
+  }
+
+  /**
+   * Check if a point index belongs to a skeleton-generated contour.
+   * These points should not be directly editable.
+   */
+  _isPointInSkeletonGeneratedContour(positionedGlyph, pointIndex) {
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+      return false;
+    }
+
+    // Get the current editing layer name
+    const editLayerName =
+      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+    if (!editLayerName) {
+      return false;
+    }
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (!skeletonData?.generatedContourIndices?.length) {
+      return false;
+    }
+
+    // Find which contour the point belongs to
+    const path = positionedGlyph.glyph.path;
+    const contourInfo = path.contourInfo;
+    let contourIndex = 0;
+    for (let i = 0; i < contourInfo.length; i++) {
+      if (pointIndex <= contourInfo[i].endPoint) {
+        contourIndex = i;
+        break;
+      }
+    }
+
+    // Check if this contour is in the skeleton-generated list
+    return skeletonData.generatedContourIndices.includes(contourIndex);
+  }
+
+  /**
+   * Find any point near the given position for measure mode.
+   * Unlike pointSelectionAtPoint, this includes skeleton-generated points.
+   * @returns {Object|null} {x, y, type: "regular"|"skeleton"|"generated"} or null
+   */
+  measurePointAtPoint(point, size) {
+    const positionedGlyph = this.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return null;
+
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+
+    // 1. Check skeleton points first
+    const editLayerName =
+      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+    if (editLayerName) {
+      const layer = positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName];
+      const skeletonData = layer?.customData?.["fontra.skeleton"];
+      if (skeletonData?.contours?.length) {
+        for (const contour of skeletonData.contours) {
+          for (const pt of contour.points) {
+            if (!pt.type) {
+              // on-curve point
+              const dist = Math.hypot(pt.x - glyphPoint.x, pt.y - glyphPoint.y);
+              if (dist <= size) {
+                return { x: pt.x, y: pt.y, type: "skeleton" };
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Check all path points (including generated)
+    const path = positionedGlyph.glyph.path;
+    if (path) {
+      const pointIndex = path.pointIndexNearPoint(glyphPoint, size);
+      if (pointIndex !== undefined) {
+        const pt = path.getPoint(pointIndex);
+        const isGenerated = this._isPointInSkeletonGeneratedContour(
+          positionedGlyph,
+          pointIndex
+        );
+        return { x: pt.x, y: pt.y, type: isGenerated ? "generated" : "regular" };
+      }
+    }
+
+    return null;
+  }
+
+  skeletonPointSelectionAtPoint(point, size, parsedCurrentSelection) {
+    const positionedGlyph = this.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+      return new Set();
+    }
+
+    // Use editLayerName if explicitly set, otherwise fall back to the positioned glyph's layer
+    const editLayerName =
+      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+    if (!editLayerName) {
+      return new Set();
+    }
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (!skeletonData?.contours?.length) {
+      return new Set();
+    }
+
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+
+    // Check if we should prefer current selection
+    if (parsedCurrentSelection?.skeletonPoint?.size) {
+      for (const selKey of parsedCurrentSelection.skeletonPoint) {
+        const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+        const contour = skeletonData.contours[contourIdx];
+        if (contour) {
+          const skeletonPoint = contour.points[pointIdx];
+          if (skeletonPoint) {
+            const dist = vector.distance(glyphPoint, skeletonPoint);
+            if (dist <= size) {
+              return new Set([`skeletonPoint/${contourIdx}/${pointIdx}`]);
+            }
+          }
+        }
+      }
+    }
+
+    // Search all skeleton points
+    for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
+      const contour = skeletonData.contours[contourIdx];
+      for (let pointIdx = 0; pointIdx < contour.points.length; pointIdx++) {
+        const skeletonPoint = contour.points[pointIdx];
+        const dist = vector.distance(glyphPoint, skeletonPoint);
+        if (dist <= size) {
+          return new Set([`skeletonPoint/${contourIdx}/${pointIdx}`]);
+        }
+      }
+    }
+
+    return new Set();
+  }
+
+  skeletonSegmentSelectionAtPoint(point, size, parsedCurrentSelection) {
+    const positionedGlyph = this.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+      return new Set();
+    }
+
+    const editLayerName =
+      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+    if (!editLayerName) {
+      return new Set();
+    }
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (!skeletonData?.contours?.length) {
+      return new Set();
+    }
+
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+
+    // Use larger margin for segment hit testing
+    const margin = size * 1.5;
+
+    // Check if we should prefer current selection
+    if (parsedCurrentSelection?.skeletonSegment?.size) {
+      for (const selKey of parsedCurrentSelection.skeletonSegment) {
+        const [contourIdx, segmentIdx] = selKey.split("/").map(Number);
+        const contour = skeletonData.contours[contourIdx];
+        if (contour) {
+          const hit = this._hitTestSkeletonSegment(
+            contour,
+            segmentIdx,
+            glyphPoint,
+            margin
+          );
+          if (hit) {
+            return new Set([`skeletonSegment/${contourIdx}/${segmentIdx}`]);
+          }
+        }
+      }
+    }
+
+    // Search all skeleton segments
+    for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
+      const contour = skeletonData.contours[contourIdx];
+
+      // Find on-curve point indices to define segments
+      const onCurveIndices = [];
+      for (let i = 0; i < contour.points.length; i++) {
+        if (!contour.points[i].type) {
+          onCurveIndices.push(i);
+        }
+      }
+
+      if (onCurveIndices.length < 2) continue;
+
+      // Test each segment
+      for (let segmentIdx = 0; segmentIdx < onCurveIndices.length - 1; segmentIdx++) {
+        const hit = this._hitTestSkeletonSegment(contour, segmentIdx, glyphPoint, margin);
+        if (hit) {
+          return new Set([`skeletonSegment/${contourIdx}/${segmentIdx}`]);
+        }
+      }
+
+      // For closed contours, test closing segment
+      if (contour.isClosed && onCurveIndices.length >= 2) {
+        const closingSegmentIdx = onCurveIndices.length - 1;
+        const hit = this._hitTestSkeletonSegment(
+          contour,
+          closingSegmentIdx,
+          glyphPoint,
+          margin,
+          true // isClosingSegment
+        );
+        if (hit) {
+          return new Set([`skeletonSegment/${contourIdx}/${closingSegmentIdx}`]);
+        }
+      }
+    }
+
+    return new Set();
+  }
+
+  _hitTestSkeletonSegment(contour, segmentIdx, point, margin, isClosingSegment = false) {
+    const points = contour.points;
+
+    // Find on-curve indices
+    const onCurveIndices = [];
+    for (let i = 0; i < points.length; i++) {
+      if (!points[i].type) {
+        onCurveIndices.push(i);
+      }
+    }
+
+    if (segmentIdx >= onCurveIndices.length) return false;
+
+    let startIdx, endIdx;
+    if (isClosingSegment) {
+      startIdx = onCurveIndices[onCurveIndices.length - 1];
+      endIdx = onCurveIndices[0];
+    } else {
+      startIdx = onCurveIndices[segmentIdx];
+      endIdx = onCurveIndices[segmentIdx + 1];
+    }
+
+    const startPoint = points[startIdx];
+    const endPoint = points[endIdx];
+
+    // Check for off-curve points
+    let hasOffCurve = false;
+    if (isClosingSegment) {
+      for (let j = startIdx + 1; j < points.length; j++) {
+        if (points[j].type) {
+          hasOffCurve = true;
+          break;
+        }
+      }
+      if (!hasOffCurve) {
+        for (let j = 0; j < endIdx; j++) {
+          if (points[j].type) {
+            hasOffCurve = true;
+            break;
+          }
+        }
+      }
+    } else {
+      hasOffCurve = endIdx - startIdx > 1;
+    }
+
+    if (!hasOffCurve) {
+      // Line segment - simple distance to line test
+      const dist = this._pointToLineSegmentDistance(point, startPoint, endPoint);
+      return dist <= margin;
+    } else {
+      // Bezier curve - collect control points and use bezier-js
+      const bezierPoints = [startPoint];
+      if (isClosingSegment) {
+        for (let j = startIdx + 1; j < points.length; j++) {
+          bezierPoints.push(points[j]);
+        }
+        for (let j = 0; j < endIdx; j++) {
+          bezierPoints.push(points[j]);
+        }
+      } else {
+        for (let j = startIdx + 1; j < endIdx; j++) {
+          bezierPoints.push(points[j]);
+        }
+      }
+      bezierPoints.push(endPoint);
+
+      const dist = this._pointToBezierDistance(point, bezierPoints);
+      return dist !== null && dist <= margin;
+    }
+  }
+
+  _pointToLineSegmentDistance(point, lineStart, lineEnd) {
+    const dx = lineEnd.x - lineStart.x;
+    const dy = lineEnd.y - lineStart.y;
+    const lengthSq = dx * dx + dy * dy;
+
+    if (lengthSq === 0) {
+      return vector.distance(point, lineStart);
+    }
+
+    let t = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / lengthSq;
+    t = Math.max(0, Math.min(1, t));
+
+    const closestPoint = {
+      x: lineStart.x + t * dx,
+      y: lineStart.y + t * dy,
+    };
+
+    return vector.distance(point, closestPoint);
+  }
+
+  _pointToBezierDistance(point, bezierPoints) {
+    if (bezierPoints.length < 2) return null;
+
+    if (bezierPoints.length === 2) {
+      return this._pointToLineSegmentDistance(point, bezierPoints[0], bezierPoints[1]);
+    }
+
+    let bezier;
+    if (bezierPoints.length === 3) {
+      bezier = new Bezier(
+        bezierPoints[0].x,
+        bezierPoints[0].y,
+        bezierPoints[1].x,
+        bezierPoints[1].y,
+        bezierPoints[2].x,
+        bezierPoints[2].y
+      );
+    } else if (bezierPoints.length === 4) {
+      bezier = new Bezier(
+        bezierPoints[0].x,
+        bezierPoints[0].y,
+        bezierPoints[1].x,
+        bezierPoints[1].y,
+        bezierPoints[2].x,
+        bezierPoints[2].y,
+        bezierPoints[3].x,
+        bezierPoints[3].y
+      );
+    } else {
+      // Approximate as cubic
+      const p0 = bezierPoints[0];
+      const p3 = bezierPoints[bezierPoints.length - 1];
+      const p1 = bezierPoints[1];
+      const p2 = bezierPoints[bezierPoints.length - 2];
+      bezier = new Bezier(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
+    }
+
+    const projected = bezier.project(point);
+    return projected.d;
   }
 
   segmentSelectionAtPoint(point, size) {
@@ -662,6 +1063,13 @@ export class SceneModel {
         (point) => vector.distance(pathHit, point) > size
       )
     ) {
+      // Don't select segments from skeleton-generated contours
+      const firstPointIndex = pathHit.segment.parentPointIndices[0];
+      const positionedGlyph = this.getSelectedPositionedGlyph();
+      if (positionedGlyph && this._isPointInSkeletonGeneratedContour(positionedGlyph, firstPointIndex)) {
+        return { selection: new Set() };
+      }
+
       const selection = new Set(
         [
           pathHit.segment.parentPointIndices[0],
@@ -871,7 +1279,10 @@ export class SceneModel {
     selRect = offsetRect(selRect, -positionedGlyph.x, -positionedGlyph.y);
     for (const hit of positionedGlyph.glyph.path.iterPointsInRect(selRect)) {
       if (!pointFilterFunc || pointFilterFunc(hit)) {
-        selection.add(`point/${hit.pointIndex}`);
+        // Skip points from skeleton-generated contours
+        if (!this._isPointInSkeletonGeneratedContour(positionedGlyph, hit.pointIndex)) {
+          selection.add(`point/${hit.pointIndex}`);
+        }
       }
     }
     const components = positionedGlyph.glyph.components;
@@ -886,6 +1297,35 @@ export class SceneModel {
       // As long as we don't have multiple background images,
       // we can just add a single selection
       selection.add("backgroundImage/0");
+    }
+
+    // Add skeleton points within rectangle
+    const editLayerName =
+      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+    if (editLayerName && positionedGlyph.varGlyph?.glyph?.layers) {
+      const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+      const skeletonData = layer?.customData?.["fontra.skeleton"];
+      if (skeletonData?.contours?.length) {
+        for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
+          const contour = skeletonData.contours[contourIdx];
+          for (let pointIdx = 0; pointIdx < contour.points.length; pointIdx++) {
+            const point = contour.points[pointIdx];
+            // Apply the same filter: on-curve (!point.type) vs off-curve (point.type)
+            if (pointFilterFunc && !pointFilterFunc(point)) {
+              continue;
+            }
+            // Check if point is within rectangle
+            if (
+              point.x >= selRect.xMin &&
+              point.x <= selRect.xMax &&
+              point.y >= selRect.yMin &&
+              point.y <= selRect.yMax
+            ) {
+              selection.add(`skeletonPoint/${contourIdx}/${pointIdx}`);
+            }
+          }
+        }
+      }
     }
 
     return selection;
@@ -903,7 +1343,12 @@ export class SceneModel {
       x: point.x - positionedGlyph.x,
       y: point.y - positionedGlyph.y,
     };
-    return positionedGlyph.glyph.pathHitTester.hitTest(glyphPoint, size / 2);
+    try {
+      return positionedGlyph.glyph.pathHitTester.hitTest(glyphPoint, size / 2);
+    } catch (e) {
+      // Can happen with malformed contours (e.g., empty contours)
+      return {};
+    }
   }
 
   glyphAtPoint(point, skipEditingGlyph = true) {

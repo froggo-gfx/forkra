@@ -112,6 +112,10 @@ export class Form extends SimpleElement {
       gap: 0.35rem;
     }
 
+    .ui-form-label.universal-row {
+      overflow: visible;
+    }
+
     .ui-form-value.slider-has-checkbox {
       display: grid;
       gap: 0.25em;
@@ -288,12 +292,18 @@ export class Form extends SimpleElement {
     this._lastValidFieldValues[fieldItem.key] = fieldItem.value;
     const inputElement = document.createElement("input");
     inputElement.type = "number";
-    inputElement.value = maybeRound(fieldItem.value, fieldItem.numDigits);
+    // Set value to empty if null/undefined (for placeholder display)
+    inputElement.value =
+      fieldItem.value != null ? maybeRound(fieldItem.value, fieldItem.numDigits) : "";
 
     if (fieldItem["data-tooltip"]) {
       // data-tooltip doesn't work for input number,
       // default title is used
       inputElement.setAttribute("title", fieldItem["data-tooltip"]);
+    }
+
+    if (fieldItem.placeholder) {
+      inputElement.placeholder = fieldItem.placeholder;
     }
 
     if ("minValue" in fieldItem) {
@@ -508,6 +518,9 @@ export class Form extends SimpleElement {
     rangeElement.minValue = fieldItem.minValue;
     rangeElement.defaultValue = fieldItem.defaultValue;
     rangeElement.maxValue = fieldItem.maxValue;
+    if (fieldItem.step !== undefined) {
+      rangeElement.step = fieldItem.step;
+    }
 
     let checkboxElement;
     if (fieldItem.hasCheckBox) {
