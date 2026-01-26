@@ -1859,21 +1859,21 @@ export class SceneController {
     const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
     const skeletonSegmentSel = this.contextMenuState.skeletonSegmentSelection;
 
-    const skeletonContourIndices = new Set();
+    const skeletonContourIndicesToRealize = new Set();
     if (skeletonPointSel) {
       for (const selKey of skeletonPointSel) {
         const [contourIdx] = selKey.split("/").map(Number);
-        skeletonContourIndices.add(contourIdx);
+        skeletonContourIndicesToRealize.add(contourIdx);
       }
     }
     if (skeletonSegmentSel) {
       for (const selKey of skeletonSegmentSel) {
         const [contourIdx] = selKey.split("/").map(Number);
-        skeletonContourIndices.add(contourIdx);
+        skeletonContourIndicesToRealize.add(contourIdx);
       }
     }
 
-    if (skeletonContourIndices.size === 0) {
+    if (skeletonContourIndicesToRealize.size === 0) {
       return;
     }
 
@@ -1888,44 +1888,52 @@ export class SceneController {
         // Deep clone for manipulation
         skeletonData = JSON.parse(JSON.stringify(skeletonData));
 
-        // Remove selected skeleton contours (in reverse order to maintain indices)
-        const sortedContourIndices = [...skeletonContourIndices].sort((a, b) => b - a);
+        const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
+
+        // Build mapping: skeleton contour index -> generated contour indices
+        // Each skeleton contour generates 1 contour (open) or 2 contours (closed)
+        const skeletonToGeneratedMap = [];
+        let genIdx = 0;
+        for (let i = 0; i < skeletonData.contours.length; i++) {
+          const skelContour = skeletonData.contours[i];
+          const numGenerated = skelContour.isClosed ? 2 : 1;
+          const indices = [];
+          for (let j = 0; j < numGenerated && genIdx < oldGeneratedIndices.length; j++) {
+            indices.push(oldGeneratedIndices[genIdx]);
+            genIdx++;
+          }
+          skeletonToGeneratedMap.push(indices);
+        }
+
+        // Find generated indices to "realize" (remove from tracking, keep in path)
+        const indicesToRealize = new Set();
+        for (const skelIdx of skeletonContourIndicesToRealize) {
+          if (skelIdx < skeletonToGeneratedMap.length) {
+            for (const genContourIdx of skeletonToGeneratedMap[skelIdx]) {
+              indicesToRealize.add(genContourIdx);
+            }
+          }
+        }
+
+        // New generatedContourIndices = old indices minus realized ones
+        const newGeneratedIndices = oldGeneratedIndices.filter(
+          (idx) => !indicesToRealize.has(idx)
+        );
+
+        // Remove skeleton contours (in reverse order to maintain indices)
+        const sortedContourIndices = [...skeletonContourIndicesToRealize].sort(
+          (a, b) => b - a
+        );
         for (const contourIdx of sortedContourIndices) {
           if (contourIdx < skeletonData.contours.length) {
             skeletonData.contours.splice(contourIdx, 1);
           }
         }
 
-        // Regenerate outline contours
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          // Delete old generated contours
-          const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
-          const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-          for (const idx of sortedIndices) {
-            if (idx < sg.path.numContours) {
-              sg.path.deleteContour(idx);
-            }
-          }
+        // Update generatedContourIndices
+        skeletonData.generatedContourIndices = newGeneratedIndices;
 
-          // If no skeleton contours left, just clear the indices
-          if (skeletonData.contours.length === 0) {
-            skeletonData.generatedContourIndices = [];
-          } else {
-            // Regenerate from remaining skeleton contours
-            const generatedContours = generateContoursFromSkeleton(skeletonData);
-            const newGeneratedIndices = [];
-            for (const contour of generatedContours) {
-              const newIndex = sg.path.numContours;
-              sg.path.insertContour(newIndex, packContour(contour));
-              newGeneratedIndices.push(newIndex);
-            }
-            skeletonData.generatedContourIndices = newGeneratedIndices;
-          }
-        });
-        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-        // Update or remove skeleton data
+        // Update or remove skeleton data (no path changes needed!)
         const customDataChange = recordChanges(layer, (l) => {
           if (skeletonData.contours.length === 0) {
             delete l.customData["fontra.skeleton"];
