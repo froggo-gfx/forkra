@@ -36,8 +36,9 @@ export class MouseTracker {
   }
 
   handleMouseDown(event) {
-    if (event.button === 2 || event.ctrlKey) {
+    if (event.button === 2 /* || event.ctrlKey */) {
       // We're not handling contextual menus
+      // Note: ctrlKey check removed to allow Ctrl+Shift+click for Tunni equalize
       return;
     }
     if (
