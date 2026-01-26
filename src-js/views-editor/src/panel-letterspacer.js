@@ -66,11 +66,19 @@ class LetterspacerEngine {
     this.upm = fontMetrics.upm;
     this.xHeight = fontMetrics.xHeight;
     this.angle = fontMetrics.italicAngle || 0;
+    this.scanLines = [];  // Store scan lines for visualization
+    this.leftPolygon = [];  // Store left polygon for visualization
+    this.rightPolygon = [];  // Store right polygon for visualization
   }
 
   computeSpacing(path, bounds, refMinY, refMaxY) {
     const freq = 5;  // шаг сканирования
     const amplitudeY = refMaxY - refMinY;
+
+    // Clear previous visualization data
+    this.scanLines = [];
+    this.leftPolygon = [];
+    this.rightPolygon = [];
 
     // Целевая белая площадь
     const areaUPM = this.params.area * Math.pow(this.upm / 1000, 2);
@@ -95,12 +103,12 @@ class LetterspacerEngine {
     processedRight = diagonize(processedRight);
 
     // Замкнуть полигоны
-    const leftPolygon = closePolygon(processedLeft, leftExtreme, refMinY, refMaxY);
-    const rightPolygon = closePolygon(processedRight, rightExtreme, refMinY, refMaxY);
+    this.leftPolygon = closePolygon(processedLeft, leftExtreme, refMinY, refMaxY);
+    this.rightPolygon = closePolygon(processedRight, rightExtreme, refMinY, refMaxY);
 
     // Вычислить sidebearings
-    const lsb = calculateSidebearing(leftPolygon, targetArea, amplitudeY);
-    const rsb = calculateSidebearing(rightPolygon, targetArea, amplitudeY);
+    const lsb = calculateSidebearing(this.leftPolygon, targetArea, amplitudeY);
+    const rsb = calculateSidebearing(this.rightPolygon, targetArea, amplitudeY);
 
     return { lsb, rsb };
   }
@@ -112,11 +120,22 @@ class LetterspacerEngine {
     let leftExtreme = bounds.xMin;
     let rightExtreme = bounds.xMax;
 
+    // Clear previous scan lines
+    this.scanLines = [];
+
     for (let y = minY; y <= maxY; y += freq) {
-      const intersections = hitTester.lineIntersections(
-        { x: bounds.xMin - 100, y },
-        { x: bounds.xMax + 100, y }
-      );
+      const lineStart = { x: bounds.xMin - 100, y };
+      const lineEnd = { x: bounds.xMax + 100, y };
+
+      const intersections = hitTester.lineIntersections(lineStart, lineEnd);
+
+      // Store scan line for visualization
+      this.scanLines.push({
+        start: lineStart,
+        end: lineEnd,
+        intersections: [...intersections], // Copy the intersections
+        y: y
+      });
 
       if (intersections.length >= 2) {
         // Сортируем по x
@@ -161,6 +180,7 @@ export default class LetterspacerPanel extends Panel {
     );
     this.fontController = this.editorController.fontController;
     this.sceneController = this.editorController.sceneController;
+    this.handleSelectionChangeBound = this.handleSelectionChange.bind(this);
 
     this.params = {
       area: 400,
@@ -230,9 +250,41 @@ export default class LetterspacerPanel extends Panel {
     formContents[0].auxiliaryElement = applyButton;
 
     this.infoForm.setFieldDescriptions(formContents);
-    this.infoForm.onFieldChange = (fieldItem, value) => {
+    this.infoForm.onFieldChange = async (fieldItem, value) => {
       this.params[fieldItem.key] = value;
+
+      // Update visualization data when parameters change
+      if (this.editorController.sceneController && this.editorController.sceneController.sceneModel) {
+        this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
+        // Request update through the editor's canvas controller
+        if (this.editorController.canvasController) {
+          this.editorController.canvasController.requestUpdate();
+        }
+      } else if (this.editorController.sceneModel) {
+        // Fallback to editor controller's scene model
+        this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
+        // Request update through the editor's canvas controller
+        if (this.editorController.canvasController) {
+          this.editorController.canvasController.requestUpdate();
+        }
+      }
     };
+
+    // Also update visualization data when the panel is updated
+    if (this.editorController.sceneController && this.editorController.sceneController.sceneModel) {
+      this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
+      // Request update through the editor's canvas controller
+      if (this.editorController.canvasController) {
+        this.editorController.canvasController.requestUpdate();
+      }
+    } else if (this.editorController.sceneModel) {
+      // Fallback to editor controller's scene model
+      this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
+      // Request update through the editor's canvas controller
+      if (this.editorController.canvasController) {
+        this.editorController.canvasController.requestUpdate();
+      }
+    }
   }
 
   async applySpacing() {
@@ -284,6 +336,15 @@ export default class LetterspacerPanel extends Panel {
 
       return "letterspacer";
     }, undefined, true);
+
+    // Update visualization data after applying changes
+    if (this.editorController.sceneModel) {
+      this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
+      // Request update through the editor's canvas controller
+      if (this.editorController.canvasController) {
+        this.editorController.canvasController.requestUpdate();
+      }
+    }
   }
 
   shiftPath(path, deltaX) {
@@ -337,7 +398,79 @@ export default class LetterspacerPanel extends Panel {
   }
 
   async toggle(on, focus) {
-    if (on) this.update();
+    if (on) {
+      this.update();
+      // Add a listener to update visualization when selection changes
+      this.sceneController.addEventListener("selectionChanged", this.handleSelectionChangeBound);
+    } else {
+      // Remove the listener when panel is turned off
+      this.sceneController.removeEventListener("selectionChanged", this.handleSelectionChangeBound);
+    }
+  }
+
+  // Handle selection changes to update visualization data
+  async handleSelectionChange() {
+    if (this.editorController.sceneController && this.editorController.sceneController.sceneModel) {
+      this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
+      // Request update through the editor's canvas controller
+      if (this.editorController.canvasController) {
+        this.editorController.canvasController.requestUpdate();
+      }
+    } else if (this.editorController.sceneModel) {
+      // Fallback to editor controller's scene model
+      this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
+      // Request update through the editor's canvas controller
+      if (this.editorController.canvasController) {
+        this.editorController.canvasController.requestUpdate();
+      }
+    }
+  }
+
+  // Methods for visualization layer
+  getEngine() {
+    return this.engine;
+  }
+
+  async getVisualizationData() {
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) {
+      console.log("No positioned glyph selected for visualization data");
+      return null;
+    }
+
+    console.log("Generating visualization data for glyph:", positionedGlyph.glyphName);
+
+    // Font metrics
+    const fontMetrics = await this.getFontMetrics();
+
+    // Reference bounds
+    const refBounds = await this.getReferenceBounds(fontMetrics);
+
+    // Create temporary engine to compute visualization data
+    const engine = new LetterspacerEngine(this.params, fontMetrics);
+
+    const path = positionedGlyph.glyph.path;
+    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    if (!bounds) {
+      console.log("No bounds found for glyph path");
+      return null;
+    }
+
+    console.log("Computing spacing with bounds:", bounds);
+
+    // Compute spacing to populate the visualization data
+    engine.computeSpacing(path, bounds, refBounds.minY, refBounds.maxY);
+
+    const result = {
+      scanLines: engine.scanLines,
+      leftPolygon: engine.leftPolygon,
+      rightPolygon: engine.rightPolygon,
+      params: this.params
+    };
+
+    console.log("Generated visualization data with", result.scanLines?.length, "scan lines");
+
+    return result;
   }
 }
 
