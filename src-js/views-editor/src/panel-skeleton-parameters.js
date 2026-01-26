@@ -1063,31 +1063,35 @@ export default class SkeletonParametersPanel extends Panel {
 
   /**
    * Handle distribution slider drag with proper change accumulation.
-   * Uses the same pattern as point dragging to avoid creating many undo entries.
+   * For multi-selection: applies delta relative to each point's initial distribution.
    */
   async _handleDistributionSliderDrag(valueStream) {
     const selectedData = this._getSelectedSkeletonPoints();
     if (!selectedData) return;
 
-    // Store initial total widths to preserve them during drag
-    const initialTotalWidths = new Map();
+    const isMultiSelection = selectedData.points.length > 1;
+
+    // Store initial state for each point
+    const initialState = new Map();
     for (const { contourIdx, pointIdx, point } of selectedData.points) {
       const key = `${contourIdx}/${pointIdx}`;
       const defaultWidth = this._getCurrentDefaultWidthWide();
       const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
       const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-      initialTotalWidths.set(key, leftHW + rightHW);
+      const totalWidth = leftHW + rightHW;
+      const distribution = this._calculateDistribution(leftHW, rightHW);
+      initialState.set(key, { totalWidth, distribution });
     }
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       let lastChange = null;
       let lastProcessedTime = 0;
-      let lastDistribution = null;
-      let processedDistribution = null;
-      const THROTTLE_MS = 50; // Process at most every 50ms
+      let lastSliderValue = null;
+      let processedSliderValue = null;
+      const THROTTLE_MS = 50;
 
-      // Helper to apply distribution and return change
-      const applyDistribution = (distribution) => {
+      // Helper to apply distribution delta and return change
+      const applyDistribution = (sliderValue) => {
         const allChanges = [];
 
         for (const editLayerName of this.sceneController.editingLayerNames) {
@@ -1105,9 +1109,19 @@ export default class SkeletonParametersPanel extends Panel {
             if (!point) continue;
 
             const key = `${contourIdx}/${pointIdx}`;
-            const totalWidth = initialTotalWidths.get(key);
+            const { totalWidth, distribution: initialDist } = initialState.get(key);
 
-            const newLeftHW = totalWidth * (0.5 + distribution / 200);
+            let newDistribution;
+            if (isMultiSelection) {
+              // Multi-selection: slider value is a DELTA from initial
+              // Clamp so result stays within [-100, 100]
+              newDistribution = Math.max(-100, Math.min(100, initialDist + sliderValue));
+            } else {
+              // Single selection: slider value is absolute
+              newDistribution = sliderValue;
+            }
+
+            const newLeftHW = totalWidth * (0.5 + newDistribution / 200);
             const newRightHW = totalWidth - newLeftHW;
 
             point.leftWidth = Math.max(0, Math.round(newLeftHW));
@@ -1132,32 +1146,31 @@ export default class SkeletonParametersPanel extends Panel {
       };
 
       // Process values from the stream with throttling
-      for await (const distribution of valueStream) {
-        lastDistribution = distribution;
+      for await (const sliderValue of valueStream) {
+        lastSliderValue = sliderValue;
         const now = Date.now();
 
-        // Skip if we processed recently (throttle)
         if (now - lastProcessedTime < THROTTLE_MS) {
           continue;
         }
         lastProcessedTime = now;
-        processedDistribution = distribution;
+        processedSliderValue = sliderValue;
 
-        lastChange = applyDistribution(distribution);
+        lastChange = applyDistribution(sliderValue);
         if (lastChange) {
           await sendIncrementalChange(lastChange.change, true);
         }
       }
 
       // Process final value if it was skipped
-      if (lastDistribution !== null && lastDistribution !== processedDistribution) {
-        lastChange = applyDistribution(lastDistribution);
+      if (lastSliderValue !== null && lastSliderValue !== processedSliderValue) {
+        lastChange = applyDistribution(lastSliderValue);
         if (lastChange) {
           await sendIncrementalChange(lastChange.change, true);
         }
       }
 
-      // Final send without "may drop" flag (creates the undo entry)
+      // Final send without "may drop" flag
       if (lastChange) {
         await sendIncrementalChange(lastChange.change);
         return {
