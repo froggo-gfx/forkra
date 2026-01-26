@@ -586,6 +586,7 @@ export default class SkeletonParametersPanel extends Panel {
                   rightWidth: rightHW,
                   normal: effectiveNormal,
                   handles: handles,
+                  initialDistribution: this._calculateDistribution(leftHW, rightHW),
                 });
               }
             }
@@ -1231,16 +1232,31 @@ export default class SkeletonParametersPanel extends Panel {
           ) {
             // Move Skeleton mode: move skeleton point, keep contour in place
             const state = this._initialSkeletonState.get(key);
-            const { x: initialX, y: initialY, leftWidth: initialLeft, rightWidth: initialRight, normal } = state;
+            const { x: initialX, y: initialY, leftWidth: initialLeft, rightWidth: initialRight, normal, initialDistribution } = state;
 
-            // Calculate offset based on distribution direction
-            // distribution > 0: move towards left contour (leftWidth decreases)
-            // distribution < 0: move towards right contour (rightWidth decreases)
+            // Calculate delta from initial slider position
+            const delta = distribution - initialDistribution;
+
+            // Calculate offset based on delta direction
+            // delta > 0: move towards left contour (+100 = at left contour, leftWidth=0)
+            // delta < 0: move towards right contour (-100 = at right contour, rightWidth=0)
             let offset;
-            if (distribution >= 0) {
-              offset = (distribution / 100) * initialLeft;
+            if (delta >= 0) {
+              // Moving towards +100 (left contour)
+              const availableRange = 100 - initialDistribution;
+              if (availableRange > 0) {
+                offset = (delta / availableRange) * initialLeft;
+              } else {
+                offset = 0;
+              }
             } else {
-              offset = (distribution / 100) * initialRight;
+              // Moving towards -100 (right contour)
+              const availableRange = initialDistribution + 100;
+              if (availableRange > 0) {
+                offset = (delta / availableRange) * initialRight;
+              } else {
+                offset = 0;
+              }
             }
 
             // Move skeleton point along normal
