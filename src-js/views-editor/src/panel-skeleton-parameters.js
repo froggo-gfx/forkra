@@ -859,6 +859,9 @@ export default class SkeletonParametersPanel extends Panel {
     // Source widths
     parts.push(`w:${this._getCurrentDefaultWidthWide()},${this._getCurrentDefaultWidthNarrow()}`);
 
+    // Single-sided state
+    parts.push(`ss:${this._getCurrentSingleSided()},${this._getCurrentSingleSidedDirection()}`);
+
     // Selection (just the string representation)
     const sel = this.sceneController.selection;
     parts.push(`s:${sel ? sel.size : 0}`);
@@ -1030,6 +1033,7 @@ export default class SkeletonParametersPanel extends Panel {
    */
   async _onSingleSidedDirectionChange(value) {
     await this._setSingleSidedDirection(value);
+    this.update();
   }
 
   /**
