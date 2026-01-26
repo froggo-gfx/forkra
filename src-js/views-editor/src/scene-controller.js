@@ -1855,16 +1855,83 @@ export class SceneController {
   }
 
   async doRealizeSkeletonProjection() {
+    // Get selected skeleton contour indices
+    const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
+    const skeletonSegmentSel = this.contextMenuState.skeletonSegmentSelection;
+
+    const skeletonContourIndices = new Set();
+    if (skeletonPointSel) {
+      for (const selKey of skeletonPointSel) {
+        const [contourIdx] = selKey.split("/").map(Number);
+        skeletonContourIndices.add(contourIdx);
+      }
+    }
+    if (skeletonSegmentSel) {
+      for (const selKey of skeletonSegmentSel) {
+        const [contourIdx] = selKey.split("/").map(Number);
+        skeletonContourIndices.add(contourIdx);
+      }
+    }
+
+    if (skeletonContourIndices.size === 0) {
+      return;
+    }
+
     await this.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
 
       for (const editLayerName of this.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.["fontra.skeleton"]) continue;
+        let skeletonData = layer?.customData?.["fontra.skeleton"];
+        if (!skeletonData?.contours) continue;
 
-        // Remove skeleton data - generated contours remain in path
+        // Deep clone for manipulation
+        skeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+        // Remove selected skeleton contours (in reverse order to maintain indices)
+        const sortedContourIndices = [...skeletonContourIndices].sort((a, b) => b - a);
+        for (const contourIdx of sortedContourIndices) {
+          if (contourIdx < skeletonData.contours.length) {
+            skeletonData.contours.splice(contourIdx, 1);
+          }
+        }
+
+        // Regenerate outline contours
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          // Delete old generated contours
+          const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
+          const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+          for (const idx of sortedIndices) {
+            if (idx < sg.path.numContours) {
+              sg.path.deleteContour(idx);
+            }
+          }
+
+          // If no skeleton contours left, just clear the indices
+          if (skeletonData.contours.length === 0) {
+            skeletonData.generatedContourIndices = [];
+          } else {
+            // Regenerate from remaining skeleton contours
+            const generatedContours = generateContoursFromSkeleton(skeletonData);
+            const newGeneratedIndices = [];
+            for (const contour of generatedContours) {
+              const newIndex = sg.path.numContours;
+              sg.path.insertContour(newIndex, packContour(contour));
+              newGeneratedIndices.push(newIndex);
+            }
+            skeletonData.generatedContourIndices = newGeneratedIndices;
+          }
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        // Update or remove skeleton data
         const customDataChange = recordChanges(layer, (l) => {
-          delete l.customData["fontra.skeleton"];
+          if (skeletonData.contours.length === 0) {
+            delete l.customData["fontra.skeleton"];
+          } else {
+            l.customData["fontra.skeleton"] = skeletonData;
+          }
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
