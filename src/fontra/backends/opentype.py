@@ -93,7 +93,7 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
 
         for sparseLoc in self._getGlyphVariationLocations(glyphName):
             fullLoc = defaultLocation | sparseLoc
-            locStr = locationToString(sparseLoc)
+            locStr = locationToString(unnormalizeLocation(sparseLoc, self.axes.axes))
             varGlyphSet = self.variationGlyphSets.get(locStr)
             if varGlyphSet is None:
                 varGlyphSet = self.font.getGlyphSet(location=fullLoc, normalized=True)
@@ -269,15 +269,9 @@ def unpackAxes(font: TTFont) -> Axes:
                 for inValue, outValue in mapping
                 if normMin <= outValue <= normMax
             ]
-        else:
-            mapping = [
-                [axis.minValue, normMin],
-                [axis.defaultValue, 0],
-                [axis.maxValue, normMax],
-            ]
 
-        if all([inValue == outValue for inValue, outValue in mapping]):
-            mapping = []
+            if all([inValue == outValue for inValue, outValue in mapping]):
+                mapping = []
 
         axisNameRecord = nameTable.getName(axis.axisNameID, 3, 1, 0x409)
         axisName = (
