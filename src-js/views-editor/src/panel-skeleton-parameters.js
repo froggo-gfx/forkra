@@ -517,20 +517,29 @@ export default class SkeletonParametersPanel extends Panel {
         // For distribution slider
         if (valueStream) {
           this._isDraggingSlider = true;
-          // Store initial distributions for multi-selection relative changes
+          // Store initial state for multi-selection
           const selectedData = this._getSelectedSkeletonPoints();
-          const initialDistributions = new Map();
 
           if (selectedData && selectedData.points.length > 1) {
+            const pointStates = new Map();
+            let maxLeft = 0;
+            let maxRight = 0;
+
             for (const { contourIdx, pointIdx, point } of selectedData.points) {
               const key = `${contourIdx}/${pointIdx}`;
               const defaultWidth = this._getCurrentDefaultWidthWide();
-              const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-              const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-              initialDistributions.set(key, this._calculateDistribution(leftHW, rightHW));
+              const left = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+              const right = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+
+              pointStates.set(key, { initialLeft: left, initialRight: right });
+              maxLeft = Math.max(maxLeft, left);
+              maxRight = Math.max(maxRight, right);
             }
+
+            this._multiSelectionState = { pointStates, maxLeft, maxRight };
+          } else {
+            this._multiSelectionState = null;
           }
-          this._initialDistributions = initialDistributions;
           try {
             let lastProcessedTime = 0;
             let lastDist = null;
@@ -553,7 +562,7 @@ export default class SkeletonParametersPanel extends Panel {
             }
           } finally {
             this._isDraggingSlider = false;
-            this._initialDistributions = null;
+            this._multiSelectionState = null;
             this.update();
           }
         } else {
@@ -1136,11 +1145,14 @@ export default class SkeletonParametersPanel extends Panel {
 
   /**
    * Set point distribution directly.
-   * For multi-selection during drag: uses _initialDistributions for relative changes.
+   * For multi-selection: all points move with the same speed, clamping at skeleton (width=0).
+   * For single selection: distribution maps directly to left/right ratio.
    */
   async _setPointDistributionDirect(distribution) {
     const selectedData = this._getSelectedSkeletonPoints();
     if (!selectedData) return;
+
+    const isMulti = this._multiSelectionState && this._multiSelectionState.pointStates.size > 0;
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
@@ -1163,25 +1175,46 @@ export default class SkeletonParametersPanel extends Panel {
           const key = `${contourIdx}/${pointIdx}`;
           const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
 
-          const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-          const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-          const totalWidth = leftHW + rightHW;
+          if (isMulti) {
+            // Multi-selection: all points move with same speed, clamp at 0
+            const state = this._multiSelectionState.pointStates.get(key);
+            if (!state) continue;
 
-          // Calculate effective distribution
-          let effectiveDistribution = distribution;
-          if (this._initialDistributions && this._initialDistributions.size > 0) {
-            // Multi-selection: slider value is a delta from initial
-            const initialDist = this._initialDistributions.get(key) || 0;
-            effectiveDistribution = Math.max(-100, Math.min(100, initialDist + distribution));
+            const { initialLeft, initialRight } = state;
+            const { maxLeft, maxRight } = this._multiSelectionState;
+
+            let newLeft, newRight;
+
+            if (distribution >= 0) {
+              // Moving right: decrease left widths
+              const delta = (distribution / 100) * maxLeft;
+              newLeft = Math.max(0, initialLeft - delta);
+              // Add to right only what was actually removed from left
+              newRight = initialRight + Math.min(delta, initialLeft);
+            } else {
+              // Moving left: decrease right widths
+              const delta = (Math.abs(distribution) / 100) * maxRight;
+              newRight = Math.max(0, initialRight - delta);
+              // Add to left only what was actually removed from right
+              newLeft = initialLeft + Math.min(delta, initialRight);
+            }
+
+            point.leftWidth = Math.round(newLeft);
+            point.rightWidth = Math.round(newRight);
+            delete point.width;
+          } else {
+            // Single selection: distribution maps directly to left/right ratio
+            const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+            const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+            const totalWidth = leftHW + rightHW;
+
+            const newLeftHW = totalWidth * (0.5 + distribution / 200);
+            const newRightHW = totalWidth - newLeftHW;
+
+            point.leftWidth = Math.max(0, Math.round(newLeftHW));
+            point.rightWidth = Math.max(0, Math.round(newRightHW));
+            delete point.width;
           }
-
-          // Calculate new widths based on distribution
-          const newLeftHW = totalWidth * (0.5 + effectiveDistribution / 200);
-          const newRightHW = totalWidth - newLeftHW;
-
-          point.leftWidth = Math.max(0, Math.round(newLeftHW));
-          point.rightWidth = Math.max(0, Math.round(newRightHW));
-          delete point.width;
         }
 
         // Record changes for this layer
