@@ -622,6 +622,9 @@ export default class SkeletonParametersPanel extends Panel {
         editableCheckbox.indeterminate = true;
       }
 
+      // Check if any selected editable rib points have nudge values
+      const hasNudge = this._selectedRibPointsHaveNudge(selectedRibSides);
+
       formContents.push({
         type: "universal-row",
         field1: {
@@ -632,7 +635,19 @@ export default class SkeletonParametersPanel extends Panel {
             html.label({ for: "editable-toggle", style: "margin-left: 4px" }, "Editable"),
           ]),
         },
-        field2: { type: "spacer" },
+        field2: {
+          type: "auxiliaryElement",
+          key: "resetPosition",
+          auxiliaryElement: (isEditable || isEditableIndeterminate) && hasNudge
+            ? html.button(
+                {
+                  style: "font-size: 11px; padding: 2px 6px;",
+                  onclick: () => this._onResetRibPosition(selectedRibSides),
+                },
+                "Reset"
+              )
+            : html.span(),
+        },
         field3: { type: "spacer" },
       });
     }
@@ -1427,6 +1442,117 @@ export default class SkeletonParametersPanel extends Panel {
       return {
         changes: combined,
         undoLabel: checked ? "Enable editable rib points" : "Disable editable rib points",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
+   * Check if any selected editable rib points have nudge values.
+   * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
+   * @returns {boolean} True if at least one selected editable rib point has nudge
+   */
+  _selectedRibPointsHaveNudge(selectedRibSides) {
+    if (!selectedRibSides || selectedRibSides.size === 0) return false;
+
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData) return false;
+
+    for (const key of selectedRibSides) {
+      const parts = key.split("/");
+      const contourIdx = parseInt(parts[0], 10);
+      const pointIdx = parseInt(parts[1], 10);
+      const side = parts[2];
+
+      const point = skeletonData.contours[contourIdx]?.points[pointIdx];
+      if (!point) continue;
+
+      const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+      const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+
+      if (point[editableKey] && point[nudgeKey] && point[nudgeKey] !== 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Reset nudge values for selected editable rib points to 0.
+   * This returns the rib points to their generated positions without disabling editable.
+   * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
+   */
+  async _onResetRibPosition(selectedRibSides) {
+    if (!selectedRibSides || selectedRibSides.size === 0) {
+      return;
+    }
+
+    // Parse selected rib sides into a map: "contourIdx/pointIdx" -> Set of sides
+    const pointSidesMap = new Map();
+    for (const key of selectedRibSides) {
+      const parts = key.split("/");
+      const pointKey = `${parts[0]}/${parts[1]}`;
+      const side = parts[2];
+      if (!pointSidesMap.has(pointKey)) {
+        pointSidesMap.set(pointKey, new Set());
+      }
+      pointSidesMap.get(pointKey).add(side);
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const [pointKey, sides] of pointSidesMap) {
+          const [contourIdx, pointIdx] = pointKey.split("/").map(Number);
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          // Reset nudge for each selected side (only if editable)
+          for (const side of sides) {
+            const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+            const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+
+            if (point[editableKey]) {
+              delete point[nudgeKey];
+            }
+          }
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Reset rib point position",
         broadcast: true,
       };
     });
