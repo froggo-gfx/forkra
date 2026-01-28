@@ -2013,12 +2013,19 @@ export class PointerTool extends BaseTool {
   _expandSelectionWithHandles(selection, editableRibPoints, positionedGlyph) {
     const expandedSelection = new Set(selection);
     const path = positionedGlyph?.glyph?.path;
-    if (!path) return expandedSelection;
+    if (!path) {
+      console.log("[EXPAND] no path");
+      return expandedSelection;
+    }
 
     for (const ribPoint of editableRibPoints) {
-      if (ribPoint.isHandle) continue; // Only expand for on-curve points
+      if (ribPoint.isHandle) {
+        console.log("[EXPAND] skipping handle", ribPoint.pointIndex);
+        continue;
+      }
 
       const pointIndex = ribPoint.pointIndex;
+      console.log("[EXPAND] processing on-curve", pointIndex);
 
       // Find which contour this point belongs to
       let contourStart = 0;
@@ -2034,14 +2041,15 @@ export class PointerTool extends BaseTool {
       const numPoints = contourEnd - contourStart + 1;
       const localIdx = pointIndex - contourStart;
       const isClosed = path.contourInfo.find(c => c.endPoint >= pointIndex)?.isClosed ?? true;
+      console.log("[EXPAND] contour:", contourStart, "-", contourEnd, "localIdx:", localIdx, "isClosed:", isClosed);
 
       // Check previous point
       if (isClosed || localIdx > 0) {
         const prevLocalIdx = (localIdx - 1 + numPoints) % numPoints;
         const prevPointIdx = contourStart + prevLocalIdx;
         const prevType = path.pointTypes[prevPointIdx];
+        console.log("[EXPAND] prev point", prevPointIdx, "type:", prevType, "isOffCurve:", (prevType & 0x03) !== 0);
         if ((prevType & 0x03) !== 0) {
-          // It's off-curve - add to selection
           expandedSelection.add(`point/${prevPointIdx}`);
         }
       }
@@ -2051,8 +2059,8 @@ export class PointerTool extends BaseTool {
         const nextLocalIdx = (localIdx + 1) % numPoints;
         const nextPointIdx = contourStart + nextLocalIdx;
         const nextType = path.pointTypes[nextPointIdx];
+        console.log("[EXPAND] next point", nextPointIdx, "type:", nextType, "isOffCurve:", (nextType & 0x03) !== 0);
         if ((nextType & 0x03) !== 0) {
-          // It's off-curve - add to selection
           expandedSelection.add(`point/${nextPointIdx}`);
         }
       }
