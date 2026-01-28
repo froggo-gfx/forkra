@@ -963,3 +963,111 @@ export function createRibEditBehavior(skeletonData, ribHit) {
     onCurvePoint
   );
 }
+
+/**
+ * EditableRibBehavior - Handles dragging of editable rib points.
+ * Allows free movement: normal component updates width, tangent component updates nudge.
+ */
+export class EditableRibBehavior {
+  /**
+   * @param {Object} skeletonData - The skeleton data
+   * @param {number} contourIndex - Index of the contour
+   * @param {number} pointIndex - Index of the on-curve point
+   * @param {string} side - "left" or "right"
+   * @param {Object} normal - The normal vector at this point
+   * @param {Object} onCurvePoint - The on-curve point position
+   */
+  constructor(skeletonData, contourIndex, pointIndex, side, normal, onCurvePoint) {
+    this.skeletonData = skeletonData;
+    this.contourIndex = contourIndex;
+    this.pointIndex = pointIndex;
+    this.side = side;
+    this.normal = normal;
+    this.tangent = { x: -normal.y, y: normal.x }; // Perpendicular to normal
+    this.onCurvePoint = onCurvePoint;
+
+    const contour = skeletonData.contours[contourIndex];
+    const point = contour.points[pointIndex];
+    const defaultWidth = contour.defaultWidth || 20;
+
+    // Store original half-width
+    if (side === "left") {
+      this.originalHalfWidth = point.leftWidth !== undefined
+        ? point.leftWidth
+        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
+    } else {
+      this.originalHalfWidth = point.rightWidth !== undefined
+        ? point.rightWidth
+        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
+    }
+
+    // Store original nudge
+    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+    this.originalNudge = point[nudgeKey] || 0;
+
+    // Minimum half-width (1 unit)
+    this.minHalfWidth = 1;
+  }
+
+  /**
+   * Apply drag delta and return changes to width and nudge.
+   * @param {Object} delta - The drag delta {x, y}
+   * @returns {Object} { halfWidth, nudge } - New half-width and nudge values
+   */
+  applyDelta(delta) {
+    // Project delta onto normal → width change
+    const sign = this.side === "left" ? 1 : -1;
+    const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
+    const normalDelta = sign * normalDot;
+
+    // Project delta onto tangent → nudge change
+    const tangentDot = delta.x * this.tangent.x + delta.y * this.tangent.y;
+
+    // Calculate new values
+    let newHalfWidth = this.originalHalfWidth + normalDelta;
+    if (newHalfWidth < this.minHalfWidth) {
+      newHalfWidth = this.minHalfWidth;
+    }
+
+    const newNudge = this.originalNudge + tangentDot;
+
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: Math.round(newHalfWidth),
+      nudge: Math.round(newNudge),
+    };
+  }
+
+  /**
+   * Get rollback data to restore original width and nudge.
+   */
+  getRollback() {
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: Math.round(this.originalHalfWidth),
+      nudge: Math.round(this.originalNudge),
+    };
+  }
+}
+
+/**
+ * Create an EditableRibBehavior for editable rib points.
+ * @param {Object} skeletonData - The skeleton data
+ * @param {Object} ribHit - Hit test result from _hitTestRibPoints
+ * @returns {EditableRibBehavior} The behavior instance
+ */
+export function createEditableRibBehavior(skeletonData, ribHit) {
+  const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
+  return new EditableRibBehavior(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint
+  );
+}

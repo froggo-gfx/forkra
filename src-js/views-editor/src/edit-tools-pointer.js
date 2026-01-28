@@ -43,6 +43,8 @@ import {
   getSkeletonBehaviorName,
   createRibEditBehavior,
   RibEditBehavior,
+  createEditableRibBehavior,
+  EditableRibBehavior,
 } from "./skeleton-edit-behavior.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import {
@@ -1710,11 +1712,13 @@ export class PointerTool extends BaseTool {
       if (!pt || pt.type) return; // skip off-curve points
       const isAsym = pt.leftWidth !== undefined || pt.rightWidth !== undefined;
       const isSingleSided = contour.singleSided ?? false;
+      const isEditable = pt.editable === true;
       targetPointsMap.set(key, {
         contourIndex: ci,
         pointIndex: pi,
         isAsymmetric: isAsym,
         isSingleSided,
+        isEditable,
       });
     };
 
@@ -1774,6 +1778,14 @@ export class PointerTool extends BaseTool {
           if (!skeletonPoint) continue;
           const normal = calculateNormalAtSkeletonPoint(contour, tp.pointIndex);
 
+          const ribHitForPoint = {
+            contourIndex: tp.contourIndex,
+            pointIndex: tp.pointIndex,
+            side: dragSide,
+            normal,
+            onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
+          };
+
           if (tp.isSingleSided) {
             // For single-sided, create behavior with totalWidth as the effective width
             // We use a synthetic ribHit that makes the behavior track totalWidth
@@ -1794,14 +1806,14 @@ export class PointerTool extends BaseTool {
             behavior.originalHalfWidth = totalWidth;
             behavior.minHalfWidth = 2;
             data.ribBehaviors.push({ behavior, target: tp });
+          } else if (tp.isEditable) {
+            // Editable mode: use EditableRibBehavior for free movement
+            data.ribBehaviors.push({
+              behavior: createEditableRibBehavior(data.original, ribHitForPoint),
+              target: tp,
+            });
           } else {
-            const ribHitForPoint = {
-              contourIndex: tp.contourIndex,
-              pointIndex: tp.pointIndex,
-              side: dragSide,
-              normal,
-              onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
-            };
+            // Normal mode: constrained to normal direction
             data.ribBehaviors.push({
               behavior: createRibEditBehavior(data.original, ribHitForPoint),
               target: tp,
@@ -1850,7 +1862,7 @@ export class PointerTool extends BaseTool {
 
           // Apply each behavior to update all target points
           for (const { behavior, target } of ribBehaviors) {
-            const widthChange = behavior.applyDelta(delta);
+            const change = behavior.applyDelta(delta);
 
             const contour = working.contours[target.contourIndex];
             const point = contour.points[target.pointIndex];
@@ -1858,20 +1870,30 @@ export class PointerTool extends BaseTool {
             if (target.isSingleSided) {
               // Single-sided: halfWidth from behavior is the new totalWidth
               // Store as symmetric width (generator handles single-sided projection)
-              point.width = widthChange.halfWidth;
+              point.width = change.halfWidth;
               delete point.leftWidth;
               delete point.rightWidth;
+            } else if (target.isEditable) {
+              // Editable mode: update width (as asymmetric) and nudge
+              if (dragSide === "left") {
+                point.leftWidth = change.halfWidth;
+                point.leftNudge = change.nudge;
+              } else {
+                point.rightWidth = change.halfWidth;
+                point.rightNudge = change.nudge;
+              }
+              delete point.width;
             } else if (target.isAsymmetric) {
               // Asymmetric: update only the dragged side
               if (dragSide === "left") {
-                point.leftWidth = widthChange.halfWidth;
+                point.leftWidth = change.halfWidth;
               } else {
-                point.rightWidth = widthChange.halfWidth;
+                point.rightWidth = change.halfWidth;
               }
               delete point.width;
             } else {
               // Symmetric: update full width (both sides)
-              point.width = widthChange.halfWidth * 2;
+              point.width = change.halfWidth * 2;
               delete point.leftWidth;
               delete point.rightWidth;
             }
@@ -2974,6 +2996,11 @@ export class PointerTool extends BaseTool {
         const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
         const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
 
+        // Calculate tangent and nudge offsets for editable points
+        const tangent = { x: -normal.y, y: normal.x };
+        const leftNudge = skeletonPoint.leftNudge || 0;
+        const rightNudge = skeletonPoint.rightNudge || 0;
+
         const singleSided = contour.singleSided ?? false;
         const singleSidedDirection = contour.singleSidedDirection ?? "left";
 
@@ -2982,9 +3009,10 @@ export class PointerTool extends BaseTool {
           const totalWidth = leftHW + rightHW;
           const side = singleSidedDirection;
           const sign = side === "left" ? 1 : -1;
+          const nudge = side === "left" ? leftNudge : rightNudge;
           const ribPoint = {
-            x: skeletonPoint.x + sign * normal.x * totalWidth,
-            y: skeletonPoint.y + sign * normal.y * totalWidth,
+            x: skeletonPoint.x + sign * normal.x * totalWidth + tangent.x * nudge,
+            y: skeletonPoint.y + sign * normal.y * totalWidth + tangent.y * nudge,
           };
           const dist = vector.distance(glyphPoint, ribPoint);
           if (dist <= margin) {
@@ -2998,14 +3026,14 @@ export class PointerTool extends BaseTool {
             };
           }
         } else {
-          // Normal mode: two rib points
+          // Normal mode: two rib points (including nudge offset)
           const leftRibPoint = {
-            x: skeletonPoint.x + normal.x * leftHW,
-            y: skeletonPoint.y + normal.y * leftHW,
+            x: skeletonPoint.x + normal.x * leftHW + tangent.x * leftNudge,
+            y: skeletonPoint.y + normal.y * leftHW + tangent.y * leftNudge,
           };
           const rightRibPoint = {
-            x: skeletonPoint.x - normal.x * rightHW,
-            y: skeletonPoint.y - normal.y * rightHW,
+            x: skeletonPoint.x - normal.x * rightHW + tangent.x * rightNudge,
+            y: skeletonPoint.y - normal.y * rightHW + tangent.y * rightNudge,
           };
 
           const leftDist = vector.distance(glyphPoint, leftRibPoint);

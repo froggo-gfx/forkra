@@ -403,6 +403,7 @@ export default class SkeletonParametersPanel extends Panel {
     let asymStates = new Set(); // Track asymmetric states across selection
     let forceHorizontalStates = new Set(); // Track forceHorizontal states
     let forceVerticalStates = new Set(); // Track forceVertical states
+    let editableStates = new Set(); // Track editable states
 
     if (hasSelection) {
       const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
@@ -419,6 +420,7 @@ export default class SkeletonParametersPanel extends Panel {
         asymStates.add(this._isAsymmetric(point));
         forceHorizontalStates.add(!!point.forceHorizontal);
         forceVerticalStates.add(!!point.forceVertical);
+        editableStates.add(!!point.editable);
       }
 
       // Check if values are mixed
@@ -589,6 +591,31 @@ export default class SkeletonParametersPanel extends Panel {
       field3: {
         type: "spacer",
       },
+    });
+
+    // === EDITABLE RIB POINTS ===
+    formContents.push({ type: "spacer" });
+
+    const isEditable = editableStates.has(true) && editableStates.size === 1;
+    const isEditableIndeterminate = editableStates.size > 1;
+
+    const editableCheckbox = html.input({
+      type: "checkbox",
+      id: "editable-toggle",
+      checked: isEditableIndeterminate ? false : isEditable,
+      onchange: (e) => this._onEditableToggle(e.target.checked),
+    });
+    if (isEditableIndeterminate) {
+      editableCheckbox.indeterminate = true;
+    }
+
+    formContents.push({
+      type: "auxiliaryElement",
+      key: "editable",
+      auxiliaryElement: html.span({}, [
+        editableCheckbox,
+        html.label({ for: "editable-toggle", style: "margin-left: 4px" }, "Editable"),
+      ]),
     });
 
     this.infoForm.setFieldDescriptions(formContents);
@@ -1279,6 +1306,80 @@ export default class SkeletonParametersPanel extends Panel {
       return {
         changes: combined,
         undoLabel: checked ? "Enable force vertical" : "Disable force vertical",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
+   * Toggle Editable mode for rib points.
+   * When enabled, rib points can be nudged along the tangent direction
+   * and their handle lengths can be adjusted.
+   */
+  async _onEditableToggle(checked) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) {
+      this.update();
+      return;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          if (checked) {
+            point.editable = true;
+          } else {
+            delete point.editable;
+            // Also clear any nudge values when disabling editable mode
+            delete point.leftNudge;
+            delete point.rightNudge;
+            delete point.leftHandleIn;
+            delete point.leftHandleOut;
+            delete point.leftHandleInAngle;
+            delete point.leftHandleOutAngle;
+            delete point.rightHandleIn;
+            delete point.rightHandleOut;
+            delete point.rightHandleInAngle;
+            delete point.rightHandleOutAngle;
+          }
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: checked ? "Enable editable rib points" : "Disable editable rib points",
         broadcast: true,
       };
     });
