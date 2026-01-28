@@ -1,6 +1,7 @@
 import { doPerformAction } from "@fontra/core/actions.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { ChangeCollector } from "@fontra/core/changes.js";
+import { getGlyphInfoFromGlyphName } from "@fontra/core/glyph-data.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
@@ -117,6 +118,14 @@ export default class SkeletonParametersPanel extends Panel {
     }
 
     const formContents = [];
+
+    // === GLYPH CASE INDICATOR ===
+    const glyphCase = this._getGlyphCase();
+    const glyphCaseLabel = glyphCase === "lower" ? "Lowercase" : "Uppercase";
+    formContents.push({
+      type: "header",
+      label: `Current glyph: ${glyphCaseLabel}`,
+    });
 
     // === SOURCE WIDTHS: CAPITAL ===
     formContents.push({
@@ -396,7 +405,8 @@ export default class SkeletonParametersPanel extends Panel {
     let forceVerticalStates = new Set(); // Track forceVertical states
 
     if (hasSelection) {
-      const defaultWidth = this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
+      const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
+      const defaultWidth = this._getSourceWidth(widthKey, widthFallback);
 
       // Collect all values from selected points
       const leftValues = [];
@@ -428,7 +438,8 @@ export default class SkeletonParametersPanel extends Panel {
       }
     } else {
       // No selection - show Source Width / 2
-      const defaultWide = this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
+      const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
+      const defaultWide = this._getSourceWidth(widthKey, widthFallback);
       left = defaultWide / 2;
       right = defaultWide / 2;
     }
@@ -623,9 +634,10 @@ export default class SkeletonParametersPanel extends Panel {
             let maxLeft = 0;
             let maxRight = 0;
 
+            const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
             for (const { contourIdx, pointIdx, point } of selectedData.points) {
               const key = `${contourIdx}/${pointIdx}`;
-              const defaultWidth = this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
+              const defaultWidth = this._getSourceWidth(widthKey, widthFallback);
               const left = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
               const right = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
 
@@ -684,6 +696,35 @@ export default class SkeletonParametersPanel extends Panel {
 
     const source = this.fontController.sources[sourceIdentifier];
     return source?.customData?.[key] ?? fallback;
+  }
+
+  /**
+   * Determine if the current glyph is lowercase or uppercase.
+   * @returns {"lower" | "upper"} The glyph case
+   */
+  _getGlyphCase() {
+    const glyphName = this.sceneController.sceneSettings.selectedGlyphName;
+    if (!glyphName) return "upper";
+    const info = getGlyphInfoFromGlyphName(glyphName);
+    return info?.case === "lower" ? "lower" : "upper";
+  }
+
+  /**
+   * Get the default base width key and value for the current glyph case.
+   * @returns {{ key: string, fallback: number }} The width key and default value
+   */
+  _getDefaultWidthForGlyph() {
+    const glyphCase = this._getGlyphCase();
+    if (glyphCase === "lower") {
+      return {
+        key: SKELETON_WIDTH_LOWERCASE_BASE_KEY,
+        fallback: DEFAULT_WIDTH_LOWERCASE_BASE,
+      };
+    }
+    return {
+      key: SKELETON_WIDTH_CAPITAL_BASE_KEY,
+      fallback: DEFAULT_WIDTH_CAPITAL_BASE,
+    };
   }
 
   /**
@@ -921,10 +962,15 @@ export default class SkeletonParametersPanel extends Panel {
     const sel = this.sceneController.selection;
     parts.push(`s:${sel ? sel.size : 0}`);
 
+    // Glyph case
+    const glyphCase = this._getGlyphCase();
+    parts.push(`gc:${glyphCase}`);
+
     // Selected skeleton points state
     const selectedData = this._getSelectedSkeletonPoints();
     if (selectedData) {
-      const defaultWidth = this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
+      const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
+      const defaultWidth = this._getSourceWidth(widthKey, widthFallback);
       for (const { contourIdx, pointIdx, point } of selectedData.points) {
         const w = this._getPointWidths(point, defaultWidth);
         const isAsym = this._isAsymmetric(point);
@@ -1027,7 +1073,7 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          const defaultWidth = contour.defaultWidth || this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
+          const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
 
           if (checked) {
             // Convert to asymmetric: split width into leftWidth/rightWidth
@@ -1268,7 +1314,7 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          const defaultWidth = contour.defaultWidth || this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
+          const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
 
           if (isAsym) {
             // Asymmetric mode - edit individual sides
@@ -1366,7 +1412,7 @@ export default class SkeletonParametersPanel extends Panel {
           if (!point || point.type) continue; // Skip off-curve points
 
           // Get current effective widths using the same logic as UI display
-          const defaultWidth = contour.defaultWidth || this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
+          const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
           const currentLeft = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
           const currentRight = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
 
@@ -1456,7 +1502,7 @@ export default class SkeletonParametersPanel extends Panel {
           if (!point) continue;
 
           const key = `${contourIdx}/${pointIdx}`;
-          const defaultWidth = contour.defaultWidth || this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
+          const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
 
           if (isMulti) {
             // Multi-selection: all points move with same speed, clamp at 0

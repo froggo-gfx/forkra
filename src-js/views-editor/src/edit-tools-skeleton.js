@@ -13,11 +13,14 @@ import {
   calculateNormalAtSkeletonPoint,
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
+import { getGlyphInfoFromGlyphName } from "@fontra/core/glyph-data.js";
 import { BaseTool } from "./edit-tools-base.js";
 
 const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
 const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
+const SKELETON_WIDTH_LOWERCASE_BASE_KEY = "fontra.skeleton.lowercaseBase";
 const DEFAULT_WIDTH_CAPITAL_BASE = 60;
+const DEFAULT_WIDTH_LOWERCASE_BASE = 60;
 
 export class SkeletonPenTool extends BaseTool {
   iconPath = "/images/skeleton-pen.svg";
@@ -139,16 +142,35 @@ export class SkeletonPenTool extends BaseTool {
   }
 
   /**
-   * Get the default wide skeleton width from the current source's customData.
-   * New skeleton contours use the wide width by default.
-   * @returns {number} The default wide width value for new skeleton contours
+   * Determine if the current glyph is lowercase or uppercase.
+   * @returns {"lower" | "upper"} The glyph case
+   */
+  _getGlyphCase() {
+    const glyphName = this.sceneController.sceneSettings.selectedGlyphName;
+    if (!glyphName) return "upper";
+    const info = getGlyphInfoFromGlyphName(glyphName);
+    return info?.case === "lower" ? "lower" : "upper";
+  }
+
+  /**
+   * Get the default skeleton width from the current source's customData.
+   * Automatically selects capital or lowercase width based on current glyph.
+   * @returns {number} The default width value for new skeleton contours
    */
   _getDefaultSkeletonWidth() {
     const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
-    if (!sourceIdentifier) return DEFAULT_WIDTH_CAPITAL_BASE;
+    const glyphCase = this._getGlyphCase();
+
+    if (!sourceIdentifier) {
+      return glyphCase === "lower" ? DEFAULT_WIDTH_LOWERCASE_BASE : DEFAULT_WIDTH_CAPITAL_BASE;
+    }
 
     const fontController = this.sceneController.sceneModel.fontController;
     const source = fontController.sources[sourceIdentifier];
+
+    if (glyphCase === "lower") {
+      return source?.customData?.[SKELETON_WIDTH_LOWERCASE_BASE_KEY] ?? DEFAULT_WIDTH_LOWERCASE_BASE;
+    }
     return source?.customData?.[SKELETON_WIDTH_CAPITAL_BASE_KEY] ?? DEFAULT_WIDTH_CAPITAL_BASE;
   }
 
