@@ -1424,26 +1424,67 @@ export class PointerTool extends BaseTool {
 
           // Regenerate outline and update customData
           const staticGlyph = layer.glyph;
-          const skeletonChanges = recordChanges(staticGlyph, (sg) => {
-            // Remove old generated contours
-            const oldGeneratedIndices = workingSkeletonData.generatedContourIndices || [];
-            const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-            for (const idx of sortedIndices) {
-              if (idx < sg.path.numContours) {
-                sg.path.deleteContour(idx);
+          const generatedContours = generateContoursFromSkeleton(workingSkeletonData);
+          const oldGeneratedIndices = workingSkeletonData.generatedContourIndices || [];
+
+          // Check if we can update point positions in-place (preserves path structure)
+          let canUpdateInPlace = oldGeneratedIndices.length === generatedContours.length;
+          const inPlaceUpdates = [];
+          if (canUpdateInPlace) {
+            for (let i = 0; i < oldGeneratedIndices.length; i++) {
+              const contourIdx = oldGeneratedIndices[i];
+              if (contourIdx >= staticGlyph.path.numContours) {
+                canUpdateInPlace = false;
+                break;
               }
+              const startPt = contourIdx === 0
+                ? 0
+                : staticGlyph.path.contourInfo[contourIdx - 1].endPoint + 1;
+              const endPt = staticGlyph.path.contourInfo[contourIdx].endPoint;
+              const numExistingPts = endPt - startPt + 1;
+              const packed = packContour(generatedContours[i]);
+              const numNewPts = packed.coordinates.length / 2;
+              if (numExistingPts !== numNewPts) {
+                canUpdateInPlace = false;
+                break;
+              }
+              inPlaceUpdates.push({ startPt, packed });
             }
-            // Generate new contours
-            const generatedContours = generateContoursFromSkeleton(workingSkeletonData);
-            const newGeneratedIndices = [];
-            for (const contour of generatedContours) {
-              const newIndex = sg.path.numContours;
-              sg.path.insertContour(sg.path.numContours, packContour(contour));
-              newGeneratedIndices.push(newIndex);
+          }
+
+          const skeletonChanges = recordChanges(staticGlyph, (sg) => {
+            if (canUpdateInPlace) {
+              // Update generated contour points in-place — path structure stays the same,
+              // so EditBehavior's cached point indices remain valid
+              for (const { startPt, packed } of inPlaceUpdates) {
+                const numPts = packed.coordinates.length / 2;
+                for (let pi = 0; pi < numPts; pi++) {
+                  sg.path.setPointPosition(
+                    startPt + pi,
+                    packed.coordinates[pi * 2],
+                    packed.coordinates[pi * 2 + 1]
+                  );
+                }
+              }
+            } else {
+              // Fallback: delete and re-insert (changes path structure)
+              const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+              for (const idx of sortedIndices) {
+                if (idx < sg.path.numContours) {
+                  sg.path.deleteContour(idx);
+                }
+              }
+              const newGeneratedIndices = [];
+              for (const contour of generatedContours) {
+                const newIndex = sg.path.numContours;
+                sg.path.insertContour(sg.path.numContours, packContour(contour));
+                newGeneratedIndices.push(newIndex);
+              }
+              workingSkeletonData.generatedContourIndices = newGeneratedIndices;
             }
-            workingSkeletonData.generatedContourIndices = newGeneratedIndices;
           });
-          deepEditChanges.push(skeletonChanges.prefixed(["layers", editLayerName, "glyph"]));
+          const prefixedSkeletonChanges = skeletonChanges.prefixed(["layers", editLayerName, "glyph"]);
+          deepEditChanges.push(prefixedSkeletonChanges.change);
 
           // Update customData
           const customDataChange = recordChanges(layer, (l) => {
@@ -1451,20 +1492,31 @@ export class PointerTool extends BaseTool {
               JSON.stringify(workingSkeletonData)
             );
           });
-          deepEditChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+          const prefixedCustomDataChange = customDataChange.prefixed(["layers", editLayerName]);
+          deepEditChanges.push(prefixedCustomDataChange.change);
+
+          // Save first frame's rollback for proper undo (it restores original state)
+          if (!skeletonEditState.firstFrameRollback) {
+            skeletonEditState.firstFrameRollback = [
+              prefixedSkeletonChanges.rollbackChange,
+              prefixedCustomDataChange.rollbackChange,
+            ];
+          }
         }
 
         editChange = consolidateChanges(deepEditChanges);
         await sendIncrementalChange(editChange, true);
       }
 
+      const rollbackParts = layerInfo.map((layer) =>
+        consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
+      );
+      if (skeletonEditState?.firstFrameRollback) {
+        rollbackParts.push(...skeletonEditState.firstFrameRollback);
+      }
       let changes = ChangeCollector.fromChanges(
         editChange,
-        consolidateChanges(
-          layerInfo.map((layer) =>
-            consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
-          )
-        )
+        consolidateChanges(rollbackParts)
       );
 
       let shouldConnect;
