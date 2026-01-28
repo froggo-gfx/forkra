@@ -610,12 +610,17 @@ export default class SkeletonParametersPanel extends Panel {
     }
 
     formContents.push({
-      type: "auxiliaryElement",
-      key: "editable",
-      auxiliaryElement: html.span({}, [
-        editableCheckbox,
-        html.label({ for: "editable-toggle", style: "margin-left: 4px" }, "Editable"),
-      ]),
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "editable",
+        auxiliaryElement: html.span({}, [
+          editableCheckbox,
+          html.label({ for: "editable-toggle", style: "margin-left: 4px" }, "Editable"),
+        ]),
+      },
+      field2: { type: "spacer" },
+      field3: { type: "spacer" },
     });
 
     this.infoForm.setFieldDescriptions(formContents);
