@@ -194,6 +194,21 @@ export class SkeletonPenTool extends BaseTool {
     return true;
   }
 
+  /**
+   * Ensure a layer has skeleton data, copying from primary source if needed.
+   * Used for multi-source editing when a layer doesn't have skeleton data yet.
+   * @param {Object} layer - The layer to check
+   * @param {Object} primarySkeletonData - Skeleton data to copy if layer has none
+   * @returns {Object} The skeleton data (deep cloned)
+   */
+  _ensureSkeletonDataForLayer(layer, primarySkeletonData) {
+    if (layer.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
+      return JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+    }
+    // Copy skeleton structure from primary source
+    return JSON.parse(JSON.stringify(primarySkeletonData));
+  }
+
   deactivate() {
     super.deactivate();
     this.sceneController.hoverSelection = new Set();
@@ -665,12 +680,23 @@ export class SkeletonPenTool extends BaseTool {
       const allChanges = [];
       const startIdx = centerlineHit.segmentStartIndex;
 
+      // Get primary skeleton data from the first layer that has it
+      let primarySkeletonData = null;
+      for (const layerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[layerName];
+        if (layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
+          primarySkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+          break;
+        }
+      }
+      if (!primarySkeletonData) return;
+
       // Apply changes to ALL editable layers (multi-source editing support)
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!layer) continue;
 
-        let skeletonData = JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+        let skeletonData = this._ensureSkeletonDataForLayer(layer, primarySkeletonData);
 
         const contour = skeletonData.contours[centerlineHit.contourIndex];
         if (!contour) continue;
@@ -767,12 +793,23 @@ export class SkeletonPenTool extends BaseTool {
       const endIdx = centerlineHit.segmentEndIndex;
       let finalInsertIndex = startIdx + 1; // Will be updated for selection
 
+      // Get primary skeleton data from the first layer that has it
+      let primarySkeletonData = null;
+      for (const layerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[layerName];
+        if (layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
+          primarySkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+          break;
+        }
+      }
+      if (!primarySkeletonData) return;
+
       // Apply changes to ALL editable layers (multi-source editing support)
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!layer) continue;
 
-        let skeletonData = JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+        let skeletonData = this._ensureSkeletonDataForLayer(layer, primarySkeletonData);
 
         const contour = skeletonData.contours[centerlineHit.contourIndex];
         if (!contour) continue;
@@ -1007,11 +1044,14 @@ export class SkeletonPenTool extends BaseTool {
         const layer = glyph.layers[editLayerName];
         if (!layer) continue;
 
-        let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
-        if (!skeletonData) {
-          skeletonData = createEmptySkeletonData();
+        let skeletonData;
+        if (layer.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
+          skeletonData = JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+        } else if (firstSkeletonData) {
+          // Copy skeleton structure from primary layer for multi-source editing
+          skeletonData = JSON.parse(JSON.stringify(firstSkeletonData));
         } else {
-          skeletonData = JSON.parse(JSON.stringify(skeletonData));
+          skeletonData = createEmptySkeletonData();
         }
 
         // Add point to skeleton
@@ -1098,16 +1138,23 @@ export class SkeletonPenTool extends BaseTool {
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
 
+      // Get primary skeleton data from the first layer that has it
+      let primarySkeletonData = null;
+      for (const layerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[layerName];
+        if (layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
+          primarySkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+          break;
+        }
+      }
+      if (!primarySkeletonData) return;
+
       // Apply to all editable layers
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
         if (!layer) continue;
 
-        let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
-        if (!skeletonData) continue;
-
-        // Deep clone
-        skeletonData = JSON.parse(JSON.stringify(skeletonData));
+        let skeletonData = this._ensureSkeletonDataForLayer(layer, primarySkeletonData);
 
         const contour = skeletonData.contours[contourIndex];
         if (!contour) continue;
