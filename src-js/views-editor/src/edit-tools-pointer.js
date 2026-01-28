@@ -10,6 +10,7 @@ import {
   generateContoursFromSkeleton,
   calculateNormalAtSkeletonPoint,
   getPointHalfWidth,
+  computeHandlePolar,
 } from "@fontra/core/skeleton-contour-generator.js";
 import {
   centeredRect,
@@ -1985,7 +1986,7 @@ export class PointerTool extends BaseTool {
   /**
    * Check if selected points are editable generated points (from skeleton).
    * @param {Array} pointSelection - Array of point indices
-   * @returns {Array} Array of {pointIndex, skeletonContourIndex, skeletonPointIndex, side}
+   * @returns {Array} Array of {pointIndex, skeletonContourIndex, skeletonPointIndex, side, isHandle?, handleType?, onCurvePointIndex?}
    */
   _getEditableGeneratedPointsFromSelection(pointSelection) {
     const result = [];
@@ -1993,6 +1994,7 @@ export class PointerTool extends BaseTool {
     if (!positionedGlyph) return result;
 
     for (const pointIndex of pointSelection) {
+      // Check if it's an on-curve rib point
       const ribInfo = this.sceneModel._getEditableRibPointForGeneratedPoint(
         positionedGlyph,
         pointIndex
@@ -2000,7 +2002,22 @@ export class PointerTool extends BaseTool {
       if (ribInfo) {
         result.push({
           pointIndex,
+          isHandle: false,
           ...ribInfo,
+        });
+        continue;
+      }
+
+      // Check if it's an off-curve handle belonging to an editable rib point
+      const handleInfo = this.sceneModel._getEditableRibHandleForGeneratedPoint(
+        positionedGlyph,
+        pointIndex
+      );
+      if (handleInfo) {
+        result.push({
+          pointIndex,
+          isHandle: true,
+          ...handleInfo,
         });
       }
     }
@@ -2010,6 +2027,7 @@ export class PointerTool extends BaseTool {
   /**
    * Handle dragging editable generated points (from skeleton contours).
    * Updates skeleton data (nudge, width) based on point movement.
+   * For off-curve (handle) points, stores polar coordinates relative to normal.
    */
   async _handleDragEditableGeneratedPoints(eventStream, initialEvent, editablePoints) {
     const sceneController = this.sceneController;
@@ -2022,6 +2040,18 @@ export class PointerTool extends BaseTool {
       x: localPoint.x - positionedGlyph.x,
       y: localPoint.y - positionedGlyph.y,
     };
+
+    // Separate on-curve points from handles
+    const onCurvePoints = editablePoints.filter(ep => !ep.isHandle);
+    const handlePoints = editablePoints.filter(ep => ep.isHandle);
+
+    // Get initial handle positions for handle editing
+    const path = positionedGlyph.glyph.path;
+    const initialHandlePositions = {};
+    for (const hp of handlePoints) {
+      const handlePos = path.getPoint(hp.pointIndex);
+      initialHandlePositions[hp.pointIndex] = { ...handlePos };
+    }
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const layersData = {};
@@ -2036,14 +2066,15 @@ export class PointerTool extends BaseTool {
           original: JSON.parse(JSON.stringify(skeletonData)),
           working: JSON.parse(JSON.stringify(skeletonData)),
           behaviors: [],
+          handleInfos: [],
         };
       }
 
       if (Object.keys(layersData).length === 0) return;
 
-      // Create behaviors for each editable point in each layer
+      // Create behaviors for on-curve editable points
       for (const data of Object.values(layersData)) {
-        for (const ep of editablePoints) {
+        for (const ep of onCurvePoints) {
           const contour = data.original.contours[ep.skeletonContourIndex];
           const skeletonPoint = contour?.points[ep.skeletonPointIndex];
           if (!skeletonPoint) continue;
@@ -2060,6 +2091,22 @@ export class PointerTool extends BaseTool {
           data.behaviors.push({
             behavior: createEditableRibBehavior(data.original, ribHit),
             editablePoint: ep,
+          });
+        }
+
+        // Setup info for handle editing
+        for (const hp of handlePoints) {
+          const contour = data.original.contours[hp.skeletonContourIndex];
+          const skeletonPoint = contour?.points[hp.skeletonPointIndex];
+          if (!skeletonPoint) continue;
+
+          const normal = calculateNormalAtSkeletonPoint(contour, hp.skeletonPointIndex);
+          const initialPos = initialHandlePositions[hp.pointIndex];
+
+          data.handleInfos.push({
+            handlePoint: hp,
+            normal,
+            initialPos: { ...initialPos },
           });
         }
       }
@@ -2098,8 +2145,9 @@ export class PointerTool extends BaseTool {
         const allChanges = [];
 
         for (const [editLayerName, data] of Object.entries(layersData)) {
-          const { layer, working, behaviors } = data;
+          const { layer, working, behaviors, handleInfos } = data;
 
+          // Process on-curve point behaviors
           for (const { behavior, editablePoint } of behaviors) {
             const change = behavior.applyDelta(delta);
             const contour = working.contours[editablePoint.skeletonContourIndex];
@@ -2126,6 +2174,53 @@ export class PointerTool extends BaseTool {
             }
           }
 
+          // Process handle movements - store polar coordinates
+          for (const { handlePoint, normal, initialPos } of handleInfos) {
+            const contour = working.contours[handlePoint.skeletonContourIndex];
+            const skeletonPoint = contour.points[handlePoint.skeletonPointIndex];
+            const side = handlePoint.side;
+            const handleType = handlePoint.handleType; // "in" or "out"
+
+            // Compute the on-curve position from skeleton data
+            // (can't use path.getPoint() because path is regenerated during drag)
+            const defaultWidth = contour.defaultWidth || 80;
+            let halfWidth = getPointHalfWidth(skeletonPoint, defaultWidth, side);
+            const nudge = skeletonPoint[side === "left" ? "leftNudge" : "rightNudge"] || 0;
+
+            // Handle single-sided mode
+            if (contour.singleSided) {
+              const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+              const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+              if (contour.singleSidedDirection === side) {
+                halfWidth = leftHW + rightHW;
+              }
+            }
+
+            const sign = side === "left" ? 1 : -1;
+            const tangent = { x: -normal.y, y: normal.x };
+            const onCurvePos = {
+              x: Math.round(skeletonPoint.x + sign * normal.x * halfWidth + tangent.x * nudge),
+              y: Math.round(skeletonPoint.y + sign * normal.y * halfWidth + tangent.y * nudge),
+            };
+
+            // Calculate new handle position
+            const newHandlePos = {
+              x: initialPos.x + delta.x,
+              y: initialPos.y + delta.y,
+            };
+
+            // Compute polar coordinates relative to normal
+            const polar = computeHandlePolar(onCurvePos, newHandlePos, normal);
+
+            // Store polar coordinates in skeleton data
+            // Key format: left/right + HandleIn/HandleOut + Length/Angle
+            const prefix = side;
+            const suffix = handleType === "in" ? "HandleIn" : "HandleOut";
+
+            skeletonPoint[`${prefix}${suffix}Length`] = polar.length;
+            skeletonPoint[`${prefix}${suffix}Angle`] = polar.angle;
+          }
+
           const staticGlyph = layer.glyph;
           const pathChange = recordChanges(staticGlyph, (sg) => {
             regenerateOutline(sg, working);
@@ -2147,7 +2242,7 @@ export class PointerTool extends BaseTool {
 
       return {
         changes: accumulatedChanges,
-        undoLabel: "Edit generated point",
+        undoLabel: handlePoints.length > 0 ? "Edit generated handle" : "Edit generated point",
         broadcast: true,
       };
     });

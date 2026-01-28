@@ -46,6 +46,63 @@ export function getPointHalfWidth(point, defaultWidth, side) {
 }
 
 /**
+ * Rotate a vector by an angle (in radians).
+ * @param {Object} vec - The vector {x, y}
+ * @param {number} angle - The angle in radians
+ * @returns {Object} Rotated vector {x, y}
+ */
+function rotateVector(vec, angle) {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: vec.x * cos - vec.y * sin,
+    y: vec.x * sin + vec.y * cos,
+  };
+}
+
+/**
+ * Compute handle position from stored polar coordinates.
+ * @param {Object} onCurvePoint - The on-curve point position {x, y}
+ * @param {Object} normal - The normal vector at this point
+ * @param {number} length - Handle length
+ * @param {number} angle - Handle angle relative to normal (radians)
+ * @returns {Object} Handle position {x, y}
+ */
+function computeHandleFromPolar(onCurvePoint, normal, length, angle) {
+  const handleDir = rotateVector(normal, angle);
+  return {
+    x: Math.round(onCurvePoint.x + handleDir.x * length),
+    y: Math.round(onCurvePoint.y + handleDir.y * length),
+  };
+}
+
+/**
+ * Compute polar coordinates (length, angle) of a handle relative to normal.
+ * @param {Object} onCurvePoint - The on-curve point position {x, y}
+ * @param {Object} handlePoint - The handle position {x, y}
+ * @param {Object} normal - The normal vector at this point
+ * @returns {Object} {length, angle} where angle is relative to normal
+ */
+export function computeHandlePolar(onCurvePoint, handlePoint, normal) {
+  const dx = handlePoint.x - onCurvePoint.x;
+  const dy = handlePoint.y - onCurvePoint.y;
+  const length = Math.sqrt(dx * dx + dy * dy);
+
+  if (length < 0.001) {
+    return { length: 0, angle: 0 };
+  }
+
+  // Angle of handle vector
+  const handleAngle = Math.atan2(dy, dx);
+  // Angle of normal vector
+  const normalAngle = Math.atan2(normal.y, normal.x);
+  // Angle relative to normal
+  const relativeAngle = handleAngle - normalAngle;
+
+  return { length, angle: relativeAngle };
+}
+
+/**
  * Apply nudge offset to a rib point position.
  * Nudge moves the point along the tangent direction (perpendicular to normal).
  * @param {Object} ribPoint - The rib point {x, y} to modify
@@ -965,7 +1022,10 @@ function generateOffsetPointsForSegment(
     fixedEndRight = applyNudgeToRibPoint(fixedEndRight, segment.endPoint, endNormal, "right", endRightHW);
 
     // Helper to add offset curves to output array
-    const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd, sideHalfWidth) => {
+    // side: "left" or "right" - used to look up stored handle data
+    // startSkelPoint/endSkelPoint: skeleton points that may have stored handle polar coords
+    // startNorm/endNorm: normals at the skeleton points
+    const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd, sideHalfWidth, side, startSkelPoint, endSkelPoint, startNorm, endNorm) => {
       // When halfWidth is near zero, contour should exactly match skeleton
       // Copy control points directly instead of using offset curves
       if (sideHalfWidth < 0.5 && segment.controlPoints.length > 0) {
@@ -1018,15 +1078,46 @@ function generateOffsetPointsForSegment(
         // Vector from original end to handle2
         const h2Offset = { x: handle2.x - origEnd.x, y: handle2.y - origEnd.y };
 
-        // Apply handles relative to fixed positions
-        const adjustedHandle1 = {
+        // Apply handles relative to fixed positions (default computed handles)
+        let adjustedHandle1 = {
           x: Math.round(fixedStart.x + h1Offset.x),
           y: Math.round(fixedStart.y + h1Offset.y),
         };
-        const adjustedHandle2 = {
+        let adjustedHandle2 = {
           x: Math.round(fixedEnd.x + h2Offset.x),
           y: Math.round(fixedEnd.y + h2Offset.y),
         };
+
+        // Check for stored handle polar coordinates (from editable rib points)
+        // Handle1 is the "out" handle of the start point
+        const editableKeyStart = side === "left" ? "leftEditable" : "rightEditable";
+        if (startSkelPoint?.[editableKeyStart]) {
+          const handleOutLengthKey = `${side}HandleOutLength`;
+          const handleOutAngleKey = `${side}HandleOutAngle`;
+          if (startSkelPoint[handleOutLengthKey] !== undefined && startSkelPoint[handleOutAngleKey] !== undefined) {
+            adjustedHandle1 = computeHandleFromPolar(
+              fixedStart,
+              startNorm,
+              startSkelPoint[handleOutLengthKey],
+              startSkelPoint[handleOutAngleKey]
+            );
+          }
+        }
+
+        // Handle2 is the "in" handle of the end point
+        const editableKeyEnd = side === "left" ? "leftEditable" : "rightEditable";
+        if (endSkelPoint?.[editableKeyEnd]) {
+          const handleInLengthKey = `${side}HandleInLength`;
+          const handleInAngleKey = `${side}HandleInAngle`;
+          if (endSkelPoint[handleInLengthKey] !== undefined && endSkelPoint[handleInAngleKey] !== undefined) {
+            adjustedHandle2 = computeHandleFromPolar(
+              fixedEnd,
+              endNorm,
+              endSkelPoint[handleInLengthKey],
+              endSkelPoint[handleInAngleKey]
+            );
+          }
+        }
 
         output.push({ x: adjustedHandle1.x, y: adjustedHandle1.y, type: "cubic" });
         output.push({ x: adjustedHandle2.x, y: adjustedHandle2.y, type: "cubic" });
@@ -1077,15 +1168,56 @@ function generateOffsetPointsForSegment(
           // Vector from original end to handle2
           const h2Offset = { x: handle2.x - origEnd.x, y: handle2.y - origEnd.y };
 
-          // Apply handles relative to actual positions
-          output.push({
+          // Compute default handle positions
+          let adjustedH1 = {
             x: Math.round(currentStart.x + h1Offset.x),
             y: Math.round(currentStart.y + h1Offset.y),
+          };
+          let adjustedH2 = {
+            x: Math.round(currentEnd.x + h2Offset.x),
+            y: Math.round(currentEnd.y + h2Offset.y),
+          };
+
+          // Check for stored handle polar coordinates (only for first/last curves)
+          const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+
+          // First curve: handle1 is the "out" handle of the start skeleton point
+          if (isFirstCurve && startSkelPoint?.[editableKey]) {
+            const handleOutLengthKey = `${side}HandleOutLength`;
+            const handleOutAngleKey = `${side}HandleOutAngle`;
+            if (startSkelPoint[handleOutLengthKey] !== undefined && startSkelPoint[handleOutAngleKey] !== undefined) {
+              adjustedH1 = computeHandleFromPolar(
+                fixedStart,
+                startNorm,
+                startSkelPoint[handleOutLengthKey],
+                startSkelPoint[handleOutAngleKey]
+              );
+            }
+          }
+
+          // Last curve: handle2 is the "in" handle of the end skeleton point
+          if (isLastCurve && endSkelPoint?.[editableKey]) {
+            const handleInLengthKey = `${side}HandleInLength`;
+            const handleInAngleKey = `${side}HandleInAngle`;
+            if (endSkelPoint[handleInLengthKey] !== undefined && endSkelPoint[handleInAngleKey] !== undefined) {
+              adjustedH2 = computeHandleFromPolar(
+                fixedEnd,
+                endNorm,
+                endSkelPoint[handleInLengthKey],
+                endSkelPoint[handleInAngleKey]
+              );
+            }
+          }
+
+          // Apply handles relative to actual positions
+          output.push({
+            x: adjustedH1.x,
+            y: adjustedH1.y,
             type: "cubic",
           });
           output.push({
-            x: Math.round(currentEnd.x + h2Offset.x),
-            y: Math.round(currentEnd.y + h2Offset.y),
+            x: adjustedH2.x,
+            y: adjustedH2.y,
             type: "cubic",
           });
         } else if (pts.length === 3) {
@@ -1145,7 +1277,12 @@ function generateOffsetPointsForSegment(
       shouldAddEnd,
       segment.startPoint.smooth,
       segment.endPoint.smooth,
-      avgLeftHW
+      avgLeftHW,
+      "left",
+      segment.startPoint,
+      segment.endPoint,
+      startNormal,
+      endNormal
     );
 
     addOffsetCurves(
@@ -1157,7 +1294,12 @@ function generateOffsetPointsForSegment(
       shouldAddEnd,
       segment.startPoint.smooth,
       segment.endPoint.smooth,
-      avgRightHW
+      avgRightHW,
+      "right",
+      segment.startPoint,
+      segment.endPoint,
+      startNormal,
+      endNormal
     );
   }
 

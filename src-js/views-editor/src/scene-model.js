@@ -687,7 +687,7 @@ export class SceneModel {
         if (this.measureMode) {
           return new Set([`measurePoint/${pointIndex}`]);
         }
-        // Check if this point corresponds to an editable rib point
+        // Check if this point corresponds to an editable rib point (on-curve)
         const editableRibInfo = this._getEditableRibPointForGeneratedPoint(
           positionedGlyph,
           pointIndex
@@ -695,6 +695,16 @@ export class SceneModel {
         if (editableRibInfo) {
           // Return standard point selection - allows normal point editing UI
           // The drag handler will detect it's an editable generated point
+          return new Set([`point/${pointIndex}`]);
+        }
+        // Check if this point is an editable rib handle (off-curve)
+        const editableHandleInfo = this._getEditableRibHandleForGeneratedPoint(
+          positionedGlyph,
+          pointIndex
+        );
+        if (editableHandleInfo) {
+          // Return standard point selection - allows handle editing UI
+          // The drag handler will detect it's an editable generated handle
           return new Set([`point/${pointIndex}`]);
         }
         // Skip skeleton-generated outline points - they shouldn't be directly editable
@@ -837,6 +847,115 @@ export class SceneModel {
             };
           }
         }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Check if a generated off-curve point (handle) belongs to an editable rib point.
+   * Returns info about the handle and its associated rib point.
+   * @param {Object} positionedGlyph - The positioned glyph
+   * @param {number} pointIndex - The point index in glyph.path (must be off-curve)
+   * @returns {Object|null} {skeletonContourIndex, skeletonPointIndex, side, handleType: "in"|"out", onCurvePointIndex} or null
+   */
+  _getEditableRibHandleForGeneratedPoint(positionedGlyph, pointIndex) {
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+      return null;
+    }
+
+    const path = positionedGlyph.glyph.path;
+    const pointType = path.pointTypes[pointIndex];
+    const isOffCurve = (pointType & 0x03) !== 0; // Not ON_CURVE
+    if (!isOffCurve) {
+      return null;
+    }
+
+    // Find which contour this point belongs to
+    const contourInfo = path.contourInfo;
+    let contourIndex = -1;
+    let contourStartPoint = 0;
+    let contourEndPoint = 0;
+    for (let i = 0; i < contourInfo.length; i++) {
+      if (pointIndex <= contourInfo[i].endPoint) {
+        contourIndex = i;
+        contourStartPoint = i === 0 ? 0 : contourInfo[i - 1].endPoint + 1;
+        contourEndPoint = contourInfo[i].endPoint;
+        break;
+      }
+    }
+
+    if (contourIndex === -1) return null;
+
+    // Check if this contour is generated from skeleton
+    const editLayerName =
+      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+    if (!editLayerName) return null;
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (!skeletonData?.generatedContourIndices?.includes(contourIndex)) {
+      return null;
+    }
+
+    // Find adjacent on-curve points
+    const contourLength = contourEndPoint - contourStartPoint + 1;
+    const localIndex = pointIndex - contourStartPoint;
+
+    // Search backward for previous on-curve point
+    let prevOnCurveLocal = -1;
+    for (let i = 1; i < contourLength; i++) {
+      const checkLocal = (localIndex - i + contourLength) % contourLength;
+      const checkIndex = contourStartPoint + checkLocal;
+      const checkType = path.pointTypes[checkIndex];
+      if ((checkType & 0x03) === 0) {
+        prevOnCurveLocal = checkLocal;
+        break;
+      }
+    }
+
+    // Search forward for next on-curve point
+    let nextOnCurveLocal = -1;
+    for (let i = 1; i < contourLength; i++) {
+      const checkLocal = (localIndex + i) % contourLength;
+      const checkIndex = contourStartPoint + checkLocal;
+      const checkType = path.pointTypes[checkIndex];
+      if ((checkType & 0x03) === 0) {
+        nextOnCurveLocal = checkLocal;
+        break;
+      }
+    }
+
+    // Determine if this handle belongs to the prev or next on-curve point
+    // Handle is "in" if it's closer to the point going backward (controls curve coming in)
+    // Handle is "out" if it's closer to the point going forward (controls curve going out)
+
+    // Try the previous on-curve point first (this handle would be its "out" handle)
+    if (prevOnCurveLocal !== -1) {
+      const prevOnCurveIndex = contourStartPoint + prevOnCurveLocal;
+      const ribInfo = this._getEditableRibPointForGeneratedPoint(positionedGlyph, prevOnCurveIndex);
+      if (ribInfo) {
+        // This handle is going OUT from the previous on-curve point
+        return {
+          ...ribInfo,
+          handleType: "out",
+          onCurvePointIndex: prevOnCurveIndex,
+        };
+      }
+    }
+
+    // Try the next on-curve point (this handle would be its "in" handle)
+    if (nextOnCurveLocal !== -1) {
+      const nextOnCurveIndex = contourStartPoint + nextOnCurveLocal;
+      const ribInfo = this._getEditableRibPointForGeneratedPoint(positionedGlyph, nextOnCurveIndex);
+      if (ribInfo) {
+        // This handle is coming IN to the next on-curve point
+        return {
+          ...ribInfo,
+          handleType: "in",
+          onCurvePointIndex: nextOnCurveIndex,
+        };
       }
     }
 
