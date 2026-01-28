@@ -1322,9 +1322,10 @@ export default class SkeletonParametersPanel extends Panel {
           const currentLeft = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
           const currentRight = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
 
-          // Apply scale
+          // Apply scale, but don't let total width go below 2 UPM
           const newLeft = Math.round(currentLeft * scale);
           const newRight = Math.round(currentRight * scale);
+          if (newLeft + newRight < 2) continue;
 
           // Store result - preserve symmetric/asymmetric mode
           if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
