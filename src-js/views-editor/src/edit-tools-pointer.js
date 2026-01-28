@@ -1748,9 +1748,9 @@ export class PointerTool extends BaseTool {
         // Asymmetric: only the dragged side
         newSelection.add(dragSide === "left" ? leftKey : rightKey);
       } else {
-        // Symmetric: both sides
-        newSelection.add(leftKey);
-        newSelection.add(rightKey);
+        // Symmetric: only select the clicked side (not both)
+        // This allows per-side editable toggle even for symmetric points
+        newSelection.add(dragSide === "left" ? leftKey : rightKey);
       }
     }
     sceneController.selection = newSelection;
