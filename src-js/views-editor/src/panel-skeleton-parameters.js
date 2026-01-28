@@ -652,6 +652,53 @@ export default class SkeletonParametersPanel extends Panel {
       });
     }
 
+    // === SKELETON POINT RIB CONTROLS ===
+    // Show when skeleton points are selected (not rib points) and they have editable ribs
+    if (hasSelection && selectedRibSides.size === 0) {
+      const ribEditInfo = this._getSkeletonPointsRibEditInfo(selectedData);
+
+      if (ribEditInfo.hasEditableRibs) {
+        formContents.push({ type: "spacer" });
+
+        const buttons = [];
+
+        // Reset Ribs button - only if there are nudged ribs
+        if (ribEditInfo.hasNudgedRibs) {
+          buttons.push(
+            html.button(
+              {
+                style: "font-size: 11px; padding: 2px 6px; margin-right: 6px;",
+                onclick: () => this._onResetSkeletonRibs(selectedData),
+              },
+              "Reset Ribs"
+            )
+          );
+        }
+
+        // Make Ribs Uneditable button - always when there are editable ribs
+        buttons.push(
+          html.button(
+            {
+              style: "font-size: 11px; padding: 2px 6px;",
+              onclick: () => this._onMakeRibsUneditable(selectedData),
+            },
+            "Make Uneditable"
+          )
+        );
+
+        formContents.push({
+          type: "universal-row",
+          field1: {
+            type: "auxiliaryElement",
+            key: "ribControls",
+            auxiliaryElement: html.span({}, buttons),
+          },
+          field2: { type: "spacer" },
+          field3: { type: "spacer" },
+        });
+      }
+    }
+
     this.infoForm.setFieldDescriptions(formContents);
 
     this.infoForm.onFieldChange = async (fieldItem, value, valueStream) => {
@@ -1558,6 +1605,164 @@ export default class SkeletonParametersPanel extends Panel {
       return {
         changes: combined,
         undoLabel: "Reset rib point position",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
+   * Get info about editable ribs for selected skeleton points.
+   * @param {Object} selectedData - Data from _getSelectedSkeletonPoints()
+   * @returns {Object} { hasEditableRibs, hasNudgedRibs }
+   */
+  _getSkeletonPointsRibEditInfo(selectedData) {
+    if (!selectedData || selectedData.points.length === 0) {
+      return { hasEditableRibs: false, hasNudgedRibs: false };
+    }
+
+    let hasEditableRibs = false;
+    let hasNudgedRibs = false;
+
+    for (const { point } of selectedData.points) {
+      if (point.leftEditable || point.rightEditable) {
+        hasEditableRibs = true;
+
+        if ((point.leftEditable && point.leftNudge && point.leftNudge !== 0) ||
+            (point.rightEditable && point.rightNudge && point.rightNudge !== 0)) {
+          hasNudgedRibs = true;
+          break; // Found both, no need to continue
+        }
+      }
+    }
+
+    return { hasEditableRibs, hasNudgedRibs };
+  }
+
+  /**
+   * Reset nudge for all editable ribs of selected skeleton points.
+   * @param {Object} selectedData - Data from _getSelectedSkeletonPoints()
+   */
+  async _onResetSkeletonRibs(selectedData) {
+    if (!selectedData || selectedData.points.length === 0) {
+      return;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          // Reset nudge for both sides if editable
+          if (point.leftEditable) {
+            delete point.leftNudge;
+          }
+          if (point.rightEditable) {
+            delete point.rightNudge;
+          }
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Reset skeleton ribs",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
+   * Make all ribs of selected skeleton points uneditable.
+   * @param {Object} selectedData - Data from _getSelectedSkeletonPoints()
+   */
+  async _onMakeRibsUneditable(selectedData) {
+    if (!selectedData || selectedData.points.length === 0) {
+      return;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          // Remove all editable-related properties
+          delete point.leftEditable;
+          delete point.rightEditable;
+          delete point.leftNudge;
+          delete point.rightNudge;
+          delete point.leftHandleIn;
+          delete point.leftHandleOut;
+          delete point.rightHandleIn;
+          delete point.rightHandleOut;
+          delete point.leftHandleInAngle;
+          delete point.leftHandleOutAngle;
+          delete point.rightHandleInAngle;
+          delete point.rightHandleOutAngle;
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Make ribs uneditable",
         broadcast: true,
       };
     });
