@@ -1211,6 +1211,20 @@ export class PointerTool extends BaseTool {
           applyChange(layer.layerGlyph, layerEditChange);
           deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
           layer.shouldConnect = layer.connectDetector.shouldConnect(layer.isPrimaryLayer);
+
+          // Constrain editable rib handles to skeleton handle direction
+          if (layer.isPrimaryLayer && editableRibPoints.length > 0) {
+            const handleCorrections = this._constrainEditableRibHandles(
+              layer.layerGlyph,
+              editableRibPoints,
+              glyph,
+              sceneController.editingLayerNames?.[0]
+            );
+            if (handleCorrections) {
+              applyChange(layer.layerGlyph, handleCorrections);
+              deepEditChanges.push(consolidateChanges(handleCorrections, layer.changePath));
+            }
+          }
         }
 
         // Apply skeleton changes
@@ -1360,12 +1374,14 @@ export class PointerTool extends BaseTool {
         }
       }
 
-      // Sync editable rib points back to skeleton data
+      // Sync ALL editable rib points back to skeleton data
+      // (not just selected ones - interpolation may have moved unselected points)
       if (editableRibPoints.length > 0) {
+        const allEditableRibPoints = this._getAllEditableRibPoints();
         const syncResult = this._syncEditableRibPointsToSkeleton(
           glyph,
           layerInfo,
-          editableRibPoints,
+          allEditableRibPoints,
           positionedGlyph
         );
         if (syncResult) {
@@ -2025,6 +2041,181 @@ export class PointerTool extends BaseTool {
       }
     }
     return result;
+  }
+
+  /**
+   * Get ALL editable rib points for the current glyph (not just selected ones).
+   * Used for syncing after interpolation moves unselected points.
+   * @returns {Array} Array of editable rib point info
+   */
+  _getAllEditableRibPoints() {
+    const result = [];
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) return result;
+
+    const editLayerName =
+      this.sceneController.sceneSettings?.editLayerName ||
+      positionedGlyph.glyph?.layerName;
+    if (!editLayerName) return result;
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData?.contours?.length || !skeletonData?.generatedContourIndices?.length) {
+      return result;
+    }
+
+    const path = positionedGlyph.glyph.path;
+
+    // Iterate through all generated contours and find editable points
+    for (let genIdx = 0; genIdx < skeletonData.generatedContourIndices.length; genIdx++) {
+      const contourIdx = skeletonData.generatedContourIndices[genIdx];
+      if (contourIdx >= path.contourInfo.length) continue;
+
+      const contourStartPt = contourIdx === 0 ? 0 : path.contourInfo[contourIdx - 1].endPoint + 1;
+      const contourEndPt = path.contourInfo[contourIdx].endPoint;
+
+      for (let pointIndex = contourStartPt; pointIndex <= contourEndPt; pointIndex++) {
+        // Check if it's an on-curve rib point
+        const ribInfo = this.sceneModel._getEditableRibPointForGeneratedPoint(
+          positionedGlyph,
+          pointIndex
+        );
+        if (ribInfo) {
+          result.push({
+            pointIndex,
+            isHandle: false,
+            ...ribInfo,
+          });
+          continue;
+        }
+
+        // Check if it's an off-curve handle belonging to an editable rib point
+        const handleInfo = this.sceneModel._getEditableRibHandleForGeneratedPoint(
+          positionedGlyph,
+          pointIndex
+        );
+        if (handleInfo) {
+          result.push({
+            pointIndex,
+            isHandle: true,
+            ...handleInfo,
+          });
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Constrain editable rib handles to move only along skeleton handle direction.
+   * Called during drag loop after EditBehavior applies changes.
+   * @param {Object} layerGlyph - The layer glyph being edited
+   * @param {Array} editableRibPoints - Array of editable rib point info
+   * @param {Object} glyph - The full glyph object
+   * @param {string} editLayerName - The editing layer name
+   * @returns {Object|null} Path change or null if no corrections needed
+   */
+  _constrainEditableRibHandles(layerGlyph, editableRibPoints, glyph, editLayerName) {
+    if (!editLayerName) return null;
+
+    const layer = glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData?.contours?.length) return null;
+
+    const path = layerGlyph.path;
+    const changes = [];
+
+    for (const ribPoint of editableRibPoints) {
+      if (!ribPoint.isHandle) continue;
+
+      const { pointIndex, skeletonContourIndex, skeletonPointIndex, side, handleType, onCurvePointIndex } = ribPoint;
+
+      const contour = skeletonData.contours[skeletonContourIndex];
+      if (!contour) continue;
+
+      const skeletonPoint = contour.points[skeletonPointIndex];
+      if (!skeletonPoint) continue;
+
+      // Find skeleton handle for this point
+      // For "out" handle: it's the control point AFTER this on-curve in the segment
+      // For "in" handle: it's the control point BEFORE this on-curve in the segment
+      let skelHandle = null;
+      const skelPoints = contour.points;
+      const numSkelPoints = skelPoints.length;
+
+      if (handleType === "out") {
+        // Look for the next off-curve point after skeletonPointIndex
+        for (let i = 1; i < numSkelPoints; i++) {
+          const idx = (skeletonPointIndex + i) % numSkelPoints;
+          if (!contour.isClosed && skeletonPointIndex + i >= numSkelPoints) break;
+          if (skelPoints[idx].type) {
+            // Found off-curve
+            skelHandle = skelPoints[idx];
+            break;
+          } else {
+            // Found on-curve, no handle in this direction
+            break;
+          }
+        }
+      } else {
+        // handleType === "in": look for the previous off-curve point
+        for (let i = 1; i < numSkelPoints; i++) {
+          const idx = (skeletonPointIndex - i + numSkelPoints) % numSkelPoints;
+          if (!contour.isClosed && skeletonPointIndex - i < 0) break;
+          if (skelPoints[idx].type) {
+            // Found off-curve
+            skelHandle = skelPoints[idx];
+            break;
+          } else {
+            // Found on-curve, no handle in this direction
+            break;
+          }
+        }
+      }
+
+      if (!skelHandle) continue;
+
+      // Get skeleton handle direction
+      const skelHandleDir = {
+        x: skelHandle.x - skeletonPoint.x,
+        y: skelHandle.y - skeletonPoint.y,
+      };
+      const skelHandleLength = Math.sqrt(skelHandleDir.x * skelHandleDir.x + skelHandleDir.y * skelHandleDir.y);
+      if (skelHandleLength < 0.001) continue;
+
+      // Normalize skeleton handle direction
+      const skelDir = {
+        x: skelHandleDir.x / skelHandleLength,
+        y: skelHandleDir.y / skelHandleLength,
+      };
+
+      // Get current positions from path
+      const handlePos = path.getPoint(pointIndex);
+      const onCurvePos = path.getPoint(onCurvePointIndex);
+      if (!handlePos || !onCurvePos) continue;
+
+      // Vector from on-curve to handle
+      const handleVec = {
+        x: handlePos.x - onCurvePos.x,
+        y: handlePos.y - onCurvePos.y,
+      };
+
+      // Project onto skeleton direction (dot product)
+      const projLength = handleVec.x * skelDir.x + handleVec.y * skelDir.y;
+
+      // Constrained handle position = on-curve + skelDir * projLength
+      const constrainedX = Math.round(onCurvePos.x + skelDir.x * projLength);
+      const constrainedY = Math.round(onCurvePos.y + skelDir.y * projLength);
+
+      // Only add change if position actually changed
+      if (constrainedX !== handlePos.x || constrainedY !== handlePos.y) {
+        changes.push({ f: "=xy", a: [pointIndex, constrainedX, constrainedY] });
+      }
+    }
+
+    if (changes.length === 0) return null;
+
+    return consolidateChanges(changes, ["path"]);
   }
 
   /**

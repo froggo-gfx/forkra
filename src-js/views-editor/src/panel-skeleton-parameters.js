@@ -1641,8 +1641,19 @@ export default class SkeletonParametersPanel extends Panel {
       if (point.leftEditable || point.rightEditable) {
         hasEditableRibs = true;
 
-        if ((point.leftEditable && point.leftNudge && point.leftNudge !== 0) ||
-            (point.rightEditable && point.rightNudge && point.rightNudge !== 0)) {
+        // Check if any modification exists (nudge or handle lengths)
+        const hasLeftMod = point.leftEditable && (
+          (point.leftNudge && point.leftNudge !== 0) ||
+          point.leftHandleInLength !== undefined ||
+          point.leftHandleOutLength !== undefined
+        );
+        const hasRightMod = point.rightEditable && (
+          (point.rightNudge && point.rightNudge !== 0) ||
+          point.rightHandleInLength !== undefined ||
+          point.rightHandleOutLength !== undefined
+        );
+
+        if (hasLeftMod || hasRightMod) {
           hasNudgedRibs = true;
           break; // Found both, no need to continue
         }
