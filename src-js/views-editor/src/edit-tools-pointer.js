@@ -2020,53 +2020,65 @@ export class PointerTool extends BaseTool {
 
     for (const ribPoint of editableRibPoints) {
       if (ribPoint.isHandle) {
-        console.log("[EXPAND] skipping handle", ribPoint.pointIndex);
-        continue;
-      }
+        // Handle selected: add on-curve point and other handle
+        const onCurveIdx = ribPoint.onCurvePointIndex;
+        console.log("[EXPAND] handle", ribPoint.pointIndex, "-> adding on-curve", onCurveIdx);
+        expandedSelection.add(`point/${onCurveIdx}`);
 
-      const pointIndex = ribPoint.pointIndex;
-      console.log("[EXPAND] processing on-curve", pointIndex);
-
-      // Find which contour this point belongs to
-      let contourStart = 0;
-      let contourEnd = 0;
-      for (let ci = 0; ci < path.contourInfo.length; ci++) {
-        contourEnd = path.contourInfo[ci].endPoint;
-        if (pointIndex <= contourEnd) {
-          contourStart = ci === 0 ? 0 : path.contourInfo[ci - 1].endPoint + 1;
-          break;
-        }
-      }
-
-      const numPoints = contourEnd - contourStart + 1;
-      const localIdx = pointIndex - contourStart;
-      const isClosed = path.contourInfo.find(c => c.endPoint >= pointIndex)?.isClosed ?? true;
-      console.log("[EXPAND] contour:", contourStart, "-", contourEnd, "localIdx:", localIdx, "isClosed:", isClosed);
-
-      // Check previous point
-      if (isClosed || localIdx > 0) {
-        const prevLocalIdx = (localIdx - 1 + numPoints) % numPoints;
-        const prevPointIdx = contourStart + prevLocalIdx;
-        const prevType = path.pointTypes[prevPointIdx];
-        console.log("[EXPAND] prev point", prevPointIdx, "type:", prevType, "isOffCurve:", (prevType & 0x03) !== 0);
-        if ((prevType & 0x03) !== 0) {
-          expandedSelection.add(`point/${prevPointIdx}`);
-        }
-      }
-
-      // Check next point
-      if (isClosed || localIdx < numPoints - 1) {
-        const nextLocalIdx = (localIdx + 1) % numPoints;
-        const nextPointIdx = contourStart + nextLocalIdx;
-        const nextType = path.pointTypes[nextPointIdx];
-        console.log("[EXPAND] next point", nextPointIdx, "type:", nextType, "isOffCurve:", (nextType & 0x03) !== 0);
-        if ((nextType & 0x03) !== 0) {
-          expandedSelection.add(`point/${nextPointIdx}`);
-        }
+        // Also add the other handle (in/out)
+        this._addAdjacentHandles(expandedSelection, path, onCurveIdx);
+      } else {
+        // On-curve selected: add both handles
+        const pointIndex = ribPoint.pointIndex;
+        console.log("[EXPAND] on-curve", pointIndex, "-> adding handles");
+        this._addAdjacentHandles(expandedSelection, path, pointIndex);
       }
     }
 
+    console.log("[EXPAND] final selection:", expandedSelection);
     return expandedSelection;
+  }
+
+  /**
+   * Add adjacent off-curve handles to selection for a given on-curve point.
+   */
+  _addAdjacentHandles(selection, path, onCurveIndex) {
+    // Find which contour this point belongs to
+    let contourStart = 0;
+    let contourEnd = 0;
+    for (let ci = 0; ci < path.contourInfo.length; ci++) {
+      contourEnd = path.contourInfo[ci].endPoint;
+      if (onCurveIndex <= contourEnd) {
+        contourStart = ci === 0 ? 0 : path.contourInfo[ci - 1].endPoint + 1;
+        break;
+      }
+    }
+
+    const numPoints = contourEnd - contourStart + 1;
+    const localIdx = onCurveIndex - contourStart;
+    const isClosed = path.contourInfo.find(c => c.endPoint >= onCurveIndex)?.isClosed ?? true;
+
+    // Check previous point
+    if (isClosed || localIdx > 0) {
+      const prevLocalIdx = (localIdx - 1 + numPoints) % numPoints;
+      const prevPointIdx = contourStart + prevLocalIdx;
+      const prevType = path.pointTypes[prevPointIdx];
+      if ((prevType & 0x03) !== 0) {
+        console.log("[EXPAND] adding prev handle", prevPointIdx);
+        selection.add(`point/${prevPointIdx}`);
+      }
+    }
+
+    // Check next point
+    if (isClosed || localIdx < numPoints - 1) {
+      const nextLocalIdx = (localIdx + 1) % numPoints;
+      const nextPointIdx = contourStart + nextLocalIdx;
+      const nextType = path.pointTypes[nextPointIdx];
+      if ((nextType & 0x03) !== 0) {
+        console.log("[EXPAND] adding next handle", nextPointIdx);
+        selection.add(`point/${nextPointIdx}`);
+      }
+    }
   }
 
   /**
