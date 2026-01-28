@@ -1045,29 +1045,35 @@ function generateOffsetPointsForSegment(
         // For editable rib points: use saved absolute handle positions if available
         // Handle1 is the "out" handle of the start point
         const editableKeyStart = side === "left" ? "leftEditable" : "rightEditable";
+        console.log("[GEN] startSkelPoint editable?", startSkelPoint?.[editableKeyStart], "side:", side);
         if (startSkelPoint?.[editableKeyStart]) {
           // Check for saved absolute handle position
           const handleOutKey = `${side}HandleOut`;
+          console.log("[GEN] checking handleOutKey:", handleOutKey, "value:", startSkelPoint[handleOutKey]);
           if (startSkelPoint[handleOutKey]) {
             // Use saved absolute position - DO NOT REGENERATE
             adjustedHandle1 = {
               x: startSkelPoint[handleOutKey].x,
               y: startSkelPoint[handleOutKey].y,
             };
+            console.log("[GEN] USING SAVED handle1:", adjustedHandle1);
           }
         }
 
         // Handle2 is the "in" handle of the end point
         const editableKeyEnd = side === "left" ? "leftEditable" : "rightEditable";
+        console.log("[GEN] endSkelPoint editable?", endSkelPoint?.[editableKeyEnd], "side:", side);
         if (endSkelPoint?.[editableKeyEnd]) {
           // Check for saved absolute handle position
           const handleInKey = `${side}HandleIn`;
+          console.log("[GEN] checking handleInKey:", handleInKey, "value:", endSkelPoint[handleInKey]);
           if (endSkelPoint[handleInKey]) {
             // Use saved absolute position - DO NOT REGENERATE
             adjustedHandle2 = {
               x: endSkelPoint[handleInKey].x,
               y: endSkelPoint[handleInKey].y,
             };
+            console.log("[GEN] USING SAVED handle2:", adjustedHandle2);
           }
         }
 
