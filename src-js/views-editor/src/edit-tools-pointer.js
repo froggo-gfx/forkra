@@ -1877,15 +1877,26 @@ export class PointerTool extends BaseTool {
               delete point.leftWidth;
               delete point.rightWidth;
             } else if ((dragSide === "left" && target.isLeftEditable) || (dragSide === "right" && target.isRightEditable)) {
-              // Editable mode: update width (as asymmetric) and nudge
-              if (dragSide === "left") {
-                point.leftWidth = change.halfWidth;
-                point.leftNudge = change.nudge;
+              // Editable mode: behavior determines if width changes based on symmetric/asymmetric
+              if (change.isAsymmetric) {
+                // Asymmetric: update per-side width and nudge
+                if (dragSide === "left") {
+                  point.leftWidth = change.halfWidth;
+                  point.leftNudge = change.nudge;
+                } else {
+                  point.rightWidth = change.halfWidth;
+                  point.rightNudge = change.nudge;
+                }
+                delete point.width;
               } else {
-                point.rightWidth = change.halfWidth;
-                point.rightNudge = change.nudge;
+                // Symmetric: only update nudge, keep width unchanged
+                if (dragSide === "left") {
+                  point.leftNudge = change.nudge;
+                } else {
+                  point.rightNudge = change.nudge;
+                }
+                // Don't touch width - it stays symmetric
               }
-              delete point.width;
             } else if (target.isAsymmetric) {
               // Asymmetric: update only the dragged side
               if (dragSide === "left") {

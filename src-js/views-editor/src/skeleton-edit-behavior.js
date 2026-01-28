@@ -966,7 +966,8 @@ export function createRibEditBehavior(skeletonData, ribHit) {
 
 /**
  * EditableRibBehavior - Handles dragging of editable rib points.
- * Allows free movement: normal component updates width, tangent component updates nudge.
+ * - If point is symmetric: only nudge (tangent movement), width stays the same
+ * - If point is asymmetric: free movement (width + nudge)
  */
 export class EditableRibBehavior {
   /**
@@ -990,6 +991,10 @@ export class EditableRibBehavior {
     const point = contour.points[pointIndex];
     const defaultWidth = contour.defaultWidth || 20;
 
+    // Determine if point is symmetric or asymmetric
+    // Asymmetric = has leftWidth or rightWidth defined
+    this.isAsymmetric = point.leftWidth !== undefined || point.rightWidth !== undefined;
+
     // Store original half-width
     if (side === "left") {
       this.originalHalfWidth = point.leftWidth !== undefined
@@ -1011,25 +1016,28 @@ export class EditableRibBehavior {
 
   /**
    * Apply drag delta and return changes to width and nudge.
+   * - Symmetric: only nudge changes, width stays original
+   * - Asymmetric: both width and nudge can change
    * @param {Object} delta - The drag delta {x, y}
-   * @returns {Object} { halfWidth, nudge } - New half-width and nudge values
+   * @returns {Object} { halfWidth, nudge, isAsymmetric } - New values and mode flag
    */
   applyDelta(delta) {
-    // Project delta onto normal → width change
-    const sign = this.side === "left" ? 1 : -1;
-    const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
-    const normalDelta = sign * normalDot;
-
-    // Project delta onto tangent → nudge change
+    // Project delta onto tangent → nudge change (always allowed)
     const tangentDot = delta.x * this.tangent.x + delta.y * this.tangent.y;
-
-    // Calculate new values
-    let newHalfWidth = this.originalHalfWidth + normalDelta;
-    if (newHalfWidth < this.minHalfWidth) {
-      newHalfWidth = this.minHalfWidth;
-    }
-
     const newNudge = this.originalNudge + tangentDot;
+
+    let newHalfWidth = this.originalHalfWidth;
+
+    // Only allow width change if asymmetric
+    if (this.isAsymmetric) {
+      const sign = this.side === "left" ? 1 : -1;
+      const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
+      const normalDelta = sign * normalDot;
+      newHalfWidth = this.originalHalfWidth + normalDelta;
+      if (newHalfWidth < this.minHalfWidth) {
+        newHalfWidth = this.minHalfWidth;
+      }
+    }
 
     return {
       contourIndex: this.contourIndex,
@@ -1037,6 +1045,7 @@ export class EditableRibBehavior {
       side: this.side,
       halfWidth: Math.round(newHalfWidth),
       nudge: Math.round(newNudge),
+      isAsymmetric: this.isAsymmetric,
     };
   }
 
