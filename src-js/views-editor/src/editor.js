@@ -2382,10 +2382,11 @@ export class EditorController extends ViewController {
 
       // 1. Delete regular selection FIRST (while point indices are still valid)
       if (hasRegularSelection) {
-        const layerGlyphs = this.sceneController.getEditingLayerFromGlyphLayers(
-          glyph.layers
-        );
         const regularChanges = recordChanges(glyph, (subject) => {
+          // Get layer glyphs through the proxy so modifications are recorded
+          const layerGlyphs = this.sceneController.getEditingLayerFromGlyphLayers(
+            subject.layers
+          );
           for (const layerGlyph of Object.values(layerGlyphs)) {
             if (event.altKey) {
               this._prepareCopyOrCut(layerGlyph, true, false);
