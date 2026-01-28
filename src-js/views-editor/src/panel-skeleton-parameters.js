@@ -1036,7 +1036,7 @@ export default class SkeletonParametersPanel extends Panel {
     const glyphCase = this._getGlyphCase();
     parts.push(`gc:${glyphCase}`);
 
-    // Selected skeleton points state
+    // Selected skeleton points state (including editable and nudge)
     const selectedData = this._getSelectedSkeletonPoints();
     if (selectedData) {
       const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
@@ -1044,7 +1044,12 @@ export default class SkeletonParametersPanel extends Panel {
       for (const { contourIdx, pointIdx, point } of selectedData.points) {
         const w = this._getPointWidths(point, defaultWidth);
         const isAsym = this._isAsymmetric(point);
-        parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)},${isAsym}`);
+        // Include editable and nudge state for Reset button visibility
+        const leftEdit = point.leftEditable ? 1 : 0;
+        const rightEdit = point.rightEditable ? 1 : 0;
+        const leftNudge = point.leftNudge || 0;
+        const rightNudge = point.rightNudge || 0;
+        parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge}`);
       }
     }
 
