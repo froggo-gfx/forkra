@@ -292,33 +292,66 @@ export class PointerTool extends BaseTool {
         }
       }
 
-      // Helper to regenerate outline
-      const regenerateOutline = (staticGlyph, skelData) => {
-        const oldGeneratedIndices = skelData.generatedContourIndices || [];
-        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-        for (const idx of sortedIndices) {
-          if (idx < staticGlyph.path.numContours) {
-            staticGlyph.path.deleteContour(idx);
-          }
-        }
-
-        const generatedContours = generateContoursFromSkeleton(skelData);
-        const newGeneratedIndices = [];
-        for (const contour of generatedContours) {
-          const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
-          newGeneratedIndices.push(newIndex);
-        }
-        skelData.generatedContourIndices = newGeneratedIndices;
-      };
-
       // Record changes
       const changes = [];
 
-      // 1. FIRST: Generate outline contours (updates workingSkeletonData.generatedContourIndices)
+      // 1. FIRST: Update outline contours (in-place to preserve path structure)
       const staticGlyph = layer.glyph;
+      const generatedContours = generateContoursFromSkeleton(workingSkeletonData);
+      const oldGeneratedIndices = workingSkeletonData.generatedContourIndices || [];
+
+      // Check if we can update point positions in-place
+      let canUpdateInPlace = oldGeneratedIndices.length === generatedContours.length;
+      const inPlaceUpdates = [];
+      if (canUpdateInPlace) {
+        for (let i = 0; i < oldGeneratedIndices.length; i++) {
+          const contourIdx = oldGeneratedIndices[i];
+          if (contourIdx >= staticGlyph.path.numContours) {
+            canUpdateInPlace = false;
+            break;
+          }
+          const startPt = contourIdx === 0
+            ? 0
+            : staticGlyph.path.contourInfo[contourIdx - 1].endPoint + 1;
+          const endPt = staticGlyph.path.contourInfo[contourIdx].endPoint;
+          const numExistingPts = endPt - startPt + 1;
+          const packed = packContour(generatedContours[i]);
+          const numNewPts = packed.coordinates.length / 2;
+          if (numExistingPts !== numNewPts) {
+            canUpdateInPlace = false;
+            break;
+          }
+          inPlaceUpdates.push({ startPt, packed });
+        }
+      }
+
       const pathChange = recordChanges(staticGlyph, (sg) => {
-        regenerateOutline(sg, workingSkeletonData);
+        if (canUpdateInPlace) {
+          for (const { startPt, packed } of inPlaceUpdates) {
+            const numPts = packed.coordinates.length / 2;
+            for (let pi = 0; pi < numPts; pi++) {
+              sg.path.setPointPosition(
+                startPt + pi,
+                packed.coordinates[pi * 2],
+                packed.coordinates[pi * 2 + 1]
+              );
+            }
+          }
+        } else {
+          const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+          for (const idx of sortedIndices) {
+            if (idx < sg.path.numContours) {
+              sg.path.deleteContour(idx);
+            }
+          }
+          const newGeneratedIndices = [];
+          for (const contour of generatedContours) {
+            const newIndex = sg.path.numContours;
+            sg.path.insertContour(sg.path.numContours, packContour(contour));
+            newGeneratedIndices.push(newIndex);
+          }
+          workingSkeletonData.generatedContourIndices = newGeneratedIndices;
+        }
       });
       changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
