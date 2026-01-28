@@ -2168,22 +2168,22 @@ export class PointerTool extends BaseTool {
       if (!skeletonPoint) continue;
 
       if (ribPoint.isHandle) {
-        // Handle point: save ABSOLUTE POSITION (not length!)
-        const { handleType } = ribPoint;
+        // Handle selected: save ALL related points (on-curve + both handles)
+        const { handleType, onCurvePointIndex } = ribPoint;
 
-        // Get handle position from path
-        const handlePos = path.getPoint(pointIndex);
-        if (!handlePos) continue;
+        // Save on-curve position
+        const onCurvePos = path.getPoint(onCurvePointIndex);
+        if (onCurvePos) {
+          const positionKey = side === "left" ? "leftPosition" : "rightPosition";
+          skeletonPoint[positionKey] = {
+            x: Math.round(onCurvePos.x),
+            y: Math.round(onCurvePos.y),
+          };
+          hasChanges = true;
+        }
 
-        // Build the key for this handle position
-        // e.g., "leftHandleOut", "rightHandleIn"
-        const handleKey = `${side}Handle${handleType === "in" ? "In" : "Out"}`;
-
-        // Save absolute handle position
-        skeletonPoint[handleKey] = {
-          x: Math.round(handlePos.x),
-          y: Math.round(handlePos.y),
-        };
+        // Save both handles using the on-curve index
+        this._saveAdjacentHandles(skeletonPoint, path, onCurvePointIndex, side);
         hasChanges = true;
 
         continue;
@@ -2206,53 +2206,7 @@ export class PointerTool extends BaseTool {
       hasChanges = true;
 
       // Also save handles that belong to this on-curve point
-      // Find the contour this point belongs to
-      const generatedIndices = skeletonData.generatedContourIndices || [];
-      for (const genContourIdx of generatedIndices) {
-        if (genContourIdx >= path.contourInfo.length) continue;
-        const contourStart = genContourIdx === 0 ? 0 : path.contourInfo[genContourIdx - 1].endPoint + 1;
-        const contourEnd = path.contourInfo[genContourIdx].endPoint;
-
-        if (pointIndex >= contourStart && pointIndex <= contourEnd) {
-          // Found the contour, now find adjacent handles
-          const numPoints = contourEnd - contourStart + 1;
-          const localIdx = pointIndex - contourStart;
-
-          // Check previous point (could be "in" handle)
-          const prevLocalIdx = (localIdx - 1 + numPoints) % numPoints;
-          const prevPointIdx = contourStart + prevLocalIdx;
-          const prevType = path.pointTypes[prevPointIdx];
-          if ((prevType & 0x03) !== 0) {
-            // It's off-curve - this is our "in" handle
-            const handlePos = path.getPoint(prevPointIdx);
-            if (handlePos) {
-              const handleKey = `${side}HandleIn`;
-              skeletonPoint[handleKey] = {
-                x: Math.round(handlePos.x),
-                y: Math.round(handlePos.y),
-              };
-            }
-          }
-
-          // Check next point (could be "out" handle)
-          const nextLocalIdx = (localIdx + 1) % numPoints;
-          const nextPointIdx = contourStart + nextLocalIdx;
-          const nextType = path.pointTypes[nextPointIdx];
-          if ((nextType & 0x03) !== 0) {
-            // It's off-curve - this is our "out" handle
-            const handlePos = path.getPoint(nextPointIdx);
-            if (handlePos) {
-              const handleKey = `${side}HandleOut`;
-              skeletonPoint[handleKey] = {
-                x: Math.round(handlePos.x),
-                y: Math.round(handlePos.y),
-              };
-            }
-          }
-
-          break; // Found the contour, done
-        }
-      }
+      this._saveAdjacentHandles(skeletonPoint, path, pointIndex, side);
     }
 
     if (!hasChanges) return null;
@@ -2267,6 +2221,61 @@ export class PointerTool extends BaseTool {
     if (!customDataChanges.hasChange) return null;
 
     return customDataChanges.prefixed(["layers", editLayerName]);
+  }
+
+  /**
+   * Save adjacent handles for an on-curve point to skeleton data.
+   * @param {Object} skeletonPoint - The skeleton point to save handles to
+   * @param {Object} path - The path object
+   * @param {number} onCurveIndex - The on-curve point index in the path
+   * @param {string} side - "left" or "right"
+   */
+  _saveAdjacentHandles(skeletonPoint, path, onCurveIndex, side) {
+    // Find which contour this point belongs to
+    let contourStart = 0;
+    let contourEnd = 0;
+    for (let ci = 0; ci < path.contourInfo.length; ci++) {
+      contourEnd = path.contourInfo[ci].endPoint;
+      if (onCurveIndex <= contourEnd) {
+        contourStart = ci === 0 ? 0 : path.contourInfo[ci - 1].endPoint + 1;
+        break;
+      }
+    }
+
+    const numPoints = contourEnd - contourStart + 1;
+    const localIdx = onCurveIndex - contourStart;
+
+    // Check previous point (could be "in" handle)
+    const prevLocalIdx = (localIdx - 1 + numPoints) % numPoints;
+    const prevPointIdx = contourStart + prevLocalIdx;
+    const prevType = path.pointTypes[prevPointIdx];
+    if ((prevType & 0x03) !== 0) {
+      // It's off-curve - this is our "in" handle
+      const handlePos = path.getPoint(prevPointIdx);
+      if (handlePos) {
+        const handleKey = `${side}HandleIn`;
+        skeletonPoint[handleKey] = {
+          x: Math.round(handlePos.x),
+          y: Math.round(handlePos.y),
+        };
+      }
+    }
+
+    // Check next point (could be "out" handle)
+    const nextLocalIdx = (localIdx + 1) % numPoints;
+    const nextPointIdx = contourStart + nextLocalIdx;
+    const nextType = path.pointTypes[nextPointIdx];
+    if ((nextType & 0x03) !== 0) {
+      // It's off-curve - this is our "out" handle
+      const handlePos = path.getPoint(nextPointIdx);
+      if (handlePos) {
+        const handleKey = `${side}HandleOut`;
+        skeletonPoint[handleKey] = {
+          x: Math.round(handlePos.x),
+          y: Math.round(handlePos.y),
+        };
+      }
+    }
   }
 
   /**
