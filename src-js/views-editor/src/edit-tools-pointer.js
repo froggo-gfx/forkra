@@ -2245,35 +2245,42 @@ export class PointerTool extends BaseTool {
     const numPoints = contourEnd - contourStart + 1;
     const localIdx = onCurveIndex - contourStart;
 
-    // Check previous point (could be "in" handle)
+    // IMPORTANT: Left side contour goes in SAME direction as skeleton,
+    // but right side goes in OPPOSITE direction.
+    // So for right side, "previous" in path = "out" in skeleton, and vice versa.
+    const prevIsIn = side === "left";
+
+    // Check previous point
     const prevLocalIdx = (localIdx - 1 + numPoints) % numPoints;
     const prevPointIdx = contourStart + prevLocalIdx;
     const prevType = path.pointTypes[prevPointIdx];
     if ((prevType & 0x03) !== 0) {
-      // It's off-curve - this is our "in" handle
       const handlePos = path.getPoint(prevPointIdx);
       if (handlePos) {
-        const handleKey = `${side}HandleIn`;
+        // For left side: prev = in; for right side: prev = out
+        const handleKey = prevIsIn ? `${side}HandleIn` : `${side}HandleOut`;
         skeletonPoint[handleKey] = {
           x: Math.round(handlePos.x),
           y: Math.round(handlePos.y),
         };
+        console.log("[SYNC] saving", handleKey, "=", skeletonPoint[handleKey]);
       }
     }
 
-    // Check next point (could be "out" handle)
+    // Check next point
     const nextLocalIdx = (localIdx + 1) % numPoints;
     const nextPointIdx = contourStart + nextLocalIdx;
     const nextType = path.pointTypes[nextPointIdx];
     if ((nextType & 0x03) !== 0) {
-      // It's off-curve - this is our "out" handle
       const handlePos = path.getPoint(nextPointIdx);
       if (handlePos) {
-        const handleKey = `${side}HandleOut`;
+        // For left side: next = out; for right side: next = in
+        const handleKey = prevIsIn ? `${side}HandleOut` : `${side}HandleIn`;
         skeletonPoint[handleKey] = {
           x: Math.round(handlePos.x),
           y: Math.round(handlePos.y),
         };
+        console.log("[SYNC] saving", handleKey, "=", skeletonPoint[handleKey]);
       }
     }
   }
