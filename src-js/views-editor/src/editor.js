@@ -2368,62 +2368,54 @@ export class EditorController extends ViewController {
       //fontGuideline: fontGuidelineSelection,
     } = parseSelection(this.sceneController.selection);
 
-    // Handle skeleton point deletion separately (requires access to layer.customData)
+    const hasRegularSelection = pointSelection?.length || componentSelection?.length ||
+      anchorSelection?.length || guidelineSelection?.length || backgroundImageSelection;
+
+    // Delete regular selection FIRST (while point indices are still valid)
+    if (hasRegularSelection) {
+      await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+        for (const layerGlyph of Object.values(layerGlyphs)) {
+          if (event.altKey) {
+            // Behave like "cut", but don't put anything on the clipboard
+            this._prepareCopyOrCut(layerGlyph, true, false);
+          } else {
+            if (pointSelection) {
+              deleteSelectedPoints(layerGlyph.path, pointSelection);
+            }
+            if (componentSelection) {
+              for (const componentIndex of reversed(componentSelection)) {
+                layerGlyph.components.splice(componentIndex, 1);
+              }
+            }
+            if (anchorSelection) {
+              for (const anchorIndex of reversed(anchorSelection)) {
+                layerGlyph.anchors.splice(anchorIndex, 1);
+              }
+            }
+            if (guidelineSelection) {
+              for (const guidelineIndex of reversed(guidelineSelection)) {
+                const guideline = layerGlyph.guidelines[guidelineIndex];
+                if (guideline.locked) {
+                  // don't delete locked guidelines
+                  continue;
+                }
+                layerGlyph.guidelines.splice(guidelineIndex, 1);
+              }
+            }
+            if (backgroundImageSelection) {
+              layerGlyph.backgroundImage = undefined;
+            }
+          }
+        }
+        this.sceneController.selection = new Set();
+        return translate("action.delete-selection");
+      });
+    }
+
+    // Delete skeleton points AFTER regular (skeleton regen shifts path indices)
     if (skeletonPointSelection?.size) {
       await this._deleteSkeletonPoints(skeletonPointSelection);
     }
-
-    const hasRegularSelection = pointSelection?.length || componentSelection?.length ||
-      anchorSelection?.length || guidelineSelection?.length || backgroundImageSelection;
-    if (!hasRegularSelection) {
-      return;
-    }
-
-    // TODO: Font Guidelines
-    // if (fontGuidelineSelection) {
-    //   for (const guidelineIndex of reversed(fontGuidelineSelection)) {
-    //     XXX
-    //   }
-    // }
-    await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
-      for (const layerGlyph of Object.values(layerGlyphs)) {
-        if (event.altKey) {
-          // Behave like "cut", but don't put anything on the clipboard
-          this._prepareCopyOrCut(layerGlyph, true, false);
-        } else {
-          if (pointSelection) {
-            deleteSelectedPoints(layerGlyph.path, pointSelection);
-          }
-          if (componentSelection) {
-            for (const componentIndex of reversed(componentSelection)) {
-              layerGlyph.components.splice(componentIndex, 1);
-            }
-          }
-          if (anchorSelection) {
-            for (const anchorIndex of reversed(anchorSelection)) {
-              layerGlyph.anchors.splice(anchorIndex, 1);
-            }
-          }
-          if (guidelineSelection) {
-            for (const guidelineIndex of reversed(guidelineSelection)) {
-              const guideline = layerGlyph.guidelines[guidelineIndex];
-              if (guideline.locked) {
-                // don't delete locked guidelines
-                continue;
-              }
-              layerGlyph.guidelines.splice(guidelineIndex, 1);
-            }
-          }
-          if (backgroundImageSelection) {
-            // TODO: don't delete if bg images are locked
-            // (even though we shouldn't be able to select them)
-            layerGlyph.backgroundImage = undefined;
-          }
-        }
-      }
-      this.sceneController.selection = new Set();
-      return translate("action.delete-selection");
-    });
   }
 
   /**
