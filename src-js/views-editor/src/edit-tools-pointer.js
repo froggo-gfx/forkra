@@ -42,6 +42,7 @@ import {
   createSkeletonEditBehavior,
   getSkeletonBehaviorName,
   createRibEditBehavior,
+  RibEditBehavior,
 } from "./skeleton-edit-behavior.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import {
@@ -1699,17 +1700,22 @@ export class PointerTool extends BaseTool {
     const skeletonDataForCheck = layerForCheck?.customData?.[SKELETON_CUSTOM_DATA_KEY];
 
     // Build set of target points: always include the dragged point, plus any pre-selected
-    // Each entry: { contourIndex, pointIndex, isAsymmetric }
-    const targetPointsMap = new Map(); // key "ci/pi" -> { contourIndex, pointIndex, isAsymmetric }
-    const draggedKey = `${ribHit.contourIndex}/${ribHit.pointIndex}`;
+    const targetPointsMap = new Map(); // key "ci/pi" -> target info
 
     const addTargetPoint = (ci, pi) => {
       const key = `${ci}/${pi}`;
       if (targetPointsMap.has(key)) return;
-      const pt = skeletonDataForCheck?.contours?.[ci]?.points?.[pi];
+      const contour = skeletonDataForCheck?.contours?.[ci];
+      const pt = contour?.points?.[pi];
       if (!pt || pt.type) return; // skip off-curve points
       const isAsym = pt.leftWidth !== undefined || pt.rightWidth !== undefined;
-      targetPointsMap.set(key, { contourIndex: ci, pointIndex: pi, isAsymmetric: isAsym });
+      const isSingleSided = contour.singleSided ?? false;
+      targetPointsMap.set(key, {
+        contourIndex: ci,
+        pointIndex: pi,
+        isAsymmetric: isAsym,
+        isSingleSided,
+      });
     };
 
     addTargetPoint(ribHit.contourIndex, ribHit.pointIndex);
@@ -1728,7 +1734,10 @@ export class PointerTool extends BaseTool {
     for (const tp of targetPoints) {
       const leftKey = `skeletonRibPoint/${tp.contourIndex}/${tp.pointIndex}/left`;
       const rightKey = `skeletonRibPoint/${tp.contourIndex}/${tp.pointIndex}/right`;
-      if (tp.isAsymmetric) {
+      if (tp.isSingleSided) {
+        // Single-sided: one rib on the direction side
+        newSelection.add(dragSide === "left" ? leftKey : rightKey);
+      } else if (tp.isAsymmetric) {
         // Asymmetric: only the dragged side
         newSelection.add(dragSide === "left" ? leftKey : rightKey);
       } else {
@@ -1764,17 +1773,39 @@ export class PointerTool extends BaseTool {
           const skeletonPoint = contour?.points[tp.pointIndex];
           if (!skeletonPoint) continue;
           const normal = calculateNormalAtSkeletonPoint(contour, tp.pointIndex);
-          const ribHitForPoint = {
-            contourIndex: tp.contourIndex,
-            pointIndex: tp.pointIndex,
-            side: dragSide,
-            normal,
-            onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
-          };
-          data.ribBehaviors.push({
-            behavior: createRibEditBehavior(data.original, ribHitForPoint),
-            target: tp,
-          });
+
+          if (tp.isSingleSided) {
+            // For single-sided, create behavior with totalWidth as the effective width
+            // We use a synthetic ribHit that makes the behavior track totalWidth
+            const defaultWidth = contour.defaultWidth || 20;
+            const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+            const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+            const totalWidth = leftHW + rightHW;
+            // Create a RibEditBehavior manually with totalWidth as originalHalfWidth
+            const behavior = new RibEditBehavior(
+              data.original,
+              tp.contourIndex,
+              tp.pointIndex,
+              dragSide,
+              normal,
+              { x: skeletonPoint.x, y: skeletonPoint.y }
+            );
+            // Override the originalHalfWidth to be the totalWidth
+            behavior.originalHalfWidth = totalWidth;
+            data.ribBehaviors.push({ behavior, target: tp });
+          } else {
+            const ribHitForPoint = {
+              contourIndex: tp.contourIndex,
+              pointIndex: tp.pointIndex,
+              side: dragSide,
+              normal,
+              onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
+            };
+            data.ribBehaviors.push({
+              behavior: createRibEditBehavior(data.original, ribHitForPoint),
+              target: tp,
+            });
+          }
         }
       }
 
@@ -1823,7 +1854,13 @@ export class PointerTool extends BaseTool {
             const contour = working.contours[target.contourIndex];
             const point = contour.points[target.pointIndex];
 
-            if (target.isAsymmetric) {
+            if (target.isSingleSided) {
+              // Single-sided: halfWidth from behavior is the new totalWidth
+              // Store as symmetric width (generator handles single-sided projection)
+              point.width = widthChange.halfWidth;
+              delete point.leftWidth;
+              delete point.rightWidth;
+            } else if (target.isAsymmetric) {
               // Asymmetric: update only the dragged side
               if (dragSide === "left") {
                 point.leftWidth = widthChange.halfWidth;
@@ -2936,40 +2973,63 @@ export class PointerTool extends BaseTool {
         const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
         const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
 
-        // Calculate rib point positions
-        const leftRibPoint = {
-          x: skeletonPoint.x + normal.x * leftHW,
-          y: skeletonPoint.y + normal.y * leftHW,
-        };
-        const rightRibPoint = {
-          x: skeletonPoint.x - normal.x * rightHW,
-          y: skeletonPoint.y - normal.y * rightHW,
-        };
+        const singleSided = contour.singleSided ?? false;
+        const singleSidedDirection = contour.singleSidedDirection ?? "left";
 
-        // Check left rib point
-        const leftDist = vector.distance(glyphPoint, leftRibPoint);
-        if (leftDist <= margin) {
-          return {
-            contourIndex,
-            pointIndex,
-            side: "left",
-            point: leftRibPoint,
-            normal,
-            onCurvePoint: skeletonPoint,
+        if (singleSided) {
+          // Single-sided: one rib point at total width on the chosen side
+          const totalWidth = leftHW + rightHW;
+          const side = singleSidedDirection;
+          const sign = side === "left" ? 1 : -1;
+          const ribPoint = {
+            x: skeletonPoint.x + sign * normal.x * totalWidth,
+            y: skeletonPoint.y + sign * normal.y * totalWidth,
           };
-        }
+          const dist = vector.distance(glyphPoint, ribPoint);
+          if (dist <= margin) {
+            return {
+              contourIndex,
+              pointIndex,
+              side,
+              point: ribPoint,
+              normal,
+              onCurvePoint: skeletonPoint,
+            };
+          }
+        } else {
+          // Normal mode: two rib points
+          const leftRibPoint = {
+            x: skeletonPoint.x + normal.x * leftHW,
+            y: skeletonPoint.y + normal.y * leftHW,
+          };
+          const rightRibPoint = {
+            x: skeletonPoint.x - normal.x * rightHW,
+            y: skeletonPoint.y - normal.y * rightHW,
+          };
 
-        // Check right rib point
-        const rightDist = vector.distance(glyphPoint, rightRibPoint);
-        if (rightDist <= margin) {
-          return {
-            contourIndex,
-            pointIndex,
-            side: "right",
-            point: rightRibPoint,
-            normal,
-            onCurvePoint: skeletonPoint,
-          };
+          const leftDist = vector.distance(glyphPoint, leftRibPoint);
+          if (leftDist <= margin) {
+            return {
+              contourIndex,
+              pointIndex,
+              side: "left",
+              point: leftRibPoint,
+              normal,
+              onCurvePoint: skeletonPoint,
+            };
+          }
+
+          const rightDist = vector.distance(glyphPoint, rightRibPoint);
+          if (rightDist <= margin) {
+            return {
+              contourIndex,
+              pointIndex,
+              side: "right",
+              point: rightRibPoint,
+              normal,
+              onCurvePoint: skeletonPoint,
+            };
+          }
         }
       }
     }
