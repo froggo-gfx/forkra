@@ -1093,6 +1093,7 @@ export class PointerTool extends BaseTool {
     let editableRibPoints = [];
     if (pointSelection?.length > 0) {
       editableRibPoints = this._getEditableGeneratedPointsFromSelection(pointSelection);
+      console.log("[DRAG] pointSelection:", pointSelection, "editableRibPoints:", editableRibPoints.length);
     }
 
     // If only skeleton selection, use dedicated handler
@@ -1113,6 +1114,7 @@ export class PointerTool extends BaseTool {
       // For editable rib points, use special behavior where handles move with on-curve
       const useEditableRibBehavior = editableRibPoints.length > 0;
       let behaviorName = useEditableRibBehavior ? "editable-rib" : getBehaviorName(initialEvent);
+      console.log("[DRAG] useEditableRibBehavior:", useEditableRibBehavior, "behaviorName:", behaviorName);
 
       // Setup for regular point editing
       const layerInfo = Object.entries(
