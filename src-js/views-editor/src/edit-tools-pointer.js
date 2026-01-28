@@ -1151,6 +1151,30 @@ export class PointerTool extends BaseTool {
       assert(layerInfo.length >= 1, "no layer to edit");
       layerInfo[0].isPrimaryLayer = true;
 
+      // For editable handle drags, capture original direction to constrain angle
+      let handleConstraint = null;
+      if (editableRibPoints.length === 1 && editableRibPoints[0].isHandle) {
+        const ribPoint = editableRibPoints[0];
+        const path = layerInfo[0].layerGlyph.path;
+        const handlePos = path.getPoint(ribPoint.pointIndex);
+        const onCurvePos = path.getPoint(ribPoint.onCurvePointIndex);
+        if (handlePos && onCurvePos) {
+          const dx = handlePos.x - onCurvePos.x;
+          const dy = handlePos.y - onCurvePos.y;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          if (length > 0.001) {
+            handleConstraint = {
+              pointIndex: ribPoint.pointIndex,
+              onCurveIndex: ribPoint.onCurvePointIndex,
+              // Unit vector from on-curve to handle
+              dirX: dx / length,
+              dirY: dy / length,
+            };
+            console.log("[DRAG] handle constraint:", handleConstraint);
+          }
+        }
+      }
+
       // Setup for skeleton editing (if we have skeleton selection too)
       let skeletonEditState = null;
       if (hasSkeletonSelection) {
@@ -1224,6 +1248,25 @@ export class PointerTool extends BaseTool {
         for (const layer of layerInfo) {
           const layerEditChange = layer.editBehavior.makeChangeForDelta(delta);
           applyChange(layer.layerGlyph, layerEditChange);
+
+          // Constrain editable handle to original angle
+          if (handleConstraint && layer.isPrimaryLayer) {
+            const path = layer.layerGlyph.path;
+            const handlePos = path.getPoint(handleConstraint.pointIndex);
+            const onCurvePos = path.getPoint(handleConstraint.onCurveIndex);
+            if (handlePos && onCurvePos) {
+              // Project handle position onto the original direction line
+              const dx = handlePos.x - onCurvePos.x;
+              const dy = handlePos.y - onCurvePos.y;
+              // Dot product gives the projection length
+              const projLength = dx * handleConstraint.dirX + dy * handleConstraint.dirY;
+              // New position is on-curve + direction * projLength
+              const newX = Math.round(onCurvePos.x + handleConstraint.dirX * projLength);
+              const newY = Math.round(onCurvePos.y + handleConstraint.dirY * projLength);
+              path.setPointPosition(handleConstraint.pointIndex, newX, newY);
+            }
+          }
+
           deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
           layer.shouldConnect = layer.connectDetector.shouldConnect(layer.isPrimaryLayer);
         }
