@@ -1088,19 +1088,31 @@ function generateOffsetPointsForSegment(
           y: Math.round(fixedEnd.y + h2Offset.y),
         };
 
-        // Check for stored handle polar coordinates (from editable rib points)
+        // For editable rib points: use skeleton handles directly (not computed offset curves)
         // Handle1 is the "out" handle of the start point
         const editableKeyStart = side === "left" ? "leftEditable" : "rightEditable";
         if (startSkelPoint?.[editableKeyStart]) {
           const handleOutLengthKey = `${side}HandleOutLength`;
           const handleOutAngleKey = `${side}HandleOutAngle`;
           if (startSkelPoint[handleOutLengthKey] !== undefined && startSkelPoint[handleOutAngleKey] !== undefined) {
+            // Use stored polar coordinates
             adjustedHandle1 = computeHandleFromPolar(
               fixedStart,
               startNorm,
               startSkelPoint[handleOutLengthKey],
               startSkelPoint[handleOutAngleKey]
             );
+          } else if (segment.controlPoints.length > 0) {
+            // Use skeleton handle directly: generated_handle = generated_oncurve + skeleton_handle_offset
+            const skelHandle = segment.controlPoints[0];
+            const skelHandleOffset = {
+              x: skelHandle.x - segment.startPoint.x,
+              y: skelHandle.y - segment.startPoint.y,
+            };
+            adjustedHandle1 = {
+              x: Math.round(fixedStart.x + skelHandleOffset.x),
+              y: Math.round(fixedStart.y + skelHandleOffset.y),
+            };
           }
         }
 
@@ -1110,12 +1122,24 @@ function generateOffsetPointsForSegment(
           const handleInLengthKey = `${side}HandleInLength`;
           const handleInAngleKey = `${side}HandleInAngle`;
           if (endSkelPoint[handleInLengthKey] !== undefined && endSkelPoint[handleInAngleKey] !== undefined) {
+            // Use stored polar coordinates
             adjustedHandle2 = computeHandleFromPolar(
               fixedEnd,
               endNorm,
               endSkelPoint[handleInLengthKey],
               endSkelPoint[handleInAngleKey]
             );
+          } else if (segment.controlPoints.length > 0) {
+            // Use skeleton handle directly: generated_handle = generated_oncurve + skeleton_handle_offset
+            const skelHandle = segment.controlPoints[segment.controlPoints.length - 1];
+            const skelHandleOffset = {
+              x: skelHandle.x - segment.endPoint.x,
+              y: skelHandle.y - segment.endPoint.y,
+            };
+            adjustedHandle2 = {
+              x: Math.round(fixedEnd.x + skelHandleOffset.x),
+              y: Math.round(fixedEnd.y + skelHandleOffset.y),
+            };
           }
         }
 
@@ -1178,7 +1202,7 @@ function generateOffsetPointsForSegment(
             y: Math.round(currentEnd.y + h2Offset.y),
           };
 
-          // Check for stored handle polar coordinates (only for first/last curves)
+          // For editable rib points: use skeleton handles directly (only for first/last curves)
           const editableKey = side === "left" ? "leftEditable" : "rightEditable";
 
           // First curve: handle1 is the "out" handle of the start skeleton point
@@ -1186,12 +1210,24 @@ function generateOffsetPointsForSegment(
             const handleOutLengthKey = `${side}HandleOutLength`;
             const handleOutAngleKey = `${side}HandleOutAngle`;
             if (startSkelPoint[handleOutLengthKey] !== undefined && startSkelPoint[handleOutAngleKey] !== undefined) {
+              // Use stored polar coordinates
               adjustedH1 = computeHandleFromPolar(
                 fixedStart,
                 startNorm,
                 startSkelPoint[handleOutLengthKey],
                 startSkelPoint[handleOutAngleKey]
               );
+            } else if (segment.controlPoints.length > 0) {
+              // Use skeleton handle directly
+              const skelHandle = segment.controlPoints[0];
+              const skelHandleOffset = {
+                x: skelHandle.x - segment.startPoint.x,
+                y: skelHandle.y - segment.startPoint.y,
+              };
+              adjustedH1 = {
+                x: Math.round(fixedStart.x + skelHandleOffset.x),
+                y: Math.round(fixedStart.y + skelHandleOffset.y),
+              };
             }
           }
 
@@ -1200,12 +1236,24 @@ function generateOffsetPointsForSegment(
             const handleInLengthKey = `${side}HandleInLength`;
             const handleInAngleKey = `${side}HandleInAngle`;
             if (endSkelPoint[handleInLengthKey] !== undefined && endSkelPoint[handleInAngleKey] !== undefined) {
+              // Use stored polar coordinates
               adjustedH2 = computeHandleFromPolar(
                 fixedEnd,
                 endNorm,
                 endSkelPoint[handleInLengthKey],
                 endSkelPoint[handleInAngleKey]
               );
+            } else if (segment.controlPoints.length > 0) {
+              // Use skeleton handle directly
+              const skelHandle = segment.controlPoints[segment.controlPoints.length - 1];
+              const skelHandleOffset = {
+                x: skelHandle.x - segment.endPoint.x,
+                y: skelHandle.y - segment.endPoint.y,
+              };
+              adjustedH2 = {
+                x: Math.round(fixedEnd.x + skelHandleOffset.x),
+                y: Math.round(fixedEnd.y + skelHandleOffset.y),
+              };
             }
           }
 
