@@ -1172,19 +1172,23 @@ export class PointerTool extends BaseTool {
           const skeletonChanges = recordChanges(staticGlyph, (sg) => {
             // Remove old generated contours
             const oldGeneratedIndices = workingSkeletonData.generatedContourIndices || [];
-            const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-            for (const idx of sortedIndices) {
+            const sortedIndicesDesc = [...oldGeneratedIndices].sort((a, b) => b - a);
+            const sortedIndicesAsc = [...oldGeneratedIndices].sort((a, b) => a - b);
+            for (const idx of sortedIndicesDesc) {
               if (idx < sg.path.numContours) {
                 sg.path.deleteContour(idx);
               }
             }
-            // Generate new contours
+            // Generate new contours — insert at original indices to preserve
+            // path structure (regular contour point indices must stay valid
+            // for the EditBehavior that was created at drag start)
             const generatedContours = generateContoursFromSkeleton(workingSkeletonData);
             const newGeneratedIndices = [];
-            for (const contour of generatedContours) {
-              const newIndex = sg.path.numContours;
-              sg.path.insertContour(sg.path.numContours, packContour(contour));
-              newGeneratedIndices.push(newIndex);
+            for (let i = 0; i < generatedContours.length; i++) {
+              const insertIdx =
+                i < sortedIndicesAsc.length ? sortedIndicesAsc[i] : sg.path.numContours;
+              sg.path.insertContour(insertIdx, packContour(generatedContours[i]));
+              newGeneratedIndices.push(insertIdx);
             }
             workingSkeletonData.generatedContourIndices = newGeneratedIndices;
           });
