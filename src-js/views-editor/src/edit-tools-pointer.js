@@ -1138,7 +1138,6 @@ export class PointerTool extends BaseTool {
 
       // Setup for skeleton editing (if we have skeleton selection too)
       let skeletonEditState = null;
-      console.log(`[DRAG] hasSkeletonSelection=${hasSkeletonSelection}, editableRibPoints=${editableRibPoints.length}`);
       if (hasSkeletonSelection) {
         const editLayerName = sceneController.editingLayerNames?.[0];
         const layer = editLayerName ? glyph.layers[editLayerName] : null;
@@ -1240,7 +1239,6 @@ export class PointerTool extends BaseTool {
           }
 
           // Regenerate outline and update customData
-          console.log(`[DRAG] REGENERATING outline in drag loop!`);
           const staticGlyph = layer.glyph;
           const generatedContours = generateContoursFromSkeleton(workingSkeletonData);
           const oldGeneratedIndices = workingSkeletonData.generatedContourIndices || [];
@@ -2090,7 +2088,7 @@ export class PointerTool extends BaseTool {
         continue;
       }
 
-      // On-curve point: save ABSOLUTE POSITION (not nudge!)
+      // On-curve point: save ABSOLUTE POSITION + HANDLES
 
       // Get new point position from path
       const newPos = path.getPoint(pointIndex);
@@ -2105,6 +2103,55 @@ export class PointerTool extends BaseTool {
         y: Math.round(newPos.y),
       };
       hasChanges = true;
+
+      // Also save handles that belong to this on-curve point
+      // Find the contour this point belongs to
+      const generatedIndices = skeletonData.generatedContourIndices || [];
+      for (const genContourIdx of generatedIndices) {
+        if (genContourIdx >= path.contourInfo.length) continue;
+        const contourStart = genContourIdx === 0 ? 0 : path.contourInfo[genContourIdx - 1].endPoint + 1;
+        const contourEnd = path.contourInfo[genContourIdx].endPoint;
+
+        if (pointIndex >= contourStart && pointIndex <= contourEnd) {
+          // Found the contour, now find adjacent handles
+          const numPoints = contourEnd - contourStart + 1;
+          const localIdx = pointIndex - contourStart;
+
+          // Check previous point (could be "in" handle)
+          const prevLocalIdx = (localIdx - 1 + numPoints) % numPoints;
+          const prevPointIdx = contourStart + prevLocalIdx;
+          const prevType = path.pointTypes[prevPointIdx];
+          if ((prevType & 0x03) !== 0) {
+            // It's off-curve - this is our "in" handle
+            const handlePos = path.getPoint(prevPointIdx);
+            if (handlePos) {
+              const handleKey = `${side}HandleIn`;
+              skeletonPoint[handleKey] = {
+                x: Math.round(handlePos.x),
+                y: Math.round(handlePos.y),
+              };
+            }
+          }
+
+          // Check next point (could be "out" handle)
+          const nextLocalIdx = (localIdx + 1) % numPoints;
+          const nextPointIdx = contourStart + nextLocalIdx;
+          const nextType = path.pointTypes[nextPointIdx];
+          if ((nextType & 0x03) !== 0) {
+            // It's off-curve - this is our "out" handle
+            const handlePos = path.getPoint(nextPointIdx);
+            if (handlePos) {
+              const handleKey = `${side}HandleOut`;
+              skeletonPoint[handleKey] = {
+                x: Math.round(handlePos.x),
+                y: Math.round(handlePos.y),
+              };
+            }
+          }
+
+          break; // Found the contour, done
+        }
+      }
     }
 
     if (!hasChanges) return null;
