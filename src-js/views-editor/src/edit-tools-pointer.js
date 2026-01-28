@@ -2080,11 +2080,17 @@ export class PointerTool extends BaseTool {
     if (!positionedGlyph) return result;
 
     for (const pointIndex of pointSelection) {
+      const path = positionedGlyph?.glyph?.path;
+      const pointType = path?.pointTypes?.[pointIndex];
+      const isOnCurve = (pointType & 0x03) === 0;
+      console.log("[DETECT] point", pointIndex, "pointType:", pointType, "isOnCurve:", isOnCurve);
+
       // Check if it's an on-curve rib point
       const ribInfo = this.sceneModel._getEditableRibPointForGeneratedPoint(
         positionedGlyph,
         pointIndex
       );
+      console.log("[DETECT] point", pointIndex, "ribInfo:", ribInfo);
       if (ribInfo) {
         result.push({
           pointIndex,
@@ -2099,6 +2105,7 @@ export class PointerTool extends BaseTool {
         positionedGlyph,
         pointIndex
       );
+      console.log("[DETECT] point", pointIndex, "handleInfo:", handleInfo);
       if (handleInfo) {
         result.push({
           pointIndex,
