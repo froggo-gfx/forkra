@@ -1192,7 +1192,8 @@ export class PointerTool extends BaseTool {
             }
             workingSkeletonData.generatedContourIndices = newGeneratedIndices;
           });
-          deepEditChanges.push(skeletonChanges.prefixed(["layers", editLayerName, "glyph"]));
+          const prefixedSkeletonChanges = skeletonChanges.prefixed(["layers", editLayerName, "glyph"]);
+          deepEditChanges.push(prefixedSkeletonChanges.change);
 
           // Update customData
           const customDataChange = recordChanges(layer, (l) => {
@@ -1200,20 +1201,31 @@ export class PointerTool extends BaseTool {
               JSON.stringify(workingSkeletonData)
             );
           });
-          deepEditChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+          const prefixedCustomDataChange = customDataChange.prefixed(["layers", editLayerName]);
+          deepEditChanges.push(prefixedCustomDataChange.change);
+
+          // Save first frame's rollback for proper undo (it restores original state)
+          if (!skeletonEditState.firstFrameRollback) {
+            skeletonEditState.firstFrameRollback = [
+              prefixedSkeletonChanges.rollbackChange,
+              prefixedCustomDataChange.rollbackChange,
+            ];
+          }
         }
 
         editChange = consolidateChanges(deepEditChanges);
         await sendIncrementalChange(editChange, true);
       }
 
+      const rollbackParts = layerInfo.map((layer) =>
+        consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
+      );
+      if (skeletonEditState?.firstFrameRollback) {
+        rollbackParts.push(...skeletonEditState.firstFrameRollback);
+      }
       let changes = ChangeCollector.fromChanges(
         editChange,
-        consolidateChanges(
-          layerInfo.map((layer) =>
-            consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
-          )
-        )
+        consolidateChanges(rollbackParts)
       );
 
       let shouldConnect;
