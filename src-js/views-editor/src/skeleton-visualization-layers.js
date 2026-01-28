@@ -313,21 +313,29 @@ registerVisualizationLayerDefinition({
           let ribPoint, ribKey, isEditable;
 
           if (singleSidedDirection === "left") {
-            // Only apply nudge if editable is true (matches generator behavior)
-            const nudge = isLeftEditable ? (point.leftNudge || 0) : 0;
-            ribPoint = {
-              x: Math.round(point.x + normal.x * totalWidth + tangent.x * nudge),
-              y: Math.round(point.y + normal.y * totalWidth + tangent.y * nudge),
-            };
+            // Use saved position if available, otherwise compute
+            if (isLeftEditable && point.leftPosition) {
+              ribPoint = point.leftPosition;
+            } else {
+              const nudge = isLeftEditable ? (point.leftNudge || 0) : 0;
+              ribPoint = {
+                x: Math.round(point.x + normal.x * totalWidth + tangent.x * nudge),
+                y: Math.round(point.y + normal.y * totalWidth + tangent.y * nudge),
+              };
+            }
             ribKey = leftKey;
             isEditable = isLeftEditable;
           } else {
-            // Only apply nudge if editable is true (matches generator behavior)
-            const nudge = isRightEditable ? (point.rightNudge || 0) : 0;
-            ribPoint = {
-              x: Math.round(point.x - normal.x * totalWidth + tangent.x * nudge),
-              y: Math.round(point.y - normal.y * totalWidth + tangent.y * nudge),
-            };
+            // Use saved position if available, otherwise compute
+            if (isRightEditable && point.rightPosition) {
+              ribPoint = point.rightPosition;
+            } else {
+              const nudge = isRightEditable ? (point.rightNudge || 0) : 0;
+              ribPoint = {
+                x: Math.round(point.x - normal.x * totalWidth + tangent.x * nudge),
+                y: Math.round(point.y - normal.y * totalWidth + tangent.y * nudge),
+              };
+            }
             ribKey = rightKey;
             isEditable = isRightEditable;
           }
@@ -343,19 +351,30 @@ registerVisualizationLayerDefinition({
           strokeDiamondNode(context, ribPoint, pointSize);
         } else {
           // Normal mode: two rib points
-          // Only apply nudge offset if editable is true (matches generator behavior)
           const tangent = { x: -normal.y, y: normal.x };
-          const leftNudge = isLeftEditable ? (point.leftNudge || 0) : 0;
-          const rightNudge = isRightEditable ? (point.rightNudge || 0) : 0;
 
-          const leftRibPoint = {
-            x: Math.round(point.x + normal.x * leftHW + tangent.x * leftNudge),
-            y: Math.round(point.y + normal.y * leftHW + tangent.y * leftNudge),
-          };
-          const rightRibPoint = {
-            x: Math.round(point.x - normal.x * rightHW + tangent.x * rightNudge),
-            y: Math.round(point.y - normal.y * rightHW + tangent.y * rightNudge),
-          };
+          // Use saved position if available, otherwise compute
+          let leftRibPoint;
+          if (isLeftEditable && point.leftPosition) {
+            leftRibPoint = point.leftPosition;
+          } else {
+            const leftNudge = isLeftEditable ? (point.leftNudge || 0) : 0;
+            leftRibPoint = {
+              x: Math.round(point.x + normal.x * leftHW + tangent.x * leftNudge),
+              y: Math.round(point.y + normal.y * leftHW + tangent.y * leftNudge),
+            };
+          }
+
+          let rightRibPoint;
+          if (isRightEditable && point.rightPosition) {
+            rightRibPoint = point.rightPosition;
+          } else {
+            const rightNudge = isRightEditable ? (point.rightNudge || 0) : 0;
+            rightRibPoint = {
+              x: Math.round(point.x - normal.x * rightHW + tangent.x * rightNudge),
+              y: Math.round(point.y - normal.y * rightHW + tangent.y * rightNudge),
+            };
+          }
 
           // Draw left rib point
           const leftPointSize = isLeftEditable ? parameters.editablePointSize : parameters.pointSize;

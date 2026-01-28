@@ -1091,15 +1091,16 @@ export default class SkeletonParametersPanel extends Panel {
       for (const { contourIdx, pointIdx, point } of selectedData.points) {
         const w = this._getPointWidths(point, defaultWidth);
         const isAsym = this._isAsymmetric(point);
-        // Include editable, nudge, and handle state for Reset button visibility
+        // Include editable and saved position state for Reset button visibility
         const leftEdit = point.leftEditable ? 1 : 0;
         const rightEdit = point.rightEditable ? 1 : 0;
-        const leftNudge = point.leftNudge || 0;
-        const rightNudge = point.rightNudge || 0;
+        // Check if absolute position data exists
+        const leftHasPos = point.leftPosition ? 1 : 0;
+        const rightHasPos = point.rightPosition ? 1 : 0;
         // Check if handle data exists
-        const leftHasHandles = (point.leftHandleInLength !== undefined || point.leftHandleOutLength !== undefined) ? 1 : 0;
-        const rightHasHandles = (point.rightHandleInLength !== undefined || point.rightHandleOutLength !== undefined) ? 1 : 0;
-        parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${leftHasHandles},${rightHasHandles}`);
+        const leftHasHandles = (point.leftHandleIn || point.leftHandleOut) ? 1 : 0;
+        const rightHasHandles = (point.rightHandleIn || point.rightHandleOut) ? 1 : 0;
+        parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)},${isAsym},${leftEdit},${rightEdit},${leftHasPos},${rightHasPos},${leftHasHandles},${rightHasHandles}`);
       }
     }
 
@@ -1457,18 +1458,18 @@ export default class SkeletonParametersPanel extends Panel {
           // Update editable state for each selected side
           for (const side of sides) {
             const editableKey = side === "left" ? "leftEditable" : "rightEditable";
-            const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-            const handleInLengthKey = `${side}HandleInLength`;
-            const handleOutLengthKey = `${side}HandleOutLength`;
+            const positionKey = side === "left" ? "leftPosition" : "rightPosition";
+            const handleInKey = `${side}HandleIn`;
+            const handleOutKey = `${side}HandleOut`;
 
             if (checked) {
               point[editableKey] = true;
             } else {
               delete point[editableKey];
-              // Also clear nudge and handle length values when disabling
-              delete point[nudgeKey];
-              delete point[handleInLengthKey];
-              delete point[handleOutLengthKey];
+              // Also clear absolute position data when disabling
+              delete point[positionKey];
+              delete point[handleInKey];
+              delete point[handleOutKey];
             }
           }
         }
@@ -1526,16 +1527,16 @@ export default class SkeletonParametersPanel extends Panel {
       const editableKey = side === "left" ? "leftEditable" : "rightEditable";
       if (!point[editableKey]) continue;
 
-      // Check for nudge
-      const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-      if (point[nudgeKey] && point[nudgeKey] !== 0) {
+      // Check for saved absolute position
+      const positionKey = side === "left" ? "leftPosition" : "rightPosition";
+      if (point[positionKey]) {
         return true;
       }
 
-      // Check for stored handle data
-      const handleInLengthKey = `${side}HandleInLength`;
-      const handleOutLengthKey = `${side}HandleOutLength`;
-      if (point[handleInLengthKey] !== undefined || point[handleOutLengthKey] !== undefined) {
+      // Check for saved handle data
+      const handleInKey = `${side}HandleIn`;
+      const handleOutKey = `${side}HandleOut`;
+      if (point[handleInKey] || point[handleOutKey]) {
         return true;
       }
     }
@@ -1582,18 +1583,18 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          // Reset nudge and handle data for each selected side (only if editable)
+          // Reset absolute position data for each selected side (only if editable)
           for (const side of sides) {
             const editableKey = side === "left" ? "leftEditable" : "rightEditable";
             if (!point[editableKey]) continue;
 
-            // Reset nudge
-            const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-            delete point[nudgeKey];
+            // Reset saved absolute position
+            const positionKey = side === "left" ? "leftPosition" : "rightPosition";
+            delete point[positionKey];
 
-            // Reset stored handle length data
-            delete point[`${side}HandleInLength`];
-            delete point[`${side}HandleOutLength`];
+            // Reset saved handle data
+            delete point[`${side}HandleIn`];
+            delete point[`${side}HandleOut`];
           }
         }
 
@@ -1641,16 +1642,16 @@ export default class SkeletonParametersPanel extends Panel {
       if (point.leftEditable || point.rightEditable) {
         hasEditableRibs = true;
 
-        // Check if any modification exists (nudge or handle lengths)
+        // Check if any modification exists (absolute position or handle data)
         const hasLeftMod = point.leftEditable && (
-          (point.leftNudge && point.leftNudge !== 0) ||
-          point.leftHandleInLength !== undefined ||
-          point.leftHandleOutLength !== undefined
+          point.leftPosition ||
+          point.leftHandleIn ||
+          point.leftHandleOut
         );
         const hasRightMod = point.rightEditable && (
-          (point.rightNudge && point.rightNudge !== 0) ||
-          point.rightHandleInLength !== undefined ||
-          point.rightHandleOutLength !== undefined
+          point.rightPosition ||
+          point.rightHandleIn ||
+          point.rightHandleOut
         );
 
         if (hasLeftMod || hasRightMod) {
@@ -1689,16 +1690,16 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          // Reset nudge and handle length data for both sides if editable
+          // Reset absolute position data for both sides if editable
           if (point.leftEditable) {
-            delete point.leftNudge;
-            delete point.leftHandleInLength;
-            delete point.leftHandleOutLength;
+            delete point.leftPosition;
+            delete point.leftHandleIn;
+            delete point.leftHandleOut;
           }
           if (point.rightEditable) {
-            delete point.rightNudge;
-            delete point.rightHandleInLength;
-            delete point.rightHandleOutLength;
+            delete point.rightPosition;
+            delete point.rightHandleIn;
+            delete point.rightHandleOut;
           }
         }
 
@@ -1758,13 +1759,14 @@ export default class SkeletonParametersPanel extends Panel {
           // Remove all editable-related properties
           delete point.leftEditable;
           delete point.rightEditable;
-          delete point.leftNudge;
-          delete point.rightNudge;
-          // Remove stored handle length data
-          delete point.leftHandleInLength;
-          delete point.leftHandleOutLength;
-          delete point.rightHandleInLength;
-          delete point.rightHandleOutLength;
+          // Remove absolute position data
+          delete point.leftPosition;
+          delete point.rightPosition;
+          // Remove handle data
+          delete point.leftHandleIn;
+          delete point.leftHandleOut;
+          delete point.rightHandleIn;
+          delete point.rightHandleOut;
         }
 
         const staticGlyph = layer.glyph;

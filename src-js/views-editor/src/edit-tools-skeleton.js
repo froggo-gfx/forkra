@@ -423,20 +423,35 @@ export class SkeletonPenTool extends BaseTool {
         const isLeftEditable = skeletonPoint.leftEditable === true;
         const isRightEditable = skeletonPoint.rightEditable === true;
 
-        // Apply nudge offset only if editable and width > 0 (matches generator behavior)
+        // Calculate rib point positions
+        // Use saved absolute positions if available, otherwise compute from skeleton
         const tangent = { x: -normal.y, y: normal.x };
-        const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
-        const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
 
-        // Calculate rib point positions (including nudge)
-        const leftRibPoint = {
-          x: skeletonPoint.x + normal.x * leftHW + tangent.x * leftNudge,
-          y: skeletonPoint.y + normal.y * leftHW + tangent.y * leftNudge,
-        };
-        const rightRibPoint = {
-          x: skeletonPoint.x - normal.x * rightHW + tangent.x * rightNudge,
-          y: skeletonPoint.y - normal.y * rightHW + tangent.y * rightNudge,
-        };
+        let leftRibPoint;
+        if (isLeftEditable && skeletonPoint.leftPosition) {
+          // Use saved absolute position
+          leftRibPoint = skeletonPoint.leftPosition;
+        } else {
+          // Compute from skeleton + nudge
+          const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
+          leftRibPoint = {
+            x: skeletonPoint.x + normal.x * leftHW + tangent.x * leftNudge,
+            y: skeletonPoint.y + normal.y * leftHW + tangent.y * leftNudge,
+          };
+        }
+
+        let rightRibPoint;
+        if (isRightEditable && skeletonPoint.rightPosition) {
+          // Use saved absolute position
+          rightRibPoint = skeletonPoint.rightPosition;
+        } else {
+          // Compute from skeleton + nudge
+          const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+          rightRibPoint = {
+            x: skeletonPoint.x - normal.x * rightHW + tangent.x * rightNudge,
+            y: skeletonPoint.y - normal.y * rightHW + tangent.y * rightNudge,
+          };
+        }
 
         // Check left rib point
         const leftDist = vector.distance(glyphPoint, leftRibPoint);

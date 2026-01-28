@@ -1211,20 +1211,6 @@ export class PointerTool extends BaseTool {
           applyChange(layer.layerGlyph, layerEditChange);
           deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
           layer.shouldConnect = layer.connectDetector.shouldConnect(layer.isPrimaryLayer);
-
-          // Constrain editable rib handles to skeleton handle direction
-          if (layer.isPrimaryLayer && editableRibPoints.length > 0) {
-            const handleCorrections = this._constrainEditableRibHandles(
-              layer.layerGlyph,
-              editableRibPoints,
-              glyph,
-              sceneController.editingLayerNames?.[0]
-            );
-            if (handleCorrections) {
-              applyChange(layer.layerGlyph, handleCorrections);
-              deepEditChanges.push(consolidateChanges(handleCorrections, layer.changePath));
-            }
-          }
         }
 
         // Apply skeleton changes
@@ -1375,31 +1361,12 @@ export class PointerTool extends BaseTool {
       }
 
       // Sync editable rib points back to skeleton data
-      // For ON-CURVE points: sync ALL (interpolation may have moved unselected points)
-      // For HANDLES: sync ONLY the selected/dragged ones (don't overwrite unedited handles)
+      // Save absolute positions of selected/dragged points
       if (editableRibPoints.length > 0) {
-        const allEditableRibPoints = this._getAllEditableRibPoints();
-
-        // Build set of selected handle point indices
-        const selectedHandleIndices = new Set();
-        for (const rp of editableRibPoints) {
-          if (rp.isHandle) {
-            selectedHandleIndices.add(rp.pointIndex);
-          }
-        }
-
-        // Filter: keep all on-curve points, but only SELECTED handles
-        const pointsToSync = allEditableRibPoints.filter(rp => {
-          if (!rp.isHandle) return true; // Always sync on-curve
-          return selectedHandleIndices.has(rp.pointIndex); // Only sync selected handles
-        });
-
-        console.log(`[SYNC-FILTER] All: ${allEditableRibPoints.length}, Selected handles: ${selectedHandleIndices.size}, To sync: ${pointsToSync.length}`);
-
         const syncResult = this._syncEditableRibPointsToSkeleton(
           glyph,
           layerInfo,
-          pointsToSync,
+          editableRibPoints,
           positionedGlyph
         );
         if (syncResult) {
@@ -2062,181 +2029,6 @@ export class PointerTool extends BaseTool {
   }
 
   /**
-   * Get ALL editable rib points for the current glyph (not just selected ones).
-   * Used for syncing after interpolation moves unselected points.
-   * @returns {Array} Array of editable rib point info
-   */
-  _getAllEditableRibPoints() {
-    const result = [];
-    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
-    if (!positionedGlyph?.varGlyph?.glyph?.layers) return result;
-
-    const editLayerName =
-      this.sceneController.sceneSettings?.editLayerName ||
-      positionedGlyph.glyph?.layerName;
-    if (!editLayerName) return result;
-
-    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
-    if (!skeletonData?.contours?.length || !skeletonData?.generatedContourIndices?.length) {
-      return result;
-    }
-
-    const path = positionedGlyph.glyph.path;
-
-    // Iterate through all generated contours and find editable points
-    for (let genIdx = 0; genIdx < skeletonData.generatedContourIndices.length; genIdx++) {
-      const contourIdx = skeletonData.generatedContourIndices[genIdx];
-      if (contourIdx >= path.contourInfo.length) continue;
-
-      const contourStartPt = contourIdx === 0 ? 0 : path.contourInfo[contourIdx - 1].endPoint + 1;
-      const contourEndPt = path.contourInfo[contourIdx].endPoint;
-
-      for (let pointIndex = contourStartPt; pointIndex <= contourEndPt; pointIndex++) {
-        // Check if it's an on-curve rib point
-        const ribInfo = this.sceneModel._getEditableRibPointForGeneratedPoint(
-          positionedGlyph,
-          pointIndex
-        );
-        if (ribInfo) {
-          result.push({
-            pointIndex,
-            isHandle: false,
-            ...ribInfo,
-          });
-          continue;
-        }
-
-        // Check if it's an off-curve handle belonging to an editable rib point
-        const handleInfo = this.sceneModel._getEditableRibHandleForGeneratedPoint(
-          positionedGlyph,
-          pointIndex
-        );
-        if (handleInfo) {
-          result.push({
-            pointIndex,
-            isHandle: true,
-            ...handleInfo,
-          });
-        }
-      }
-    }
-    return result;
-  }
-
-  /**
-   * Constrain editable rib handles to move only along skeleton handle direction.
-   * Called during drag loop after EditBehavior applies changes.
-   * @param {Object} layerGlyph - The layer glyph being edited
-   * @param {Array} editableRibPoints - Array of editable rib point info
-   * @param {Object} glyph - The full glyph object
-   * @param {string} editLayerName - The editing layer name
-   * @returns {Object|null} Path change or null if no corrections needed
-   */
-  _constrainEditableRibHandles(layerGlyph, editableRibPoints, glyph, editLayerName) {
-    if (!editLayerName) return null;
-
-    const layer = glyph.layers[editLayerName];
-    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
-    if (!skeletonData?.contours?.length) return null;
-
-    const path = layerGlyph.path;
-    const changes = [];
-
-    for (const ribPoint of editableRibPoints) {
-      if (!ribPoint.isHandle) continue;
-
-      const { pointIndex, skeletonContourIndex, skeletonPointIndex, side, handleType, onCurvePointIndex } = ribPoint;
-
-      const contour = skeletonData.contours[skeletonContourIndex];
-      if (!contour) continue;
-
-      const skeletonPoint = contour.points[skeletonPointIndex];
-      if (!skeletonPoint) continue;
-
-      // Find skeleton handle for this point
-      // For "out" handle: it's the control point AFTER this on-curve in the segment
-      // For "in" handle: it's the control point BEFORE this on-curve in the segment
-      let skelHandle = null;
-      const skelPoints = contour.points;
-      const numSkelPoints = skelPoints.length;
-
-      if (handleType === "out") {
-        // Look for the next off-curve point after skeletonPointIndex
-        for (let i = 1; i < numSkelPoints; i++) {
-          const idx = (skeletonPointIndex + i) % numSkelPoints;
-          if (!contour.isClosed && skeletonPointIndex + i >= numSkelPoints) break;
-          if (skelPoints[idx].type) {
-            // Found off-curve
-            skelHandle = skelPoints[idx];
-            break;
-          } else {
-            // Found on-curve, no handle in this direction
-            break;
-          }
-        }
-      } else {
-        // handleType === "in": look for the previous off-curve point
-        for (let i = 1; i < numSkelPoints; i++) {
-          const idx = (skeletonPointIndex - i + numSkelPoints) % numSkelPoints;
-          if (!contour.isClosed && skeletonPointIndex - i < 0) break;
-          if (skelPoints[idx].type) {
-            // Found off-curve
-            skelHandle = skelPoints[idx];
-            break;
-          } else {
-            // Found on-curve, no handle in this direction
-            break;
-          }
-        }
-      }
-
-      if (!skelHandle) continue;
-
-      // Get skeleton handle direction
-      const skelHandleDir = {
-        x: skelHandle.x - skeletonPoint.x,
-        y: skelHandle.y - skeletonPoint.y,
-      };
-      const skelHandleLength = Math.sqrt(skelHandleDir.x * skelHandleDir.x + skelHandleDir.y * skelHandleDir.y);
-      if (skelHandleLength < 0.001) continue;
-
-      // Normalize skeleton handle direction
-      const skelDir = {
-        x: skelHandleDir.x / skelHandleLength,
-        y: skelHandleDir.y / skelHandleLength,
-      };
-
-      // Get current positions from path
-      const handlePos = path.getPoint(pointIndex);
-      const onCurvePos = path.getPoint(onCurvePointIndex);
-      if (!handlePos || !onCurvePos) continue;
-
-      // Vector from on-curve to handle
-      const handleVec = {
-        x: handlePos.x - onCurvePos.x,
-        y: handlePos.y - onCurvePos.y,
-      };
-
-      // Project onto skeleton direction (dot product)
-      const projLength = handleVec.x * skelDir.x + handleVec.y * skelDir.y;
-
-      // Constrained handle position = on-curve + skelDir * projLength
-      const constrainedX = Math.round(onCurvePos.x + skelDir.x * projLength);
-      const constrainedY = Math.round(onCurvePos.y + skelDir.y * projLength);
-
-      // Only add change if position actually changed
-      if (constrainedX !== handlePos.x || constrainedY !== handlePos.y) {
-        changes.push({ f: "=xy", a: [pointIndex, constrainedX, constrainedY] });
-      }
-    }
-
-    if (changes.length === 0) return null;
-
-    return consolidateChanges(changes, ["path"]);
-  }
-
-  /**
    * Sync edited rib points back to skeleton data.
    * Called after standard EditBehavior drag to update nudge/width in skeleton.
    * @param {Object} glyph - The glyph being edited
@@ -2275,89 +2067,42 @@ export class PointerTool extends BaseTool {
       if (!skeletonPoint) continue;
 
       if (ribPoint.isHandle) {
-        // Handle point: save only the LENGTH (angle comes from skeleton)
-        const { handleType, onCurvePointIndex } = ribPoint;
+        // Handle point: save ABSOLUTE POSITION (not length!)
+        const { handleType } = ribPoint;
 
         // Get handle position from path
         const handlePos = path.getPoint(pointIndex);
         if (!handlePos) continue;
 
-        // Get on-curve position from path
-        const onCurvePos = path.getPoint(onCurvePointIndex);
-        if (!onCurvePos) continue;
+        // Build the key for this handle position
+        // e.g., "leftHandleOut", "rightHandleIn"
+        const handleKey = `${side}Handle${handleType === "in" ? "In" : "Out"}`;
 
-        // Calculate handle length
-        const dx = handlePos.x - onCurvePos.x;
-        const dy = handlePos.y - onCurvePos.y;
-        const handleLength = Math.sqrt(dx * dx + dy * dy);
-
-        // Build the key for this handle length
-        // e.g., "leftHandleOutLength", "rightHandleInLength"
-        const handleLengthKey = `${side}Handle${handleType === "in" ? "In" : "Out"}Length`;
-
-        // Save handle length (only length, not angle - angle comes from skeleton)
-        if (handleLength > 0.1) {
-          console.log(`[SYNC] Handle ${handleType}: pt=${pointIndex} -> ${handleLengthKey}=${Math.round(handleLength)}`);
-          skeletonPoint[handleLengthKey] = Math.round(handleLength);
-          hasChanges = true;
-        } else if (skeletonPoint[handleLengthKey]) {
-          console.log(`[SYNC] Deleting handle length: ${handleLengthKey}`);
-          delete skeletonPoint[handleLengthKey];
-          hasChanges = true;
-        }
+        // Save absolute handle position
+        skeletonPoint[handleKey] = {
+          x: Math.round(handlePos.x),
+          y: Math.round(handlePos.y),
+        };
+        hasChanges = true;
 
         continue;
       }
 
-      // On-curve point: save nudge and width
+      // On-curve point: save ABSOLUTE POSITION (not nudge!)
 
       // Get new point position from path
       const newPos = path.getPoint(pointIndex);
       if (!newPos) continue;
 
-      // Calculate normal and tangent at skeleton point
-      const normal = calculateNormalAtSkeletonPoint(contour, skeletonPointIndex);
-      const tangent = { x: -normal.y, y: normal.x };
+      // Build the key for this point position
+      const positionKey = side === "left" ? "leftPosition" : "rightPosition";
 
-      // Calculate delta from skeleton point
-      const deltaX = newPos.x - skeletonPoint.x;
-      const deltaY = newPos.y - skeletonPoint.y;
-
-      // Project delta onto tangent → nudge
-      const newNudge = deltaX * tangent.x + deltaY * tangent.y;
-
-      // Project delta onto normal → halfWidth
-      const sign = side === "left" ? 1 : -1;
-      const deltaNormal = deltaX * normal.x + deltaY * normal.y;
-      const newHalfWidth = sign * deltaNormal;
-
-      // Update skeleton point
-      const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-      const widthKey = side === "left" ? "leftWidth" : "rightWidth";
-      const defaultWidth = contour.defaultWidth || 20;
-
-      // Always update nudge
-      if (Math.abs(newNudge) > 0.1) {
-        skeletonPoint[nudgeKey] = Math.round(newNudge);
-        hasChanges = true;
-      } else if (skeletonPoint[nudgeKey]) {
-        delete skeletonPoint[nudgeKey];
-        hasChanges = true;
-      }
-
-      // Check if asymmetric (has per-side width or will need it)
-      const isAsymmetric = skeletonPoint.leftWidth !== undefined ||
-                           skeletonPoint.rightWidth !== undefined ||
-                           skeletonPoint.asymmetric;
-
-      // Update width only for asymmetric points
-      if (isAsymmetric) {
-        const clampedWidth = Math.max(1, Math.round(newHalfWidth));
-        if (clampedWidth !== defaultWidth / 2) {
-          skeletonPoint[widthKey] = clampedWidth;
-          hasChanges = true;
-        }
-      }
+      // Save absolute position
+      skeletonPoint[positionKey] = {
+        x: Math.round(newPos.x),
+        y: Math.round(newPos.y),
+      };
+      hasChanges = true;
     }
 
     if (!hasChanges) return null;

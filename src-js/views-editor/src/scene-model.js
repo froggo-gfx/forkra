@@ -828,12 +828,22 @@ export class SceneModel {
 
           if (halfWidth < 0.5) continue; // Skip zero-width sides
 
-          const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-          const nudge = skeletonPoint[nudgeKey] || 0;
+          // Check for saved absolute position first
+          const positionKey = side === "left" ? "leftPosition" : "rightPosition";
+          let expectedX, expectedY;
 
-          const sign = side === "left" ? 1 : -1;
-          const expectedX = Math.round(skeletonPoint.x + sign * normal.x * halfWidth + tangent.x * nudge);
-          const expectedY = Math.round(skeletonPoint.y + sign * normal.y * halfWidth + tangent.y * nudge);
+          if (skeletonPoint[positionKey]) {
+            // Use saved absolute position
+            expectedX = skeletonPoint[positionKey].x;
+            expectedY = skeletonPoint[positionKey].y;
+          } else {
+            // Compute expected position from skeleton + nudge (fallback)
+            const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+            const nudge = skeletonPoint[nudgeKey] || 0;
+            const sign = side === "left" ? 1 : -1;
+            expectedX = Math.round(skeletonPoint.x + sign * normal.x * halfWidth + tangent.x * nudge);
+            expectedY = Math.round(skeletonPoint.y + sign * normal.y * halfWidth + tangent.y * nudge);
+          }
 
           // Check if position matches
           const dx = Math.abs(pointPos.x - expectedX);
