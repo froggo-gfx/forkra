@@ -1050,15 +1050,17 @@ function generateOffsetPointsForSegment(
               y: skelHandleOffset.y / skelHandleLength,
             };
 
-            // Get handle length: use stored value or default from offset curve computation
+            // Get handle length: use stored value or default from OFFSET CURVE (not skeleton!)
             const handleOutLengthKey = `${side}HandleOutLength`;
             let handleLength;
             if (startSkelPoint[handleOutLengthKey] !== undefined) {
               // Use stored length from user edit
               handleLength = startSkelPoint[handleOutLengthKey];
+              console.log(`[GEN] Handle1 OUT: using STORED length=${handleLength} for ${side} at skelPt ${segment.startPointIndex}`);
             } else {
-              // Use default: same as skeleton handle length (offset curve default)
-              handleLength = skelHandleLength;
+              // Use default: length from offset curve computation (h1Offset)
+              handleLength = Math.sqrt(h1Offset.x * h1Offset.x + h1Offset.y * h1Offset.y);
+              console.log(`[GEN] Handle1 OUT: using OFFSET length=${handleLength} (skelLen=${skelHandleLength}) for ${side} at skelPt ${segment.startPointIndex}`);
             }
 
             // Apply: skeleton direction * stored/default length
@@ -1087,15 +1089,17 @@ function generateOffsetPointsForSegment(
               y: skelHandleOffset.y / skelHandleLength,
             };
 
-            // Get handle length: use stored value or default from offset curve computation
+            // Get handle length: use stored value or default from OFFSET CURVE (not skeleton!)
             const handleInLengthKey = `${side}HandleInLength`;
             let handleLength;
             if (endSkelPoint[handleInLengthKey] !== undefined) {
               // Use stored length from user edit
               handleLength = endSkelPoint[handleInLengthKey];
+              console.log(`[GEN] Handle2 IN: using STORED length=${handleLength} for ${side} at skelPt ${segment.endPointIndex}`);
             } else {
-              // Use default: same as skeleton handle length (offset curve default)
-              handleLength = skelHandleLength;
+              // Use default: length from offset curve computation (h2Offset)
+              handleLength = Math.sqrt(h2Offset.x * h2Offset.x + h2Offset.y * h2Offset.y);
+              console.log(`[GEN] Handle2 IN: using OFFSET length=${handleLength} (skelLen=${skelHandleLength}) for ${side} at skelPt ${segment.endPointIndex}`);
             }
 
             // Apply: skeleton direction * stored/default length
@@ -1185,15 +1189,17 @@ function generateOffsetPointsForSegment(
                 y: skelHandleOffset.y / skelHandleLength,
               };
 
-              // Get handle length: use stored value or default from offset curve computation
+              // Get handle length: use stored value or default from OFFSET CURVE (not skeleton!)
               const handleOutLengthKey = `${side}HandleOutLength`;
               let handleLength;
               if (startSkelPoint[handleOutLengthKey] !== undefined) {
                 // Use stored length from user edit
                 handleLength = startSkelPoint[handleOutLengthKey];
+                console.log(`[GEN-FB] Handle1 OUT: using STORED length=${handleLength} for ${side}`);
               } else {
-                // Use default: same as skeleton handle length
-                handleLength = skelHandleLength;
+                // Use default: length from offset curve computation (h1Offset)
+                handleLength = Math.sqrt(h1Offset.x * h1Offset.x + h1Offset.y * h1Offset.y);
+                console.log(`[GEN-FB] Handle1 OUT: using OFFSET length=${handleLength} for ${side}`);
               }
 
               // Apply: skeleton direction * stored/default length
@@ -1221,15 +1227,17 @@ function generateOffsetPointsForSegment(
                 y: skelHandleOffset.y / skelHandleLength,
               };
 
-              // Get handle length: use stored value or default from offset curve computation
+              // Get handle length: use stored value or default from OFFSET CURVE (not skeleton!)
               const handleInLengthKey = `${side}HandleInLength`;
               let handleLength;
               if (endSkelPoint[handleInLengthKey] !== undefined) {
                 // Use stored length from user edit
                 handleLength = endSkelPoint[handleInLengthKey];
+                console.log(`[GEN-FB] Handle2 IN: using STORED length=${handleLength} for ${side}`);
               } else {
-                // Use default: same as skeleton handle length
-                handleLength = skelHandleLength;
+                // Use default: length from offset curve computation (h2Offset)
+                handleLength = Math.sqrt(h2Offset.x * h2Offset.x + h2Offset.y * h2Offset.y);
+                console.log(`[GEN-FB] Handle2 IN: using OFFSET length=${handleLength} for ${side}`);
               }
 
               // Apply: skeleton direction * stored/default length

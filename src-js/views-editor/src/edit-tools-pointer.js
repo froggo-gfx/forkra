@@ -1214,6 +1214,7 @@ export class PointerTool extends BaseTool {
 
           // Constrain editable rib handles to skeleton handle direction
           if (layer.isPrimaryLayer && editableRibPoints.length > 0) {
+            console.log(`[DRAG] Constraining handles, editableRibPoints:`, editableRibPoints.map(p => `${p.pointIndex}(${p.isHandle ? 'H' : 'OC'})`).join(', '));
             const handleCorrections = this._constrainEditableRibHandles(
               layer.layerGlyph,
               editableRibPoints,
@@ -1221,6 +1222,7 @@ export class PointerTool extends BaseTool {
               sceneController.editingLayerNames?.[0]
             );
             if (handleCorrections) {
+              console.log(`[DRAG] Handle corrections applied`);
               applyChange(layer.layerGlyph, handleCorrections);
               deepEditChanges.push(consolidateChanges(handleCorrections, layer.changePath));
             }
@@ -2103,6 +2105,7 @@ export class PointerTool extends BaseTool {
         }
       }
     }
+    console.log(`[GET_ALL] Found ${result.length} editable rib points:`, result.map(p => `${p.pointIndex}(${p.isHandle ? 'handle' : 'onCurve'})`).join(', '));
     return result;
   }
 
@@ -2207,8 +2210,11 @@ export class PointerTool extends BaseTool {
       const constrainedX = Math.round(onCurvePos.x + skelDir.x * projLength);
       const constrainedY = Math.round(onCurvePos.y + skelDir.y * projLength);
 
+      console.log(`[CONSTRAIN] Handle pointIndex=${pointIndex}: pos=(${handlePos.x},${handlePos.y}) -> constrained=(${constrainedX},${constrainedY}), projLen=${projLength}`);
+
       // Only add change if position actually changed
       if (constrainedX !== handlePos.x || constrainedY !== handlePos.y) {
+        console.log(`[CONSTRAIN] Applying correction for handle ${pointIndex}`);
         changes.push({ f: "=xy", a: [pointIndex, constrainedX, constrainedY] });
       }
     }
@@ -2277,11 +2283,15 @@ export class PointerTool extends BaseTool {
         // e.g., "leftHandleOutLength", "rightHandleInLength"
         const handleLengthKey = `${side}Handle${handleType === "in" ? "In" : "Out"}Length`;
 
+        console.log(`[SYNC] Handle ${handleType}: pointIndex=${pointIndex}, onCurve=${onCurvePointIndex}, length=${handleLength}, key=${handleLengthKey}`);
+
         // Save handle length (only length, not angle - angle comes from skeleton)
         if (handleLength > 0.1) {
+          console.log(`[SYNC] Saving handle length: ${handleLengthKey}=${Math.round(handleLength)}`);
           skeletonPoint[handleLengthKey] = Math.round(handleLength);
           hasChanges = true;
         } else if (skeletonPoint[handleLengthKey]) {
+          console.log(`[SYNC] Deleting handle length: ${handleLengthKey}`);
           delete skeletonPoint[handleLengthKey];
           hasChanges = true;
         }
