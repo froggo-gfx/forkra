@@ -1214,7 +1214,6 @@ export class PointerTool extends BaseTool {
 
           // Constrain editable rib handles to skeleton handle direction
           if (layer.isPrimaryLayer && editableRibPoints.length > 0) {
-            console.log(`[DRAG] Constraining handles, editableRibPoints:`, editableRibPoints.map(p => `${p.pointIndex}(${p.isHandle ? 'H' : 'OC'})`).join(', '));
             const handleCorrections = this._constrainEditableRibHandles(
               layer.layerGlyph,
               editableRibPoints,
@@ -1222,7 +1221,6 @@ export class PointerTool extends BaseTool {
               sceneController.editingLayerNames?.[0]
             );
             if (handleCorrections) {
-              console.log(`[DRAG] Handle corrections applied`);
               applyChange(layer.layerGlyph, handleCorrections);
               deepEditChanges.push(consolidateChanges(handleCorrections, layer.changePath));
             }
@@ -1376,14 +1374,32 @@ export class PointerTool extends BaseTool {
         }
       }
 
-      // Sync ALL editable rib points back to skeleton data
-      // (not just selected ones - interpolation may have moved unselected points)
+      // Sync editable rib points back to skeleton data
+      // For ON-CURVE points: sync ALL (interpolation may have moved unselected points)
+      // For HANDLES: sync ONLY the selected/dragged ones (don't overwrite unedited handles)
       if (editableRibPoints.length > 0) {
         const allEditableRibPoints = this._getAllEditableRibPoints();
+
+        // Build set of selected handle point indices
+        const selectedHandleIndices = new Set();
+        for (const rp of editableRibPoints) {
+          if (rp.isHandle) {
+            selectedHandleIndices.add(rp.pointIndex);
+          }
+        }
+
+        // Filter: keep all on-curve points, but only SELECTED handles
+        const pointsToSync = allEditableRibPoints.filter(rp => {
+          if (!rp.isHandle) return true; // Always sync on-curve
+          return selectedHandleIndices.has(rp.pointIndex); // Only sync selected handles
+        });
+
+        console.log(`[SYNC-FILTER] All: ${allEditableRibPoints.length}, Selected handles: ${selectedHandleIndices.size}, To sync: ${pointsToSync.length}`);
+
         const syncResult = this._syncEditableRibPointsToSkeleton(
           glyph,
           layerInfo,
-          allEditableRibPoints,
+          pointsToSync,
           positionedGlyph
         );
         if (syncResult) {
@@ -2105,7 +2121,6 @@ export class PointerTool extends BaseTool {
         }
       }
     }
-    console.log(`[GET_ALL] Found ${result.length} editable rib points:`, result.map(p => `${p.pointIndex}(${p.isHandle ? 'handle' : 'onCurve'})`).join(', '));
     return result;
   }
 
@@ -2210,11 +2225,8 @@ export class PointerTool extends BaseTool {
       const constrainedX = Math.round(onCurvePos.x + skelDir.x * projLength);
       const constrainedY = Math.round(onCurvePos.y + skelDir.y * projLength);
 
-      console.log(`[CONSTRAIN] Handle pointIndex=${pointIndex}: pos=(${handlePos.x},${handlePos.y}) -> constrained=(${constrainedX},${constrainedY}), projLen=${projLength}`);
-
       // Only add change if position actually changed
       if (constrainedX !== handlePos.x || constrainedY !== handlePos.y) {
-        console.log(`[CONSTRAIN] Applying correction for handle ${pointIndex}`);
         changes.push({ f: "=xy", a: [pointIndex, constrainedX, constrainedY] });
       }
     }
@@ -2283,11 +2295,9 @@ export class PointerTool extends BaseTool {
         // e.g., "leftHandleOutLength", "rightHandleInLength"
         const handleLengthKey = `${side}Handle${handleType === "in" ? "In" : "Out"}Length`;
 
-        console.log(`[SYNC] Handle ${handleType}: pointIndex=${pointIndex}, onCurve=${onCurvePointIndex}, length=${handleLength}, key=${handleLengthKey}`);
-
         // Save handle length (only length, not angle - angle comes from skeleton)
         if (handleLength > 0.1) {
-          console.log(`[SYNC] Saving handle length: ${handleLengthKey}=${Math.round(handleLength)}`);
+          console.log(`[SYNC] Handle ${handleType}: pt=${pointIndex} -> ${handleLengthKey}=${Math.round(handleLength)}`);
           skeletonPoint[handleLengthKey] = Math.round(handleLength);
           hasChanges = true;
         } else if (skeletonPoint[handleLengthKey]) {
