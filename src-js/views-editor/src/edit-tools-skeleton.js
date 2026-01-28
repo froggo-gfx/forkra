@@ -402,13 +402,31 @@ export class SkeletonPenTool extends BaseTool {
         if (skeletonPoint.type) continue;
 
         const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
-        const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
-        const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+        let leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+        let rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
 
-        // Apply nudge offset for editable points
+        // Handle single-sided mode: redirect all width to one side
+        const singleSided = contour.singleSided ?? false;
+        const singleSidedDirection = contour.singleSidedDirection ?? "left";
+        if (singleSided) {
+          const totalWidth = leftHW + rightHW;
+          if (singleSidedDirection === "left") {
+            leftHW = totalWidth;
+            rightHW = 0;
+          } else {
+            leftHW = 0;
+            rightHW = totalWidth;
+          }
+        }
+
+        // Per-side editable flags
+        const isLeftEditable = skeletonPoint.leftEditable === true;
+        const isRightEditable = skeletonPoint.rightEditable === true;
+
+        // Apply nudge offset only if editable and width > 0 (matches generator behavior)
         const tangent = { x: -normal.y, y: normal.x };
-        const leftNudge = skeletonPoint.leftNudge || 0;
-        const rightNudge = skeletonPoint.rightNudge || 0;
+        const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
+        const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
 
         // Calculate rib point positions (including nudge)
         const leftRibPoint = {

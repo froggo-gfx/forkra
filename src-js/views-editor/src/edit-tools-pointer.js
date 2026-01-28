@@ -1789,27 +1789,41 @@ export class PointerTool extends BaseTool {
             onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
           };
 
+          // Check if this side is editable
+          const sideIsEditable = (dragSide === "left" && tp.isLeftEditable) || (dragSide === "right" && tp.isRightEditable);
+
           if (tp.isSingleSided) {
             // For single-sided, create behavior with totalWidth as the effective width
-            // We use a synthetic ribHit that makes the behavior track totalWidth
             const defaultWidth = contour.defaultWidth || 20;
             const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
             const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
             const totalWidth = leftHW + rightHW;
-            // Create a RibEditBehavior manually with totalWidth as originalHalfWidth
-            const behavior = new RibEditBehavior(
-              data.original,
-              tp.contourIndex,
-              tp.pointIndex,
-              dragSide,
-              normal,
-              { x: skeletonPoint.x, y: skeletonPoint.y }
-            );
-            // Override to track totalWidth; min 2 UPM since it's the full width
-            behavior.originalHalfWidth = totalWidth;
-            behavior.minHalfWidth = 2;
-            data.ribBehaviors.push({ behavior, target: tp });
-          } else if ((dragSide === "left" && tp.isLeftEditable) || (dragSide === "right" && tp.isRightEditable)) {
+
+            if (sideIsEditable) {
+              // Editable single-sided: use EditableRibBehavior for nudge support
+              const behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+              // Override to track totalWidth for width changes
+              behavior.originalHalfWidth = totalWidth;
+              behavior.minHalfWidth = 2;
+              // Force asymmetric mode to allow width changes in single-sided
+              behavior.isAsymmetric = true;
+              data.ribBehaviors.push({ behavior, target: tp });
+            } else {
+              // Non-editable single-sided: constrained to normal direction
+              const behavior = new RibEditBehavior(
+                data.original,
+                tp.contourIndex,
+                tp.pointIndex,
+                dragSide,
+                normal,
+                { x: skeletonPoint.x, y: skeletonPoint.y }
+              );
+              // Override to track totalWidth; min 2 UPM since it's the full width
+              behavior.originalHalfWidth = totalWidth;
+              behavior.minHalfWidth = 2;
+              data.ribBehaviors.push({ behavior, target: tp });
+            }
+          } else if (sideIsEditable) {
             // Editable mode: use EditableRibBehavior for free movement
             data.ribBehaviors.push({
               behavior: createEditableRibBehavior(data.original, ribHitForPoint),
@@ -1870,13 +1884,24 @@ export class PointerTool extends BaseTool {
             const contour = working.contours[target.contourIndex];
             const point = contour.points[target.pointIndex];
 
+            // Check if this side is editable
+            const sideIsEditable = (dragSide === "left" && target.isLeftEditable) || (dragSide === "right" && target.isRightEditable);
+
             if (target.isSingleSided) {
               // Single-sided: halfWidth from behavior is the new totalWidth
               // Store as symmetric width (generator handles single-sided projection)
               point.width = change.halfWidth;
               delete point.leftWidth;
               delete point.rightWidth;
-            } else if ((dragSide === "left" && target.isLeftEditable) || (dragSide === "right" && target.isRightEditable)) {
+              // Also apply nudge if editable
+              if (sideIsEditable && change.nudge !== undefined) {
+                if (dragSide === "left") {
+                  point.leftNudge = change.nudge;
+                } else {
+                  point.rightNudge = change.nudge;
+                }
+              }
+            } else if (sideIsEditable) {
               // Editable mode: behavior determines if width changes based on symmetric/asymmetric
               if (change.isAsymmetric) {
                 // Asymmetric: update per-side width and nudge
@@ -3010,10 +3035,14 @@ export class PointerTool extends BaseTool {
         const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
         const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
 
-        // Calculate tangent and nudge offsets for editable points
+        // Per-side editable flags
+        const isLeftEditable = skeletonPoint.leftEditable === true;
+        const isRightEditable = skeletonPoint.rightEditable === true;
+
+        // Calculate tangent and nudge offsets (only if editable, to match generator behavior)
         const tangent = { x: -normal.y, y: normal.x };
-        const leftNudge = skeletonPoint.leftNudge || 0;
-        const rightNudge = skeletonPoint.rightNudge || 0;
+        const leftNudge = isLeftEditable ? (skeletonPoint.leftNudge || 0) : 0;
+        const rightNudge = isRightEditable ? (skeletonPoint.rightNudge || 0) : 0;
 
         const singleSided = contour.singleSided ?? false;
         const singleSidedDirection = contour.singleSidedDirection ?? "left";
@@ -3040,7 +3069,7 @@ export class PointerTool extends BaseTool {
             };
           }
         } else {
-          // Normal mode: two rib points (including nudge offset)
+          // Normal mode: two rib points (including nudge offset if editable)
           const leftRibPoint = {
             x: skeletonPoint.x + normal.x * leftHW + tangent.x * leftNudge,
             y: skeletonPoint.y + normal.y * leftHW + tangent.y * leftNudge,

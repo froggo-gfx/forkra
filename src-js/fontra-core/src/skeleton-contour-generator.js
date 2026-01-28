@@ -52,9 +52,15 @@ export function getPointHalfWidth(point, defaultWidth, side) {
  * @param {Object} skeletonPoint - The skeleton point (may have nudge values)
  * @param {Object} normal - The normal vector at this point
  * @param {string} side - "left" or "right"
+ * @param {number} halfWidth - The half-width for this side (don't apply nudge if near 0)
  * @returns {Object} Modified rib point {x, y}
  */
-function applyNudgeToRibPoint(ribPoint, skeletonPoint, normal, side) {
+function applyNudgeToRibPoint(ribPoint, skeletonPoint, normal, side, halfWidth) {
+  // Don't apply nudge if width is near 0 (single-sided mode - this side matches skeleton)
+  if (halfWidth !== undefined && halfWidth < 0.5) {
+    return ribPoint;
+  }
+
   // Check per-side editable flag
   const editableKey = side === "left" ? "leftEditable" : "rightEditable";
   if (!skeletonPoint?.[editableKey]) {
@@ -847,14 +853,14 @@ function generateOffsetPointsForSegment(
         x: Math.round(segment.startPoint.x + startNormal.x * startLeftHW),
         y: Math.round(segment.startPoint.y + startNormal.y * startLeftHW),
       };
-      startLeftPt = applyNudgeToRibPoint(startLeftPt, segment.startPoint, startNormal, "left");
+      startLeftPt = applyNudgeToRibPoint(startLeftPt, segment.startPoint, startNormal, "left", startLeftHW);
       left.push({ ...startLeftPt, smooth: segment.startPoint.smooth });
 
       let startRightPt = {
         x: Math.round(segment.startPoint.x - startNormal.x * startRightHW),
         y: Math.round(segment.startPoint.y - startNormal.y * startRightHW),
       };
-      startRightPt = applyNudgeToRibPoint(startRightPt, segment.startPoint, startNormal, "right");
+      startRightPt = applyNudgeToRibPoint(startRightPt, segment.startPoint, startNormal, "right", startRightHW);
       right.push({ ...startRightPt, smooth: segment.startPoint.smooth });
     }
 
@@ -877,14 +883,14 @@ function generateOffsetPointsForSegment(
         x: Math.round(segment.endPoint.x + endNormal.x * endLeftHW),
         y: Math.round(segment.endPoint.y + endNormal.y * endLeftHW),
       };
-      endLeftPt = applyNudgeToRibPoint(endLeftPt, segment.endPoint, endNormal, "left");
+      endLeftPt = applyNudgeToRibPoint(endLeftPt, segment.endPoint, endNormal, "left", endLeftHW);
       left.push({ ...endLeftPt, smooth: segment.endPoint.smooth });
 
       let endRightPt = {
         x: Math.round(segment.endPoint.x - endNormal.x * endRightHW),
         y: Math.round(segment.endPoint.y - endNormal.y * endRightHW),
       };
-      endRightPt = applyNudgeToRibPoint(endRightPt, segment.endPoint, endNormal, "right");
+      endRightPt = applyNudgeToRibPoint(endRightPt, segment.endPoint, endNormal, "right", endRightHW);
       right.push({ ...endRightPt, smooth: segment.endPoint.smooth });
     }
   } else {
@@ -938,25 +944,25 @@ function generateOffsetPointsForSegment(
       x: Math.round(segment.startPoint.x + startNormal.x * startLeftHW),
       y: Math.round(segment.startPoint.y + startNormal.y * startLeftHW),
     };
-    fixedStartLeft = applyNudgeToRibPoint(fixedStartLeft, segment.startPoint, startNormal, "left");
+    fixedStartLeft = applyNudgeToRibPoint(fixedStartLeft, segment.startPoint, startNormal, "left", startLeftHW);
 
     let fixedStartRight = {
       x: Math.round(segment.startPoint.x - startNormal.x * startRightHW),
       y: Math.round(segment.startPoint.y - startNormal.y * startRightHW),
     };
-    fixedStartRight = applyNudgeToRibPoint(fixedStartRight, segment.startPoint, startNormal, "right");
+    fixedStartRight = applyNudgeToRibPoint(fixedStartRight, segment.startPoint, startNormal, "right", startRightHW);
 
     let fixedEndLeft = {
       x: Math.round(segment.endPoint.x + endNormal.x * endLeftHW),
       y: Math.round(segment.endPoint.y + endNormal.y * endLeftHW),
     };
-    fixedEndLeft = applyNudgeToRibPoint(fixedEndLeft, segment.endPoint, endNormal, "left");
+    fixedEndLeft = applyNudgeToRibPoint(fixedEndLeft, segment.endPoint, endNormal, "left", endLeftHW);
 
     let fixedEndRight = {
       x: Math.round(segment.endPoint.x - endNormal.x * endRightHW),
       y: Math.round(segment.endPoint.y - endNormal.y * endRightHW),
     };
-    fixedEndRight = applyNudgeToRibPoint(fixedEndRight, segment.endPoint, endNormal, "right");
+    fixedEndRight = applyNudgeToRibPoint(fixedEndRight, segment.endPoint, endNormal, "right", endRightHW);
 
     // Helper to add offset curves to output array
     const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd, sideHalfWidth) => {

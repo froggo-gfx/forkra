@@ -313,7 +313,8 @@ registerVisualizationLayerDefinition({
           let ribPoint, ribKey, isEditable;
 
           if (singleSidedDirection === "left") {
-            const nudge = point.leftNudge || 0;
+            // Only apply nudge if editable is true (matches generator behavior)
+            const nudge = isLeftEditable ? (point.leftNudge || 0) : 0;
             ribPoint = {
               x: Math.round(point.x + normal.x * totalWidth + tangent.x * nudge),
               y: Math.round(point.y + normal.y * totalWidth + tangent.y * nudge),
@@ -321,7 +322,8 @@ registerVisualizationLayerDefinition({
             ribKey = leftKey;
             isEditable = isLeftEditable;
           } else {
-            const nudge = point.rightNudge || 0;
+            // Only apply nudge if editable is true (matches generator behavior)
+            const nudge = isRightEditable ? (point.rightNudge || 0) : 0;
             ribPoint = {
               x: Math.round(point.x - normal.x * totalWidth + tangent.x * nudge),
               y: Math.round(point.y - normal.y * totalWidth + tangent.y * nudge),
@@ -341,10 +343,10 @@ registerVisualizationLayerDefinition({
           strokeDiamondNode(context, ribPoint, pointSize);
         } else {
           // Normal mode: two rib points
-          // Apply nudge offset if editable
+          // Only apply nudge offset if editable is true (matches generator behavior)
           const tangent = { x: -normal.y, y: normal.x };
-          const leftNudge = point.leftNudge || 0;
-          const rightNudge = point.rightNudge || 0;
+          const leftNudge = isLeftEditable ? (point.leftNudge || 0) : 0;
+          const rightNudge = isRightEditable ? (point.rightNudge || 0) : 0;
 
           const leftRibPoint = {
             x: Math.round(point.x + normal.x * leftHW + tangent.x * leftNudge),
