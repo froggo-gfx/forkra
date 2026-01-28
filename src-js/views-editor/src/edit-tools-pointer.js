@@ -1065,6 +1065,22 @@ export class PointerTool extends BaseTool {
       assert(layerInfo.length >= 1, "no layer to edit");
       layerInfo[0].isPrimaryLayer = true;
 
+      // === DEBUG: log initial state ===
+      console.log("[MixedDrag] === DRAG START ===");
+      console.log("[MixedDrag] selection:", [...sceneController.selection]);
+      console.log("[MixedDrag] hasSkeletonSelection:", hasSkeletonSelection, "hasRegularSelection:", hasRegularSelection);
+      console.log("[MixedDrag] skeletonPointSelection:", effectiveSkeletonPointSelection ? [...effectiveSkeletonPointSelection] : null);
+      console.log("[MixedDrag] pointSelection:", pointSelection);
+      for (const li of layerInfo) {
+        const path = li.layerGlyph.path;
+        console.log(`[MixedDrag] layer=${li.layerName} numContours=${path.numContours} numPoints=${path.numPoints}`);
+        for (let ci = 0; ci < path.contourInfo.length; ci++) {
+          const ep = path.contourInfo[ci].endPoint;
+          const sp = ci === 0 ? 0 : path.contourInfo[ci - 1].endPoint + 1;
+          console.log(`[MixedDrag]   contour[${ci}]: points ${sp}..${ep} (${ep - sp + 1} pts)`);
+        }
+      }
+
       // Setup for skeleton editing (if we have skeleton selection too)
       let skeletonEditState = null;
       if (hasSkeletonSelection) {
@@ -1073,6 +1089,8 @@ export class PointerTool extends BaseTool {
         const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
 
         if (skeletonData) {
+          console.log("[MixedDrag] skeletonData.generatedContourIndices:", skeletonData.generatedContourIndices);
+          console.log("[MixedDrag] skeletonData.contours.length:", skeletonData.contours.length);
           skeletonEditState = {
             editLayerName,
             layer,
@@ -1092,8 +1110,10 @@ export class PointerTool extends BaseTool {
       }
 
       let editChange;
+      let _debugFrameCount = 0;
 
       for await (const event of eventStream) {
+        _debugFrameCount++;
         const newEditBehaviorName = getBehaviorName(event);
 
         // Handle behavior change for regular points
@@ -1137,6 +1157,11 @@ export class PointerTool extends BaseTool {
         // Apply regular point changes
         for (const layer of layerInfo) {
           const layerEditChange = layer.editBehavior.makeChangeForDelta(delta);
+          if (_debugFrameCount <= 3) {
+            console.log(`[MixedDrag] frame=${_debugFrameCount} delta=`, delta);
+            console.log(`[MixedDrag] frame=${_debugFrameCount} regularEditChange=`, JSON.stringify(layerEditChange));
+            console.log(`[MixedDrag] frame=${_debugFrameCount} path before applyChange: numContours=${layer.layerGlyph.path.numContours} numPoints=${layer.layerGlyph.path.numPoints}`);
+          }
           applyChange(layer.layerGlyph, layerEditChange);
           deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
           layer.shouldConnect = layer.connectDetector.shouldConnect(layer.isPrimaryLayer);
@@ -1169,28 +1194,36 @@ export class PointerTool extends BaseTool {
 
           // Regenerate outline and update customData
           const staticGlyph = layer.glyph;
+          if (_debugFrameCount <= 3) {
+            console.log(`[MixedDrag] frame=${_debugFrameCount} BEFORE skeleton regen: numContours=${staticGlyph.path.numContours} numPoints=${staticGlyph.path.numPoints}`);
+            console.log(`[MixedDrag] frame=${_debugFrameCount} generatedContourIndices=`, workingSkeletonData.generatedContourIndices);
+          }
           const skeletonChanges = recordChanges(staticGlyph, (sg) => {
             // Remove old generated contours
             const oldGeneratedIndices = workingSkeletonData.generatedContourIndices || [];
-            const sortedIndicesDesc = [...oldGeneratedIndices].sort((a, b) => b - a);
-            const sortedIndicesAsc = [...oldGeneratedIndices].sort((a, b) => a - b);
-            for (const idx of sortedIndicesDesc) {
+            const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+            for (const idx of sortedIndices) {
               if (idx < sg.path.numContours) {
                 sg.path.deleteContour(idx);
               }
             }
-            // Generate new contours — insert at original indices to preserve
-            // path structure (regular contour point indices must stay valid
-            // for the EditBehavior that was created at drag start)
+            // Generate new contours
             const generatedContours = generateContoursFromSkeleton(workingSkeletonData);
             const newGeneratedIndices = [];
-            for (let i = 0; i < generatedContours.length; i++) {
-              const insertIdx =
-                i < sortedIndicesAsc.length ? sortedIndicesAsc[i] : sg.path.numContours;
-              sg.path.insertContour(insertIdx, packContour(generatedContours[i]));
-              newGeneratedIndices.push(insertIdx);
+            for (const contour of generatedContours) {
+              const newIndex = sg.path.numContours;
+              sg.path.insertContour(sg.path.numContours, packContour(contour));
+              newGeneratedIndices.push(newIndex);
             }
             workingSkeletonData.generatedContourIndices = newGeneratedIndices;
+            if (_debugFrameCount <= 3) {
+              console.log(`[MixedDrag] frame=${_debugFrameCount} AFTER skeleton regen: numContours=${sg.path.numContours} numPoints=${sg.path.numPoints} newGeneratedIndices=`, newGeneratedIndices);
+              for (let ci = 0; ci < sg.path.contourInfo.length; ci++) {
+                const ep = sg.path.contourInfo[ci].endPoint;
+                const sp = ci === 0 ? 0 : sg.path.contourInfo[ci - 1].endPoint + 1;
+                console.log(`[MixedDrag] frame=${_debugFrameCount}   contour[${ci}]: points ${sp}..${ep} (${ep - sp + 1} pts)`);
+              }
+            }
           });
           const prefixedSkeletonChanges = skeletonChanges.prefixed(["layers", editLayerName, "glyph"]);
           deepEditChanges.push(prefixedSkeletonChanges.change);
@@ -1215,6 +1248,13 @@ export class PointerTool extends BaseTool {
 
         editChange = consolidateChanges(deepEditChanges);
         await sendIncrementalChange(editChange, true);
+      }
+
+      console.log("[MixedDrag] === DRAG END === frames:", _debugFrameCount);
+      console.log("[MixedDrag] editChange:", JSON.stringify(editChange).slice(0, 500));
+      for (const li of layerInfo) {
+        const path = li.layerGlyph.path;
+        console.log(`[MixedDrag] final layer=${li.layerName} numContours=${path.numContours} numPoints=${path.numPoints}`);
       }
 
       const rollbackParts = layerInfo.map((layer) =>
