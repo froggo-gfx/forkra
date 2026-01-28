@@ -2370,52 +2370,115 @@ export class EditorController extends ViewController {
 
     const hasRegularSelection = pointSelection?.length || componentSelection?.length ||
       anchorSelection?.length || guidelineSelection?.length || backgroundImageSelection;
+    const hasSkeletonSelection = skeletonPointSelection?.size > 0;
 
-    // Delete regular selection FIRST (while point indices are still valid)
-    if (hasRegularSelection) {
-      await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
-        for (const layerGlyph of Object.values(layerGlyphs)) {
-          if (event.altKey) {
-            // Behave like "cut", but don't put anything on the clipboard
-            this._prepareCopyOrCut(layerGlyph, true, false);
-          } else {
-            if (pointSelection) {
-              deleteSelectedPoints(layerGlyph.path, pointSelection);
-            }
-            if (componentSelection) {
-              for (const componentIndex of reversed(componentSelection)) {
-                layerGlyph.components.splice(componentIndex, 1);
+    if (!hasRegularSelection && !hasSkeletonSelection) {
+      return;
+    }
+
+    // Single editGlyph call for both regular and skeleton deletion
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      // 1. Delete regular selection FIRST (while point indices are still valid)
+      if (hasRegularSelection) {
+        const layerGlyphs = this.sceneController.getEditingLayerFromGlyphLayers(
+          glyph.layers
+        );
+        const regularChanges = recordChanges(glyph, (subject) => {
+          for (const layerGlyph of Object.values(layerGlyphs)) {
+            if (event.altKey) {
+              this._prepareCopyOrCut(layerGlyph, true, false);
+            } else {
+              if (pointSelection) {
+                deleteSelectedPoints(layerGlyph.path, pointSelection);
               }
-            }
-            if (anchorSelection) {
-              for (const anchorIndex of reversed(anchorSelection)) {
-                layerGlyph.anchors.splice(anchorIndex, 1);
-              }
-            }
-            if (guidelineSelection) {
-              for (const guidelineIndex of reversed(guidelineSelection)) {
-                const guideline = layerGlyph.guidelines[guidelineIndex];
-                if (guideline.locked) {
-                  // don't delete locked guidelines
-                  continue;
+              if (componentSelection) {
+                for (const componentIndex of reversed(componentSelection)) {
+                  layerGlyph.components.splice(componentIndex, 1);
                 }
-                layerGlyph.guidelines.splice(guidelineIndex, 1);
               }
-            }
-            if (backgroundImageSelection) {
-              layerGlyph.backgroundImage = undefined;
+              if (anchorSelection) {
+                for (const anchorIndex of reversed(anchorSelection)) {
+                  layerGlyph.anchors.splice(anchorIndex, 1);
+                }
+              }
+              if (guidelineSelection) {
+                for (const guidelineIndex of reversed(guidelineSelection)) {
+                  const guideline = layerGlyph.guidelines[guidelineIndex];
+                  if (guideline.locked) {
+                    continue;
+                  }
+                  layerGlyph.guidelines.splice(guidelineIndex, 1);
+                }
+              }
+              if (backgroundImageSelection) {
+                layerGlyph.backgroundImage = undefined;
+              }
             }
           }
+        });
+        if (regularChanges.hasChange) {
+          allChanges.push(regularChanges);
         }
-        this.sceneController.selection = new Set();
-        return translate("action.delete-selection");
-      });
-    }
+      }
 
-    // Delete skeleton points AFTER regular (skeleton regen shifts path indices)
-    if (skeletonPointSelection?.size) {
-      await this._deleteSkeletonPoints(skeletonPointSelection);
-    }
+      // 2. Delete skeleton points AFTER regular (skeleton regen shifts path indices)
+      if (hasSkeletonSelection) {
+        const SKELETON_KEY = "fontra.skeleton";
+        const editLayerName = this.sceneController.editingLayerNames?.[0];
+        const layer = editLayerName ? glyph.layers[editLayerName] : null;
+        let skeletonData = layer?.customData?.[SKELETON_KEY];
+
+        if (skeletonData) {
+          skeletonData = JSON.parse(JSON.stringify(skeletonData));
+          const modified = deleteSkeletonPoints(skeletonData, skeletonPointSelection);
+
+          if (modified) {
+            const staticGlyph = layer.glyph;
+
+            // Regenerate outline contours
+            const pathChange = recordChanges(staticGlyph, (sg) => {
+              const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
+              const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+              for (const idx of sortedIndices) {
+                if (idx < sg.path.numContours) {
+                  sg.path.deleteContour(idx);
+                }
+              }
+              const generatedContours = generateContoursFromSkeleton(skeletonData);
+              const newGeneratedIndices = [];
+              for (const contour of generatedContours) {
+                const newIndex = sg.path.numContours;
+                sg.path.insertContour(newIndex, packContour(contour));
+                newGeneratedIndices.push(newIndex);
+              }
+              skeletonData.generatedContourIndices = newGeneratedIndices;
+            });
+            allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+            // Save updated skeletonData
+            const customDataChange = recordChanges(layer, (l) => {
+              l.customData[SKELETON_KEY] = skeletonData;
+            });
+            allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+          }
+        }
+      }
+
+      if (!allChanges.length) return;
+
+      const combinedChange = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combinedChange.change);
+
+      this.sceneController.selection = new Set();
+
+      return {
+        changes: combinedChange,
+        undoLabel: translate("action.delete-selection"),
+        broadcast: true,
+      };
+    });
   }
 
   /**
