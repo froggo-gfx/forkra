@@ -46,63 +46,6 @@ export function getPointHalfWidth(point, defaultWidth, side) {
 }
 
 /**
- * Rotate a vector by an angle (in radians).
- * @param {Object} vec - The vector {x, y}
- * @param {number} angle - The angle in radians
- * @returns {Object} Rotated vector {x, y}
- */
-function rotateVector(vec, angle) {
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  return {
-    x: vec.x * cos - vec.y * sin,
-    y: vec.x * sin + vec.y * cos,
-  };
-}
-
-/**
- * Compute handle position from stored polar coordinates.
- * @param {Object} onCurvePoint - The on-curve point position {x, y}
- * @param {Object} normal - The normal vector at this point
- * @param {number} length - Handle length
- * @param {number} angle - Handle angle relative to normal (radians)
- * @returns {Object} Handle position {x, y}
- */
-function computeHandleFromPolar(onCurvePoint, normal, length, angle) {
-  const handleDir = rotateVector(normal, angle);
-  return {
-    x: Math.round(onCurvePoint.x + handleDir.x * length),
-    y: Math.round(onCurvePoint.y + handleDir.y * length),
-  };
-}
-
-/**
- * Compute polar coordinates (length, angle) of a handle relative to normal.
- * @param {Object} onCurvePoint - The on-curve point position {x, y}
- * @param {Object} handlePoint - The handle position {x, y}
- * @param {Object} normal - The normal vector at this point
- * @returns {Object} {length, angle} where angle is relative to normal
- */
-export function computeHandlePolar(onCurvePoint, handlePoint, normal) {
-  const dx = handlePoint.x - onCurvePoint.x;
-  const dy = handlePoint.y - onCurvePoint.y;
-  const length = Math.sqrt(dx * dx + dy * dy);
-
-  if (length < 0.001) {
-    return { length: 0, angle: 0 };
-  }
-
-  // Angle of handle vector
-  const handleAngle = Math.atan2(dy, dx);
-  // Angle of normal vector
-  const normalAngle = Math.atan2(normal.y, normal.x);
-  // Angle relative to normal
-  const relativeAngle = handleAngle - normalAngle;
-
-  return { length, angle: relativeAngle };
-}
-
-/**
  * Apply nudge offset to a rib point position.
  * Nudge moves the point along the tangent direction (perpendicular to normal).
  * @param {Object} ribPoint - The rib point {x, y} to modify
@@ -1088,57 +1031,77 @@ function generateOffsetPointsForSegment(
           y: Math.round(fixedEnd.y + h2Offset.y),
         };
 
-        // For editable rib points: use skeleton handles directly (not computed offset curves)
+        // For editable rib points: use skeleton handle DIRECTION with stored/computed LENGTH
         // Handle1 is the "out" handle of the start point
         const editableKeyStart = side === "left" ? "leftEditable" : "rightEditable";
-        if (startSkelPoint?.[editableKeyStart]) {
-          const handleOutLengthKey = `${side}HandleOutLength`;
-          const handleOutAngleKey = `${side}HandleOutAngle`;
-          if (startSkelPoint[handleOutLengthKey] !== undefined && startSkelPoint[handleOutAngleKey] !== undefined) {
-            // Use stored polar coordinates
-            adjustedHandle1 = computeHandleFromPolar(
-              fixedStart,
-              startNorm,
-              startSkelPoint[handleOutLengthKey],
-              startSkelPoint[handleOutAngleKey]
-            );
-          } else if (segment.controlPoints.length > 0) {
-            // Use skeleton handle directly: generated_handle = generated_oncurve + skeleton_handle_offset
-            const skelHandle = segment.controlPoints[0];
-            const skelHandleOffset = {
-              x: skelHandle.x - segment.startPoint.x,
-              y: skelHandle.y - segment.startPoint.y,
+        if (startSkelPoint?.[editableKeyStart] && segment.controlPoints.length > 0) {
+          // Get skeleton handle direction (ALWAYS from skeleton)
+          const skelHandle = segment.controlPoints[0];
+          const skelHandleOffset = {
+            x: skelHandle.x - segment.startPoint.x,
+            y: skelHandle.y - segment.startPoint.y,
+          };
+          const skelHandleLength = Math.sqrt(skelHandleOffset.x * skelHandleOffset.x + skelHandleOffset.y * skelHandleOffset.y);
+
+          if (skelHandleLength > 0.001) {
+            // Normalize skeleton handle direction
+            const skelHandleDir = {
+              x: skelHandleOffset.x / skelHandleLength,
+              y: skelHandleOffset.y / skelHandleLength,
             };
+
+            // Get handle length: use stored value or default from offset curve computation
+            const handleOutLengthKey = `${side}HandleOutLength`;
+            let handleLength;
+            if (startSkelPoint[handleOutLengthKey] !== undefined) {
+              // Use stored length from user edit
+              handleLength = startSkelPoint[handleOutLengthKey];
+            } else {
+              // Use default: same as skeleton handle length (offset curve default)
+              handleLength = skelHandleLength;
+            }
+
+            // Apply: skeleton direction * stored/default length
             adjustedHandle1 = {
-              x: Math.round(fixedStart.x + skelHandleOffset.x),
-              y: Math.round(fixedStart.y + skelHandleOffset.y),
+              x: Math.round(fixedStart.x + skelHandleDir.x * handleLength),
+              y: Math.round(fixedStart.y + skelHandleDir.y * handleLength),
             };
           }
         }
 
         // Handle2 is the "in" handle of the end point
         const editableKeyEnd = side === "left" ? "leftEditable" : "rightEditable";
-        if (endSkelPoint?.[editableKeyEnd]) {
-          const handleInLengthKey = `${side}HandleInLength`;
-          const handleInAngleKey = `${side}HandleInAngle`;
-          if (endSkelPoint[handleInLengthKey] !== undefined && endSkelPoint[handleInAngleKey] !== undefined) {
-            // Use stored polar coordinates
-            adjustedHandle2 = computeHandleFromPolar(
-              fixedEnd,
-              endNorm,
-              endSkelPoint[handleInLengthKey],
-              endSkelPoint[handleInAngleKey]
-            );
-          } else if (segment.controlPoints.length > 0) {
-            // Use skeleton handle directly: generated_handle = generated_oncurve + skeleton_handle_offset
-            const skelHandle = segment.controlPoints[segment.controlPoints.length - 1];
-            const skelHandleOffset = {
-              x: skelHandle.x - segment.endPoint.x,
-              y: skelHandle.y - segment.endPoint.y,
+        if (endSkelPoint?.[editableKeyEnd] && segment.controlPoints.length > 0) {
+          // Get skeleton handle direction (ALWAYS from skeleton)
+          const skelHandle = segment.controlPoints[segment.controlPoints.length - 1];
+          const skelHandleOffset = {
+            x: skelHandle.x - segment.endPoint.x,
+            y: skelHandle.y - segment.endPoint.y,
+          };
+          const skelHandleLength = Math.sqrt(skelHandleOffset.x * skelHandleOffset.x + skelHandleOffset.y * skelHandleOffset.y);
+
+          if (skelHandleLength > 0.001) {
+            // Normalize skeleton handle direction
+            const skelHandleDir = {
+              x: skelHandleOffset.x / skelHandleLength,
+              y: skelHandleOffset.y / skelHandleLength,
             };
+
+            // Get handle length: use stored value or default from offset curve computation
+            const handleInLengthKey = `${side}HandleInLength`;
+            let handleLength;
+            if (endSkelPoint[handleInLengthKey] !== undefined) {
+              // Use stored length from user edit
+              handleLength = endSkelPoint[handleInLengthKey];
+            } else {
+              // Use default: same as skeleton handle length (offset curve default)
+              handleLength = skelHandleLength;
+            }
+
+            // Apply: skeleton direction * stored/default length
             adjustedHandle2 = {
-              x: Math.round(fixedEnd.x + skelHandleOffset.x),
-              y: Math.round(fixedEnd.y + skelHandleOffset.y),
+              x: Math.round(fixedEnd.x + skelHandleDir.x * handleLength),
+              y: Math.round(fixedEnd.y + skelHandleDir.y * handleLength),
             };
           }
         }
@@ -1202,57 +1165,77 @@ function generateOffsetPointsForSegment(
             y: Math.round(currentEnd.y + h2Offset.y),
           };
 
-          // For editable rib points: use skeleton handles directly (only for first/last curves)
+          // For editable rib points: use skeleton handle DIRECTION with stored/computed LENGTH
           const editableKey = side === "left" ? "leftEditable" : "rightEditable";
 
           // First curve: handle1 is the "out" handle of the start skeleton point
-          if (isFirstCurve && startSkelPoint?.[editableKey]) {
-            const handleOutLengthKey = `${side}HandleOutLength`;
-            const handleOutAngleKey = `${side}HandleOutAngle`;
-            if (startSkelPoint[handleOutLengthKey] !== undefined && startSkelPoint[handleOutAngleKey] !== undefined) {
-              // Use stored polar coordinates
-              adjustedH1 = computeHandleFromPolar(
-                fixedStart,
-                startNorm,
-                startSkelPoint[handleOutLengthKey],
-                startSkelPoint[handleOutAngleKey]
-              );
-            } else if (segment.controlPoints.length > 0) {
-              // Use skeleton handle directly
-              const skelHandle = segment.controlPoints[0];
-              const skelHandleOffset = {
-                x: skelHandle.x - segment.startPoint.x,
-                y: skelHandle.y - segment.startPoint.y,
+          if (isFirstCurve && startSkelPoint?.[editableKey] && segment.controlPoints.length > 0) {
+            // Get skeleton handle direction (ALWAYS from skeleton)
+            const skelHandle = segment.controlPoints[0];
+            const skelHandleOffset = {
+              x: skelHandle.x - segment.startPoint.x,
+              y: skelHandle.y - segment.startPoint.y,
+            };
+            const skelHandleLength = Math.sqrt(skelHandleOffset.x * skelHandleOffset.x + skelHandleOffset.y * skelHandleOffset.y);
+
+            if (skelHandleLength > 0.001) {
+              // Normalize skeleton handle direction
+              const skelHandleDir = {
+                x: skelHandleOffset.x / skelHandleLength,
+                y: skelHandleOffset.y / skelHandleLength,
               };
+
+              // Get handle length: use stored value or default from offset curve computation
+              const handleOutLengthKey = `${side}HandleOutLength`;
+              let handleLength;
+              if (startSkelPoint[handleOutLengthKey] !== undefined) {
+                // Use stored length from user edit
+                handleLength = startSkelPoint[handleOutLengthKey];
+              } else {
+                // Use default: same as skeleton handle length
+                handleLength = skelHandleLength;
+              }
+
+              // Apply: skeleton direction * stored/default length
               adjustedH1 = {
-                x: Math.round(fixedStart.x + skelHandleOffset.x),
-                y: Math.round(fixedStart.y + skelHandleOffset.y),
+                x: Math.round(fixedStart.x + skelHandleDir.x * handleLength),
+                y: Math.round(fixedStart.y + skelHandleDir.y * handleLength),
               };
             }
           }
 
           // Last curve: handle2 is the "in" handle of the end skeleton point
-          if (isLastCurve && endSkelPoint?.[editableKey]) {
-            const handleInLengthKey = `${side}HandleInLength`;
-            const handleInAngleKey = `${side}HandleInAngle`;
-            if (endSkelPoint[handleInLengthKey] !== undefined && endSkelPoint[handleInAngleKey] !== undefined) {
-              // Use stored polar coordinates
-              adjustedH2 = computeHandleFromPolar(
-                fixedEnd,
-                endNorm,
-                endSkelPoint[handleInLengthKey],
-                endSkelPoint[handleInAngleKey]
-              );
-            } else if (segment.controlPoints.length > 0) {
-              // Use skeleton handle directly
-              const skelHandle = segment.controlPoints[segment.controlPoints.length - 1];
-              const skelHandleOffset = {
-                x: skelHandle.x - segment.endPoint.x,
-                y: skelHandle.y - segment.endPoint.y,
+          if (isLastCurve && endSkelPoint?.[editableKey] && segment.controlPoints.length > 0) {
+            // Get skeleton handle direction (ALWAYS from skeleton)
+            const skelHandle = segment.controlPoints[segment.controlPoints.length - 1];
+            const skelHandleOffset = {
+              x: skelHandle.x - segment.endPoint.x,
+              y: skelHandle.y - segment.endPoint.y,
+            };
+            const skelHandleLength = Math.sqrt(skelHandleOffset.x * skelHandleOffset.x + skelHandleOffset.y * skelHandleOffset.y);
+
+            if (skelHandleLength > 0.001) {
+              // Normalize skeleton handle direction
+              const skelHandleDir = {
+                x: skelHandleOffset.x / skelHandleLength,
+                y: skelHandleOffset.y / skelHandleLength,
               };
+
+              // Get handle length: use stored value or default from offset curve computation
+              const handleInLengthKey = `${side}HandleInLength`;
+              let handleLength;
+              if (endSkelPoint[handleInLengthKey] !== undefined) {
+                // Use stored length from user edit
+                handleLength = endSkelPoint[handleInLengthKey];
+              } else {
+                // Use default: same as skeleton handle length
+                handleLength = skelHandleLength;
+              }
+
+              // Apply: skeleton direction * stored/default length
               adjustedH2 = {
-                x: Math.round(fixedEnd.x + skelHandleOffset.x),
-                y: Math.round(fixedEnd.y + skelHandleOffset.y),
+                x: Math.round(fixedEnd.x + skelHandleDir.x * handleLength),
+                y: Math.round(fixedEnd.y + skelHandleDir.y * handleLength),
               };
             }
           }

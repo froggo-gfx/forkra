@@ -2055,10 +2055,8 @@ export class PointerTool extends BaseTool {
     // Track if any changes were made
     let hasChanges = false;
 
-    // Process each editable rib point (only on-curve for now, skip handles)
+    // Process each editable rib point
     for (const ribPoint of editableRibPoints) {
-      if (ribPoint.isHandle) continue; // Skip handles for now
-
       const { pointIndex, skeletonContourIndex, skeletonPointIndex, side } = ribPoint;
 
       const contour = skeletonData.contours[skeletonContourIndex];
@@ -2066,6 +2064,41 @@ export class PointerTool extends BaseTool {
 
       const skeletonPoint = contour.points[skeletonPointIndex];
       if (!skeletonPoint) continue;
+
+      if (ribPoint.isHandle) {
+        // Handle point: save only the LENGTH (angle comes from skeleton)
+        const { handleType, onCurvePointIndex } = ribPoint;
+
+        // Get handle position from path
+        const handlePos = path.getPoint(pointIndex);
+        if (!handlePos) continue;
+
+        // Get on-curve position from path
+        const onCurvePos = path.getPoint(onCurvePointIndex);
+        if (!onCurvePos) continue;
+
+        // Calculate handle length
+        const dx = handlePos.x - onCurvePos.x;
+        const dy = handlePos.y - onCurvePos.y;
+        const handleLength = Math.sqrt(dx * dx + dy * dy);
+
+        // Build the key for this handle length
+        // e.g., "leftHandleOutLength", "rightHandleInLength"
+        const handleLengthKey = `${side}Handle${handleType === "in" ? "In" : "Out"}Length`;
+
+        // Save handle length (only length, not angle - angle comes from skeleton)
+        if (handleLength > 0.1) {
+          skeletonPoint[handleLengthKey] = Math.round(handleLength);
+          hasChanges = true;
+        } else if (skeletonPoint[handleLengthKey]) {
+          delete skeletonPoint[handleLengthKey];
+          hasChanges = true;
+        }
+
+        continue;
+      }
+
+      // On-curve point: save nudge and width
 
       // Get new point position from path
       const newPos = path.getPoint(pointIndex);
