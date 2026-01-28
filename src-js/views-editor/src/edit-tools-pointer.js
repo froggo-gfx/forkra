@@ -1790,8 +1790,9 @@ export class PointerTool extends BaseTool {
               normal,
               { x: skeletonPoint.x, y: skeletonPoint.y }
             );
-            // Override the originalHalfWidth to be the totalWidth
+            // Override to track totalWidth; min 2 UPM since it's the full width
             behavior.originalHalfWidth = totalWidth;
+            behavior.minHalfWidth = 2;
             data.ribBehaviors.push({ behavior, target: tp });
           } else {
             const ribHitForPoint = {
