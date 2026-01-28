@@ -1040,11 +1040,8 @@ export class SkeletonPenTool extends BaseTool {
       const layersData = {};
       let newPointIndex = 0;
 
-      console.log("[_handleAddSkeletonPoint] editingLayerNames:", this.sceneController.editingLayerNames);
-      console.log("[_handleAddSkeletonPoint] glyph.layers keys:", Object.keys(glyph.layers));
       for (const editLayerName of this.sceneController.editingLayerNames) {
-        let layer = glyph.layers[editLayerName];
-        console.log("[_handleAddSkeletonPoint] layer", editLayerName, "exists:", !!layer);
+        const layer = glyph.layers[editLayerName];
         if (!layer) continue;
 
         let skeletonData;

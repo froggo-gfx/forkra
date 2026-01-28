@@ -1419,20 +1419,14 @@ export class SceneController {
 
     // Find skeleton customData from an existing source layer to copy
     let sourceCustomData = null;
-    const existingLayerNames = Object.keys(varGlyph.glyph.layers);
-    console.log("[_insertGlyphSourceIfAtFontSource] Creating new layer:", layerName);
-    console.log("[_insertGlyphSourceIfAtFontSource] Existing layers:", existingLayerNames);
-    for (const existingLayerName of existingLayerNames) {
+    for (const existingLayerName of Object.keys(varGlyph.glyph.layers)) {
       const existingLayer = varGlyph.glyph.layers[existingLayerName];
-      console.log("[_insertGlyphSourceIfAtFontSource] Checking layer:", existingLayerName, "customData:", existingLayer?.customData);
       if (existingLayer?.customData?.["fontra.skeleton"]) {
         // Deep clone the customData to avoid sharing references
         sourceCustomData = JSON.parse(JSON.stringify(existingLayer.customData));
-        console.log("[_insertGlyphSourceIfAtFontSource] Found skeleton data in layer:", existingLayerName);
         break;
       }
     }
-    console.log("[_insertGlyphSourceIfAtFontSource] sourceCustomData:", sourceCustomData);
 
     const addSourceChanges = recordChanges(varGlyph.glyph, (glyph) => {
       glyph.sources.push(
@@ -1447,9 +1441,6 @@ export class SceneController {
       // Copy skeleton customData if found
       if (sourceCustomData) {
         newLayer.customData = sourceCustomData;
-        console.log("[_insertGlyphSourceIfAtFontSource] Copied customData to new layer");
-      } else {
-        console.log("[_insertGlyphSourceIfAtFontSource] No skeleton customData to copy");
       }
       glyph.layers[layerName] = newLayer;
     });

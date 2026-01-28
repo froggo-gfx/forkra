@@ -1474,7 +1474,16 @@ export default class DesignspaceNavigationPanel extends Panel {
         })
       );
       if (doAddLayer) {
-        glyph.layers[layerName] = Layer.fromObject({ glyph: instance });
+        const newLayer = Layer.fromObject({ glyph: instance });
+        // Copy skeleton customData from an existing layer if present
+        for (const existingLayerName of Object.keys(glyph.layers)) {
+          const existingLayer = glyph.layers[existingLayerName];
+          if (existingLayer?.customData?.["fontra.skeleton"]) {
+            newLayer.customData = JSON.parse(JSON.stringify(existingLayer.customData));
+            break;
+          }
+        }
+        glyph.layers[layerName] = newLayer;
       }
       return translate("sidebar.designspace-navigation.dialog.add-source.title");
     });
