@@ -2020,15 +2020,11 @@ export class PointerTool extends BaseTool {
 
     for (const ribPoint of editableRibPoints) {
       if (ribPoint.isHandle) {
-        // Handle selected: add on-curve point and other handle
-        const onCurveIdx = ribPoint.onCurvePointIndex;
-        console.log("[EXPAND] handle", ribPoint.pointIndex, "-> adding on-curve", onCurveIdx);
-        expandedSelection.add(`point/${onCurveIdx}`);
-
-        // Also add the other handle (in/out)
-        this._addAdjacentHandles(expandedSelection, path, onCurveIdx);
+        // Handle selected: DON'T expand - only the handle should move
+        // This is standard bezier editing behavior
+        console.log("[EXPAND] handle", ribPoint.pointIndex, "-> not expanding (handle-only drag)");
       } else {
-        // On-curve selected: add both handles
+        // On-curve selected: add both handles so they move together
         const pointIndex = ribPoint.pointIndex;
         console.log("[EXPAND] on-curve", pointIndex, "-> adding handles");
         this._addAdjacentHandles(expandedSelection, path, pointIndex);
@@ -2168,22 +2164,27 @@ export class PointerTool extends BaseTool {
       if (!skeletonPoint) continue;
 
       if (ribPoint.isHandle) {
-        // Handle selected: save ALL related points (on-curve + both handles)
-        const { handleType, onCurvePointIndex } = ribPoint;
+        // Handle selected: save ONLY this handle (standard bezier behavior)
+        const { handleType } = ribPoint;
 
-        // Save on-curve position
-        const onCurvePos = path.getPoint(onCurvePointIndex);
-        if (onCurvePos) {
-          const positionKey = side === "left" ? "leftPosition" : "rightPosition";
-          skeletonPoint[positionKey] = {
-            x: Math.round(onCurvePos.x),
-            y: Math.round(onCurvePos.y),
-          };
-          hasChanges = true;
+        // Get handle position from path
+        const handlePos = path.getPoint(pointIndex);
+        if (!handlePos) continue;
+
+        // For right side, In/Out are swapped due to opposite contour direction
+        const isRightSide = side === "right";
+        let handleKey;
+        if (handleType === "in") {
+          handleKey = isRightSide ? `${side}HandleOut` : `${side}HandleIn`;
+        } else {
+          handleKey = isRightSide ? `${side}HandleIn` : `${side}HandleOut`;
         }
 
-        // Save both handles using the on-curve index
-        this._saveAdjacentHandles(skeletonPoint, path, onCurvePointIndex, side);
+        skeletonPoint[handleKey] = {
+          x: Math.round(handlePos.x),
+          y: Math.round(handlePos.y),
+        };
+        console.log("[SYNC] handle only - saving", handleKey, "=", skeletonPoint[handleKey]);
         hasChanges = true;
 
         continue;
