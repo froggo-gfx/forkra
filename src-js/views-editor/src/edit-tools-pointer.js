@@ -1712,13 +1712,16 @@ export class PointerTool extends BaseTool {
       if (!pt || pt.type) return; // skip off-curve points
       const isAsym = pt.leftWidth !== undefined || pt.rightWidth !== undefined;
       const isSingleSided = contour.singleSided ?? false;
-      const isEditable = pt.editable === true;
+      // Per-side editable: check based on dragSide (determined later)
+      const isLeftEditable = pt.leftEditable === true;
+      const isRightEditable = pt.rightEditable === true;
       targetPointsMap.set(key, {
         contourIndex: ci,
         pointIndex: pi,
         isAsymmetric: isAsym,
         isSingleSided,
-        isEditable,
+        isLeftEditable,
+        isRightEditable,
       });
     };
 
@@ -1806,7 +1809,7 @@ export class PointerTool extends BaseTool {
             behavior.originalHalfWidth = totalWidth;
             behavior.minHalfWidth = 2;
             data.ribBehaviors.push({ behavior, target: tp });
-          } else if (tp.isEditable) {
+          } else if ((dragSide === "left" && tp.isLeftEditable) || (dragSide === "right" && tp.isRightEditable)) {
             // Editable mode: use EditableRibBehavior for free movement
             data.ribBehaviors.push({
               behavior: createEditableRibBehavior(data.original, ribHitForPoint),
@@ -1873,7 +1876,7 @@ export class PointerTool extends BaseTool {
               point.width = change.halfWidth;
               delete point.leftWidth;
               delete point.rightWidth;
-            } else if (target.isEditable) {
+            } else if ((dragSide === "left" && target.isLeftEditable) || (dragSide === "right" && target.isRightEditable)) {
               // Editable mode: update width (as asymmetric) and nudge
               if (dragSide === "left") {
                 point.leftWidth = change.halfWidth;

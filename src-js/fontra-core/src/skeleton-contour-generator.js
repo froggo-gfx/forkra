@@ -55,7 +55,9 @@ export function getPointHalfWidth(point, defaultWidth, side) {
  * @returns {Object} Modified rib point {x, y}
  */
 function applyNudgeToRibPoint(ribPoint, skeletonPoint, normal, side) {
-  if (!skeletonPoint?.editable) {
+  // Check per-side editable flag
+  const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+  if (!skeletonPoint?.[editableKey]) {
     return ribPoint;
   }
 

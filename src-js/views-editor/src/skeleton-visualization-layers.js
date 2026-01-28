@@ -302,15 +302,15 @@ registerVisualizationLayerDefinition({
         const leftKey = `${contourIndex}/${pointIndex}/left`;
         const rightKey = `${contourIndex}/${pointIndex}/right`;
 
-        // Determine if this point is editable
-        const isEditable = point.editable === true;
-        const pointSize = isEditable ? parameters.editablePointSize : parameters.pointSize;
+        // Determine if each side is editable (per-side editable)
+        const isLeftEditable = point.leftEditable === true;
+        const isRightEditable = point.rightEditable === true;
 
         if (singleSided) {
           // Single-sided mode: only one rib point at total width
           const totalWidth = leftHW + rightHW;
           const tangent = { x: -normal.y, y: normal.x };
-          let ribPoint, ribKey;
+          let ribPoint, ribKey, isEditable;
 
           if (singleSidedDirection === "left") {
             const nudge = point.leftNudge || 0;
@@ -319,6 +319,7 @@ registerVisualizationLayerDefinition({
               y: Math.round(point.y + normal.y * totalWidth + tangent.y * nudge),
             };
             ribKey = leftKey;
+            isEditable = isLeftEditable;
           } else {
             const nudge = point.rightNudge || 0;
             ribPoint = {
@@ -326,8 +327,10 @@ registerVisualizationLayerDefinition({
               y: Math.round(point.y - normal.y * totalWidth + tangent.y * nudge),
             };
             ribKey = rightKey;
+            isEditable = isRightEditable;
           }
 
+          const pointSize = isEditable ? parameters.editablePointSize : parameters.pointSize;
           if (selectedRibPoints?.has(ribKey)) {
             context.strokeStyle = parameters.selectedColor;
           } else if (hoveredRibPoints?.has(ribKey)) {
@@ -338,7 +341,7 @@ registerVisualizationLayerDefinition({
           strokeDiamondNode(context, ribPoint, pointSize);
         } else {
           // Normal mode: two rib points
-          // Apply nudge offset if point is editable
+          // Apply nudge offset if editable
           const tangent = { x: -normal.y, y: normal.x };
           const leftNudge = point.leftNudge || 0;
           const rightNudge = point.rightNudge || 0;
@@ -353,24 +356,26 @@ registerVisualizationLayerDefinition({
           };
 
           // Draw left rib point
+          const leftPointSize = isLeftEditable ? parameters.editablePointSize : parameters.pointSize;
           if (selectedRibPoints?.has(leftKey)) {
             context.strokeStyle = parameters.selectedColor;
           } else if (hoveredRibPoints?.has(leftKey)) {
-            context.strokeStyle = isEditable ? parameters.editableHoveredColor : parameters.hoveredColor;
+            context.strokeStyle = isLeftEditable ? parameters.editableHoveredColor : parameters.hoveredColor;
           } else {
-            context.strokeStyle = isEditable ? parameters.editableStrokeColor : parameters.strokeColor;
+            context.strokeStyle = isLeftEditable ? parameters.editableStrokeColor : parameters.strokeColor;
           }
-          strokeDiamondNode(context, leftRibPoint, pointSize);
+          strokeDiamondNode(context, leftRibPoint, leftPointSize);
 
           // Draw right rib point
+          const rightPointSize = isRightEditable ? parameters.editablePointSize : parameters.pointSize;
           if (selectedRibPoints?.has(rightKey)) {
             context.strokeStyle = parameters.selectedColor;
           } else if (hoveredRibPoints?.has(rightKey)) {
-            context.strokeStyle = isEditable ? parameters.editableHoveredColor : parameters.hoveredColor;
+            context.strokeStyle = isRightEditable ? parameters.editableHoveredColor : parameters.hoveredColor;
           } else {
-            context.strokeStyle = isEditable ? parameters.editableStrokeColor : parameters.strokeColor;
+            context.strokeStyle = isRightEditable ? parameters.editableStrokeColor : parameters.strokeColor;
           }
-          strokeDiamondNode(context, rightRibPoint, pointSize);
+          strokeDiamondNode(context, rightRibPoint, rightPointSize);
         }
       }
     }

@@ -403,7 +403,10 @@ export default class SkeletonParametersPanel extends Panel {
     let asymStates = new Set(); // Track asymmetric states across selection
     let forceHorizontalStates = new Set(); // Track forceHorizontal states
     let forceVerticalStates = new Set(); // Track forceVertical states
-    let editableStates = new Set(); // Track editable states
+
+    // Track editable states per side based on selected rib points
+    const selectedRibSides = this._getSelectedRibSides();
+    let editableStates = new Set();
 
     if (hasSelection) {
       const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
@@ -413,14 +416,22 @@ export default class SkeletonParametersPanel extends Panel {
       const leftValues = [];
       const rightValues = [];
 
-      for (const { point } of selectedData.points) {
+      for (const { point, contourIdx, pointIdx } of selectedData.points) {
         const widths = this._getPointWidths(point, defaultWidth);
         leftValues.push(Math.round(widths.left));
         rightValues.push(Math.round(widths.right));
         asymStates.add(this._isAsymmetric(point));
         forceHorizontalStates.add(!!point.forceHorizontal);
         forceVerticalStates.add(!!point.forceVertical);
-        editableStates.add(!!point.editable);
+
+        // Collect editable states for selected rib sides
+        const pointKey = `${contourIdx}/${pointIdx}`;
+        if (selectedRibSides.has(`${pointKey}/left`)) {
+          editableStates.add(!!point.leftEditable);
+        }
+        if (selectedRibSides.has(`${pointKey}/right`)) {
+          editableStates.add(!!point.rightEditable);
+        }
       }
 
       // Check if values are mixed
@@ -594,34 +605,37 @@ export default class SkeletonParametersPanel extends Panel {
     });
 
     // === EDITABLE RIB POINTS ===
-    formContents.push({ type: "spacer" });
+    // Only show when rib points are selected (not just skeleton points)
+    if (selectedRibSides.size > 0) {
+      formContents.push({ type: "spacer" });
 
-    const isEditable = editableStates.has(true) && editableStates.size === 1;
-    const isEditableIndeterminate = editableStates.size > 1;
+      const isEditable = editableStates.has(true) && editableStates.size === 1;
+      const isEditableIndeterminate = editableStates.size > 1;
 
-    const editableCheckbox = html.input({
-      type: "checkbox",
-      id: "editable-toggle",
-      checked: isEditableIndeterminate ? false : isEditable,
-      onchange: (e) => this._onEditableToggle(e.target.checked),
-    });
-    if (isEditableIndeterminate) {
-      editableCheckbox.indeterminate = true;
+      const editableCheckbox = html.input({
+        type: "checkbox",
+        id: "editable-toggle",
+        checked: isEditableIndeterminate ? false : isEditable,
+        onchange: (e) => this._onEditableToggle(e.target.checked, selectedRibSides),
+      });
+      if (isEditableIndeterminate) {
+        editableCheckbox.indeterminate = true;
+      }
+
+      formContents.push({
+        type: "universal-row",
+        field1: {
+          type: "auxiliaryElement",
+          key: "editable",
+          auxiliaryElement: html.span({}, [
+            editableCheckbox,
+            html.label({ for: "editable-toggle", style: "margin-left: 4px" }, "Editable"),
+          ]),
+        },
+        field2: { type: "spacer" },
+        field3: { type: "spacer" },
+      });
     }
-
-    formContents.push({
-      type: "universal-row",
-      field1: {
-        type: "auxiliaryElement",
-        key: "editable",
-        auxiliaryElement: html.span({}, [
-          editableCheckbox,
-          html.label({ for: "editable-toggle", style: "margin-left: 4px" }, "Editable"),
-        ]),
-      },
-      field2: { type: "spacer" },
-      field3: { type: "spacer" },
-    });
 
     this.infoForm.setFieldDescriptions(formContents);
 
@@ -978,6 +992,15 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
+   * Get the sides of selected rib points.
+   * @returns {Set} Set of "contourIdx/pointIdx/side" strings for selected rib points
+   */
+  _getSelectedRibSides() {
+    const { skeletonRibPoint } = parseSelection(this.sceneController.selection);
+    return skeletonRibPoint || new Set();
+  }
+
+  /**
    * Compute a signature representing current panel state.
    * Used to skip unnecessary form rebuilds.
    */
@@ -1319,15 +1342,28 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Toggle Editable mode for rib points.
+   * Toggle Editable mode for selected rib points.
    * When enabled, rib points can be nudged along the tangent direction
    * and their handle lengths can be adjusted.
+   * @param {boolean} checked - Whether to enable or disable editable mode
+   * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
    */
-  async _onEditableToggle(checked) {
-    const selectedData = this._getSelectedSkeletonPoints();
-    if (!selectedData) {
+  async _onEditableToggle(checked, selectedRibSides) {
+    if (!selectedRibSides || selectedRibSides.size === 0) {
       this.update();
       return;
+    }
+
+    // Parse selected rib sides into a map: "contourIdx/pointIdx" -> Set of sides
+    const pointSidesMap = new Map();
+    for (const key of selectedRibSides) {
+      const parts = key.split("/");
+      const pointKey = `${parts[0]}/${parts[1]}`;
+      const side = parts[2];
+      if (!pointSidesMap.has(pointKey)) {
+        pointSidesMap.set(pointKey, new Set());
+      }
+      pointSidesMap.get(pointKey).add(side);
     }
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
@@ -1341,27 +1377,33 @@ export default class SkeletonParametersPanel extends Panel {
           JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
         );
 
-        for (const { contourIdx, pointIdx } of selectedData.points) {
+        for (const [pointKey, sides] of pointSidesMap) {
+          const [contourIdx, pointIdx] = pointKey.split("/").map(Number);
           const contour = skeletonData.contours[contourIdx];
           if (!contour) continue;
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          if (checked) {
-            point.editable = true;
-          } else {
-            delete point.editable;
-            // Also clear any nudge values when disabling editable mode
-            delete point.leftNudge;
-            delete point.rightNudge;
-            delete point.leftHandleIn;
-            delete point.leftHandleOut;
-            delete point.leftHandleInAngle;
-            delete point.leftHandleOutAngle;
-            delete point.rightHandleIn;
-            delete point.rightHandleOut;
-            delete point.rightHandleInAngle;
-            delete point.rightHandleOutAngle;
+          // Update editable state for each selected side
+          for (const side of sides) {
+            const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+            const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+            const handleInKey = side === "left" ? "leftHandleIn" : "rightHandleIn";
+            const handleOutKey = side === "left" ? "leftHandleOut" : "rightHandleOut";
+            const handleInAngleKey = side === "left" ? "leftHandleInAngle" : "rightHandleInAngle";
+            const handleOutAngleKey = side === "left" ? "leftHandleOutAngle" : "rightHandleOutAngle";
+
+            if (checked) {
+              point[editableKey] = true;
+            } else {
+              delete point[editableKey];
+              // Also clear nudge and handle values when disabling
+              delete point[nudgeKey];
+              delete point[handleInKey];
+              delete point[handleOutKey];
+              delete point[handleInAngleKey];
+              delete point[handleOutAngleKey];
+            }
           }
         }
 
