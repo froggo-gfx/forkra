@@ -936,12 +936,19 @@ export class SceneModel {
       const prevOnCurveIndex = contourStartPoint + prevOnCurveLocal;
       const ribInfo = this._getEditableRibPointForGeneratedPoint(positionedGlyph, prevOnCurveIndex);
       if (ribInfo) {
-        // This handle is going OUT from the previous on-curve point
-        return {
-          ...ribInfo,
-          handleType: "out",
-          onCurvePointIndex: prevOnCurveIndex,
-        };
+        // Verify that this handle is on the same side as the on-curve point
+        // by checking if the handle position is close to skeleton direction
+        const handleSide = this._determineHandleSide(
+          positionedGlyph, pointIndex, ribInfo.skeletonContourIndex, ribInfo.skeletonPointIndex, skeletonData
+        );
+        if (handleSide === ribInfo.side) {
+          // This handle is going OUT from the previous on-curve point
+          return {
+            ...ribInfo,
+            handleType: "out",
+            onCurvePointIndex: prevOnCurveIndex,
+          };
+        }
       }
     }
 
@@ -950,16 +957,58 @@ export class SceneModel {
       const nextOnCurveIndex = contourStartPoint + nextOnCurveLocal;
       const ribInfo = this._getEditableRibPointForGeneratedPoint(positionedGlyph, nextOnCurveIndex);
       if (ribInfo) {
-        // This handle is coming IN to the next on-curve point
-        return {
-          ...ribInfo,
-          handleType: "in",
-          onCurvePointIndex: nextOnCurveIndex,
-        };
+        // Verify that this handle is on the same side as the on-curve point
+        const handleSide = this._determineHandleSide(
+          positionedGlyph, pointIndex, ribInfo.skeletonContourIndex, ribInfo.skeletonPointIndex, skeletonData
+        );
+        if (handleSide === ribInfo.side) {
+          // This handle is coming IN to the next on-curve point
+          return {
+            ...ribInfo,
+            handleType: "in",
+            onCurvePointIndex: nextOnCurveIndex,
+          };
+        }
       }
     }
 
     return null;
+  }
+
+  /**
+   * Determine which side (left/right) a handle belongs to based on its position
+   * relative to the skeleton point's normal.
+   * @param {Object} positionedGlyph - The positioned glyph
+   * @param {number} handlePointIndex - The handle's point index in path
+   * @param {number} skeletonContourIndex - The skeleton contour index
+   * @param {number} skeletonPointIndex - The skeleton point index
+   * @param {Object} skeletonData - The skeleton data
+   * @returns {string} "left" or "right"
+   */
+  _determineHandleSide(positionedGlyph, handlePointIndex, skeletonContourIndex, skeletonPointIndex, skeletonData) {
+    const path = positionedGlyph.glyph.path;
+    const handlePos = path.getPoint(handlePointIndex);
+    if (!handlePos) return "right"; // fallback
+
+    const contour = skeletonData.contours[skeletonContourIndex];
+    if (!contour) return "right";
+
+    const skeletonPoint = contour.points[skeletonPointIndex];
+    if (!skeletonPoint) return "right";
+
+    // Calculate normal at skeleton point
+    const normal = calculateNormalAtSkeletonPoint(contour, skeletonPointIndex);
+
+    // Vector from skeleton point to handle
+    const toHandle = {
+      x: handlePos.x - skeletonPoint.x,
+      y: handlePos.y - skeletonPoint.y,
+    };
+
+    // Dot product with normal: positive = left side, negative = right side
+    const dot = toHandle.x * normal.x + toHandle.y * normal.y;
+
+    return dot >= 0 ? "left" : "right";
   }
 
   /**
