@@ -1111,10 +1111,21 @@ export class PointerTool extends BaseTool {
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const initialPoint = sceneController.localPoint(initialEvent);
       const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
-      // For editable rib points, use special behavior where handles move with on-curve
-      const useEditableRibBehavior = editableRibPoints.length > 0;
-      let behaviorName = useEditableRibBehavior ? "editable-rib" : getBehaviorName(initialEvent);
-      console.log("[DRAG] useEditableRibBehavior:", useEditableRibBehavior, "behaviorName:", behaviorName);
+      // For editable rib points, we expand selection to include handles (see below)
+      const hasEditableRibPoints = editableRibPoints.length > 0;
+      let behaviorName = getBehaviorName(initialEvent);
+      console.log("[DRAG] hasEditableRibPoints:", hasEditableRibPoints, "behaviorName:", behaviorName);
+
+      // For editable rib points, expand selection to include adjacent handles
+      let effectiveSelection = sceneController.selection;
+      if (hasEditableRibPoints) {
+        effectiveSelection = this._expandSelectionWithHandles(
+          sceneController.selection,
+          editableRibPoints,
+          positionedGlyph
+        );
+        console.log("[DRAG] expanded selection:", effectiveSelection);
+      }
 
       // Setup for regular point editing
       const layerInfo = Object.entries(
@@ -1122,7 +1133,7 @@ export class PointerTool extends BaseTool {
       ).map(([layerName, layerGlyph]) => {
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
-          sceneController.selection,
+          effectiveSelection,
           this.scalingEditBehavior
         );
         return {
@@ -1172,7 +1183,7 @@ export class PointerTool extends BaseTool {
         const newEditBehaviorName = getBehaviorName(event);
 
         // Handle behavior change for regular points (not for editable rib points)
-        if (!useEditableRibBehavior && behaviorName !== newEditBehaviorName) {
+        if (!hasEditableRibPoints && behaviorName !== newEditBehaviorName) {
           behaviorName = newEditBehaviorName;
           const rollbackChanges = [];
           for (const layer of layerInfo) {
@@ -1989,6 +2000,65 @@ export class PointerTool extends BaseTool {
         broadcast: true,
       };
     });
+  }
+
+  /**
+   * Expand selection to include adjacent handles for editable on-curve points.
+   * This ensures handles move with on-curve when dragging editable rib points.
+   * @param {Set} selection - Original selection
+   * @param {Array} editableRibPoints - Editable rib points info
+   * @param {Object} positionedGlyph - The positioned glyph
+   * @returns {Set} Expanded selection including handles
+   */
+  _expandSelectionWithHandles(selection, editableRibPoints, positionedGlyph) {
+    const expandedSelection = new Set(selection);
+    const path = positionedGlyph?.glyph?.path;
+    if (!path) return expandedSelection;
+
+    for (const ribPoint of editableRibPoints) {
+      if (ribPoint.isHandle) continue; // Only expand for on-curve points
+
+      const pointIndex = ribPoint.pointIndex;
+
+      // Find which contour this point belongs to
+      let contourStart = 0;
+      let contourEnd = 0;
+      for (let ci = 0; ci < path.contourInfo.length; ci++) {
+        contourEnd = path.contourInfo[ci].endPoint;
+        if (pointIndex <= contourEnd) {
+          contourStart = ci === 0 ? 0 : path.contourInfo[ci - 1].endPoint + 1;
+          break;
+        }
+      }
+
+      const numPoints = contourEnd - contourStart + 1;
+      const localIdx = pointIndex - contourStart;
+      const isClosed = path.contourInfo.find(c => c.endPoint >= pointIndex)?.isClosed ?? true;
+
+      // Check previous point
+      if (isClosed || localIdx > 0) {
+        const prevLocalIdx = (localIdx - 1 + numPoints) % numPoints;
+        const prevPointIdx = contourStart + prevLocalIdx;
+        const prevType = path.pointTypes[prevPointIdx];
+        if ((prevType & 0x03) !== 0) {
+          // It's off-curve - add to selection
+          expandedSelection.add(`point/${prevPointIdx}`);
+        }
+      }
+
+      // Check next point
+      if (isClosed || localIdx < numPoints - 1) {
+        const nextLocalIdx = (localIdx + 1) % numPoints;
+        const nextPointIdx = contourStart + nextLocalIdx;
+        const nextType = path.pointTypes[nextPointIdx];
+        if ((nextType & 0x03) !== 0) {
+          // It's off-curve - add to selection
+          expandedSelection.add(`point/${nextPointIdx}`);
+        }
+      }
+    }
+
+    return expandedSelection;
   }
 
   /**
