@@ -1690,26 +1690,54 @@ export class PointerTool extends BaseTool {
       y: localPoint.y - positionedGlyph.y,
     };
 
-    // Check if point is in asymmetric mode (has leftWidth or rightWidth properties)
-    // Use first layer for check - all layers should have same structure
+    // Capture pre-existing skeleton point selection before overwriting
+    const { skeletonPoint: preSelectedPoints } = parseSelection(sceneController.selection);
+
+    // Use first layer for structural checks
     const editLayerNameForCheck = sceneController.editingLayerNames?.[0];
     const layerForCheck = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerNameForCheck];
     const skeletonDataForCheck = layerForCheck?.customData?.[SKELETON_CUSTOM_DATA_KEY];
-    const pointForCheck = skeletonDataForCheck?.contours?.[ribHit.contourIndex]?.points?.[ribHit.pointIndex];
-    const isAsymmetric = pointForCheck?.leftWidth !== undefined ||
-                         pointForCheck?.rightWidth !== undefined;
 
-    // Set selection based on mode
-    const leftKey = `skeletonRibPoint/${ribHit.contourIndex}/${ribHit.pointIndex}/left`;
-    const rightKey = `skeletonRibPoint/${ribHit.contourIndex}/${ribHit.pointIndex}/right`;
-    if (isAsymmetric) {
-      // Asymmetric mode: select only the dragged side
-      const draggedKey = ribHit.side === "left" ? leftKey : rightKey;
-      sceneController.selection = new Set([draggedKey]);
-    } else {
-      // Symmetric mode: select both sides
-      sceneController.selection = new Set([leftKey, rightKey]);
+    // Build set of target points: always include the dragged point, plus any pre-selected
+    // Each entry: { contourIndex, pointIndex, isAsymmetric }
+    const targetPointsMap = new Map(); // key "ci/pi" -> { contourIndex, pointIndex, isAsymmetric }
+    const draggedKey = `${ribHit.contourIndex}/${ribHit.pointIndex}`;
+
+    const addTargetPoint = (ci, pi) => {
+      const key = `${ci}/${pi}`;
+      if (targetPointsMap.has(key)) return;
+      const pt = skeletonDataForCheck?.contours?.[ci]?.points?.[pi];
+      if (!pt || pt.type) return; // skip off-curve points
+      const isAsym = pt.leftWidth !== undefined || pt.rightWidth !== undefined;
+      targetPointsMap.set(key, { contourIndex: ci, pointIndex: pi, isAsymmetric: isAsym });
+    };
+
+    addTargetPoint(ribHit.contourIndex, ribHit.pointIndex);
+    if (preSelectedPoints) {
+      for (const key of preSelectedPoints) {
+        const [ci, pi] = key.split("/").map(Number);
+        addTargetPoint(ci, pi);
+      }
     }
+
+    const targetPoints = [...targetPointsMap.values()];
+    const dragSide = ribHit.side; // "left" or "right"
+
+    // Build visual selection: rib point keys for all targets
+    const newSelection = new Set();
+    for (const tp of targetPoints) {
+      const leftKey = `skeletonRibPoint/${tp.contourIndex}/${tp.pointIndex}/left`;
+      const rightKey = `skeletonRibPoint/${tp.contourIndex}/${tp.pointIndex}/right`;
+      if (tp.isAsymmetric) {
+        // Asymmetric: only the dragged side
+        newSelection.add(dragSide === "left" ? leftKey : rightKey);
+      } else {
+        // Symmetric: both sides
+        newSelection.add(leftKey);
+        newSelection.add(rightKey);
+      }
+    }
+    sceneController.selection = newSelection;
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       // Setup data for ALL editable layers (multi-source editing support)
@@ -1723,15 +1751,31 @@ export class PointerTool extends BaseTool {
           layer,
           original: JSON.parse(JSON.stringify(skeletonData)),
           working: JSON.parse(JSON.stringify(skeletonData)),
-          ribBehavior: null, // Will be created below
+          ribBehaviors: [], // One per target point
         };
       }
 
       if (Object.keys(layersData).length === 0) return;
 
-      // Create rib edit behavior for each layer
+      // Create rib edit behaviors for each target point in each layer
       for (const data of Object.values(layersData)) {
-        data.ribBehavior = createRibEditBehavior(data.original, ribHit);
+        for (const tp of targetPoints) {
+          const contour = data.original.contours[tp.contourIndex];
+          const skeletonPoint = contour?.points[tp.pointIndex];
+          if (!skeletonPoint) continue;
+          const normal = calculateNormalAtSkeletonPoint(contour, tp.pointIndex);
+          const ribHitForPoint = {
+            contourIndex: tp.contourIndex,
+            pointIndex: tp.pointIndex,
+            side: dragSide,
+            normal,
+            onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
+          };
+          data.ribBehaviors.push({
+            behavior: createRibEditBehavior(data.original, ribHitForPoint),
+            target: tp,
+          });
+        }
       }
 
       // Helper function to regenerate outline contours
@@ -1770,41 +1814,38 @@ export class PointerTool extends BaseTool {
 
         // Apply changes to ALL editable layers
         for (const [editLayerName, data] of Object.entries(layersData)) {
-          const { layer, working, ribBehavior } = data;
+          const { layer, working, ribBehaviors } = data;
 
-          // Apply behavior to get new width (each layer has its own behavior based on its data)
-          const widthChange = ribBehavior.applyDelta(delta);
+          // Apply each behavior to update all target points
+          for (const { behavior, target } of ribBehaviors) {
+            const widthChange = behavior.applyDelta(delta);
 
-          // Update working skeleton data with new width
-          const contour = working.contours[widthChange.contourIndex];
-          const point = contour.points[widthChange.pointIndex];
+            const contour = working.contours[target.contourIndex];
+            const point = contour.points[target.pointIndex];
 
-          if (isAsymmetric) {
-            // Asymmetric mode: update only the dragged side
-            if (ribHit.side === "left") {
-              point.leftWidth = widthChange.halfWidth;
+            if (target.isAsymmetric) {
+              // Asymmetric: update only the dragged side
+              if (dragSide === "left") {
+                point.leftWidth = widthChange.halfWidth;
+              } else {
+                point.rightWidth = widthChange.halfWidth;
+              }
+              delete point.width;
             } else {
-              point.rightWidth = widthChange.halfWidth;
+              // Symmetric: update full width (both sides)
+              point.width = widthChange.halfWidth * 2;
+              delete point.leftWidth;
+              delete point.rightWidth;
             }
-            delete point.width;
-          } else {
-            // Symmetric mode: update width property (affects both sides)
-            // The halfWidth from behavior is the new half-width, so full width = halfWidth * 2
-            point.width = widthChange.halfWidth * 2;
-            // Clear any asymmetric widths to ensure symmetric behavior
-            delete point.leftWidth;
-            delete point.rightWidth;
           }
 
           // Record changes for this layer
-          // 1. FIRST: Generate outline contours
           const staticGlyph = layer.glyph;
           const pathChange = recordChanges(staticGlyph, (sg) => {
             regenerateOutline(sg, working);
           });
           allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
-          // 2. THEN: Save skeletonData to customData
           const customDataChange = recordChanges(layer, (l) => {
             l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
           });
