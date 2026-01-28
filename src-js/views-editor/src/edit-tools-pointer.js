@@ -10,7 +10,6 @@ import {
   generateContoursFromSkeleton,
   calculateNormalAtSkeletonPoint,
   getPointHalfWidth,
-  computeHandlePolar,
 } from "@fontra/core/skeleton-contour-generator.js";
 import {
   centeredRect,
@@ -1090,19 +1089,10 @@ export class PointerTool extends BaseTool {
       anchorSelection?.length > 0 ||
       guidelineSelection?.length > 0;
 
-    // Check if any selected points are editable generated points
-    // If so, redirect to dedicated handler
+    // Detect editable rib points in selection for later sync to skeleton
+    let editableRibPoints = [];
     if (pointSelection?.length > 0) {
-      const editableGenerated = this._getEditableGeneratedPointsFromSelection(pointSelection);
-      if (editableGenerated.length > 0 && !hasSkeletonSelection) {
-        await this._handleDragEditableGeneratedPoints(
-          eventStream,
-          initialEvent,
-          editableGenerated
-        );
-        this.sceneController.sceneModel.showTransformSelection = true;
-        return;
-      }
+      editableRibPoints = this._getEditableGeneratedPointsFromSelection(pointSelection);
     }
 
     // If only skeleton selection, use dedicated handler
@@ -1367,6 +1357,19 @@ export class PointerTool extends BaseTool {
         });
         if (connectChanges.hasChange) {
           changes = changes.concat(connectChanges.prefixed(layer.changePath));
+        }
+      }
+
+      // Sync editable rib points back to skeleton data
+      if (editableRibPoints.length > 0) {
+        const syncResult = this._syncEditableRibPointsToSkeleton(
+          glyph,
+          layerInfo,
+          editableRibPoints,
+          positionedGlyph
+        );
+        if (syncResult) {
+          changes = changes.concat(syncResult);
         }
       }
 
@@ -2025,227 +2028,106 @@ export class PointerTool extends BaseTool {
   }
 
   /**
-   * Handle dragging editable generated points (from skeleton contours).
-   * Updates skeleton data (nudge, width) based on point movement.
-   * For off-curve (handle) points, stores polar coordinates relative to normal.
+   * Sync edited rib points back to skeleton data.
+   * Called after standard EditBehavior drag to update nudge/width in skeleton.
+   * @param {Object} glyph - The glyph being edited
+   * @param {Array} layerInfo - Layer info from handleDragSelection
+   * @param {Array} editableRibPoints - Array of editable rib point info
+   * @param {Object} positionedGlyph - The positioned glyph
+   * @returns {Object|null} {changes} or null if no changes
    */
-  async _handleDragEditableGeneratedPoints(eventStream, initialEvent, editablePoints) {
+  _syncEditableRibPointsToSkeleton(glyph, layerInfo, editableRibPoints, positionedGlyph) {
+    if (!editableRibPoints.length) return null;
+
     const sceneController = this.sceneController;
-    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const editLayerName = sceneController.editingLayerNames?.[0];
+    if (!editLayerName) return null;
 
-    if (!positionedGlyph || editablePoints.length === 0) return;
+    const layer = glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData?.contours?.length) return null;
 
-    const localPoint = sceneController.localPoint(initialEvent);
-    const startGlyphPoint = {
-      x: localPoint.x - positionedGlyph.x,
-      y: localPoint.y - positionedGlyph.y,
-    };
+    // Get current path from layerInfo
+    const primaryLayer = layerInfo.find((l) => l.isPrimaryLayer);
+    if (!primaryLayer) return null;
+    const path = primaryLayer.layerGlyph.path;
 
-    // Separate on-curve points from handles
-    const onCurvePoints = editablePoints.filter(ep => !ep.isHandle);
-    const handlePoints = editablePoints.filter(ep => ep.isHandle);
+    // Track if any changes were made
+    let hasChanges = false;
 
-    // Get initial handle positions for handle editing
-    const path = positionedGlyph.glyph.path;
-    const initialHandlePositions = {};
-    for (const hp of handlePoints) {
-      const handlePos = path.getPoint(hp.pointIndex);
-      initialHandlePositions[hp.pointIndex] = { ...handlePos };
+    // Process each editable rib point (only on-curve for now, skip handles)
+    for (const ribPoint of editableRibPoints) {
+      if (ribPoint.isHandle) continue; // Skip handles for now
+
+      const { pointIndex, skeletonContourIndex, skeletonPointIndex, side } = ribPoint;
+
+      const contour = skeletonData.contours[skeletonContourIndex];
+      if (!contour) continue;
+
+      const skeletonPoint = contour.points[skeletonPointIndex];
+      if (!skeletonPoint) continue;
+
+      // Get new point position from path
+      const newPos = path.getPoint(pointIndex);
+      if (!newPos) continue;
+
+      // Calculate normal and tangent at skeleton point
+      const normal = calculateNormalAtSkeletonPoint(contour, skeletonPointIndex);
+      const tangent = { x: -normal.y, y: normal.x };
+
+      // Calculate delta from skeleton point
+      const deltaX = newPos.x - skeletonPoint.x;
+      const deltaY = newPos.y - skeletonPoint.y;
+
+      // Project delta onto tangent → nudge
+      const newNudge = deltaX * tangent.x + deltaY * tangent.y;
+
+      // Project delta onto normal → halfWidth
+      const sign = side === "left" ? 1 : -1;
+      const deltaNormal = deltaX * normal.x + deltaY * normal.y;
+      const newHalfWidth = sign * deltaNormal;
+
+      // Update skeleton point
+      const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+      const widthKey = side === "left" ? "leftWidth" : "rightWidth";
+      const defaultWidth = contour.defaultWidth || 20;
+
+      // Always update nudge
+      if (Math.abs(newNudge) > 0.1) {
+        skeletonPoint[nudgeKey] = Math.round(newNudge);
+        hasChanges = true;
+      } else if (skeletonPoint[nudgeKey]) {
+        delete skeletonPoint[nudgeKey];
+        hasChanges = true;
+      }
+
+      // Check if asymmetric (has per-side width or will need it)
+      const isAsymmetric = skeletonPoint.leftWidth !== undefined ||
+                           skeletonPoint.rightWidth !== undefined ||
+                           skeletonPoint.asymmetric;
+
+      // Update width only for asymmetric points
+      if (isAsymmetric) {
+        const clampedWidth = Math.max(1, Math.round(newHalfWidth));
+        if (clampedWidth !== defaultWidth / 2) {
+          skeletonPoint[widthKey] = clampedWidth;
+          hasChanges = true;
+        }
+      }
     }
 
-    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const layersData = {};
+    if (!hasChanges) return null;
 
-      for (const editLayerName of sceneController.editingLayerNames) {
-        const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
-
-        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
-        layersData[editLayerName] = {
-          layer,
-          original: JSON.parse(JSON.stringify(skeletonData)),
-          working: JSON.parse(JSON.stringify(skeletonData)),
-          behaviors: [],
-          handleInfos: [],
-        };
-      }
-
-      if (Object.keys(layersData).length === 0) return;
-
-      // Create behaviors for on-curve editable points
-      for (const data of Object.values(layersData)) {
-        for (const ep of onCurvePoints) {
-          const contour = data.original.contours[ep.skeletonContourIndex];
-          const skeletonPoint = contour?.points[ep.skeletonPointIndex];
-          if (!skeletonPoint) continue;
-
-          const normal = calculateNormalAtSkeletonPoint(contour, ep.skeletonPointIndex);
-          const ribHit = {
-            contourIndex: ep.skeletonContourIndex,
-            pointIndex: ep.skeletonPointIndex,
-            side: ep.side,
-            normal,
-            onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
-          };
-
-          data.behaviors.push({
-            behavior: createEditableRibBehavior(data.original, ribHit),
-            editablePoint: ep,
-          });
-        }
-
-        // Setup info for handle editing
-        for (const hp of handlePoints) {
-          const contour = data.original.contours[hp.skeletonContourIndex];
-          const skeletonPoint = contour?.points[hp.skeletonPointIndex];
-          if (!skeletonPoint) continue;
-
-          const normal = calculateNormalAtSkeletonPoint(contour, hp.skeletonPointIndex);
-          const initialPos = initialHandlePositions[hp.pointIndex];
-
-          data.handleInfos.push({
-            handlePoint: hp,
-            normal,
-            initialPos: { ...initialPos },
-          });
-        }
-      }
-
-      // Helper function to regenerate outline contours
-      const regenerateOutline = (staticGlyph, skelData) => {
-        const oldGeneratedIndices = skelData.generatedContourIndices || [];
-        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-        for (const idx of sortedIndices) {
-          if (idx < staticGlyph.path.numContours) {
-            staticGlyph.path.deleteContour(idx);
-          }
-        }
-
-        const generatedContours = generateContoursFromSkeleton(skelData);
-        const newGeneratedIndices = [];
-        for (const contour of generatedContours) {
-          const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
-          newGeneratedIndices.push(newIndex);
-        }
-        skelData.generatedContourIndices = newGeneratedIndices;
-      };
-
-      let accumulatedChanges = new ChangeCollector();
-
-      // Drag loop
-      for await (const event of eventStream) {
-        const currentLocalPoint = sceneController.localPoint(event);
-        const currentGlyphPoint = {
-          x: currentLocalPoint.x - positionedGlyph.x,
-          y: currentLocalPoint.y - positionedGlyph.y,
-        };
-
-        const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
-        const allChanges = [];
-
-        for (const [editLayerName, data] of Object.entries(layersData)) {
-          const { layer, working, behaviors, handleInfos } = data;
-
-          // Process on-curve point behaviors
-          for (const { behavior, editablePoint } of behaviors) {
-            const change = behavior.applyDelta(delta);
-            const contour = working.contours[editablePoint.skeletonContourIndex];
-            const point = contour.points[editablePoint.skeletonPointIndex];
-            const side = editablePoint.side;
-
-            // Apply changes based on symmetric/asymmetric mode
-            if (change.isAsymmetric) {
-              if (side === "left") {
-                point.leftWidth = change.halfWidth;
-                point.leftNudge = change.nudge;
-              } else {
-                point.rightWidth = change.halfWidth;
-                point.rightNudge = change.nudge;
-              }
-              delete point.width;
-            } else {
-              // Symmetric: only update nudge
-              if (side === "left") {
-                point.leftNudge = change.nudge;
-              } else {
-                point.rightNudge = change.nudge;
-              }
-            }
-          }
-
-          // Process handle movements - store polar coordinates
-          for (const { handlePoint, normal, initialPos } of handleInfos) {
-            const contour = working.contours[handlePoint.skeletonContourIndex];
-            const skeletonPoint = contour.points[handlePoint.skeletonPointIndex];
-            const side = handlePoint.side;
-            const handleType = handlePoint.handleType; // "in" or "out"
-
-            // Compute the on-curve position from skeleton data
-            // (can't use path.getPoint() because path is regenerated during drag)
-            const defaultWidth = contour.defaultWidth || 80;
-            let halfWidth = getPointHalfWidth(skeletonPoint, defaultWidth, side);
-            const nudge = skeletonPoint[side === "left" ? "leftNudge" : "rightNudge"] || 0;
-
-            // Handle single-sided mode
-            if (contour.singleSided) {
-              const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
-              const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
-              if (contour.singleSidedDirection === side) {
-                halfWidth = leftHW + rightHW;
-              }
-            }
-
-            const sign = side === "left" ? 1 : -1;
-            const tangent = { x: -normal.y, y: normal.x };
-            const onCurvePos = {
-              x: Math.round(skeletonPoint.x + sign * normal.x * halfWidth + tangent.x * nudge),
-              y: Math.round(skeletonPoint.y + sign * normal.y * halfWidth + tangent.y * nudge),
-            };
-
-            // Calculate new handle position
-            const newHandlePos = {
-              x: initialPos.x + delta.x,
-              y: initialPos.y + delta.y,
-            };
-
-            // Compute polar coordinates relative to normal
-            const polar = computeHandlePolar(onCurvePos, newHandlePos, normal);
-
-            // Store polar coordinates in skeleton data
-            // Key format: left/right + HandleIn/HandleOut + Length/Angle
-            const prefix = side;
-            const suffix = handleType === "in" ? "HandleIn" : "HandleOut";
-
-            skeletonPoint[`${prefix}${suffix}Length`] = polar.length;
-            skeletonPoint[`${prefix}${suffix}Angle`] = polar.angle;
-          }
-
-          const staticGlyph = layer.glyph;
-          const pathChange = recordChanges(staticGlyph, (sg) => {
-            regenerateOutline(sg, working);
-          });
-          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-          const customDataChange = recordChanges(layer, (l) => {
-            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
-          });
-          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-        }
-
-        const combinedChange = new ChangeCollector().concat(...allChanges);
-        accumulatedChanges = accumulatedChanges.concat(combinedChange);
-        await sendIncrementalChange(combinedChange.change, true);
-      }
-
-      await sendIncrementalChange(accumulatedChanges.change);
-
-      return {
-        changes: accumulatedChanges,
-        undoLabel: handlePoints.length > 0 ? "Edit generated handle" : "Edit generated point",
-        broadcast: true,
-      };
+    // Record changes to customData
+    const customDataChanges = recordChanges(layer, (l) => {
+      l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+        JSON.stringify(skeletonData)
+      );
     });
+
+    if (!customDataChanges.hasChange) return null;
+
+    return customDataChanges.prefixed(["layers", editLayerName]);
   }
 
   /**
