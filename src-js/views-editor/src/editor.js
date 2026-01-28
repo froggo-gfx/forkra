@@ -2371,6 +2371,11 @@ export class EditorController extends ViewController {
     // Handle skeleton point deletion separately (requires access to layer.customData)
     if (skeletonPointSelection?.size) {
       await this._deleteSkeletonPoints(skeletonPointSelection);
+    }
+
+    const hasRegularSelection = pointSelection?.length || componentSelection?.length ||
+      anchorSelection?.length || guidelineSelection?.length || backgroundImageSelection;
+    if (!hasRegularSelection) {
       return;
     }
 
