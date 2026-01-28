@@ -1089,6 +1089,21 @@ export class PointerTool extends BaseTool {
       anchorSelection?.length > 0 ||
       guidelineSelection?.length > 0;
 
+    // Check if any selected points are editable generated points
+    // If so, redirect to dedicated handler
+    if (pointSelection?.length > 0) {
+      const editableGenerated = this._getEditableGeneratedPointsFromSelection(pointSelection);
+      if (editableGenerated.length > 0 && !hasSkeletonSelection) {
+        await this._handleDragEditableGeneratedPoints(
+          eventStream,
+          initialEvent,
+          editableGenerated
+        );
+        this.sceneController.sceneModel.showTransformSelection = true;
+        return;
+      }
+    }
+
     // If only skeleton selection, use dedicated handler
     if (hasSkeletonSelection && !hasRegularSelection) {
       await this._handleDragSkeletonPoints(
@@ -1962,6 +1977,177 @@ export class PointerTool extends BaseTool {
       return {
         changes: accumulatedChanges,
         undoLabel: translate("edit-tools-pointer.undo.change-skeleton-width"),
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Check if selected points are editable generated points (from skeleton).
+   * @param {Array} pointSelection - Array of point indices
+   * @returns {Array} Array of {pointIndex, skeletonContourIndex, skeletonPointIndex, side}
+   */
+  _getEditableGeneratedPointsFromSelection(pointSelection) {
+    const result = [];
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return result;
+
+    for (const pointIndex of pointSelection) {
+      const ribInfo = this.sceneModel._getEditableRibPointForGeneratedPoint(
+        positionedGlyph,
+        pointIndex
+      );
+      if (ribInfo) {
+        result.push({
+          pointIndex,
+          ...ribInfo,
+        });
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Handle dragging editable generated points (from skeleton contours).
+   * Updates skeleton data (nudge, width) based on point movement.
+   */
+  async _handleDragEditableGeneratedPoints(eventStream, initialEvent, editablePoints) {
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+
+    if (!positionedGlyph || editablePoints.length === 0) return;
+
+    const localPoint = sceneController.localPoint(initialEvent);
+    const startGlyphPoint = {
+      x: localPoint.x - positionedGlyph.x,
+      y: localPoint.y - positionedGlyph.y,
+    };
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layersData = {};
+
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        layersData[editLayerName] = {
+          layer,
+          original: JSON.parse(JSON.stringify(skeletonData)),
+          working: JSON.parse(JSON.stringify(skeletonData)),
+          behaviors: [],
+        };
+      }
+
+      if (Object.keys(layersData).length === 0) return;
+
+      // Create behaviors for each editable point in each layer
+      for (const data of Object.values(layersData)) {
+        for (const ep of editablePoints) {
+          const contour = data.original.contours[ep.skeletonContourIndex];
+          const skeletonPoint = contour?.points[ep.skeletonPointIndex];
+          if (!skeletonPoint) continue;
+
+          const normal = calculateNormalAtSkeletonPoint(contour, ep.skeletonPointIndex);
+          const ribHit = {
+            contourIndex: ep.skeletonContourIndex,
+            pointIndex: ep.skeletonPointIndex,
+            side: ep.side,
+            normal,
+            onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
+          };
+
+          data.behaviors.push({
+            behavior: createEditableRibBehavior(data.original, ribHit),
+            editablePoint: ep,
+          });
+        }
+      }
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      let accumulatedChanges = new ChangeCollector();
+
+      // Drag loop
+      for await (const event of eventStream) {
+        const currentLocalPoint = sceneController.localPoint(event);
+        const currentGlyphPoint = {
+          x: currentLocalPoint.x - positionedGlyph.x,
+          y: currentLocalPoint.y - positionedGlyph.y,
+        };
+
+        const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+        const allChanges = [];
+
+        for (const [editLayerName, data] of Object.entries(layersData)) {
+          const { layer, working, behaviors } = data;
+
+          for (const { behavior, editablePoint } of behaviors) {
+            const change = behavior.applyDelta(delta);
+            const contour = working.contours[editablePoint.skeletonContourIndex];
+            const point = contour.points[editablePoint.skeletonPointIndex];
+            const side = editablePoint.side;
+
+            // Apply changes based on symmetric/asymmetric mode
+            if (change.isAsymmetric) {
+              if (side === "left") {
+                point.leftWidth = change.halfWidth;
+                point.leftNudge = change.nudge;
+              } else {
+                point.rightWidth = change.halfWidth;
+                point.rightNudge = change.nudge;
+              }
+              delete point.width;
+            } else {
+              // Symmetric: only update nudge
+              if (side === "left") {
+                point.leftNudge = change.nudge;
+              } else {
+                point.rightNudge = change.nudge;
+              }
+            }
+          }
+
+          const staticGlyph = layer.glyph;
+          const pathChange = recordChanges(staticGlyph, (sg) => {
+            regenerateOutline(sg, working);
+          });
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+          const customDataChange = recordChanges(layer, (l) => {
+            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+          });
+          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+        }
+
+        const combinedChange = new ChangeCollector().concat(...allChanges);
+        accumulatedChanges = accumulatedChanges.concat(combinedChange);
+        await sendIncrementalChange(combinedChange.change, true);
+      }
+
+      await sendIncrementalChange(accumulatedChanges.change);
+
+      return {
+        changes: accumulatedChanges,
+        undoLabel: "Edit generated point",
         broadcast: true,
       };
     });

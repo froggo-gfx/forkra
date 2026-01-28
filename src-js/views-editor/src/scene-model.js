@@ -2,6 +2,10 @@ import {
   pointInConvexPolygon,
   rectIntersectsPolygon,
 } from "@fontra/core/convex-hull.js";
+import {
+  calculateNormalAtSkeletonPoint,
+  getPointHalfWidth,
+} from "@fontra/core/skeleton-contour-generator.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
 import {
   centeredRect,
@@ -683,6 +687,16 @@ export class SceneModel {
         if (this.measureMode) {
           return new Set([`measurePoint/${pointIndex}`]);
         }
+        // Check if this point corresponds to an editable rib point
+        const editableRibInfo = this._getEditableRibPointForGeneratedPoint(
+          positionedGlyph,
+          pointIndex
+        );
+        if (editableRibInfo) {
+          // Return standard point selection - allows normal point editing UI
+          // The drag handler will detect it's an editable generated point
+          return new Set([`point/${pointIndex}`]);
+        }
         // Skip skeleton-generated outline points - they shouldn't be directly editable
         return new Set();
       }
@@ -727,6 +741,106 @@ export class SceneModel {
 
     // Check if this contour is in the skeleton-generated list
     return skeletonData.generatedContourIndices.includes(contourIndex);
+  }
+
+  /**
+   * Check if a generated point corresponds to an editable rib point.
+   * Returns rib point info if found, null otherwise.
+   * @param {Object} positionedGlyph - The positioned glyph
+   * @param {number} pointIndex - The point index in glyph.path
+   * @returns {Object|null} {skeletonContourIndex, skeletonPointIndex, side} or null
+   */
+  _getEditableRibPointForGeneratedPoint(positionedGlyph, pointIndex) {
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+      return null;
+    }
+
+    const editLayerName =
+      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+    if (!editLayerName) {
+      return null;
+    }
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (!skeletonData?.contours?.length) {
+      return null;
+    }
+
+    // Get the point's position
+    const path = positionedGlyph.glyph.path;
+    const pointPos = path.getPoint(pointIndex);
+    if (!pointPos) {
+      return null;
+    }
+
+    // Check if the point is on-curve (only on-curve points can be rib points)
+    const pointType = path.pointTypes[pointIndex];
+    const isOnCurve = (pointType & 0x03) === 0; // ON_CURVE = 0
+    if (!isOnCurve) {
+      return null;
+    }
+
+    // Tolerance for position matching (in units)
+    const tolerance = 1.5;
+
+    // Iterate through skeleton contours and find matching editable rib point
+    for (let skeletonContourIndex = 0; skeletonContourIndex < skeletonData.contours.length; skeletonContourIndex++) {
+      const contour = skeletonData.contours[skeletonContourIndex];
+      const defaultWidth = contour.defaultWidth || 20;
+      const singleSided = contour.singleSided ?? false;
+      const singleSidedDirection = contour.singleSidedDirection ?? "left";
+
+      for (let skeletonPointIndex = 0; skeletonPointIndex < contour.points.length; skeletonPointIndex++) {
+        const skeletonPoint = contour.points[skeletonPointIndex];
+
+        // Only check on-curve skeleton points
+        if (skeletonPoint.type) continue;
+
+        const normal = calculateNormalAtSkeletonPoint(contour, skeletonPointIndex);
+        const tangent = { x: -normal.y, y: normal.x };
+
+        // Check both sides
+        for (const side of ["left", "right"]) {
+          const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+          if (!skeletonPoint[editableKey]) continue;
+
+          // Compute expected rib point position
+          let halfWidth = getPointHalfWidth(skeletonPoint, defaultWidth, side);
+
+          // Handle single-sided mode
+          if (singleSided) {
+            if (singleSidedDirection !== side) continue; // Only check the active side
+            const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+            const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+            halfWidth = leftHW + rightHW;
+          }
+
+          if (halfWidth < 0.5) continue; // Skip zero-width sides
+
+          const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+          const nudge = skeletonPoint[nudgeKey] || 0;
+
+          const sign = side === "left" ? 1 : -1;
+          const expectedX = Math.round(skeletonPoint.x + sign * normal.x * halfWidth + tangent.x * nudge);
+          const expectedY = Math.round(skeletonPoint.y + sign * normal.y * halfWidth + tangent.y * nudge);
+
+          // Check if position matches
+          const dx = Math.abs(pointPos.x - expectedX);
+          const dy = Math.abs(pointPos.y - expectedY);
+
+          if (dx <= tolerance && dy <= tolerance) {
+            return {
+              skeletonContourIndex,
+              skeletonPointIndex,
+              side,
+            };
+          }
+        }
+      }
+    }
+
+    return null;
   }
 
   /**
