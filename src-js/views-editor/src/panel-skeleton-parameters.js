@@ -9,11 +9,22 @@ import { packContour } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
 
-const SKELETON_DEFAULT_WIDTH_WIDE_KEY = "fontra.skeleton.defaultWidthWide";
-const SKELETON_DEFAULT_WIDTH_NARROW_KEY = "fontra.skeleton.defaultWidthNarrow";
 const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
-const DEFAULT_WIDTH_WIDE = 80;
-const DEFAULT_WIDTH_NARROW = 40;
+
+// Source width keys stored in source customData
+const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
+const SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY = "fontra.skeleton.capitalHorizontal";
+const SKELETON_WIDTH_CAPITAL_CONTRAST_KEY = "fontra.skeleton.capitalContrast";
+const SKELETON_WIDTH_LOWERCASE_BASE_KEY = "fontra.skeleton.lowercaseBase";
+const SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY = "fontra.skeleton.lowercaseHorizontal";
+const SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY = "fontra.skeleton.lowercaseContrast";
+
+const DEFAULT_WIDTH_CAPITAL_BASE = 60;
+const DEFAULT_WIDTH_CAPITAL_HORIZONTAL = 50;
+const DEFAULT_WIDTH_CAPITAL_CONTRAST = 40;
+const DEFAULT_WIDTH_LOWERCASE_BASE = 60;
+const DEFAULT_WIDTH_LOWERCASE_HORIZONTAL = 50;
+const DEFAULT_WIDTH_LOWERCASE_CONTRAST = 40;
 
 export default class SkeletonParametersPanel extends Panel {
   identifier = "skeleton-parameters";
@@ -107,25 +118,63 @@ export default class SkeletonParametersPanel extends Panel {
 
     const formContents = [];
 
-    // === SOURCE WIDTHS ===
+    // === SOURCE WIDTHS: CAPITAL ===
     formContents.push({
       type: "header",
-      label: "Source Widths",
+      label: "Capital",
     });
 
     formContents.push({
       type: "edit-number",
-      key: "defaultSkeletonWidthWide",
-      label: "Wide",
-      value: this._getCurrentDefaultWidthWide(),
+      key: "capitalBase",
+      label: "Base",
+      value: this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE),
       minValue: 1,
     });
 
     formContents.push({
       type: "edit-number",
-      key: "defaultSkeletonWidthNarrow",
-      label: "Narrow",
-      value: this._getCurrentDefaultWidthNarrow(),
+      key: "capitalHorizontal",
+      label: "Horizontal",
+      value: this._getSourceWidth(SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY, DEFAULT_WIDTH_CAPITAL_HORIZONTAL),
+      minValue: 1,
+    });
+
+    formContents.push({
+      type: "edit-number",
+      key: "capitalContrast",
+      label: "Contrast",
+      value: this._getSourceWidth(SKELETON_WIDTH_CAPITAL_CONTRAST_KEY, DEFAULT_WIDTH_CAPITAL_CONTRAST),
+      minValue: 1,
+    });
+
+    // === SOURCE WIDTHS: LOWERCASE ===
+    formContents.push({
+      type: "header",
+      label: "Lowercase",
+    });
+
+    formContents.push({
+      type: "edit-number",
+      key: "lowercaseBase",
+      label: "Base",
+      value: this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_BASE_KEY, DEFAULT_WIDTH_LOWERCASE_BASE),
+      minValue: 1,
+    });
+
+    formContents.push({
+      type: "edit-number",
+      key: "lowercaseHorizontal",
+      label: "Horizontal",
+      value: this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY, DEFAULT_WIDTH_LOWERCASE_HORIZONTAL),
+      minValue: 1,
+    });
+
+    formContents.push({
+      type: "edit-number",
+      key: "lowercaseContrast",
+      label: "Contrast",
+      value: this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY, DEFAULT_WIDTH_LOWERCASE_CONTRAST),
       minValue: 1,
     });
 
@@ -347,7 +396,7 @@ export default class SkeletonParametersPanel extends Panel {
     let forceVerticalStates = new Set(); // Track forceVertical states
 
     if (hasSelection) {
-      const defaultWidth = this._getCurrentDefaultWidthWide();
+      const defaultWidth = this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
 
       // Collect all values from selected points
       const leftValues = [];
@@ -379,7 +428,7 @@ export default class SkeletonParametersPanel extends Panel {
       }
     } else {
       // No selection - show Source Width / 2
-      const defaultWide = this._getCurrentDefaultWidthWide();
+      const defaultWide = this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
       left = defaultWide / 2;
       right = defaultWide / 2;
     }
@@ -534,10 +583,16 @@ export default class SkeletonParametersPanel extends Panel {
     this.infoForm.setFieldDescriptions(formContents);
 
     this.infoForm.onFieldChange = async (fieldItem, value, valueStream) => {
-      if (fieldItem.key === "defaultSkeletonWidthWide") {
-        await this._setDefaultSkeletonWidth(SKELETON_DEFAULT_WIDTH_WIDE_KEY, value);
-      } else if (fieldItem.key === "defaultSkeletonWidthNarrow") {
-        await this._setDefaultSkeletonWidth(SKELETON_DEFAULT_WIDTH_NARROW_KEY, value);
+      const sourceWidthKeyMap = {
+        capitalBase: SKELETON_WIDTH_CAPITAL_BASE_KEY,
+        capitalHorizontal: SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY,
+        capitalContrast: SKELETON_WIDTH_CAPITAL_CONTRAST_KEY,
+        lowercaseBase: SKELETON_WIDTH_LOWERCASE_BASE_KEY,
+        lowercaseHorizontal: SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY,
+        lowercaseContrast: SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY,
+      };
+      if (sourceWidthKeyMap[fieldItem.key]) {
+        await this._setDefaultSkeletonWidth(sourceWidthKeyMap[fieldItem.key], value);
       } else if (fieldItem.key === "pointWidthLeft" || fieldItem.key === "pointWidthRight") {
         await this._setPointWidth(fieldItem.key, value);
       } else if (fieldItem.key === "pointWidthScale") {
@@ -570,7 +625,7 @@ export default class SkeletonParametersPanel extends Panel {
 
             for (const { contourIdx, pointIdx, point } of selectedData.points) {
               const key = `${contourIdx}/${pointIdx}`;
-              const defaultWidth = this._getCurrentDefaultWidthWide();
+              const defaultWidth = this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
               const left = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
               const right = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
 
@@ -618,27 +673,17 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Get the current default wide skeleton width from the active source's customData.
-   * @returns {number} The default wide width value
+   * Get a source width value from the active source's customData.
+   * @param {string} key - The customData key
+   * @param {number} fallback - Default value if not set
+   * @returns {number} The width value
    */
-  _getCurrentDefaultWidthWide() {
+  _getSourceWidth(key, fallback) {
     const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
-    if (!sourceIdentifier) return DEFAULT_WIDTH_WIDE;
+    if (!sourceIdentifier) return fallback;
 
     const source = this.fontController.sources[sourceIdentifier];
-    return source?.customData?.[SKELETON_DEFAULT_WIDTH_WIDE_KEY] ?? DEFAULT_WIDTH_WIDE;
-  }
-
-  /**
-   * Get the current default narrow skeleton width from the active source's customData.
-   * @returns {number} The default narrow width value
-   */
-  _getCurrentDefaultWidthNarrow() {
-    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
-    if (!sourceIdentifier) return DEFAULT_WIDTH_NARROW;
-
-    const source = this.fontController.sources[sourceIdentifier];
-    return source?.customData?.[SKELETON_DEFAULT_WIDTH_NARROW_KEY] ?? DEFAULT_WIDTH_NARROW;
+    return source?.customData?.[key] ?? fallback;
   }
 
   /**
@@ -867,7 +912,7 @@ export default class SkeletonParametersPanel extends Panel {
     const parts = [];
 
     // Source widths
-    parts.push(`w:${this._getCurrentDefaultWidthWide()},${this._getCurrentDefaultWidthNarrow()}`);
+    parts.push(`w:${this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE)},${this._getSourceWidth(SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY, DEFAULT_WIDTH_CAPITAL_HORIZONTAL)},${this._getSourceWidth(SKELETON_WIDTH_CAPITAL_CONTRAST_KEY, DEFAULT_WIDTH_CAPITAL_CONTRAST)},${this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_BASE_KEY, DEFAULT_WIDTH_LOWERCASE_BASE)},${this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY, DEFAULT_WIDTH_LOWERCASE_HORIZONTAL)},${this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY, DEFAULT_WIDTH_LOWERCASE_CONTRAST)}`);
 
     // Single-sided state
     parts.push(`ss:${this._getCurrentSingleSided()},${this._getCurrentSingleSidedDirection()}`);
@@ -879,7 +924,7 @@ export default class SkeletonParametersPanel extends Panel {
     // Selected skeleton points state
     const selectedData = this._getSelectedSkeletonPoints();
     if (selectedData) {
-      const defaultWidth = this._getCurrentDefaultWidthWide();
+      const defaultWidth = this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
       for (const { contourIdx, pointIdx, point } of selectedData.points) {
         const w = this._getPointWidths(point, defaultWidth);
         const isAsym = this._isAsymmetric(point);
@@ -982,7 +1027,7 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
+          const defaultWidth = contour.defaultWidth || this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
 
           if (checked) {
             // Convert to asymmetric: split width into leftWidth/rightWidth
@@ -1223,7 +1268,7 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
+          const defaultWidth = contour.defaultWidth || this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
 
           if (isAsym) {
             // Asymmetric mode - edit individual sides
@@ -1321,7 +1366,7 @@ export default class SkeletonParametersPanel extends Panel {
           if (!point || point.type) continue; // Skip off-curve points
 
           // Get current effective widths using the same logic as UI display
-          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
+          const defaultWidth = contour.defaultWidth || this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
           const currentLeft = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
           const currentRight = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
 
@@ -1411,7 +1456,7 @@ export default class SkeletonParametersPanel extends Panel {
           if (!point) continue;
 
           const key = `${contourIdx}/${pointIdx}`;
-          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
+          const defaultWidth = contour.defaultWidth || this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE);
 
           if (isMulti) {
             // Multi-selection: all points move with same speed, clamp at 0
