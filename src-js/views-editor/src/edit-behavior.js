@@ -1270,6 +1270,17 @@ const alternateConstrainRules = alternateRules.concat([
 
 ]);
 
+// prettier-ignore
+// Rules for editable rib points - handles always move with on-curve (no HandleIntersect)
+const editableRibRules = [
+  // All selected points just move
+  [    ANY|NIL,    ANY|NIL,    ANY|NIL,    ANY|SEL,    ANY|NIL,    ANY|NIL,    false,      "Move"],
+
+  // Unselected handles next to a selected on-curve also move (NOT HandleIntersect!)
+  [    ANY|NIL,    ANY|NIL,    SHA|SMO|SEL,OFF|UNS,    ANY|NIL,    ANY|NIL,    false,      "Move"],
+  [    ANY|NIL,    ANY|NIL,    ANY|NIL,    OFF|UNS,    SHA|SMO|SEL,ANY|NIL,    false,      "Move"],
+];
+
 const behaviorTypes = {
   "default": {
     matchTree: buildPointMatchTree(defaultRules),
@@ -1293,5 +1304,10 @@ const behaviorTypes = {
     matchTree: buildPointMatchTree(alternateConstrainRules),
     actions: actionFactories,
     constrainDelta: constrainHorVerDiag,
+  },
+
+  "editable-rib": {
+    matchTree: buildPointMatchTree(editableRibRules),
+    actions: actionFactories,
   },
 };

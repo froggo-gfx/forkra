@@ -1110,7 +1110,9 @@ export class PointerTool extends BaseTool {
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const initialPoint = sceneController.localPoint(initialEvent);
       const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
-      let behaviorName = getBehaviorName(initialEvent);
+      // For editable rib points, use special behavior where handles move with on-curve
+      const useEditableRibBehavior = editableRibPoints.length > 0;
+      let behaviorName = useEditableRibBehavior ? "editable-rib" : getBehaviorName(initialEvent);
 
       // Setup for regular point editing
       const layerInfo = Object.entries(
@@ -1167,8 +1169,8 @@ export class PointerTool extends BaseTool {
       for await (const event of eventStream) {
         const newEditBehaviorName = getBehaviorName(event);
 
-        // Handle behavior change for regular points
-        if (behaviorName !== newEditBehaviorName) {
+        // Handle behavior change for regular points (not for editable rib points)
+        if (!useEditableRibBehavior && behaviorName !== newEditBehaviorName) {
           behaviorName = newEditBehaviorName;
           const rollbackChanges = [];
           for (const layer of layerInfo) {
