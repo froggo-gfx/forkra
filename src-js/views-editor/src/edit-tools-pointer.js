@@ -249,7 +249,7 @@ export class PointerTool extends BaseTool {
       return sceneController.handleArrowKeys(event);
     }
 
-    // Handle skeleton point nudging
+    // Handle skeleton point nudging (combined with regular points in one editGlyph)
     let [dx, dy] = arrowKeyDeltas[event.key];
     if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
       dx *= 100;
@@ -275,7 +275,6 @@ export class PointerTool extends BaseTool {
       const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
 
       // Create behaviors and apply delta
-      // For arrow keys: altKey enables constrain mode (horizontal/vertical)
       const behaviorName = getSkeletonBehaviorName(false, event.altKey);
       const behaviors = createSkeletonEditBehavior(
         originalSkeletonData,
@@ -292,15 +291,44 @@ export class PointerTool extends BaseTool {
         }
       }
 
-      // Record changes
-      const changes = [];
+      const allChanges = [];
+      const regularRollbackParts = [];
 
-      // 1. FIRST: Update outline contours (in-place to preserve path structure)
+      // 1. Regular point nudging (if any regular points selected)
+      if (hasRegularPoints) {
+        const layerInfo = Object.entries(
+          sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+        ).map(([layerName, layerGlyph]) => {
+          const behaviorFactory = new EditBehaviorFactory(
+            layerGlyph,
+            sceneController.selection,
+            this.scalingEditBehavior
+          );
+          return {
+            layerName,
+            layerGlyph,
+            changePath: ["layers", layerName, "glyph"],
+            editBehavior: behaviorFactory.getBehavior(
+              event.altKey ? "alternate" : "default"
+            ),
+          };
+        });
+
+        for (const { layerGlyph, changePath, editBehavior } of layerInfo) {
+          const editChange = editBehavior.makeChangeForDelta(delta);
+          applyChange(layerGlyph, editChange);
+          allChanges.push(consolidateChanges(editChange, changePath));
+          regularRollbackParts.push(
+            consolidateChanges(editBehavior.rollbackChange, changePath)
+          );
+        }
+      }
+
+      // 2. Update skeleton outline contours (in-place to preserve path structure)
       const staticGlyph = layer.glyph;
       const generatedContours = generateContoursFromSkeleton(workingSkeletonData);
       const oldGeneratedIndices = workingSkeletonData.generatedContourIndices || [];
 
-      // Check if we can update point positions in-place
       let canUpdateInPlace = oldGeneratedIndices.length === generatedContours.length;
       const inPlaceUpdates = [];
       if (canUpdateInPlace) {
@@ -353,28 +381,29 @@ export class PointerTool extends BaseTool {
           workingSkeletonData.generatedContourIndices = newGeneratedIndices;
         }
       });
-      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+      allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]).change);
 
-      // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
+      // 3. Save skeletonData to customData
       const customDataChange = recordChanges(layer, (l) => {
         l.customData[SKELETON_CUSTOM_DATA_KEY] = workingSkeletonData;
       });
-      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+      allChanges.push(customDataChange.prefixed(["layers", editLayerName]).change);
 
-      const combinedChange = new ChangeCollector().concat(...changes);
-      await sendIncrementalChange(combinedChange.change);
+      const editChange = consolidateChanges(allChanges);
+      await sendIncrementalChange(editChange);
+
+      const rollbackParts = [
+        ...regularRollbackParts,
+        pathChange.prefixed(["layers", editLayerName, "glyph"]).rollbackChange,
+        customDataChange.prefixed(["layers", editLayerName]).rollbackChange,
+      ];
 
       return {
-        changes: combinedChange,
+        changes: ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts)),
         undoLabel: translate("action.nudge-selection"),
         broadcast: true,
       };
     });
-
-    // Also handle regular points if they are selected
-    if (hasRegularPoints) {
-      await sceneController.handleArrowKeys(event);
-    }
   }
 
   setCursorForRotationHandle(handleName) {
