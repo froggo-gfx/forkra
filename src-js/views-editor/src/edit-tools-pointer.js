@@ -1138,6 +1138,7 @@ export class PointerTool extends BaseTool {
 
       // Setup for skeleton editing (if we have skeleton selection too)
       let skeletonEditState = null;
+      console.log(`[DRAG] hasSkeletonSelection=${hasSkeletonSelection}, editableRibPoints=${editableRibPoints.length}`);
       if (hasSkeletonSelection) {
         const editLayerName = sceneController.editingLayerNames?.[0];
         const layer = editLayerName ? glyph.layers[editLayerName] : null;
@@ -1239,6 +1240,7 @@ export class PointerTool extends BaseTool {
           }
 
           // Regenerate outline and update customData
+          console.log(`[DRAG] REGENERATING outline in drag loop!`);
           const staticGlyph = layer.glyph;
           const generatedContours = generateContoursFromSkeleton(workingSkeletonData);
           const oldGeneratedIndices = workingSkeletonData.generatedContourIndices || [];
