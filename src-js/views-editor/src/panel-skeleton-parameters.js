@@ -457,6 +457,7 @@ export default class SkeletonParametersPanel extends Panel {
       defaultValue: 1.0,
       maxValue: 2.0,
       step: 0.2,
+      allowInputBeyondRange: true,
     });
 
     // Apply Scale button
@@ -1322,10 +1323,17 @@ export default class SkeletonParametersPanel extends Panel {
           const currentLeft = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
           const currentRight = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
 
-          // Apply scale, but don't let total width go below 2 UPM
-          const newLeft = Math.round(currentLeft * scale);
-          const newRight = Math.round(currentRight * scale);
-          if (newLeft + newRight < 2) continue;
+          // Apply scale, clamping total width to minimum 2 UPM
+          let newLeft = currentLeft * scale;
+          let newRight = currentRight * scale;
+          const totalWidth = newLeft + newRight;
+          if (totalWidth < 2) {
+            const ratio = 2 / totalWidth;
+            newLeft *= ratio;
+            newRight *= ratio;
+          }
+          newLeft = Math.round(newLeft);
+          newRight = Math.round(newRight);
 
           // Store result - preserve symmetric/asymmetric mode
           if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
