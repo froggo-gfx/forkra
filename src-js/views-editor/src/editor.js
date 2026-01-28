@@ -2368,61 +2368,117 @@ export class EditorController extends ViewController {
       //fontGuideline: fontGuidelineSelection,
     } = parseSelection(this.sceneController.selection);
 
-    // Handle skeleton point deletion separately (requires access to layer.customData)
-    if (skeletonPointSelection?.size) {
-      await this._deleteSkeletonPoints(skeletonPointSelection);
-    }
-
     const hasRegularSelection = pointSelection?.length || componentSelection?.length ||
       anchorSelection?.length || guidelineSelection?.length || backgroundImageSelection;
-    if (!hasRegularSelection) {
+    const hasSkeletonSelection = skeletonPointSelection?.size > 0;
+
+    if (!hasRegularSelection && !hasSkeletonSelection) {
       return;
     }
 
-    // TODO: Font Guidelines
-    // if (fontGuidelineSelection) {
-    //   for (const guidelineIndex of reversed(fontGuidelineSelection)) {
-    //     XXX
-    //   }
-    // }
-    await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
-      for (const layerGlyph of Object.values(layerGlyphs)) {
-        if (event.altKey) {
-          // Behave like "cut", but don't put anything on the clipboard
-          this._prepareCopyOrCut(layerGlyph, true, false);
-        } else {
-          if (pointSelection) {
-            deleteSelectedPoints(layerGlyph.path, pointSelection);
-          }
-          if (componentSelection) {
-            for (const componentIndex of reversed(componentSelection)) {
-              layerGlyph.components.splice(componentIndex, 1);
-            }
-          }
-          if (anchorSelection) {
-            for (const anchorIndex of reversed(anchorSelection)) {
-              layerGlyph.anchors.splice(anchorIndex, 1);
-            }
-          }
-          if (guidelineSelection) {
-            for (const guidelineIndex of reversed(guidelineSelection)) {
-              const guideline = layerGlyph.guidelines[guidelineIndex];
-              if (guideline.locked) {
-                // don't delete locked guidelines
-                continue;
+    // Single editGlyph call for both regular and skeleton deletion
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      // 1. Delete regular selection FIRST (while point indices are still valid)
+      if (hasRegularSelection) {
+        const regularChanges = recordChanges(glyph, (subject) => {
+          // Get layer glyphs through the proxy so modifications are recorded
+          const layerGlyphs = this.sceneController.getEditingLayerFromGlyphLayers(
+            subject.layers
+          );
+          for (const layerGlyph of Object.values(layerGlyphs)) {
+            if (event.altKey) {
+              this._prepareCopyOrCut(layerGlyph, true, false);
+            } else {
+              if (pointSelection) {
+                deleteSelectedPoints(layerGlyph.path, pointSelection);
               }
-              layerGlyph.guidelines.splice(guidelineIndex, 1);
+              if (componentSelection) {
+                for (const componentIndex of reversed(componentSelection)) {
+                  layerGlyph.components.splice(componentIndex, 1);
+                }
+              }
+              if (anchorSelection) {
+                for (const anchorIndex of reversed(anchorSelection)) {
+                  layerGlyph.anchors.splice(anchorIndex, 1);
+                }
+              }
+              if (guidelineSelection) {
+                for (const guidelineIndex of reversed(guidelineSelection)) {
+                  const guideline = layerGlyph.guidelines[guidelineIndex];
+                  if (guideline.locked) {
+                    continue;
+                  }
+                  layerGlyph.guidelines.splice(guidelineIndex, 1);
+                }
+              }
+              if (backgroundImageSelection) {
+                layerGlyph.backgroundImage = undefined;
+              }
             }
           }
-          if (backgroundImageSelection) {
-            // TODO: don't delete if bg images are locked
-            // (even though we shouldn't be able to select them)
-            layerGlyph.backgroundImage = undefined;
+        });
+        if (regularChanges.hasChange) {
+          allChanges.push(regularChanges);
+        }
+      }
+
+      // 2. Delete skeleton points AFTER regular (skeleton regen shifts path indices)
+      if (hasSkeletonSelection) {
+        const SKELETON_KEY = "fontra.skeleton";
+        const editLayerName = this.sceneController.editingLayerNames?.[0];
+        const layer = editLayerName ? glyph.layers[editLayerName] : null;
+        let skeletonData = layer?.customData?.[SKELETON_KEY];
+
+        if (skeletonData) {
+          skeletonData = JSON.parse(JSON.stringify(skeletonData));
+          const modified = deleteSkeletonPoints(skeletonData, skeletonPointSelection);
+
+          if (modified) {
+            const staticGlyph = layer.glyph;
+
+            // Regenerate outline contours
+            const pathChange = recordChanges(staticGlyph, (sg) => {
+              const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
+              const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+              for (const idx of sortedIndices) {
+                if (idx < sg.path.numContours) {
+                  sg.path.deleteContour(idx);
+                }
+              }
+              const generatedContours = generateContoursFromSkeleton(skeletonData);
+              const newGeneratedIndices = [];
+              for (const contour of generatedContours) {
+                const newIndex = sg.path.numContours;
+                sg.path.insertContour(newIndex, packContour(contour));
+                newGeneratedIndices.push(newIndex);
+              }
+              skeletonData.generatedContourIndices = newGeneratedIndices;
+            });
+            allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+            // Save updated skeletonData
+            const customDataChange = recordChanges(layer, (l) => {
+              l.customData[SKELETON_KEY] = skeletonData;
+            });
+            allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
           }
         }
       }
+
+      if (!allChanges.length) return;
+
+      const combinedChange = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combinedChange.change);
+
       this.sceneController.selection = new Set();
-      return translate("action.delete-selection");
+
+      return {
+        changes: combinedChange,
+        undoLabel: translate("action.delete-selection"),
+        broadcast: true,
+      };
     });
   }
 
