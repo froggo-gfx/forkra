@@ -941,6 +941,7 @@ export class SceneModel {
         const handleSide = this._determineHandleSide(
           positionedGlyph, pointIndex, ribInfo.skeletonContourIndex, ribInfo.skeletonPointIndex, skeletonData
         );
+        console.log(`[HANDLE] pointIndex=${pointIndex} prevOnCurve=${prevOnCurveIndex} ribInfo.side=${ribInfo.side} handleSide=${handleSide}`);
         if (handleSide === ribInfo.side) {
           // This handle is going OUT from the previous on-curve point
           return {
@@ -948,6 +949,8 @@ export class SceneModel {
             handleType: "out",
             onCurvePointIndex: prevOnCurveIndex,
           };
+        } else {
+          console.log(`[HANDLE] REJECTED: side mismatch for handle ${pointIndex} as OUT of ${prevOnCurveIndex}`);
         }
       }
     }
@@ -961,6 +964,7 @@ export class SceneModel {
         const handleSide = this._determineHandleSide(
           positionedGlyph, pointIndex, ribInfo.skeletonContourIndex, ribInfo.skeletonPointIndex, skeletonData
         );
+        console.log(`[HANDLE] pointIndex=${pointIndex} nextOnCurve=${nextOnCurveIndex} ribInfo.side=${ribInfo.side} handleSide=${handleSide}`);
         if (handleSide === ribInfo.side) {
           // This handle is coming IN to the next on-curve point
           return {
@@ -968,10 +972,13 @@ export class SceneModel {
             handleType: "in",
             onCurvePointIndex: nextOnCurveIndex,
           };
+        } else {
+          console.log(`[HANDLE] REJECTED: side mismatch for handle ${pointIndex} as IN of ${nextOnCurveIndex}`);
         }
       }
     }
 
+    console.log(`[HANDLE] No match found for handle ${pointIndex}`);
     return null;
   }
 
@@ -1008,7 +1015,9 @@ export class SceneModel {
     // Dot product with normal: positive = left side, negative = right side
     const dot = toHandle.x * normal.x + toHandle.y * normal.y;
 
-    return dot >= 0 ? "left" : "right";
+    const side = dot >= 0 ? "left" : "right";
+    console.log(`[SIDE] handle=${handlePointIndex} skelPt=(${skeletonPoint.x},${skeletonPoint.y}) handlePos=(${handlePos.x},${handlePos.y}) normal=(${normal.x.toFixed(2)},${normal.y.toFixed(2)}) dot=${dot.toFixed(2)} -> ${side}`);
+    return side;
   }
 
   /**
