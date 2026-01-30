@@ -1192,25 +1192,27 @@ export class InterpolatingRibBehavior {
       y: this.prevHandle.y + this.lineDir.y * projectedDist,
     };
 
-    // Convert new rib position back to halfWidth and nudge
+    // For interpolation, we keep halfWidth constant and only change nudge
+    // Calculate nudge that would place the rib point at newRibPos
     const sign = this.side === "left" ? 1 : -1;
-    const deltaFromSkeleton = {
-      x: newRibPos.x - this.onCurvePoint.x,
-      y: newRibPos.y - this.onCurvePoint.y,
+
+    // The rib position formula: ribPos = onCurve + sign*normal*halfWidth + tangent*nudge
+    // We want to find nudge such that ribPos is on the line between handles
+    // Since halfWidth is fixed, we solve for nudge along the tangent direction
+
+    // Project newRibPos onto tangent relative to the base point (skeleton + halfWidth offset)
+    const basePoint = {
+      x: this.onCurvePoint.x + sign * this.normal.x * this.originalHalfWidth,
+      y: this.onCurvePoint.y + sign * this.normal.y * this.originalHalfWidth,
     };
 
-    // Project onto normal (width) and tangent (nudge)
-    const normalComponent = deltaFromSkeleton.x * this.normal.x + deltaFromSkeleton.y * this.normal.y;
-    const tangentComponent = deltaFromSkeleton.x * this.tangent.x + deltaFromSkeleton.y * this.tangent.y;
-
-    const newHalfWidth = Math.max(1, sign * normalComponent);
-    const newNudge = tangentComponent;
+    const newNudge = (newRibPos.x - basePoint.x) * this.tangent.x + (newRibPos.y - basePoint.y) * this.tangent.y;
 
     console.log('[RIB-INTERPOLATE] applyDelta', {
       delta,
       projectedDist,
       newRibPos,
-      newHalfWidth,
+      halfWidth: this.originalHalfWidth,
       newNudge,
     });
 
@@ -1218,9 +1220,9 @@ export class InterpolatingRibBehavior {
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
       side: this.side,
-      halfWidth: Math.round(newHalfWidth),
+      halfWidth: Math.round(this.originalHalfWidth), // Keep width constant!
       nudge: Math.round(newNudge),
-      isAsymmetric: true, // Interpolation always produces asymmetric result
+      isAsymmetric: true,
     };
   }
 
