@@ -1137,12 +1137,6 @@ export class EditableRibBehavior {
       }
     }
 
-    // Compute handle offset compensation when nudge changes
-    // When rib point moves by tangent * deltaNudge, handles need opposite offset
-    const deltaNudge = newNudge - this.originalNudge;
-    const handleOffsetDeltaX = -this.tangent.x * deltaNudge;
-    const handleOffsetDeltaY = -this.tangent.y * deltaNudge;
-
     const result = {
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
@@ -1152,14 +1146,10 @@ export class EditableRibBehavior {
       isAsymmetric: this.isAsymmetric,
     };
 
-    // Only include handle offsets if there were existing offsets to preserve
-    if (this.hasHandleOffsets) {
-      result.handleInOffsetX = Math.round(this.originalHandleInOffsetX + handleOffsetDeltaX);
-      result.handleInOffsetY = Math.round(this.originalHandleInOffsetY + handleOffsetDeltaY);
-      result.handleOutOffsetX = Math.round(this.originalHandleOutOffsetX + handleOffsetDeltaX);
-      result.handleOutOffsetY = Math.round(this.originalHandleOutOffsetY + handleOffsetDeltaY);
-      result.hasHandleOffsets = true;
-    }
+    // Note: we don't compensate handle offsets here.
+    // Handles should move WITH the rib point in normal drag mode.
+    // Handle offset compensation (keeping handles stationary) is only done
+    // in InterpolatingRibBehavior (Alt+drag).
 
     return result;
   }
