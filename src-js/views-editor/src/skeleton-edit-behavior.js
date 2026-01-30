@@ -1203,13 +1203,14 @@ export class InterpolatingRibBehavior {
       newNudge,
     });
 
+    // For interpolation, we only change nudge - width stays the same
+    // Return isAsymmetric: false so that only nudge is updated
     return {
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
       side: this.side,
-      halfWidth: Math.round(newHalfWidth),
       nudge: Math.round(newNudge),
-      isAsymmetric: true,
+      isAsymmetric: false,
     };
   }
 
