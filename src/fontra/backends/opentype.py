@@ -1,4 +1,5 @@
 import uuid
+from copy import deepcopy
 from itertools import product
 from os import PathLike
 from typing import Any, Generator
@@ -53,7 +54,7 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
 
     def _initialize(self) -> None:
         self.axes = unpackAxes(self.font)
-        self.fontSources = unpackFontSources(self.font)
+        self.fontSources = unpackFontSources(self.font, self.axes.axes)
         self.fontSourcesInstancer = FontSourcesInstancer(
             fontAxes=self.axes.axes, fontSources=self.fontSources
         )
@@ -110,19 +111,20 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
                 varGlyphSet = self.font.getGlyphSet(location=fullLoc, normalized=True)
                 self.variationGlyphSets[locStr] = varGlyphSet
             varGlyph = buildStaticGlyph(varGlyphSet, glyphName)
-            layers[locStr] = Layer(glyph=varGlyph)
 
             sourceLocation = unnormalizeLocation(fullLoc, self.axes.axes)
             locationBase = self.fontSourcesInstancer.getSourceIdentifierForLocation(
                 sourceLocation
             )
+            layerName = locationBase if locationBase is not None else locStr
+            layers[layerName] = Layer(glyph=varGlyph)
 
             sources.append(
                 GlyphSource(
                     location={} if locationBase is not None else sourceLocation,
                     locationBase=locationBase,
-                    name=None if locationBase is not None else locStr,
-                    layerName=locStr,
+                    name="" if locationBase is not None else locStr,
+                    layerName=layerName,
                 )
             )
         if self.charStrings is not None:
@@ -352,8 +354,10 @@ def unpackAxes(font: TTFont) -> Axes:
     return Axes(axes=axisList, mappings=mappings)
 
 
-def unpackFontSources(font):
+def unpackFontSources(font, fontraAxes):
     nameTable = font["name"]
+    fvarTable = font.get("fvar")
+    fvarAxes = fvarTable.axes if fvarTable is not None else []
 
     defaultSourceIdentifier = makeSourceIdentifier(0)
     defaultSource = FontSource(
@@ -363,6 +367,15 @@ def unpackFontSources(font):
     postTable = font.get("post")
     if postTable is not None:
         defaultSource.italicAngle = postTable.italicAngle
+
+    locations = set()
+
+    gdefTable = font.get("GDEF")
+    if gdefTable is not None and gdefTable.table.VarStore is not None:
+        locations |= {
+            locationToTuple(loc)
+            for loc in getLocationsFromVarstore(gdefTable.table.VarStore, fvarAxes)
+        }
 
     os2Table = font.get("OS/2")
     if os2Table is not None:
@@ -379,9 +392,32 @@ def unpackFontSources(font):
             value=os2Table.sxHeight
         )
 
+        mvarTable = font.get("MVAR")
+        if mvarTable is not None:
+            locations |= {
+                locationToTuple(loc)
+                for loc in getLocationsFromVarstore(mvarTable.table.VarStore, fvarAxes)
+            }
+    # else:
+    #     ...fall back for hhea table?
+
     defaultSource.lineMetricsHorizontalLayout["baseline"] = LineMetric(value=0)
 
-    return {defaultSourceIdentifier: defaultSource}
+    sources = {defaultSourceIdentifier: defaultSource}
+
+    for loc in sorted(locations):
+        loc = dict(loc)
+        source = deepcopy(defaultSource)
+        sourceIdentifier = makeSourceIdentifier(len(sources))
+
+        source.location = unnormalizeLocation(loc, fontraAxes)
+        source.name = locationToString(source.location)
+
+        # XXX instantiate MVAR
+
+        sources[sourceIdentifier] = source
+
+    return sources
 
 
 # Monkeypatch this for deterministic testing
