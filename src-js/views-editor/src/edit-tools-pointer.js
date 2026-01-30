@@ -2060,12 +2060,23 @@ export class PointerTool extends BaseTool {
    */
   _findAdjacentHandlesForRibPoint(path, ribPointIndex) {
     const numPoints = path.numPoints;
-    if (ribPointIndex < 0 || ribPointIndex >= numPoints) return null;
+    console.log('[RIB-INTERPOLATE] _findAdjacentHandlesForRibPoint called', {
+      ribPointIndex, numPoints,
+    });
+
+    if (ribPointIndex < 0 || ribPointIndex >= numPoints) {
+      console.log('[RIB-INTERPOLATE] ribPointIndex out of bounds');
+      return null;
+    }
 
     // Get contour range for this point
     const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(ribPointIndex);
     const numContourPoints = path.getNumPointsOfContour(contourIndex);
     const contourStart = ribPointIndex - contourPointIndex;
+
+    console.log('[RIB-INTERPOLATE] Contour info', {
+      contourIndex, contourPointIndex, numContourPoints, contourStart,
+    });
 
     // Helper to wrap index within contour
     const wrapIndex = (idx) => {
@@ -2074,39 +2085,26 @@ export class PointerTool extends BaseTool {
       return contourStart + wrapped;
     };
 
-    // Find prev and next off-curve points
-    let prevHandle = null;
-    let nextHandle = null;
+    // Check immediate neighbors (prev and next)
+    const prevIdx = wrapIndex(ribPointIndex - 1);
+    const nextIdx = wrapIndex(ribPointIndex + 1);
 
-    // Look backwards for prev handle
-    for (let i = 1; i <= numContourPoints; i++) {
-      const checkIdx = wrapIndex(ribPointIndex - i);
-      const pointType = path.pointTypes[checkIdx];
-      const isOnCurve = (pointType & 0x03) === 0;
-      if (!isOnCurve) {
-        prevHandle = path.getPoint(checkIdx);
-        break;
-      }
-      // If we hit another on-curve before finding off-curve, no prev handle
-      if (isOnCurve && i > 1) break;
-    }
+    const prevType = path.pointTypes[prevIdx];
+    const nextType = path.pointTypes[nextIdx];
+    const prevIsOnCurve = (prevType & 0x03) === 0;
+    const nextIsOnCurve = (nextType & 0x03) === 0;
 
-    // Look forwards for next handle
-    for (let i = 1; i <= numContourPoints; i++) {
-      const checkIdx = wrapIndex(ribPointIndex + i);
-      const pointType = path.pointTypes[checkIdx];
-      const isOnCurve = (pointType & 0x03) === 0;
-      if (!isOnCurve) {
-        nextHandle = path.getPoint(checkIdx);
-        break;
-      }
-      // If we hit another on-curve before finding off-curve, no next handle
-      if (isOnCurve && i > 1) break;
-    }
-
-    console.log('[RIB-INTERPOLATE] _findAdjacentHandlesForRibPoint', {
-      ribPointIndex, prevHandle, nextHandle,
+    console.log('[RIB-INTERPOLATE] Immediate neighbors', {
+      prevIdx, nextIdx,
+      prevType, nextType,
+      prevIsOnCurve, nextIsOnCurve,
     });
+
+    // For generated skeleton contours, immediate neighbors should be handles
+    const prevHandle = !prevIsOnCurve ? path.getPoint(prevIdx) : null;
+    const nextHandle = !nextIsOnCurve ? path.getPoint(nextIdx) : null;
+
+    console.log('[RIB-INTERPOLATE] Result', { prevHandle, nextHandle });
 
     if (!prevHandle || !nextHandle) return null;
     return { prevHandle, nextHandle };
@@ -2124,7 +2122,17 @@ export class PointerTool extends BaseTool {
     if (!positionedGlyph || editablePoints.length === 0) return;
 
     const useInterpolation = initialEvent.altKey;
-    console.log('[RIB-INTERPOLATE] Alt key:', useInterpolation);
+    console.log('[RIB-INTERPOLATE] _handleDragEditableGeneratedPoints called', {
+      altKey: initialEvent.altKey,
+      useInterpolation,
+      editablePointsCount: editablePoints.length,
+      editablePoints: editablePoints.map(ep => ({
+        pointIndex: ep.pointIndex,
+        skeletonContourIndex: ep.skeletonContourIndex,
+        skeletonPointIndex: ep.skeletonPointIndex,
+        side: ep.side,
+      })),
+    });
 
     const localPoint = sceneController.localPoint(initialEvent);
     const startGlyphPoint = {
@@ -2134,10 +2142,14 @@ export class PointerTool extends BaseTool {
 
     // If using interpolation, find adjacent handles for each editable rib point
     const generatedPath = positionedGlyph.glyph.path;
+    console.log('[RIB-INTERPOLATE] generatedPath numPoints:', generatedPath.numPoints);
+
     const editablePointsWithHandles = useInterpolation
       ? editablePoints.map(ep => {
           // ep.pointIndex is the index in the generated path
+          console.log('[RIB-INTERPOLATE] Looking for handles for pointIndex:', ep.pointIndex);
           const handles = this._findAdjacentHandlesForRibPoint(generatedPath, ep.pointIndex);
+          console.log('[RIB-INTERPOLATE] Found handles:', handles);
           return { ...ep, handles };
         })
       : editablePoints.map(ep => ({ ...ep, handles: null }));
@@ -2178,11 +2190,18 @@ export class PointerTool extends BaseTool {
 
           // Use interpolating behavior if Alt is pressed and handles are found
           let behavior;
+          console.log('[RIB-INTERPOLATE] Creating behavior:', {
+            useInterpolation,
+            hasHandles: !!ep.handles,
+            handles: ep.handles,
+          });
           if (useInterpolation && ep.handles) {
+            console.log('[RIB-INTERPOLATE] Using InterpolatingRibBehavior');
             behavior = createInterpolatingRibBehavior(
               data.original, ribHit, ep.handles.prevHandle, ep.handles.nextHandle
             );
           } else {
+            console.log('[RIB-INTERPOLATE] Using EditableRibBehavior');
             behavior = createEditableRibBehavior(data.original, ribHit);
           }
 
