@@ -900,11 +900,10 @@ export class SceneModel {
     console.log('[HANDLE-EDIT] Phase 3: Point is off-curve, checking for match');
 
     // Find adjacent on-curve point (anchor) to determine which skeleton point this relates to
-    const numPoints = path.numPoints;
-    const contourRange = path.getContourRange(path.pointToContourIndex(pointIndex));
-    if (!contourRange) return null;
-
-    const [contourStart, contourEnd] = contourRange;
+    const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
+    const numContourPoints = path.getNumPointsOfContour(contourIndex);
+    const contourStart = pointIndex - contourPointIndex;
+    const contourEnd = contourStart + numContourPoints; // exclusive end
 
     // Get previous and next point indices (within contour bounds)
     const getPrevIdx = (idx) => idx > contourStart ? idx - 1 : contourEnd - 1;
