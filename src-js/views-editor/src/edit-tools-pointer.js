@@ -1904,7 +1904,7 @@ export class PointerTool extends BaseTool {
             if (useInterpolation) {
               // Find adjacent handles in the generated path
               const handles = this._findHandlesForRibPointFromSkeleton(
-                layer.glyph.path,
+                data.layer.glyph.path,
                 skeletonPoint,
                 normal,
                 contour,
