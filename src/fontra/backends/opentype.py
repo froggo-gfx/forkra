@@ -354,6 +354,14 @@ def unpackAxes(font: TTFont) -> Axes:
     return Axes(axes=axisList, mappings=mappings)
 
 
+MVAR_MAPPING = {
+    "hasc": "ascender",
+    "hdsc": "descender",
+    "cpht": "capHeight",
+    "xhgt": "xHeight",
+}
+
+
 def unpackFontSources(font, fontraAxes):
     nameTable = font["name"]
     fvarTable = font.get("fvar")
@@ -391,15 +399,15 @@ def unpackFontSources(font, fontraAxes):
         defaultSource.lineMetricsHorizontalLayout["xHeight"] = LineMetric(
             value=os2Table.sxHeight
         )
-
-        mvarTable = font.get("MVAR")
-        if mvarTable is not None:
-            locations |= {
-                locationToTuple(loc)
-                for loc in getLocationsFromVarstore(mvarTable.table.VarStore, fvarAxes)
-            }
     # else:
     #     ...fall back for hhea table?
+
+    mvarTable = font.get("MVAR")
+    if mvarTable is not None:
+        locations |= {
+            locationToTuple(loc)
+            for loc in getLocationsFromVarstore(mvarTable.table.VarStore, fvarAxes)
+        }
 
     defaultSource.lineMetricsHorizontalLayout["baseline"] = LineMetric(value=0)
 
@@ -413,7 +421,14 @@ def unpackFontSources(font, fontraAxes):
         source.location = unnormalizeLocation(loc, fontraAxes)
         source.name = locationToString(source.location)
 
-        # XXX instantiate MVAR
+        if os2Table is not None and mvarTable is not None:
+            mvarInstancer = VarStoreInstancer(mvarTable.table.VarStore, fvarAxes, loc)
+            for rec in mvarTable.table.ValueRecord:
+                metricKey = MVAR_MAPPING.get(rec.ValueTag)
+                if metricKey:
+                    source.lineMetricsHorizontalLayout[
+                        metricKey
+                    ].value += mvarInstancer[rec.VarIdx]
 
         sources[sourceIdentifier] = source
 
