@@ -1583,6 +1583,67 @@ export class SceneModel {
       }
     }
 
+    // Add rib points within rectangle ONLY if no other points were selected
+    if (selection.size === 0 && editLayerName && positionedGlyph.varGlyph?.glyph?.layers) {
+      const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+      const skeletonData = layer?.customData?.["fontra.skeleton"];
+      if (skeletonData?.contours?.length) {
+        let lastRibPointKey = null;
+
+        for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
+          const contour = skeletonData.contours[contourIdx];
+          const defaultWidth = contour.defaultWidth || 20;
+          const singleSided = contour.singleSided ?? false;
+          const singleSidedDirection = contour.singleSidedDirection ?? "left";
+
+          for (let pointIdx = 0; pointIdx < contour.points.length; pointIdx++) {
+            const point = contour.points[pointIdx];
+            // Only on-curve points have rib points
+            if (point.type) continue;
+
+            const normal = calculateNormalAtSkeletonPoint(contour, pointIdx);
+            const tangent = { x: -normal.y, y: normal.x };
+
+            for (const side of ["left", "right"]) {
+              let halfWidth = getPointHalfWidth(point, defaultWidth, side);
+
+              // Handle single-sided mode
+              if (singleSided) {
+                if (singleSidedDirection !== side) continue;
+                const leftHW = getPointHalfWidth(point, defaultWidth, "left");
+                const rightHW = getPointHalfWidth(point, defaultWidth, "right");
+                halfWidth = leftHW + rightHW;
+              }
+
+              if (halfWidth < 0.5) continue;
+
+              const isEditable = side === "left" ? point.leftEditable : point.rightEditable;
+              const nudge = isEditable ? (side === "left" ? point.leftNudge || 0 : point.rightNudge || 0) : 0;
+
+              const sign = side === "left" ? 1 : -1;
+              const ribX = Math.round(point.x + sign * normal.x * halfWidth + tangent.x * nudge);
+              const ribY = Math.round(point.y + sign * normal.y * halfWidth + tangent.y * nudge);
+
+              // Check if rib point is within rectangle
+              if (
+                ribX >= selRect.xMin &&
+                ribX <= selRect.xMax &&
+                ribY >= selRect.yMin &&
+                ribY <= selRect.yMax
+              ) {
+                // Keep only the last one (no multiple selection)
+                lastRibPointKey = `skeletonRibPoint/${contourIdx}/${pointIdx}/${side}`;
+              }
+            }
+          }
+        }
+
+        if (lastRibPointKey) {
+          selection.add(lastRibPointKey);
+        }
+      }
+    }
+
     return selection;
   }
 

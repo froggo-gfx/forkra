@@ -333,7 +333,8 @@ registerVisualizationLayerDefinition({
           }
 
           const pointSize = isEditable ? parameters.editablePointSize : parameters.pointSize;
-          if (selectedRibPoints?.has(ribKey)) {
+          const isSelected = selectedRibPoints?.has(ribKey);
+          if (isSelected) {
             context.strokeStyle = parameters.selectedColor;
           } else if (hoveredRibPoints?.has(ribKey)) {
             context.strokeStyle = isEditable ? parameters.editableHoveredColor : parameters.hoveredColor;
@@ -341,6 +342,10 @@ registerVisualizationLayerDefinition({
             context.strokeStyle = isEditable ? parameters.editableStrokeColor : parameters.strokeColor;
           }
           strokeDiamondNode(context, ribPoint, pointSize);
+          if (isSelected) {
+            context.fillStyle = parameters.selectedColor;
+            fillDiamondNode(context, ribPoint, pointSize);
+          }
         } else {
           // Normal mode: two rib points
           // Only apply nudge offset if editable is true (matches generator behavior)
@@ -359,7 +364,8 @@ registerVisualizationLayerDefinition({
 
           // Draw left rib point
           const leftPointSize = isLeftEditable ? parameters.editablePointSize : parameters.pointSize;
-          if (selectedRibPoints?.has(leftKey)) {
+          const isLeftSelected = selectedRibPoints?.has(leftKey);
+          if (isLeftSelected) {
             context.strokeStyle = parameters.selectedColor;
           } else if (hoveredRibPoints?.has(leftKey)) {
             context.strokeStyle = isLeftEditable ? parameters.editableHoveredColor : parameters.hoveredColor;
@@ -367,10 +373,15 @@ registerVisualizationLayerDefinition({
             context.strokeStyle = isLeftEditable ? parameters.editableStrokeColor : parameters.strokeColor;
           }
           strokeDiamondNode(context, leftRibPoint, leftPointSize);
+          if (isLeftSelected) {
+            context.fillStyle = parameters.selectedColor;
+            fillDiamondNode(context, leftRibPoint, leftPointSize);
+          }
 
           // Draw right rib point
           const rightPointSize = isRightEditable ? parameters.editablePointSize : parameters.pointSize;
-          if (selectedRibPoints?.has(rightKey)) {
+          const isRightSelected = selectedRibPoints?.has(rightKey);
+          if (isRightSelected) {
             context.strokeStyle = parameters.selectedColor;
           } else if (hoveredRibPoints?.has(rightKey)) {
             context.strokeStyle = isRightEditable ? parameters.editableHoveredColor : parameters.hoveredColor;
@@ -378,6 +389,10 @@ registerVisualizationLayerDefinition({
             context.strokeStyle = isRightEditable ? parameters.editableStrokeColor : parameters.strokeColor;
           }
           strokeDiamondNode(context, rightRibPoint, rightPointSize);
+          if (isRightSelected) {
+            context.fillStyle = parameters.selectedColor;
+            fillDiamondNode(context, rightRibPoint, rightPointSize);
+          }
         }
       }
     }
