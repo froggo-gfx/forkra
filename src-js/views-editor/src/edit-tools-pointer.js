@@ -118,8 +118,6 @@ export class PointerTool extends BaseTool {
       this.measureMode = false;
       this.sceneModel.measureMode = false;
       this.sceneModel.measureHoverSegment = null;
-      this.sceneModel.measureSelectedPoints = [];
-      this.sceneModel.measureClickDirect = false;
       if (this._boundKeyUp) {
         window.removeEventListener("keyup", this._boundKeyUp);
         this._boundKeyUp = null;
@@ -453,10 +451,8 @@ export class PointerTool extends BaseTool {
   }
 
   async handleDrag(eventStream, initialEvent) {
-    // Handle measure mode (Q-key) clicks
+    // In measure mode, don't handle clicks - only hover over segments
     if (this.measureMode) {
-      await this._handleMeasureClick(initialEvent);
-      initialEvent.preventDefault();
       return;
     }
 
@@ -3947,33 +3943,6 @@ export class PointerTool extends BaseTool {
   }
 
   /**
-   * Handle measure mode click - select point for distance measurement.
-   */
-  async _handleMeasureClick(event) {
-    const point = this.sceneController.localPoint(event);
-    const size = this.sceneController.mouseClickMargin;
-
-    // Find any point (regular, skeleton, or generated)
-    const measurePoint = this.sceneModel.measurePointAtPoint(point, size);
-
-    if (measurePoint) {
-      if (event.shiftKey) {
-        // Add to measure selection (keep existing direct mode)
-        this.sceneModel.measureSelectedPoints.push(measurePoint);
-      } else {
-        // Replace measure selection, set direct mode based on Alt key
-        this.sceneModel.measureSelectedPoints = [measurePoint];
-        this.sceneModel.measureClickDirect = event.altKey;
-      }
-    } else {
-      // Click on empty space - clear selection
-      this.sceneModel.measureSelectedPoints = [];
-      this.sceneModel.measureClickDirect = false;
-    }
-    this.canvasController.requestUpdate();
-  }
-
-  /**
    * Find segment under cursor for measure mode.
    * Returns { p1, p2, type } where p1 and p2 are on-curve endpoints.
    */
@@ -4154,8 +4123,6 @@ export class PointerTool extends BaseTool {
       this.measureMode = false;
       this.sceneModel.measureMode = false;
       this.sceneModel.measureHoverSegment = null;
-      this.sceneModel.measureSelectedPoints = [];
-      this.sceneModel.measureClickDirect = false;
       if (this._boundKeyUp) {
         window.removeEventListener("keyup", this._boundKeyUp);
         this._boundKeyUp = null;

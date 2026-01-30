@@ -1692,34 +1692,27 @@ registerVisualizationLayerDefinition({
     strokeWidth: 1,
     fontSize: 14,
     dashPattern: [4, 4],
-    pointRadius: 4,
   },
   colors: {
-    lineColor: "#FF6600",
     textColor: "#333",
     textBgColor: "#FFFFFF",
     textBorderColor: "rgba(0, 0, 0, 0.15)",
-    projectionColor: "#0088FF",
-    selectedPointColor: "#FF0066",
     skeletonColor: "#0066FF",
     pathColor: "#22AA44",
   },
   colorsDarkMode: {
-    lineColor: "#FF8833",
     textColor: "#EEE",
     textBgColor: "#333333",
     textBorderColor: "rgba(255, 255, 255, 0.15)",
-    projectionColor: "#44AAFF",
-    selectedPointColor: "#FF4488",
     skeletonColor: "#4499FF",
     pathColor: "#44CC66",
   },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     if (!model.measureMode) return;
 
-    const { measureHoverSegment, measureSelectedPoints, measureShowDirect, measureClickDirect } = model;
+    const { measureHoverSegment, measureShowDirect } = model;
 
-    // 1. Draw segment hover measurement (Q+hover)
+    // Draw segment hover measurement (Q+hover)
     if (measureHoverSegment) {
       const { p1, p2, type } = measureHoverSegment;
       // Use skeleton color (blue) for skeleton segments, path color (green) for regular
@@ -1763,62 +1756,6 @@ registerVisualizationLayerDefinition({
             segmentColor,
             parameters
           );
-        }
-      }
-    }
-
-    // 2. Draw distances between selected measure points (Q-click)
-    if (measureSelectedPoints?.length >= 1) {
-      // Highlight selected points
-      context.fillStyle = parameters.selectedPointColor;
-      for (const pt of measureSelectedPoints) {
-        fillRoundNode(context, pt, parameters.pointRadius * 2);
-      }
-
-      // Draw lines between consecutive points
-      if (measureSelectedPoints.length >= 2) {
-        for (let i = 0; i < measureSelectedPoints.length - 1; i++) {
-          const pt1 = measureSelectedPoints[i];
-          const pt2 = measureSelectedPoints[i + 1];
-
-          if (measureClickDirect) {
-            // Alt+Q-click: direct distance + angle
-            const dx = pt2.x - pt1.x;
-            const dy = pt2.y - pt1.y;
-            const dist = Math.hypot(dx, dy);
-            let angle = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
-            if (angle > 90) angle = 180 - angle;
-            const label = `${dist.toFixed(1)}  ${angle.toFixed(1)}°`;
-            drawMeasureLine(context, pt1, pt2, label, parameters.lineColor, parameters);
-          } else {
-            // Q-click: projected distances (dx, dy)
-            const dx = Math.abs(pt2.x - pt1.x);
-            const dy = Math.abs(pt2.y - pt1.y);
-            const cornerPoint = { x: pt2.x, y: pt1.y };
-
-            // Horizontal projection line (dx)
-            if (dx > 0.5) {
-              drawMeasureLine(
-                context,
-                pt1,
-                cornerPoint,
-                dx.toFixed(1),
-                parameters.projectionColor,
-                parameters
-              );
-            }
-            // Vertical projection line (dy)
-            if (dy > 0.5) {
-              drawMeasureLine(
-                context,
-                cornerPoint,
-                pt2,
-                dy.toFixed(1),
-                parameters.projectionColor,
-                parameters
-              );
-            }
-          }
         }
       }
     }

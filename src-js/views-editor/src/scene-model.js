@@ -53,10 +53,8 @@ export class SceneModel {
 
     // Measure mode properties (Q-key measurement tool)
     this.measureMode = false;
-    this.measureShowDirect = false; // For hover: Alt+Q shows direct distance
-    this.measureClickDirect = false; // For click: Alt+Q-click shows direct distance
-    this.measureHoverSegment = null; // { p1, p2, contourIndex, segmentIndex }
-    this.measureSelectedPoints = []; // [{x, y, type}]
+    this.measureShowDirect = false; // Alt+Q shows direct distance + angle
+    this.measureHoverSegment = null; // { p1, p2, type }
 
     this.sceneSettingsController.addKeyListener(
       ["glyphLines", "align", "applyKerning", "selectedGlyph", "editLayerName"],
@@ -984,58 +982,6 @@ export class SceneModel {
             };
           }
         }
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Find any point near the given position for measure mode.
-   * Unlike pointSelectionAtPoint, this includes skeleton-generated points.
-   * @returns {Object|null} {x, y, type: "regular"|"skeleton"|"generated"} or null
-   */
-  measurePointAtPoint(point, size) {
-    const positionedGlyph = this.getSelectedPositionedGlyph();
-    if (!positionedGlyph) return null;
-
-    const glyphPoint = {
-      x: point.x - positionedGlyph.x,
-      y: point.y - positionedGlyph.y,
-    };
-
-    // 1. Check skeleton points first
-    const editLayerName =
-      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
-    if (editLayerName) {
-      const layer = positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName];
-      const skeletonData = layer?.customData?.["fontra.skeleton"];
-      if (skeletonData?.contours?.length) {
-        for (const contour of skeletonData.contours) {
-          for (const pt of contour.points) {
-            if (!pt.type) {
-              // on-curve point
-              const dist = Math.hypot(pt.x - glyphPoint.x, pt.y - glyphPoint.y);
-              if (dist <= size) {
-                return { x: pt.x, y: pt.y, type: "skeleton" };
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // 2. Check all path points (including generated)
-    const path = positionedGlyph.glyph.path;
-    if (path) {
-      const pointIndex = path.pointIndexNearPoint(glyphPoint, size);
-      if (pointIndex !== undefined) {
-        const pt = path.getPoint(pointIndex);
-        const isGenerated = this._isPointInSkeletonGeneratedContour(
-          positionedGlyph,
-          pointIndex
-        );
-        return { x: pt.x, y: pt.y, type: isGenerated ? "generated" : "regular" };
       }
     }
 
