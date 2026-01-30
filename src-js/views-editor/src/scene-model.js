@@ -704,7 +704,6 @@ export class SceneModel {
           pointIndex
         );
         if (editableHandleInfo) {
-          console.log('[HANDLE-EDIT] Phase 3: Allowing selection of editable handle');
           // Return standard point selection - allows normal point editing UI
           // The drag handler will detect it's an editable handle
           return new Set([`point/${pointIndex}`]);
@@ -864,8 +863,6 @@ export class SceneModel {
    * @returns {Object|null} {skeletonContourIndex, skeletonPointIndex, side, handleType} or null
    */
   _getEditableHandleForGeneratedPoint(positionedGlyph, pointIndex) {
-    console.log('[HANDLE-EDIT] Phase 3: _getEditableHandleForGeneratedPoint called', { pointIndex });
-
     if (!positionedGlyph?.varGlyph?.glyph?.layers) {
       return null;
     }
@@ -893,11 +890,8 @@ export class SceneModel {
     const pointType = path.pointTypes[pointIndex];
     const isOnCurve = (pointType & 0x03) === 0;
     if (isOnCurve) {
-      console.log('[HANDLE-EDIT] Phase 3: Point is on-curve, not a handle');
       return null;
     }
-
-    console.log('[HANDLE-EDIT] Phase 3: Point is off-curve, checking for match');
 
     // Find adjacent on-curve point (anchor) to determine which skeleton point this relates to
     const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
@@ -927,12 +921,10 @@ export class SceneModel {
       handleType = "in"; // Incoming handle to next on-curve
     } else {
       // Between two off-curve points (middle of multi-handle curve)
-      console.log('[HANDLE-EDIT] Phase 3: Handle between two off-curves, not supported yet');
       return null;
     }
 
     const anchorPos = path.getPoint(anchorIdx);
-    console.log('[HANDLE-EDIT] Phase 3: Anchor point', { anchorIdx, anchorPos, handleType });
 
     // Now find which skeleton point the anchor corresponds to
     const tolerance = 1.5;
@@ -978,12 +970,6 @@ export class SceneModel {
           const dy = Math.abs(anchorPos.y - expectedAnchorY);
 
           if (dx <= tolerance && dy <= tolerance) {
-            console.log('[HANDLE-EDIT] Phase 3: Found matching skeleton point', {
-              skeletonContourIndex,
-              skeletonPointIndex,
-              side,
-              handleType,
-            });
             return {
               skeletonContourIndex,
               skeletonPointIndex,
@@ -995,7 +981,6 @@ export class SceneModel {
       }
     }
 
-    console.log('[HANDLE-EDIT] Phase 3: No matching skeleton point found');
     return null;
   }
 

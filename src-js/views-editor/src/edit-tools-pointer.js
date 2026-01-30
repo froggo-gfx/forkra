@@ -1094,11 +1094,6 @@ export class PointerTool extends BaseTool {
 
     // Check if any selected points are editable generated points
     // If so, redirect to dedicated handler
-    console.log('[RIB-INTERPOLATE] Checking pointSelection', {
-      hasPointSelection: !!pointSelection,
-      length: pointSelection?.length,
-      pointSelection: pointSelection ? Array.from(pointSelection) : null,
-    });
     if (pointSelection?.length > 0) {
       const editableGenerated = this._getEditableGeneratedPointsFromSelection(pointSelection);
       if (editableGenerated.length > 0 && !hasSkeletonSelection) {
@@ -1114,7 +1109,6 @@ export class PointerTool extends BaseTool {
       // Check if any selected points are editable generated handles
       const editableHandles = this._getEditableGeneratedHandlesFromSelection(pointSelection);
       if (editableHandles.length > 0 && !hasSkeletonSelection) {
-        console.log('[HANDLE-EDIT] Phase 4: Redirecting to handle drag');
         await this._handleDragEditableGeneratedHandles(
           eventStream,
           initialEvent,
@@ -1723,11 +1717,6 @@ export class PointerTool extends BaseTool {
     if (!positionedGlyph) return;
 
     const useInterpolation = initialEvent.altKey;
-    console.log('[RIB-INTERPOLATE] _handleDragRibPoint called', {
-      altKey: initialEvent.altKey,
-      useInterpolation,
-      ribHit,
-    });
 
     // Get initial point in glyph coordinates
     const localPoint = sceneController.localPoint(initialEvent);
@@ -1836,15 +1825,6 @@ export class PointerTool extends BaseTool {
           // Check if this side is editable
           const sideIsEditable = (dragSide === "left" && tp.isLeftEditable) || (dragSide === "right" && tp.isRightEditable);
 
-          console.log('[RIB-INTERPOLATE] Branch selection:', {
-            isSingleSided: tp.isSingleSided,
-            sideIsEditable,
-            useInterpolation,
-            dragSide,
-            isLeftEditable: tp.isLeftEditable,
-            isRightEditable: tp.isRightEditable
-          });
-
           if (tp.isSingleSided) {
             // For single-sided, create behavior with totalWidth as the effective width
             const defaultWidth = contour.defaultWidth || 20;
@@ -1865,7 +1845,6 @@ export class PointerTool extends BaseTool {
                   contour,
                   dragSide
                 );
-                console.log('[RIB-INTERPOLATE] Single-sided: Found handles for interpolation:', handles);
                 if (handles) {
                   behavior = createInterpolatingRibBehavior(
                     data.original, ribHitForPoint, handles.prevHandle, handles.nextHandle
@@ -1916,7 +1895,6 @@ export class PointerTool extends BaseTool {
                 contour,
                 dragSide
               );
-              console.log('[RIB-INTERPOLATE] Found handles for interpolation:', handles);
               if (handles) {
                 behavior = createInterpolatingRibBehavior(
                   data.original, ribHitForPoint, handles.prevHandle, handles.nextHandle
@@ -2007,10 +1985,6 @@ export class PointerTool extends BaseTool {
               }
               // Apply 2D handle offset compensation for interpolation or editable drag (single-sided)
               if (sideIsEditable && (change.isInterpolation || change.hasHandleOffsets)) {
-                console.log('[INTERPOLATE-2D] Applying 2D offsets in _handleDragRibPoint (single-sided)', {
-                  dragSide, change, isInterpolation: change.isInterpolation, hasHandleOffsets: change.hasHandleOffsets
-                });
-
                 if (dragSide === "left") {
                   point.leftHandleInOffsetX = change.handleInOffsetX;
                   point.leftHandleInOffsetY = change.handleInOffsetY;
@@ -2051,10 +2025,6 @@ export class PointerTool extends BaseTool {
 
               // Apply 2D handle offset compensation for interpolation or editable drag
               if (change.isInterpolation || change.hasHandleOffsets) {
-                console.log('[INTERPOLATE-2D] Applying 2D offsets in _handleDragRibPoint', {
-                  dragSide, change, isInterpolation: change.isInterpolation, hasHandleOffsets: change.hasHandleOffsets
-                });
-
                 if (dragSide === "left") {
                   point.leftHandleInOffsetX = change.handleInOffsetX;
                   point.leftHandleInOffsetY = change.handleInOffsetY;
@@ -2124,24 +2094,17 @@ export class PointerTool extends BaseTool {
    * @returns {Array} Array of {pointIndex, skeletonContourIndex, skeletonPointIndex, side}
    */
   _getEditableGeneratedPointsFromSelection(pointSelection) {
-    console.log('[RIB-INTERPOLATE] _getEditableGeneratedPointsFromSelection called', {
-      pointSelection: Array.from(pointSelection),
-    });
-
     const result = [];
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) {
-      console.log('[RIB-INTERPOLATE] No positionedGlyph');
       return result;
     }
 
     for (const pointIndex of pointSelection) {
-      console.log('[RIB-INTERPOLATE] Checking pointIndex:', pointIndex);
       const ribInfo = this.sceneModel._getEditableRibPointForGeneratedPoint(
         positionedGlyph,
         pointIndex
       );
-      console.log('[RIB-INTERPOLATE] ribInfo:', ribInfo);
       if (ribInfo) {
         result.push({
           pointIndex,
@@ -2149,7 +2112,6 @@ export class PointerTool extends BaseTool {
         });
       }
     }
-    console.log('[RIB-INTERPOLATE] Result:', result);
     return result;
   }
 
@@ -2164,12 +2126,9 @@ export class PointerTool extends BaseTool {
    * @returns {Object|null} { prevHandle, nextHandle } or null
    */
   _findHandlesForRibPointFromSkeleton(path, skeletonPoint, normal, contour, side) {
-    console.log('[RIB-INTERPOLATE] Computing handles from skeleton', { side });
-
     const points = contour.points;
     const pointIndex = points.findIndex(p => p === skeletonPoint || (p.x === skeletonPoint.x && p.y === skeletonPoint.y));
     if (pointIndex < 0) {
-      console.log('[RIB-INTERPOLATE] Skeleton point not found in contour');
       return null;
     }
 
@@ -2182,7 +2141,6 @@ export class PointerTool extends BaseTool {
     // Find position of our point in on-curve list
     const posInOnCurve = onCurveIndices.indexOf(pointIndex);
     if (posInOnCurve < 0) {
-      console.log('[RIB-INTERPOLATE] Point is not on-curve');
       return null;
     }
 
@@ -2193,17 +2151,14 @@ export class PointerTool extends BaseTool {
     const prevIdx = (pointIndex - 1 + points.length) % points.length;
     if (points[prevIdx]?.type) {
       prevHandle = this._offsetSkeletonHandle(points[prevIdx], skeletonPoint, normal, contour, side);
-      console.log('[RIB-INTERPOLATE] Found prev handle from skeleton', prevHandle);
     }
 
     // Outgoing handle: off-curve after current point
     const nextIdx = (pointIndex + 1) % points.length;
     if (points[nextIdx]?.type) {
       nextHandle = this._offsetSkeletonHandle(points[nextIdx], skeletonPoint, normal, contour, side);
-      console.log('[RIB-INTERPOLATE] Found next handle from skeleton', nextHandle);
     }
 
-    console.log('[RIB-INTERPOLATE] Computed handles', { prevHandle, nextHandle });
     return (prevHandle || nextHandle) ? { prevHandle, nextHandle } : null;
   }
 
@@ -2226,8 +2181,6 @@ export class PointerTool extends BaseTool {
    * @returns {Array} Array of {pointIndex, skeletonContourIndex, skeletonPointIndex, side, handleType}
    */
   _getEditableGeneratedHandlesFromSelection(pointSelection) {
-    console.log('[HANDLE-EDIT] Phase 4: _getEditableGeneratedHandlesFromSelection', { pointSelection });
-
     const result = [];
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) return result;
@@ -2245,7 +2198,6 @@ export class PointerTool extends BaseTool {
       }
     }
 
-    console.log('[HANDLE-EDIT] Phase 4: Found editable handles', result);
     return result;
   }
 
@@ -2257,12 +2209,8 @@ export class PointerTool extends BaseTool {
    */
   _findAdjacentHandlesForRibPoint(path, ribPointIndex) {
     const numPoints = path.numPoints;
-    console.log('[RIB-INTERPOLATE] _findAdjacentHandlesForRibPoint called', {
-      ribPointIndex, numPoints,
-    });
 
     if (ribPointIndex < 0 || ribPointIndex >= numPoints) {
-      console.log('[RIB-INTERPOLATE] ribPointIndex out of bounds');
       return null;
     }
 
@@ -2270,10 +2218,6 @@ export class PointerTool extends BaseTool {
     const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(ribPointIndex);
     const numContourPoints = path.getNumPointsOfContour(contourIndex);
     const contourStart = ribPointIndex - contourPointIndex;
-
-    console.log('[RIB-INTERPOLATE] Contour info', {
-      contourIndex, contourPointIndex, numContourPoints, contourStart,
-    });
 
     // Helper to wrap index within contour
     const wrapIndex = (idx) => {
@@ -2291,17 +2235,9 @@ export class PointerTool extends BaseTool {
     const prevIsOnCurve = (prevType & 0x03) === 0;
     const nextIsOnCurve = (nextType & 0x03) === 0;
 
-    console.log('[RIB-INTERPOLATE] Immediate neighbors', {
-      prevIdx, nextIdx,
-      prevType, nextType,
-      prevIsOnCurve, nextIsOnCurve,
-    });
-
     // For generated skeleton contours, immediate neighbors should be handles
     const prevHandle = !prevIsOnCurve ? path.getPoint(prevIdx) : null;
     const nextHandle = !nextIsOnCurve ? path.getPoint(nextIdx) : null;
-
-    console.log('[RIB-INTERPOLATE] Result', { prevHandle, nextHandle });
 
     if (!prevHandle || !nextHandle) return null;
     return { prevHandle, nextHandle };
@@ -2319,17 +2255,6 @@ export class PointerTool extends BaseTool {
     if (!positionedGlyph || editablePoints.length === 0) return;
 
     const useInterpolation = initialEvent.altKey;
-    console.log('[RIB-INTERPOLATE] _handleDragEditableGeneratedPoints called', {
-      altKey: initialEvent.altKey,
-      useInterpolation,
-      editablePointsCount: editablePoints.length,
-      editablePoints: editablePoints.map(ep => ({
-        pointIndex: ep.pointIndex,
-        skeletonContourIndex: ep.skeletonContourIndex,
-        skeletonPointIndex: ep.skeletonPointIndex,
-        side: ep.side,
-      })),
-    });
 
     const localPoint = sceneController.localPoint(initialEvent);
     const startGlyphPoint = {
@@ -2339,14 +2264,11 @@ export class PointerTool extends BaseTool {
 
     // If using interpolation, find adjacent handles for each editable rib point
     const generatedPath = positionedGlyph.glyph.path;
-    console.log('[RIB-INTERPOLATE] generatedPath numPoints:', generatedPath.numPoints);
 
     const editablePointsWithHandles = useInterpolation
       ? editablePoints.map(ep => {
           // ep.pointIndex is the index in the generated path
-          console.log('[RIB-INTERPOLATE] Looking for handles for pointIndex:', ep.pointIndex);
           const handles = this._findAdjacentHandlesForRibPoint(generatedPath, ep.pointIndex);
-          console.log('[RIB-INTERPOLATE] Found handles:', handles);
           return { ...ep, handles };
         })
       : editablePoints.map(ep => ({ ...ep, handles: null }));
@@ -2387,18 +2309,11 @@ export class PointerTool extends BaseTool {
 
           // Use interpolating behavior if Alt is pressed and handles are found
           let behavior;
-          console.log('[RIB-INTERPOLATE] Creating behavior:', {
-            useInterpolation,
-            hasHandles: !!ep.handles,
-            handles: ep.handles,
-          });
           if (useInterpolation && ep.handles) {
-            console.log('[RIB-INTERPOLATE] Using InterpolatingRibBehavior');
             behavior = createInterpolatingRibBehavior(
               data.original, ribHit, ep.handles.prevHandle, ep.handles.nextHandle
             );
           } else {
-            console.log('[RIB-INTERPOLATE] Using EditableRibBehavior');
             behavior = createEditableRibBehavior(data.original, ribHit);
           }
 
@@ -2477,10 +2392,6 @@ export class PointerTool extends BaseTool {
 
             // Apply 2D handle offset compensation for interpolation or editable drag
             if (change.isInterpolation || change.hasHandleOffsets) {
-              console.log('[INTERPOLATE-2D] Applying 2D offsets in _handleDragEditableGeneratedPoints', {
-                side, change, isInterpolation: change.isInterpolation, hasHandleOffsets: change.hasHandleOffsets
-              });
-
               if (side === "left") {
                 point.leftHandleInOffsetX = change.handleInOffsetX;
                 point.leftHandleInOffsetY = change.handleInOffsetY;
@@ -2533,8 +2444,6 @@ export class PointerTool extends BaseTool {
    * Updates skeleton data (handle offsets) based on handle movement.
    */
   async _handleDragEditableGeneratedHandles(eventStream, initialEvent, editableHandles) {
-    console.log('[HANDLE-EDIT] Phase 4: _handleDragEditableGeneratedHandles starting', { editableHandles });
-
     const sceneController = this.sceneController;
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
 
@@ -2576,11 +2485,8 @@ export class PointerTool extends BaseTool {
           );
 
           if (!skeletonHandleDir) {
-            console.log('[HANDLE-EDIT] Phase 4: Could not find skeleton handle direction');
             continue;
           }
-
-          console.log('[HANDLE-EDIT] Phase 4: Creating behavior', { skeletonHandleDir });
 
           data.behaviors.push({
             behavior: createEditableHandleBehavior(data.original, eh, skeletonHandleDir),
@@ -2620,7 +2526,6 @@ export class PointerTool extends BaseTool {
         };
 
         const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
-        console.log('[HANDLE-EDIT] Phase 4: Drag delta', delta);
 
         const allChanges = [];
 
@@ -2648,7 +2553,6 @@ export class PointerTool extends BaseTool {
             delete point[offsetYKey];
 
             point[offsetKey] = change.offset;
-            console.log('[HANDLE-EDIT] Phase 4: Applied 1D offset (cleared 2D)', { offsetKey, offset: change.offset });
           }
 
           const staticGlyph = layer.glyph;
@@ -2719,7 +2623,6 @@ export class PointerTool extends BaseTool {
     }
 
     if (!controlPoint) {
-      console.log('[HANDLE-EDIT] Phase 4: No control point found for handle', { pointIndex, handleType });
       return null;
     }
 
@@ -2732,7 +2635,6 @@ export class PointerTool extends BaseTool {
     if (length < 0.001) return null;
 
     const normalized = { x: dir.x / length, y: dir.y / length };
-    console.log('[HANDLE-EDIT] Phase 4: Handle direction', { pointIndex, handleType, normalized });
     return normalized;
   }
 

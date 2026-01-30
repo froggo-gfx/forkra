@@ -1062,14 +1062,6 @@ export class EditableRibBehavior {
     this.hasHandleOffsets = has2DIn || has2DOut ||
       point[handleIn1DKey] !== undefined || point[handleOut1DKey] !== undefined;
 
-    console.log('[EDITABLE-RIB] _initHandleOffsets', {
-      side,
-      has2DIn, has2DOut,
-      has1DIn: point[handleIn1DKey] !== undefined,
-      has1DOut: point[handleOut1DKey] !== undefined,
-      hasHandleOffsets: this.hasHandleOffsets,
-    });
-
     if (has2DIn) {
       this.originalHandleInOffsetX = point[handleInXKey] || 0;
       this.originalHandleInOffsetY = point[handleInYKey] || 0;
@@ -1167,20 +1159,6 @@ export class EditableRibBehavior {
       result.handleOutOffsetX = Math.round(this.originalHandleOutOffsetX + handleOffsetDeltaX);
       result.handleOutOffsetY = Math.round(this.originalHandleOutOffsetY + handleOffsetDeltaY);
       result.hasHandleOffsets = true;
-
-      console.log('[EDITABLE-RIB] applyDelta with handle compensation', {
-        deltaNudge,
-        tangent: this.tangent,
-        handleOffsetDelta: { x: handleOffsetDeltaX, y: handleOffsetDeltaY },
-        original: {
-          inX: this.originalHandleInOffsetX, inY: this.originalHandleInOffsetY,
-          outX: this.originalHandleOutOffsetX, outY: this.originalHandleOutOffsetY,
-        },
-        result: {
-          inX: result.handleInOffsetX, inY: result.handleInOffsetY,
-          outX: result.handleOutOffsetX, outY: result.handleOutOffsetY,
-        },
-      });
     }
 
     return result;
@@ -1254,10 +1232,6 @@ export class InterpolatingRibBehavior {
    * @param {Object} nextHandle - Next handle position {x, y}
    */
   constructor(skeletonData, contourIndex, pointIndex, side, normal, onCurvePoint, prevHandle, nextHandle) {
-    console.log('[INTERPOLATE-2D] Constructor called', {
-      contourIndex, pointIndex, side, prevHandle, nextHandle,
-    });
-
     this.skeletonData = skeletonData;
     this.contourIndex = contourIndex;
     this.pointIndex = pointIndex;
@@ -1300,12 +1274,6 @@ export class InterpolatingRibBehavior {
       }
     }
 
-    console.log('[INTERPOLATE-2D] Computed skeleton handle directions', {
-      skeletonHandleInDir: this.skeletonHandleInDir,
-      skeletonHandleOutDir: this.skeletonHandleOutDir,
-      tangent: this.tangent,
-    });
-
     // Store original half-width
     if (side === "left") {
       this.originalHalfWidth = point.leftWidth !== undefined
@@ -1330,21 +1298,6 @@ export class InterpolatingRibBehavior {
     const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
     const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
 
-    // Debug: log all handle offset keys for this point
-    console.log('[INTERPOLATE-2D] Reading offsets for side:', side, {
-      handleInXKey, handleInYKey, handleOutXKey, handleOutYKey,
-      handleIn1DKey, handleOut1DKey,
-      rawValues: {
-        inX: point[handleInXKey],
-        inY: point[handleInYKey],
-        outX: point[handleOutXKey],
-        outY: point[handleOutYKey],
-        in1D: point[handleIn1DKey],
-        out1D: point[handleOut1DKey],
-      },
-      allPointKeys: Object.keys(point),
-    });
-
     // Check if 2D offsets exist
     const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
     const has2DOut = point[handleOutXKey] !== undefined || point[handleOutYKey] !== undefined;
@@ -1358,11 +1311,6 @@ export class InterpolatingRibBehavior {
       const dir = this.skeletonHandleInDir || this.tangent;
       this.originalHandleInOffsetX = dir.x * point[handleIn1DKey];
       this.originalHandleInOffsetY = dir.y * point[handleIn1DKey];
-      console.log('[INTERPOLATE-2D] Converting 1D to 2D for IN handle', {
-        offset1D: point[handleIn1DKey],
-        dir,
-        result: { x: this.originalHandleInOffsetX, y: this.originalHandleInOffsetY }
-      });
     } else {
       this.originalHandleInOffsetX = 0;
       this.originalHandleInOffsetY = 0;
@@ -1377,11 +1325,6 @@ export class InterpolatingRibBehavior {
       const dir = this.skeletonHandleOutDir || this.tangent;
       this.originalHandleOutOffsetX = dir.x * point[handleOut1DKey];
       this.originalHandleOutOffsetY = dir.y * point[handleOut1DKey];
-      console.log('[INTERPOLATE-2D] Converting 1D to 2D for OUT handle', {
-        offset1D: point[handleOut1DKey],
-        dir,
-        result: { x: this.originalHandleOutOffsetX, y: this.originalHandleOutOffsetY }
-      });
     } else {
       this.originalHandleOutOffsetX = 0;
       this.originalHandleOutOffsetY = 0;
@@ -1401,16 +1344,6 @@ export class InterpolatingRibBehavior {
       this.lineDir.x /= this.lineLength;
       this.lineDir.y /= this.lineLength;
     }
-
-    console.log('[INTERPOLATE-2D] Initial state', {
-      originalRibPos: this.originalRibPos,
-      tangent: this.tangent,
-      lineDir: this.lineDir,
-      originalOffsets: {
-        in: { x: this.originalHandleInOffsetX, y: this.originalHandleInOffsetY },
-        out: { x: this.originalHandleOutOffsetX, y: this.originalHandleOutOffsetY }
-      }
-    });
   }
 
   /**
@@ -1432,10 +1365,6 @@ export class InterpolatingRibBehavior {
   setOriginalHalfWidth(halfWidth) {
     this.originalHalfWidth = halfWidth;
     this._recalculateRibPos();
-    console.log('[INTERPOLATE-2D] setOriginalHalfWidth called', {
-      halfWidth,
-      newRibPos: this.originalRibPos
-    });
   }
 
   /**
@@ -1464,19 +1393,6 @@ export class InterpolatingRibBehavior {
     const newHandleInOffsetY = this.originalHandleInOffsetY + handleOffsetDeltaY;
     const newHandleOutOffsetX = this.originalHandleOutOffsetX + handleOffsetDeltaX;
     const newHandleOutOffsetY = this.originalHandleOutOffsetY + handleOffsetDeltaY;
-
-    console.log('[INTERPOLATE-2D] applyDelta', {
-      delta,
-      deltaAlongLine,
-      deltaNudge,
-      tangent: this.tangent,
-      handleOffsetDelta: { x: handleOffsetDeltaX, y: handleOffsetDeltaY },
-      newNudge,
-      newHandleOffsets: {
-        in: { x: newHandleInOffsetX, y: newHandleInOffsetY },
-        out: { x: newHandleOutOffsetX, y: newHandleOutOffsetY }
-      }
-    });
 
     return {
       contourIndex: this.contourIndex,
@@ -1548,10 +1464,6 @@ export class EditableHandleBehavior {
    * @param {Object} skeletonHandleDir - Normalized direction of skeleton handle
    */
   constructor(skeletonData, contourIndex, pointIndex, side, handleType, skeletonHandleDir) {
-    console.log('[HANDLE-EDIT] Phase 4: EditableHandleBehavior constructor', {
-      contourIndex, pointIndex, side, handleType, skeletonHandleDir,
-    });
-
     this.skeletonData = skeletonData;
     this.contourIndex = contourIndex;
     this.pointIndex = pointIndex;
@@ -1567,13 +1479,26 @@ export class EditableHandleBehavior {
       ? (handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
       : (handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
 
-    // Store original offset
-    this.originalOffset = point[this.offsetKey] || 0;
+    // 2D offset keys (created by interpolation)
+    const offsetXKey = side === "left"
+      ? (handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+      : (handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+    const offsetYKey = side === "left"
+      ? (handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+      : (handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
 
-    console.log('[HANDLE-EDIT] Phase 4: Original offset', {
-      offsetKey: this.offsetKey,
-      originalOffset: this.originalOffset
-    });
+    // Check if 2D offsets exist (from interpolation)
+    const has2D = point[offsetXKey] !== undefined || point[offsetYKey] !== undefined;
+
+    if (has2D) {
+      // Convert 2D offset to 1D by projecting onto skeletonHandleDir
+      const offset2DX = point[offsetXKey] || 0;
+      const offset2DY = point[offsetYKey] || 0;
+      this.originalOffset = offset2DX * skeletonHandleDir.x + offset2DY * skeletonHandleDir.y;
+    } else {
+      // Use 1D offset directly
+      this.originalOffset = point[this.offsetKey] || 0;
+    }
   }
 
   /**
@@ -1586,13 +1511,6 @@ export class EditableHandleBehavior {
     // Project delta onto skeleton handle direction
     const projectedDelta = delta.x * this.skeletonHandleDir.x + delta.y * this.skeletonHandleDir.y;
     const newOffset = this.originalOffset + projectedDelta;
-
-    console.log('[HANDLE-EDIT] Phase 4: applyDelta', {
-      delta,
-      projectedDelta,
-      originalOffset: this.originalOffset,
-      newOffset,
-    });
 
     return {
       contourIndex: this.contourIndex,

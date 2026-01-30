@@ -91,12 +91,6 @@ function applyNudgeToRibPoint(ribPoint, skeletonPoint, normal, side, halfWidth) 
  * @returns {Object|null} Normalized direction vector {x, y} or null if no handle
  */
 function getSkeletonHandleDirection(segment, position, handleType) {
-  console.log('[HANDLE-EDIT] Phase 2: getSkeletonHandleDirection', {
-    position,
-    handleType,
-    hasControlPoints: segment.controlPoints.length > 0
-  });
-
   if (segment.controlPoints.length === 0) {
     // Line segment - no handles
     return null;
@@ -128,7 +122,6 @@ function getSkeletonHandleDirection(segment, position, handleType) {
   if (length < 0.001) return null;
 
   const normalized = { x: dir.x / length, y: dir.y / length };
-  console.log('[HANDLE-EDIT] Phase 2: Handle direction calculated', normalized);
   return normalized;
 }
 
@@ -166,29 +159,19 @@ function applyHandleOffsetToControlPoint(controlPoint, skeletonPoint, skeletonHa
   const offset2DY = skeletonPoint[offsetKeyY];
   const offset1D = skeletonPoint[offset1DKey];
 
-  console.log('[INTERPOLATE-2D] applyHandleOffsetToControlPoint', {
-    side, handleType,
-    offset2D: { x: offset2DX, y: offset2DY },
-    offset1D
-  });
-
   // Priority: 2D offset if present, else 1D
   if (offset2DX !== undefined || offset2DY !== undefined) {
-    const result = {
+    return {
       x: Math.round(controlPoint.x + (offset2DX || 0)),
       y: Math.round(controlPoint.y + (offset2DY || 0)),
     };
-    console.log('[INTERPOLATE-2D] Using 2D offset, result:', result);
-    return result;
   }
 
   if (offset1D !== undefined && offset1D !== 0) {
-    const result = {
+    return {
       x: Math.round(controlPoint.x + skeletonHandleDir.x * offset1D),
       y: Math.round(controlPoint.y + skeletonHandleDir.y * offset1D),
     };
-    console.log('[INTERPOLATE-2D] Using 1D offset, result:', result);
-    return result;
   }
 
   return controlPoint;
@@ -1077,8 +1060,6 @@ function generateOffsetPointsForSegment(
 
     // Helper to add offset curves to output array
     const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd, sideHalfWidth, isLeftSide) => {
-      const side = isLeftSide ? "left" : "right";
-      console.log('[HANDLE-EDIT] Phase 2: addOffsetCurves called', { side, sideHalfWidth, hasCurves: curves?.length > 0 });
       // When halfWidth is near zero, contour should exactly match skeleton
       // Copy control points directly instead of using offset curves
       if (sideHalfWidth < 0.5 && segment.controlPoints.length > 0) {
@@ -1155,8 +1136,6 @@ function generateOffsetPointsForSegment(
             adjustedHandle2, segment.endPoint, endHandleDir, side, "in"
           );
         }
-
-        console.log('[HANDLE-EDIT] Phase 2: Final simplified handles', { adjustedHandle1, adjustedHandle2, side });
 
         output.push({ x: adjustedHandle1.x, y: adjustedHandle1.y, type: "cubic" });
         output.push({ x: adjustedHandle2.x, y: adjustedHandle2.y, type: "cubic" });
