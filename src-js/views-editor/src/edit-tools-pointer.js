@@ -1769,7 +1769,8 @@ export class PointerTool extends BaseTool {
     };
 
     addTargetPoint(ribHit.contourIndex, ribHit.pointIndex);
-    if (preSelectedPoints) {
+    // Only include pre-selected points if Shift is held (additive selection)
+    if (initialEvent.shiftKey && preSelectedPoints) {
       for (const key of preSelectedPoints) {
         const [ci, pi] = key.split("/").map(Number);
         addTargetPoint(ci, pi);
