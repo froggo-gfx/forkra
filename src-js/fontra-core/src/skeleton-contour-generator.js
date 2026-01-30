@@ -134,7 +134,7 @@ function getSkeletonHandleDirection(segment, position, handleType) {
 
 /**
  * Apply handle offset to a generated control point position.
- * The offset moves the control point along the skeleton handle direction.
+ * Supports both 2D offsets (X/Y) and legacy 1D offsets (along skeleton handle direction).
  * @param {Object} controlPoint - The generated control point {x, y}
  * @param {Object} skeletonPoint - The skeleton on-curve point (may have handle offset values)
  * @param {Object} skeletonHandleDir - Normalized direction of skeleton handle
@@ -143,40 +143,55 @@ function getSkeletonHandleDirection(segment, position, handleType) {
  * @returns {Object} Modified control point {x, y}
  */
 function applyHandleOffsetToControlPoint(controlPoint, skeletonPoint, skeletonHandleDir, side, handleType) {
-  console.log('[HANDLE-EDIT] Phase 2: applyHandleOffsetToControlPoint called', {
-    controlPoint,
-    skeletonPoint: { x: skeletonPoint?.x, y: skeletonPoint?.y },
-    skeletonHandleDir,
-    side,
-    handleType,
-  });
-
   // Check per-side editable flag
   const editableKey = side === "left" ? "leftEditable" : "rightEditable";
   if (!skeletonPoint?.[editableKey]) {
-    console.log('[HANDLE-EDIT] Phase 2: Not editable, returning original');
     return controlPoint;
   }
 
-  // Get the appropriate offset key based on side and handle type
-  const offsetKey = side === "left"
+  // 2D offset keys (new format for precise interpolation)
+  const offsetKeyX = side === "left"
+    ? (handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+    : (handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+  const offsetKeyY = side === "left"
+    ? (handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+    : (handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+
+  // Legacy 1D offset key (backwards compatibility)
+  const offset1DKey = side === "left"
     ? (handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
     : (handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
 
-  const offset = skeletonPoint[offsetKey];
+  const offset2DX = skeletonPoint[offsetKeyX];
+  const offset2DY = skeletonPoint[offsetKeyY];
+  const offset1D = skeletonPoint[offset1DKey];
 
-  if (offset === undefined || offset === 0) {
-    console.log('[HANDLE-EDIT] Phase 2: No offset, returning original');
-    return controlPoint;
+  console.log('[INTERPOLATE-2D] applyHandleOffsetToControlPoint', {
+    side, handleType,
+    offset2D: { x: offset2DX, y: offset2DY },
+    offset1D
+  });
+
+  // Priority: 2D offset if present, else 1D
+  if (offset2DX !== undefined || offset2DY !== undefined) {
+    const result = {
+      x: Math.round(controlPoint.x + (offset2DX || 0)),
+      y: Math.round(controlPoint.y + (offset2DY || 0)),
+    };
+    console.log('[INTERPOLATE-2D] Using 2D offset, result:', result);
+    return result;
   }
 
-  console.log('[HANDLE-EDIT] Phase 2: Applying offset', { offsetKey, offset });
+  if (offset1D !== undefined && offset1D !== 0) {
+    const result = {
+      x: Math.round(controlPoint.x + skeletonHandleDir.x * offset1D),
+      y: Math.round(controlPoint.y + skeletonHandleDir.y * offset1D),
+    };
+    console.log('[INTERPOLATE-2D] Using 1D offset, result:', result);
+    return result;
+  }
 
-  // Move control point along skeleton handle direction
-  return {
-    x: Math.round(controlPoint.x + skeletonHandleDir.x * offset),
-    y: Math.round(controlPoint.y + skeletonHandleDir.y * offset),
-  };
+  return controlPoint;
 }
 
 // Constants for offset curve simplification

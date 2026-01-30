@@ -1084,7 +1084,8 @@ export function createEditableRibBehavior(skeletonData, ribHit) {
 /**
  * InterpolatingRibBehavior - Handles dragging of editable rib points with Alt key.
  * The rib point slides along the line between its two adjacent handles (off-curve points).
- * This is similar to the Interpolate behavior in standard edit-behavior.
+ * Handles remain fixed in place while the rib point moves between them.
+ * Uses 2D handle offsets for precise compensation.
  */
 export class InterpolatingRibBehavior {
   /**
@@ -1098,7 +1099,7 @@ export class InterpolatingRibBehavior {
    * @param {Object} nextHandle - Next handle position {x, y}
    */
   constructor(skeletonData, contourIndex, pointIndex, side, normal, onCurvePoint, prevHandle, nextHandle) {
-    console.log('[RIB-INTERPOLATE] constructor', {
+    console.log('[INTERPOLATE-2D] Constructor called', {
       contourIndex, pointIndex, side, prevHandle, nextHandle,
     });
 
@@ -1131,11 +1132,16 @@ export class InterpolatingRibBehavior {
     const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
     this.originalNudge = point[nudgeKey] || 0;
 
-    // Store original handle offsets (for compensation during interpolation)
-    const handleInKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
-    const handleOutKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
-    this.originalHandleInOffset = point[handleInKey] || 0;
-    this.originalHandleOutOffset = point[handleOutKey] || 0;
+    // Store original 2D handle offsets (new format)
+    const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+    const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+    const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+    const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+
+    this.originalHandleInOffsetX = point[handleInXKey] || 0;
+    this.originalHandleInOffsetY = point[handleInYKey] || 0;
+    this.originalHandleOutOffsetX = point[handleOutXKey] || 0;
+    this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
 
     // Calculate current rib point position
     const sign = side === "left" ? 1 : -1;
@@ -1156,83 +1162,73 @@ export class InterpolatingRibBehavior {
       this.lineDir.y /= this.lineLength;
     }
 
-    // Calculate initial t (position along the line)
-    const fromPrev = {
-      x: this.originalRibPos.x - prevHandle.x,
-      y: this.originalRibPos.y - prevHandle.y,
-    };
-    this.originalT = this.lineLength > 0.001
-      ? (fromPrev.x * this.lineDir.x + fromPrev.y * this.lineDir.y) / this.lineLength
-      : 0.5;
-
-    console.log('[RIB-INTERPOLATE] Initial state', {
+    console.log('[INTERPOLATE-2D] Initial state', {
       originalRibPos: this.originalRibPos,
-      originalT: this.originalT,
-      lineLength: this.lineLength,
+      tangent: this.tangent,
+      lineDir: this.lineDir,
+      originalOffsets: {
+        in: { x: this.originalHandleInOffsetX, y: this.originalHandleInOffsetY },
+        out: { x: this.originalHandleOutOffsetX, y: this.originalHandleOutOffsetY }
+      }
     });
   }
 
   /**
-   * Apply drag delta and return changes to width and nudge.
+   * Apply drag delta and return changes to nudge and 2D handle offsets.
    * Movement is constrained to the line between handles.
+   * Handles stay fixed by compensating with 2D offsets.
    * @param {Object} delta - The drag delta {x, y}
-   * @returns {Object} { halfWidth, nudge, isAsymmetric } - New values
+   * @returns {Object} { nudge, handleInOffsetX/Y, handleOutOffsetX/Y, isInterpolation }
    */
   applyDelta(delta) {
     // Project drag delta onto the handle-handle line direction
-    // This gives us how far along the line we've moved
     const deltaAlongLine = delta.x * this.lineDir.x + delta.y * this.lineDir.y;
 
-    // Now convert this line movement into halfWidth and nudge deltas
-    // Movement along lineDir changes the rib position by deltaAlongLine * lineDir
-    // We decompose this into normal and tangent components
-    const sign = this.side === "left" ? 1 : -1;
-
-    // How much does moving along lineDir affect halfWidth and nudge?
-    // dHalfWidth = sign * (lineDir · normal) * deltaAlongLine
-    // dNudge = (lineDir · tangent) * deltaAlongLine
-    const lineDirDotNormal = this.lineDir.x * this.normal.x + this.lineDir.y * this.normal.y;
+    // Decompose line movement into tangent component (nudge)
     const lineDirDotTangent = this.lineDir.x * this.tangent.x + this.lineDir.y * this.tangent.y;
-
-    const deltaHalfWidth = sign * lineDirDotNormal * deltaAlongLine;
     const deltaNudge = lineDirDotTangent * deltaAlongLine;
-
-    const newHalfWidth = Math.max(1, this.originalHalfWidth + deltaHalfWidth);
     const newNudge = this.originalNudge + deltaNudge;
 
-    // For interpolation, we need to compensate handle positions
-    // When the point moves by deltaNudge along tangent, handles would move with it
-    // We add negative offset to keep handles in place
-    // Assuming skeletonHandleDir ≈ tangent, compensation = -deltaNudge
-    const handleCompensation = -deltaNudge;
-    const newHandleInOffset = this.originalHandleInOffset + handleCompensation;
-    const newHandleOutOffset = this.originalHandleOutOffset + handleCompensation;
+    // 2D compensation: handles must stay fixed in place
+    // When rib point moves by tangent * deltaNudge, we need to add
+    // an opposite offset to keep handles stationary
+    const handleOffsetDeltaX = -this.tangent.x * deltaNudge;
+    const handleOffsetDeltaY = -this.tangent.y * deltaNudge;
 
-    console.log('[RIB-INTERPOLATE] applyDelta', {
+    const newHandleInOffsetX = this.originalHandleInOffsetX + handleOffsetDeltaX;
+    const newHandleInOffsetY = this.originalHandleInOffsetY + handleOffsetDeltaY;
+    const newHandleOutOffsetX = this.originalHandleOutOffsetX + handleOffsetDeltaX;
+    const newHandleOutOffsetY = this.originalHandleOutOffsetY + handleOffsetDeltaY;
+
+    console.log('[INTERPOLATE-2D] applyDelta', {
       delta,
       deltaAlongLine,
       deltaNudge,
-      handleCompensation,
+      tangent: this.tangent,
+      handleOffsetDelta: { x: handleOffsetDeltaX, y: handleOffsetDeltaY },
       newNudge,
-      newHandleInOffset,
-      newHandleOutOffset,
+      newHandleOffsets: {
+        in: { x: newHandleInOffsetX, y: newHandleInOffsetY },
+        out: { x: newHandleOutOffsetX, y: newHandleOutOffsetY }
+      }
     });
 
-    // Return nudge change AND handle offset compensation
     return {
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
       side: this.side,
       nudge: Math.round(newNudge),
-      handleInOffset: Math.round(newHandleInOffset),
-      handleOutOffset: Math.round(newHandleOutOffset),
+      handleInOffsetX: Math.round(newHandleInOffsetX),
+      handleInOffsetY: Math.round(newHandleInOffsetY),
+      handleOutOffsetX: Math.round(newHandleOutOffsetX),
+      handleOutOffsetY: Math.round(newHandleOutOffsetY),
       isAsymmetric: false,
-      isInterpolation: true,  // Flag to indicate handle offsets should be applied
+      isInterpolation: true,
     };
   }
 
   /**
-   * Get rollback data to restore original width and nudge.
+   * Get rollback data to restore original nudge and 2D handle offsets.
    */
   getRollback() {
     return {
@@ -1241,8 +1237,10 @@ export class InterpolatingRibBehavior {
       side: this.side,
       halfWidth: Math.round(this.originalHalfWidth),
       nudge: Math.round(this.originalNudge),
-      handleInOffset: Math.round(this.originalHandleInOffset),
-      handleOutOffset: Math.round(this.originalHandleOutOffset),
+      handleInOffsetX: Math.round(this.originalHandleInOffsetX),
+      handleInOffsetY: Math.round(this.originalHandleInOffsetY),
+      handleOutOffsetX: Math.round(this.originalHandleOutOffsetX),
+      handleOutOffsetY: Math.round(this.originalHandleOutOffsetY),
       isInterpolation: true,
     };
   }

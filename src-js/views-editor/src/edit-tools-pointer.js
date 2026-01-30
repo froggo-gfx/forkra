@@ -1995,6 +1995,28 @@ export class PointerTool extends BaseTool {
                   point.rightNudge = change.nudge;
                 }
               }
+              // Apply 2D handle offset compensation for interpolation (single-sided)
+              if (sideIsEditable && change.isInterpolation) {
+                console.log('[INTERPOLATE-2D] Applying 2D offsets in _handleDragRibPoint (single-sided)', {
+                  dragSide, change
+                });
+
+                if (dragSide === "left") {
+                  point.leftHandleInOffsetX = change.handleInOffsetX;
+                  point.leftHandleInOffsetY = change.handleInOffsetY;
+                  point.leftHandleOutOffsetX = change.handleOutOffsetX;
+                  point.leftHandleOutOffsetY = change.handleOutOffsetY;
+                  delete point.leftHandleInOffset;
+                  delete point.leftHandleOutOffset;
+                } else {
+                  point.rightHandleInOffsetX = change.handleInOffsetX;
+                  point.rightHandleInOffsetY = change.handleInOffsetY;
+                  point.rightHandleOutOffsetX = change.handleOutOffsetX;
+                  point.rightHandleOutOffsetY = change.handleOutOffsetY;
+                  delete point.rightHandleInOffset;
+                  delete point.rightHandleOutOffset;
+                }
+              }
             } else if (sideIsEditable) {
               // Editable mode: behavior determines if width changes based on symmetric/asymmetric
               if (change.isAsymmetric) {
@@ -2015,6 +2037,31 @@ export class PointerTool extends BaseTool {
                   point.rightNudge = change.nudge;
                 }
                 // Don't touch width - it stays symmetric
+              }
+
+              // Apply 2D handle offset compensation for interpolation
+              if (change.isInterpolation) {
+                console.log('[INTERPOLATE-2D] Applying 2D offsets in _handleDragRibPoint', {
+                  dragSide, change
+                });
+
+                if (dragSide === "left") {
+                  point.leftHandleInOffsetX = change.handleInOffsetX;
+                  point.leftHandleInOffsetY = change.handleInOffsetY;
+                  point.leftHandleOutOffsetX = change.handleOutOffsetX;
+                  point.leftHandleOutOffsetY = change.handleOutOffsetY;
+                  // Clear legacy 1D offsets
+                  delete point.leftHandleInOffset;
+                  delete point.leftHandleOutOffset;
+                } else {
+                  point.rightHandleInOffsetX = change.handleInOffsetX;
+                  point.rightHandleInOffsetY = change.handleInOffsetY;
+                  point.rightHandleOutOffsetX = change.handleOutOffsetX;
+                  point.rightHandleOutOffsetY = change.handleOutOffsetY;
+                  // Clear legacy 1D offsets
+                  delete point.rightHandleInOffset;
+                  delete point.rightHandleOutOffset;
+                }
               }
             } else if (target.isAsymmetric) {
               // Asymmetric: update only the dragged side
@@ -2413,14 +2460,28 @@ export class PointerTool extends BaseTool {
               }
             }
 
-            // Apply handle offset compensation for interpolation
+            // Apply 2D handle offset compensation for interpolation
             if (change.isInterpolation) {
+              console.log('[INTERPOLATE-2D] Applying 2D offsets in _handleDragEditableGeneratedPoints', {
+                side, change
+              });
+
               if (side === "left") {
-                point.leftHandleInOffset = change.handleInOffset;
-                point.leftHandleOutOffset = change.handleOutOffset;
+                point.leftHandleInOffsetX = change.handleInOffsetX;
+                point.leftHandleInOffsetY = change.handleInOffsetY;
+                point.leftHandleOutOffsetX = change.handleOutOffsetX;
+                point.leftHandleOutOffsetY = change.handleOutOffsetY;
+                // Clear legacy 1D offsets
+                delete point.leftHandleInOffset;
+                delete point.leftHandleOutOffset;
               } else {
-                point.rightHandleInOffset = change.handleInOffset;
-                point.rightHandleOutOffset = change.handleOutOffset;
+                point.rightHandleInOffsetX = change.handleInOffsetX;
+                point.rightHandleInOffsetY = change.handleInOffsetY;
+                point.rightHandleOutOffsetX = change.handleOutOffsetX;
+                point.rightHandleOutOffsetY = change.handleOutOffsetY;
+                // Clear legacy 1D offsets
+                delete point.rightHandleInOffset;
+                delete point.rightHandleOutOffset;
               }
             }
           }

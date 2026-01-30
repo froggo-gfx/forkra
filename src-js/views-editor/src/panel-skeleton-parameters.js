@@ -1479,9 +1479,14 @@ export default class SkeletonParametersPanel extends Panel {
             const handleOutKey = side === "left" ? "leftHandleOut" : "rightHandleOut";
             const handleInAngleKey = side === "left" ? "leftHandleInAngle" : "rightHandleInAngle";
             const handleOutAngleKey = side === "left" ? "leftHandleOutAngle" : "rightHandleOutAngle";
-            // Handle offset keys (for editable generated handles)
+            // Legacy 1D handle offset keys
             const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
             const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+            // New 2D handle offset keys
+            const handleInOffsetXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+            const handleInOffsetYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+            const handleOutOffsetXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+            const handleOutOffsetYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
             // Saved keys for preserving values when toggling editable off/on
             const nudgeSavedKey = side === "left" ? "leftNudgeSaved" : "rightNudgeSaved";
             const handleInOffsetSavedKey = side === "left" ? "leftHandleInOffsetSaved" : "rightHandleInOffsetSaved";
@@ -1520,8 +1525,14 @@ export default class SkeletonParametersPanel extends Panel {
               delete point[handleOutKey];
               delete point[handleInAngleKey];
               delete point[handleOutAngleKey];
+              // Clear legacy 1D offsets
               delete point[handleInOffsetKey];
               delete point[handleOutOffsetKey];
+              // Clear new 2D offsets
+              delete point[handleInOffsetXKey];
+              delete point[handleInOffsetYKey];
+              delete point[handleOutOffsetXKey];
+              delete point[handleOutOffsetYKey];
             }
           }
         }
@@ -1610,12 +1621,22 @@ export default class SkeletonParametersPanel extends Panel {
       if (!point) continue;
 
       const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+      // Legacy 1D offset keys
       const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
       const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+      // New 2D offset keys
+      const handleInOffsetXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+      const handleInOffsetYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+      const handleOutOffsetXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+      const handleOutOffsetYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
 
       if (point[editableKey] &&
           ((point[handleInOffsetKey] && point[handleInOffsetKey] !== 0) ||
-           (point[handleOutOffsetKey] && point[handleOutOffsetKey] !== 0))) {
+           (point[handleOutOffsetKey] && point[handleOutOffsetKey] !== 0) ||
+           (point[handleInOffsetXKey] && point[handleInOffsetXKey] !== 0) ||
+           (point[handleInOffsetYKey] && point[handleInOffsetYKey] !== 0) ||
+           (point[handleOutOffsetXKey] && point[handleOutOffsetXKey] !== 0) ||
+           (point[handleOutOffsetYKey] && point[handleOutOffsetYKey] !== 0))) {
         return true;
       }
     }
@@ -1665,17 +1686,28 @@ export default class SkeletonParametersPanel extends Panel {
           // Reset handle offsets for each selected side (only if editable)
           for (const side of sides) {
             const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+            // Legacy 1D offset keys
             const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
             const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
-            // Also clear saved offsets
             const handleInOffsetSavedKey = side === "left" ? "leftHandleInOffsetSaved" : "rightHandleInOffsetSaved";
             const handleOutOffsetSavedKey = side === "left" ? "leftHandleOutOffsetSaved" : "rightHandleOutOffsetSaved";
+            // New 2D offset keys
+            const handleInOffsetXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+            const handleInOffsetYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+            const handleOutOffsetXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+            const handleOutOffsetYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
 
             if (point[editableKey]) {
+              // Clear legacy 1D offsets
               delete point[handleInOffsetKey];
               delete point[handleOutOffsetKey];
               delete point[handleInOffsetSavedKey];
               delete point[handleOutOffsetSavedKey];
+              // Clear new 2D offsets
+              delete point[handleInOffsetXKey];
+              delete point[handleInOffsetYKey];
+              delete point[handleOutOffsetXKey];
+              delete point[handleOutOffsetYKey];
             }
           }
         }
