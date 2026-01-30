@@ -425,7 +425,7 @@ def unpackFontSources(font, fontraAxes):
             mvarInstancer = VarStoreInstancer(mvarTable.table.VarStore, fvarAxes, loc)
             for rec in mvarTable.table.ValueRecord:
                 whichMetrics, metricKey = MVAR_MAPPING.get(rec.ValueTag, (None, None))
-                if metricKey:
+                if whichMetrics is not None:
                     getattr(source, whichMetrics)[metricKey].value += mvarInstancer[
                         rec.VarIdx
                     ]
