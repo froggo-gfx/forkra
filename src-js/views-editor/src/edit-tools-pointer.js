@@ -1965,6 +1965,10 @@ export class PointerTool extends BaseTool {
 
         const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
 
+        // Determine constraint mode based on Shift key
+        // Shift: constrain to tangent direction (only nudge changes)
+        const constrainMode = event.shiftKey ? "tangent" : null;
+
         const allChanges = [];
 
         // Apply changes to ALL editable layers
@@ -1973,7 +1977,7 @@ export class PointerTool extends BaseTool {
 
           // Apply each behavior to update all target points
           for (const { behavior, target } of ribBehaviors) {
-            const change = behavior.applyDelta(delta);
+            const change = behavior.applyDelta(delta, constrainMode);
 
             const contour = working.contours[target.contourIndex];
             const point = contour.points[target.pointIndex];
@@ -2430,13 +2434,18 @@ export class PointerTool extends BaseTool {
         };
 
         const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+
+        // Determine constraint mode based on Shift key
+        // Shift: constrain to tangent direction (only nudge changes)
+        const constrainMode = event.shiftKey ? "tangent" : null;
+
         const allChanges = [];
 
         for (const [editLayerName, data] of Object.entries(layersData)) {
           const { layer, working, behaviors } = data;
 
           for (const { behavior, editablePoint } of behaviors) {
-            const change = behavior.applyDelta(delta);
+            const change = behavior.applyDelta(delta, constrainMode);
             const contour = working.contours[editablePoint.skeletonContourIndex];
             const point = contour.points[editablePoint.skeletonPointIndex];
             const side = editablePoint.side;

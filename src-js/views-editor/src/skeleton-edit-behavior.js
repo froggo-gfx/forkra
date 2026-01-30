@@ -1018,24 +1018,48 @@ export class EditableRibBehavior {
    * Apply drag delta and return changes to width and nudge.
    * - Symmetric: only nudge changes, width stays original
    * - Asymmetric: both width and nudge can change
+   * - With constrainMode: lock to tangent or normal direction
    * @param {Object} delta - The drag delta {x, y}
+   * @param {string|null} constrainMode - null (free), "tangent" (nudge only), or "normal" (width only)
    * @returns {Object} { halfWidth, nudge, isAsymmetric } - New values and mode flag
    */
-  applyDelta(delta) {
-    // Project delta onto tangent → nudge change (always allowed)
-    const tangentDot = delta.x * this.tangent.x + delta.y * this.tangent.y;
-    const newNudge = this.originalNudge + tangentDot;
-
+  applyDelta(delta, constrainMode = null) {
+    let newNudge = this.originalNudge;
     let newHalfWidth = this.originalHalfWidth;
 
-    // Only allow width change if asymmetric
-    if (this.isAsymmetric) {
-      const sign = this.side === "left" ? 1 : -1;
-      const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
-      const normalDelta = sign * normalDot;
-      newHalfWidth = this.originalHalfWidth + normalDelta;
-      if (newHalfWidth < this.minHalfWidth) {
-        newHalfWidth = this.minHalfWidth;
+    // Constrain to tangent: only nudge changes
+    if (constrainMode === "tangent") {
+      const tangentDot = delta.x * this.tangent.x + delta.y * this.tangent.y;
+      newNudge = this.originalNudge + tangentDot;
+    }
+    // Constrain to normal: only width changes
+    else if (constrainMode === "normal") {
+      if (this.isAsymmetric) {
+        const sign = this.side === "left" ? 1 : -1;
+        const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
+        const normalDelta = sign * normalDot;
+        newHalfWidth = this.originalHalfWidth + normalDelta;
+        if (newHalfWidth < this.minHalfWidth) {
+          newHalfWidth = this.minHalfWidth;
+        }
+      }
+      // For symmetric points, normal constraint has no effect (width locked)
+    }
+    // Free movement (no constraint)
+    else {
+      // Project delta onto tangent → nudge change (always allowed)
+      const tangentDot = delta.x * this.tangent.x + delta.y * this.tangent.y;
+      newNudge = this.originalNudge + tangentDot;
+
+      // Only allow width change if asymmetric
+      if (this.isAsymmetric) {
+        const sign = this.side === "left" ? 1 : -1;
+        const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
+        const normalDelta = sign * normalDot;
+        newHalfWidth = this.originalHalfWidth + normalDelta;
+        if (newHalfWidth < this.minHalfWidth) {
+          newHalfWidth = this.minHalfWidth;
+        }
       }
     }
 
