@@ -3826,14 +3826,6 @@ export class PointerTool extends BaseTool {
     const path = positionedGlyph.glyph.path;
     const margin = size * 1.5;
 
-    // Get skeleton-generated contour indices to skip them
-    const editLayerName = this.sceneController.editingLayerNames?.[0];
-    const layer = editLayerName
-      ? positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName]
-      : null;
-    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
-    const generatedIndices = skeletonData?.generatedContourIndices || [];
-
     // Check skeleton segments FIRST (they should have priority over generated contours)
     const skeletonSegmentHit = this._findSkeletonSegmentNear(
       positionedGlyph,
@@ -3844,8 +3836,8 @@ export class PointerTool extends BaseTool {
       return skeletonSegmentHit;
     }
 
-    // Check path segments (excluding skeleton-generated contours)
-    const segmentHit = this._findPathSegmentNear(path, glyphPoint, margin, generatedIndices);
+    // Check path segments
+    const segmentHit = this._findPathSegmentNear(path, glyphPoint, margin);
     if (segmentHit) {
       return segmentHit;
     }
@@ -3855,16 +3847,12 @@ export class PointerTool extends BaseTool {
 
   /**
    * Find path segment near point.
-   * @param {Array} skipContourIndices - Contour indices to skip (e.g., skeleton-generated)
    */
-  _findPathSegmentNear(path, point, margin, skipContourIndices = []) {
+  _findPathSegmentNear(path, point, margin) {
     const contourInfo = path.contourInfo;
     if (!contourInfo?.length) return null;
 
     for (let contourIdx = 0; contourIdx < contourInfo.length; contourIdx++) {
-      // Skip skeleton-generated contours
-      if (skipContourIndices.includes(contourIdx)) continue;
-
       const info = contourInfo[contourIdx];
       const startPoint = contourIdx === 0 ? 0 : contourInfo[contourIdx - 1].endPoint + 1;
       const endPoint = info.endPoint;
