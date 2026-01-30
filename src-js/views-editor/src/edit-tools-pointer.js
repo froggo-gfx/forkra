@@ -1722,6 +1722,13 @@ export class PointerTool extends BaseTool {
 
     if (!positionedGlyph) return;
 
+    const useInterpolation = initialEvent.altKey;
+    console.log('[RIB-INTERPOLATE] _handleDragRibPoint called', {
+      altKey: initialEvent.altKey,
+      useInterpolation,
+      ribHit,
+    });
+
     // Get initial point in glyph coordinates
     const localPoint = sceneController.localPoint(initialEvent);
     const startGlyphPoint = {
@@ -1861,10 +1868,30 @@ export class PointerTool extends BaseTool {
             }
           } else if (sideIsEditable) {
             // Editable mode: use EditableRibBehavior for free movement
-            data.ribBehaviors.push({
-              behavior: createEditableRibBehavior(data.original, ribHitForPoint),
-              target: tp,
-            });
+            // Or InterpolatingRibBehavior if Alt is pressed
+            let behavior;
+            if (useInterpolation) {
+              // Find adjacent handles in the generated path
+              const handles = this._findHandlesForRibPointFromSkeleton(
+                layer.glyph.path,
+                skeletonPoint,
+                normal,
+                contour,
+                dragSide
+              );
+              console.log('[RIB-INTERPOLATE] Found handles for interpolation:', handles);
+              if (handles) {
+                behavior = createInterpolatingRibBehavior(
+                  data.original, ribHitForPoint, handles.prevHandle, handles.nextHandle
+                );
+              } else {
+                // Fallback to normal behavior if handles not found
+                behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+              }
+            } else {
+              behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+            }
+            data.ribBehaviors.push({ behavior, target: tp });
           } else {
             // Normal mode: constrained to normal direction
             data.ribBehaviors.push({
@@ -2036,6 +2063,68 @@ export class PointerTool extends BaseTool {
     }
     console.log('[RIB-INTERPOLATE] Result:', result);
     return result;
+  }
+
+  /**
+   * Find adjacent handles for a rib point by computing its expected position
+   * and searching in the generated path.
+   * @param {Object} path - The generated glyph path
+   * @param {Object} skeletonPoint - The skeleton point {x, y, ...}
+   * @param {Object} normal - The normal vector at this point
+   * @param {Object} contour - The skeleton contour
+   * @param {string} side - "left" or "right"
+   * @returns {Object|null} { prevHandle, nextHandle } or null
+   */
+  _findHandlesForRibPointFromSkeleton(path, skeletonPoint, normal, contour, side) {
+    console.log('[RIB-INTERPOLATE] _findHandlesForRibPointFromSkeleton called', {
+      skeletonPoint: { x: skeletonPoint.x, y: skeletonPoint.y },
+      normal, side,
+    });
+
+    const defaultWidth = contour.defaultWidth || 20;
+    const tangent = { x: -normal.y, y: normal.x };
+
+    // Calculate expected rib point position
+    let halfWidth = side === "left"
+      ? (skeletonPoint.leftWidth !== undefined ? skeletonPoint.leftWidth : (skeletonPoint.width !== undefined ? skeletonPoint.width / 2 : defaultWidth / 2))
+      : (skeletonPoint.rightWidth !== undefined ? skeletonPoint.rightWidth : (skeletonPoint.width !== undefined ? skeletonPoint.width / 2 : defaultWidth / 2));
+
+    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+    const nudge = skeletonPoint[nudgeKey] || 0;
+
+    const sign = side === "left" ? 1 : -1;
+    const expectedX = Math.round(skeletonPoint.x + sign * normal.x * halfWidth + tangent.x * nudge);
+    const expectedY = Math.round(skeletonPoint.y + sign * normal.y * halfWidth + tangent.y * nudge);
+
+    console.log('[RIB-INTERPOLATE] Expected rib position', { expectedX, expectedY, halfWidth, nudge });
+
+    // Search for this point in the path
+    const tolerance = 2;
+    let ribPointIndex = -1;
+
+    for (let i = 0; i < path.numPoints; i++) {
+      const pt = path.getPoint(i);
+      const pointType = path.pointTypes[i];
+      const isOnCurve = (pointType & 0x03) === 0;
+
+      if (isOnCurve) {
+        const dx = Math.abs(pt.x - expectedX);
+        const dy = Math.abs(pt.y - expectedY);
+        if (dx <= tolerance && dy <= tolerance) {
+          ribPointIndex = i;
+          console.log('[RIB-INTERPOLATE] Found rib point at index', i, pt);
+          break;
+        }
+      }
+    }
+
+    if (ribPointIndex < 0) {
+      console.log('[RIB-INTERPOLATE] Rib point not found in path');
+      return null;
+    }
+
+    // Now find adjacent handles using existing function
+    return this._findAdjacentHandlesForRibPoint(path, ribPointIndex);
   }
 
   /**
