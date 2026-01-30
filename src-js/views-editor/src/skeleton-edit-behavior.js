@@ -1080,3 +1080,104 @@ export function createEditableRibBehavior(skeletonData, ribHit) {
     onCurvePoint
   );
 }
+
+/**
+ * EditableHandleBehavior - Handles dragging of editable generated control points (handles).
+ * Movement is constrained to the direction of the corresponding skeleton handle.
+ */
+export class EditableHandleBehavior {
+  /**
+   * @param {Object} skeletonData - The skeleton data
+   * @param {number} contourIndex - Index of the contour
+   * @param {number} pointIndex - Index of the on-curve skeleton point
+   * @param {string} side - "left" or "right"
+   * @param {string} handleType - "in" or "out" (incoming or outgoing handle)
+   * @param {Object} skeletonHandleDir - Normalized direction of skeleton handle
+   */
+  constructor(skeletonData, contourIndex, pointIndex, side, handleType, skeletonHandleDir) {
+    console.log('[HANDLE-EDIT] Phase 4: EditableHandleBehavior constructor', {
+      contourIndex, pointIndex, side, handleType, skeletonHandleDir,
+    });
+
+    this.skeletonData = skeletonData;
+    this.contourIndex = contourIndex;
+    this.pointIndex = pointIndex;
+    this.side = side;
+    this.handleType = handleType;
+    this.skeletonHandleDir = skeletonHandleDir;
+
+    const contour = skeletonData.contours[contourIndex];
+    const point = contour.points[pointIndex];
+
+    // Get the appropriate offset key based on side and handle type
+    this.offsetKey = side === "left"
+      ? (handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
+      : (handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
+
+    // Store original offset
+    this.originalOffset = point[this.offsetKey] || 0;
+
+    console.log('[HANDLE-EDIT] Phase 4: Original offset', {
+      offsetKey: this.offsetKey,
+      originalOffset: this.originalOffset
+    });
+  }
+
+  /**
+   * Apply drag delta and return the new offset.
+   * Movement is constrained to skeleton handle direction.
+   * @param {Object} delta - The drag delta {x, y}
+   * @returns {Object} { contourIndex, pointIndex, side, handleType, offset }
+   */
+  applyDelta(delta) {
+    // Project delta onto skeleton handle direction
+    const projectedDelta = delta.x * this.skeletonHandleDir.x + delta.y * this.skeletonHandleDir.y;
+    const newOffset = this.originalOffset + projectedDelta;
+
+    console.log('[HANDLE-EDIT] Phase 4: applyDelta', {
+      delta,
+      projectedDelta,
+      originalOffset: this.originalOffset,
+      newOffset,
+    });
+
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      handleType: this.handleType,
+      offset: Math.round(newOffset),
+    };
+  }
+
+  /**
+   * Get rollback data to restore original offset.
+   */
+  getRollback() {
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      handleType: this.handleType,
+      offset: Math.round(this.originalOffset),
+    };
+  }
+}
+
+/**
+ * Create an EditableHandleBehavior for editable generated handles.
+ * @param {Object} skeletonData - The skeleton data
+ * @param {Object} handleInfo - Handle info from _getEditableHandleForGeneratedPoint
+ * @param {Object} skeletonHandleDir - Normalized direction of skeleton handle
+ * @returns {EditableHandleBehavior} The behavior instance
+ */
+export function createEditableHandleBehavior(skeletonData, handleInfo, skeletonHandleDir) {
+  return new EditableHandleBehavior(
+    skeletonData,
+    handleInfo.skeletonContourIndex,
+    handleInfo.skeletonPointIndex,
+    handleInfo.side,
+    handleInfo.handleType,
+    skeletonHandleDir
+  );
+}

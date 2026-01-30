@@ -45,6 +45,8 @@ import {
   RibEditBehavior,
   createEditableRibBehavior,
   EditableRibBehavior,
+  createEditableHandleBehavior,
+  EditableHandleBehavior,
 } from "./skeleton-edit-behavior.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import {
@@ -1102,6 +1104,19 @@ export class PointerTool extends BaseTool {
         this.sceneController.sceneModel.showTransformSelection = true;
         return;
       }
+
+      // Check if any selected points are editable generated handles
+      const editableHandles = this._getEditableGeneratedHandlesFromSelection(pointSelection);
+      if (editableHandles.length > 0 && !hasSkeletonSelection) {
+        console.log('[HANDLE-EDIT] Phase 4: Redirecting to handle drag');
+        await this._handleDragEditableGeneratedHandles(
+          eventStream,
+          initialEvent,
+          editableHandles
+        );
+        this.sceneController.sceneModel.showTransformSelection = true;
+        return;
+      }
     }
 
     // If only skeleton selection, use dedicated handler
@@ -2008,6 +2023,35 @@ export class PointerTool extends BaseTool {
   }
 
   /**
+   * Check if selected points are editable generated handles (from skeleton).
+   * @param {Array} pointSelection - Array of point indices
+   * @returns {Array} Array of {pointIndex, skeletonContourIndex, skeletonPointIndex, side, handleType}
+   */
+  _getEditableGeneratedHandlesFromSelection(pointSelection) {
+    console.log('[HANDLE-EDIT] Phase 4: _getEditableGeneratedHandlesFromSelection', { pointSelection });
+
+    const result = [];
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return result;
+
+    for (const pointIndex of pointSelection) {
+      const handleInfo = this.sceneModel._getEditableHandleForGeneratedPoint(
+        positionedGlyph,
+        pointIndex
+      );
+      if (handleInfo) {
+        result.push({
+          pointIndex,
+          ...handleInfo,
+        });
+      }
+    }
+
+    console.log('[HANDLE-EDIT] Phase 4: Found editable handles', result);
+    return result;
+  }
+
+  /**
    * Handle dragging editable generated points (from skeleton contours).
    * Updates skeleton data (nudge, width) based on point movement.
    */
@@ -2151,6 +2195,203 @@ export class PointerTool extends BaseTool {
         broadcast: true,
       };
     });
+  }
+
+  /**
+   * Handle dragging editable generated handles (from skeleton contours).
+   * Updates skeleton data (handle offsets) based on handle movement.
+   */
+  async _handleDragEditableGeneratedHandles(eventStream, initialEvent, editableHandles) {
+    console.log('[HANDLE-EDIT] Phase 4: _handleDragEditableGeneratedHandles starting', { editableHandles });
+
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+
+    if (!positionedGlyph || editableHandles.length === 0) return;
+
+    const localPoint = sceneController.localPoint(initialEvent);
+    const startGlyphPoint = {
+      x: localPoint.x - positionedGlyph.x,
+      y: localPoint.y - positionedGlyph.y,
+    };
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layersData = {};
+
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        layersData[editLayerName] = {
+          layer,
+          original: JSON.parse(JSON.stringify(skeletonData)),
+          working: JSON.parse(JSON.stringify(skeletonData)),
+          behaviors: [],
+        };
+      }
+
+      if (Object.keys(layersData).length === 0) return;
+
+      // Create behaviors for each editable handle in each layer
+      for (const data of Object.values(layersData)) {
+        for (const eh of editableHandles) {
+          const contour = data.original.contours[eh.skeletonContourIndex];
+          if (!contour) continue;
+
+          // Calculate skeleton handle direction
+          const skeletonHandleDir = this._getSkeletonHandleDirForPoint(
+            contour, eh.skeletonPointIndex, eh.handleType
+          );
+
+          if (!skeletonHandleDir) {
+            console.log('[HANDLE-EDIT] Phase 4: Could not find skeleton handle direction');
+            continue;
+          }
+
+          console.log('[HANDLE-EDIT] Phase 4: Creating behavior', { skeletonHandleDir });
+
+          data.behaviors.push({
+            behavior: createEditableHandleBehavior(data.original, eh, skeletonHandleDir),
+            editableHandle: eh,
+          });
+        }
+      }
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      let accumulatedChanges = new ChangeCollector();
+
+      // Drag loop
+      for await (const event of eventStream) {
+        const currentLocalPoint = sceneController.localPoint(event);
+        const currentGlyphPoint = {
+          x: currentLocalPoint.x - positionedGlyph.x,
+          y: currentLocalPoint.y - positionedGlyph.y,
+        };
+
+        const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+        console.log('[HANDLE-EDIT] Phase 4: Drag delta', delta);
+
+        const allChanges = [];
+
+        for (const [editLayerName, data] of Object.entries(layersData)) {
+          const { layer, working, behaviors } = data;
+
+          for (const { behavior, editableHandle } of behaviors) {
+            const change = behavior.applyDelta(delta);
+            const point = working.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
+
+            // Apply the offset to the appropriate key
+            const offsetKey = editableHandle.side === "left"
+              ? (editableHandle.handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
+              : (editableHandle.handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
+
+            point[offsetKey] = change.offset;
+            console.log('[HANDLE-EDIT] Phase 4: Applied offset', { offsetKey, offset: change.offset });
+          }
+
+          const staticGlyph = layer.glyph;
+          const pathChange = recordChanges(staticGlyph, (sg) => {
+            regenerateOutline(sg, working);
+          });
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+          const customDataChange = recordChanges(layer, (l) => {
+            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+          });
+          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+        }
+
+        const combinedChange = new ChangeCollector().concat(...allChanges);
+        accumulatedChanges = accumulatedChanges.concat(combinedChange);
+        await sendIncrementalChange(combinedChange.change, true);
+      }
+
+      await sendIncrementalChange(accumulatedChanges.change);
+
+      return {
+        changes: accumulatedChanges,
+        undoLabel: "Edit generated handle",
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Get skeleton handle direction for a given skeleton point.
+   * @param {Object} contour - The skeleton contour
+   * @param {number} pointIndex - Index of the on-curve skeleton point
+   * @param {string} handleType - "in" or "out"
+   * @returns {Object|null} Normalized direction vector {x, y}
+   */
+  _getSkeletonHandleDirForPoint(contour, pointIndex, handleType) {
+    const points = contour.points;
+    const numPoints = points.length;
+    const isClosed = contour.isClosed;
+
+    const skeletonPoint = points[pointIndex];
+    if (!skeletonPoint || skeletonPoint.type) return null;
+
+    // Find adjacent control points
+    // For "out" handle: look at the next point
+    // For "in" handle: look at the previous point
+    let controlPoint = null;
+
+    if (handleType === "out") {
+      // Look for next point (could be off-curve)
+      const nextIdx = (pointIndex + 1) % numPoints;
+      if (isClosed || pointIndex < numPoints - 1) {
+        const nextPt = points[nextIdx];
+        if (nextPt?.type === "cubic") {
+          controlPoint = nextPt;
+        }
+      }
+    } else {
+      // "in" handle: look at previous point
+      const prevIdx = (pointIndex - 1 + numPoints) % numPoints;
+      if (isClosed || pointIndex > 0) {
+        const prevPt = points[prevIdx];
+        if (prevPt?.type === "cubic") {
+          controlPoint = prevPt;
+        }
+      }
+    }
+
+    if (!controlPoint) {
+      console.log('[HANDLE-EDIT] Phase 4: No control point found for handle', { pointIndex, handleType });
+      return null;
+    }
+
+    const dir = {
+      x: controlPoint.x - skeletonPoint.x,
+      y: controlPoint.y - skeletonPoint.y,
+    };
+    const length = Math.hypot(dir.x, dir.y);
+
+    if (length < 0.001) return null;
+
+    const normalized = { x: dir.x / length, y: dir.y / length };
+    console.log('[HANDLE-EDIT] Phase 4: Handle direction', { pointIndex, handleType, normalized });
+    return normalized;
   }
 
   /**

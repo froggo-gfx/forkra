@@ -697,6 +697,19 @@ export class SceneModel {
           // The drag handler will detect it's an editable generated point
           return new Set([`point/${pointIndex}`]);
         }
+
+        // Check if this point corresponds to an editable handle
+        const editableHandleInfo = this._getEditableHandleForGeneratedPoint(
+          positionedGlyph,
+          pointIndex
+        );
+        if (editableHandleInfo) {
+          console.log('[HANDLE-EDIT] Phase 3: Allowing selection of editable handle');
+          // Return standard point selection - allows normal point editing UI
+          // The drag handler will detect it's an editable handle
+          return new Set([`point/${pointIndex}`]);
+        }
+
         // Skip skeleton-generated outline points - they shouldn't be directly editable
         return new Set();
       }
@@ -840,6 +853,150 @@ export class SceneModel {
       }
     }
 
+    return null;
+  }
+
+  /**
+   * Check if a generated control point (handle) corresponds to an editable handle.
+   * Returns handle info if found, null otherwise.
+   * @param {Object} positionedGlyph - The positioned glyph
+   * @param {number} pointIndex - The point index in glyph.path
+   * @returns {Object|null} {skeletonContourIndex, skeletonPointIndex, side, handleType} or null
+   */
+  _getEditableHandleForGeneratedPoint(positionedGlyph, pointIndex) {
+    console.log('[HANDLE-EDIT] Phase 3: _getEditableHandleForGeneratedPoint called', { pointIndex });
+
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+      return null;
+    }
+
+    const editLayerName =
+      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+    if (!editLayerName) {
+      return null;
+    }
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (!skeletonData?.contours?.length) {
+      return null;
+    }
+
+    // Get the point's position
+    const path = positionedGlyph.glyph.path;
+    const pointPos = path.getPoint(pointIndex);
+    if (!pointPos) {
+      return null;
+    }
+
+    // Check if the point is off-curve (control point / handle)
+    const pointType = path.pointTypes[pointIndex];
+    const isOnCurve = (pointType & 0x03) === 0;
+    if (isOnCurve) {
+      console.log('[HANDLE-EDIT] Phase 3: Point is on-curve, not a handle');
+      return null;
+    }
+
+    console.log('[HANDLE-EDIT] Phase 3: Point is off-curve, checking for match');
+
+    // Find adjacent on-curve point (anchor) to determine which skeleton point this relates to
+    const numPoints = path.numPoints;
+    const contourRange = path.getContourRange(path.pointToContourIndex(pointIndex));
+    if (!contourRange) return null;
+
+    const [contourStart, contourEnd] = contourRange;
+
+    // Get previous and next point indices (within contour bounds)
+    const getPrevIdx = (idx) => idx > contourStart ? idx - 1 : contourEnd - 1;
+    const getNextIdx = (idx) => idx < contourEnd - 1 ? idx + 1 : contourStart;
+
+    const prevIdx = getPrevIdx(pointIndex);
+    const nextIdx = getNextIdx(pointIndex);
+
+    const prevType = path.pointTypes[prevIdx];
+    const nextType = path.pointTypes[nextIdx];
+    const prevIsOnCurve = (prevType & 0x03) === 0;
+    const nextIsOnCurve = (nextType & 0x03) === 0;
+
+    // Determine handle type based on position relative to on-curve points
+    let anchorIdx, handleType;
+    if (prevIsOnCurve) {
+      anchorIdx = prevIdx;
+      handleType = "out"; // Outgoing handle from previous on-curve
+    } else if (nextIsOnCurve) {
+      anchorIdx = nextIdx;
+      handleType = "in"; // Incoming handle to next on-curve
+    } else {
+      // Between two off-curve points (middle of multi-handle curve)
+      console.log('[HANDLE-EDIT] Phase 3: Handle between two off-curves, not supported yet');
+      return null;
+    }
+
+    const anchorPos = path.getPoint(anchorIdx);
+    console.log('[HANDLE-EDIT] Phase 3: Anchor point', { anchorIdx, anchorPos, handleType });
+
+    // Now find which skeleton point the anchor corresponds to
+    const tolerance = 1.5;
+
+    for (let skeletonContourIndex = 0; skeletonContourIndex < skeletonData.contours.length; skeletonContourIndex++) {
+      const contour = skeletonData.contours[skeletonContourIndex];
+      const defaultWidth = contour.defaultWidth || 20;
+      const singleSided = contour.singleSided ?? false;
+      const singleSidedDirection = contour.singleSidedDirection ?? "left";
+
+      for (let skeletonPointIndex = 0; skeletonPointIndex < contour.points.length; skeletonPointIndex++) {
+        const skeletonPoint = contour.points[skeletonPointIndex];
+
+        // Only check on-curve skeleton points
+        if (skeletonPoint.type) continue;
+
+        const normal = calculateNormalAtSkeletonPoint(contour, skeletonPointIndex);
+        const tangent = { x: -normal.y, y: normal.x };
+
+        for (const side of ["left", "right"]) {
+          const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+          if (!skeletonPoint[editableKey]) continue;
+
+          let halfWidth = getPointHalfWidth(skeletonPoint, defaultWidth, side);
+
+          if (singleSided) {
+            if (singleSidedDirection !== side) continue;
+            const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+            const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+            halfWidth = leftHW + rightHW;
+          }
+
+          if (halfWidth < 0.5) continue;
+
+          const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+          const nudge = skeletonPoint[nudgeKey] || 0;
+
+          const sign = side === "left" ? 1 : -1;
+          const expectedAnchorX = Math.round(skeletonPoint.x + sign * normal.x * halfWidth + tangent.x * nudge);
+          const expectedAnchorY = Math.round(skeletonPoint.y + sign * normal.y * halfWidth + tangent.y * nudge);
+
+          const dx = Math.abs(anchorPos.x - expectedAnchorX);
+          const dy = Math.abs(anchorPos.y - expectedAnchorY);
+
+          if (dx <= tolerance && dy <= tolerance) {
+            console.log('[HANDLE-EDIT] Phase 3: Found matching skeleton point', {
+              skeletonContourIndex,
+              skeletonPointIndex,
+              side,
+              handleType,
+            });
+            return {
+              skeletonContourIndex,
+              skeletonPointIndex,
+              side,
+              handleType,
+            };
+          }
+        }
+      }
+    }
+
+    console.log('[HANDLE-EDIT] Phase 3: No matching skeleton point found');
     return null;
   }
 
