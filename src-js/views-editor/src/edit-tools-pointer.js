@@ -2412,6 +2412,17 @@ export class PointerTool extends BaseTool {
                 point.rightNudge = change.nudge;
               }
             }
+
+            // Apply handle offset compensation for interpolation
+            if (change.isInterpolation) {
+              if (side === "left") {
+                point.leftHandleInOffset = change.handleInOffset;
+                point.leftHandleOutOffset = change.handleOutOffset;
+              } else {
+                point.rightHandleInOffset = change.handleInOffset;
+                point.rightHandleOutOffset = change.handleOutOffset;
+              }
+            }
           }
 
           const staticGlyph = layer.glyph;

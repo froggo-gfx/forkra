@@ -1131,6 +1131,12 @@ export class InterpolatingRibBehavior {
     const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
     this.originalNudge = point[nudgeKey] || 0;
 
+    // Store original handle offsets (for compensation during interpolation)
+    const handleInKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+    const handleOutKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+    this.originalHandleInOffset = point[handleInKey] || 0;
+    this.originalHandleOutOffset = point[handleOutKey] || 0;
+
     // Calculate current rib point position
     const sign = side === "left" ? 1 : -1;
     this.originalRibPos = {
@@ -1194,23 +1200,34 @@ export class InterpolatingRibBehavior {
     const newHalfWidth = Math.max(1, this.originalHalfWidth + deltaHalfWidth);
     const newNudge = this.originalNudge + deltaNudge;
 
+    // For interpolation, we need to compensate handle positions
+    // When the point moves by deltaNudge along tangent, handles would move with it
+    // We add negative offset to keep handles in place
+    // Assuming skeletonHandleDir ≈ tangent, compensation = -deltaNudge
+    const handleCompensation = -deltaNudge;
+    const newHandleInOffset = this.originalHandleInOffset + handleCompensation;
+    const newHandleOutOffset = this.originalHandleOutOffset + handleCompensation;
+
     console.log('[RIB-INTERPOLATE] applyDelta', {
       delta,
       deltaAlongLine,
-      deltaHalfWidth,
       deltaNudge,
-      newHalfWidth,
+      handleCompensation,
       newNudge,
+      newHandleInOffset,
+      newHandleOutOffset,
     });
 
-    // For interpolation, we only change nudge - width stays the same
-    // Return isAsymmetric: false so that only nudge is updated
+    // Return nudge change AND handle offset compensation
     return {
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
       side: this.side,
       nudge: Math.round(newNudge),
+      handleInOffset: Math.round(newHandleInOffset),
+      handleOutOffset: Math.round(newHandleOutOffset),
       isAsymmetric: false,
+      isInterpolation: true,  // Flag to indicate handle offsets should be applied
     };
   }
 
@@ -1224,6 +1241,9 @@ export class InterpolatingRibBehavior {
       side: this.side,
       halfWidth: Math.round(this.originalHalfWidth),
       nudge: Math.round(this.originalNudge),
+      handleInOffset: Math.round(this.originalHandleInOffset),
+      handleOutOffset: Math.round(this.originalHandleOutOffset),
+      isInterpolation: true,
     };
   }
 }
