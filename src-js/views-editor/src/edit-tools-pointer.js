@@ -45,6 +45,7 @@ import {
   RibEditBehavior,
   createEditableRibBehavior,
   EditableRibBehavior,
+  createInterpolatingRibBehavior,
   createEditableHandleBehavior,
   EditableHandleBehavior,
 } from "./skeleton-edit-behavior.js";
@@ -2052,8 +2053,69 @@ export class PointerTool extends BaseTool {
   }
 
   /**
+   * Find adjacent handles (off-curve points) for a rib point in the generated path.
+   * @param {Object} path - The generated path
+   * @param {number} ribPointIndex - Index of the rib point in the path
+   * @returns {Object|null} { prevHandle, nextHandle } or null if not found
+   */
+  _findAdjacentHandlesForRibPoint(path, ribPointIndex) {
+    const numPoints = path.numPoints;
+    if (ribPointIndex < 0 || ribPointIndex >= numPoints) return null;
+
+    // Get contour range for this point
+    const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(ribPointIndex);
+    const numContourPoints = path.getNumPointsOfContour(contourIndex);
+    const contourStart = ribPointIndex - contourPointIndex;
+
+    // Helper to wrap index within contour
+    const wrapIndex = (idx) => {
+      const relative = idx - contourStart;
+      const wrapped = ((relative % numContourPoints) + numContourPoints) % numContourPoints;
+      return contourStart + wrapped;
+    };
+
+    // Find prev and next off-curve points
+    let prevHandle = null;
+    let nextHandle = null;
+
+    // Look backwards for prev handle
+    for (let i = 1; i <= numContourPoints; i++) {
+      const checkIdx = wrapIndex(ribPointIndex - i);
+      const pointType = path.pointTypes[checkIdx];
+      const isOnCurve = (pointType & 0x03) === 0;
+      if (!isOnCurve) {
+        prevHandle = path.getPoint(checkIdx);
+        break;
+      }
+      // If we hit another on-curve before finding off-curve, no prev handle
+      if (isOnCurve && i > 1) break;
+    }
+
+    // Look forwards for next handle
+    for (let i = 1; i <= numContourPoints; i++) {
+      const checkIdx = wrapIndex(ribPointIndex + i);
+      const pointType = path.pointTypes[checkIdx];
+      const isOnCurve = (pointType & 0x03) === 0;
+      if (!isOnCurve) {
+        nextHandle = path.getPoint(checkIdx);
+        break;
+      }
+      // If we hit another on-curve before finding off-curve, no next handle
+      if (isOnCurve && i > 1) break;
+    }
+
+    console.log('[RIB-INTERPOLATE] _findAdjacentHandlesForRibPoint', {
+      ribPointIndex, prevHandle, nextHandle,
+    });
+
+    if (!prevHandle || !nextHandle) return null;
+    return { prevHandle, nextHandle };
+  }
+
+  /**
    * Handle dragging editable generated points (from skeleton contours).
    * Updates skeleton data (nudge, width) based on point movement.
+   * When Alt is held, the rib point slides along the line between its adjacent handles.
    */
   async _handleDragEditableGeneratedPoints(eventStream, initialEvent, editablePoints) {
     const sceneController = this.sceneController;
@@ -2061,11 +2123,24 @@ export class PointerTool extends BaseTool {
 
     if (!positionedGlyph || editablePoints.length === 0) return;
 
+    const useInterpolation = initialEvent.altKey;
+    console.log('[RIB-INTERPOLATE] Alt key:', useInterpolation);
+
     const localPoint = sceneController.localPoint(initialEvent);
     const startGlyphPoint = {
       x: localPoint.x - positionedGlyph.x,
       y: localPoint.y - positionedGlyph.y,
     };
+
+    // If using interpolation, find adjacent handles for each editable rib point
+    const generatedPath = positionedGlyph.glyph.path;
+    const editablePointsWithHandles = useInterpolation
+      ? editablePoints.map(ep => {
+          // ep.pointIndex is the index in the generated path
+          const handles = this._findAdjacentHandlesForRibPoint(generatedPath, ep.pointIndex);
+          return { ...ep, handles };
+        })
+      : editablePoints.map(ep => ({ ...ep, handles: null }));
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const layersData = {};
@@ -2087,7 +2162,7 @@ export class PointerTool extends BaseTool {
 
       // Create behaviors for each editable point in each layer
       for (const data of Object.values(layersData)) {
-        for (const ep of editablePoints) {
+        for (const ep of editablePointsWithHandles) {
           const contour = data.original.contours[ep.skeletonContourIndex];
           const skeletonPoint = contour?.points[ep.skeletonPointIndex];
           if (!skeletonPoint) continue;
@@ -2101,8 +2176,18 @@ export class PointerTool extends BaseTool {
             onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
           };
 
+          // Use interpolating behavior if Alt is pressed and handles are found
+          let behavior;
+          if (useInterpolation && ep.handles) {
+            behavior = createInterpolatingRibBehavior(
+              data.original, ribHit, ep.handles.prevHandle, ep.handles.nextHandle
+            );
+          } else {
+            behavior = createEditableRibBehavior(data.original, ribHit);
+          }
+
           data.behaviors.push({
-            behavior: createEditableRibBehavior(data.original, ribHit),
+            behavior,
             editablePoint: ep,
           });
         }

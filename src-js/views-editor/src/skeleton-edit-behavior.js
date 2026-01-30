@@ -1082,6 +1082,185 @@ export function createEditableRibBehavior(skeletonData, ribHit) {
 }
 
 /**
+ * InterpolatingRibBehavior - Handles dragging of editable rib points with Alt key.
+ * The rib point slides along the line between its two adjacent handles (off-curve points).
+ * This is similar to the Interpolate behavior in standard edit-behavior.
+ */
+export class InterpolatingRibBehavior {
+  /**
+   * @param {Object} skeletonData - The skeleton data
+   * @param {number} contourIndex - Index of the skeleton contour
+   * @param {number} pointIndex - Index of the on-curve skeleton point
+   * @param {string} side - "left" or "right"
+   * @param {Object} normal - The normal vector at this point
+   * @param {Object} onCurvePoint - The skeleton on-curve point position {x, y}
+   * @param {Object} prevHandle - Previous handle position {x, y}
+   * @param {Object} nextHandle - Next handle position {x, y}
+   */
+  constructor(skeletonData, contourIndex, pointIndex, side, normal, onCurvePoint, prevHandle, nextHandle) {
+    console.log('[RIB-INTERPOLATE] constructor', {
+      contourIndex, pointIndex, side, prevHandle, nextHandle,
+    });
+
+    this.skeletonData = skeletonData;
+    this.contourIndex = contourIndex;
+    this.pointIndex = pointIndex;
+    this.side = side;
+    this.normal = normal;
+    this.tangent = { x: -normal.y, y: normal.x };
+    this.onCurvePoint = onCurvePoint;
+    this.prevHandle = prevHandle;
+    this.nextHandle = nextHandle;
+
+    const contour = skeletonData.contours[contourIndex];
+    const point = contour.points[pointIndex];
+    const defaultWidth = contour.defaultWidth || 20;
+
+    // Store original half-width
+    if (side === "left") {
+      this.originalHalfWidth = point.leftWidth !== undefined
+        ? point.leftWidth
+        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
+    } else {
+      this.originalHalfWidth = point.rightWidth !== undefined
+        ? point.rightWidth
+        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
+    }
+
+    // Store original nudge
+    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+    this.originalNudge = point[nudgeKey] || 0;
+
+    // Calculate current rib point position
+    const sign = side === "left" ? 1 : -1;
+    this.originalRibPos = {
+      x: onCurvePoint.x + sign * normal.x * this.originalHalfWidth + this.tangent.x * this.originalNudge,
+      y: onCurvePoint.y + sign * normal.y * this.originalHalfWidth + this.tangent.y * this.originalNudge,
+    };
+
+    // Calculate the line direction from prevHandle to nextHandle
+    this.lineDir = {
+      x: nextHandle.x - prevHandle.x,
+      y: nextHandle.y - prevHandle.y,
+    };
+    this.lineLength = Math.hypot(this.lineDir.x, this.lineDir.y);
+
+    if (this.lineLength > 0.001) {
+      this.lineDir.x /= this.lineLength;
+      this.lineDir.y /= this.lineLength;
+    }
+
+    // Calculate initial t (position along the line)
+    const fromPrev = {
+      x: this.originalRibPos.x - prevHandle.x,
+      y: this.originalRibPos.y - prevHandle.y,
+    };
+    this.originalT = this.lineLength > 0.001
+      ? (fromPrev.x * this.lineDir.x + fromPrev.y * this.lineDir.y) / this.lineLength
+      : 0.5;
+
+    console.log('[RIB-INTERPOLATE] Initial state', {
+      originalRibPos: this.originalRibPos,
+      originalT: this.originalT,
+      lineLength: this.lineLength,
+    });
+  }
+
+  /**
+   * Apply drag delta and return changes to width and nudge.
+   * Movement is constrained to the line between handles.
+   * @param {Object} delta - The drag delta {x, y}
+   * @returns {Object} { halfWidth, nudge, isAsymmetric } - New values
+   */
+  applyDelta(delta) {
+    // Calculate target position
+    const targetPos = {
+      x: this.originalRibPos.x + delta.x,
+      y: this.originalRibPos.y + delta.y,
+    };
+
+    // Project target onto the handle-handle line
+    const fromPrev = {
+      x: targetPos.x - this.prevHandle.x,
+      y: targetPos.y - this.prevHandle.y,
+    };
+    const projectedDist = fromPrev.x * this.lineDir.x + fromPrev.y * this.lineDir.y;
+
+    // New position on the line
+    const newRibPos = {
+      x: this.prevHandle.x + this.lineDir.x * projectedDist,
+      y: this.prevHandle.y + this.lineDir.y * projectedDist,
+    };
+
+    // Convert new rib position back to halfWidth and nudge
+    const sign = this.side === "left" ? 1 : -1;
+    const deltaFromSkeleton = {
+      x: newRibPos.x - this.onCurvePoint.x,
+      y: newRibPos.y - this.onCurvePoint.y,
+    };
+
+    // Project onto normal (width) and tangent (nudge)
+    const normalComponent = deltaFromSkeleton.x * this.normal.x + deltaFromSkeleton.y * this.normal.y;
+    const tangentComponent = deltaFromSkeleton.x * this.tangent.x + deltaFromSkeleton.y * this.tangent.y;
+
+    const newHalfWidth = Math.max(1, sign * normalComponent);
+    const newNudge = tangentComponent;
+
+    console.log('[RIB-INTERPOLATE] applyDelta', {
+      delta,
+      projectedDist,
+      newRibPos,
+      newHalfWidth,
+      newNudge,
+    });
+
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: Math.round(newHalfWidth),
+      nudge: Math.round(newNudge),
+      isAsymmetric: true, // Interpolation always produces asymmetric result
+    };
+  }
+
+  /**
+   * Get rollback data to restore original width and nudge.
+   */
+  getRollback() {
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: Math.round(this.originalHalfWidth),
+      nudge: Math.round(this.originalNudge),
+    };
+  }
+}
+
+/**
+ * Create an InterpolatingRibBehavior for Alt+drag of editable rib points.
+ * @param {Object} skeletonData - The skeleton data
+ * @param {Object} ribHit - Hit test result
+ * @param {Object} prevHandle - Previous handle position {x, y}
+ * @param {Object} nextHandle - Next handle position {x, y}
+ * @returns {InterpolatingRibBehavior} The behavior instance
+ */
+export function createInterpolatingRibBehavior(skeletonData, ribHit, prevHandle, nextHandle) {
+  const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
+  return new InterpolatingRibBehavior(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint,
+    prevHandle,
+    nextHandle
+  );
+}
+
+/**
  * EditableHandleBehavior - Handles dragging of editable generated control points (handles).
  * Movement is constrained to the direction of the corresponding skeleton handle.
  */
