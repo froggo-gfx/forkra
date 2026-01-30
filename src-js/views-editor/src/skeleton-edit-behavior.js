@@ -1062,6 +1062,14 @@ export class EditableRibBehavior {
     this.hasHandleOffsets = has2DIn || has2DOut ||
       point[handleIn1DKey] !== undefined || point[handleOut1DKey] !== undefined;
 
+    console.log('[EDITABLE-RIB] _initHandleOffsets', {
+      side,
+      has2DIn, has2DOut,
+      has1DIn: point[handleIn1DKey] !== undefined,
+      has1DOut: point[handleOut1DKey] !== undefined,
+      hasHandleOffsets: this.hasHandleOffsets,
+    });
+
     if (has2DIn) {
       this.originalHandleInOffsetX = point[handleInXKey] || 0;
       this.originalHandleInOffsetY = point[handleInYKey] || 0;
@@ -1159,6 +1167,20 @@ export class EditableRibBehavior {
       result.handleOutOffsetX = Math.round(this.originalHandleOutOffsetX + handleOffsetDeltaX);
       result.handleOutOffsetY = Math.round(this.originalHandleOutOffsetY + handleOffsetDeltaY);
       result.hasHandleOffsets = true;
+
+      console.log('[EDITABLE-RIB] applyDelta with handle compensation', {
+        deltaNudge,
+        tangent: this.tangent,
+        handleOffsetDelta: { x: handleOffsetDeltaX, y: handleOffsetDeltaY },
+        original: {
+          inX: this.originalHandleInOffsetX, inY: this.originalHandleInOffsetY,
+          outX: this.originalHandleOutOffsetX, outY: this.originalHandleOutOffsetY,
+        },
+        result: {
+          inX: result.handleInOffsetX, inY: result.handleInOffsetY,
+          outX: result.handleOutOffsetX, outY: result.handleOutOffsetY,
+        },
+      });
     }
 
     return result;
