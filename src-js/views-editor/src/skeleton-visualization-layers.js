@@ -248,7 +248,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: true,
-  zIndex: 453,
+  zIndex: 560,
   screenParameters: {
     pointSize: 10,
     editablePointSize: 12,
