@@ -793,6 +793,7 @@ export default class SkeletonParametersPanel extends Panel {
         await this._setPointWidth(fieldItem.key, value);
       } else if (fieldItem.key === "pointWidthScale") {
         // Protect scale slider from form rebuilds during drag
+        // Scale is applied only when user clicks "Apply Scale" button
         if (valueStream) {
           this._isDraggingSlider = true;
           try {
@@ -805,8 +806,6 @@ export default class SkeletonParametersPanel extends Panel {
         } else {
           this.pointParameters.scaleValue = value;
         }
-        // Apply immediately and reset slider to center (1.0)
-        await this._applyScaleToSelectedPoints();
       } else if (fieldItem.key === "pointDistribution") {
         // For distribution slider
         if (valueStream) {
