@@ -2616,13 +2616,24 @@ export class PointerTool extends BaseTool {
             const change = behavior.applyDelta(delta);
             const point = working.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
 
-            // Apply the offset to the appropriate key
+            // Apply the offset to the appropriate key (1D offset)
             const offsetKey = editableHandle.side === "left"
               ? (editableHandle.handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
               : (editableHandle.handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
 
+            // Clear 2D offsets for this handle (they have priority, so must be removed)
+            const offsetXKey = editableHandle.side === "left"
+              ? (editableHandle.handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+              : (editableHandle.handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+            const offsetYKey = editableHandle.side === "left"
+              ? (editableHandle.handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+              : (editableHandle.handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+
+            delete point[offsetXKey];
+            delete point[offsetYKey];
+
             point[offsetKey] = change.offset;
-            console.log('[HANDLE-EDIT] Phase 4: Applied offset', { offsetKey, offset: change.offset });
+            console.log('[HANDLE-EDIT] Phase 4: Applied 1D offset (cleared 2D)', { offsetKey, offset: change.offset });
           }
 
           const staticGlyph = layer.glyph;
