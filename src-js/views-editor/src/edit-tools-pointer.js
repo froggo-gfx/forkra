@@ -2501,6 +2501,7 @@ export class PointerTool extends BaseTool {
           data.behaviors.push({
             behavior: createEditableHandleBehavior(data.original, eh, skeletonHandleDir),
             editableHandle: eh,
+            skeletonHandleDir,
           });
         }
       }
@@ -2542,16 +2543,19 @@ export class PointerTool extends BaseTool {
         for (const [editLayerName, data] of Object.entries(layersData)) {
           const { layer, working, behaviors } = data;
 
-          for (const { behavior, editableHandle } of behaviors) {
+          for (const { behavior, editableHandle, skeletonHandleDir } of behaviors) {
             const change = behavior.applyDelta(delta);
             const point = working.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
+
+            // Check if handle is in detached mode
+            const detachedKey = editableHandle.side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+            const isDetached = point[detachedKey];
 
             // Apply the offset to the appropriate key (1D offset)
             const offsetKey = editableHandle.side === "left"
               ? (editableHandle.handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
               : (editableHandle.handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
 
-            // Clear 2D offsets for this handle (they have priority, so must be removed)
             const offsetXKey = editableHandle.side === "left"
               ? (editableHandle.handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
               : (editableHandle.handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
@@ -2559,10 +2563,19 @@ export class PointerTool extends BaseTool {
               ? (editableHandle.handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
               : (editableHandle.handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
 
-            delete point[offsetXKey];
-            delete point[offsetYKey];
-
-            point[offsetKey] = change.offset;
+            if (isDetached) {
+              // Detached mode: update 2D offsets, preserve detached state
+              // Project delta onto skeleton handle direction
+              const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
+              point[offsetXKey] = (point[offsetXKey] || 0) + Math.round(skeletonHandleDir.x * projectedDelta);
+              point[offsetYKey] = (point[offsetYKey] || 0) + Math.round(skeletonHandleDir.y * projectedDelta);
+              // Don't touch 1D offset - let 2D offsets take priority
+            } else {
+              // Normal mode: clear 2D offsets (they have priority), set 1D offset
+              delete point[offsetXKey];
+              delete point[offsetYKey];
+              point[offsetKey] = change.offset;
+            }
           }
 
           const staticGlyph = layer.glyph;
@@ -2646,6 +2659,7 @@ export class PointerTool extends BaseTool {
           data.behaviors.push({
             behavior: createEditableHandleBehavior(data.original, eh, skeletonHandleDir),
             editableHandle: eh,
+            skeletonHandleDir,
           });
         }
       }
@@ -2655,16 +2669,19 @@ export class PointerTool extends BaseTool {
       for (const [editLayerName, data] of Object.entries(layersData)) {
         const { layer, working, behaviors } = data;
 
-        for (const { behavior, editableHandle } of behaviors) {
+        for (const { behavior, editableHandle, skeletonHandleDir } of behaviors) {
           const change = behavior.applyDelta(delta);
           const point = working.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
 
-          // Apply the offset (1D only for arrow keys)
+          // Check if handle is in detached mode
+          const detachedKey = editableHandle.side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+          const isDetached = point[detachedKey];
+
+          // Apply the offset (1D only for arrow keys, unless detached)
           const offsetKey = editableHandle.side === "left"
             ? (editableHandle.handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
             : (editableHandle.handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
 
-          // Clear 2D offsets (they have priority)
           const offsetXKey = editableHandle.side === "left"
             ? (editableHandle.handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
             : (editableHandle.handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
@@ -2672,9 +2689,19 @@ export class PointerTool extends BaseTool {
             ? (editableHandle.handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
             : (editableHandle.handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
 
-          delete point[offsetXKey];
-          delete point[offsetYKey];
-          point[offsetKey] = change.offset;
+          if (isDetached) {
+            // Detached mode: update 2D offsets, preserve detached state
+            // Project delta onto skeleton handle direction
+            const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
+            point[offsetXKey] = (point[offsetXKey] || 0) + Math.round(skeletonHandleDir.x * projectedDelta);
+            point[offsetYKey] = (point[offsetYKey] || 0) + Math.round(skeletonHandleDir.y * projectedDelta);
+            // Don't touch 1D offset - let 2D offsets take priority
+          } else {
+            // Normal mode: clear 2D offsets (they have priority), set 1D offset
+            delete point[offsetXKey];
+            delete point[offsetYKey];
+            point[offsetKey] = change.offset;
+          }
         }
 
         // Regenerate outline contours
