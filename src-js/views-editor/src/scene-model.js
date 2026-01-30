@@ -970,11 +970,17 @@ export class SceneModel {
           const dy = Math.abs(anchorPos.y - expectedAnchorY);
 
           if (dx <= tolerance && dy <= tolerance) {
+            // For right side, generated contour direction is opposite to skeleton
+            // So "out" in generated contour = "in" in skeleton terms, and vice versa
+            const skeletonHandleType = side === "right"
+              ? (handleType === "in" ? "out" : "in")
+              : handleType;
+
             return {
               skeletonContourIndex,
               skeletonPointIndex,
               side,
-              handleType,
+              handleType: skeletonHandleType,
             };
           }
         }
