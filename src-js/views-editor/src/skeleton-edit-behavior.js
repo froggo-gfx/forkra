@@ -1192,27 +1192,29 @@ export class InterpolatingRibBehavior {
       y: this.prevHandle.y + this.lineDir.y * projectedDist,
     };
 
-    // For interpolation, we keep halfWidth constant and only change nudge
-    // Calculate nudge that would place the rib point at newRibPos
+    // For interpolation, the rib point must stay on the line between handles.
+    // rib position formula: ribPos = onCurve + sign*normal*halfWidth + tangent*nudge
+    // We need to find halfWidth and nudge such that ribPos = newRibPos
     const sign = this.side === "left" ? 1 : -1;
 
-    // The rib position formula: ribPos = onCurve + sign*normal*halfWidth + tangent*nudge
-    // We want to find nudge such that ribPos is on the line between handles
-    // Since halfWidth is fixed, we solve for nudge along the tangent direction
-
-    // Project newRibPos onto tangent relative to the base point (skeleton + halfWidth offset)
-    const basePoint = {
-      x: this.onCurvePoint.x + sign * this.normal.x * this.originalHalfWidth,
-      y: this.onCurvePoint.y + sign * this.normal.y * this.originalHalfWidth,
+    // Decompose newRibPos relative to skeleton point into normal and tangent components
+    const deltaFromSkeleton = {
+      x: newRibPos.x - this.onCurvePoint.x,
+      y: newRibPos.y - this.onCurvePoint.y,
     };
 
-    const newNudge = (newRibPos.x - basePoint.x) * this.tangent.x + (newRibPos.y - basePoint.y) * this.tangent.y;
+    // Project onto normal (gives halfWidth) and tangent (gives nudge)
+    const normalComponent = deltaFromSkeleton.x * this.normal.x + deltaFromSkeleton.y * this.normal.y;
+    const tangentComponent = deltaFromSkeleton.x * this.tangent.x + deltaFromSkeleton.y * this.tangent.y;
+
+    const newHalfWidth = Math.max(1, sign * normalComponent);
+    const newNudge = tangentComponent;
 
     console.log('[RIB-INTERPOLATE] applyDelta', {
       delta,
       projectedDist,
       newRibPos,
-      halfWidth: this.originalHalfWidth,
+      newHalfWidth,
       newNudge,
     });
 
@@ -1220,7 +1222,7 @@ export class InterpolatingRibBehavior {
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
       side: this.side,
-      halfWidth: Math.round(this.originalHalfWidth), // Keep width constant!
+      halfWidth: Math.round(newHalfWidth),
       nudge: Math.round(newNudge),
       isAsymmetric: true,
     };
