@@ -261,6 +261,7 @@ registerVisualizationLayerDefinition({
     // Editable rib points - more saturated purple
     editableStrokeColor: "rgba(160, 40, 180, 0.9)",
     editableHoveredColor: "rgba(160, 40, 180, 1.0)",
+    editableSelectedColor: "rgba(160, 40, 180, 1.0)",
   },
   colorsDarkMode: {
     strokeColor: "rgba(220, 100, 140, 0.7)",
@@ -269,6 +270,7 @@ registerVisualizationLayerDefinition({
     // Editable rib points - more saturated purple
     editableStrokeColor: "rgba(180, 80, 200, 0.9)",
     editableHoveredColor: "rgba(180, 80, 200, 1.0)",
+    editableSelectedColor: "rgba(180, 80, 200, 1.0)",
   },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
@@ -335,7 +337,7 @@ registerVisualizationLayerDefinition({
           const pointSize = isEditable ? parameters.editablePointSize : parameters.pointSize;
           const isSelected = selectedRibPoints?.has(ribKey);
           if (isSelected) {
-            context.strokeStyle = parameters.selectedColor;
+            context.strokeStyle = isEditable ? parameters.editableSelectedColor : parameters.selectedColor;
           } else if (hoveredRibPoints?.has(ribKey)) {
             context.strokeStyle = isEditable ? parameters.editableHoveredColor : parameters.hoveredColor;
           } else {
@@ -343,7 +345,7 @@ registerVisualizationLayerDefinition({
           }
           strokeDiamondNode(context, ribPoint, pointSize);
           if (isSelected) {
-            context.fillStyle = parameters.selectedColor;
+            context.fillStyle = isEditable ? parameters.editableSelectedColor : parameters.selectedColor;
             fillDiamondNode(context, ribPoint, pointSize);
           }
         } else {
@@ -366,7 +368,7 @@ registerVisualizationLayerDefinition({
           const leftPointSize = isLeftEditable ? parameters.editablePointSize : parameters.pointSize;
           const isLeftSelected = selectedRibPoints?.has(leftKey);
           if (isLeftSelected) {
-            context.strokeStyle = parameters.selectedColor;
+            context.strokeStyle = isLeftEditable ? parameters.editableSelectedColor : parameters.selectedColor;
           } else if (hoveredRibPoints?.has(leftKey)) {
             context.strokeStyle = isLeftEditable ? parameters.editableHoveredColor : parameters.hoveredColor;
           } else {
@@ -374,7 +376,7 @@ registerVisualizationLayerDefinition({
           }
           strokeDiamondNode(context, leftRibPoint, leftPointSize);
           if (isLeftSelected) {
-            context.fillStyle = parameters.selectedColor;
+            context.fillStyle = isLeftEditable ? parameters.editableSelectedColor : parameters.selectedColor;
             fillDiamondNode(context, leftRibPoint, leftPointSize);
           }
 
@@ -382,7 +384,7 @@ registerVisualizationLayerDefinition({
           const rightPointSize = isRightEditable ? parameters.editablePointSize : parameters.pointSize;
           const isRightSelected = selectedRibPoints?.has(rightKey);
           if (isRightSelected) {
-            context.strokeStyle = parameters.selectedColor;
+            context.strokeStyle = isRightEditable ? parameters.editableSelectedColor : parameters.selectedColor;
           } else if (hoveredRibPoints?.has(rightKey)) {
             context.strokeStyle = isRightEditable ? parameters.editableHoveredColor : parameters.hoveredColor;
           } else {
@@ -390,7 +392,7 @@ registerVisualizationLayerDefinition({
           }
           strokeDiamondNode(context, rightRibPoint, rightPointSize);
           if (isRightSelected) {
-            context.fillStyle = parameters.selectedColor;
+            context.fillStyle = isRightEditable ? parameters.editableSelectedColor : parameters.selectedColor;
             fillDiamondNode(context, rightRibPoint, rightPointSize);
           }
         }

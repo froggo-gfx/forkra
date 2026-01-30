@@ -1588,7 +1588,12 @@ export class SceneModel {
       const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
       const skeletonData = layer?.customData?.["fontra.skeleton"];
       if (skeletonData?.contours?.length) {
-        let lastRibPointKey = null;
+        // Find rib point closest to the "current corner" of rect (xMax, yMax)
+        // This makes selection feel like "last to enter the rect"
+        const targetX = selRect.xMax;
+        const targetY = selRect.yMax;
+        let closestRibPointKey = null;
+        let closestDistSq = Infinity;
 
         for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
           const contour = skeletonData.contours[contourIdx];
@@ -1631,15 +1636,19 @@ export class SceneModel {
                 ribY >= selRect.yMin &&
                 ribY <= selRect.yMax
               ) {
-                // Keep only the last one (no multiple selection)
-                lastRibPointKey = `skeletonRibPoint/${contourIdx}/${pointIdx}/${side}`;
+                // Select the one closest to the current corner (where cursor is)
+                const distSq = (ribX - targetX) ** 2 + (ribY - targetY) ** 2;
+                if (distSq < closestDistSq) {
+                  closestDistSq = distSq;
+                  closestRibPointKey = `skeletonRibPoint/${contourIdx}/${pointIdx}/${side}`;
+                }
               }
             }
           }
         }
 
-        if (lastRibPointKey) {
-          selection.add(lastRibPointKey);
+        if (closestRibPointKey) {
+          selection.add(closestRibPointKey);
         }
       }
     }
