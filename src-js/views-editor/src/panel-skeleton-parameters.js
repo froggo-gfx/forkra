@@ -4,7 +4,11 @@ import { ChangeCollector } from "@fontra/core/changes.js";
 import { getGlyphInfoFromGlyphName } from "@fontra/core/glyph-data.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
+import {
+  generateContoursFromSkeleton,
+  calculateNormalAtSkeletonPoint,
+  getPointHalfWidth,
+} from "@fontra/core/skeleton-contour-generator.js";
 import { parseSelection } from "@fontra/core/utils.js";
 import { packContour } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
@@ -1653,6 +1657,9 @@ export default class SkeletonParametersPanel extends Panel {
           JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
         );
 
+        // Get the current generated path to find handle positions
+        const generatedPath = layer.glyph.path;
+
         for (const [pointKey, sides] of pointSidesMap) {
           const [contourIdx, pointIdx] = pointKey.split("/").map(Number);
           const contour = skeletonData.contours[contourIdx];
@@ -1660,11 +1667,63 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
+          const defaultWidth = contour.defaultWidth || 20;
+          const singleSided = contour.singleSided ?? false;
+          const singleSidedDirection = contour.singleSidedDirection ?? "left";
+
           // Update detached state for each selected side
           for (const side of sides) {
             const detachedKey = side === "left" ? "leftHandleDetached" : "rightHandleDetached";
 
             if (checked) {
+              // When enabling detach, capture current handle positions as 2D offsets
+              const normal = calculateNormalAtSkeletonPoint(contour, pointIdx);
+              const tangent = { x: -normal.y, y: normal.x };
+
+              let halfWidth = getPointHalfWidth(point, defaultWidth, side);
+              if (singleSided && singleSidedDirection === side) {
+                const leftHW = getPointHalfWidth(point, defaultWidth, "left");
+                const rightHW = getPointHalfWidth(point, defaultWidth, "right");
+                halfWidth = leftHW + rightHW;
+              }
+
+              const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+              const nudge = point[nudgeKey] || 0;
+              const sign = side === "left" ? 1 : -1;
+
+              // Calculate rib point position
+              const ribPoint = {
+                x: Math.round(point.x + sign * normal.x * halfWidth + tangent.x * nudge),
+                y: Math.round(point.y + sign * normal.y * halfWidth + tangent.y * nudge),
+              };
+
+              // Find handles in generated path by matching rib point position
+              const handlePositions = this._findHandlePositionsForRibPoint(
+                generatedPath, ribPoint, side
+              );
+
+              // Store handle offsets relative to rib point
+              for (const handleType of ["in", "out"]) {
+                const handlePos = handlePositions?.[handleType];
+                if (handlePos) {
+                  const offsetXKey = side === "left"
+                    ? (handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+                    : (handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+                  const offsetYKey = side === "left"
+                    ? (handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+                    : (handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+
+                  point[offsetXKey] = handlePos.x - ribPoint.x;
+                  point[offsetYKey] = handlePos.y - ribPoint.y;
+
+                  // Clear legacy 1D offset
+                  const offset1DKey = side === "left"
+                    ? (handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
+                    : (handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
+                  delete point[offset1DKey];
+                }
+              }
+
               point[detachedKey] = true;
             } else {
               delete point[detachedKey];
@@ -1697,6 +1756,68 @@ export default class SkeletonParametersPanel extends Panel {
     });
 
     this.update();
+  }
+
+  /**
+   * Find handle positions for a rib point in the generated path.
+   * @param {Object} path - The generated path
+   * @param {Object} ribPoint - The rib point position {x, y}
+   * @param {string} side - "left" or "right"
+   * @returns {Object|null} { in: {x, y}, out: {x, y} } or null
+   */
+  _findHandlePositionsForRibPoint(path, ribPoint, side) {
+    if (!path) return null;
+
+    const tolerance = 2;
+    const numPoints = path.numPoints;
+
+    // Find the rib point (on-curve) in the path
+    for (let i = 0; i < numPoints; i++) {
+      const pointType = path.pointTypes[i];
+      const isOnCurve = (pointType & 0x03) === 0;
+      if (!isOnCurve) continue;
+
+      const pt = path.getPoint(i);
+      const dx = Math.abs(pt.x - ribPoint.x);
+      const dy = Math.abs(pt.y - ribPoint.y);
+
+      if (dx <= tolerance && dy <= tolerance) {
+        // Found the rib point, now get adjacent handles
+        const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(i);
+        const numContourPoints = path.getNumPointsOfContour(contourIndex);
+        const contourStart = i - contourPointIndex;
+
+        const wrapIndex = (idx) => {
+          const relative = idx - contourStart;
+          const wrapped = ((relative % numContourPoints) + numContourPoints) % numContourPoints;
+          return contourStart + wrapped;
+        };
+
+        const prevIdx = wrapIndex(i - 1);
+        const nextIdx = wrapIndex(i + 1);
+
+        const prevType = path.pointTypes[prevIdx];
+        const nextType = path.pointTypes[nextIdx];
+        const prevIsOffCurve = (prevType & 0x03) !== 0;
+        const nextIsOffCurve = (nextType & 0x03) !== 0;
+
+        const result = {};
+
+        // For right side, contour direction is opposite, so swap in/out
+        if (side === "left") {
+          if (prevIsOffCurve) result.in = path.getPoint(prevIdx);
+          if (nextIsOffCurve) result.out = path.getPoint(nextIdx);
+        } else {
+          // Right side: prev = out, next = in (opposite direction)
+          if (prevIsOffCurve) result.out = path.getPoint(prevIdx);
+          if (nextIsOffCurve) result.in = path.getPoint(nextIdx);
+        }
+
+        return Object.keys(result).length > 0 ? result : null;
+      }
+    }
+
+    return null;
   }
 
   /**
