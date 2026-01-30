@@ -409,6 +409,7 @@ export default class SkeletonParametersPanel extends Panel {
     // Track editable states per side based on selected rib points
     const selectedRibSides = this._getSelectedRibSides();
     let editableStates = new Set();
+    let detachedStates = new Set(); // Track detached handle states
 
     if (hasSelection) {
       const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
@@ -433,13 +434,15 @@ export default class SkeletonParametersPanel extends Panel {
           singleSidedDirection = contour.singleSidedDirection ?? "left";
         }
 
-        // Collect editable states for selected rib sides
+        // Collect editable and detached states for selected rib sides
         const pointKey = `${contourIdx}/${pointIdx}`;
         if (selectedRibSides.has(`${pointKey}/left`)) {
           editableStates.add(!!point.leftEditable);
+          detachedStates.add(!!point.leftHandleDetached);
         }
         if (selectedRibSides.has(`${pointKey}/right`)) {
           editableStates.add(!!point.rightEditable);
+          detachedStates.add(!!point.rightHandleDetached);
         }
       }
 
@@ -644,6 +647,21 @@ export default class SkeletonParametersPanel extends Panel {
         editableCheckbox.indeterminate = true;
       }
 
+      // Detach Handles checkbox - only visible when editable
+      const isDetached = detachedStates.has(true) && detachedStates.size === 1;
+      const isDetachedIndeterminate = detachedStates.size > 1;
+      const showDetachOption = isEditable || isEditableIndeterminate;
+
+      const detachCheckbox = showDetachOption ? html.input({
+        type: "checkbox",
+        id: "detach-handles-toggle",
+        checked: isDetachedIndeterminate ? false : isDetached,
+        onchange: (e) => this._onDetachHandlesToggle(e.target.checked, selectedRibSides),
+      }) : null;
+      if (detachCheckbox && isDetachedIndeterminate) {
+        detachCheckbox.indeterminate = true;
+      }
+
       // Check if any selected editable rib points have nudge values or handle offsets
       const hasNudge = this._selectedRibPointsHaveNudge(selectedRibSides);
       const hasHandleOffsets = this._selectedRibPointsHaveHandleOffsets(selectedRibSides);
@@ -685,12 +703,25 @@ export default class SkeletonParametersPanel extends Panel {
         },
         field2: {
           type: "auxiliaryElement",
+          key: "detachHandles",
+          auxiliaryElement: showDetachOption
+            ? html.span({}, [
+                detachCheckbox,
+                html.label({
+                  for: "detach-handles-toggle",
+                  style: "margin-left: 4px",
+                  title: "Detach handle lengths from skeleton (absolute positioning)",
+                }, "Detach"),
+              ])
+            : html.span(),
+        },
+        field3: {
+          type: "auxiliaryElement",
           key: "resetButtons",
           auxiliaryElement: resetButtons.length > 0
             ? html.span({}, resetButtons)
             : html.span(),
         },
-        field3: { type: "spacer" },
       });
     }
 
@@ -1579,6 +1610,88 @@ export default class SkeletonParametersPanel extends Panel {
       return {
         changes: combined,
         undoLabel: checked ? "Enable editable rib points" : "Disable editable rib points",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
+   * Toggle Detach Handles mode for selected editable rib points.
+   * When enabled, handle positions are stored as absolute offsets from the rib point,
+   * independent of skeleton handle lengths.
+   * @param {boolean} checked - Whether to enable or disable detach mode
+   * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
+   */
+  async _onDetachHandlesToggle(checked, selectedRibSides) {
+    if (!selectedRibSides || selectedRibSides.size === 0) {
+      this.update();
+      return;
+    }
+
+    // Parse selected rib sides into a map: "contourIdx/pointIdx" -> Set of sides
+    const pointSidesMap = new Map();
+    for (const key of selectedRibSides) {
+      const parts = key.split("/");
+      const pointKey = `${parts[0]}/${parts[1]}`;
+      const side = parts[2];
+      if (!pointSidesMap.has(pointKey)) {
+        pointSidesMap.set(pointKey, new Set());
+      }
+      pointSidesMap.get(pointKey).add(side);
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const [pointKey, sides] of pointSidesMap) {
+          const [contourIdx, pointIdx] = pointKey.split("/").map(Number);
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          // Update detached state for each selected side
+          for (const side of sides) {
+            const detachedKey = side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+
+            if (checked) {
+              point[detachedKey] = true;
+            } else {
+              delete point[detachedKey];
+            }
+          }
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: checked ? "Detach handle lengths" : "Attach handle lengths",
         broadcast: true,
       };
     });

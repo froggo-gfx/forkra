@@ -128,19 +128,26 @@ function getSkeletonHandleDirection(segment, position, handleType) {
 /**
  * Apply handle offset to a generated control point position.
  * Supports both 2D offsets (X/Y) and legacy 1D offsets (along skeleton handle direction).
+ * In "detached" mode, offsets are absolute positions relative to the rib point,
+ * independent of skeleton handle lengths.
  * @param {Object} controlPoint - The generated control point {x, y}
  * @param {Object} skeletonPoint - The skeleton on-curve point (may have handle offset values)
  * @param {Object} skeletonHandleDir - Normalized direction of skeleton handle
  * @param {string} side - "left" or "right"
  * @param {string} handleType - "in" or "out" (incoming or outgoing handle)
+ * @param {Object} ribPoint - Optional rib point position {x, y} for detached mode
  * @returns {Object} Modified control point {x, y}
  */
-function applyHandleOffsetToControlPoint(controlPoint, skeletonPoint, skeletonHandleDir, side, handleType) {
+function applyHandleOffsetToControlPoint(controlPoint, skeletonPoint, skeletonHandleDir, side, handleType, ribPoint = null) {
   // Check per-side editable flag
   const editableKey = side === "left" ? "leftEditable" : "rightEditable";
   if (!skeletonPoint?.[editableKey]) {
     return controlPoint;
   }
+
+  // Check if handles are detached (absolute positioning)
+  const detachedKey = side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+  const isDetached = skeletonPoint[detachedKey];
 
   // 2D offset keys (new format for precise interpolation)
   const offsetKeyX = side === "left"
@@ -159,7 +166,15 @@ function applyHandleOffsetToControlPoint(controlPoint, skeletonPoint, skeletonHa
   const offset2DY = skeletonPoint[offsetKeyY];
   const offset1D = skeletonPoint[offset1DKey];
 
-  // Priority: 2D offset if present, else 1D
+  // In detached mode with 2D offsets, use ribPoint as base (absolute positioning)
+  if (isDetached && ribPoint && (offset2DX !== undefined || offset2DY !== undefined)) {
+    return {
+      x: Math.round(ribPoint.x + (offset2DX || 0)),
+      y: Math.round(ribPoint.y + (offset2DY || 0)),
+    };
+  }
+
+  // Priority: 2D offset if present, else 1D (relative to controlPoint)
   if (offset2DX !== undefined || offset2DY !== undefined) {
     return {
       x: Math.round(controlPoint.x + (offset2DX || 0)),
@@ -1129,12 +1144,12 @@ function generateOffsetPointsForSegment(
 
         if (startHandleDir) {
           adjustedHandle1 = applyHandleOffsetToControlPoint(
-            adjustedHandle1, segment.startPoint, startHandleDir, side, "out"
+            adjustedHandle1, segment.startPoint, startHandleDir, side, "out", fixedStart
           );
         }
         if (endHandleDir) {
           adjustedHandle2 = applyHandleOffsetToControlPoint(
-            adjustedHandle2, segment.endPoint, endHandleDir, side, "in"
+            adjustedHandle2, segment.endPoint, endHandleDir, side, "in", fixedEnd
           );
         }
 
@@ -1202,7 +1217,7 @@ function generateOffsetPointsForSegment(
             const startHandleDir = getSkeletonHandleDirection(segment, "start", "out");
             if (startHandleDir) {
               adjustedH1 = applyHandleOffsetToControlPoint(
-                adjustedH1, segment.startPoint, startHandleDir, side, "out"
+                adjustedH1, segment.startPoint, startHandleDir, side, "out", fixedStart
               );
             }
           }
@@ -1210,7 +1225,7 @@ function generateOffsetPointsForSegment(
             const endHandleDir = getSkeletonHandleDirection(segment, "end", "in");
             if (endHandleDir) {
               adjustedH2 = applyHandleOffsetToControlPoint(
-                adjustedH2, segment.endPoint, endHandleDir, side, "in"
+                adjustedH2, segment.endPoint, endHandleDir, side, "in", fixedEnd
               );
             }
           }
