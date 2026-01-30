@@ -1270,6 +1270,7 @@ export class InterpolatingRibBehavior {
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
       side: this.side,
+      halfWidth: Math.round(this.originalHalfWidth),  // Keep width unchanged
       nudge: Math.round(newNudge),
       handleInOffsetX: Math.round(newHandleInOffsetX),
       handleInOffsetY: Math.round(newHandleInOffsetY),
