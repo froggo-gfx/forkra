@@ -235,9 +235,9 @@ async def test_getSources(testFontMutatorSans):
             name="wdth=1000,wght=900",
             location={"wdth": 1000.0, "wght": 900.0},
             lineMetricsHorizontalLayout={
-                "ascender": LineMetric(value=700),
+                "ascender": LineMetric(value=800),
                 "baseline": LineMetric(value=0),
-                "capHeight": LineMetric(value=700),
+                "capHeight": LineMetric(value=800),
                 "descender": LineMetric(value=-200),
                 "xHeight": LineMetric(value=500),
             },
@@ -246,9 +246,9 @@ async def test_getSources(testFontMutatorSans):
             name="wght=900",
             location={"wght": 900.0},
             lineMetricsHorizontalLayout={
-                "ascender": LineMetric(value=700),
+                "ascender": LineMetric(value=800),
                 "baseline": LineMetric(value=0),
-                "capHeight": LineMetric(value=700),
+                "capHeight": LineMetric(value=800),
                 "descender": LineMetric(value=-200),
                 "xHeight": LineMetric(value=500),
             },
