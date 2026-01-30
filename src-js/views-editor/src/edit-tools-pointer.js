@@ -2107,58 +2107,60 @@ export class PointerTool extends BaseTool {
    * @returns {Object|null} { prevHandle, nextHandle } or null
    */
   _findHandlesForRibPointFromSkeleton(path, skeletonPoint, normal, contour, side) {
-    console.log('[RIB-INTERPOLATE] _findHandlesForRibPointFromSkeleton called', {
-      skeletonPoint: { x: skeletonPoint.x, y: skeletonPoint.y },
-      normal, side,
-    });
+    console.log('[RIB-INTERPOLATE] Computing handles from skeleton', { side });
 
-    const defaultWidth = contour.defaultWidth || 20;
-    const tangent = { x: -normal.y, y: normal.x };
-
-    // Calculate expected rib point position
-    let halfWidth = side === "left"
-      ? (skeletonPoint.leftWidth !== undefined ? skeletonPoint.leftWidth : (skeletonPoint.width !== undefined ? skeletonPoint.width / 2 : defaultWidth / 2))
-      : (skeletonPoint.rightWidth !== undefined ? skeletonPoint.rightWidth : (skeletonPoint.width !== undefined ? skeletonPoint.width / 2 : defaultWidth / 2));
-
-    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-    const nudge = skeletonPoint[nudgeKey] || 0;
-
-    const sign = side === "left" ? 1 : -1;
-    const expectedX = Math.round(skeletonPoint.x + sign * normal.x * halfWidth + tangent.x * nudge);
-    const expectedY = Math.round(skeletonPoint.y + sign * normal.y * halfWidth + tangent.y * nudge);
-
-    console.log('[RIB-INTERPOLATE] Expected rib position', { expectedX, expectedY, halfWidth, nudge });
-
-    // Search for this point in the path
-    const tolerance = 5; // Increased tolerance
-    let ribPointIndex = -1;
-
-    // Log all on-curve points to debug
-    const onCurvePoints = [];
-    for (let i = 0; i < path.numPoints; i++) {
-      const pt = path.getPoint(i);
-      const pointType = path.pointTypes[i];
-      const isOnCurve = (pointType & 0x03) === 0;
-
-      if (isOnCurve) {
-        const dx = Math.abs(pt.x - expectedX);
-        const dy = Math.abs(pt.y - expectedY);
-        onCurvePoints.push({ i, x: pt.x, y: pt.y, dx, dy });
-        if (dx <= tolerance && dy <= tolerance) {
-          ribPointIndex = i;
-          console.log('[RIB-INTERPOLATE] Found rib point at index', i, pt);
-          break;
-        }
-      }
-    }
-
-    if (ribPointIndex < 0) {
-      console.log('[RIB-INTERPOLATE] Rib point not found in path. On-curve points:', onCurvePoints);
+    const points = contour.points;
+    const pointIndex = points.findIndex(p => p === skeletonPoint || (p.x === skeletonPoint.x && p.y === skeletonPoint.y));
+    if (pointIndex < 0) {
+      console.log('[RIB-INTERPOLATE] Skeleton point not found in contour');
       return null;
     }
 
-    // Now find adjacent handles using existing function
-    return this._findAdjacentHandlesForRibPoint(path, ribPointIndex);
+    // Build on-curve indices from skeleton points
+    const onCurveIndices = [];
+    for (let i = 0; i < points.length; i++) {
+      if (!points[i].type) onCurveIndices.push(i);
+    }
+
+    // Find position of our point in on-curve list
+    const posInOnCurve = onCurveIndices.indexOf(pointIndex);
+    if (posInOnCurve < 0) {
+      console.log('[RIB-INTERPOLATE] Point is not on-curve');
+      return null;
+    }
+
+    let prevHandle = null;
+    let nextHandle = null;
+
+    // Incoming handle: off-curve before current point
+    const prevIdx = (pointIndex - 1 + points.length) % points.length;
+    if (points[prevIdx]?.type) {
+      prevHandle = this._offsetSkeletonHandle(points[prevIdx], skeletonPoint, normal, contour, side);
+      console.log('[RIB-INTERPOLATE] Found prev handle from skeleton', prevHandle);
+    }
+
+    // Outgoing handle: off-curve after current point
+    const nextIdx = (pointIndex + 1) % points.length;
+    if (points[nextIdx]?.type) {
+      nextHandle = this._offsetSkeletonHandle(points[nextIdx], skeletonPoint, normal, contour, side);
+      console.log('[RIB-INTERPOLATE] Found next handle from skeleton', nextHandle);
+    }
+
+    console.log('[RIB-INTERPOLATE] Computed handles', { prevHandle, nextHandle });
+    return (prevHandle || nextHandle) ? { prevHandle, nextHandle } : null;
+  }
+
+  _offsetSkeletonHandle(skelHandle, skelOnCurve, normal, contour, side) {
+    const defaultWidth = contour.defaultWidth || 20;
+    const halfWidth = side === "left"
+      ? (skelOnCurve.leftWidth ?? (skelOnCurve.width !== undefined ? skelOnCurve.width / 2 : defaultWidth / 2))
+      : (skelOnCurve.rightWidth ?? (skelOnCurve.width !== undefined ? skelOnCurve.width / 2 : defaultWidth / 2));
+    const sign = side === "left" ? 1 : -1;
+
+    return {
+      x: skelHandle.x + sign * normal.x * halfWidth,
+      y: skelHandle.y + sign * normal.y * halfWidth,
+    };
   }
 
   /**
