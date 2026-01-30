@@ -1085,6 +1085,14 @@ export class EditableRibBehavior {
       nudge: Math.round(this.originalNudge),
     };
   }
+
+  /**
+   * Set the original half-width.
+   * Use this for single-sided mode where halfWidth = totalWidth.
+   */
+  setOriginalHalfWidth(halfWidth) {
+    this.originalHalfWidth = halfWidth;
+  }
 }
 
 /**
@@ -1168,11 +1176,7 @@ export class InterpolatingRibBehavior {
     this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
 
     // Calculate current rib point position
-    const sign = side === "left" ? 1 : -1;
-    this.originalRibPos = {
-      x: onCurvePoint.x + sign * normal.x * this.originalHalfWidth + this.tangent.x * this.originalNudge,
-      y: onCurvePoint.y + sign * normal.y * this.originalHalfWidth + this.tangent.y * this.originalNudge,
-    };
+    this._recalculateRibPos();
 
     // Calculate the line direction from prevHandle to nextHandle
     this.lineDir = {
@@ -1194,6 +1198,31 @@ export class InterpolatingRibBehavior {
         in: { x: this.originalHandleInOffsetX, y: this.originalHandleInOffsetY },
         out: { x: this.originalHandleOutOffsetX, y: this.originalHandleOutOffsetY }
       }
+    });
+  }
+
+  /**
+   * Recalculate the original rib point position based on current originalHalfWidth.
+   * Call this after overriding originalHalfWidth for single-sided mode.
+   */
+  _recalculateRibPos() {
+    const sign = this.side === "left" ? 1 : -1;
+    this.originalRibPos = {
+      x: this.onCurvePoint.x + sign * this.normal.x * this.originalHalfWidth + this.tangent.x * this.originalNudge,
+      y: this.onCurvePoint.y + sign * this.normal.y * this.originalHalfWidth + this.tangent.y * this.originalNudge,
+    };
+  }
+
+  /**
+   * Set the original half-width and recalculate rib position.
+   * Use this for single-sided mode where halfWidth = totalWidth.
+   */
+  setOriginalHalfWidth(halfWidth) {
+    this.originalHalfWidth = halfWidth;
+    this._recalculateRibPos();
+    console.log('[INTERPOLATE-2D] setOriginalHalfWidth called', {
+      halfWidth,
+      newRibPos: this.originalRibPos
     });
   }
 

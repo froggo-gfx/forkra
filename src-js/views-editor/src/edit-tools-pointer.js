@@ -1877,7 +1877,12 @@ export class PointerTool extends BaseTool {
                 behavior = createEditableRibBehavior(data.original, ribHitForPoint);
               }
               // Override to track totalWidth for width changes
-              behavior.originalHalfWidth = totalWidth;
+              // Use setOriginalHalfWidth for InterpolatingRibBehavior to recalculate ribPos
+              if (behavior.setOriginalHalfWidth) {
+                behavior.setOriginalHalfWidth(totalWidth);
+              } else {
+                behavior.originalHalfWidth = totalWidth;
+              }
               behavior.minHalfWidth = 2;
               // Force asymmetric mode to allow width changes in single-sided
               behavior.isAsymmetric = true;
