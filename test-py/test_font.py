@@ -800,7 +800,7 @@ getGlyphTestData = [
         {
             "name": "period",
             "layers": {
-                "default": {
+                "font-source-0": {
                     "glyph": {
                         "path": {
                             "coordinates": [60, 0, 110, 0, 110, 120, 60, 120],
@@ -870,9 +870,10 @@ getGlyphTestData = [
             },
             "sources": [
                 {
-                    "location": {"wdth": 0.0, "wght": 100.0},
-                    "name": "default",
-                    "layerName": "default",
+                    "location": {},
+                    "locationBase": "font-source-0",
+                    "name": "",
+                    "layerName": "font-source-0",
                 },
                 {
                     "location": {"wdth": 1000.0, "wght": 100.0},
@@ -898,9 +899,10 @@ getGlyphTestData = [
             "name": "varcotest1",
             "sources": [
                 {
-                    "name": "default",
-                    "layerName": "default",
-                    "location": {"V000": 0, "V001": 0, "wdth": 0, "wght": 100},
+                    "name": "",
+                    "layerName": "font-source-0",
+                    "location": {},
+                    "locationBase": "font-source-0",
                 },
                 {
                     "name": "wght=900",
@@ -909,7 +911,7 @@ getGlyphTestData = [
                 },
             ],
             "layers": {
-                "default": {
+                "font-source-0": {
                     "glyph": {
                         "components": [
                             {
