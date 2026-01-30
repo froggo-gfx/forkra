@@ -963,3 +963,582 @@ export function createRibEditBehavior(skeletonData, ribHit) {
     onCurvePoint
   );
 }
+
+/**
+ * EditableRibBehavior - Handles dragging of editable rib points.
+ * - If point is symmetric: only nudge (tangent movement), width stays the same
+ * - If point is asymmetric: free movement (width + nudge)
+ */
+export class EditableRibBehavior {
+  /**
+   * @param {Object} skeletonData - The skeleton data
+   * @param {number} contourIndex - Index of the contour
+   * @param {number} pointIndex - Index of the on-curve point
+   * @param {string} side - "left" or "right"
+   * @param {Object} normal - The normal vector at this point
+   * @param {Object} onCurvePoint - The on-curve point position
+   */
+  constructor(skeletonData, contourIndex, pointIndex, side, normal, onCurvePoint) {
+    this.skeletonData = skeletonData;
+    this.contourIndex = contourIndex;
+    this.pointIndex = pointIndex;
+    this.side = side;
+    this.normal = normal;
+    this.tangent = { x: -normal.y, y: normal.x }; // Perpendicular to normal
+    this.onCurvePoint = onCurvePoint;
+
+    const contour = skeletonData.contours[contourIndex];
+    const point = contour.points[pointIndex];
+    const points = contour.points;
+    const defaultWidth = contour.defaultWidth || 20;
+
+    // Determine if point is symmetric or asymmetric
+    // Asymmetric = has leftWidth or rightWidth defined
+    this.isAsymmetric = point.leftWidth !== undefined || point.rightWidth !== undefined;
+
+    // Store original half-width
+    if (side === "left") {
+      this.originalHalfWidth = point.leftWidth !== undefined
+        ? point.leftWidth
+        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
+    } else {
+      this.originalHalfWidth = point.rightWidth !== undefined
+        ? point.rightWidth
+        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
+    }
+
+    // Store original nudge
+    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+    this.originalNudge = point[nudgeKey] || 0;
+
+    // Minimum half-width (1 unit)
+    this.minHalfWidth = 1;
+
+    // Store original 2D handle offsets for compensation when nudge changes
+    // This ensures handles stay in place when rib point moves
+    this._initHandleOffsets(point, points, pointIndex, side);
+  }
+
+  /**
+   * Initialize handle offset tracking for nudge compensation.
+   */
+  _initHandleOffsets(point, points, pointIndex, side) {
+    // Compute skeleton handle directions
+    this.skeletonHandleInDir = null;
+    this.skeletonHandleOutDir = null;
+
+    const prevIdx = (pointIndex - 1 + points.length) % points.length;
+    if (points[prevIdx]?.type) {
+      const dx = points[prevIdx].x - point.x;
+      const dy = points[prevIdx].y - point.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) {
+        this.skeletonHandleInDir = { x: dx / len, y: dy / len };
+      }
+    }
+
+    const nextIdx = (pointIndex + 1) % points.length;
+    if (points[nextIdx]?.type) {
+      const dx = points[nextIdx].x - point.x;
+      const dy = points[nextIdx].y - point.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) {
+        this.skeletonHandleOutDir = { x: dx / len, y: dy / len };
+      }
+    }
+
+    // Read existing 2D offsets or convert from 1D
+    const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+    const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+    const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+    const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+    const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+    const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+
+    const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
+    const has2DOut = point[handleOutXKey] !== undefined || point[handleOutYKey] !== undefined;
+
+    // Check if any handle offsets exist (2D or 1D)
+    this.hasHandleOffsets = has2DIn || has2DOut ||
+      point[handleIn1DKey] !== undefined || point[handleOut1DKey] !== undefined;
+
+    if (has2DIn) {
+      this.originalHandleInOffsetX = point[handleInXKey] || 0;
+      this.originalHandleInOffsetY = point[handleInYKey] || 0;
+    } else if (point[handleIn1DKey]) {
+      const dir = this.skeletonHandleInDir || this.tangent;
+      this.originalHandleInOffsetX = dir.x * point[handleIn1DKey];
+      this.originalHandleInOffsetY = dir.y * point[handleIn1DKey];
+    } else {
+      this.originalHandleInOffsetX = 0;
+      this.originalHandleInOffsetY = 0;
+    }
+
+    if (has2DOut) {
+      this.originalHandleOutOffsetX = point[handleOutXKey] || 0;
+      this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
+    } else if (point[handleOut1DKey]) {
+      const dir = this.skeletonHandleOutDir || this.tangent;
+      this.originalHandleOutOffsetX = dir.x * point[handleOut1DKey];
+      this.originalHandleOutOffsetY = dir.y * point[handleOut1DKey];
+    } else {
+      this.originalHandleOutOffsetX = 0;
+      this.originalHandleOutOffsetY = 0;
+    }
+  }
+
+  /**
+   * Apply drag delta and return changes to width and nudge.
+   * - Symmetric: only nudge changes, width stays original
+   * - Asymmetric: both width and nudge can change
+   * - With constrainMode: lock to tangent or normal direction
+   * Also compensates 2D handle offsets when nudge changes to keep handles stationary.
+   * @param {Object} delta - The drag delta {x, y}
+   * @param {string|null} constrainMode - null (free), "tangent" (nudge only), or "normal" (width only)
+   * @returns {Object} { halfWidth, nudge, isAsymmetric, handleInOffsetX/Y, handleOutOffsetX/Y }
+   */
+  applyDelta(delta, constrainMode = null) {
+    let newNudge = this.originalNudge;
+    let newHalfWidth = this.originalHalfWidth;
+
+    // Constrain to tangent: only nudge changes
+    if (constrainMode === "tangent") {
+      const tangentDot = delta.x * this.tangent.x + delta.y * this.tangent.y;
+      newNudge = this.originalNudge + tangentDot;
+    }
+    // Constrain to normal: only width changes
+    else if (constrainMode === "normal") {
+      if (this.isAsymmetric) {
+        const sign = this.side === "left" ? 1 : -1;
+        const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
+        const normalDelta = sign * normalDot;
+        newHalfWidth = this.originalHalfWidth + normalDelta;
+        if (newHalfWidth < this.minHalfWidth) {
+          newHalfWidth = this.minHalfWidth;
+        }
+      }
+      // For symmetric points, normal constraint has no effect (width locked)
+    }
+    // Free movement (no constraint)
+    else {
+      // Project delta onto tangent → nudge change (always allowed)
+      const tangentDot = delta.x * this.tangent.x + delta.y * this.tangent.y;
+      newNudge = this.originalNudge + tangentDot;
+
+      // Only allow width change if asymmetric
+      if (this.isAsymmetric) {
+        const sign = this.side === "left" ? 1 : -1;
+        const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
+        const normalDelta = sign * normalDot;
+        newHalfWidth = this.originalHalfWidth + normalDelta;
+        if (newHalfWidth < this.minHalfWidth) {
+          newHalfWidth = this.minHalfWidth;
+        }
+      }
+    }
+
+    const result = {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: Math.round(newHalfWidth),
+      nudge: Math.round(newNudge),
+      isAsymmetric: this.isAsymmetric,
+    };
+
+    // Note: we don't compensate handle offsets here.
+    // Handles should move WITH the rib point in normal drag mode.
+    // Handle offset compensation (keeping handles stationary) is only done
+    // in InterpolatingRibBehavior (Alt+drag).
+
+    return result;
+  }
+
+  /**
+   * Get rollback data to restore original width, nudge, and handle offsets.
+   */
+  getRollback() {
+    const result = {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: Math.round(this.originalHalfWidth),
+      nudge: Math.round(this.originalNudge),
+    };
+
+    if (this.hasHandleOffsets) {
+      result.handleInOffsetX = Math.round(this.originalHandleInOffsetX);
+      result.handleInOffsetY = Math.round(this.originalHandleInOffsetY);
+      result.handleOutOffsetX = Math.round(this.originalHandleOutOffsetX);
+      result.handleOutOffsetY = Math.round(this.originalHandleOutOffsetY);
+      result.hasHandleOffsets = true;
+    }
+
+    return result;
+  }
+
+  /**
+   * Set the original half-width.
+   * Use this for single-sided mode where halfWidth = totalWidth.
+   */
+  setOriginalHalfWidth(halfWidth) {
+    this.originalHalfWidth = halfWidth;
+  }
+}
+
+/**
+ * Create an EditableRibBehavior for editable rib points.
+ * @param {Object} skeletonData - The skeleton data
+ * @param {Object} ribHit - Hit test result from _hitTestRibPoints
+ * @returns {EditableRibBehavior} The behavior instance
+ */
+export function createEditableRibBehavior(skeletonData, ribHit) {
+  const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
+  return new EditableRibBehavior(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint
+  );
+}
+
+/**
+ * InterpolatingRibBehavior - Handles dragging of editable rib points with Alt key.
+ * The rib point slides along the line between its two adjacent handles (off-curve points).
+ * Handles remain fixed in place while the rib point moves between them.
+ * Uses 2D handle offsets for precise compensation.
+ */
+export class InterpolatingRibBehavior {
+  /**
+   * @param {Object} skeletonData - The skeleton data
+   * @param {number} contourIndex - Index of the skeleton contour
+   * @param {number} pointIndex - Index of the on-curve skeleton point
+   * @param {string} side - "left" or "right"
+   * @param {Object} normal - The normal vector at this point
+   * @param {Object} onCurvePoint - The skeleton on-curve point position {x, y}
+   * @param {Object} prevHandle - Previous handle position {x, y}
+   * @param {Object} nextHandle - Next handle position {x, y}
+   */
+  constructor(skeletonData, contourIndex, pointIndex, side, normal, onCurvePoint, prevHandle, nextHandle) {
+    this.skeletonData = skeletonData;
+    this.contourIndex = contourIndex;
+    this.pointIndex = pointIndex;
+    this.side = side;
+    this.normal = normal;
+    this.tangent = { x: -normal.y, y: normal.x };
+    this.onCurvePoint = onCurvePoint;
+    this.prevHandle = prevHandle;
+    this.nextHandle = nextHandle;
+
+    const contour = skeletonData.contours[contourIndex];
+    const point = contour.points[pointIndex];
+    const points = contour.points;
+    const defaultWidth = contour.defaultWidth || 20;
+
+    // Compute skeleton handle directions for 1D to 2D conversion
+    // These are needed to correctly interpret existing 1D offsets
+    this.skeletonHandleInDir = null;
+    this.skeletonHandleOutDir = null;
+
+    // Incoming handle (previous point if it's off-curve)
+    const prevIdx = (pointIndex - 1 + points.length) % points.length;
+    if (points[prevIdx]?.type) {
+      const dx = points[prevIdx].x - point.x;
+      const dy = points[prevIdx].y - point.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) {
+        this.skeletonHandleInDir = { x: dx / len, y: dy / len };
+      }
+    }
+
+    // Outgoing handle (next point if it's off-curve)
+    const nextIdx = (pointIndex + 1) % points.length;
+    if (points[nextIdx]?.type) {
+      const dx = points[nextIdx].x - point.x;
+      const dy = points[nextIdx].y - point.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) {
+        this.skeletonHandleOutDir = { x: dx / len, y: dy / len };
+      }
+    }
+
+    // Store original half-width
+    if (side === "left") {
+      this.originalHalfWidth = point.leftWidth !== undefined
+        ? point.leftWidth
+        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
+    } else {
+      this.originalHalfWidth = point.rightWidth !== undefined
+        ? point.rightWidth
+        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
+    }
+
+    // Store original nudge
+    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+    this.originalNudge = point[nudgeKey] || 0;
+
+    // Store original 2D handle offsets (new format)
+    // If only 1D offsets exist, convert them to 2D using skeleton handle direction
+    const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+    const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+    const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+    const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+    const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+    const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+
+    // Check if 2D offsets exist
+    const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
+    const has2DOut = point[handleOutXKey] !== undefined || point[handleOutYKey] !== undefined;
+
+    if (has2DIn) {
+      this.originalHandleInOffsetX = point[handleInXKey] || 0;
+      this.originalHandleInOffsetY = point[handleInYKey] || 0;
+    } else if (point[handleIn1DKey]) {
+      // Convert 1D to 2D using the actual skeleton handle direction
+      // The 1D offset was applied along skeletonHandleInDir, so use that for conversion
+      const dir = this.skeletonHandleInDir || this.tangent;
+      this.originalHandleInOffsetX = dir.x * point[handleIn1DKey];
+      this.originalHandleInOffsetY = dir.y * point[handleIn1DKey];
+    } else {
+      this.originalHandleInOffsetX = 0;
+      this.originalHandleInOffsetY = 0;
+    }
+
+    if (has2DOut) {
+      this.originalHandleOutOffsetX = point[handleOutXKey] || 0;
+      this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
+    } else if (point[handleOut1DKey]) {
+      // Convert 1D to 2D using the actual skeleton handle direction
+      // The 1D offset was applied along skeletonHandleOutDir, so use that for conversion
+      const dir = this.skeletonHandleOutDir || this.tangent;
+      this.originalHandleOutOffsetX = dir.x * point[handleOut1DKey];
+      this.originalHandleOutOffsetY = dir.y * point[handleOut1DKey];
+    } else {
+      this.originalHandleOutOffsetX = 0;
+      this.originalHandleOutOffsetY = 0;
+    }
+
+    // Calculate current rib point position
+    this._recalculateRibPos();
+
+    // Calculate the line direction from prevHandle to nextHandle
+    this.lineDir = {
+      x: nextHandle.x - prevHandle.x,
+      y: nextHandle.y - prevHandle.y,
+    };
+    this.lineLength = Math.hypot(this.lineDir.x, this.lineDir.y);
+
+    if (this.lineLength > 0.001) {
+      this.lineDir.x /= this.lineLength;
+      this.lineDir.y /= this.lineLength;
+    }
+  }
+
+  /**
+   * Recalculate the original rib point position based on current originalHalfWidth.
+   * Call this after overriding originalHalfWidth for single-sided mode.
+   */
+  _recalculateRibPos() {
+    const sign = this.side === "left" ? 1 : -1;
+    this.originalRibPos = {
+      x: this.onCurvePoint.x + sign * this.normal.x * this.originalHalfWidth + this.tangent.x * this.originalNudge,
+      y: this.onCurvePoint.y + sign * this.normal.y * this.originalHalfWidth + this.tangent.y * this.originalNudge,
+    };
+  }
+
+  /**
+   * Set the original half-width and recalculate rib position.
+   * Use this for single-sided mode where halfWidth = totalWidth.
+   */
+  setOriginalHalfWidth(halfWidth) {
+    this.originalHalfWidth = halfWidth;
+    this._recalculateRibPos();
+  }
+
+  /**
+   * Apply drag delta and return changes to nudge and 2D handle offsets.
+   * Movement is constrained to the line between handles.
+   * Handles stay fixed by compensating with 2D offsets.
+   * @param {Object} delta - The drag delta {x, y}
+   * @returns {Object} { nudge, handleInOffsetX/Y, handleOutOffsetX/Y, isInterpolation }
+   */
+  applyDelta(delta) {
+    // Project drag delta onto the handle-handle line direction
+    const deltaAlongLine = delta.x * this.lineDir.x + delta.y * this.lineDir.y;
+
+    // Decompose line movement into tangent component (nudge)
+    const lineDirDotTangent = this.lineDir.x * this.tangent.x + this.lineDir.y * this.tangent.y;
+    const deltaNudge = lineDirDotTangent * deltaAlongLine;
+    const newNudge = this.originalNudge + deltaNudge;
+
+    // 2D compensation: handles must stay fixed in place
+    // When rib point moves by tangent * deltaNudge, we need to add
+    // an opposite offset to keep handles stationary
+    const handleOffsetDeltaX = -this.tangent.x * deltaNudge;
+    const handleOffsetDeltaY = -this.tangent.y * deltaNudge;
+
+    const newHandleInOffsetX = this.originalHandleInOffsetX + handleOffsetDeltaX;
+    const newHandleInOffsetY = this.originalHandleInOffsetY + handleOffsetDeltaY;
+    const newHandleOutOffsetX = this.originalHandleOutOffsetX + handleOffsetDeltaX;
+    const newHandleOutOffsetY = this.originalHandleOutOffsetY + handleOffsetDeltaY;
+
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: Math.round(this.originalHalfWidth),  // Keep width unchanged
+      nudge: Math.round(newNudge),
+      handleInOffsetX: Math.round(newHandleInOffsetX),
+      handleInOffsetY: Math.round(newHandleInOffsetY),
+      handleOutOffsetX: Math.round(newHandleOutOffsetX),
+      handleOutOffsetY: Math.round(newHandleOutOffsetY),
+      isAsymmetric: false,
+      isInterpolation: true,
+    };
+  }
+
+  /**
+   * Get rollback data to restore original nudge and 2D handle offsets.
+   */
+  getRollback() {
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: Math.round(this.originalHalfWidth),
+      nudge: Math.round(this.originalNudge),
+      handleInOffsetX: Math.round(this.originalHandleInOffsetX),
+      handleInOffsetY: Math.round(this.originalHandleInOffsetY),
+      handleOutOffsetX: Math.round(this.originalHandleOutOffsetX),
+      handleOutOffsetY: Math.round(this.originalHandleOutOffsetY),
+      isInterpolation: true,
+    };
+  }
+}
+
+/**
+ * Create an InterpolatingRibBehavior for Alt+drag of editable rib points.
+ * @param {Object} skeletonData - The skeleton data
+ * @param {Object} ribHit - Hit test result
+ * @param {Object} prevHandle - Previous handle position {x, y}
+ * @param {Object} nextHandle - Next handle position {x, y}
+ * @returns {InterpolatingRibBehavior} The behavior instance
+ */
+export function createInterpolatingRibBehavior(skeletonData, ribHit, prevHandle, nextHandle) {
+  const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
+  return new InterpolatingRibBehavior(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint,
+    prevHandle,
+    nextHandle
+  );
+}
+
+/**
+ * EditableHandleBehavior - Handles dragging of editable generated control points (handles).
+ * Movement is constrained to the direction of the corresponding skeleton handle.
+ */
+export class EditableHandleBehavior {
+  /**
+   * @param {Object} skeletonData - The skeleton data
+   * @param {number} contourIndex - Index of the contour
+   * @param {number} pointIndex - Index of the on-curve skeleton point
+   * @param {string} side - "left" or "right"
+   * @param {string} handleType - "in" or "out" (incoming or outgoing handle)
+   * @param {Object} skeletonHandleDir - Normalized direction of skeleton handle
+   */
+  constructor(skeletonData, contourIndex, pointIndex, side, handleType, skeletonHandleDir) {
+    this.skeletonData = skeletonData;
+    this.contourIndex = contourIndex;
+    this.pointIndex = pointIndex;
+    this.side = side;
+    this.handleType = handleType;
+    this.skeletonHandleDir = skeletonHandleDir;
+
+    const contour = skeletonData.contours[contourIndex];
+    const point = contour.points[pointIndex];
+
+    // Get the appropriate offset key based on side and handle type
+    this.offsetKey = side === "left"
+      ? (handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
+      : (handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
+
+    // 2D offset keys (created by interpolation)
+    const offsetXKey = side === "left"
+      ? (handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+      : (handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+    const offsetYKey = side === "left"
+      ? (handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+      : (handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+
+    // Check if 2D offsets exist (from interpolation)
+    const has2D = point[offsetXKey] !== undefined || point[offsetYKey] !== undefined;
+
+    if (has2D) {
+      // Convert 2D offset to 1D by projecting onto skeletonHandleDir
+      const offset2DX = point[offsetXKey] || 0;
+      const offset2DY = point[offsetYKey] || 0;
+      this.originalOffset = offset2DX * skeletonHandleDir.x + offset2DY * skeletonHandleDir.y;
+    } else {
+      // Use 1D offset directly
+      this.originalOffset = point[this.offsetKey] || 0;
+    }
+  }
+
+  /**
+   * Apply drag delta and return the new offset.
+   * Movement is constrained to skeleton handle direction.
+   * @param {Object} delta - The drag delta {x, y}
+   * @returns {Object} { contourIndex, pointIndex, side, handleType, offset }
+   */
+  applyDelta(delta) {
+    // Project delta onto skeleton handle direction
+    const projectedDelta = delta.x * this.skeletonHandleDir.x + delta.y * this.skeletonHandleDir.y;
+    const newOffset = this.originalOffset + projectedDelta;
+
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      handleType: this.handleType,
+      offset: Math.round(newOffset),
+    };
+  }
+
+  /**
+   * Get rollback data to restore original offset.
+   */
+  getRollback() {
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      handleType: this.handleType,
+      offset: Math.round(this.originalOffset),
+    };
+  }
+}
+
+/**
+ * Create an EditableHandleBehavior for editable generated handles.
+ * @param {Object} skeletonData - The skeleton data
+ * @param {Object} handleInfo - Handle info from _getEditableHandleForGeneratedPoint
+ * @param {Object} skeletonHandleDir - Normalized direction of skeleton handle
+ * @returns {EditableHandleBehavior} The behavior instance
+ */
+export function createEditableHandleBehavior(skeletonData, handleInfo, skeletonHandleDir) {
+  return new EditableHandleBehavior(
+    skeletonData,
+    handleInfo.skeletonContourIndex,
+    handleInfo.skeletonPointIndex,
+    handleInfo.side,
+    handleInfo.handleType,
+    skeletonHandleDir
+  );
+}

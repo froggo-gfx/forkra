@@ -13,11 +13,14 @@ import {
   calculateNormalAtSkeletonPoint,
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
+import { getGlyphInfoFromGlyphName } from "@fontra/core/glyph-data.js";
 import { BaseTool } from "./edit-tools-base.js";
 
 const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
-const SKELETON_DEFAULT_WIDTH_WIDE_KEY = "fontra.skeleton.defaultWidthWide";
-const DEFAULT_WIDTH_WIDE = 80;
+const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
+const SKELETON_WIDTH_LOWERCASE_BASE_KEY = "fontra.skeleton.lowercaseBase";
+const DEFAULT_WIDTH_CAPITAL_BASE = 60;
+const DEFAULT_WIDTH_LOWERCASE_BASE = 60;
 
 export class SkeletonPenTool extends BaseTool {
   iconPath = "/images/skeleton-pen.svg";
@@ -139,17 +142,36 @@ export class SkeletonPenTool extends BaseTool {
   }
 
   /**
-   * Get the default wide skeleton width from the current source's customData.
-   * New skeleton contours use the wide width by default.
-   * @returns {number} The default wide width value for new skeleton contours
+   * Determine if the current glyph is lowercase or uppercase.
+   * @returns {"lower" | "upper"} The glyph case
+   */
+  _getGlyphCase() {
+    const glyphName = this.sceneController.sceneSettings.selectedGlyphName;
+    if (!glyphName) return "upper";
+    const info = getGlyphInfoFromGlyphName(glyphName);
+    return info?.case === "lower" ? "lower" : "upper";
+  }
+
+  /**
+   * Get the default skeleton width from the current source's customData.
+   * Automatically selects capital or lowercase width based on current glyph.
+   * @returns {number} The default width value for new skeleton contours
    */
   _getDefaultSkeletonWidth() {
     const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
-    if (!sourceIdentifier) return DEFAULT_WIDTH_WIDE;
+    const glyphCase = this._getGlyphCase();
+
+    if (!sourceIdentifier) {
+      return glyphCase === "lower" ? DEFAULT_WIDTH_LOWERCASE_BASE : DEFAULT_WIDTH_CAPITAL_BASE;
+    }
 
     const fontController = this.sceneController.sceneModel.fontController;
     const source = fontController.sources[sourceIdentifier];
-    return source?.customData?.[SKELETON_DEFAULT_WIDTH_WIDE_KEY] ?? DEFAULT_WIDTH_WIDE;
+
+    if (glyphCase === "lower") {
+      return source?.customData?.[SKELETON_WIDTH_LOWERCASE_BASE_KEY] ?? DEFAULT_WIDTH_LOWERCASE_BASE;
+    }
+    return source?.customData?.[SKELETON_WIDTH_CAPITAL_BASE_KEY] ?? DEFAULT_WIDTH_CAPITAL_BASE;
   }
 
   _insertHandlesEqual(a, b) {
@@ -170,6 +192,21 @@ export class SkeletonPenTool extends BaseTool {
       if (!setB.has(item)) return false;
     }
     return true;
+  }
+
+  /**
+   * Ensure a layer has skeleton data, copying from primary source if needed.
+   * Used for multi-source editing when a layer doesn't have skeleton data yet.
+   * @param {Object} layer - The layer to check
+   * @param {Object} primarySkeletonData - Skeleton data to copy if layer has none
+   * @returns {Object} The skeleton data (deep cloned)
+   */
+  _ensureSkeletonDataForLayer(layer, primarySkeletonData) {
+    if (layer.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
+      return JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+    }
+    // Copy skeleton structure from primary source
+    return JSON.parse(JSON.stringify(primarySkeletonData));
   }
 
   deactivate() {
@@ -193,14 +230,23 @@ export class SkeletonPenTool extends BaseTool {
       return;
     }
 
+    // Check if we're in "drawing mode" - have an endpoint of an open contour selected
+    const { skeletonPoint: selectedSkeletonPoints } = parseSelection(
+      this.sceneController.selection
+    );
+    const drawingContourIdx = this._getDrawingContourIndex(selectedSkeletonPoints);
+    const isDrawingMode = drawingContourIdx !== null;
+
     // Check if we clicked on an existing skeleton point
     const skeletonHit = this._hitTestSkeletonPoints(initialEvent);
 
     if (skeletonHit) {
-      // Check if clicking on first point should close the contour
-      const { skeletonPoint: selectedSkeletonPoints } = parseSelection(
-        this.sceneController.selection
-      );
+      // In drawing mode, only consider hits on the same contour (for closing)
+      if (isDrawingMode && skeletonHit.contourIndex !== drawingContourIdx) {
+        // Ignore hits on other contours - just add new point
+        await this._handleAddSkeletonPoint(eventStream, initialEvent);
+        return;
+      }
 
       if (selectedSkeletonPoints?.size === 1) {
         const selectedKey = [...selectedSkeletonPoints][0];
@@ -246,6 +292,12 @@ export class SkeletonPenTool extends BaseTool {
     const centerlineHit = this._hitTestSkeletonCenterline(initialEvent);
 
     if (centerlineHit) {
+      // In drawing mode, ignore centerline hits on other contours
+      if (isDrawingMode && centerlineHit.contourIndex !== drawingContourIdx) {
+        await this._handleAddSkeletonPoint(eventStream, initialEvent);
+        return;
+      }
+
       if (initialEvent.altKey) {
         // Alt+click: Insert handles (convert line to curve)
         await this._handleInsertSkeletonHandles(eventStream, initialEvent, centerlineHit);
@@ -257,6 +309,45 @@ export class SkeletonPenTool extends BaseTool {
       // Add new skeleton point
       await this._handleAddSkeletonPoint(eventStream, initialEvent);
     }
+  }
+
+  /**
+   * Check if we're in drawing mode and return the contour index being drawn.
+   * Returns contour index if an endpoint of an open contour is selected, null otherwise.
+   */
+  _getDrawingContourIndex(selectedSkeletonPoints) {
+    if (!selectedSkeletonPoints || selectedSkeletonPoints.size !== 1) {
+      return null;
+    }
+
+    const skeletonData = this._getSkeletonData();
+    if (!skeletonData) return null;
+
+    const selectedKey = [...selectedSkeletonPoints][0];
+    const [contourIdx, pointIdx] = selectedKey.split("/").map(Number);
+
+    const contour = skeletonData.contours[contourIdx];
+    if (!contour || contour.isClosed) return null;
+
+    // Count on-curve points
+    const onCurveCount = contour.points.filter(p => !p.type).length;
+    if (onCurveCount < 1) return null;
+
+    // Find the on-curve index of the selected point
+    let onCurveIdx = 0;
+    for (let i = 0; i < pointIdx; i++) {
+      if (!contour.points[i].type) onCurveIdx++;
+    }
+
+    // Check if selected point is an endpoint (first or last on-curve point)
+    const isFirstOnCurve = onCurveIdx === 0 && !contour.points[pointIdx].type;
+    const isLastOnCurve = onCurveIdx === onCurveCount - 1 && !contour.points[pointIdx].type;
+
+    if (isFirstOnCurve || isLastOnCurve) {
+      return contourIdx;
+    }
+
+    return null;
   }
 
   /**
@@ -365,17 +456,40 @@ export class SkeletonPenTool extends BaseTool {
         if (skeletonPoint.type) continue;
 
         const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
-        const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
-        const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+        let leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+        let rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
 
-        // Calculate rib point positions
+        // Handle single-sided mode: redirect all width to one side
+        const singleSided = contour.singleSided ?? false;
+        const singleSidedDirection = contour.singleSidedDirection ?? "left";
+        if (singleSided) {
+          const totalWidth = leftHW + rightHW;
+          if (singleSidedDirection === "left") {
+            leftHW = totalWidth;
+            rightHW = 0;
+          } else {
+            leftHW = 0;
+            rightHW = totalWidth;
+          }
+        }
+
+        // Per-side editable flags
+        const isLeftEditable = skeletonPoint.leftEditable === true;
+        const isRightEditable = skeletonPoint.rightEditable === true;
+
+        // Apply nudge offset only if editable and width > 0 (matches generator behavior)
+        const tangent = { x: -normal.y, y: normal.x };
+        const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
+        const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+
+        // Calculate rib point positions (including nudge)
         const leftRibPoint = {
-          x: skeletonPoint.x + normal.x * leftHW,
-          y: skeletonPoint.y + normal.y * leftHW,
+          x: skeletonPoint.x + normal.x * leftHW + tangent.x * leftNudge,
+          y: skeletonPoint.y + normal.y * leftHW + tangent.y * leftNudge,
         };
         const rightRibPoint = {
-          x: skeletonPoint.x - normal.x * rightHW,
-          y: skeletonPoint.y - normal.y * rightHW,
+          x: skeletonPoint.x - normal.x * rightHW + tangent.x * rightNudge,
+          y: skeletonPoint.y - normal.y * rightHW + tangent.y * rightNudge,
         };
 
         // Check left rib point
@@ -643,12 +757,23 @@ export class SkeletonPenTool extends BaseTool {
       const allChanges = [];
       const startIdx = centerlineHit.segmentStartIndex;
 
+      // Get primary skeleton data from the first layer that has it
+      let primarySkeletonData = null;
+      for (const layerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[layerName];
+        if (layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
+          primarySkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+          break;
+        }
+      }
+      if (!primarySkeletonData) return;
+
       // Apply changes to ALL editable layers (multi-source editing support)
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!layer) continue;
 
-        let skeletonData = JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+        let skeletonData = this._ensureSkeletonDataForLayer(layer, primarySkeletonData);
 
         const contour = skeletonData.contours[centerlineHit.contourIndex];
         if (!contour) continue;
@@ -745,12 +870,23 @@ export class SkeletonPenTool extends BaseTool {
       const endIdx = centerlineHit.segmentEndIndex;
       let finalInsertIndex = startIdx + 1; // Will be updated for selection
 
+      // Get primary skeleton data from the first layer that has it
+      let primarySkeletonData = null;
+      for (const layerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[layerName];
+        if (layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
+          primarySkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+          break;
+        }
+      }
+      if (!primarySkeletonData) return;
+
       // Apply changes to ALL editable layers (multi-source editing support)
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!layer) continue;
 
-        let skeletonData = JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+        let skeletonData = this._ensureSkeletonDataForLayer(layer, primarySkeletonData);
 
         const contour = skeletonData.contours[centerlineHit.contourIndex];
         if (!contour) continue;
@@ -985,11 +1121,14 @@ export class SkeletonPenTool extends BaseTool {
         const layer = glyph.layers[editLayerName];
         if (!layer) continue;
 
-        let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
-        if (!skeletonData) {
-          skeletonData = createEmptySkeletonData();
+        let skeletonData;
+        if (layer.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
+          skeletonData = JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+        } else if (firstSkeletonData) {
+          // Copy skeleton structure from primary layer for multi-source editing
+          skeletonData = JSON.parse(JSON.stringify(firstSkeletonData));
         } else {
-          skeletonData = JSON.parse(JSON.stringify(skeletonData));
+          skeletonData = createEmptySkeletonData();
         }
 
         // Add point to skeleton
@@ -1076,16 +1215,23 @@ export class SkeletonPenTool extends BaseTool {
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
 
+      // Get primary skeleton data from the first layer that has it
+      let primarySkeletonData = null;
+      for (const layerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[layerName];
+        if (layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
+          primarySkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+          break;
+        }
+      }
+      if (!primarySkeletonData) return;
+
       // Apply to all editable layers
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
         if (!layer) continue;
 
-        let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
-        if (!skeletonData) continue;
-
-        // Deep clone
-        skeletonData = JSON.parse(JSON.stringify(skeletonData));
+        let skeletonData = this._ensureSkeletonDataForLayer(layer, primarySkeletonData);
 
         const contour = skeletonData.contours[contourIndex];
         if (!contour) continue;

@@ -42,6 +42,12 @@ import {
   createSkeletonEditBehavior,
   getSkeletonBehaviorName,
   createRibEditBehavior,
+  RibEditBehavior,
+  createEditableRibBehavior,
+  EditableRibBehavior,
+  createInterpolatingRibBehavior,
+  createEditableHandleBehavior,
+  EditableHandleBehavior,
 } from "./skeleton-edit-behavior.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import {
@@ -126,8 +132,7 @@ export class PointerTool extends BaseTool {
       this.measureMode = false;
       this.sceneModel.measureMode = false;
       this.sceneModel.measureHoverSegment = null;
-      this.sceneModel.measureSelectedPoints = [];
-      this.sceneModel.measureClickDirect = false;
+      this.sceneModel.measureHoverRibPoint = null;
       if (this._boundKeyUp) {
         window.removeEventListener("keyup", this._boundKeyUp);
         this._boundKeyUp = null;
@@ -151,9 +156,23 @@ export class PointerTool extends BaseTool {
     const point = sceneController.localPoint(event);
     const size = sceneController.mouseClickMargin;
 
-    // Q-mode: find segment under cursor for measurement
+    // Q-mode: find rib point or segment under cursor for measurement
     if (this.measureMode) {
       this.sceneModel.measureShowDirect = event.altKey;
+
+      // Check for rib point first (has priority over segments)
+      const ribPointHit = this._findRibPointForMeasure(point, size);
+      if (ribPointHit) {
+        if (!this._ribPointsEqual(ribPointHit, this.sceneModel.measureHoverRibPoint)) {
+          this.sceneModel.measureHoverRibPoint = ribPointHit;
+          this.sceneModel.measureHoverSegment = null;
+          this.canvasController.requestUpdate();
+        }
+        return;
+      }
+
+      // No rib point - check for segment
+      this.sceneModel.measureHoverRibPoint = null;
       const segmentHit = this._findSegmentForMeasure(point, size);
       if (
         !this._segmentsEqual(segmentHit, this.sceneModel.measureHoverSegment)
@@ -306,7 +325,16 @@ export class PointerTool extends BaseTool {
     }
 
     if (!hasSkeletonPoints) {
-      // No skeleton points - use default handler
+      // Check if any selected points are editable handles (from skeleton contours)
+      // These need special handling: movement constrained to skeleton handle direction
+      if (hasRegularPoints) {
+        const editableHandles = this._getEditableGeneratedHandlesFromSelection(regularPointSelection);
+        if (editableHandles.length > 0) {
+          await this._handleArrowKeysForEditableHandles(event, editableHandles);
+          return;
+        }
+      }
+      // No skeleton points and no editable handles - use default handler
       return sceneController.handleArrowKeys(event);
     }
 
@@ -504,10 +532,8 @@ export class PointerTool extends BaseTool {
   }
 
   async handleDrag(eventStream, initialEvent) {
-    // Handle measure mode (Q-key) clicks
+    // In measure mode, don't handle clicks - only hover over segments
     if (this.measureMode) {
-      await this._handleMeasureClick(initialEvent);
-      initialEvent.preventDefault();
       return;
     }
 
@@ -1294,7 +1320,8 @@ export class PointerTool extends BaseTool {
       });
       const selection = this.sceneModel.selectionAtRect(
         selRect,
-        modifierEvent.altKey ? (point) => !!point.type : (point) => !point.type
+        modifierEvent.altKey ? (point) => !!point.type : (point) => !point.type,
+        currentPoint
       );
       const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
       sceneController.selectionRect = offsetRect(
@@ -1340,6 +1367,33 @@ export class PointerTool extends BaseTool {
       componentSelection?.length > 0 ||
       anchorSelection?.length > 0 ||
       guidelineSelection?.length > 0;
+
+    // Check if any selected points are editable generated points
+    // If so, redirect to dedicated handler
+    if (pointSelection?.length > 0) {
+      const editableGenerated = this._getEditableGeneratedPointsFromSelection(pointSelection);
+      if (editableGenerated.length > 0 && !hasSkeletonSelection) {
+        await this._handleDragEditableGeneratedPoints(
+          eventStream,
+          initialEvent,
+          editableGenerated
+        );
+        this.sceneController.sceneModel.showTransformSelection = true;
+        return;
+      }
+
+      // Check if any selected points are editable generated handles
+      const editableHandles = this._getEditableGeneratedHandlesFromSelection(pointSelection);
+      if (editableHandles.length > 0 && !hasSkeletonSelection) {
+        await this._handleDragEditableGeneratedHandles(
+          eventStream,
+          initialEvent,
+          editableHandles
+        );
+        this.sceneController.sceneModel.showTransformSelection = true;
+        return;
+      }
+    }
 
     // If only skeleton selection, use dedicated handler
     if (hasSkeletonSelection && !hasRegularSelection) {
@@ -1938,6 +1992,8 @@ export class PointerTool extends BaseTool {
 
     if (!positionedGlyph) return;
 
+    const useInterpolation = initialEvent.altKey;
+
     // Get initial point in glyph coordinates
     const localPoint = sceneController.localPoint(initialEvent);
     const startGlyphPoint = {
@@ -1945,26 +2001,68 @@ export class PointerTool extends BaseTool {
       y: localPoint.y - positionedGlyph.y,
     };
 
-    // Check if point is in asymmetric mode (has leftWidth or rightWidth properties)
-    // Use first layer for check - all layers should have same structure
+    // Capture pre-existing skeleton point selection before overwriting
+    const { skeletonPoint: preSelectedPoints } = parseSelection(sceneController.selection);
+
+    // Use first layer for structural checks
     const editLayerNameForCheck = sceneController.editingLayerNames?.[0];
     const layerForCheck = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerNameForCheck];
     const skeletonDataForCheck = layerForCheck?.customData?.[SKELETON_CUSTOM_DATA_KEY];
-    const pointForCheck = skeletonDataForCheck?.contours?.[ribHit.contourIndex]?.points?.[ribHit.pointIndex];
-    const isAsymmetric = pointForCheck?.leftWidth !== undefined ||
-                         pointForCheck?.rightWidth !== undefined;
 
-    // Set selection based on mode
-    const leftKey = `skeletonRibPoint/${ribHit.contourIndex}/${ribHit.pointIndex}/left`;
-    const rightKey = `skeletonRibPoint/${ribHit.contourIndex}/${ribHit.pointIndex}/right`;
-    if (isAsymmetric) {
-      // Asymmetric mode: select only the dragged side
-      const draggedKey = ribHit.side === "left" ? leftKey : rightKey;
-      sceneController.selection = new Set([draggedKey]);
-    } else {
-      // Symmetric mode: select both sides
-      sceneController.selection = new Set([leftKey, rightKey]);
+    // Build set of target points: always include the dragged point, plus any pre-selected
+    const targetPointsMap = new Map(); // key "ci/pi" -> target info
+
+    const addTargetPoint = (ci, pi) => {
+      const key = `${ci}/${pi}`;
+      if (targetPointsMap.has(key)) return;
+      const contour = skeletonDataForCheck?.contours?.[ci];
+      const pt = contour?.points?.[pi];
+      if (!pt || pt.type) return; // skip off-curve points
+      const isAsym = pt.leftWidth !== undefined || pt.rightWidth !== undefined;
+      const isSingleSided = contour.singleSided ?? false;
+      // Per-side editable: check based on dragSide (determined later)
+      const isLeftEditable = pt.leftEditable === true;
+      const isRightEditable = pt.rightEditable === true;
+      targetPointsMap.set(key, {
+        contourIndex: ci,
+        pointIndex: pi,
+        isAsymmetric: isAsym,
+        isSingleSided,
+        isLeftEditable,
+        isRightEditable,
+      });
+    };
+
+    addTargetPoint(ribHit.contourIndex, ribHit.pointIndex);
+    // Only include pre-selected points if Shift is held (additive selection)
+    if (initialEvent.shiftKey && preSelectedPoints) {
+      for (const key of preSelectedPoints) {
+        const [ci, pi] = key.split("/").map(Number);
+        addTargetPoint(ci, pi);
+      }
     }
+
+    const targetPoints = [...targetPointsMap.values()];
+    const dragSide = ribHit.side; // "left" or "right"
+
+    // Build visual selection: rib point keys for all targets
+    const newSelection = new Set();
+    for (const tp of targetPoints) {
+      const leftKey = `skeletonRibPoint/${tp.contourIndex}/${tp.pointIndex}/left`;
+      const rightKey = `skeletonRibPoint/${tp.contourIndex}/${tp.pointIndex}/right`;
+      if (tp.isSingleSided) {
+        // Single-sided: one rib on the direction side
+        newSelection.add(dragSide === "left" ? leftKey : rightKey);
+      } else if (tp.isAsymmetric) {
+        // Asymmetric: only the dragged side
+        newSelection.add(dragSide === "left" ? leftKey : rightKey);
+      } else {
+        // Symmetric: only select the clicked side (not both)
+        // This allows per-side editable toggle even for symmetric points
+        newSelection.add(dragSide === "left" ? leftKey : rightKey);
+      }
+    }
+    sceneController.selection = newSelection;
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       // Setup data for ALL editable layers (multi-source editing support)
@@ -1978,15 +2076,700 @@ export class PointerTool extends BaseTool {
           layer,
           original: JSON.parse(JSON.stringify(skeletonData)),
           working: JSON.parse(JSON.stringify(skeletonData)),
-          ribBehavior: null, // Will be created below
+          ribBehaviors: [], // One per target point
         };
       }
 
       if (Object.keys(layersData).length === 0) return;
 
-      // Create rib edit behavior for each layer
+      // Create rib edit behaviors for each target point in each layer
       for (const data of Object.values(layersData)) {
-        data.ribBehavior = createRibEditBehavior(data.original, ribHit);
+        for (const tp of targetPoints) {
+          const contour = data.original.contours[tp.contourIndex];
+          const skeletonPoint = contour?.points[tp.pointIndex];
+          if (!skeletonPoint) continue;
+          const normal = calculateNormalAtSkeletonPoint(contour, tp.pointIndex);
+
+          const ribHitForPoint = {
+            contourIndex: tp.contourIndex,
+            pointIndex: tp.pointIndex,
+            side: dragSide,
+            normal,
+            onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
+          };
+
+          // Check if this side is editable
+          const sideIsEditable = (dragSide === "left" && tp.isLeftEditable) || (dragSide === "right" && tp.isRightEditable);
+
+          if (tp.isSingleSided) {
+            // For single-sided, create behavior with totalWidth as the effective width
+            const defaultWidth = contour.defaultWidth || 20;
+            const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+            const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+            const totalWidth = leftHW + rightHW;
+
+            if (sideIsEditable) {
+              // Editable single-sided: use EditableRibBehavior for nudge support
+              // Or InterpolatingRibBehavior if Alt is pressed
+              let behavior;
+              if (useInterpolation) {
+                // Find adjacent handles in the generated path
+                const handles = this._findHandlesForRibPointFromSkeleton(
+                  data.layer.glyph.path,
+                  skeletonPoint,
+                  normal,
+                  contour,
+                  dragSide
+                );
+                if (handles) {
+                  behavior = createInterpolatingRibBehavior(
+                    data.original, ribHitForPoint, handles.prevHandle, handles.nextHandle
+                  );
+                } else {
+                  // Fallback to normal behavior if handles not found
+                  behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+                }
+              } else {
+                behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+              }
+              // Override to track totalWidth for width changes
+              // Use setOriginalHalfWidth for InterpolatingRibBehavior to recalculate ribPos
+              if (behavior.setOriginalHalfWidth) {
+                behavior.setOriginalHalfWidth(totalWidth);
+              } else {
+                behavior.originalHalfWidth = totalWidth;
+              }
+              behavior.minHalfWidth = 2;
+              // Force asymmetric mode to allow width changes in single-sided
+              behavior.isAsymmetric = true;
+              data.ribBehaviors.push({ behavior, target: tp });
+            } else {
+              // Non-editable single-sided: constrained to normal direction
+              const behavior = new RibEditBehavior(
+                data.original,
+                tp.contourIndex,
+                tp.pointIndex,
+                dragSide,
+                normal,
+                { x: skeletonPoint.x, y: skeletonPoint.y }
+              );
+              // Override to track totalWidth; min 2 UPM since it's the full width
+              behavior.originalHalfWidth = totalWidth;
+              behavior.minHalfWidth = 2;
+              data.ribBehaviors.push({ behavior, target: tp });
+            }
+          } else if (sideIsEditable) {
+            // Editable mode: use EditableRibBehavior for free movement
+            // Or InterpolatingRibBehavior if Alt is pressed
+            let behavior;
+            if (useInterpolation) {
+              // Find adjacent handles in the generated path
+              const handles = this._findHandlesForRibPointFromSkeleton(
+                data.layer.glyph.path,
+                skeletonPoint,
+                normal,
+                contour,
+                dragSide
+              );
+              if (handles) {
+                behavior = createInterpolatingRibBehavior(
+                  data.original, ribHitForPoint, handles.prevHandle, handles.nextHandle
+                );
+              } else {
+                // Fallback to normal behavior if handles not found
+                behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+              }
+            } else {
+              behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+            }
+            data.ribBehaviors.push({ behavior, target: tp });
+          } else {
+            // Normal mode: constrained to normal direction
+            data.ribBehaviors.push({
+              behavior: createRibEditBehavior(data.original, ribHitForPoint),
+              target: tp,
+            });
+          }
+        }
+      }
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      let accumulatedChanges = new ChangeCollector();
+
+      // Drag loop
+      for await (const event of eventStream) {
+        const currentLocalPoint = sceneController.localPoint(event);
+        const currentGlyphPoint = {
+          x: currentLocalPoint.x - positionedGlyph.x,
+          y: currentLocalPoint.y - positionedGlyph.y,
+        };
+
+        const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+
+        // Determine constraint mode based on Shift key
+        // Shift: constrain to tangent direction (only nudge changes)
+        const constrainMode = event.shiftKey ? "tangent" : null;
+
+        const allChanges = [];
+
+        // Apply changes to ALL editable layers
+        for (const [editLayerName, data] of Object.entries(layersData)) {
+          const { layer, working, ribBehaviors } = data;
+
+          // Apply each behavior to update all target points
+          for (const { behavior, target } of ribBehaviors) {
+            const change = behavior.applyDelta(delta, constrainMode);
+
+            const contour = working.contours[target.contourIndex];
+            const point = contour.points[target.pointIndex];
+
+            // Check if this side is editable
+            const sideIsEditable = (dragSide === "left" && target.isLeftEditable) || (dragSide === "right" && target.isRightEditable);
+
+            if (target.isSingleSided) {
+              // Single-sided: halfWidth from behavior is the new totalWidth
+              // Store as symmetric width (generator handles single-sided projection)
+              point.width = change.halfWidth;
+              delete point.leftWidth;
+              delete point.rightWidth;
+              // Also apply nudge if editable
+              if (sideIsEditable && change.nudge !== undefined) {
+                if (dragSide === "left") {
+                  point.leftNudge = change.nudge;
+                } else {
+                  point.rightNudge = change.nudge;
+                }
+              }
+              // Apply 2D handle offset compensation for interpolation or editable drag (single-sided)
+              if (sideIsEditable && (change.isInterpolation || change.hasHandleOffsets)) {
+                if (dragSide === "left") {
+                  point.leftHandleInOffsetX = change.handleInOffsetX;
+                  point.leftHandleInOffsetY = change.handleInOffsetY;
+                  point.leftHandleOutOffsetX = change.handleOutOffsetX;
+                  point.leftHandleOutOffsetY = change.handleOutOffsetY;
+                  delete point.leftHandleInOffset;
+                  delete point.leftHandleOutOffset;
+                } else {
+                  point.rightHandleInOffsetX = change.handleInOffsetX;
+                  point.rightHandleInOffsetY = change.handleInOffsetY;
+                  point.rightHandleOutOffsetX = change.handleOutOffsetX;
+                  point.rightHandleOutOffsetY = change.handleOutOffsetY;
+                  delete point.rightHandleInOffset;
+                  delete point.rightHandleOutOffset;
+                }
+              }
+            } else if (sideIsEditable) {
+              // Editable mode: behavior determines if width changes based on symmetric/asymmetric
+              if (change.isAsymmetric) {
+                // Asymmetric: update per-side width and nudge
+                if (dragSide === "left") {
+                  point.leftWidth = change.halfWidth;
+                  point.leftNudge = change.nudge;
+                } else {
+                  point.rightWidth = change.halfWidth;
+                  point.rightNudge = change.nudge;
+                }
+                delete point.width;
+              } else {
+                // Symmetric: only update nudge, keep width unchanged
+                if (dragSide === "left") {
+                  point.leftNudge = change.nudge;
+                } else {
+                  point.rightNudge = change.nudge;
+                }
+                // Don't touch width - it stays symmetric
+              }
+
+              // Apply 2D handle offset compensation for interpolation or editable drag
+              if (change.isInterpolation || change.hasHandleOffsets) {
+                if (dragSide === "left") {
+                  point.leftHandleInOffsetX = change.handleInOffsetX;
+                  point.leftHandleInOffsetY = change.handleInOffsetY;
+                  point.leftHandleOutOffsetX = change.handleOutOffsetX;
+                  point.leftHandleOutOffsetY = change.handleOutOffsetY;
+                  // Clear legacy 1D offsets
+                  delete point.leftHandleInOffset;
+                  delete point.leftHandleOutOffset;
+                } else {
+                  point.rightHandleInOffsetX = change.handleInOffsetX;
+                  point.rightHandleInOffsetY = change.handleInOffsetY;
+                  point.rightHandleOutOffsetX = change.handleOutOffsetX;
+                  point.rightHandleOutOffsetY = change.handleOutOffsetY;
+                  // Clear legacy 1D offsets
+                  delete point.rightHandleInOffset;
+                  delete point.rightHandleOutOffset;
+                }
+              }
+            } else if (target.isAsymmetric) {
+              // Asymmetric: update only the dragged side
+              if (dragSide === "left") {
+                point.leftWidth = change.halfWidth;
+              } else {
+                point.rightWidth = change.halfWidth;
+              }
+              delete point.width;
+            } else {
+              // Symmetric: update full width (both sides)
+              point.width = change.halfWidth * 2;
+              delete point.leftWidth;
+              delete point.rightWidth;
+            }
+          }
+
+          // Record changes for this layer
+          const staticGlyph = layer.glyph;
+          const pathChange = recordChanges(staticGlyph, (sg) => {
+            regenerateOutline(sg, working);
+          });
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+          const customDataChange = recordChanges(layer, (l) => {
+            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+          });
+          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+        }
+
+        const combinedChange = new ChangeCollector().concat(...allChanges);
+        accumulatedChanges = accumulatedChanges.concat(combinedChange);
+        await sendIncrementalChange(combinedChange.change, true);
+      }
+
+      // Final send without "may drop" flag
+      await sendIncrementalChange(accumulatedChanges.change);
+
+      return {
+        changes: accumulatedChanges,
+        undoLabel: translate("edit-tools-pointer.undo.change-skeleton-width"),
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Check if selected points are editable generated points (from skeleton).
+   * @param {Array} pointSelection - Array of point indices
+   * @returns {Array} Array of {pointIndex, skeletonContourIndex, skeletonPointIndex, side}
+   */
+  _getEditableGeneratedPointsFromSelection(pointSelection) {
+    const result = [];
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) {
+      return result;
+    }
+
+    for (const pointIndex of pointSelection) {
+      const ribInfo = this.sceneModel._getEditableRibPointForGeneratedPoint(
+        positionedGlyph,
+        pointIndex
+      );
+      if (ribInfo) {
+        result.push({
+          pointIndex,
+          ...ribInfo,
+        });
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Find adjacent handles for a rib point by computing its expected position
+   * and searching in the generated path.
+   * @param {Object} path - The generated glyph path
+   * @param {Object} skeletonPoint - The skeleton point {x, y, ...}
+   * @param {Object} normal - The normal vector at this point
+   * @param {Object} contour - The skeleton contour
+   * @param {string} side - "left" or "right"
+   * @returns {Object|null} { prevHandle, nextHandle } or null
+   */
+  _findHandlesForRibPointFromSkeleton(path, skeletonPoint, normal, contour, side) {
+    const points = contour.points;
+    const pointIndex = points.findIndex(p => p === skeletonPoint || (p.x === skeletonPoint.x && p.y === skeletonPoint.y));
+    if (pointIndex < 0) {
+      return null;
+    }
+
+    // Build on-curve indices from skeleton points
+    const onCurveIndices = [];
+    for (let i = 0; i < points.length; i++) {
+      if (!points[i].type) onCurveIndices.push(i);
+    }
+
+    // Find position of our point in on-curve list
+    const posInOnCurve = onCurveIndices.indexOf(pointIndex);
+    if (posInOnCurve < 0) {
+      return null;
+    }
+
+    let prevHandle = null;
+    let nextHandle = null;
+
+    // Incoming handle: off-curve before current point
+    const prevIdx = (pointIndex - 1 + points.length) % points.length;
+    if (points[prevIdx]?.type) {
+      prevHandle = this._offsetSkeletonHandle(points[prevIdx], skeletonPoint, normal, contour, side);
+    }
+
+    // Outgoing handle: off-curve after current point
+    const nextIdx = (pointIndex + 1) % points.length;
+    if (points[nextIdx]?.type) {
+      nextHandle = this._offsetSkeletonHandle(points[nextIdx], skeletonPoint, normal, contour, side);
+    }
+
+    return (prevHandle || nextHandle) ? { prevHandle, nextHandle } : null;
+  }
+
+  _offsetSkeletonHandle(skelHandle, skelOnCurve, normal, contour, side) {
+    const defaultWidth = contour.defaultWidth || 20;
+    const halfWidth = side === "left"
+      ? (skelOnCurve.leftWidth ?? (skelOnCurve.width !== undefined ? skelOnCurve.width / 2 : defaultWidth / 2))
+      : (skelOnCurve.rightWidth ?? (skelOnCurve.width !== undefined ? skelOnCurve.width / 2 : defaultWidth / 2));
+    const sign = side === "left" ? 1 : -1;
+
+    return {
+      x: skelHandle.x + sign * normal.x * halfWidth,
+      y: skelHandle.y + sign * normal.y * halfWidth,
+    };
+  }
+
+  /**
+   * Check if selected points are editable generated handles (from skeleton).
+   * @param {Array} pointSelection - Array of point indices
+   * @returns {Array} Array of {pointIndex, skeletonContourIndex, skeletonPointIndex, side, handleType}
+   */
+  _getEditableGeneratedHandlesFromSelection(pointSelection) {
+    const result = [];
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return result;
+
+    for (const pointIndex of pointSelection) {
+      const handleInfo = this.sceneModel._getEditableHandleForGeneratedPoint(
+        positionedGlyph,
+        pointIndex
+      );
+      if (handleInfo) {
+        result.push({
+          pointIndex,
+          ...handleInfo,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Find adjacent handles (off-curve points) for a rib point in the generated path.
+   * @param {Object} path - The generated path
+   * @param {number} ribPointIndex - Index of the rib point in the path
+   * @returns {Object|null} { prevHandle, nextHandle } or null if not found
+   */
+  _findAdjacentHandlesForRibPoint(path, ribPointIndex) {
+    const numPoints = path.numPoints;
+
+    if (ribPointIndex < 0 || ribPointIndex >= numPoints) {
+      return null;
+    }
+
+    // Get contour range for this point
+    const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(ribPointIndex);
+    const numContourPoints = path.getNumPointsOfContour(contourIndex);
+    const contourStart = ribPointIndex - contourPointIndex;
+
+    // Helper to wrap index within contour
+    const wrapIndex = (idx) => {
+      const relative = idx - contourStart;
+      const wrapped = ((relative % numContourPoints) + numContourPoints) % numContourPoints;
+      return contourStart + wrapped;
+    };
+
+    // Check immediate neighbors (prev and next)
+    const prevIdx = wrapIndex(ribPointIndex - 1);
+    const nextIdx = wrapIndex(ribPointIndex + 1);
+
+    const prevType = path.pointTypes[prevIdx];
+    const nextType = path.pointTypes[nextIdx];
+    const prevIsOnCurve = (prevType & 0x03) === 0;
+    const nextIsOnCurve = (nextType & 0x03) === 0;
+
+    // For generated skeleton contours, immediate neighbors should be handles
+    const prevHandle = !prevIsOnCurve ? path.getPoint(prevIdx) : null;
+    const nextHandle = !nextIsOnCurve ? path.getPoint(nextIdx) : null;
+
+    if (!prevHandle || !nextHandle) return null;
+    return { prevHandle, nextHandle };
+  }
+
+  /**
+   * Handle dragging editable generated points (from skeleton contours).
+   * Updates skeleton data (nudge, width) based on point movement.
+   * When Alt is held, the rib point slides along the line between its adjacent handles.
+   */
+  async _handleDragEditableGeneratedPoints(eventStream, initialEvent, editablePoints) {
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+
+    if (!positionedGlyph || editablePoints.length === 0) return;
+
+    const useInterpolation = initialEvent.altKey;
+
+    const localPoint = sceneController.localPoint(initialEvent);
+    const startGlyphPoint = {
+      x: localPoint.x - positionedGlyph.x,
+      y: localPoint.y - positionedGlyph.y,
+    };
+
+    // If using interpolation, find adjacent handles for each editable rib point
+    const generatedPath = positionedGlyph.glyph.path;
+
+    const editablePointsWithHandles = useInterpolation
+      ? editablePoints.map(ep => {
+          // ep.pointIndex is the index in the generated path
+          const handles = this._findAdjacentHandlesForRibPoint(generatedPath, ep.pointIndex);
+          return { ...ep, handles };
+        })
+      : editablePoints.map(ep => ({ ...ep, handles: null }));
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layersData = {};
+
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        layersData[editLayerName] = {
+          layer,
+          original: JSON.parse(JSON.stringify(skeletonData)),
+          working: JSON.parse(JSON.stringify(skeletonData)),
+          behaviors: [],
+        };
+      }
+
+      if (Object.keys(layersData).length === 0) return;
+
+      // Create behaviors for each editable point in each layer
+      for (const data of Object.values(layersData)) {
+        for (const ep of editablePointsWithHandles) {
+          const contour = data.original.contours[ep.skeletonContourIndex];
+          const skeletonPoint = contour?.points[ep.skeletonPointIndex];
+          if (!skeletonPoint) continue;
+
+          const normal = calculateNormalAtSkeletonPoint(contour, ep.skeletonPointIndex);
+          const ribHit = {
+            contourIndex: ep.skeletonContourIndex,
+            pointIndex: ep.skeletonPointIndex,
+            side: ep.side,
+            normal,
+            onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
+          };
+
+          // Use interpolating behavior if Alt is pressed and handles are found
+          let behavior;
+          if (useInterpolation && ep.handles) {
+            behavior = createInterpolatingRibBehavior(
+              data.original, ribHit, ep.handles.prevHandle, ep.handles.nextHandle
+            );
+          } else {
+            behavior = createEditableRibBehavior(data.original, ribHit);
+          }
+
+          data.behaviors.push({
+            behavior,
+            editablePoint: ep,
+          });
+        }
+      }
+
+      // Helper function to regenerate outline contours
+      const regenerateOutline = (staticGlyph, skelData) => {
+        const oldGeneratedIndices = skelData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(skelData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        skelData.generatedContourIndices = newGeneratedIndices;
+      };
+
+      let accumulatedChanges = new ChangeCollector();
+
+      // Drag loop
+      for await (const event of eventStream) {
+        const currentLocalPoint = sceneController.localPoint(event);
+        const currentGlyphPoint = {
+          x: currentLocalPoint.x - positionedGlyph.x,
+          y: currentLocalPoint.y - positionedGlyph.y,
+        };
+
+        const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+
+        // Determine constraint mode based on Shift key
+        // Shift: constrain to tangent direction (only nudge changes)
+        const constrainMode = event.shiftKey ? "tangent" : null;
+
+        const allChanges = [];
+
+        for (const [editLayerName, data] of Object.entries(layersData)) {
+          const { layer, working, behaviors } = data;
+
+          for (const { behavior, editablePoint } of behaviors) {
+            const change = behavior.applyDelta(delta, constrainMode);
+            const contour = working.contours[editablePoint.skeletonContourIndex];
+            const point = contour.points[editablePoint.skeletonPointIndex];
+            const side = editablePoint.side;
+
+            // Apply changes based on symmetric/asymmetric mode
+            if (change.isAsymmetric) {
+              if (side === "left") {
+                point.leftWidth = change.halfWidth;
+                point.leftNudge = change.nudge;
+              } else {
+                point.rightWidth = change.halfWidth;
+                point.rightNudge = change.nudge;
+              }
+              delete point.width;
+            } else {
+              // Symmetric: only update nudge
+              if (side === "left") {
+                point.leftNudge = change.nudge;
+              } else {
+                point.rightNudge = change.nudge;
+              }
+            }
+
+            // Apply 2D handle offset compensation for interpolation or editable drag
+            if (change.isInterpolation || change.hasHandleOffsets) {
+              if (side === "left") {
+                point.leftHandleInOffsetX = change.handleInOffsetX;
+                point.leftHandleInOffsetY = change.handleInOffsetY;
+                point.leftHandleOutOffsetX = change.handleOutOffsetX;
+                point.leftHandleOutOffsetY = change.handleOutOffsetY;
+                // Clear legacy 1D offsets
+                delete point.leftHandleInOffset;
+                delete point.leftHandleOutOffset;
+              } else {
+                point.rightHandleInOffsetX = change.handleInOffsetX;
+                point.rightHandleInOffsetY = change.handleInOffsetY;
+                point.rightHandleOutOffsetX = change.handleOutOffsetX;
+                point.rightHandleOutOffsetY = change.handleOutOffsetY;
+                // Clear legacy 1D offsets
+                delete point.rightHandleInOffset;
+                delete point.rightHandleOutOffset;
+              }
+            }
+          }
+
+          const staticGlyph = layer.glyph;
+          const pathChange = recordChanges(staticGlyph, (sg) => {
+            regenerateOutline(sg, working);
+          });
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+          const customDataChange = recordChanges(layer, (l) => {
+            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+          });
+          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+        }
+
+        const combinedChange = new ChangeCollector().concat(...allChanges);
+        accumulatedChanges = accumulatedChanges.concat(combinedChange);
+        await sendIncrementalChange(combinedChange.change, true);
+      }
+
+      await sendIncrementalChange(accumulatedChanges.change);
+
+      return {
+        changes: accumulatedChanges,
+        undoLabel: "Edit generated point",
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Handle dragging editable generated handles (from skeleton contours).
+   * Updates skeleton data (handle offsets) based on handle movement.
+   */
+  async _handleDragEditableGeneratedHandles(eventStream, initialEvent, editableHandles) {
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+
+    if (!positionedGlyph || editableHandles.length === 0) return;
+
+    const localPoint = sceneController.localPoint(initialEvent);
+    const startGlyphPoint = {
+      x: localPoint.x - positionedGlyph.x,
+      y: localPoint.y - positionedGlyph.y,
+    };
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layersData = {};
+
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        layersData[editLayerName] = {
+          layer,
+          original: JSON.parse(JSON.stringify(skeletonData)),
+          working: JSON.parse(JSON.stringify(skeletonData)),
+          behaviors: [],
+        };
+      }
+
+      if (Object.keys(layersData).length === 0) return;
+
+      // Create behaviors for each editable handle in each layer
+      for (const data of Object.values(layersData)) {
+        for (const eh of editableHandles) {
+          const contour = data.original.contours[eh.skeletonContourIndex];
+          if (!contour) continue;
+
+          // Calculate skeleton handle direction
+          const skeletonHandleDir = this._getSkeletonHandleDirForPoint(
+            contour, eh.skeletonPointIndex, eh.handleType
+          );
+
+          if (!skeletonHandleDir) {
+            continue;
+          }
+
+          data.behaviors.push({
+            behavior: createEditableHandleBehavior(data.original, eh, skeletonHandleDir),
+            editableHandle: eh,
+            skeletonHandleDir,
+          });
+        }
       }
 
       // Helper function to regenerate outline contours
@@ -2023,43 +2806,50 @@ export class PointerTool extends BaseTool {
 
         const allChanges = [];
 
-        // Apply changes to ALL editable layers
         for (const [editLayerName, data] of Object.entries(layersData)) {
-          const { layer, working, ribBehavior } = data;
+          const { layer, working, behaviors } = data;
 
-          // Apply behavior to get new width (each layer has its own behavior based on its data)
-          const widthChange = ribBehavior.applyDelta(delta);
+          for (const { behavior, editableHandle, skeletonHandleDir } of behaviors) {
+            const change = behavior.applyDelta(delta);
+            const point = working.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
 
-          // Update working skeleton data with new width
-          const contour = working.contours[widthChange.contourIndex];
-          const point = contour.points[widthChange.pointIndex];
+            // Check if handle is in detached mode
+            const detachedKey = editableHandle.side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+            const isDetached = point[detachedKey];
 
-          if (isAsymmetric) {
-            // Asymmetric mode: update only the dragged side
-            if (ribHit.side === "left") {
-              point.leftWidth = widthChange.halfWidth;
+            // Apply the offset to the appropriate key (1D offset)
+            const offsetKey = editableHandle.side === "left"
+              ? (editableHandle.handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
+              : (editableHandle.handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
+
+            const offsetXKey = editableHandle.side === "left"
+              ? (editableHandle.handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+              : (editableHandle.handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+            const offsetYKey = editableHandle.side === "left"
+              ? (editableHandle.handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+              : (editableHandle.handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+
+            if (isDetached) {
+              // Detached mode: update 2D offsets, preserve detached state
+              // Use original values since delta is cumulative from drag start
+              const originalPoint = data.original.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
+              const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
+              point[offsetXKey] = (originalPoint[offsetXKey] || 0) + Math.round(skeletonHandleDir.x * projectedDelta);
+              point[offsetYKey] = (originalPoint[offsetYKey] || 0) + Math.round(skeletonHandleDir.y * projectedDelta);
             } else {
-              point.rightWidth = widthChange.halfWidth;
+              // Normal mode: clear 2D offsets (they have priority), set 1D offset
+              delete point[offsetXKey];
+              delete point[offsetYKey];
+              point[offsetKey] = change.offset;
             }
-            delete point.width;
-          } else {
-            // Symmetric mode: update width property (affects both sides)
-            // The halfWidth from behavior is the new half-width, so full width = halfWidth * 2
-            point.width = widthChange.halfWidth * 2;
-            // Clear any asymmetric widths to ensure symmetric behavior
-            delete point.leftWidth;
-            delete point.rightWidth;
           }
 
-          // Record changes for this layer
-          // 1. FIRST: Generate outline contours
           const staticGlyph = layer.glyph;
           const pathChange = recordChanges(staticGlyph, (sg) => {
             regenerateOutline(sg, working);
           });
           allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
-          // 2. THEN: Save skeletonData to customData
           const customDataChange = recordChanges(layer, (l) => {
             l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
           });
@@ -2071,15 +2861,213 @@ export class PointerTool extends BaseTool {
         await sendIncrementalChange(combinedChange.change, true);
       }
 
-      // Final send without "may drop" flag
       await sendIncrementalChange(accumulatedChanges.change);
 
       return {
         changes: accumulatedChanges,
-        undoLabel: translate("edit-tools-pointer.undo.change-skeleton-width"),
+        undoLabel: "Edit generated handle",
         broadcast: true,
       };
     });
+  }
+
+  /**
+   * Handle arrow key movement for editable generated handles.
+   * Movement is constrained to the skeleton handle direction (tangent).
+   */
+  async _handleArrowKeysForEditableHandles(event, editableHandles) {
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+
+    if (!positionedGlyph || editableHandles.length === 0) return;
+
+    // Calculate arrow key delta
+    let [dx, dy] = arrowKeyDeltas[event.key];
+    if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
+      dx *= 100;
+      dy *= 100;
+    } else if (event.shiftKey) {
+      dx *= 10;
+      dy *= 10;
+    }
+    const delta = { x: dx, y: dy };
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layersData = {};
+
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        layersData[editLayerName] = {
+          layer,
+          original: JSON.parse(JSON.stringify(skeletonData)),
+          working: JSON.parse(JSON.stringify(skeletonData)),
+          behaviors: [],
+        };
+      }
+
+      if (Object.keys(layersData).length === 0) return;
+
+      // Create behaviors for each editable handle
+      for (const data of Object.values(layersData)) {
+        for (const eh of editableHandles) {
+          const contour = data.original.contours[eh.skeletonContourIndex];
+          if (!contour) continue;
+
+          const skeletonHandleDir = this._getSkeletonHandleDirForPoint(
+            contour, eh.skeletonPointIndex, eh.handleType
+          );
+
+          if (!skeletonHandleDir) continue;
+
+          data.behaviors.push({
+            behavior: createEditableHandleBehavior(data.original, eh, skeletonHandleDir),
+            editableHandle: eh,
+            skeletonHandleDir,
+          });
+        }
+      }
+
+      const allChanges = [];
+
+      for (const [editLayerName, data] of Object.entries(layersData)) {
+        const { layer, working, behaviors } = data;
+
+        for (const { behavior, editableHandle, skeletonHandleDir } of behaviors) {
+          const change = behavior.applyDelta(delta);
+          const point = working.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
+
+          // Check if handle is in detached mode
+          const detachedKey = editableHandle.side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+          const isDetached = point[detachedKey];
+
+          // Apply the offset (1D only for arrow keys, unless detached)
+          const offsetKey = editableHandle.side === "left"
+            ? (editableHandle.handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
+            : (editableHandle.handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
+
+          const offsetXKey = editableHandle.side === "left"
+            ? (editableHandle.handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+            : (editableHandle.handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+          const offsetYKey = editableHandle.side === "left"
+            ? (editableHandle.handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+            : (editableHandle.handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+
+          if (isDetached) {
+            // Detached mode: update 2D offsets, preserve detached state
+            // Project delta onto skeleton handle direction
+            const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
+            point[offsetXKey] = (point[offsetXKey] || 0) + Math.round(skeletonHandleDir.x * projectedDelta);
+            point[offsetYKey] = (point[offsetYKey] || 0) + Math.round(skeletonHandleDir.y * projectedDelta);
+            // Don't touch 1D offset - let 2D offsets take priority
+          } else {
+            // Normal mode: clear 2D offsets (they have priority), set 1D offset
+            delete point[offsetXKey];
+            delete point[offsetYKey];
+            point[offsetKey] = change.offset;
+          }
+        }
+
+        // Regenerate outline contours
+        const staticGlyph = layer.glyph;
+        const oldGeneratedIndices = working.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(working);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        working.generatedContourIndices = newGeneratedIndices;
+
+        // Record changes
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          // Path already modified above
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = working;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Nudge generated handle",
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Get skeleton handle direction for a given skeleton point.
+   * @param {Object} contour - The skeleton contour
+   * @param {number} pointIndex - Index of the on-curve skeleton point
+   * @param {string} handleType - "in" or "out"
+   * @returns {Object|null} Normalized direction vector {x, y}
+   */
+  _getSkeletonHandleDirForPoint(contour, pointIndex, handleType) {
+    const points = contour.points;
+    const numPoints = points.length;
+    const isClosed = contour.isClosed;
+
+    const skeletonPoint = points[pointIndex];
+    if (!skeletonPoint || skeletonPoint.type) return null;
+
+    // Find adjacent control points
+    // For "out" handle: look at the next point
+    // For "in" handle: look at the previous point
+    let controlPoint = null;
+
+    if (handleType === "out") {
+      // Look for next point (could be off-curve)
+      const nextIdx = (pointIndex + 1) % numPoints;
+      if (isClosed || pointIndex < numPoints - 1) {
+        const nextPt = points[nextIdx];
+        if (nextPt?.type === "cubic") {
+          controlPoint = nextPt;
+        }
+      }
+    } else {
+      // "in" handle: look at previous point
+      const prevIdx = (pointIndex - 1 + numPoints) % numPoints;
+      if (isClosed || pointIndex > 0) {
+        const prevPt = points[prevIdx];
+        if (prevPt?.type === "cubic") {
+          controlPoint = prevPt;
+        }
+      }
+    }
+
+    if (!controlPoint) {
+      return null;
+    }
+
+    const dir = {
+      x: controlPoint.x - skeletonPoint.x,
+      y: controlPoint.y - skeletonPoint.y,
+    };
+    const length = Math.hypot(dir.x, dir.y);
+
+    if (length < 0.001) return null;
+
+    const normalized = { x: dir.x / length, y: dir.y / length };
+    return normalized;
   }
 
   /**
@@ -2376,9 +3364,9 @@ export class PointerTool extends BaseTool {
     const prevPoint = contour.points[prevIndex];
     const nextPoint = contour.points[nextIndex];
 
-    // Check if prev is smooth (on-curve without type)
-    if (!prevPoint?.type) {
-      // prevPoint is on-curve, check if it's smooth and has off-curve on the other side
+    // Check if prev is smooth (on-curve with smooth flag)
+    if (!prevPoint?.type && prevPoint?.smooth) {
+      // prevPoint is smooth on-curve, check if it has off-curve on the other side
       const prevPrevIndex = (prevIndex - 1 + numPoints) % numPoints;
       const prevPrevPoint = contour.points[prevPrevIndex];
       if (prevPrevPoint?.type === "cubic") {
@@ -2387,8 +3375,8 @@ export class PointerTool extends BaseTool {
       }
     }
 
-    // Check if next is smooth (on-curve without type)
-    if (smoothIndex === null && !nextPoint?.type) {
+    // Check if next is smooth (on-curve with smooth flag)
+    if (smoothIndex === null && !nextPoint?.type && nextPoint?.smooth) {
       const nextNextIndex = (nextIndex + 1) % numPoints;
       const nextNextPoint = contour.points[nextNextIndex];
       if (nextNextPoint?.type === "cubic") {
@@ -2438,10 +3426,10 @@ export class PointerTool extends BaseTool {
         const oppLength = Math.hypot(oppDirX, oppDirY);
 
         if (oppLength > 0.001) {
-          // Normalize and scale to clicked length
+          // Normalize and scale to clicked length, round to UPM grid
           const scale = layerClickedLength / oppLength;
-          workingContour.points[oppositeIndex].x = layerSmoothPt.x + oppDirX * scale;
-          workingContour.points[oppositeIndex].y = layerSmoothPt.y + oppDirY * scale;
+          workingContour.points[oppositeIndex].x = Math.round(layerSmoothPt.x + oppDirX * scale);
+          workingContour.points[oppositeIndex].y = Math.round(layerSmoothPt.y + oppDirY * scale);
         }
 
         // Regenerate outline
@@ -2509,8 +3497,8 @@ export class PointerTool extends BaseTool {
     const prevPoint = contour.points[prevIndex];
     const nextPoint = contour.points[nextIndex];
 
-    // Check if prev is smooth (on-curve without type)
-    if (!prevPoint?.type) {
+    // Check if prev is smooth (on-curve with smooth flag)
+    if (!prevPoint?.type && prevPoint?.smooth) {
       const prevPrevIndex = (prevIndex - 1 + numPoints) % numPoints;
       const prevPrevPoint = contour.points[prevPrevIndex];
       if (prevPrevPoint?.type === "cubic") {
@@ -2519,8 +3507,8 @@ export class PointerTool extends BaseTool {
       }
     }
 
-    // Check if next is smooth (on-curve without type)
-    if (smoothIndex === null && !nextPoint?.type) {
+    // Check if next is smooth (on-curve with smooth flag)
+    if (smoothIndex === null && !nextPoint?.type && nextPoint?.smooth) {
       const nextNextIndex = (nextIndex + 1) % numPoints;
       const nextNextPoint = contour.points[nextNextIndex];
       if (nextNextPoint?.type === "cubic") {
@@ -2615,13 +3603,13 @@ export class PointerTool extends BaseTool {
             continue;
           }
 
-          // Update dragged point
-          workContour.points[pointIndex].x = smoothPt.x + newDragVec.x;
-          workContour.points[pointIndex].y = smoothPt.y + newDragVec.y;
+          // Update dragged point, round to UPM grid
+          workContour.points[pointIndex].x = Math.round(smoothPt.x + newDragVec.x);
+          workContour.points[pointIndex].y = Math.round(smoothPt.y + newDragVec.y);
 
-          // Update opposite point: same length, opposite direction
-          workContour.points[oppositeIndex].x = smoothPt.x - newDragVec.x;
-          workContour.points[oppositeIndex].y = smoothPt.y - newDragVec.y;
+          // Update opposite point: same length, opposite direction, round to UPM grid
+          workContour.points[oppositeIndex].x = Math.round(smoothPt.x - newDragVec.x);
+          workContour.points[oppositeIndex].y = Math.round(smoothPt.y - newDragVec.y);
 
           // Record changes for this layer
           const staticGlyph = layer.glyph;
@@ -3150,40 +4138,73 @@ export class PointerTool extends BaseTool {
         const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
         const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
 
-        // Calculate rib point positions
-        const leftRibPoint = {
-          x: skeletonPoint.x + normal.x * leftHW,
-          y: skeletonPoint.y + normal.y * leftHW,
-        };
-        const rightRibPoint = {
-          x: skeletonPoint.x - normal.x * rightHW,
-          y: skeletonPoint.y - normal.y * rightHW,
-        };
+        // Per-side editable flags
+        const isLeftEditable = skeletonPoint.leftEditable === true;
+        const isRightEditable = skeletonPoint.rightEditable === true;
 
-        // Check left rib point
-        const leftDist = vector.distance(glyphPoint, leftRibPoint);
-        if (leftDist <= margin) {
-          return {
-            contourIndex,
-            pointIndex,
-            side: "left",
-            point: leftRibPoint,
-            normal,
-            onCurvePoint: skeletonPoint,
-          };
-        }
+        // Calculate tangent and nudge offsets (only if editable, to match generator behavior)
+        const tangent = { x: -normal.y, y: normal.x };
+        const leftNudge = isLeftEditable ? (skeletonPoint.leftNudge || 0) : 0;
+        const rightNudge = isRightEditable ? (skeletonPoint.rightNudge || 0) : 0;
 
-        // Check right rib point
-        const rightDist = vector.distance(glyphPoint, rightRibPoint);
-        if (rightDist <= margin) {
-          return {
-            contourIndex,
-            pointIndex,
-            side: "right",
-            point: rightRibPoint,
-            normal,
-            onCurvePoint: skeletonPoint,
+        const singleSided = contour.singleSided ?? false;
+        const singleSidedDirection = contour.singleSidedDirection ?? "left";
+
+        if (singleSided) {
+          // Single-sided: one rib point at total width on the chosen side
+          const totalWidth = leftHW + rightHW;
+          const side = singleSidedDirection;
+          const sign = side === "left" ? 1 : -1;
+          const nudge = side === "left" ? leftNudge : rightNudge;
+          const ribPoint = {
+            x: skeletonPoint.x + sign * normal.x * totalWidth + tangent.x * nudge,
+            y: skeletonPoint.y + sign * normal.y * totalWidth + tangent.y * nudge,
           };
+          const dist = vector.distance(glyphPoint, ribPoint);
+          if (dist <= margin) {
+            return {
+              contourIndex,
+              pointIndex,
+              side,
+              point: ribPoint,
+              normal,
+              onCurvePoint: skeletonPoint,
+            };
+          }
+        } else {
+          // Normal mode: two rib points (including nudge offset if editable)
+          const leftRibPoint = {
+            x: skeletonPoint.x + normal.x * leftHW + tangent.x * leftNudge,
+            y: skeletonPoint.y + normal.y * leftHW + tangent.y * leftNudge,
+          };
+          const rightRibPoint = {
+            x: skeletonPoint.x - normal.x * rightHW + tangent.x * rightNudge,
+            y: skeletonPoint.y - normal.y * rightHW + tangent.y * rightNudge,
+          };
+
+          const leftDist = vector.distance(glyphPoint, leftRibPoint);
+          if (leftDist <= margin) {
+            return {
+              contourIndex,
+              pointIndex,
+              side: "left",
+              point: leftRibPoint,
+              normal,
+              onCurvePoint: skeletonPoint,
+            };
+          }
+
+          const rightDist = vector.distance(glyphPoint, rightRibPoint);
+          if (rightDist <= margin) {
+            return {
+              contourIndex,
+              pointIndex,
+              side: "right",
+              point: rightRibPoint,
+              normal,
+              onCurvePoint: skeletonPoint,
+            };
+          }
         }
       }
     }
@@ -3192,30 +4213,109 @@ export class PointerTool extends BaseTool {
   }
 
   /**
-   * Handle measure mode click - select point for distance measurement.
+   * Find rib endpoint under cursor for measure mode.
+   * Returns { x, y, width, leftWidth, rightWidth } or null.
    */
-  async _handleMeasureClick(event) {
-    const point = this.sceneController.localPoint(event);
-    const size = this.sceneController.mouseClickMargin;
+  _findRibPointForMeasure(point, size) {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) return null;
 
-    // Find any point (regular, skeleton, or generated)
-    const measurePoint = this.sceneModel.measurePointAtPoint(point, size);
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
 
-    if (measurePoint) {
-      if (event.shiftKey) {
-        // Add to measure selection (keep existing direct mode)
-        this.sceneModel.measureSelectedPoints.push(measurePoint);
-      } else {
-        // Replace measure selection, set direct mode based on Alt key
-        this.sceneModel.measureSelectedPoints = [measurePoint];
-        this.sceneModel.measureClickDirect = event.altKey;
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    if (!editLayerName) return null;
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData?.contours?.length) return null;
+
+    const defaultWidth = skeletonData.defaultWidth ?? 100;
+
+    for (const contour of skeletonData.contours) {
+      const contourDefaultWidth = contour.defaultWidth ?? defaultWidth;
+      const singleSided = contour.singleSided ?? false;
+      const singleSidedDirection = contour.singleSidedDirection ?? "left";
+
+      for (let pointIndex = 0; pointIndex < contour.points.length; pointIndex++) {
+        const skeletonPoint = contour.points[pointIndex];
+        if (skeletonPoint.type) continue; // Skip control points
+
+        const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
+        let leftHW = getPointHalfWidth(skeletonPoint, contourDefaultWidth, "left");
+        let rightHW = getPointHalfWidth(skeletonPoint, contourDefaultWidth, "right");
+
+        // Handle single-sided mode
+        if (singleSided) {
+          const totalWidth = leftHW + rightHW;
+          if (singleSidedDirection === "left") {
+            leftHW = totalWidth;
+            rightHW = 0;
+          } else {
+            leftHW = 0;
+            rightHW = totalWidth;
+          }
+        }
+
+        // Apply nudge offset for editable points
+        const tangent = { x: -normal.y, y: normal.x };
+        const isLeftEditable = skeletonPoint.leftEditable === true;
+        const isRightEditable = skeletonPoint.rightEditable === true;
+        const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
+        const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+
+        // Calculate rib endpoint positions (including nudge)
+        const leftRibPoint = {
+          x: skeletonPoint.x + normal.x * leftHW + tangent.x * leftNudge,
+          y: skeletonPoint.y + normal.y * leftHW + tangent.y * leftNudge,
+        };
+        const rightRibPoint = {
+          x: skeletonPoint.x - normal.x * rightHW + tangent.x * rightNudge,
+          y: skeletonPoint.y - normal.y * rightHW + tangent.y * rightNudge,
+        };
+
+        // Check left rib point
+        if (leftHW > 0.5) {
+          const dist = Math.hypot(leftRibPoint.x - glyphPoint.x, leftRibPoint.y - glyphPoint.y);
+          if (dist <= size) {
+            return {
+              x: leftRibPoint.x,
+              y: leftRibPoint.y,
+              width: leftHW + rightHW,
+              leftWidth: leftHW,
+              rightWidth: rightHW,
+            };
+          }
+        }
+
+        // Check right rib point
+        if (rightHW > 0.5) {
+          const dist = Math.hypot(rightRibPoint.x - glyphPoint.x, rightRibPoint.y - glyphPoint.y);
+          if (dist <= size) {
+            return {
+              x: rightRibPoint.x,
+              y: rightRibPoint.y,
+              width: leftHW + rightHW,
+              leftWidth: leftHW,
+              rightWidth: rightHW,
+            };
+          }
+        }
       }
-    } else {
-      // Click on empty space - clear selection
-      this.sceneModel.measureSelectedPoints = [];
-      this.sceneModel.measureClickDirect = false;
     }
-    this.canvasController.requestUpdate();
+
+    return null;
+  }
+
+  /**
+   * Compare two rib point objects for equality.
+   */
+  _ribPointsEqual(rp1, rp2) {
+    if (rp1 === rp2) return true;
+    if (!rp1 || !rp2) return false;
+    return rp1.x === rp2.x && rp1.y === rp2.y;
   }
 
   /**
@@ -3236,13 +4336,7 @@ export class PointerTool extends BaseTool {
     const path = positionedGlyph.glyph.path;
     const margin = size * 1.5;
 
-    // Check path segments (including generated contours)
-    const segmentHit = this._findPathSegmentNear(path, glyphPoint, margin);
-    if (segmentHit) {
-      return segmentHit;
-    }
-
-    // Check skeleton segments
+    // Check skeleton segments FIRST (they should have priority over generated contours)
     const skeletonSegmentHit = this._findSkeletonSegmentNear(
       positionedGlyph,
       glyphPoint,
@@ -3250,6 +4344,12 @@ export class PointerTool extends BaseTool {
     );
     if (skeletonSegmentHit) {
       return skeletonSegmentHit;
+    }
+
+    // Check path segments
+    const segmentHit = this._findPathSegmentNear(path, glyphPoint, margin);
+    if (segmentHit) {
+      return segmentHit;
     }
 
     return null;
@@ -3287,8 +4387,21 @@ export class PointerTool extends BaseTool {
         const p1 = path.getPoint(idx1);
         const p2 = path.getPoint(idx2);
 
-        // Simple distance-to-line check
-        const dist = this._distanceToSegment(point, p1, p2);
+        // Collect control points between on-curve points
+        const controlPoints = [];
+        let j = idx1 + 1;
+        const limit = idx2 > idx1 ? idx2 : endPoint + 1 + idx2 - startPoint;
+        while (j < limit) {
+          const actualIdx = j <= endPoint ? j : startPoint + (j - endPoint - 1);
+          const cp = path.getPoint(actualIdx);
+          if (cp.type) {
+            controlPoints.push(cp);
+          }
+          j++;
+        }
+
+        // Check distance to curve (sampled if has control points)
+        const dist = this._distanceToCurve(point, p1, p2, controlPoints);
         if (dist <= margin) {
           return { p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, type: "path" };
         }
@@ -3313,30 +4426,54 @@ export class PointerTool extends BaseTool {
     if (!skeletonData?.contours?.length) return null;
 
     for (const contour of skeletonData.contours) {
-      // Find on-curve points
-      const onCurvePoints = [];
-      for (const pt of contour.points) {
-        if (!pt.type) {
-          onCurvePoints.push(pt);
+      const points = contour.points;
+
+      // Find on-curve point indices
+      const onCurveIndices = [];
+      for (let i = 0; i < points.length; i++) {
+        if (!points[i].type) {
+          onCurveIndices.push(i);
         }
       }
 
       // Check each segment
-      for (let i = 0; i < onCurvePoints.length - 1; i++) {
-        const p1 = onCurvePoints[i];
-        const p2 = onCurvePoints[i + 1];
+      for (let i = 0; i < onCurveIndices.length - 1; i++) {
+        const idx1 = onCurveIndices[i];
+        const idx2 = onCurveIndices[i + 1];
+        const p1 = points[idx1];
+        const p2 = points[idx2];
 
-        const dist = this._distanceToSegment(point, p1, p2);
+        // Collect control points between on-curve points
+        const controlPoints = [];
+        for (let j = idx1 + 1; j < idx2; j++) {
+          if (points[j].type) {
+            controlPoints.push(points[j]);
+          }
+        }
+
+        const dist = this._distanceToCurve(point, p1, p2, controlPoints);
         if (dist <= margin) {
           return { p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, type: "skeleton" };
         }
       }
 
       // Check closing segment if closed
-      if (contour.isClosed && onCurvePoints.length >= 2) {
-        const p1 = onCurvePoints[onCurvePoints.length - 1];
-        const p2 = onCurvePoints[0];
-        const dist = this._distanceToSegment(point, p1, p2);
+      if (contour.isClosed && onCurveIndices.length >= 2) {
+        const idx1 = onCurveIndices[onCurveIndices.length - 1];
+        const idx2 = onCurveIndices[0];
+        const p1 = points[idx1];
+        const p2 = points[idx2];
+
+        // Control points wrap around
+        const controlPoints = [];
+        for (let j = idx1 + 1; j < points.length; j++) {
+          if (points[j].type) controlPoints.push(points[j]);
+        }
+        for (let j = 0; j < idx2; j++) {
+          if (points[j].type) controlPoints.push(points[j]);
+        }
+
+        const dist = this._distanceToCurve(point, p1, p2, controlPoints);
         if (dist <= margin) {
           return { p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, type: "skeleton" };
         }
@@ -3344,6 +4481,69 @@ export class PointerTool extends BaseTool {
     }
 
     return null;
+  }
+
+  /**
+   * Calculate distance from point to a curve (bezier or line).
+   * Samples the curve if control points are present.
+   */
+  _distanceToCurve(point, p1, p2, controlPoints) {
+    if (!controlPoints || controlPoints.length === 0) {
+      // Straight line
+      return this._distanceToSegment(point, p1, p2);
+    }
+
+    // Sample the bezier curve and find minimum distance
+    const samples = 16;
+    let minDist = Infinity;
+
+    for (let i = 0; i < samples; i++) {
+      const t1 = i / samples;
+      const t2 = (i + 1) / samples;
+      const pt1 = this._evaluateBezier(t1, p1, p2, controlPoints);
+      const pt2 = this._evaluateBezier(t2, p1, p2, controlPoints);
+      const dist = this._distanceToSegment(point, pt1, pt2);
+      if (dist < minDist) {
+        minDist = dist;
+      }
+    }
+
+    return minDist;
+  }
+
+  /**
+   * Evaluate a bezier curve at parameter t.
+   */
+  _evaluateBezier(t, p1, p2, controlPoints) {
+    if (controlPoints.length === 2) {
+      // Cubic bezier
+      const cp1 = controlPoints[0];
+      const cp2 = controlPoints[1];
+      const mt = 1 - t;
+      const mt2 = mt * mt;
+      const mt3 = mt2 * mt;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      return {
+        x: mt3 * p1.x + 3 * mt2 * t * cp1.x + 3 * mt * t2 * cp2.x + t3 * p2.x,
+        y: mt3 * p1.y + 3 * mt2 * t * cp1.y + 3 * mt * t2 * cp2.y + t3 * p2.y,
+      };
+    } else if (controlPoints.length === 1) {
+      // Quadratic bezier
+      const cp = controlPoints[0];
+      const mt = 1 - t;
+      const mt2 = mt * mt;
+      const t2 = t * t;
+      return {
+        x: mt2 * p1.x + 2 * mt * t * cp.x + t2 * p2.x,
+        y: mt2 * p1.y + 2 * mt * t * cp.y + t2 * p2.y,
+      };
+    }
+    // Fallback: straight line
+    return {
+      x: p1.x + t * (p2.x - p1.x),
+      y: p1.y + t * (p2.y - p1.y),
+    };
   }
 
   /**
@@ -3399,8 +4599,7 @@ export class PointerTool extends BaseTool {
       this.measureMode = false;
       this.sceneModel.measureMode = false;
       this.sceneModel.measureHoverSegment = null;
-      this.sceneModel.measureSelectedPoints = [];
-      this.sceneModel.measureClickDirect = false;
+      this.sceneModel.measureHoverRibPoint = null;
       if (this._boundKeyUp) {
         window.removeEventListener("keyup", this._boundKeyUp);
         this._boundKeyUp = null;

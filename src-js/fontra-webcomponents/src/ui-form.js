@@ -521,6 +521,9 @@ export class Form extends SimpleElement {
     if (fieldItem.step !== undefined) {
       rangeElement.step = fieldItem.step;
     }
+    if (fieldItem.allowInputBeyondRange) {
+      rangeElement.allowInputBeyondRange = true;
+    }
 
     let checkboxElement;
     if (fieldItem.hasCheckBox) {

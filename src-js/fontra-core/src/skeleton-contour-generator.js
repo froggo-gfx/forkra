@@ -45,6 +45,153 @@ export function getPointHalfWidth(point, defaultWidth, side) {
   return defaultWidth / 2;
 }
 
+/**
+ * Apply nudge offset to a rib point position.
+ * Nudge moves the point along the tangent direction (perpendicular to normal).
+ * @param {Object} ribPoint - The rib point {x, y} to modify
+ * @param {Object} skeletonPoint - The skeleton point (may have nudge values)
+ * @param {Object} normal - The normal vector at this point
+ * @param {string} side - "left" or "right"
+ * @param {number} halfWidth - The half-width for this side (don't apply nudge if near 0)
+ * @returns {Object} Modified rib point {x, y}
+ */
+function applyNudgeToRibPoint(ribPoint, skeletonPoint, normal, side, halfWidth) {
+  // Don't apply nudge if width is near 0 (single-sided mode - this side matches skeleton)
+  if (halfWidth !== undefined && halfWidth < 0.5) {
+    return ribPoint;
+  }
+
+  // Check per-side editable flag
+  const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+  if (!skeletonPoint?.[editableKey]) {
+    return ribPoint;
+  }
+
+  const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+  const nudge = skeletonPoint[nudgeKey];
+
+  if (nudge === undefined || nudge === 0) {
+    return ribPoint;
+  }
+
+  // Tangent is perpendicular to normal (rotate 90 CCW)
+  const tangent = { x: -normal.y, y: normal.x };
+
+  return {
+    x: Math.round(ribPoint.x + tangent.x * nudge),
+    y: Math.round(ribPoint.y + tangent.y * nudge),
+  };
+}
+
+/**
+ * Get the skeleton handle direction for a given segment endpoint.
+ * @param {Object} segment - The segment containing the on-curve point
+ * @param {string} position - "start" or "end" (which end of segment)
+ * @param {string} handleType - "in" or "out" (which direction from on-curve)
+ * @returns {Object|null} Normalized direction vector {x, y} or null if no handle
+ */
+function getSkeletonHandleDirection(segment, position, handleType) {
+  if (segment.controlPoints.length === 0) {
+    // Line segment - no handles
+    return null;
+  }
+
+  let onCurvePoint, controlPoint;
+
+  if (position === "start" && handleType === "out") {
+    // Outgoing handle from start = first control point
+    onCurvePoint = segment.startPoint;
+    controlPoint = segment.controlPoints[0];
+  } else if (position === "end" && handleType === "in") {
+    // Incoming handle to end = last control point
+    onCurvePoint = segment.endPoint;
+    controlPoint = segment.controlPoints[segment.controlPoints.length - 1];
+  } else {
+    // Other combinations not handled here (would need previous/next segment)
+    return null;
+  }
+
+  if (!controlPoint) return null;
+
+  const dir = {
+    x: controlPoint.x - onCurvePoint.x,
+    y: controlPoint.y - onCurvePoint.y,
+  };
+  const length = Math.hypot(dir.x, dir.y);
+
+  if (length < 0.001) return null;
+
+  const normalized = { x: dir.x / length, y: dir.y / length };
+  return normalized;
+}
+
+/**
+ * Apply handle offset to a generated control point position.
+ * Supports both 2D offsets (X/Y) and legacy 1D offsets (along skeleton handle direction).
+ * In "detached" mode, offsets are absolute positions relative to the rib point,
+ * independent of skeleton handle lengths.
+ * @param {Object} controlPoint - The generated control point {x, y}
+ * @param {Object} skeletonPoint - The skeleton on-curve point (may have handle offset values)
+ * @param {Object} skeletonHandleDir - Normalized direction of skeleton handle
+ * @param {string} side - "left" or "right"
+ * @param {string} handleType - "in" or "out" (incoming or outgoing handle)
+ * @param {Object} ribPoint - Optional rib point position {x, y} for detached mode
+ * @returns {Object} Modified control point {x, y}
+ */
+function applyHandleOffsetToControlPoint(controlPoint, skeletonPoint, skeletonHandleDir, side, handleType, ribPoint = null) {
+  // Check per-side editable flag
+  const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+  if (!skeletonPoint?.[editableKey]) {
+    return controlPoint;
+  }
+
+  // Check if handles are detached (absolute positioning)
+  const detachedKey = side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+  const isDetached = skeletonPoint[detachedKey];
+
+  // 2D offset keys (new format for precise interpolation)
+  const offsetKeyX = side === "left"
+    ? (handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+    : (handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+  const offsetKeyY = side === "left"
+    ? (handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+    : (handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+
+  // Legacy 1D offset key (backwards compatibility)
+  const offset1DKey = side === "left"
+    ? (handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
+    : (handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
+
+  const offset2DX = skeletonPoint[offsetKeyX];
+  const offset2DY = skeletonPoint[offsetKeyY];
+  const offset1D = skeletonPoint[offset1DKey];
+
+  // In detached mode with 2D offsets, use ribPoint as base (absolute positioning)
+  if (isDetached && ribPoint && (offset2DX !== undefined || offset2DY !== undefined)) {
+    return {
+      x: Math.round(ribPoint.x + (offset2DX || 0)),
+      y: Math.round(ribPoint.y + (offset2DY || 0)),
+    };
+  }
+
+  // Priority: 2D offset if present, else 1D (relative to controlPoint)
+  if (offset2DX !== undefined || offset2DY !== undefined) {
+    return {
+      x: Math.round(controlPoint.x + (offset2DX || 0)),
+      y: Math.round(controlPoint.y + (offset2DY || 0)),
+    };
+  }
+
+  if (offset1D !== undefined && offset1D !== 0) {
+    return {
+      x: Math.round(controlPoint.x + skeletonHandleDir.x * offset1D),
+      y: Math.round(controlPoint.y + skeletonHandleDir.y * offset1D),
+    };
+  }
+
+  return controlPoint;
+}
+
 // Constants for offset curve simplification
 const SIMPLIFY_OFFSET_CURVES = true;
 const SAMPLES_PER_CURVE = 5;
@@ -810,16 +957,20 @@ function generateOffsetPointsForSegment(
 
       // Copy smooth property from skeleton point, round to UPM grid
       // Use per-point half-widths for left and right sides
-      left.push({
+      // Apply nudge offset if point is editable
+      let startLeftPt = {
         x: Math.round(segment.startPoint.x + startNormal.x * startLeftHW),
         y: Math.round(segment.startPoint.y + startNormal.y * startLeftHW),
-        smooth: segment.startPoint.smooth,
-      });
-      right.push({
+      };
+      startLeftPt = applyNudgeToRibPoint(startLeftPt, segment.startPoint, startNormal, "left", startLeftHW);
+      left.push({ ...startLeftPt, smooth: segment.startPoint.smooth });
+
+      let startRightPt = {
         x: Math.round(segment.startPoint.x - startNormal.x * startRightHW),
         y: Math.round(segment.startPoint.y - startNormal.y * startRightHW),
-        smooth: segment.startPoint.smooth,
-      });
+      };
+      startRightPt = applyNudgeToRibPoint(startRightPt, segment.startPoint, startNormal, "right", startRightHW);
+      right.push({ ...startRightPt, smooth: segment.startPoint.smooth });
     }
 
     // Add end point offset:
@@ -836,16 +987,20 @@ function generateOffsetPointsForSegment(
 
       // Copy smooth property from skeleton point, round to UPM grid
       // Use per-point half-widths for left and right sides
-      left.push({
+      // Apply nudge offset if point is editable
+      let endLeftPt = {
         x: Math.round(segment.endPoint.x + endNormal.x * endLeftHW),
         y: Math.round(segment.endPoint.y + endNormal.y * endLeftHW),
-        smooth: segment.endPoint.smooth,
-      });
-      right.push({
+      };
+      endLeftPt = applyNudgeToRibPoint(endLeftPt, segment.endPoint, endNormal, "left", endLeftHW);
+      left.push({ ...endLeftPt, smooth: segment.endPoint.smooth });
+
+      let endRightPt = {
         x: Math.round(segment.endPoint.x - endNormal.x * endRightHW),
         y: Math.round(segment.endPoint.y - endNormal.y * endRightHW),
-        smooth: segment.endPoint.smooth,
-      });
+      };
+      endRightPt = applyNudgeToRibPoint(endRightPt, segment.endPoint, endNormal, "right", endRightHW);
+      right.push({ ...endRightPt, smooth: segment.endPoint.smooth });
     }
   } else {
     // Bezier segment - use bezier.offset() for mathematically correct offset
@@ -893,25 +1048,34 @@ function generateOffsetPointsForSegment(
     const offsetRightCurves = bezier.offset(avgRightHW);
 
     // Fixed endpoint positions (using corner-aware normals and per-point widths), rounded to UPM grid
-    const fixedStartLeft = {
+    // Apply nudge offset if points are editable
+    let fixedStartLeft = {
       x: Math.round(segment.startPoint.x + startNormal.x * startLeftHW),
       y: Math.round(segment.startPoint.y + startNormal.y * startLeftHW),
     };
-    const fixedStartRight = {
+    fixedStartLeft = applyNudgeToRibPoint(fixedStartLeft, segment.startPoint, startNormal, "left", startLeftHW);
+
+    let fixedStartRight = {
       x: Math.round(segment.startPoint.x - startNormal.x * startRightHW),
       y: Math.round(segment.startPoint.y - startNormal.y * startRightHW),
     };
-    const fixedEndLeft = {
+    fixedStartRight = applyNudgeToRibPoint(fixedStartRight, segment.startPoint, startNormal, "right", startRightHW);
+
+    let fixedEndLeft = {
       x: Math.round(segment.endPoint.x + endNormal.x * endLeftHW),
       y: Math.round(segment.endPoint.y + endNormal.y * endLeftHW),
     };
-    const fixedEndRight = {
+    fixedEndLeft = applyNudgeToRibPoint(fixedEndLeft, segment.endPoint, endNormal, "left", endLeftHW);
+
+    let fixedEndRight = {
       x: Math.round(segment.endPoint.x - endNormal.x * endRightHW),
       y: Math.round(segment.endPoint.y - endNormal.y * endRightHW),
     };
+    fixedEndRight = applyNudgeToRibPoint(fixedEndRight, segment.endPoint, endNormal, "right", endRightHW);
 
     // Helper to add offset curves to output array
-    const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd, sideHalfWidth) => {
+    const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd, sideHalfWidth, isLeftSide) => {
+      const side = isLeftSide ? "left" : "right";
       // When halfWidth is near zero, contour should exactly match skeleton
       // Copy control points directly instead of using offset curves
       if (sideHalfWidth < 0.5 && segment.controlPoints.length > 0) {
@@ -965,14 +1129,29 @@ function generateOffsetPointsForSegment(
         const h2Offset = { x: handle2.x - origEnd.x, y: handle2.y - origEnd.y };
 
         // Apply handles relative to fixed positions
-        const adjustedHandle1 = {
+        let adjustedHandle1 = {
           x: Math.round(fixedStart.x + h1Offset.x),
           y: Math.round(fixedStart.y + h1Offset.y),
         };
-        const adjustedHandle2 = {
+        let adjustedHandle2 = {
           x: Math.round(fixedEnd.x + h2Offset.x),
           y: Math.round(fixedEnd.y + h2Offset.y),
         };
+
+        // Apply handle offsets if the skeleton points are editable
+        const startHandleDir = getSkeletonHandleDirection(segment, "start", "out");
+        const endHandleDir = getSkeletonHandleDirection(segment, "end", "in");
+
+        if (startHandleDir) {
+          adjustedHandle1 = applyHandleOffsetToControlPoint(
+            adjustedHandle1, segment.startPoint, startHandleDir, side, "out", fixedStart
+          );
+        }
+        if (endHandleDir) {
+          adjustedHandle2 = applyHandleOffsetToControlPoint(
+            adjustedHandle2, segment.endPoint, endHandleDir, side, "in", fixedEnd
+          );
+        }
 
         output.push({ x: adjustedHandle1.x, y: adjustedHandle1.y, type: "cubic" });
         output.push({ x: adjustedHandle2.x, y: adjustedHandle2.y, type: "cubic" });
@@ -1024,14 +1203,41 @@ function generateOffsetPointsForSegment(
           const h2Offset = { x: handle2.x - origEnd.x, y: handle2.y - origEnd.y };
 
           // Apply handles relative to actual positions
-          output.push({
+          let adjustedH1 = {
             x: Math.round(currentStart.x + h1Offset.x),
             y: Math.round(currentStart.y + h1Offset.y),
+          };
+          let adjustedH2 = {
+            x: Math.round(currentEnd.x + h2Offset.x),
+            y: Math.round(currentEnd.y + h2Offset.y),
+          };
+
+          // Apply handle offsets for first and last curves
+          if (isFirstCurve) {
+            const startHandleDir = getSkeletonHandleDirection(segment, "start", "out");
+            if (startHandleDir) {
+              adjustedH1 = applyHandleOffsetToControlPoint(
+                adjustedH1, segment.startPoint, startHandleDir, side, "out", fixedStart
+              );
+            }
+          }
+          if (isLastCurve) {
+            const endHandleDir = getSkeletonHandleDirection(segment, "end", "in");
+            if (endHandleDir) {
+              adjustedH2 = applyHandleOffsetToControlPoint(
+                adjustedH2, segment.endPoint, endHandleDir, side, "in", fixedEnd
+              );
+            }
+          }
+
+          output.push({
+            x: adjustedH1.x,
+            y: adjustedH1.y,
             type: "cubic",
           });
           output.push({
-            x: Math.round(currentEnd.x + h2Offset.x),
-            y: Math.round(currentEnd.y + h2Offset.y),
+            x: adjustedH2.x,
+            y: adjustedH2.y,
             type: "cubic",
           });
         } else if (pts.length === 3) {
@@ -1091,7 +1297,8 @@ function generateOffsetPointsForSegment(
       shouldAddEnd,
       segment.startPoint.smooth,
       segment.endPoint.smooth,
-      avgLeftHW
+      avgLeftHW,
+      true  // isLeftSide
     );
 
     addOffsetCurves(
@@ -1103,7 +1310,8 @@ function generateOffsetPointsForSegment(
       shouldAddEnd,
       segment.startPoint.smooth,
       segment.endPoint.smooth,
-      avgRightHW
+      avgRightHW,
+      false  // isLeftSide
     );
   }
 

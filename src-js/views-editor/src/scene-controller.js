@@ -1474,6 +1474,17 @@ export class SceneController {
 
     const layerName = sourceIdentifier;
 
+    // Find skeleton customData from an existing source layer to copy
+    let sourceCustomData = null;
+    for (const existingLayerName of Object.keys(varGlyph.glyph.layers)) {
+      const existingLayer = varGlyph.glyph.layers[existingLayerName];
+      if (existingLayer?.customData?.["fontra.skeleton"]) {
+        // Deep clone the customData to avoid sharing references
+        sourceCustomData = JSON.parse(JSON.stringify(existingLayer.customData));
+        break;
+      }
+    }
+
     const addSourceChanges = recordChanges(varGlyph.glyph, (glyph) => {
       glyph.sources.push(
         GlyphSource.fromObject({
@@ -1483,7 +1494,12 @@ export class SceneController {
           locationBase: sourceIdentifier,
         })
       );
-      glyph.layers[layerName] = Layer.fromObject({ glyph: instance });
+      const newLayer = Layer.fromObject({ glyph: instance });
+      // Copy skeleton customData if found
+      if (sourceCustomData) {
+        newLayer.customData = sourceCustomData;
+      }
+      glyph.layers[layerName] = newLayer;
     });
     this.sceneSettings.editingLayers = {
       [layerName]: varGlyph.getSparseLocationStringForSourceLocation(

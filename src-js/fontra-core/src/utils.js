@@ -238,7 +238,7 @@ export function parseSelection(selection) {
 
     if (result[tp] === undefined) {
       result[tp] =
-        tp === "skeletonPoint" || tp === "skeletonHandle" || tp === "skeletonSegment" || tp === "skeletonRibPoint"
+        tp === "skeletonPoint" || tp === "skeletonHandle" || tp === "skeletonSegment" || tp === "skeletonRibPoint" || tp === "editableGeneratedPoint"
           ? new Set()
           : [];
     }
@@ -255,6 +255,9 @@ export function parseSelection(selection) {
     } else if (tp === "skeletonRibPoint" && parts.length === 4) {
       // Format: "skeletonRibPoint/contourIndex/pointIndex/left|right"
       result[tp].add(`${parts[1]}/${parts[2]}/${parts[3]}`);
+    } else if (tp === "editableGeneratedPoint" && parts.length === 5) {
+      // Format: "editableGeneratedPoint/pathPointIndex/skeletonContourIndex/skeletonPointIndex/side"
+      result[tp].add(`${parts[1]}/${parts[2]}/${parts[3]}/${parts[4]}`);
     } else if (parts.length === 2) {
       // Standard format: "type/index"
       result[tp].push(parseInt(parts[1]));

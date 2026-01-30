@@ -2183,37 +2183,54 @@ registerVisualizationLayerDefinition({
   zIndex: 650, // Above other layers
   screenParameters: {
     strokeWidth: 1,
-    fontSize: 11,
+    fontSize: 14,
     dashPattern: [4, 4],
-    pointRadius: 4,
   },
   colors: {
-    lineColor: "#FF6600",
     textColor: "#333",
-    textBgColor: "#FFFFFFCC",
-    projectionColor: "#0088FF",
-    selectedPointColor: "#FF0066",
+    textBgColor: "#FFFFFF",
+    textBorderColor: "rgba(0, 0, 0, 0.25)",
+    skeletonColor: "#0066FF",
+    pathColor: "#22AA44",
   },
   colorsDarkMode: {
-    lineColor: "#FF8833",
     textColor: "#EEE",
-    textBgColor: "#333333CC",
-    projectionColor: "#44AAFF",
-    selectedPointColor: "#FF4488",
+    textBgColor: "#333333",
+    textBorderColor: "rgba(255, 255, 255, 0.25)",
+    skeletonColor: "#4499FF",
+    pathColor: "#44CC66",
   },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     if (!model.measureMode) return;
 
-    const { measureHoverSegment, measureSelectedPoints, measureShowDirect, measureClickDirect } = model;
+    const { measureHoverSegment, measureHoverRibPoint, measureShowDirect } = model;
 
-    // 1. Draw segment hover measurement (Q+hover)
+    // Draw rib point width (Q+hover on rib point)
+    if (measureHoverRibPoint) {
+      const { x, y, width, leftWidth, rightWidth } = measureHoverRibPoint;
+      const isAsym = Math.abs(leftWidth - rightWidth) > 0.01;
+      const label = isAsym
+        ? `${leftWidth.toFixed(1)} | ${rightWidth.toFixed(1)}`
+        : width.toFixed(1);
+      drawMeasureLabel(context, x, y, label, parameters.skeletonColor, parameters);
+      return; // Don't show segment when over rib point
+    }
+
+    // Draw segment hover measurement (Q+hover)
     if (measureHoverSegment) {
-      const { p1, p2 } = measureHoverSegment;
+      const { p1, p2, type } = measureHoverSegment;
+      // Use skeleton color (blue) for skeleton segments, path color (green) for regular
+      const segmentColor = type === "skeleton" ? parameters.skeletonColor : parameters.pathColor;
 
       if (measureShowDirect) {
-        // Alt+Q: direct distance line
-        const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-        drawMeasureLine(context, p1, p2, dist.toFixed(1), parameters.lineColor, parameters);
+        // Alt+Q: direct distance line + angle
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const dist = Math.hypot(dx, dy);
+        let angle = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+        if (angle > 90) angle = 180 - angle;
+        const label = `${dist.toFixed(1)}  ${angle.toFixed(1)}°`;
+        drawMeasureLine(context, p1, p2, label, segmentColor, parameters);
       } else {
         // Q: projected distances (dx, dy)
         const dx = Math.abs(p2.x - p1.x);
@@ -2229,7 +2246,7 @@ registerVisualizationLayerDefinition({
             p1,
             cornerPoint,
             dx.toFixed(1),
-            parameters.projectionColor,
+            segmentColor,
             parameters
           );
         }
@@ -2240,60 +2257,9 @@ registerVisualizationLayerDefinition({
             cornerPoint,
             p2,
             dy.toFixed(1),
-            parameters.projectionColor,
+            segmentColor,
             parameters
           );
-        }
-      }
-    }
-
-    // 2. Draw distances between selected measure points (Q-click)
-    if (measureSelectedPoints?.length >= 1) {
-      // Highlight selected points
-      context.fillStyle = parameters.selectedPointColor;
-      for (const pt of measureSelectedPoints) {
-        fillRoundNode(context, pt, parameters.pointRadius * 2);
-      }
-
-      // Draw lines between consecutive points
-      if (measureSelectedPoints.length >= 2) {
-        for (let i = 0; i < measureSelectedPoints.length - 1; i++) {
-          const pt1 = measureSelectedPoints[i];
-          const pt2 = measureSelectedPoints[i + 1];
-
-          if (measureClickDirect) {
-            // Alt+Q-click: direct distance
-            const dist = Math.hypot(pt2.x - pt1.x, pt2.y - pt1.y);
-            drawMeasureLine(context, pt1, pt2, dist.toFixed(1), parameters.lineColor, parameters);
-          } else {
-            // Q-click: projected distances (dx, dy)
-            const dx = Math.abs(pt2.x - pt1.x);
-            const dy = Math.abs(pt2.y - pt1.y);
-            const cornerPoint = { x: pt2.x, y: pt1.y };
-
-            // Horizontal projection line (dx)
-            if (dx > 0.5) {
-              drawMeasureLine(
-                context,
-                pt1,
-                cornerPoint,
-                dx.toFixed(1),
-                parameters.projectionColor,
-                parameters
-              );
-            }
-            // Vertical projection line (dy)
-            if (dy > 0.5) {
-              drawMeasureLine(
-                context,
-                cornerPoint,
-                pt2,
-                dy.toFixed(1),
-                parameters.projectionColor,
-                parameters
-              );
-            }
-          }
         }
       }
     }
@@ -2315,26 +2281,73 @@ function drawMeasureLine(context, p1, p2, label, color, parameters) {
   context.save();
   context.scale(1, -1);
 
-  context.font = `${parameters.fontSize}px fontra-ui-regular, sans-serif`;
+  context.font = `500 ${parameters.fontSize}px fontra-ui-regular, sans-serif`;
   context.textAlign = "center";
   context.textBaseline = "middle";
 
   // Measure text for background
   const textWidth = context.measureText(label).width;
-  const padding = 3;
+  const padding = 4;
 
-  // Draw background
+  const bgX = midX - textWidth / 2 - padding;
+  const bgY = -midY - parameters.fontSize / 2 - padding;
+  const bgW = textWidth + padding * 2;
+  const bgH = parameters.fontSize + padding * 2;
+
+  // Draw background with rounded corners
+  const radius = 3;
+  context.beginPath();
+  context.roundRect(bgX, bgY, bgW, bgH, radius);
   context.fillStyle = parameters.textBgColor;
-  context.fillRect(
-    midX - textWidth / 2 - padding,
-    -midY - parameters.fontSize / 2 - padding,
-    textWidth + padding * 2,
-    parameters.fontSize + padding * 2
-  );
+  context.fill();
+
+  // Draw subtle border
+  context.strokeStyle = parameters.textBorderColor;
+  context.lineWidth = 1;
+  context.stroke();
 
   // Draw text
   context.fillStyle = parameters.textColor;
   context.fillText(label, midX, -midY);
+  context.restore();
+}
+
+function drawMeasureLabel(context, x, y, label, color, parameters) {
+  // Draw label at point with small offset above
+  const offsetY = 15;
+
+  context.save();
+  context.scale(1, -1);
+
+  context.font = `500 ${parameters.fontSize}px fontra-ui-regular, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  // Measure text for background
+  const textWidth = context.measureText(label).width;
+  const padding = 4;
+
+  const labelY = -y - offsetY;
+  const bgX = x - textWidth / 2 - padding;
+  const bgY = labelY - parameters.fontSize / 2 - padding;
+  const bgW = textWidth + padding * 2;
+  const bgH = parameters.fontSize + padding * 2;
+
+  // Draw background with rounded corners
+  const radius = 3;
+  context.beginPath();
+  context.roundRect(bgX, bgY, bgW, bgH, radius);
+  context.fillStyle = parameters.textBgColor;
+  context.fill();
+
+  // Draw subtle border
+  context.strokeStyle = parameters.textBorderColor;
+  context.lineWidth = 1;
+  context.stroke();
+
+  // Draw text
+  context.fillStyle = parameters.textColor;
+  context.fillText(label, x, labelY);
   context.restore();
 }
 

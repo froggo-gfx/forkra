@@ -1,19 +1,35 @@
 import { doPerformAction } from "@fontra/core/actions.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { ChangeCollector } from "@fontra/core/changes.js";
+import { getGlyphInfoFromGlyphName } from "@fontra/core/glyph-data.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
+import {
+  generateContoursFromSkeleton,
+  calculateNormalAtSkeletonPoint,
+  getPointHalfWidth,
+} from "@fontra/core/skeleton-contour-generator.js";
 import { parseSelection } from "@fontra/core/utils.js";
 import { packContour } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
 
-const SKELETON_DEFAULT_WIDTH_WIDE_KEY = "fontra.skeleton.defaultWidthWide";
-const SKELETON_DEFAULT_WIDTH_NARROW_KEY = "fontra.skeleton.defaultWidthNarrow";
 const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
-const DEFAULT_WIDTH_WIDE = 80;
-const DEFAULT_WIDTH_NARROW = 40;
+
+// Source width keys stored in source customData
+const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
+const SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY = "fontra.skeleton.capitalHorizontal";
+const SKELETON_WIDTH_CAPITAL_CONTRAST_KEY = "fontra.skeleton.capitalContrast";
+const SKELETON_WIDTH_LOWERCASE_BASE_KEY = "fontra.skeleton.lowercaseBase";
+const SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY = "fontra.skeleton.lowercaseHorizontal";
+const SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY = "fontra.skeleton.lowercaseContrast";
+
+const DEFAULT_WIDTH_CAPITAL_BASE = 60;
+const DEFAULT_WIDTH_CAPITAL_HORIZONTAL = 50;
+const DEFAULT_WIDTH_CAPITAL_CONTRAST = 40;
+const DEFAULT_WIDTH_LOWERCASE_BASE = 60;
+const DEFAULT_WIDTH_LOWERCASE_HORIZONTAL = 50;
+const DEFAULT_WIDTH_LOWERCASE_CONTRAST = 40;
 
 export default class SkeletonParametersPanel extends Panel {
   identifier = "skeleton-parameters";
@@ -107,25 +123,71 @@ export default class SkeletonParametersPanel extends Panel {
 
     const formContents = [];
 
-    // === SOURCE WIDTHS ===
+    // === GLYPH CASE INDICATOR ===
+    const glyphCase = this._getGlyphCase();
+    const glyphCaseLabel = glyphCase === "lower" ? "Lowercase" : "Uppercase";
     formContents.push({
       type: "header",
-      label: "Source Widths",
+      label: `Current glyph: ${glyphCaseLabel}`,
+    });
+
+    // === SOURCE WIDTHS: CAPITAL ===
+    formContents.push({
+      type: "header",
+      label: "Capital",
     });
 
     formContents.push({
       type: "edit-number",
-      key: "defaultSkeletonWidthWide",
-      label: "Wide",
-      value: this._getCurrentDefaultWidthWide(),
+      key: "capitalBase",
+      label: "Base",
+      value: this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE),
       minValue: 1,
     });
 
     formContents.push({
       type: "edit-number",
-      key: "defaultSkeletonWidthNarrow",
-      label: "Narrow",
-      value: this._getCurrentDefaultWidthNarrow(),
+      key: "capitalHorizontal",
+      label: "Horizontal",
+      value: this._getSourceWidth(SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY, DEFAULT_WIDTH_CAPITAL_HORIZONTAL),
+      minValue: 1,
+    });
+
+    formContents.push({
+      type: "edit-number",
+      key: "capitalContrast",
+      label: "Contrast",
+      value: this._getSourceWidth(SKELETON_WIDTH_CAPITAL_CONTRAST_KEY, DEFAULT_WIDTH_CAPITAL_CONTRAST),
+      minValue: 1,
+    });
+
+    // === SOURCE WIDTHS: LOWERCASE ===
+    formContents.push({
+      type: "header",
+      label: "Lowercase",
+    });
+
+    formContents.push({
+      type: "edit-number",
+      key: "lowercaseBase",
+      label: "Base",
+      value: this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_BASE_KEY, DEFAULT_WIDTH_LOWERCASE_BASE),
+      minValue: 1,
+    });
+
+    formContents.push({
+      type: "edit-number",
+      key: "lowercaseHorizontal",
+      label: "Horizontal",
+      value: this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY, DEFAULT_WIDTH_LOWERCASE_HORIZONTAL),
+      minValue: 1,
+    });
+
+    formContents.push({
+      type: "edit-number",
+      key: "lowercaseContrast",
+      label: "Contrast",
+      value: this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY, DEFAULT_WIDTH_LOWERCASE_CONTRAST),
       minValue: 1,
     });
 
@@ -345,21 +407,47 @@ export default class SkeletonParametersPanel extends Panel {
     let asymStates = new Set(); // Track asymmetric states across selection
     let forceHorizontalStates = new Set(); // Track forceHorizontal states
     let forceVerticalStates = new Set(); // Track forceVertical states
+    let hasSingleSided = false; // Track if any selected point is in single-sided contour
+    let singleSidedDirection = null; // Track single-sided direction ("left" or "right")
+
+    // Track editable states per side based on selected rib points
+    const selectedRibSides = this._getSelectedRibSides();
+    let editableStates = new Set();
+    let detachedStates = new Set(); // Track detached handle states
 
     if (hasSelection) {
-      const defaultWidth = this._getCurrentDefaultWidthWide();
+      const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
+      const defaultWidth = this._getSourceWidth(widthKey, widthFallback);
 
       // Collect all values from selected points
       const leftValues = [];
       const rightValues = [];
 
-      for (const { point } of selectedData.points) {
+      for (const { point, contourIdx, pointIdx } of selectedData.points) {
         const widths = this._getPointWidths(point, defaultWidth);
         leftValues.push(Math.round(widths.left));
         rightValues.push(Math.round(widths.right));
         asymStates.add(this._isAsymmetric(point));
         forceHorizontalStates.add(!!point.forceHorizontal);
         forceVerticalStates.add(!!point.forceVertical);
+
+        // Check if contour is single-sided
+        const contour = selectedData.skeletonData?.contours?.[contourIdx];
+        if (contour?.singleSided) {
+          hasSingleSided = true;
+          singleSidedDirection = contour.singleSidedDirection ?? "left";
+        }
+
+        // Collect editable and detached states for selected rib sides
+        const pointKey = `${contourIdx}/${pointIdx}`;
+        if (selectedRibSides.has(`${pointKey}/left`)) {
+          editableStates.add(!!point.leftEditable);
+          detachedStates.add(!!point.leftHandleDetached);
+        }
+        if (selectedRibSides.has(`${pointKey}/right`)) {
+          editableStates.add(!!point.rightEditable);
+          detachedStates.add(!!point.rightHandleDetached);
+        }
       }
 
       // Check if values are mixed
@@ -379,7 +467,8 @@ export default class SkeletonParametersPanel extends Panel {
       }
     } else {
       // No selection - show Source Width / 2
-      const defaultWide = this._getCurrentDefaultWidthWide();
+      const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
+      const defaultWide = this._getSourceWidth(widthKey, widthFallback);
       left = defaultWide / 2;
       right = defaultWide / 2;
     }
@@ -389,11 +478,13 @@ export default class SkeletonParametersPanel extends Panel {
     const isIndeterminate = asymStates.size > 1; // Mixed asym states
 
     // Header with Asymmetrical toggle
+    // Disabled for single-sided contours (asym doesn't make sense there)
     // When indeterminate, set checked=false so first click turns ON
     const checkbox = html.input({
       type: "checkbox",
       id: "asymmetrical-toggle",
       checked: isIndeterminate ? false : isAsym,
+      disabled: hasSingleSided,
       onchange: (e) => this._onAsymmetricalToggle(e.target.checked),
     });
     // Set indeterminate state after creation (can't be set via attribute)
@@ -406,28 +497,39 @@ export default class SkeletonParametersPanel extends Panel {
       label: "Point Parameters",
       auxiliaryElement: html.span({}, [
         checkbox,
-        html.label({ for: "asymmetrical-toggle", style: "margin-left: 4px" }, "Asym"),
+        html.label({
+          for: "asymmetrical-toggle",
+          style: `margin-left: 4px${hasSingleSided ? "; opacity: 0.5" : ""}`,
+          title: hasSingleSided ? "Asymmetric mode not available for single-sided contours" : undefined,
+        }, "Asym"),
       ]),
     });
 
     // Width fields (Left / Right) - show "mixed" placeholder if values differ
+    // In single-sided mode: active side shows full width, inactive side is disabled
+    const totalWidth = (left ?? 0) + (right ?? 0);
+    const leftDisabled = hasSingleSided && singleSidedDirection === "right";
+    const rightDisabled = hasSingleSided && singleSidedDirection === "left";
+
     formContents.push({
       type: "edit-number",
       key: "pointWidthLeft",
       label: "Left",
-      value: leftMixed ? null : Math.round(left),
+      value: leftMixed ? null : Math.round(leftDisabled ? 0 : (rightDisabled ? totalWidth : left)),
       placeholder: leftMixed ? "mixed" : undefined,
-      minValue: 1,
+      minValue: leftDisabled ? 0 : 1,
       allowEmptyField: leftMixed,
+      disabled: leftDisabled,
     });
     formContents.push({
       type: "edit-number",
       key: "pointWidthRight",
       label: "Right",
-      value: rightMixed ? null : Math.round(right),
+      value: rightMixed ? null : Math.round(rightDisabled ? 0 : (leftDisabled ? totalWidth : right)),
       placeholder: rightMixed ? "mixed" : undefined,
-      minValue: 1,
+      minValue: rightDisabled ? 0 : 1,
       allowEmptyField: rightMixed,
+      disabled: rightDisabled,
     });
 
     // Distribution slider (only in asymmetric mode)
@@ -457,6 +559,7 @@ export default class SkeletonParametersPanel extends Panel {
       defaultValue: 1.0,
       maxValue: 2.0,
       step: 0.2,
+      allowInputBeyondRange: true,
     });
 
     // Apply Scale button
@@ -530,18 +633,168 @@ export default class SkeletonParametersPanel extends Panel {
       },
     });
 
+    // === EDITABLE RIB POINTS ===
+    // Only show when rib points are selected (not just skeleton points)
+    if (selectedRibSides.size > 0) {
+      formContents.push({ type: "spacer" });
+
+      const isEditable = editableStates.has(true) && editableStates.size === 1;
+      const isEditableIndeterminate = editableStates.size > 1;
+
+      const editableCheckbox = html.input({
+        type: "checkbox",
+        id: "editable-toggle",
+        checked: isEditableIndeterminate ? false : isEditable,
+        onchange: (e) => this._onEditableToggle(e.target.checked, selectedRibSides),
+      });
+      if (isEditableIndeterminate) {
+        editableCheckbox.indeterminate = true;
+      }
+
+      // Detach Handles checkbox - only visible when editable
+      const isDetached = detachedStates.has(true) && detachedStates.size === 1;
+      const isDetachedIndeterminate = detachedStates.size > 1;
+      const showDetachOption = isEditable || isEditableIndeterminate;
+
+      const detachCheckbox = showDetachOption ? html.input({
+        type: "checkbox",
+        id: "detach-handles-toggle",
+        checked: isDetachedIndeterminate ? false : isDetached,
+        onchange: (e) => this._onDetachHandlesToggle(e.target.checked, selectedRibSides),
+      }) : null;
+      if (detachCheckbox && isDetachedIndeterminate) {
+        detachCheckbox.indeterminate = true;
+      }
+
+      // Check if any selected editable rib points have nudge values or handle offsets
+      const hasNudge = this._selectedRibPointsHaveNudge(selectedRibSides);
+      const hasHandleOffsets = this._selectedRibPointsHaveHandleOffsets(selectedRibSides);
+
+      // Build reset buttons array
+      const resetButtons = [];
+      if ((isEditable || isEditableIndeterminate) && hasNudge) {
+        resetButtons.push(
+          html.button(
+            {
+              style: "font-size: 11px; padding: 2px 6px; margin-right: 4px;",
+              onclick: () => this._onResetRibPosition(selectedRibSides),
+            },
+            "Reset"
+          )
+        );
+      }
+      if ((isEditable || isEditableIndeterminate) && hasHandleOffsets) {
+        resetButtons.push(
+          html.button(
+            {
+              style: "font-size: 11px; padding: 2px 6px;",
+              onclick: () => this._onResetHandleOffsets(selectedRibSides),
+            },
+            "Reset Handles"
+          )
+        );
+      }
+
+      formContents.push({
+        type: "universal-row",
+        field1: {
+          type: "auxiliaryElement",
+          key: "editable",
+          auxiliaryElement: html.span({}, [
+            editableCheckbox,
+            html.label({ for: "editable-toggle", style: "margin-left: 4px" }, "Editable"),
+          ]),
+        },
+        field2: {
+          type: "auxiliaryElement",
+          key: "detachHandles",
+          auxiliaryElement: showDetachOption
+            ? html.span({}, [
+                detachCheckbox,
+                html.label({
+                  for: "detach-handles-toggle",
+                  style: "margin-left: 4px",
+                  title: "Detach handle lengths from skeleton (absolute positioning)",
+                }, "Detach"),
+              ])
+            : html.span(),
+        },
+        field3: {
+          type: "auxiliaryElement",
+          key: "resetButtons",
+          auxiliaryElement: resetButtons.length > 0
+            ? html.span({}, resetButtons)
+            : html.span(),
+        },
+      });
+    }
+
+    // === SKELETON POINT RIB CONTROLS ===
+    // Show when skeleton points are selected (not rib points) and they have editable ribs
+    if (hasSelection && selectedRibSides.size === 0) {
+      const ribEditInfo = this._getSkeletonPointsRibEditInfo(selectedData);
+
+      if (ribEditInfo.hasEditableRibs) {
+        formContents.push({ type: "spacer" });
+
+        const buttons = [];
+
+        // Reset Ribs button - only if there are nudged ribs
+        if (ribEditInfo.hasNudgedRibs) {
+          buttons.push(
+            html.button(
+              {
+                style: "font-size: 11px; padding: 2px 6px; margin-right: 6px;",
+                onclick: () => this._onResetSkeletonRibs(selectedData),
+              },
+              "Reset Ribs"
+            )
+          );
+        }
+
+        // Make Ribs Uneditable button - always when there are editable ribs
+        buttons.push(
+          html.button(
+            {
+              style: "font-size: 11px; padding: 2px 6px;",
+              onclick: () => this._onMakeRibsUneditable(selectedData),
+            },
+            "Make Uneditable"
+          )
+        );
+
+        formContents.push({
+          type: "universal-row",
+          field1: {
+            type: "auxiliaryElement",
+            key: "ribControls",
+            auxiliaryElement: html.span({}, buttons),
+          },
+          field2: { type: "spacer" },
+          field3: { type: "spacer" },
+        });
+      }
+    }
+
     this.infoForm.setFieldDescriptions(formContents);
 
     this.infoForm.onFieldChange = async (fieldItem, value, valueStream) => {
-      if (fieldItem.key === "defaultSkeletonWidthWide") {
-        await this._setDefaultSkeletonWidth(SKELETON_DEFAULT_WIDTH_WIDE_KEY, value);
-      } else if (fieldItem.key === "defaultSkeletonWidthNarrow") {
-        await this._setDefaultSkeletonWidth(SKELETON_DEFAULT_WIDTH_NARROW_KEY, value);
+      const sourceWidthKeyMap = {
+        capitalBase: SKELETON_WIDTH_CAPITAL_BASE_KEY,
+        capitalHorizontal: SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY,
+        capitalContrast: SKELETON_WIDTH_CAPITAL_CONTRAST_KEY,
+        lowercaseBase: SKELETON_WIDTH_LOWERCASE_BASE_KEY,
+        lowercaseHorizontal: SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY,
+        lowercaseContrast: SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY,
+      };
+      if (sourceWidthKeyMap[fieldItem.key]) {
+        await this._setDefaultSkeletonWidth(sourceWidthKeyMap[fieldItem.key], value);
       } else if (fieldItem.key === "pointWidthLeft" || fieldItem.key === "pointWidthRight") {
         await this._setPointWidth(fieldItem.key, value);
       } else if (fieldItem.key === "pointWidthScale") {
         // Protect scale slider from form rebuilds during drag
         if (valueStream) {
+          // Slider drag: just update value, wait for "Apply Scale" button
           this._isDraggingSlider = true;
           try {
             for await (const v of valueStream) {
@@ -551,7 +804,9 @@ export default class SkeletonParametersPanel extends Panel {
             this._isDraggingSlider = false;
           }
         } else {
+          // Direct input (Enter key): apply immediately
           this.pointParameters.scaleValue = value;
+          await this._applyScaleToSelectedPoints();
         }
       } else if (fieldItem.key === "pointDistribution") {
         // For distribution slider
@@ -565,9 +820,10 @@ export default class SkeletonParametersPanel extends Panel {
             let maxLeft = 0;
             let maxRight = 0;
 
+            const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
             for (const { contourIdx, pointIdx, point } of selectedData.points) {
               const key = `${contourIdx}/${pointIdx}`;
-              const defaultWidth = this._getCurrentDefaultWidthWide();
+              const defaultWidth = this._getSourceWidth(widthKey, widthFallback);
               const left = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
               const right = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
 
@@ -615,27 +871,46 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Get the current default wide skeleton width from the active source's customData.
-   * @returns {number} The default wide width value
+   * Get a source width value from the active source's customData.
+   * @param {string} key - The customData key
+   * @param {number} fallback - Default value if not set
+   * @returns {number} The width value
    */
-  _getCurrentDefaultWidthWide() {
+  _getSourceWidth(key, fallback) {
     const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
-    if (!sourceIdentifier) return DEFAULT_WIDTH_WIDE;
+    if (!sourceIdentifier) return fallback;
 
     const source = this.fontController.sources[sourceIdentifier];
-    return source?.customData?.[SKELETON_DEFAULT_WIDTH_WIDE_KEY] ?? DEFAULT_WIDTH_WIDE;
+    return source?.customData?.[key] ?? fallback;
   }
 
   /**
-   * Get the current default narrow skeleton width from the active source's customData.
-   * @returns {number} The default narrow width value
+   * Determine if the current glyph is lowercase or uppercase.
+   * @returns {"lower" | "upper"} The glyph case
    */
-  _getCurrentDefaultWidthNarrow() {
-    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
-    if (!sourceIdentifier) return DEFAULT_WIDTH_NARROW;
+  _getGlyphCase() {
+    const glyphName = this.sceneController.sceneSettings.selectedGlyphName;
+    if (!glyphName) return "upper";
+    const info = getGlyphInfoFromGlyphName(glyphName);
+    return info?.case === "lower" ? "lower" : "upper";
+  }
 
-    const source = this.fontController.sources[sourceIdentifier];
-    return source?.customData?.[SKELETON_DEFAULT_WIDTH_NARROW_KEY] ?? DEFAULT_WIDTH_NARROW;
+  /**
+   * Get the default base width key and value for the current glyph case.
+   * @returns {{ key: string, fallback: number }} The width key and default value
+   */
+  _getDefaultWidthForGlyph() {
+    const glyphCase = this._getGlyphCase();
+    if (glyphCase === "lower") {
+      return {
+        key: SKELETON_WIDTH_LOWERCASE_BASE_KEY,
+        fallback: DEFAULT_WIDTH_LOWERCASE_BASE,
+      };
+    }
+    return {
+      key: SKELETON_WIDTH_CAPITAL_BASE_KEY,
+      fallback: DEFAULT_WIDTH_CAPITAL_BASE,
+    };
   }
 
   /**
@@ -857,6 +1132,15 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
+   * Get the sides of selected rib points.
+   * @returns {Set} Set of "contourIdx/pointIdx/side" strings for selected rib points
+   */
+  _getSelectedRibSides() {
+    const { skeletonRibPoint } = parseSelection(this.sceneController.selection);
+    return skeletonRibPoint || new Set();
+  }
+
+  /**
    * Compute a signature representing current panel state.
    * Used to skip unnecessary form rebuilds.
    */
@@ -864,7 +1148,7 @@ export default class SkeletonParametersPanel extends Panel {
     const parts = [];
 
     // Source widths
-    parts.push(`w:${this._getCurrentDefaultWidthWide()},${this._getCurrentDefaultWidthNarrow()}`);
+    parts.push(`w:${this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE)},${this._getSourceWidth(SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY, DEFAULT_WIDTH_CAPITAL_HORIZONTAL)},${this._getSourceWidth(SKELETON_WIDTH_CAPITAL_CONTRAST_KEY, DEFAULT_WIDTH_CAPITAL_CONTRAST)},${this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_BASE_KEY, DEFAULT_WIDTH_LOWERCASE_BASE)},${this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY, DEFAULT_WIDTH_LOWERCASE_HORIZONTAL)},${this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY, DEFAULT_WIDTH_LOWERCASE_CONTRAST)}`);
 
     // Single-sided state
     parts.push(`ss:${this._getCurrentSingleSided()},${this._getCurrentSingleSidedDirection()}`);
@@ -873,14 +1157,24 @@ export default class SkeletonParametersPanel extends Panel {
     const sel = this.sceneController.selection;
     parts.push(`s:${sel ? sel.size : 0}`);
 
-    // Selected skeleton points state
+    // Glyph case
+    const glyphCase = this._getGlyphCase();
+    parts.push(`gc:${glyphCase}`);
+
+    // Selected skeleton points state (including editable and nudge)
     const selectedData = this._getSelectedSkeletonPoints();
     if (selectedData) {
-      const defaultWidth = this._getCurrentDefaultWidthWide();
+      const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
+      const defaultWidth = this._getSourceWidth(widthKey, widthFallback);
       for (const { contourIdx, pointIdx, point } of selectedData.points) {
         const w = this._getPointWidths(point, defaultWidth);
         const isAsym = this._isAsymmetric(point);
-        parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)},${isAsym}`);
+        // Include editable and nudge state for Reset button visibility
+        const leftEdit = point.leftEditable ? 1 : 0;
+        const rightEdit = point.rightEditable ? 1 : 0;
+        const leftNudge = point.leftNudge || 0;
+        const rightNudge = point.rightNudge || 0;
+        parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge}`);
       }
     }
 
@@ -979,7 +1273,7 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
+          const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
 
           if (checked) {
             // Convert to asymmetric: split width into leftWidth/rightWidth
@@ -1193,6 +1487,752 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
+   * Toggle Editable mode for selected rib points.
+   * When enabled, rib points can be nudged along the tangent direction
+   * and their handle lengths can be adjusted.
+   * @param {boolean} checked - Whether to enable or disable editable mode
+   * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
+   */
+  async _onEditableToggle(checked, selectedRibSides) {
+    if (!selectedRibSides || selectedRibSides.size === 0) {
+      this.update();
+      return;
+    }
+
+    // Parse selected rib sides into a map: "contourIdx/pointIdx" -> Set of sides
+    const pointSidesMap = new Map();
+    for (const key of selectedRibSides) {
+      const parts = key.split("/");
+      const pointKey = `${parts[0]}/${parts[1]}`;
+      const side = parts[2];
+      if (!pointSidesMap.has(pointKey)) {
+        pointSidesMap.set(pointKey, new Set());
+      }
+      pointSidesMap.get(pointKey).add(side);
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const [pointKey, sides] of pointSidesMap) {
+          const [contourIdx, pointIdx] = pointKey.split("/").map(Number);
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          // Update editable state for each selected side
+          for (const side of sides) {
+            const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+            const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+            const handleInKey = side === "left" ? "leftHandleIn" : "rightHandleIn";
+            const handleOutKey = side === "left" ? "leftHandleOut" : "rightHandleOut";
+            const handleInAngleKey = side === "left" ? "leftHandleInAngle" : "rightHandleInAngle";
+            const handleOutAngleKey = side === "left" ? "leftHandleOutAngle" : "rightHandleOutAngle";
+            // Legacy 1D handle offset keys
+            const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+            const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+            // New 2D handle offset keys
+            const handleInOffsetXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+            const handleInOffsetYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+            const handleOutOffsetXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+            const handleOutOffsetYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+            // Saved keys for preserving values when toggling editable off/on
+            const nudgeSavedKey = side === "left" ? "leftNudgeSaved" : "rightNudgeSaved";
+            const handleInOffsetSavedKey = side === "left" ? "leftHandleInOffsetSaved" : "rightHandleInOffsetSaved";
+            const handleOutOffsetSavedKey = side === "left" ? "leftHandleOutOffsetSaved" : "rightHandleOutOffsetSaved";
+
+            if (checked) {
+              point[editableKey] = true;
+              // Restore saved values if they exist
+              if (point[nudgeSavedKey] !== undefined) {
+                point[nudgeKey] = point[nudgeSavedKey];
+                delete point[nudgeSavedKey];
+              }
+              if (point[handleInOffsetSavedKey] !== undefined) {
+                point[handleInOffsetKey] = point[handleInOffsetSavedKey];
+                delete point[handleInOffsetSavedKey];
+              }
+              if (point[handleOutOffsetSavedKey] !== undefined) {
+                point[handleOutOffsetKey] = point[handleOutOffsetSavedKey];
+                delete point[handleOutOffsetSavedKey];
+              }
+            } else {
+              delete point[editableKey];
+              // Save current values before clearing
+              if (point[nudgeKey] !== undefined && point[nudgeKey] !== 0) {
+                point[nudgeSavedKey] = point[nudgeKey];
+              }
+              if (point[handleInOffsetKey] !== undefined && point[handleInOffsetKey] !== 0) {
+                point[handleInOffsetSavedKey] = point[handleInOffsetKey];
+              }
+              if (point[handleOutOffsetKey] !== undefined && point[handleOutOffsetKey] !== 0) {
+                point[handleOutOffsetSavedKey] = point[handleOutOffsetKey];
+              }
+              // Clear active values when disabling
+              delete point[nudgeKey];
+              delete point[handleInKey];
+              delete point[handleOutKey];
+              delete point[handleInAngleKey];
+              delete point[handleOutAngleKey];
+              // Clear legacy 1D offsets
+              delete point[handleInOffsetKey];
+              delete point[handleOutOffsetKey];
+              // Clear new 2D offsets
+              delete point[handleInOffsetXKey];
+              delete point[handleInOffsetYKey];
+              delete point[handleOutOffsetXKey];
+              delete point[handleOutOffsetYKey];
+            }
+          }
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: checked ? "Enable editable rib points" : "Disable editable rib points",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
+   * Toggle Detach Handles mode for selected editable rib points.
+   * When enabled, handle positions are stored as absolute offsets from the rib point,
+   * independent of skeleton handle lengths.
+   * @param {boolean} checked - Whether to enable or disable detach mode
+   * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
+   */
+  async _onDetachHandlesToggle(checked, selectedRibSides) {
+    if (!selectedRibSides || selectedRibSides.size === 0) {
+      this.update();
+      return;
+    }
+
+    // Parse selected rib sides into a map: "contourIdx/pointIdx" -> Set of sides
+    const pointSidesMap = new Map();
+    for (const key of selectedRibSides) {
+      const parts = key.split("/");
+      const pointKey = `${parts[0]}/${parts[1]}`;
+      const side = parts[2];
+      if (!pointSidesMap.has(pointKey)) {
+        pointSidesMap.set(pointKey, new Set());
+      }
+      pointSidesMap.get(pointKey).add(side);
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        // Get the current generated path to find handle positions
+        const generatedPath = layer.glyph.path;
+
+        for (const [pointKey, sides] of pointSidesMap) {
+          const [contourIdx, pointIdx] = pointKey.split("/").map(Number);
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          const defaultWidth = contour.defaultWidth || 20;
+          const singleSided = contour.singleSided ?? false;
+          const singleSidedDirection = contour.singleSidedDirection ?? "left";
+
+          // Update detached state for each selected side
+          for (const side of sides) {
+            const detachedKey = side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+
+            if (checked) {
+              // When enabling detach, capture current handle positions as 2D offsets
+              const normal = calculateNormalAtSkeletonPoint(contour, pointIdx);
+              const tangent = { x: -normal.y, y: normal.x };
+
+              let halfWidth = getPointHalfWidth(point, defaultWidth, side);
+              if (singleSided && singleSidedDirection === side) {
+                const leftHW = getPointHalfWidth(point, defaultWidth, "left");
+                const rightHW = getPointHalfWidth(point, defaultWidth, "right");
+                halfWidth = leftHW + rightHW;
+              }
+
+              const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+              const nudge = point[nudgeKey] || 0;
+              const sign = side === "left" ? 1 : -1;
+
+              // Calculate rib point position
+              const ribPoint = {
+                x: Math.round(point.x + sign * normal.x * halfWidth + tangent.x * nudge),
+                y: Math.round(point.y + sign * normal.y * halfWidth + tangent.y * nudge),
+              };
+
+              // Find handles in generated path by matching rib point position
+              const handlePositions = this._findHandlePositionsForRibPoint(
+                generatedPath, ribPoint, side
+              );
+
+              // Store handle offsets relative to rib point
+              for (const handleType of ["in", "out"]) {
+                const handlePos = handlePositions?.[handleType];
+                if (handlePos) {
+                  const offsetXKey = side === "left"
+                    ? (handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+                    : (handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+                  const offsetYKey = side === "left"
+                    ? (handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+                    : (handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+
+                  point[offsetXKey] = handlePos.x - ribPoint.x;
+                  point[offsetYKey] = handlePos.y - ribPoint.y;
+
+                  // Clear legacy 1D offset
+                  const offset1DKey = side === "left"
+                    ? (handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
+                    : (handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
+                  delete point[offset1DKey];
+                }
+              }
+
+              point[detachedKey] = true;
+            } else {
+              delete point[detachedKey];
+            }
+          }
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: checked ? "Detach handle lengths" : "Attach handle lengths",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
+   * Find handle positions for a rib point in the generated path.
+   * @param {Object} path - The generated path
+   * @param {Object} ribPoint - The rib point position {x, y}
+   * @param {string} side - "left" or "right"
+   * @returns {Object|null} { in: {x, y}, out: {x, y} } or null
+   */
+  _findHandlePositionsForRibPoint(path, ribPoint, side) {
+    if (!path) return null;
+
+    const tolerance = 2;
+    const numPoints = path.numPoints;
+
+    // Find the rib point (on-curve) in the path
+    for (let i = 0; i < numPoints; i++) {
+      const pointType = path.pointTypes[i];
+      const isOnCurve = (pointType & 0x03) === 0;
+      if (!isOnCurve) continue;
+
+      const pt = path.getPoint(i);
+      const dx = Math.abs(pt.x - ribPoint.x);
+      const dy = Math.abs(pt.y - ribPoint.y);
+
+      if (dx <= tolerance && dy <= tolerance) {
+        // Found the rib point, now get adjacent handles
+        const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(i);
+        const numContourPoints = path.getNumPointsOfContour(contourIndex);
+        const contourStart = i - contourPointIndex;
+
+        const wrapIndex = (idx) => {
+          const relative = idx - contourStart;
+          const wrapped = ((relative % numContourPoints) + numContourPoints) % numContourPoints;
+          return contourStart + wrapped;
+        };
+
+        const prevIdx = wrapIndex(i - 1);
+        const nextIdx = wrapIndex(i + 1);
+
+        const prevType = path.pointTypes[prevIdx];
+        const nextType = path.pointTypes[nextIdx];
+        const prevIsOffCurve = (prevType & 0x03) !== 0;
+        const nextIsOffCurve = (nextType & 0x03) !== 0;
+
+        const result = {};
+
+        // For right side, contour direction is opposite, so swap in/out
+        if (side === "left") {
+          if (prevIsOffCurve) result.in = path.getPoint(prevIdx);
+          if (nextIsOffCurve) result.out = path.getPoint(nextIdx);
+        } else {
+          // Right side: prev = out, next = in (opposite direction)
+          if (prevIsOffCurve) result.out = path.getPoint(prevIdx);
+          if (nextIsOffCurve) result.in = path.getPoint(nextIdx);
+        }
+
+        return Object.keys(result).length > 0 ? result : null;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Check if any selected editable rib points have nudge values.
+   * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
+   * @returns {boolean} True if at least one selected editable rib point has nudge
+   */
+  _selectedRibPointsHaveNudge(selectedRibSides) {
+    if (!selectedRibSides || selectedRibSides.size === 0) return false;
+
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData) return false;
+
+    for (const key of selectedRibSides) {
+      const parts = key.split("/");
+      const contourIdx = parseInt(parts[0], 10);
+      const pointIdx = parseInt(parts[1], 10);
+      const side = parts[2];
+
+      const point = skeletonData.contours[contourIdx]?.points[pointIdx];
+      if (!point) continue;
+
+      const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+      const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+
+      if (point[editableKey] && point[nudgeKey] && point[nudgeKey] !== 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Check if any selected editable rib points have handle offset values.
+   * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
+   * @returns {boolean} True if at least one selected editable rib point has handle offsets
+   */
+  _selectedRibPointsHaveHandleOffsets(selectedRibSides) {
+    if (!selectedRibSides || selectedRibSides.size === 0) return false;
+
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData) return false;
+
+    for (const key of selectedRibSides) {
+      const parts = key.split("/");
+      const contourIdx = parseInt(parts[0], 10);
+      const pointIdx = parseInt(parts[1], 10);
+      const side = parts[2];
+
+      const point = skeletonData.contours[contourIdx]?.points[pointIdx];
+      if (!point) continue;
+
+      const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+      // Legacy 1D offset keys
+      const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+      const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+      // New 2D offset keys
+      const handleInOffsetXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+      const handleInOffsetYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+      const handleOutOffsetXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+      const handleOutOffsetYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+
+      if (point[editableKey] &&
+          ((point[handleInOffsetKey] && point[handleInOffsetKey] !== 0) ||
+           (point[handleOutOffsetKey] && point[handleOutOffsetKey] !== 0) ||
+           (point[handleInOffsetXKey] && point[handleInOffsetXKey] !== 0) ||
+           (point[handleInOffsetYKey] && point[handleInOffsetYKey] !== 0) ||
+           (point[handleOutOffsetXKey] && point[handleOutOffsetXKey] !== 0) ||
+           (point[handleOutOffsetYKey] && point[handleOutOffsetYKey] !== 0))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Reset handle offset values for selected editable rib points to 0.
+   * This returns the handles to their generated positions without affecting nudge.
+   * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
+   */
+  async _onResetHandleOffsets(selectedRibSides) {
+    if (!selectedRibSides || selectedRibSides.size === 0) {
+      return;
+    }
+
+    // Parse selected rib sides into a map: "contourIdx/pointIdx" -> Set of sides
+    const pointSidesMap = new Map();
+    for (const key of selectedRibSides) {
+      const parts = key.split("/");
+      const pointKey = `${parts[0]}/${parts[1]}`;
+      const side = parts[2];
+      if (!pointSidesMap.has(pointKey)) {
+        pointSidesMap.set(pointKey, new Set());
+      }
+      pointSidesMap.get(pointKey).add(side);
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const [pointKey, sides] of pointSidesMap) {
+          const [contourIdx, pointIdx] = pointKey.split("/").map(Number);
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          // Reset handle offsets for each selected side (only if editable)
+          for (const side of sides) {
+            const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+            // Legacy 1D offset keys
+            const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+            const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+            const handleInOffsetSavedKey = side === "left" ? "leftHandleInOffsetSaved" : "rightHandleInOffsetSaved";
+            const handleOutOffsetSavedKey = side === "left" ? "leftHandleOutOffsetSaved" : "rightHandleOutOffsetSaved";
+            // New 2D offset keys
+            const handleInOffsetXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+            const handleInOffsetYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+            const handleOutOffsetXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+            const handleOutOffsetYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+
+            if (point[editableKey]) {
+              // Clear legacy 1D offsets
+              delete point[handleInOffsetKey];
+              delete point[handleOutOffsetKey];
+              delete point[handleInOffsetSavedKey];
+              delete point[handleOutOffsetSavedKey];
+              // Clear new 2D offsets
+              delete point[handleInOffsetXKey];
+              delete point[handleInOffsetYKey];
+              delete point[handleOutOffsetXKey];
+              delete point[handleOutOffsetYKey];
+            }
+          }
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Reset handle offsets",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
+   * Reset nudge values for selected editable rib points to 0.
+   * This returns the rib points to their generated positions without disabling editable.
+   * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
+   */
+  async _onResetRibPosition(selectedRibSides) {
+    if (!selectedRibSides || selectedRibSides.size === 0) {
+      return;
+    }
+
+    // Parse selected rib sides into a map: "contourIdx/pointIdx" -> Set of sides
+    const pointSidesMap = new Map();
+    for (const key of selectedRibSides) {
+      const parts = key.split("/");
+      const pointKey = `${parts[0]}/${parts[1]}`;
+      const side = parts[2];
+      if (!pointSidesMap.has(pointKey)) {
+        pointSidesMap.set(pointKey, new Set());
+      }
+      pointSidesMap.get(pointKey).add(side);
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const [pointKey, sides] of pointSidesMap) {
+          const [contourIdx, pointIdx] = pointKey.split("/").map(Number);
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          // Reset nudge for each selected side (only if editable)
+          for (const side of sides) {
+            const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+            const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+
+            if (point[editableKey]) {
+              delete point[nudgeKey];
+            }
+          }
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Reset rib point position",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
+   * Get info about editable ribs for selected skeleton points.
+   * @param {Object} selectedData - Data from _getSelectedSkeletonPoints()
+   * @returns {Object} { hasEditableRibs, hasNudgedRibs }
+   */
+  _getSkeletonPointsRibEditInfo(selectedData) {
+    if (!selectedData || selectedData.points.length === 0) {
+      return { hasEditableRibs: false, hasNudgedRibs: false };
+    }
+
+    let hasEditableRibs = false;
+    let hasNudgedRibs = false;
+
+    for (const { point } of selectedData.points) {
+      if (point.leftEditable || point.rightEditable) {
+        hasEditableRibs = true;
+
+        if ((point.leftEditable && point.leftNudge && point.leftNudge !== 0) ||
+            (point.rightEditable && point.rightNudge && point.rightNudge !== 0)) {
+          hasNudgedRibs = true;
+          break; // Found both, no need to continue
+        }
+      }
+    }
+
+    return { hasEditableRibs, hasNudgedRibs };
+  }
+
+  /**
+   * Reset nudge for all editable ribs of selected skeleton points.
+   * @param {Object} selectedData - Data from _getSelectedSkeletonPoints()
+   */
+  async _onResetSkeletonRibs(selectedData) {
+    if (!selectedData || selectedData.points.length === 0) {
+      return;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          // Reset nudge for both sides if editable
+          if (point.leftEditable) {
+            delete point.leftNudge;
+          }
+          if (point.rightEditable) {
+            delete point.rightNudge;
+          }
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Reset skeleton ribs",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
+   * Make all ribs of selected skeleton points uneditable.
+   * @param {Object} selectedData - Data from _getSelectedSkeletonPoints()
+   */
+  async _onMakeRibsUneditable(selectedData) {
+    if (!selectedData || selectedData.points.length === 0) {
+      return;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          // Remove all editable-related properties
+          delete point.leftEditable;
+          delete point.rightEditable;
+          delete point.leftNudge;
+          delete point.rightNudge;
+          delete point.leftHandleIn;
+          delete point.leftHandleOut;
+          delete point.rightHandleIn;
+          delete point.rightHandleOut;
+          delete point.leftHandleInAngle;
+          delete point.leftHandleOutAngle;
+          delete point.rightHandleInAngle;
+          delete point.rightHandleOutAngle;
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Make ribs uneditable",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  /**
    * Set point width (Left or Right).
    */
   async _setPointWidth(key, value) {
@@ -1220,9 +2260,17 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
+          const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
 
-          if (isAsym) {
+          // Check if contour is single-sided
+          const isSingleSided = contour.singleSided ?? false;
+
+          if (isSingleSided) {
+            // Single-sided mode: the value is the full width, store as symmetric
+            point.width = value;
+            delete point.leftWidth;
+            delete point.rightWidth;
+          } else if (isAsym) {
             // Asymmetric mode - edit individual sides
             if (isLeft) {
               point.leftWidth = value;
@@ -1318,13 +2366,21 @@ export default class SkeletonParametersPanel extends Panel {
           if (!point || point.type) continue; // Skip off-curve points
 
           // Get current effective widths using the same logic as UI display
-          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
+          const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
           const currentLeft = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
           const currentRight = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
 
-          // Apply scale
-          const newLeft = Math.round(currentLeft * scale);
-          const newRight = Math.round(currentRight * scale);
+          // Apply scale, clamping total width to minimum 2 UPM
+          let newLeft = currentLeft * scale;
+          let newRight = currentRight * scale;
+          const totalWidth = newLeft + newRight;
+          if (totalWidth < 2) {
+            const ratio = 2 / totalWidth;
+            newLeft *= ratio;
+            newRight *= ratio;
+          }
+          newLeft = Math.round(newLeft);
+          newRight = Math.round(newRight);
 
           // Store result - preserve symmetric/asymmetric mode
           if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
@@ -1400,7 +2456,7 @@ export default class SkeletonParametersPanel extends Panel {
           if (!point) continue;
 
           const key = `${contourIdx}/${pointIdx}`;
-          const defaultWidth = contour.defaultWidth || this._getCurrentDefaultWidthWide();
+          const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
 
           if (isMulti) {
             // Multi-selection: all points move with same speed, clamp at 0
