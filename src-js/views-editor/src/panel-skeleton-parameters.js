@@ -404,6 +404,7 @@ export default class SkeletonParametersPanel extends Panel {
     let forceHorizontalStates = new Set(); // Track forceHorizontal states
     let forceVerticalStates = new Set(); // Track forceVertical states
     let hasSingleSided = false; // Track if any selected point is in single-sided contour
+    let singleSidedDirection = null; // Track single-sided direction ("left" or "right")
 
     // Track editable states per side based on selected rib points
     const selectedRibSides = this._getSelectedRibSides();
@@ -429,6 +430,7 @@ export default class SkeletonParametersPanel extends Panel {
         const contour = selectedData.skeletonData?.contours?.[contourIdx];
         if (contour?.singleSided) {
           hasSingleSided = true;
+          singleSidedDirection = contour.singleSidedDirection ?? "left";
         }
 
         // Collect editable states for selected rib sides
@@ -497,23 +499,30 @@ export default class SkeletonParametersPanel extends Panel {
     });
 
     // Width fields (Left / Right) - show "mixed" placeholder if values differ
+    // In single-sided mode: active side shows full width, inactive side is disabled
+    const totalWidth = (left ?? 0) + (right ?? 0);
+    const leftDisabled = hasSingleSided && singleSidedDirection === "right";
+    const rightDisabled = hasSingleSided && singleSidedDirection === "left";
+
     formContents.push({
       type: "edit-number",
       key: "pointWidthLeft",
       label: "Left",
-      value: leftMixed ? null : Math.round(left),
+      value: leftMixed ? null : Math.round(leftDisabled ? 0 : (rightDisabled ? totalWidth : left)),
       placeholder: leftMixed ? "mixed" : undefined,
-      minValue: 1,
+      minValue: leftDisabled ? 0 : 1,
       allowEmptyField: leftMixed,
+      disabled: leftDisabled,
     });
     formContents.push({
       type: "edit-number",
       key: "pointWidthRight",
       label: "Right",
-      value: rightMixed ? null : Math.round(right),
+      value: rightMixed ? null : Math.round(rightDisabled ? 0 : (leftDisabled ? totalWidth : right)),
       placeholder: rightMixed ? "mixed" : undefined,
-      minValue: 1,
+      minValue: rightDisabled ? 0 : 1,
       allowEmptyField: rightMixed,
+      disabled: rightDisabled,
     });
 
     // Distribution slider (only in asymmetric mode)
@@ -2018,7 +2027,15 @@ export default class SkeletonParametersPanel extends Panel {
 
           const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
 
-          if (isAsym) {
+          // Check if contour is single-sided
+          const isSingleSided = contour.singleSided ?? false;
+
+          if (isSingleSided) {
+            // Single-sided mode: the value is the full width, store as symmetric
+            point.width = value;
+            delete point.leftWidth;
+            delete point.rightWidth;
+          } else if (isAsym) {
             // Asymmetric mode - edit individual sides
             if (isLeft) {
               point.leftWidth = value;
