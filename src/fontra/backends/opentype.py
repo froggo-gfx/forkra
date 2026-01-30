@@ -1,3 +1,4 @@
+import uuid
 from itertools import product
 from os import PathLike
 from typing import Any, Generator
@@ -19,10 +20,12 @@ from ..core.classes import (
     GlyphSource,
     Kerning,
     Layer,
+    LineMetric,
     OpenTypeFeatures,
     StaticGlyph,
     VariableGlyph,
 )
+from ..core.instancer import FontSourcesInstancer
 from ..core.path import PackedPath, PackedPathPointPen
 from ..core.protocols import ReadableFontBackend
 from ..core.varutils import locationToTuple, unnormalizeLocation, unnormalizeValue
@@ -50,6 +53,11 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
 
     def _initialize(self) -> None:
         self.axes = unpackAxes(self.font)
+        self.fontSources = unpackFontSources(self.font)
+        self.fontSourcesInstancer = FontSourcesInstancer(
+            fontAxes=self.axes.axes, fontSources=self.fontSources
+        )
+
         gvar = self.font.get("gvar")
         self.gvarVariations = gvar.variations if gvar is not None else None
         varc = self.font.get("VARC")
@@ -78,7 +86,9 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
     async def getGlyph(self, glyphName: str) -> VariableGlyph | None:
         if glyphName not in self.glyphSet:
             return None
-        defaultLayerName = "default"
+
+        defaultSourceIdentifier = self.fontSourcesInstancer.defaultSourceIdentifier
+        defaultLayerName = defaultSourceIdentifier
         glyph = VariableGlyph(name=glyphName)
         staticGlyph = buildStaticGlyph(self.glyphSet, glyphName)
         layers = {defaultLayerName: Layer(glyph=staticGlyph)}
@@ -86,7 +96,8 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
         sources = [
             GlyphSource(
                 location=unnormalizeLocation(defaultLocation, self.axes.axes),
-                name=defaultLayerName,
+                locationBase=defaultSourceIdentifier,
+                name="",
                 layerName=defaultLayerName,
             )
         ]
@@ -100,10 +111,17 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
                 self.variationGlyphSets[locStr] = varGlyphSet
             varGlyph = buildStaticGlyph(varGlyphSet, glyphName)
             layers[locStr] = Layer(glyph=varGlyph)
+
+            sourceLocation = unnormalizeLocation(fullLoc, self.axes.axes)
+            locationBase = self.fontSourcesInstancer.getSourceIdentifierForLocation(
+                sourceLocation
+            )
+
             sources.append(
                 GlyphSource(
-                    location=unnormalizeLocation(fullLoc, self.axes.axes),
-                    name=locStr,
+                    location={} if locationBase is not None else sourceLocation,
+                    locationBase=locationBase,
+                    name=None if locationBase is not None else locStr,
                     layerName=locStr,
                 )
             )
@@ -181,7 +199,7 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
         return self.axes
 
     async def getSources(self) -> dict[str, FontSource]:
-        return {}
+        return self.fontSources
 
     async def getUnitsPerEm(self) -> int:
         return self.font["head"].unitsPerEm
@@ -326,6 +344,47 @@ def unpackAxes(font: TTFont) -> Axes:
             )
 
     return Axes(axes=axisList, mappings=mappings)
+
+
+def unpackFontSources(font):
+    nameTable = font["name"]
+
+    defaultSourceIdentifier = str(uuid.uuid4())[:8]
+    defaultSource = FontSource(
+        name=getEnglishNameWithFallback(nameTable, [17, 2], "Regular")
+    )
+
+    postTable = font.get("post")
+    if postTable is not None:
+        defaultSource.italicAngle = postTable.italicAngle
+
+    os2Table = font.get("OS/2")
+    if os2Table is not None:
+        defaultSource.lineMetricsHorizontalLayout["ascender"] = LineMetric(
+            value=os2Table.sTypoAscender
+        )
+        defaultSource.lineMetricsHorizontalLayout["descender"] = LineMetric(
+            value=os2Table.sTypoDescender
+        )
+        defaultSource.lineMetricsHorizontalLayout["capHeight"] = LineMetric(
+            value=os2Table.sCapHeight
+        )
+        defaultSource.lineMetricsHorizontalLayout["xHeight"] = LineMetric(
+            value=os2Table.sxHeight
+        )
+
+    defaultSource.lineMetricsHorizontalLayout["baseline"] = LineMetric(value=0)
+
+    return {defaultSourceIdentifier: defaultSource}
+
+
+def getEnglishNameWithFallback(nameTable, nameIDs, fallback):
+    for nameID in nameIDs:
+        nameRecord = nameTable.getName(nameID, 3, 1, 0x409)
+        if nameRecord is not None:
+            return nameRecord.toUnicode()
+
+    return fallback
 
 
 def buildStaticGlyph(glyphSet, glyphName):

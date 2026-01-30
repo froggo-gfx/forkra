@@ -7,11 +7,23 @@ import pytest
 from fontTools.ttLib import TTFont
 
 from fontra.backends import getFileSystemBackend
-from fontra.core.classes import Axes, CrossAxisMapping, FontAxis, VariableGlyph
+from fontra.core.classes import (
+    Axes,
+    CrossAxisMapping,
+    FontAxis,
+    FontSource,
+    LineMetric,
+    VariableGlyph,
+)
 from fontra.core.fonthandler import FontHandler
 from fontra.filesystem.projectmanager import FileSystemProjectManager
 
 dataDir = pathlib.Path(__file__).resolve().parent / "data"
+
+
+@pytest.fixture
+def testFontMutatorSans():
+    return getFileSystemBackend(dataDir / "mutatorsans" / "MutatorSans.ttf")
 
 
 @pytest.fixture
@@ -189,3 +201,41 @@ async def test_readTTX():
     font = getFileSystemBackend(path)
     glyph = await font.getGlyph("A")
     assert isinstance(glyph, VariableGlyph)
+
+
+async def test_getSources(testFontMutatorSans):
+    sources = await testFontMutatorSans.getSources()
+    assert len(sources) == 1
+    expectedSourceValues = [
+        FontSource(
+            name="LightCondensed",
+            lineMetricsHorizontalLayout={
+                "ascender": LineMetric(
+                    value=700,
+                    zone=0,
+                    customData={},
+                ),
+                "baseline": LineMetric(
+                    value=0,
+                    zone=0,
+                    customData={},
+                ),
+                "capHeight": LineMetric(
+                    value=700,
+                    zone=0,
+                    customData={},
+                ),
+                "descender": LineMetric(
+                    value=-200,
+                    zone=0,
+                    customData={},
+                ),
+                "xHeight": LineMetric(
+                    value=500,
+                    zone=0,
+                    customData={},
+                ),
+            },
+        )
+    ]
+    assert list(sources.values()) == expectedSourceValues
