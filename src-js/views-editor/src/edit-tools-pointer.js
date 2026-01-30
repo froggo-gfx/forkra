@@ -3958,7 +3958,7 @@ export class PointerTool extends BaseTool {
   }
 
   /**
-   * Find skeleton rib point under cursor for measure mode.
+   * Find rib endpoint under cursor for measure mode.
    * Returns { x, y, width, leftWidth, rightWidth } or null.
    */
   _findRibPointForMeasure(point, size) {
@@ -3980,20 +3980,66 @@ export class PointerTool extends BaseTool {
     const defaultWidth = skeletonData.defaultWidth ?? 100;
 
     for (const contour of skeletonData.contours) {
-      for (const pt of contour.points) {
-        if (pt.type) continue; // Skip control points
+      const contourDefaultWidth = contour.defaultWidth ?? defaultWidth;
+      const singleSided = contour.singleSided ?? false;
+      const singleSidedDirection = contour.singleSidedDirection ?? "left";
 
-        const dist = Math.hypot(pt.x - glyphPoint.x, pt.y - glyphPoint.y);
-        if (dist <= size) {
-          const leftWidth = pt.leftWidth ?? (pt.width ?? defaultWidth) / 2;
-          const rightWidth = pt.rightWidth ?? (pt.width ?? defaultWidth) / 2;
-          return {
-            x: pt.x,
-            y: pt.y,
-            width: leftWidth + rightWidth,
-            leftWidth,
-            rightWidth,
-          };
+      for (let pointIndex = 0; pointIndex < contour.points.length; pointIndex++) {
+        const skeletonPoint = contour.points[pointIndex];
+        if (skeletonPoint.type) continue; // Skip control points
+
+        const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
+        let leftHW = getPointHalfWidth(skeletonPoint, contourDefaultWidth, "left");
+        let rightHW = getPointHalfWidth(skeletonPoint, contourDefaultWidth, "right");
+
+        // Handle single-sided mode
+        if (singleSided) {
+          const totalWidth = leftHW + rightHW;
+          if (singleSidedDirection === "left") {
+            leftHW = totalWidth;
+            rightHW = 0;
+          } else {
+            leftHW = 0;
+            rightHW = totalWidth;
+          }
+        }
+
+        // Calculate rib endpoint positions
+        const leftRibPoint = {
+          x: skeletonPoint.x + normal.x * leftHW,
+          y: skeletonPoint.y + normal.y * leftHW,
+        };
+        const rightRibPoint = {
+          x: skeletonPoint.x - normal.x * rightHW,
+          y: skeletonPoint.y - normal.y * rightHW,
+        };
+
+        // Check left rib point
+        if (leftHW > 0.5) {
+          const dist = Math.hypot(leftRibPoint.x - glyphPoint.x, leftRibPoint.y - glyphPoint.y);
+          if (dist <= size) {
+            return {
+              x: leftRibPoint.x,
+              y: leftRibPoint.y,
+              width: leftHW + rightHW,
+              leftWidth: leftHW,
+              rightWidth: rightHW,
+            };
+          }
+        }
+
+        // Check right rib point
+        if (rightHW > 0.5) {
+          const dist = Math.hypot(rightRibPoint.x - glyphPoint.x, rightRibPoint.y - glyphPoint.y);
+          if (dist <= size) {
+            return {
+              x: rightRibPoint.x,
+              y: rightRibPoint.y,
+              width: leftHW + rightHW,
+              leftWidth: leftHW,
+              rightWidth: rightHW,
+            };
+          }
         }
       }
     }
