@@ -1696,14 +1696,14 @@ registerVisualizationLayerDefinition({
   colors: {
     textColor: "#333",
     textBgColor: "#FFFFFF",
-    textBorderColor: "rgba(0, 0, 0, 0.15)",
+    textBorderColor: "rgba(0, 0, 0, 0.25)",
     skeletonColor: "#0066FF",
     pathColor: "#22AA44",
   },
   colorsDarkMode: {
     textColor: "#EEE",
     textBgColor: "#333333",
-    textBorderColor: "rgba(255, 255, 255, 0.15)",
+    textBorderColor: "rgba(255, 255, 255, 0.25)",
     skeletonColor: "#4499FF",
     pathColor: "#44CC66",
   },
@@ -1790,14 +1790,17 @@ function drawMeasureLine(context, p1, p2, label, color, parameters) {
   const bgW = textWidth + padding * 2;
   const bgH = parameters.fontSize + padding * 2;
 
-  // Draw background
+  // Draw background with rounded corners
+  const radius = 3;
+  context.beginPath();
+  context.roundRect(bgX, bgY, bgW, bgH, radius);
   context.fillStyle = parameters.textBgColor;
-  context.fillRect(bgX, bgY, bgW, bgH);
+  context.fill();
 
   // Draw subtle border
   context.strokeStyle = parameters.textBorderColor;
   context.lineWidth = 1;
-  context.strokeRect(bgX, bgY, bgW, bgH);
+  context.stroke();
 
   // Draw text
   context.fillStyle = parameters.textColor;
