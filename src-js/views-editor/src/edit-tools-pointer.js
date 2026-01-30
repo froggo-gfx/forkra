@@ -118,6 +118,7 @@ export class PointerTool extends BaseTool {
       this.measureMode = false;
       this.sceneModel.measureMode = false;
       this.sceneModel.measureHoverSegment = null;
+      this.sceneModel.measureHoverRibPoint = null;
       if (this._boundKeyUp) {
         window.removeEventListener("keyup", this._boundKeyUp);
         this._boundKeyUp = null;
@@ -141,9 +142,23 @@ export class PointerTool extends BaseTool {
     const point = sceneController.localPoint(event);
     const size = sceneController.mouseClickMargin;
 
-    // Q-mode: find segment under cursor for measurement
+    // Q-mode: find rib point or segment under cursor for measurement
     if (this.measureMode) {
       this.sceneModel.measureShowDirect = event.altKey;
+
+      // Check for rib point first (has priority over segments)
+      const ribPointHit = this._findRibPointForMeasure(point, size);
+      if (ribPointHit) {
+        if (!this._ribPointsEqual(ribPointHit, this.sceneModel.measureHoverRibPoint)) {
+          this.sceneModel.measureHoverRibPoint = ribPointHit;
+          this.sceneModel.measureHoverSegment = null;
+          this.canvasController.requestUpdate();
+        }
+        return;
+      }
+
+      // No rib point - check for segment
+      this.sceneModel.measureHoverRibPoint = null;
       const segmentHit = this._findSegmentForMeasure(point, size);
       if (
         !this._segmentsEqual(segmentHit, this.sceneModel.measureHoverSegment)
@@ -3943,6 +3958,59 @@ export class PointerTool extends BaseTool {
   }
 
   /**
+   * Find skeleton rib point under cursor for measure mode.
+   * Returns { x, y, width, leftWidth, rightWidth } or null.
+   */
+  _findRibPointForMeasure(point, size) {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) return null;
+
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    if (!editLayerName) return null;
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData?.contours?.length) return null;
+
+    const defaultWidth = skeletonData.defaultWidth ?? 100;
+
+    for (const contour of skeletonData.contours) {
+      for (const pt of contour.points) {
+        if (pt.type) continue; // Skip control points
+
+        const dist = Math.hypot(pt.x - glyphPoint.x, pt.y - glyphPoint.y);
+        if (dist <= size) {
+          const leftWidth = pt.leftWidth ?? (pt.width ?? defaultWidth) / 2;
+          const rightWidth = pt.rightWidth ?? (pt.width ?? defaultWidth) / 2;
+          return {
+            x: pt.x,
+            y: pt.y,
+            width: leftWidth + rightWidth,
+            leftWidth,
+            rightWidth,
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Compare two rib point objects for equality.
+   */
+  _ribPointsEqual(rp1, rp2) {
+    if (rp1 === rp2) return true;
+    if (!rp1 || !rp2) return false;
+    return rp1.x === rp2.x && rp1.y === rp2.y;
+  }
+
+  /**
    * Find segment under cursor for measure mode.
    * Returns { p1, p2, type } where p1 and p2 are on-curve endpoints.
    */
@@ -4223,6 +4291,7 @@ export class PointerTool extends BaseTool {
       this.measureMode = false;
       this.sceneModel.measureMode = false;
       this.sceneModel.measureHoverSegment = null;
+      this.sceneModel.measureHoverRibPoint = null;
       if (this._boundKeyUp) {
         window.removeEventListener("keyup", this._boundKeyUp);
         this._boundKeyUp = null;

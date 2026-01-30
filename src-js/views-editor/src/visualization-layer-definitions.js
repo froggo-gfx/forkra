@@ -1710,7 +1710,18 @@ registerVisualizationLayerDefinition({
   draw: (context, positionedGlyph, parameters, model, controller) => {
     if (!model.measureMode) return;
 
-    const { measureHoverSegment, measureShowDirect } = model;
+    const { measureHoverSegment, measureHoverRibPoint, measureShowDirect } = model;
+
+    // Draw rib point width (Q+hover on rib point)
+    if (measureHoverRibPoint) {
+      const { x, y, width, leftWidth, rightWidth } = measureHoverRibPoint;
+      const isAsym = Math.abs(leftWidth - rightWidth) > 0.01;
+      const label = isAsym
+        ? `${leftWidth.toFixed(1)} | ${rightWidth.toFixed(1)}`
+        : width.toFixed(1);
+      drawMeasureLabel(context, x, y, label, parameters.skeletonColor, parameters);
+      return; // Don't show segment when over rib point
+    }
 
     // Draw segment hover measurement (Q+hover)
     if (measureHoverSegment) {
@@ -1805,6 +1816,45 @@ function drawMeasureLine(context, p1, p2, label, color, parameters) {
   // Draw text
   context.fillStyle = parameters.textColor;
   context.fillText(label, midX, -midY);
+  context.restore();
+}
+
+function drawMeasureLabel(context, x, y, label, color, parameters) {
+  // Draw label at point with small offset above
+  const offsetY = 15;
+
+  context.save();
+  context.scale(1, -1);
+
+  context.font = `500 ${parameters.fontSize}px fontra-ui-regular, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  // Measure text for background
+  const textWidth = context.measureText(label).width;
+  const padding = 4;
+
+  const labelY = -y - offsetY;
+  const bgX = x - textWidth / 2 - padding;
+  const bgY = labelY - parameters.fontSize / 2 - padding;
+  const bgW = textWidth + padding * 2;
+  const bgH = parameters.fontSize + padding * 2;
+
+  // Draw background with rounded corners
+  const radius = 3;
+  context.beginPath();
+  context.roundRect(bgX, bgY, bgW, bgH, radius);
+  context.fillStyle = parameters.textBgColor;
+  context.fill();
+
+  // Draw subtle border
+  context.strokeStyle = parameters.textBorderColor;
+  context.lineWidth = 1;
+  context.stroke();
+
+  // Draw text
+  context.fillStyle = parameters.textColor;
+  context.fillText(label, x, labelY);
   context.restore();
 }
 
