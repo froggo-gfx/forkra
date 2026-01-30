@@ -1165,15 +1165,41 @@ export class InterpolatingRibBehavior {
     this.originalNudge = point[nudgeKey] || 0;
 
     // Store original 2D handle offsets (new format)
+    // If only 1D offsets exist, convert them to 2D using tangent as approximation
     const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
     const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
     const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
     const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+    const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+    const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
 
-    this.originalHandleInOffsetX = point[handleInXKey] || 0;
-    this.originalHandleInOffsetY = point[handleInYKey] || 0;
-    this.originalHandleOutOffsetX = point[handleOutXKey] || 0;
-    this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
+    // Check if 2D offsets exist
+    const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
+    const has2DOut = point[handleOutXKey] !== undefined || point[handleOutYKey] !== undefined;
+
+    if (has2DIn) {
+      this.originalHandleInOffsetX = point[handleInXKey] || 0;
+      this.originalHandleInOffsetY = point[handleInYKey] || 0;
+    } else if (point[handleIn1DKey]) {
+      // Convert 1D to 2D using tangent (approximation for skeleton handle direction)
+      this.originalHandleInOffsetX = this.tangent.x * point[handleIn1DKey];
+      this.originalHandleInOffsetY = this.tangent.y * point[handleIn1DKey];
+    } else {
+      this.originalHandleInOffsetX = 0;
+      this.originalHandleInOffsetY = 0;
+    }
+
+    if (has2DOut) {
+      this.originalHandleOutOffsetX = point[handleOutXKey] || 0;
+      this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
+    } else if (point[handleOut1DKey]) {
+      // Convert 1D to 2D using tangent (approximation for skeleton handle direction)
+      this.originalHandleOutOffsetX = this.tangent.x * point[handleOut1DKey];
+      this.originalHandleOutOffsetY = this.tangent.y * point[handleOut1DKey];
+    } else {
+      this.originalHandleOutOffsetX = 0;
+      this.originalHandleOutOffsetY = 0;
+    }
 
     // Calculate current rib point position
     this._recalculateRibPos();
