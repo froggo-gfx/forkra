@@ -1173,47 +1173,32 @@ export class InterpolatingRibBehavior {
    * @returns {Object} { halfWidth, nudge, isAsymmetric } - New values
    */
   applyDelta(delta) {
-    // Calculate target position
-    const targetPos = {
-      x: this.originalRibPos.x + delta.x,
-      y: this.originalRibPos.y + delta.y,
-    };
+    // Project drag delta onto the handle-handle line direction
+    // This gives us how far along the line we've moved
+    const deltaAlongLine = delta.x * this.lineDir.x + delta.y * this.lineDir.y;
 
-    // Project target onto the handle-handle line
-    const fromPrev = {
-      x: targetPos.x - this.prevHandle.x,
-      y: targetPos.y - this.prevHandle.y,
-    };
-    const projectedDist = fromPrev.x * this.lineDir.x + fromPrev.y * this.lineDir.y;
-
-    // New position on the line
-    const newRibPos = {
-      x: this.prevHandle.x + this.lineDir.x * projectedDist,
-      y: this.prevHandle.y + this.lineDir.y * projectedDist,
-    };
-
-    // For interpolation, the rib point must stay on the line between handles.
-    // rib position formula: ribPos = onCurve + sign*normal*halfWidth + tangent*nudge
-    // We need to find halfWidth and nudge such that ribPos = newRibPos
+    // Now convert this line movement into halfWidth and nudge deltas
+    // Movement along lineDir changes the rib position by deltaAlongLine * lineDir
+    // We decompose this into normal and tangent components
     const sign = this.side === "left" ? 1 : -1;
 
-    // Decompose newRibPos relative to skeleton point into normal and tangent components
-    const deltaFromSkeleton = {
-      x: newRibPos.x - this.onCurvePoint.x,
-      y: newRibPos.y - this.onCurvePoint.y,
-    };
+    // How much does moving along lineDir affect halfWidth and nudge?
+    // dHalfWidth = sign * (lineDir · normal) * deltaAlongLine
+    // dNudge = (lineDir · tangent) * deltaAlongLine
+    const lineDirDotNormal = this.lineDir.x * this.normal.x + this.lineDir.y * this.normal.y;
+    const lineDirDotTangent = this.lineDir.x * this.tangent.x + this.lineDir.y * this.tangent.y;
 
-    // Project onto normal (gives halfWidth) and tangent (gives nudge)
-    const normalComponent = deltaFromSkeleton.x * this.normal.x + deltaFromSkeleton.y * this.normal.y;
-    const tangentComponent = deltaFromSkeleton.x * this.tangent.x + deltaFromSkeleton.y * this.tangent.y;
+    const deltaHalfWidth = sign * lineDirDotNormal * deltaAlongLine;
+    const deltaNudge = lineDirDotTangent * deltaAlongLine;
 
-    const newHalfWidth = Math.max(1, sign * normalComponent);
-    const newNudge = tangentComponent;
+    const newHalfWidth = Math.max(1, this.originalHalfWidth + deltaHalfWidth);
+    const newNudge = this.originalNudge + deltaNudge;
 
     console.log('[RIB-INTERPOLATE] applyDelta', {
       delta,
-      projectedDist,
-      newRibPos,
+      deltaAlongLine,
+      deltaHalfWidth,
+      deltaNudge,
       newHalfWidth,
       newNudge,
     });
