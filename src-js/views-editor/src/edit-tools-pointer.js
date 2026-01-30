@@ -1835,6 +1835,15 @@ export class PointerTool extends BaseTool {
           // Check if this side is editable
           const sideIsEditable = (dragSide === "left" && tp.isLeftEditable) || (dragSide === "right" && tp.isRightEditable);
 
+          console.log('[RIB-INTERPOLATE] Branch selection:', {
+            isSingleSided: tp.isSingleSided,
+            sideIsEditable,
+            useInterpolation,
+            dragSide,
+            isLeftEditable: tp.isLeftEditable,
+            isRightEditable: tp.isRightEditable
+          });
+
           if (tp.isSingleSided) {
             // For single-sided, create behavior with totalWidth as the effective width
             const defaultWidth = contour.defaultWidth || 20;
@@ -1844,7 +1853,29 @@ export class PointerTool extends BaseTool {
 
             if (sideIsEditable) {
               // Editable single-sided: use EditableRibBehavior for nudge support
-              const behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+              // Or InterpolatingRibBehavior if Alt is pressed
+              let behavior;
+              if (useInterpolation) {
+                // Find adjacent handles in the generated path
+                const handles = this._findHandlesForRibPointFromSkeleton(
+                  layer.glyph.path,
+                  skeletonPoint,
+                  normal,
+                  contour,
+                  dragSide
+                );
+                console.log('[RIB-INTERPOLATE] Single-sided: Found handles for interpolation:', handles);
+                if (handles) {
+                  behavior = createInterpolatingRibBehavior(
+                    data.original, ribHitForPoint, handles.prevHandle, handles.nextHandle
+                  );
+                } else {
+                  // Fallback to normal behavior if handles not found
+                  behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+                }
+              } else {
+                behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+              }
               // Override to track totalWidth for width changes
               behavior.originalHalfWidth = totalWidth;
               behavior.minHalfWidth = 2;
