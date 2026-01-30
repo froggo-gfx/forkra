@@ -251,7 +251,16 @@ export class PointerTool extends BaseTool {
     }
 
     if (!hasSkeletonPoints) {
-      // No skeleton points - use default handler
+      // Check if any selected points are editable handles (from skeleton contours)
+      // These need special handling: movement constrained to skeleton handle direction
+      if (hasRegularPoints) {
+        const editableHandles = this._getEditableGeneratedHandlesFromSelection(regularPointSelection);
+        if (editableHandles.length > 0) {
+          await this._handleArrowKeysForEditableHandles(event, editableHandles);
+          return;
+        }
+      }
+      // No skeleton points and no editable handles - use default handler
       return sceneController.handleArrowKeys(event);
     }
 
@@ -2578,6 +2587,135 @@ export class PointerTool extends BaseTool {
       return {
         changes: accumulatedChanges,
         undoLabel: "Edit generated handle",
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Handle arrow key movement for editable generated handles.
+   * Movement is constrained to the skeleton handle direction (tangent).
+   */
+  async _handleArrowKeysForEditableHandles(event, editableHandles) {
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+
+    if (!positionedGlyph || editableHandles.length === 0) return;
+
+    // Calculate arrow key delta
+    let [dx, dy] = arrowKeyDeltas[event.key];
+    if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
+      dx *= 100;
+      dy *= 100;
+    } else if (event.shiftKey) {
+      dx *= 10;
+      dy *= 10;
+    }
+    const delta = { x: dx, y: dy };
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layersData = {};
+
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        layersData[editLayerName] = {
+          layer,
+          original: JSON.parse(JSON.stringify(skeletonData)),
+          working: JSON.parse(JSON.stringify(skeletonData)),
+          behaviors: [],
+        };
+      }
+
+      if (Object.keys(layersData).length === 0) return;
+
+      // Create behaviors for each editable handle
+      for (const data of Object.values(layersData)) {
+        for (const eh of editableHandles) {
+          const contour = data.original.contours[eh.skeletonContourIndex];
+          if (!contour) continue;
+
+          const skeletonHandleDir = this._getSkeletonHandleDirForPoint(
+            contour, eh.skeletonPointIndex, eh.handleType
+          );
+
+          if (!skeletonHandleDir) continue;
+
+          data.behaviors.push({
+            behavior: createEditableHandleBehavior(data.original, eh, skeletonHandleDir),
+            editableHandle: eh,
+          });
+        }
+      }
+
+      const allChanges = [];
+
+      for (const [editLayerName, data] of Object.entries(layersData)) {
+        const { layer, working, behaviors } = data;
+
+        for (const { behavior, editableHandle } of behaviors) {
+          const change = behavior.applyDelta(delta);
+          const point = working.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
+
+          // Apply the offset (1D only for arrow keys)
+          const offsetKey = editableHandle.side === "left"
+            ? (editableHandle.handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
+            : (editableHandle.handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
+
+          // Clear 2D offsets (they have priority)
+          const offsetXKey = editableHandle.side === "left"
+            ? (editableHandle.handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+            : (editableHandle.handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+          const offsetYKey = editableHandle.side === "left"
+            ? (editableHandle.handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+            : (editableHandle.handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+
+          delete point[offsetXKey];
+          delete point[offsetYKey];
+          point[offsetKey] = change.offset;
+        }
+
+        // Regenerate outline contours
+        const staticGlyph = layer.glyph;
+        const oldGeneratedIndices = working.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(working);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        working.generatedContourIndices = newGeneratedIndices;
+
+        // Record changes
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          // Path already modified above
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = working;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Nudge generated handle",
         broadcast: true,
       };
     });
