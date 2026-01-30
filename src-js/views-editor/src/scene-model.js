@@ -1522,7 +1522,7 @@ export class SceneModel {
     return new Set();
   }
 
-  selectionAtRect(selRect, pointFilterFunc) {
+  selectionAtRect(selRect, pointFilterFunc, cursorPoint = null) {
     const selection = new Set();
     if (!this.selectedGlyph?.isEditing) {
       return selection;
@@ -1588,10 +1588,10 @@ export class SceneModel {
       const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
       const skeletonData = layer?.customData?.["fontra.skeleton"];
       if (skeletonData?.contours?.length) {
-        // Find rib point closest to the "current corner" of rect (xMax, yMax)
-        // This makes selection feel like "last to enter the rect"
-        const targetX = selRect.xMax;
-        const targetY = selRect.yMax;
+        // Find rib point closest to cursor position
+        // cursorPoint is in screen coords, convert to glyph coords
+        const targetX = cursorPoint ? cursorPoint.x - positionedGlyph.x : selRect.xMax;
+        const targetY = cursorPoint ? cursorPoint.y - positionedGlyph.y : selRect.yMax;
         let closestRibPointKey = null;
         let closestDistSq = Infinity;
 
