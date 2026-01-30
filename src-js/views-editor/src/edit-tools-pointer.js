@@ -2932,9 +2932,9 @@ export class PointerTool extends BaseTool {
     const prevPoint = contour.points[prevIndex];
     const nextPoint = contour.points[nextIndex];
 
-    // Check if prev is smooth (on-curve without type)
-    if (!prevPoint?.type) {
-      // prevPoint is on-curve, check if it's smooth and has off-curve on the other side
+    // Check if prev is smooth (on-curve with smooth flag)
+    if (!prevPoint?.type && prevPoint?.smooth) {
+      // prevPoint is smooth on-curve, check if it has off-curve on the other side
       const prevPrevIndex = (prevIndex - 1 + numPoints) % numPoints;
       const prevPrevPoint = contour.points[prevPrevIndex];
       if (prevPrevPoint?.type === "cubic") {
@@ -2943,8 +2943,8 @@ export class PointerTool extends BaseTool {
       }
     }
 
-    // Check if next is smooth (on-curve without type)
-    if (smoothIndex === null && !nextPoint?.type) {
+    // Check if next is smooth (on-curve with smooth flag)
+    if (smoothIndex === null && !nextPoint?.type && nextPoint?.smooth) {
       const nextNextIndex = (nextIndex + 1) % numPoints;
       const nextNextPoint = contour.points[nextNextIndex];
       if (nextNextPoint?.type === "cubic") {
@@ -3065,8 +3065,8 @@ export class PointerTool extends BaseTool {
     const prevPoint = contour.points[prevIndex];
     const nextPoint = contour.points[nextIndex];
 
-    // Check if prev is smooth (on-curve without type)
-    if (!prevPoint?.type) {
+    // Check if prev is smooth (on-curve with smooth flag)
+    if (!prevPoint?.type && prevPoint?.smooth) {
       const prevPrevIndex = (prevIndex - 1 + numPoints) % numPoints;
       const prevPrevPoint = contour.points[prevPrevIndex];
       if (prevPrevPoint?.type === "cubic") {
@@ -3075,8 +3075,8 @@ export class PointerTool extends BaseTool {
       }
     }
 
-    // Check if next is smooth (on-curve without type)
-    if (smoothIndex === null && !nextPoint?.type) {
+    // Check if next is smooth (on-curve with smooth flag)
+    if (smoothIndex === null && !nextPoint?.type && nextPoint?.smooth) {
       const nextNextIndex = (nextIndex + 1) % numPoints;
       const nextNextPoint = contour.points[nextNextIndex];
       if (nextNextPoint?.type === "cubic") {
