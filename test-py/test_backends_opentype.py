@@ -207,37 +207,51 @@ async def test_readTTX():
 
 async def test_getSources(testFontMutatorSans):
     sources = await testFontMutatorSans.getSources()
-    assert len(sources) == 1
+    assert len(sources) == 4
+
     expectedSourceValues = [
         FontSource(
             name="LightCondensed",
             lineMetricsHorizontalLayout={
-                "ascender": LineMetric(
-                    value=700,
-                    zone=0,
-                    customData={},
-                ),
-                "baseline": LineMetric(
-                    value=0,
-                    zone=0,
-                    customData={},
-                ),
-                "capHeight": LineMetric(
-                    value=700,
-                    zone=0,
-                    customData={},
-                ),
-                "descender": LineMetric(
-                    value=-200,
-                    zone=0,
-                    customData={},
-                ),
-                "xHeight": LineMetric(
-                    value=500,
-                    zone=0,
-                    customData={},
-                ),
+                "ascender": LineMetric(value=700),
+                "baseline": LineMetric(value=0),
+                "capHeight": LineMetric(value=700),
+                "descender": LineMetric(value=-200),
+                "xHeight": LineMetric(value=500),
             },
-        )
+        ),
+        FontSource(
+            name="wdth=1000",
+            location={"wdth": 1000.0},
+            lineMetricsHorizontalLayout={
+                "ascender": LineMetric(value=700),
+                "baseline": LineMetric(value=0),
+                "capHeight": LineMetric(value=700),
+                "descender": LineMetric(value=-200),
+                "xHeight": LineMetric(value=500),
+            },
+        ),
+        FontSource(
+            name="wdth=1000,wght=900",
+            location={"wdth": 1000.0, "wght": 900.0},
+            lineMetricsHorizontalLayout={
+                "ascender": LineMetric(value=700),
+                "baseline": LineMetric(value=0),
+                "capHeight": LineMetric(value=700),
+                "descender": LineMetric(value=-200),
+                "xHeight": LineMetric(value=500),
+            },
+        ),
+        FontSource(
+            name="wght=900",
+            location={"wght": 900.0},
+            lineMetricsHorizontalLayout={
+                "ascender": LineMetric(value=700),
+                "baseline": LineMetric(value=0),
+                "capHeight": LineMetric(value=700),
+                "descender": LineMetric(value=-200),
+                "xHeight": LineMetric(value=500),
+            },
+        ),
     ]
     assert list(sources.values()) == expectedSourceValues
