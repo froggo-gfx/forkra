@@ -95,7 +95,7 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
         defaultLocation = {axis.name: 0 for axis in self.axes.axes}
         sources = [
             GlyphSource(
-                location=unnormalizeLocation(defaultLocation, self.axes.axes),
+                location={},
                 locationBase=defaultSourceIdentifier,
                 name="",
                 layerName=defaultLayerName,
@@ -349,7 +349,7 @@ def unpackAxes(font: TTFont) -> Axes:
 def unpackFontSources(font):
     nameTable = font["name"]
 
-    defaultSourceIdentifier = str(uuid.uuid4())[:8]
+    defaultSourceIdentifier = makeSourceIdentifier(0)
     defaultSource = FontSource(
         name=getEnglishNameWithFallback(nameTable, [17, 2], "Regular")
     )
@@ -376,6 +376,16 @@ def unpackFontSources(font):
     defaultSource.lineMetricsHorizontalLayout["baseline"] = LineMetric(value=0)
 
     return {defaultSourceIdentifier: defaultSource}
+
+
+# Monkeypatch this for deterministic testing
+_USE_SOURCE_INDEX_INSTEAD_OF_UUID = False
+
+
+def makeSourceIdentifier(sourceIndex):
+    if _USE_SOURCE_INDEX_INSTEAD_OF_UUID:
+        return f"font-source-{sourceIndex}"
+    return str(uuid.uuid4())[:8]
 
 
 def getEnglishNameWithFallback(nameTable, nameIDs, fallback):
