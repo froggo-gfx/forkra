@@ -6,7 +6,7 @@ from contextlib import aclosing
 import pytest
 from fontTools.ttLib import TTFont
 
-from fontra.backends import getFileSystemBackend
+from fontra.backends import getFileSystemBackend, opentype
 from fontra.core.classes import (
     Axes,
     CrossAxisMapping,
@@ -17,6 +17,8 @@ from fontra.core.classes import (
 )
 from fontra.core.fonthandler import FontHandler
 from fontra.filesystem.projectmanager import FileSystemProjectManager
+
+opentype._USE_SOURCE_INDEX_INSTEAD_OF_UUID = True
 
 dataDir = pathlib.Path(__file__).resolve().parent / "data"
 
@@ -182,7 +184,7 @@ async def test_externalChanges(tmpdir):
         await handler.startTasks()
 
         glyph = await handler.getGlyph("A")
-        assert glyph.layers["default"].glyph.xAdvance == 396
+        assert glyph.layers["font-source-0"].glyph.xAdvance == 396
 
         ttFont = TTFont(destPath)
         assert ttFont["hmtx"]["A"] == (396, 20)
@@ -193,7 +195,7 @@ async def test_externalChanges(tmpdir):
 
         modifiedGlyph = await handler.getGlyph("A")
 
-        assert modifiedGlyph.layers["default"].glyph.xAdvance == 999
+        assert modifiedGlyph.layers["font-source-0"].glyph.xAdvance == 999
 
 
 async def test_readTTX():

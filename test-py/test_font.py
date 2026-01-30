@@ -3,7 +3,7 @@ import pathlib
 
 import pytest
 
-from fontra.backends import getFileSystemBackend
+from fontra.backends import getFileSystemBackend, opentype
 from fontra.core.classes import (
     AxisValueLabel,
     DiscreteFontAxis,
@@ -12,6 +12,8 @@ from fontra.core.classes import (
     structure,
     unstructure,
 )
+
+opentype._USE_SOURCE_INDEX_INSTEAD_OF_UUID = True
 
 dataDir = pathlib.Path(__file__).resolve().parent / "data"
 
@@ -670,7 +672,7 @@ getGlyphTestData = [
         {
             "name": "period",
             "layers": {
-                "default": {
+                "font-source-0": {
                     "glyph": {
                         "path": {
                             "contourInfo": [{"endPoint": 3, "isClosed": True}],
@@ -713,9 +715,10 @@ getGlyphTestData = [
             },
             "sources": [
                 {
-                    "layerName": "default",
-                    "location": {"wdth": 0, "wght": 100},
-                    "name": "default",
+                    "layerName": "font-source-0",
+                    "location": {},
+                    "locationBase": "font-source-0",
+                    "name": "",
                 },
                 {
                     "layerName": "wdth=1000",
@@ -740,7 +743,7 @@ getGlyphTestData = [
         {
             "name": "tenttest",
             "layers": {
-                "default": {
+                "font-source-0": {
                     "glyph": {
                         "path": {
                             "contourInfo": [{"endPoint": 3, "isClosed": True}],
@@ -774,9 +777,10 @@ getGlyphTestData = [
             },
             "sources": [
                 {
-                    "layerName": "default",
-                    "location": {"wdth": 0, "wght": 100},
-                    "name": "default",
+                    "layerName": "font-source-0",
+                    "location": {},
+                    "locationBase": "font-source-0",
+                    "name": "",
                 },
                 {
                     "layerName": "wdth=200.01221",
