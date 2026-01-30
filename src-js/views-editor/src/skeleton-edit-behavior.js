@@ -1147,7 +1147,41 @@ export class InterpolatingRibBehavior {
 
     const contour = skeletonData.contours[contourIndex];
     const point = contour.points[pointIndex];
+    const points = contour.points;
     const defaultWidth = contour.defaultWidth || 20;
+
+    // Compute skeleton handle directions for 1D to 2D conversion
+    // These are needed to correctly interpret existing 1D offsets
+    this.skeletonHandleInDir = null;
+    this.skeletonHandleOutDir = null;
+
+    // Incoming handle (previous point if it's off-curve)
+    const prevIdx = (pointIndex - 1 + points.length) % points.length;
+    if (points[prevIdx]?.type) {
+      const dx = points[prevIdx].x - point.x;
+      const dy = points[prevIdx].y - point.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) {
+        this.skeletonHandleInDir = { x: dx / len, y: dy / len };
+      }
+    }
+
+    // Outgoing handle (next point if it's off-curve)
+    const nextIdx = (pointIndex + 1) % points.length;
+    if (points[nextIdx]?.type) {
+      const dx = points[nextIdx].x - point.x;
+      const dy = points[nextIdx].y - point.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) {
+        this.skeletonHandleOutDir = { x: dx / len, y: dy / len };
+      }
+    }
+
+    console.log('[INTERPOLATE-2D] Computed skeleton handle directions', {
+      skeletonHandleInDir: this.skeletonHandleInDir,
+      skeletonHandleOutDir: this.skeletonHandleOutDir,
+      tangent: this.tangent,
+    });
 
     // Store original half-width
     if (side === "left") {
@@ -1165,13 +1199,28 @@ export class InterpolatingRibBehavior {
     this.originalNudge = point[nudgeKey] || 0;
 
     // Store original 2D handle offsets (new format)
-    // If only 1D offsets exist, convert them to 2D using tangent as approximation
+    // If only 1D offsets exist, convert them to 2D using skeleton handle direction
     const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
     const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
     const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
     const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
     const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
     const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+
+    // Debug: log all handle offset keys for this point
+    console.log('[INTERPOLATE-2D] Reading offsets for side:', side, {
+      handleInXKey, handleInYKey, handleOutXKey, handleOutYKey,
+      handleIn1DKey, handleOut1DKey,
+      rawValues: {
+        inX: point[handleInXKey],
+        inY: point[handleInYKey],
+        outX: point[handleOutXKey],
+        outY: point[handleOutYKey],
+        in1D: point[handleIn1DKey],
+        out1D: point[handleOut1DKey],
+      },
+      allPointKeys: Object.keys(point),
+    });
 
     // Check if 2D offsets exist
     const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
@@ -1181,9 +1230,16 @@ export class InterpolatingRibBehavior {
       this.originalHandleInOffsetX = point[handleInXKey] || 0;
       this.originalHandleInOffsetY = point[handleInYKey] || 0;
     } else if (point[handleIn1DKey]) {
-      // Convert 1D to 2D using tangent (approximation for skeleton handle direction)
-      this.originalHandleInOffsetX = this.tangent.x * point[handleIn1DKey];
-      this.originalHandleInOffsetY = this.tangent.y * point[handleIn1DKey];
+      // Convert 1D to 2D using the actual skeleton handle direction
+      // The 1D offset was applied along skeletonHandleInDir, so use that for conversion
+      const dir = this.skeletonHandleInDir || this.tangent;
+      this.originalHandleInOffsetX = dir.x * point[handleIn1DKey];
+      this.originalHandleInOffsetY = dir.y * point[handleIn1DKey];
+      console.log('[INTERPOLATE-2D] Converting 1D to 2D for IN handle', {
+        offset1D: point[handleIn1DKey],
+        dir,
+        result: { x: this.originalHandleInOffsetX, y: this.originalHandleInOffsetY }
+      });
     } else {
       this.originalHandleInOffsetX = 0;
       this.originalHandleInOffsetY = 0;
@@ -1193,9 +1249,16 @@ export class InterpolatingRibBehavior {
       this.originalHandleOutOffsetX = point[handleOutXKey] || 0;
       this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
     } else if (point[handleOut1DKey]) {
-      // Convert 1D to 2D using tangent (approximation for skeleton handle direction)
-      this.originalHandleOutOffsetX = this.tangent.x * point[handleOut1DKey];
-      this.originalHandleOutOffsetY = this.tangent.y * point[handleOut1DKey];
+      // Convert 1D to 2D using the actual skeleton handle direction
+      // The 1D offset was applied along skeletonHandleOutDir, so use that for conversion
+      const dir = this.skeletonHandleOutDir || this.tangent;
+      this.originalHandleOutOffsetX = dir.x * point[handleOut1DKey];
+      this.originalHandleOutOffsetY = dir.y * point[handleOut1DKey];
+      console.log('[INTERPOLATE-2D] Converting 1D to 2D for OUT handle', {
+        offset1D: point[handleOut1DKey],
+        dir,
+        result: { x: this.originalHandleOutOffsetX, y: this.originalHandleOutOffsetY }
+      });
     } else {
       this.originalHandleOutOffsetX = 0;
       this.originalHandleOutOffsetY = 0;
