@@ -2130,9 +2130,11 @@ export class PointerTool extends BaseTool {
     console.log('[RIB-INTERPOLATE] Expected rib position', { expectedX, expectedY, halfWidth, nudge });
 
     // Search for this point in the path
-    const tolerance = 2;
+    const tolerance = 5; // Increased tolerance
     let ribPointIndex = -1;
 
+    // Log all on-curve points to debug
+    const onCurvePoints = [];
     for (let i = 0; i < path.numPoints; i++) {
       const pt = path.getPoint(i);
       const pointType = path.pointTypes[i];
@@ -2141,6 +2143,7 @@ export class PointerTool extends BaseTool {
       if (isOnCurve) {
         const dx = Math.abs(pt.x - expectedX);
         const dy = Math.abs(pt.y - expectedY);
+        onCurvePoints.push({ i, x: pt.x, y: pt.y, dx, dy });
         if (dx <= tolerance && dy <= tolerance) {
           ribPointIndex = i;
           console.log('[RIB-INTERPOLATE] Found rib point at index', i, pt);
@@ -2150,7 +2153,7 @@ export class PointerTool extends BaseTool {
     }
 
     if (ribPointIndex < 0) {
-      console.log('[RIB-INTERPOLATE] Rib point not found in path');
+      console.log('[RIB-INTERPOLATE] Rib point not found in path. On-curve points:', onCurvePoints);
       return null;
     }
 
