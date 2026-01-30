@@ -4011,8 +4011,21 @@ export class PointerTool extends BaseTool {
         const p1 = path.getPoint(idx1);
         const p2 = path.getPoint(idx2);
 
-        // Simple distance-to-line check
-        const dist = this._distanceToSegment(point, p1, p2);
+        // Collect control points between on-curve points
+        const controlPoints = [];
+        let j = idx1 + 1;
+        const limit = idx2 > idx1 ? idx2 : endPoint + 1 + idx2 - startPoint;
+        while (j < limit) {
+          const actualIdx = j <= endPoint ? j : startPoint + (j - endPoint - 1);
+          const cp = path.getPoint(actualIdx);
+          if (cp.type) {
+            controlPoints.push(cp);
+          }
+          j++;
+        }
+
+        // Check distance to curve (sampled if has control points)
+        const dist = this._distanceToCurve(point, p1, p2, controlPoints);
         if (dist <= margin) {
           return { p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, type: "path" };
         }
@@ -4037,30 +4050,54 @@ export class PointerTool extends BaseTool {
     if (!skeletonData?.contours?.length) return null;
 
     for (const contour of skeletonData.contours) {
-      // Find on-curve points
-      const onCurvePoints = [];
-      for (const pt of contour.points) {
-        if (!pt.type) {
-          onCurvePoints.push(pt);
+      const points = contour.points;
+
+      // Find on-curve point indices
+      const onCurveIndices = [];
+      for (let i = 0; i < points.length; i++) {
+        if (!points[i].type) {
+          onCurveIndices.push(i);
         }
       }
 
       // Check each segment
-      for (let i = 0; i < onCurvePoints.length - 1; i++) {
-        const p1 = onCurvePoints[i];
-        const p2 = onCurvePoints[i + 1];
+      for (let i = 0; i < onCurveIndices.length - 1; i++) {
+        const idx1 = onCurveIndices[i];
+        const idx2 = onCurveIndices[i + 1];
+        const p1 = points[idx1];
+        const p2 = points[idx2];
 
-        const dist = this._distanceToSegment(point, p1, p2);
+        // Collect control points between on-curve points
+        const controlPoints = [];
+        for (let j = idx1 + 1; j < idx2; j++) {
+          if (points[j].type) {
+            controlPoints.push(points[j]);
+          }
+        }
+
+        const dist = this._distanceToCurve(point, p1, p2, controlPoints);
         if (dist <= margin) {
           return { p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, type: "skeleton" };
         }
       }
 
       // Check closing segment if closed
-      if (contour.isClosed && onCurvePoints.length >= 2) {
-        const p1 = onCurvePoints[onCurvePoints.length - 1];
-        const p2 = onCurvePoints[0];
-        const dist = this._distanceToSegment(point, p1, p2);
+      if (contour.isClosed && onCurveIndices.length >= 2) {
+        const idx1 = onCurveIndices[onCurveIndices.length - 1];
+        const idx2 = onCurveIndices[0];
+        const p1 = points[idx1];
+        const p2 = points[idx2];
+
+        // Control points wrap around
+        const controlPoints = [];
+        for (let j = idx1 + 1; j < points.length; j++) {
+          if (points[j].type) controlPoints.push(points[j]);
+        }
+        for (let j = 0; j < idx2; j++) {
+          if (points[j].type) controlPoints.push(points[j]);
+        }
+
+        const dist = this._distanceToCurve(point, p1, p2, controlPoints);
         if (dist <= margin) {
           return { p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, type: "skeleton" };
         }
@@ -4068,6 +4105,69 @@ export class PointerTool extends BaseTool {
     }
 
     return null;
+  }
+
+  /**
+   * Calculate distance from point to a curve (bezier or line).
+   * Samples the curve if control points are present.
+   */
+  _distanceToCurve(point, p1, p2, controlPoints) {
+    if (!controlPoints || controlPoints.length === 0) {
+      // Straight line
+      return this._distanceToSegment(point, p1, p2);
+    }
+
+    // Sample the bezier curve and find minimum distance
+    const samples = 16;
+    let minDist = Infinity;
+
+    for (let i = 0; i < samples; i++) {
+      const t1 = i / samples;
+      const t2 = (i + 1) / samples;
+      const pt1 = this._evaluateBezier(t1, p1, p2, controlPoints);
+      const pt2 = this._evaluateBezier(t2, p1, p2, controlPoints);
+      const dist = this._distanceToSegment(point, pt1, pt2);
+      if (dist < minDist) {
+        minDist = dist;
+      }
+    }
+
+    return minDist;
+  }
+
+  /**
+   * Evaluate a bezier curve at parameter t.
+   */
+  _evaluateBezier(t, p1, p2, controlPoints) {
+    if (controlPoints.length === 2) {
+      // Cubic bezier
+      const cp1 = controlPoints[0];
+      const cp2 = controlPoints[1];
+      const mt = 1 - t;
+      const mt2 = mt * mt;
+      const mt3 = mt2 * mt;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      return {
+        x: mt3 * p1.x + 3 * mt2 * t * cp1.x + 3 * mt * t2 * cp2.x + t3 * p2.x,
+        y: mt3 * p1.y + 3 * mt2 * t * cp1.y + 3 * mt * t2 * cp2.y + t3 * p2.y,
+      };
+    } else if (controlPoints.length === 1) {
+      // Quadratic bezier
+      const cp = controlPoints[0];
+      const mt = 1 - t;
+      const mt2 = mt * mt;
+      const t2 = t * t;
+      return {
+        x: mt2 * p1.x + 2 * mt * t * cp.x + t2 * p2.x,
+        y: mt2 * p1.y + 2 * mt * t * cp.y + t2 * p2.y,
+      };
+    }
+    // Fallback: straight line
+    return {
+      x: p1.x + t * (p2.x - p1.x),
+      y: p1.y + t * (p2.y - p1.y),
+    };
   }
 
   /**
