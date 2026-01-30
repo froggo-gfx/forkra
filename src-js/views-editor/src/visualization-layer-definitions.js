@@ -1690,23 +1690,29 @@ registerVisualizationLayerDefinition({
   zIndex: 650, // Above other layers
   screenParameters: {
     strokeWidth: 1,
-    fontSize: 11,
+    fontSize: 14,
     dashPattern: [4, 4],
     pointRadius: 4,
   },
   colors: {
     lineColor: "#FF6600",
     textColor: "#333",
-    textBgColor: "#FFFFFFCC",
+    textBgColor: "#FFFFFF",
+    textBorderColor: "rgba(0, 0, 0, 0.15)",
     projectionColor: "#0088FF",
     selectedPointColor: "#FF0066",
+    skeletonColor: "#0066FF",
+    pathColor: "#22AA44",
   },
   colorsDarkMode: {
     lineColor: "#FF8833",
     textColor: "#EEE",
-    textBgColor: "#333333CC",
+    textBgColor: "#333333",
+    textBorderColor: "rgba(255, 255, 255, 0.15)",
     projectionColor: "#44AAFF",
     selectedPointColor: "#FF4488",
+    skeletonColor: "#4499FF",
+    pathColor: "#44CC66",
   },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     if (!model.measureMode) return;
@@ -1715,12 +1721,14 @@ registerVisualizationLayerDefinition({
 
     // 1. Draw segment hover measurement (Q+hover)
     if (measureHoverSegment) {
-      const { p1, p2 } = measureHoverSegment;
+      const { p1, p2, type } = measureHoverSegment;
+      // Use skeleton color (blue) for skeleton segments, path color (green) for regular
+      const segmentColor = type === "skeleton" ? parameters.skeletonColor : parameters.pathColor;
 
       if (measureShowDirect) {
         // Alt+Q: direct distance line
         const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-        drawMeasureLine(context, p1, p2, dist.toFixed(1), parameters.lineColor, parameters);
+        drawMeasureLine(context, p1, p2, dist.toFixed(1), segmentColor, parameters);
       } else {
         // Q: projected distances (dx, dy)
         const dx = Math.abs(p2.x - p1.x);
@@ -1736,7 +1744,7 @@ registerVisualizationLayerDefinition({
             p1,
             cornerPoint,
             dx.toFixed(1),
-            parameters.projectionColor,
+            segmentColor,
             parameters
           );
         }
@@ -1747,7 +1755,7 @@ registerVisualizationLayerDefinition({
             cornerPoint,
             p2,
             dy.toFixed(1),
-            parameters.projectionColor,
+            segmentColor,
             parameters
           );
         }
@@ -1822,22 +1830,27 @@ function drawMeasureLine(context, p1, p2, label, color, parameters) {
   context.save();
   context.scale(1, -1);
 
-  context.font = `${parameters.fontSize}px fontra-ui-regular, sans-serif`;
+  context.font = `500 ${parameters.fontSize}px fontra-ui-regular, sans-serif`;
   context.textAlign = "center";
   context.textBaseline = "middle";
 
   // Measure text for background
   const textWidth = context.measureText(label).width;
-  const padding = 3;
+  const padding = 4;
+
+  const bgX = midX - textWidth / 2 - padding;
+  const bgY = -midY - parameters.fontSize / 2 - padding;
+  const bgW = textWidth + padding * 2;
+  const bgH = parameters.fontSize + padding * 2;
 
   // Draw background
   context.fillStyle = parameters.textBgColor;
-  context.fillRect(
-    midX - textWidth / 2 - padding,
-    -midY - parameters.fontSize / 2 - padding,
-    textWidth + padding * 2,
-    parameters.fontSize + padding * 2
-  );
+  context.fillRect(bgX, bgY, bgW, bgH);
+
+  // Draw subtle border
+  context.strokeStyle = parameters.textBorderColor;
+  context.lineWidth = 1;
+  context.strokeRect(bgX, bgY, bgW, bgH);
 
   // Draw text
   context.fillStyle = parameters.textColor;
