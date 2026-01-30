@@ -355,10 +355,10 @@ def unpackAxes(font: TTFont) -> Axes:
 
 
 MVAR_MAPPING = {
-    "hasc": "ascender",
-    "hdsc": "descender",
-    "cpht": "capHeight",
-    "xhgt": "xHeight",
+    "hasc": ("lineMetricsHorizontalLayout", "ascender"),
+    "hdsc": ("lineMetricsHorizontalLayout", "descender"),
+    "cpht": ("lineMetricsHorizontalLayout", "capHeight"),
+    "xhgt": ("lineMetricsHorizontalLayout", "xHeight"),
 }
 
 
@@ -424,11 +424,11 @@ def unpackFontSources(font, fontraAxes):
         if os2Table is not None and mvarTable is not None:
             mvarInstancer = VarStoreInstancer(mvarTable.table.VarStore, fvarAxes, loc)
             for rec in mvarTable.table.ValueRecord:
-                metricKey = MVAR_MAPPING.get(rec.ValueTag)
+                whichMetrics, metricKey = MVAR_MAPPING.get(rec.ValueTag, (None, None))
                 if metricKey:
-                    source.lineMetricsHorizontalLayout[
-                        metricKey
-                    ].value += mvarInstancer[rec.VarIdx]
+                    getattr(source, whichMetrics)[metricKey].value += mvarInstancer[
+                        rec.VarIdx
+                    ]
 
         sources[sourceIdentifier] = source
 
