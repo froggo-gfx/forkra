@@ -230,14 +230,23 @@ export class SkeletonPenTool extends BaseTool {
       return;
     }
 
+    // Check if we're in "drawing mode" - have an endpoint of an open contour selected
+    const { skeletonPoint: selectedSkeletonPoints } = parseSelection(
+      this.sceneController.selection
+    );
+    const drawingContourIdx = this._getDrawingContourIndex(selectedSkeletonPoints);
+    const isDrawingMode = drawingContourIdx !== null;
+
     // Check if we clicked on an existing skeleton point
     const skeletonHit = this._hitTestSkeletonPoints(initialEvent);
 
     if (skeletonHit) {
-      // Check if clicking on first point should close the contour
-      const { skeletonPoint: selectedSkeletonPoints } = parseSelection(
-        this.sceneController.selection
-      );
+      // In drawing mode, only consider hits on the same contour (for closing)
+      if (isDrawingMode && skeletonHit.contourIndex !== drawingContourIdx) {
+        // Ignore hits on other contours - just add new point
+        await this._handleAddSkeletonPoint(eventStream, initialEvent);
+        return;
+      }
 
       if (selectedSkeletonPoints?.size === 1) {
         const selectedKey = [...selectedSkeletonPoints][0];
@@ -283,6 +292,12 @@ export class SkeletonPenTool extends BaseTool {
     const centerlineHit = this._hitTestSkeletonCenterline(initialEvent);
 
     if (centerlineHit) {
+      // In drawing mode, ignore centerline hits on other contours
+      if (isDrawingMode && centerlineHit.contourIndex !== drawingContourIdx) {
+        await this._handleAddSkeletonPoint(eventStream, initialEvent);
+        return;
+      }
+
       if (initialEvent.altKey) {
         // Alt+click: Insert handles (convert line to curve)
         await this._handleInsertSkeletonHandles(eventStream, initialEvent, centerlineHit);
@@ -294,6 +309,45 @@ export class SkeletonPenTool extends BaseTool {
       // Add new skeleton point
       await this._handleAddSkeletonPoint(eventStream, initialEvent);
     }
+  }
+
+  /**
+   * Check if we're in drawing mode and return the contour index being drawn.
+   * Returns contour index if an endpoint of an open contour is selected, null otherwise.
+   */
+  _getDrawingContourIndex(selectedSkeletonPoints) {
+    if (!selectedSkeletonPoints || selectedSkeletonPoints.size !== 1) {
+      return null;
+    }
+
+    const skeletonData = this._getSkeletonData();
+    if (!skeletonData) return null;
+
+    const selectedKey = [...selectedSkeletonPoints][0];
+    const [contourIdx, pointIdx] = selectedKey.split("/").map(Number);
+
+    const contour = skeletonData.contours[contourIdx];
+    if (!contour || contour.isClosed) return null;
+
+    // Count on-curve points
+    const onCurveCount = contour.points.filter(p => !p.type).length;
+    if (onCurveCount < 1) return null;
+
+    // Find the on-curve index of the selected point
+    let onCurveIdx = 0;
+    for (let i = 0; i < pointIdx; i++) {
+      if (!contour.points[i].type) onCurveIdx++;
+    }
+
+    // Check if selected point is an endpoint (first or last on-curve point)
+    const isFirstOnCurve = onCurveIdx === 0 && !contour.points[pointIdx].type;
+    const isLastOnCurve = onCurveIdx === onCurveCount - 1 && !contour.points[pointIdx].type;
+
+    if (isFirstOnCurve || isLastOnCurve) {
+      return contourIdx;
+    }
+
+    return null;
   }
 
   /**
