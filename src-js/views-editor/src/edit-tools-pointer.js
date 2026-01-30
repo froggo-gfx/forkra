@@ -2005,10 +2005,10 @@ export class PointerTool extends BaseTool {
                   point.rightNudge = change.nudge;
                 }
               }
-              // Apply 2D handle offset compensation for interpolation (single-sided)
-              if (sideIsEditable && change.isInterpolation) {
+              // Apply 2D handle offset compensation for interpolation or editable drag (single-sided)
+              if (sideIsEditable && (change.isInterpolation || change.hasHandleOffsets)) {
                 console.log('[INTERPOLATE-2D] Applying 2D offsets in _handleDragRibPoint (single-sided)', {
-                  dragSide, change
+                  dragSide, change, isInterpolation: change.isInterpolation, hasHandleOffsets: change.hasHandleOffsets
                 });
 
                 if (dragSide === "left") {
@@ -2049,10 +2049,10 @@ export class PointerTool extends BaseTool {
                 // Don't touch width - it stays symmetric
               }
 
-              // Apply 2D handle offset compensation for interpolation
-              if (change.isInterpolation) {
+              // Apply 2D handle offset compensation for interpolation or editable drag
+              if (change.isInterpolation || change.hasHandleOffsets) {
                 console.log('[INTERPOLATE-2D] Applying 2D offsets in _handleDragRibPoint', {
-                  dragSide, change
+                  dragSide, change, isInterpolation: change.isInterpolation, hasHandleOffsets: change.hasHandleOffsets
                 });
 
                 if (dragSide === "left") {
@@ -2475,10 +2475,10 @@ export class PointerTool extends BaseTool {
               }
             }
 
-            // Apply 2D handle offset compensation for interpolation
-            if (change.isInterpolation) {
+            // Apply 2D handle offset compensation for interpolation or editable drag
+            if (change.isInterpolation || change.hasHandleOffsets) {
               console.log('[INTERPOLATE-2D] Applying 2D offsets in _handleDragEditableGeneratedPoints', {
-                side, change
+                side, change, isInterpolation: change.isInterpolation, hasHandleOffsets: change.hasHandleOffsets
               });
 
               if (side === "left") {

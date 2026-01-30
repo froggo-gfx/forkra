@@ -989,6 +989,7 @@ export class EditableRibBehavior {
 
     const contour = skeletonData.contours[contourIndex];
     const point = contour.points[pointIndex];
+    const points = contour.points;
     const defaultWidth = contour.defaultWidth || 20;
 
     // Determine if point is symmetric or asymmetric
@@ -1012,6 +1013,78 @@ export class EditableRibBehavior {
 
     // Minimum half-width (1 unit)
     this.minHalfWidth = 1;
+
+    // Store original 2D handle offsets for compensation when nudge changes
+    // This ensures handles stay in place when rib point moves
+    this._initHandleOffsets(point, points, pointIndex, side);
+  }
+
+  /**
+   * Initialize handle offset tracking for nudge compensation.
+   */
+  _initHandleOffsets(point, points, pointIndex, side) {
+    // Compute skeleton handle directions
+    this.skeletonHandleInDir = null;
+    this.skeletonHandleOutDir = null;
+
+    const prevIdx = (pointIndex - 1 + points.length) % points.length;
+    if (points[prevIdx]?.type) {
+      const dx = points[prevIdx].x - point.x;
+      const dy = points[prevIdx].y - point.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) {
+        this.skeletonHandleInDir = { x: dx / len, y: dy / len };
+      }
+    }
+
+    const nextIdx = (pointIndex + 1) % points.length;
+    if (points[nextIdx]?.type) {
+      const dx = points[nextIdx].x - point.x;
+      const dy = points[nextIdx].y - point.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) {
+        this.skeletonHandleOutDir = { x: dx / len, y: dy / len };
+      }
+    }
+
+    // Read existing 2D offsets or convert from 1D
+    const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+    const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+    const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+    const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+    const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+    const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+
+    const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
+    const has2DOut = point[handleOutXKey] !== undefined || point[handleOutYKey] !== undefined;
+
+    // Check if any handle offsets exist (2D or 1D)
+    this.hasHandleOffsets = has2DIn || has2DOut ||
+      point[handleIn1DKey] !== undefined || point[handleOut1DKey] !== undefined;
+
+    if (has2DIn) {
+      this.originalHandleInOffsetX = point[handleInXKey] || 0;
+      this.originalHandleInOffsetY = point[handleInYKey] || 0;
+    } else if (point[handleIn1DKey]) {
+      const dir = this.skeletonHandleInDir || this.tangent;
+      this.originalHandleInOffsetX = dir.x * point[handleIn1DKey];
+      this.originalHandleInOffsetY = dir.y * point[handleIn1DKey];
+    } else {
+      this.originalHandleInOffsetX = 0;
+      this.originalHandleInOffsetY = 0;
+    }
+
+    if (has2DOut) {
+      this.originalHandleOutOffsetX = point[handleOutXKey] || 0;
+      this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
+    } else if (point[handleOut1DKey]) {
+      const dir = this.skeletonHandleOutDir || this.tangent;
+      this.originalHandleOutOffsetX = dir.x * point[handleOut1DKey];
+      this.originalHandleOutOffsetY = dir.y * point[handleOut1DKey];
+    } else {
+      this.originalHandleOutOffsetX = 0;
+      this.originalHandleOutOffsetY = 0;
+    }
   }
 
   /**
@@ -1019,9 +1092,10 @@ export class EditableRibBehavior {
    * - Symmetric: only nudge changes, width stays original
    * - Asymmetric: both width and nudge can change
    * - With constrainMode: lock to tangent or normal direction
+   * Also compensates 2D handle offsets when nudge changes to keep handles stationary.
    * @param {Object} delta - The drag delta {x, y}
    * @param {string|null} constrainMode - null (free), "tangent" (nudge only), or "normal" (width only)
-   * @returns {Object} { halfWidth, nudge, isAsymmetric } - New values and mode flag
+   * @returns {Object} { halfWidth, nudge, isAsymmetric, handleInOffsetX/Y, handleOutOffsetX/Y }
    */
   applyDelta(delta, constrainMode = null) {
     let newNudge = this.originalNudge;
@@ -1063,7 +1137,13 @@ export class EditableRibBehavior {
       }
     }
 
-    return {
+    // Compute handle offset compensation when nudge changes
+    // When rib point moves by tangent * deltaNudge, handles need opposite offset
+    const deltaNudge = newNudge - this.originalNudge;
+    const handleOffsetDeltaX = -this.tangent.x * deltaNudge;
+    const handleOffsetDeltaY = -this.tangent.y * deltaNudge;
+
+    const result = {
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
       side: this.side,
@@ -1071,19 +1151,40 @@ export class EditableRibBehavior {
       nudge: Math.round(newNudge),
       isAsymmetric: this.isAsymmetric,
     };
+
+    // Only include handle offsets if there were existing offsets to preserve
+    if (this.hasHandleOffsets) {
+      result.handleInOffsetX = Math.round(this.originalHandleInOffsetX + handleOffsetDeltaX);
+      result.handleInOffsetY = Math.round(this.originalHandleInOffsetY + handleOffsetDeltaY);
+      result.handleOutOffsetX = Math.round(this.originalHandleOutOffsetX + handleOffsetDeltaX);
+      result.handleOutOffsetY = Math.round(this.originalHandleOutOffsetY + handleOffsetDeltaY);
+      result.hasHandleOffsets = true;
+    }
+
+    return result;
   }
 
   /**
-   * Get rollback data to restore original width and nudge.
+   * Get rollback data to restore original width, nudge, and handle offsets.
    */
   getRollback() {
-    return {
+    const result = {
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
       side: this.side,
       halfWidth: Math.round(this.originalHalfWidth),
       nudge: Math.round(this.originalNudge),
     };
+
+    if (this.hasHandleOffsets) {
+      result.handleInOffsetX = Math.round(this.originalHandleInOffsetX);
+      result.handleInOffsetY = Math.round(this.originalHandleInOffsetY);
+      result.handleOutOffsetX = Math.round(this.originalHandleOutOffsetX);
+      result.handleOutOffsetY = Math.round(this.originalHandleOutOffsetY);
+      result.hasHandleOffsets = true;
+    }
+
+    return result;
   }
 
   /**
