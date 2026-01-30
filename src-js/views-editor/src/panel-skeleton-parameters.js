@@ -403,6 +403,7 @@ export default class SkeletonParametersPanel extends Panel {
     let asymStates = new Set(); // Track asymmetric states across selection
     let forceHorizontalStates = new Set(); // Track forceHorizontal states
     let forceVerticalStates = new Set(); // Track forceVertical states
+    let hasSingleSided = false; // Track if any selected point is in single-sided contour
 
     // Track editable states per side based on selected rib points
     const selectedRibSides = this._getSelectedRibSides();
@@ -423,6 +424,12 @@ export default class SkeletonParametersPanel extends Panel {
         asymStates.add(this._isAsymmetric(point));
         forceHorizontalStates.add(!!point.forceHorizontal);
         forceVerticalStates.add(!!point.forceVertical);
+
+        // Check if contour is single-sided
+        const contour = selectedData.skeletonData?.contours?.[contourIdx];
+        if (contour?.singleSided) {
+          hasSingleSided = true;
+        }
 
         // Collect editable states for selected rib sides
         const pointKey = `${contourIdx}/${pointIdx}`;
@@ -462,11 +469,13 @@ export default class SkeletonParametersPanel extends Panel {
     const isIndeterminate = asymStates.size > 1; // Mixed asym states
 
     // Header with Asymmetrical toggle
+    // Disabled for single-sided contours (asym doesn't make sense there)
     // When indeterminate, set checked=false so first click turns ON
     const checkbox = html.input({
       type: "checkbox",
       id: "asymmetrical-toggle",
       checked: isIndeterminate ? false : isAsym,
+      disabled: hasSingleSided,
       onchange: (e) => this._onAsymmetricalToggle(e.target.checked),
     });
     // Set indeterminate state after creation (can't be set via attribute)
@@ -479,7 +488,11 @@ export default class SkeletonParametersPanel extends Panel {
       label: "Point Parameters",
       auxiliaryElement: html.span({}, [
         checkbox,
-        html.label({ for: "asymmetrical-toggle", style: "margin-left: 4px" }, "Asym"),
+        html.label({
+          for: "asymmetrical-toggle",
+          style: `margin-left: 4px${hasSingleSided ? "; opacity: 0.5" : ""}`,
+          title: hasSingleSided ? "Asymmetric mode not available for single-sided contours" : undefined,
+        }, "Asym"),
       ]),
     });
 
