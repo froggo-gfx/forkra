@@ -2565,11 +2565,11 @@ export class PointerTool extends BaseTool {
 
             if (isDetached) {
               // Detached mode: update 2D offsets, preserve detached state
-              // Project delta onto skeleton handle direction
+              // Use original values since delta is cumulative from drag start
+              const originalPoint = data.original.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
               const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
-              point[offsetXKey] = (point[offsetXKey] || 0) + Math.round(skeletonHandleDir.x * projectedDelta);
-              point[offsetYKey] = (point[offsetYKey] || 0) + Math.round(skeletonHandleDir.y * projectedDelta);
-              // Don't touch 1D offset - let 2D offsets take priority
+              point[offsetXKey] = (originalPoint[offsetXKey] || 0) + Math.round(skeletonHandleDir.x * projectedDelta);
+              point[offsetYKey] = (originalPoint[offsetYKey] || 0) + Math.round(skeletonHandleDir.y * projectedDelta);
             } else {
               // Normal mode: clear 2D offsets (they have priority), set 1D offset
               delete point[offsetXKey];
