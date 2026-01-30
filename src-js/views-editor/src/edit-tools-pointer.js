@@ -4004,14 +4004,21 @@ export class PointerTool extends BaseTool {
           }
         }
 
-        // Calculate rib endpoint positions
+        // Apply nudge offset for editable points
+        const tangent = { x: -normal.y, y: normal.x };
+        const isLeftEditable = skeletonPoint.leftEditable === true;
+        const isRightEditable = skeletonPoint.rightEditable === true;
+        const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
+        const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+
+        // Calculate rib endpoint positions (including nudge)
         const leftRibPoint = {
-          x: skeletonPoint.x + normal.x * leftHW,
-          y: skeletonPoint.y + normal.y * leftHW,
+          x: skeletonPoint.x + normal.x * leftHW + tangent.x * leftNudge,
+          y: skeletonPoint.y + normal.y * leftHW + tangent.y * leftNudge,
         };
         const rightRibPoint = {
-          x: skeletonPoint.x - normal.x * rightHW,
-          y: skeletonPoint.y - normal.y * rightHW,
+          x: skeletonPoint.x - normal.x * rightHW + tangent.x * rightNudge,
+          y: skeletonPoint.y - normal.y * rightHW + tangent.y * rightNudge,
         };
 
         // Check left rib point
