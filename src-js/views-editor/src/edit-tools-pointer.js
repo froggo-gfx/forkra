@@ -1094,6 +1094,11 @@ export class PointerTool extends BaseTool {
 
     // Check if any selected points are editable generated points
     // If so, redirect to dedicated handler
+    console.log('[RIB-INTERPOLATE] Checking pointSelection', {
+      hasPointSelection: !!pointSelection,
+      length: pointSelection?.length,
+      pointSelection: pointSelection ? Array.from(pointSelection) : null,
+    });
     if (pointSelection?.length > 0) {
       const editableGenerated = this._getEditableGeneratedPointsFromSelection(pointSelection);
       if (editableGenerated.length > 0 && !hasSkeletonSelection) {
@@ -2004,15 +2009,24 @@ export class PointerTool extends BaseTool {
    * @returns {Array} Array of {pointIndex, skeletonContourIndex, skeletonPointIndex, side}
    */
   _getEditableGeneratedPointsFromSelection(pointSelection) {
+    console.log('[RIB-INTERPOLATE] _getEditableGeneratedPointsFromSelection called', {
+      pointSelection: Array.from(pointSelection),
+    });
+
     const result = [];
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
-    if (!positionedGlyph) return result;
+    if (!positionedGlyph) {
+      console.log('[RIB-INTERPOLATE] No positionedGlyph');
+      return result;
+    }
 
     for (const pointIndex of pointSelection) {
+      console.log('[RIB-INTERPOLATE] Checking pointIndex:', pointIndex);
       const ribInfo = this.sceneModel._getEditableRibPointForGeneratedPoint(
         positionedGlyph,
         pointIndex
       );
+      console.log('[RIB-INTERPOLATE] ribInfo:', ribInfo);
       if (ribInfo) {
         result.push({
           pointIndex,
@@ -2020,6 +2034,7 @@ export class PointerTool extends BaseTool {
         });
       }
     }
+    console.log('[RIB-INTERPOLATE] Result:', result);
     return result;
   }
 
