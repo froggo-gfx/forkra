@@ -60,7 +60,6 @@ getGlyphTestData = [
             "name": "Aacute",
             "sources": [
                 {
-                    "location": {},
                     "layerName": "default",
                     "name": "",
                     "locationBase": "default",
@@ -114,31 +113,26 @@ getGlyphTestData = [
             "sources": [
                 {
                     "name": "",
-                    "location": {},
                     "locationBase": "light-condensed",
                     "layerName": "light-condensed",
                 },
                 {
                     "name": "",
-                    "location": {},
                     "locationBase": "bold-condensed",
                     "layerName": "bold-condensed",
                 },
                 {
                     "name": "",
-                    "location": {},
                     "locationBase": "light-wide",
                     "layerName": "light-wide",
                 },
                 {
                     "name": "",
-                    "location": {},
                     "locationBase": "bold-wide",
                     "layerName": "bold-wide",
                 },
                 {
                     "name": "",
-                    "location": {},
                     "locationBase": "light-condensed-italic",
                     "layerName": "light-condensed-italic",
                 },
@@ -214,25 +208,21 @@ getGlyphTestData = [
             "sources": [
                 {
                     "name": "",
-                    "location": {},
                     "locationBase": "light-condensed",
                     "layerName": "light-condensed",
                 },
                 {
                     "name": "",
-                    "location": {},
                     "locationBase": "bold-condensed",
                     "layerName": "bold-condensed",
                 },
                 {
                     "name": "",
-                    "location": {},
                     "locationBase": "light-wide",
                     "layerName": "light-wide",
                 },
                 {
                     "name": "",
-                    "location": {},
                     "locationBase": "bold-wide",
                     "layerName": "bold-wide",
                 },
@@ -396,13 +386,11 @@ getGlyphTestData = [
             "sources": [
                 {
                     "name": "",
-                    "location": {},
                     "locationBase": "light-condensed",
                     "layerName": "light-condensed",
                 },
                 {
                     "name": "",
-                    "location": {},
                     "locationBase": "bold-condensed",
                     "layerName": "weight=850",
                 },
@@ -526,7 +514,6 @@ getGlyphTestData = [
             "sources": [
                 {
                     "name": "",
-                    "location": {},
                     "locationBase": "light-condensed",
                     "layerName": "light-condensed",
                 },
@@ -682,7 +669,7 @@ getGlyphTestData = [
                         "xAdvance": 170,
                     },
                 },
-                "wdth=1000": {
+                "font-source-1": {
                     "glyph": {
                         "path": {
                             "contourInfo": [{"endPoint": 3, "isClosed": True}],
@@ -692,7 +679,7 @@ getGlyphTestData = [
                         "xAdvance": 290,
                     },
                 },
-                "wdth=1000,wght=900": {
+                "font-source-2": {
                     "glyph": {
                         "path": {
                             "contourInfo": [{"endPoint": 3, "isClosed": True}],
@@ -702,7 +689,7 @@ getGlyphTestData = [
                         "xAdvance": 310,
                     },
                 },
-                "wght=900": {
+                "font-source-3": {
                     "glyph": {
                         "path": {
                             "contourInfo": [{"endPoint": 3, "isClosed": True}],
@@ -716,24 +703,23 @@ getGlyphTestData = [
             "sources": [
                 {
                     "layerName": "font-source-0",
-                    "location": {},
                     "locationBase": "font-source-0",
                     "name": "",
                 },
                 {
-                    "layerName": "wdth=1000",
-                    "location": {"wdth": 1000, "wght": 100},
-                    "name": "wdth=1000",
+                    "layerName": "font-source-1",
+                    "locationBase": "font-source-1",
+                    "name": "",
                 },
                 {
-                    "layerName": "wdth=1000,wght=900",
-                    "location": {"wdth": 1000, "wght": 900},
-                    "name": "wdth=1000,wght=900",
+                    "layerName": "font-source-2",
+                    "locationBase": "font-source-2",
+                    "name": "",
                 },
                 {
-                    "layerName": "wght=900",
-                    "location": {"wdth": 0, "wght": 900},
-                    "name": "wght=900",
+                    "layerName": "font-source-3",
+                    "locationBase": "font-source-3",
+                    "name": "",
                 },
             ],
         },
@@ -764,7 +750,7 @@ getGlyphTestData = [
                     },
                     "customData": {},
                 },
-                "wdth=1000": {
+                "font-source-1": {
                     "glyph": {
                         "path": {
                             "contourInfo": [{"endPoint": 3, "isClosed": True}],
@@ -778,7 +764,6 @@ getGlyphTestData = [
             "sources": [
                 {
                     "layerName": "font-source-0",
-                    "location": {},
                     "locationBase": "font-source-0",
                     "name": "",
                 },
@@ -788,9 +773,10 @@ getGlyphTestData = [
                     "name": "wdth=200.01221",
                 },
                 {
-                    "layerName": "wdth=1000",
-                    "location": {"wdth": 1000, "wght": 100},
-                    "name": "wdth=1000",
+                    "layerName": "font-source-1",
+                    "location": {},
+                    "locationBase": "font-source-1",
+                    "name": "",
                 },
             ],
         },
@@ -810,7 +796,7 @@ getGlyphTestData = [
                         "xAdvance": 170,
                     },
                 },
-                "wdth=1000": {
+                "font-source-1": {
                     "glyph": {
                         "path": {
                             "coordinates": [
@@ -829,7 +815,7 @@ getGlyphTestData = [
                         "xAdvance": 290.0,
                     },
                 },
-                "wdth=1000,wght=900": {
+                "font-source-2": {
                     "glyph": {
                         "path": {
                             "coordinates": [
@@ -848,7 +834,7 @@ getGlyphTestData = [
                         "xAdvance": 310.0,
                     },
                 },
-                "wght=900": {
+                "font-source-3": {
                     "glyph": {
                         "path": {
                             "coordinates": [
@@ -870,25 +856,24 @@ getGlyphTestData = [
             },
             "sources": [
                 {
-                    "location": {},
                     "locationBase": "font-source-0",
                     "name": "",
                     "layerName": "font-source-0",
                 },
                 {
-                    "location": {"wdth": 1000.0, "wght": 100.0},
-                    "name": "wdth=1000",
-                    "layerName": "wdth=1000",
+                    "locationBase": "font-source-1",
+                    "name": "",
+                    "layerName": "font-source-1",
                 },
                 {
-                    "location": {"wdth": 1000.0, "wght": 900.0},
-                    "name": "wdth=1000,wght=900",
-                    "layerName": "wdth=1000,wght=900",
+                    "locationBase": "font-source-2",
+                    "name": "",
+                    "layerName": "font-source-2",
                 },
                 {
-                    "location": {"wdth": 0.0, "wght": 900.0},
-                    "name": "wght=900",
-                    "layerName": "wght=900",
+                    "locationBase": "font-source-3",
+                    "name": "",
+                    "layerName": "font-source-3",
                 },
             ],
         },
@@ -901,7 +886,6 @@ getGlyphTestData = [
                 {
                     "name": "",
                     "layerName": "font-source-0",
-                    "location": {},
                     "locationBase": "font-source-0",
                 },
                 {
