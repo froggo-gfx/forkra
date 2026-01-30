@@ -622,8 +622,34 @@ export default class SkeletonParametersPanel extends Panel {
         editableCheckbox.indeterminate = true;
       }
 
-      // Check if any selected editable rib points have nudge values
+      // Check if any selected editable rib points have nudge values or handle offsets
       const hasNudge = this._selectedRibPointsHaveNudge(selectedRibSides);
+      const hasHandleOffsets = this._selectedRibPointsHaveHandleOffsets(selectedRibSides);
+
+      // Build reset buttons array
+      const resetButtons = [];
+      if ((isEditable || isEditableIndeterminate) && hasNudge) {
+        resetButtons.push(
+          html.button(
+            {
+              style: "font-size: 11px; padding: 2px 6px; margin-right: 4px;",
+              onclick: () => this._onResetRibPosition(selectedRibSides),
+            },
+            "Reset"
+          )
+        );
+      }
+      if ((isEditable || isEditableIndeterminate) && hasHandleOffsets) {
+        resetButtons.push(
+          html.button(
+            {
+              style: "font-size: 11px; padding: 2px 6px;",
+              onclick: () => this._onResetHandleOffsets(selectedRibSides),
+            },
+            "Reset Handles"
+          )
+        );
+      }
 
       formContents.push({
         type: "universal-row",
@@ -637,15 +663,9 @@ export default class SkeletonParametersPanel extends Panel {
         },
         field2: {
           type: "auxiliaryElement",
-          key: "resetPosition",
-          auxiliaryElement: (isEditable || isEditableIndeterminate) && hasNudge
-            ? html.button(
-                {
-                  style: "font-size: 11px; padding: 2px 6px;",
-                  onclick: () => this._onResetRibPosition(selectedRibSides),
-                },
-                "Reset"
-              )
+          key: "resetButtons",
+          auxiliaryElement: resetButtons.length > 0
+            ? html.span({}, resetButtons)
             : html.span(),
         },
         field3: { type: "spacer" },
@@ -1459,17 +1479,49 @@ export default class SkeletonParametersPanel extends Panel {
             const handleOutKey = side === "left" ? "leftHandleOut" : "rightHandleOut";
             const handleInAngleKey = side === "left" ? "leftHandleInAngle" : "rightHandleInAngle";
             const handleOutAngleKey = side === "left" ? "leftHandleOutAngle" : "rightHandleOutAngle";
+            // Handle offset keys (for editable generated handles)
+            const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+            const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+            // Saved keys for preserving values when toggling editable off/on
+            const nudgeSavedKey = side === "left" ? "leftNudgeSaved" : "rightNudgeSaved";
+            const handleInOffsetSavedKey = side === "left" ? "leftHandleInOffsetSaved" : "rightHandleInOffsetSaved";
+            const handleOutOffsetSavedKey = side === "left" ? "leftHandleOutOffsetSaved" : "rightHandleOutOffsetSaved";
 
             if (checked) {
               point[editableKey] = true;
+              // Restore saved values if they exist
+              if (point[nudgeSavedKey] !== undefined) {
+                point[nudgeKey] = point[nudgeSavedKey];
+                delete point[nudgeSavedKey];
+              }
+              if (point[handleInOffsetSavedKey] !== undefined) {
+                point[handleInOffsetKey] = point[handleInOffsetSavedKey];
+                delete point[handleInOffsetSavedKey];
+              }
+              if (point[handleOutOffsetSavedKey] !== undefined) {
+                point[handleOutOffsetKey] = point[handleOutOffsetSavedKey];
+                delete point[handleOutOffsetSavedKey];
+              }
             } else {
               delete point[editableKey];
-              // Also clear nudge and handle values when disabling
+              // Save current values before clearing
+              if (point[nudgeKey] !== undefined && point[nudgeKey] !== 0) {
+                point[nudgeSavedKey] = point[nudgeKey];
+              }
+              if (point[handleInOffsetKey] !== undefined && point[handleInOffsetKey] !== 0) {
+                point[handleInOffsetSavedKey] = point[handleInOffsetKey];
+              }
+              if (point[handleOutOffsetKey] !== undefined && point[handleOutOffsetKey] !== 0) {
+                point[handleOutOffsetSavedKey] = point[handleOutOffsetKey];
+              }
+              // Clear active values when disabling
               delete point[nudgeKey];
               delete point[handleInKey];
               delete point[handleOutKey];
               delete point[handleInAngleKey];
               delete point[handleOutAngleKey];
+              delete point[handleInOffsetKey];
+              delete point[handleOutOffsetKey];
             }
           }
         }
@@ -1532,6 +1584,127 @@ export default class SkeletonParametersPanel extends Panel {
       }
     }
     return false;
+  }
+
+  /**
+   * Check if any selected editable rib points have handle offset values.
+   * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
+   * @returns {boolean} True if at least one selected editable rib point has handle offsets
+   */
+  _selectedRibPointsHaveHandleOffsets(selectedRibSides) {
+    if (!selectedRibSides || selectedRibSides.size === 0) return false;
+
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
+    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData) return false;
+
+    for (const key of selectedRibSides) {
+      const parts = key.split("/");
+      const contourIdx = parseInt(parts[0], 10);
+      const pointIdx = parseInt(parts[1], 10);
+      const side = parts[2];
+
+      const point = skeletonData.contours[contourIdx]?.points[pointIdx];
+      if (!point) continue;
+
+      const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+      const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+      const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+
+      if (point[editableKey] &&
+          ((point[handleInOffsetKey] && point[handleInOffsetKey] !== 0) ||
+           (point[handleOutOffsetKey] && point[handleOutOffsetKey] !== 0))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Reset handle offset values for selected editable rib points to 0.
+   * This returns the handles to their generated positions without affecting nudge.
+   * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
+   */
+  async _onResetHandleOffsets(selectedRibSides) {
+    if (!selectedRibSides || selectedRibSides.size === 0) {
+      return;
+    }
+
+    // Parse selected rib sides into a map: "contourIdx/pointIdx" -> Set of sides
+    const pointSidesMap = new Map();
+    for (const key of selectedRibSides) {
+      const parts = key.split("/");
+      const pointKey = `${parts[0]}/${parts[1]}`;
+      const side = parts[2];
+      if (!pointSidesMap.has(pointKey)) {
+        pointSidesMap.set(pointKey, new Set());
+      }
+      pointSidesMap.get(pointKey).add(side);
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const [pointKey, sides] of pointSidesMap) {
+          const [contourIdx, pointIdx] = pointKey.split("/").map(Number);
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          // Reset handle offsets for each selected side (only if editable)
+          for (const side of sides) {
+            const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+            const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+            const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+            // Also clear saved offsets
+            const handleInOffsetSavedKey = side === "left" ? "leftHandleInOffsetSaved" : "rightHandleInOffsetSaved";
+            const handleOutOffsetSavedKey = side === "left" ? "leftHandleOutOffsetSaved" : "rightHandleOutOffsetSaved";
+
+            if (point[editableKey]) {
+              delete point[handleInOffsetKey];
+              delete point[handleOutOffsetKey];
+              delete point[handleInOffsetSavedKey];
+              delete point[handleOutOffsetSavedKey];
+            }
+          }
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Reset handle offsets",
+        broadcast: true,
+      };
+    });
+
+    this.update();
   }
 
   /**
