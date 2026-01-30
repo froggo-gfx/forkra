@@ -187,7 +187,7 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
             locations |= {
                 locationToTuple(loc)
                 for varDataIndex in vsIndices
-                for loc in getLocationsFromVarstore(varDataIndex, varStore, fvarAxes)
+                for loc in getLocationsFromVarstore(varStore, fvarAxes, varDataIndex)
             }
 
         return [dict(loc) for loc in sorted(locations)]
@@ -233,16 +233,22 @@ class TTXBackend(OTFBackend):
 
 
 def getLocationsFromVarstore(
-    varDataIndex: int, varStore, fvarAxes
+    varStore, fvarAxes, varDataIndex: int | None = None
 ) -> Generator[dict[str, float], None, None]:
     regions = varStore.VarRegionList.Region
-    for regionIndex in varStore.VarData[varDataIndex].VarRegionIndex:
-        location = {
-            fvarAxes[i].axisTag: reg.PeakCoord
-            for i, reg in enumerate(regions[regionIndex].VarRegionAxis)
-            if reg.PeakCoord != 0
-        }
-        yield location
+    varDatas = (
+        [varStore.VarData[varDataIndex]]
+        if varDataIndex is not None
+        else varStore.VarData
+    )
+    for varData in varDatas:
+        for regionIndex in varData.VarRegionIndex:
+            location = {
+                fvarAxes[i].axisTag: reg.PeakCoord
+                for i, reg in enumerate(regions[regionIndex].VarRegionAxis)
+                if reg.PeakCoord != 0
+            }
+            yield location
 
 
 def getLocationsFromMultiVarstore(
@@ -320,7 +326,7 @@ def unpackAxes(font: TTFont) -> Axes:
             if varIdx == NO_VARIATION_INDEX:
                 continue
 
-            for loc in getLocationsFromVarstore(varIdx >> 16, varStore, fvarAxes):
+            for loc in getLocationsFromVarstore(varStore, fvarAxes, varIdx >> 16):
                 locations.add(locationToTuple(loc))
 
         for locTuple in sorted(locations):
