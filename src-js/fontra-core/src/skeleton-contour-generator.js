@@ -1060,6 +1060,7 @@ function generateOffsetPointsForSegment(
 
     // Helper to add offset curves to output array
     const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd, sideHalfWidth, isLeftSide) => {
+      const side = isLeftSide ? "left" : "right";
       // When halfWidth is near zero, contour should exactly match skeleton
       // Copy control points directly instead of using offset curves
       if (sideHalfWidth < 0.5 && segment.controlPoints.length > 0) {
