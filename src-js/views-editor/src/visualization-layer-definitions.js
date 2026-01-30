@@ -1726,9 +1726,14 @@ registerVisualizationLayerDefinition({
       const segmentColor = type === "skeleton" ? parameters.skeletonColor : parameters.pathColor;
 
       if (measureShowDirect) {
-        // Alt+Q: direct distance line
-        const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-        drawMeasureLine(context, p1, p2, dist.toFixed(1), segmentColor, parameters);
+        // Alt+Q: direct distance line + angle
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const dist = Math.hypot(dx, dy);
+        let angle = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+        if (angle > 90) angle = 180 - angle;
+        const label = `${dist.toFixed(1)}  ${angle.toFixed(1)}°`;
+        drawMeasureLine(context, p1, p2, label, segmentColor, parameters);
       } else {
         // Q: projected distances (dx, dy)
         const dx = Math.abs(p2.x - p1.x);
@@ -1777,9 +1782,14 @@ registerVisualizationLayerDefinition({
           const pt2 = measureSelectedPoints[i + 1];
 
           if (measureClickDirect) {
-            // Alt+Q-click: direct distance
-            const dist = Math.hypot(pt2.x - pt1.x, pt2.y - pt1.y);
-            drawMeasureLine(context, pt1, pt2, dist.toFixed(1), parameters.lineColor, parameters);
+            // Alt+Q-click: direct distance + angle
+            const dx = pt2.x - pt1.x;
+            const dy = pt2.y - pt1.y;
+            const dist = Math.hypot(dx, dy);
+            let angle = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+            if (angle > 90) angle = 180 - angle;
+            const label = `${dist.toFixed(1)}  ${angle.toFixed(1)}°`;
+            drawMeasureLine(context, pt1, pt2, label, parameters.lineColor, parameters);
           } else {
             // Q-click: projected distances (dx, dy)
             const dx = Math.abs(pt2.x - pt1.x);
