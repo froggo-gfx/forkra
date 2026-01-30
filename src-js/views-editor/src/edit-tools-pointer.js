@@ -2994,10 +2994,10 @@ export class PointerTool extends BaseTool {
         const oppLength = Math.hypot(oppDirX, oppDirY);
 
         if (oppLength > 0.001) {
-          // Normalize and scale to clicked length
+          // Normalize and scale to clicked length, round to UPM grid
           const scale = layerClickedLength / oppLength;
-          workingContour.points[oppositeIndex].x = layerSmoothPt.x + oppDirX * scale;
-          workingContour.points[oppositeIndex].y = layerSmoothPt.y + oppDirY * scale;
+          workingContour.points[oppositeIndex].x = Math.round(layerSmoothPt.x + oppDirX * scale);
+          workingContour.points[oppositeIndex].y = Math.round(layerSmoothPt.y + oppDirY * scale);
         }
 
         // Regenerate outline
@@ -3171,13 +3171,13 @@ export class PointerTool extends BaseTool {
             continue;
           }
 
-          // Update dragged point
-          workContour.points[pointIndex].x = smoothPt.x + newDragVec.x;
-          workContour.points[pointIndex].y = smoothPt.y + newDragVec.y;
+          // Update dragged point, round to UPM grid
+          workContour.points[pointIndex].x = Math.round(smoothPt.x + newDragVec.x);
+          workContour.points[pointIndex].y = Math.round(smoothPt.y + newDragVec.y);
 
-          // Update opposite point: same length, opposite direction
-          workContour.points[oppositeIndex].x = smoothPt.x - newDragVec.x;
-          workContour.points[oppositeIndex].y = smoothPt.y - newDragVec.y;
+          // Update opposite point: same length, opposite direction, round to UPM grid
+          workContour.points[oppositeIndex].x = Math.round(smoothPt.x - newDragVec.x);
+          workContour.points[oppositeIndex].y = Math.round(smoothPt.y - newDragVec.y);
 
           // Record changes for this layer
           const staticGlyph = layer.glyph;
