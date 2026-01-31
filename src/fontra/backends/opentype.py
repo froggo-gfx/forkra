@@ -402,20 +402,13 @@ def unpackFontSources(
 
     os2Table = font.get("OS/2")
     if os2Table is not None:
-        defaultSource.lineMetricsHorizontalLayout["ascender"] = LineMetric(
-            value=os2Table.sTypoAscender
-        )
-        defaultSource.lineMetricsHorizontalLayout["descender"] = LineMetric(
-            value=os2Table.sTypoDescender
-        )
-        defaultSource.lineMetricsHorizontalLayout["capHeight"] = LineMetric(
-            value=os2Table.sCapHeight
-        )
-        defaultSource.lineMetricsHorizontalLayout["xHeight"] = LineMetric(
-            value=os2Table.sxHeight
-        )
+        lineMetricsH = defaultSource.lineMetricsHorizontalLayout
+        lineMetricsH["ascender"] = LineMetric(value=os2Table.sTypoAscender)
+        lineMetricsH["descender"] = LineMetric(value=os2Table.sTypoDescender)
+        lineMetricsH["capHeight"] = LineMetric(value=os2Table.sCapHeight)
+        lineMetricsH["xHeight"] = LineMetric(value=os2Table.sxHeight)
     # else:
-    #     ...fall back for hhea table?
+    #     ...fall back to hhea table?
 
     mvarTable = font.get("MVAR")
     if mvarTable is not None:
