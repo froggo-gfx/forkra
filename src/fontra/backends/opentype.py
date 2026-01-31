@@ -400,6 +400,9 @@ def unpackFontSources(
             for loc in getLocationsFromVarstore(gdefTable.table.VarStore, fvarAxes)
         }
 
+    lineMetricsH = defaultSource.lineMetricsHorizontalLayout
+    lineMetricsH["baseline"] = LineMetric(value=0)
+
     os2Table = font.get("OS/2")
     if os2Table is not None:
         lineMetricsH = defaultSource.lineMetricsHorizontalLayout
@@ -416,8 +419,6 @@ def unpackFontSources(
             locationToTuple(loc)
             for loc in getLocationsFromVarstore(mvarTable.table.VarStore, fvarAxes)
         }
-
-    defaultSource.lineMetricsHorizontalLayout["baseline"] = LineMetric(value=0)
 
     sources = {defaultSourceIdentifier: defaultSource}
 
