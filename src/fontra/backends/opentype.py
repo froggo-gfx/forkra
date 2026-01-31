@@ -9,6 +9,7 @@ from fontTools.misc.psCharStrings import SimpleT2Decompiler
 from fontTools.pens.pointPen import GuessSmoothPointPen
 from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables.otTables import NO_VARIATION_INDEX
+from fontTools.varLib.models import piecewiseLinearMap
 from fontTools.varLib.varStore import VarStoreInstancer
 
 from ..core.classes import (
@@ -368,11 +369,18 @@ def unpackFontSources(font, fontraAxes):
     nameTable = font["name"]
     fvarTable = font.get("fvar")
     fvarAxes = fvarTable.axes if fvarTable is not None else []
+    fvarInstances = unpackFVARInstances(font)
 
     defaultSourceIdentifier = makeSourceIdentifier(0)
-    defaultSource = FontSource(
-        name=getEnglishNameWithFallback(nameTable, [17, 2], "Regular")
+    defaultLocation = {axis.axisTag: axis.defaultValue for axis in fvarAxes}
+
+    defaultSourceName = findNameForLocationFromInstances(
+        mapLocationBackward(defaultLocation, fontraAxes), fvarInstances
     )
+    if defaultSourceName is None:
+        defaultSourceName = getEnglishNameWithFallback(nameTable, [17, 2], "Regular")
+
+    defaultSource = FontSource(name=defaultSourceName)
 
     postTable = font.get("post")
     if postTable is not None:
@@ -421,7 +429,12 @@ def unpackFontSources(font, fontraAxes):
         sourceIdentifier = makeSourceIdentifier(len(sources))
 
         source.location = unnormalizeLocation(loc, fontraAxes)
-        source.name = locationToString(source.location)
+
+        source.name = findNameForLocationFromInstances(
+            mapLocationBackward(source.location, fontraAxes), fvarInstances
+        )
+        if source.name is None:
+            source.name = locationToString(source.location)
 
         if os2Table is not None and mvarTable is not None:
             mvarInstancer = VarStoreInstancer(mvarTable.table.VarStore, fvarAxes, loc)
@@ -435,6 +448,49 @@ def unpackFontSources(font, fontraAxes):
         sources[sourceIdentifier] = source
 
     return sources
+
+
+def unpackFVARInstances(font) -> list[tuple[dict[str, float], str]]:
+    fvarTable = font.get("fvar")
+    if fvarTable is None:
+        return []
+
+    nameTable = font["name"]
+
+    instances = []
+
+    for instance in fvarTable.instances:
+        name = getEnglishNameWithFallback(nameTable, [instance.subfamilyNameID], None)
+        if name is not None:
+            instances.append((instance.coordinates, name))
+
+    return instances
+
+
+def findNameForLocationFromInstances(location, instances) -> str | None:
+    axisNames = set(location)
+
+    for instanceLoc, name in instances:
+        if axisNames != set(instanceLoc):
+            continue
+
+        if all(
+            abs(axisValue - instanceLoc[axisName]) < 0.1
+            for axisName, axisValue in location.items()
+        ):
+            return name
+
+    return None
+
+
+def mapLocationBackward(location, axes):
+    return {
+        axis.name: piecewiseLinearMap(
+            location.get(axis.name, axis.defaultValue),
+            dict([(b, a) for a, b in axis.mapping]),
+        )
+        for axis in axes
+    }
 
 
 # Monkeypatch this for deterministic testing

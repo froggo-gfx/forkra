@@ -255,3 +255,19 @@ async def test_getSources(testFontMutatorSans):
         ),
     ]
     assert list(sources.values()) == expectedSourceValues
+
+
+fontSourceNamesTestData = [
+    (
+        dataDir / "sourcesans" / "SourceSans3VF-Upright.subset.otf",
+        ["ExtraLight", "Semibold", "Black"],
+    )
+]
+
+
+@pytest.mark.parametrize("fontPath, expectedNames", fontSourceNamesTestData)
+async def test_font_sources_names(fontPath, expectedNames):
+    font = getFileSystemBackend(fontPath)
+    sources = await font.getSources()
+    sourceNames = [s.name for s in sources.values()]
+    assert sourceNames == expectedNames
