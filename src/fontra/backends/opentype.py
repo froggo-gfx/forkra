@@ -89,7 +89,9 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
             return None
 
         defaultSourceIdentifier = self.fontSourcesInstancer.defaultSourceIdentifier
+        assert defaultSourceIdentifier is not None
         defaultLayerName = defaultSourceIdentifier
+
         glyph = VariableGlyph(name=glyphName)
         staticGlyph = buildStaticGlyph(self.glyphSet, glyphName)
         layers = {defaultLayerName: Layer(glyph=staticGlyph)}
