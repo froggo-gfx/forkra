@@ -1,3 +1,5 @@
+import uuid
+from copy import deepcopy
 from itertools import product
 from os import PathLike
 from typing import Any, Generator
@@ -7,6 +9,7 @@ from fontTools.misc.psCharStrings import SimpleT2Decompiler
 from fontTools.pens.pointPen import GuessSmoothPointPen
 from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables.otTables import NO_VARIATION_INDEX
+from fontTools.varLib.models import piecewiseLinearMap
 from fontTools.varLib.varStore import VarStoreInstancer
 
 from ..core.classes import (
@@ -19,10 +22,12 @@ from ..core.classes import (
     GlyphSource,
     Kerning,
     Layer,
+    LineMetric,
     OpenTypeFeatures,
     StaticGlyph,
     VariableGlyph,
 )
+from ..core.instancer import FontSourcesInstancer
 from ..core.path import PackedPath, PackedPathPointPen
 from ..core.protocols import ReadableFontBackend
 from ..core.varutils import locationToTuple, unnormalizeLocation, unnormalizeValue
@@ -50,6 +55,14 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
 
     def _initialize(self) -> None:
         self.axes = unpackAxes(self.font)
+        fontAxes: list[FontAxis] = [
+            axis for axis in self.axes.axes if isinstance(axis, FontAxis)
+        ]
+        self.fontSources = unpackFontSources(self.font, fontAxes)
+        self.fontSourcesInstancer = FontSourcesInstancer(
+            fontAxes=self.axes.axes, fontSources=self.fontSources
+        )
+
         gvar = self.font.get("gvar")
         self.gvarVariations = gvar.variations if gvar is not None else None
         varc = self.font.get("VARC")
@@ -69,7 +82,7 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
         self.glyphSet = self.font.getGlyphSet()
         self.variationGlyphSets: dict[str, Any] = {}
 
-    async def aclose(self):
+    async def aclose(self) -> None:
         self.font.close()
 
     async def getGlyphMap(self) -> dict[str, list[int]]:
@@ -78,15 +91,20 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
     async def getGlyph(self, glyphName: str) -> VariableGlyph | None:
         if glyphName not in self.glyphSet:
             return None
-        defaultLayerName = "default"
+
+        defaultSourceIdentifier = self.fontSourcesInstancer.defaultSourceIdentifier
+        assert defaultSourceIdentifier is not None
+        defaultLayerName = defaultSourceIdentifier
+
         glyph = VariableGlyph(name=glyphName)
         staticGlyph = buildStaticGlyph(self.glyphSet, glyphName)
         layers = {defaultLayerName: Layer(glyph=staticGlyph)}
         defaultLocation = {axis.name: 0 for axis in self.axes.axes}
         sources = [
             GlyphSource(
-                location=unnormalizeLocation(defaultLocation, self.axes.axes),
-                name=defaultLayerName,
+                location={},
+                locationBase=defaultSourceIdentifier,
+                name="",
                 layerName=defaultLayerName,
             )
         ]
@@ -99,12 +117,20 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
                 varGlyphSet = self.font.getGlyphSet(location=fullLoc, normalized=True)
                 self.variationGlyphSets[locStr] = varGlyphSet
             varGlyph = buildStaticGlyph(varGlyphSet, glyphName)
-            layers[locStr] = Layer(glyph=varGlyph)
+
+            sourceLocation = unnormalizeLocation(fullLoc, self.axes.axes)
+            locationBase = self.fontSourcesInstancer.getSourceIdentifierForLocation(
+                sourceLocation
+            )
+            layerName = locationBase if locationBase is not None else locStr
+            layers[layerName] = Layer(glyph=varGlyph)
+
             sources.append(
                 GlyphSource(
-                    location=unnormalizeLocation(fullLoc, self.axes.axes),
-                    name=locStr,
-                    layerName=locStr,
+                    location={} if locationBase is not None else sourceLocation,
+                    locationBase=locationBase,
+                    name="" if locationBase is not None else locStr,
+                    layerName=layerName,
                 )
             )
         if self.charStrings is not None:
@@ -169,7 +195,7 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
             locations |= {
                 locationToTuple(loc)
                 for varDataIndex in vsIndices
-                for loc in getLocationsFromVarstore(varDataIndex, varStore, fvarAxes)
+                for loc in getLocationsFromVarstore(varStore, fvarAxes, varDataIndex)
             }
 
         return [dict(loc) for loc in sorted(locations)]
@@ -181,7 +207,7 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
         return self.axes
 
     async def getSources(self) -> dict[str, FontSource]:
-        return {}
+        return self.fontSources
 
     async def getUnitsPerEm(self) -> int:
         return self.font["head"].unitsPerEm
@@ -215,16 +241,22 @@ class TTXBackend(OTFBackend):
 
 
 def getLocationsFromVarstore(
-    varDataIndex: int, varStore, fvarAxes
+    varStore, fvarAxes, varDataIndex: int | None = None
 ) -> Generator[dict[str, float], None, None]:
     regions = varStore.VarRegionList.Region
-    for regionIndex in varStore.VarData[varDataIndex].VarRegionIndex:
-        location = {
-            fvarAxes[i].axisTag: reg.PeakCoord
-            for i, reg in enumerate(regions[regionIndex].VarRegionAxis)
-            if reg.PeakCoord != 0
-        }
-        yield location
+    varDatas = (
+        [varStore.VarData[varDataIndex]]
+        if varDataIndex is not None
+        else varStore.VarData
+    )
+    for varData in varDatas:
+        for regionIndex in varData.VarRegionIndex:
+            location = {
+                fvarAxes[i].axisTag: reg.PeakCoord
+                for i, reg in enumerate(regions[regionIndex].VarRegionAxis)
+                if reg.PeakCoord != 0
+            }
+            yield location
 
 
 def getLocationsFromMultiVarstore(
@@ -302,7 +334,7 @@ def unpackAxes(font: TTFont) -> Axes:
             if varIdx == NO_VARIATION_INDEX:
                 continue
 
-            for loc in getLocationsFromVarstore(varIdx >> 16, varStore, fvarAxes):
+            for loc in getLocationsFromVarstore(varStore, fvarAxes, varIdx >> 16):
                 locations.add(locationToTuple(loc))
 
         for locTuple in sorted(locations):
@@ -328,7 +360,168 @@ def unpackAxes(font: TTFont) -> Axes:
     return Axes(axes=axisList, mappings=mappings)
 
 
-def buildStaticGlyph(glyphSet, glyphName):
+MVAR_MAPPING = {
+    "hasc": ("lineMetricsHorizontalLayout", "ascender"),
+    "hdsc": ("lineMetricsHorizontalLayout", "descender"),
+    "cpht": ("lineMetricsHorizontalLayout", "capHeight"),
+    "xhgt": ("lineMetricsHorizontalLayout", "xHeight"),
+}
+
+
+def unpackFontSources(
+    font: TTFont, fontraAxes: list[FontAxis]
+) -> dict[str, FontSource]:
+    nameTable = font["name"]
+    fvarTable = font.get("fvar")
+    fvarAxes = fvarTable.axes if fvarTable is not None else []
+    fvarInstances = unpackFVARInstances(font)
+
+    defaultSourceIdentifier = makeSourceIdentifier(0)
+    defaultLocation = {axis.axisTag: axis.defaultValue for axis in fvarAxes}
+
+    defaultSourceName = findNameForLocationFromInstances(
+        mapLocationBackward(defaultLocation, fontraAxes), fvarInstances
+    )
+    if defaultSourceName is None:
+        defaultSourceName = getEnglishNameWithFallback(nameTable, [17, 2], "Regular")
+
+    defaultSource = FontSource(name=defaultSourceName)
+
+    postTable = font.get("post")
+    if postTable is not None:
+        defaultSource.italicAngle = postTable.italicAngle
+
+    locations = set()
+
+    gdefTable = font.get("GDEF")
+    if gdefTable is not None and getattr(gdefTable.table, "VarStore", None) is not None:
+        locations |= {
+            locationToTuple(loc)
+            for loc in getLocationsFromVarstore(gdefTable.table.VarStore, fvarAxes)
+        }
+
+    lineMetricsH = defaultSource.lineMetricsHorizontalLayout
+    lineMetricsH["baseline"] = LineMetric(value=0)
+
+    os2Table = font.get("OS/2")
+    if os2Table is not None:
+        lineMetricsH = defaultSource.lineMetricsHorizontalLayout
+        lineMetricsH["ascender"] = LineMetric(value=os2Table.sTypoAscender)
+        lineMetricsH["descender"] = LineMetric(value=os2Table.sTypoDescender)
+        lineMetricsH["capHeight"] = LineMetric(value=os2Table.sCapHeight)
+        lineMetricsH["xHeight"] = LineMetric(value=os2Table.sxHeight)
+    # else:
+    #     ...fall back to hhea table?
+
+    mvarTable = font.get("MVAR")
+    if mvarTable is not None:
+        locations |= {
+            locationToTuple(loc)
+            for loc in getLocationsFromVarstore(mvarTable.table.VarStore, fvarAxes)
+        }
+
+    sources = {defaultSourceIdentifier: defaultSource}
+
+    for locationTuple in sorted(locations):
+        location = dict(locationTuple)
+        source = deepcopy(defaultSource)
+        sourceIdentifier = makeSourceIdentifier(len(sources))
+
+        source.location = unnormalizeLocation(location, fontraAxes)
+
+        sourceName = findNameForLocationFromInstances(
+            mapLocationBackward(source.location, fontraAxes), fvarInstances
+        )
+        if sourceName is None:
+            sourceName = locationToString(source.location)
+
+        source.name = sourceName
+
+        if os2Table is not None and mvarTable is not None:
+            mvarInstancer = VarStoreInstancer(
+                mvarTable.table.VarStore, fvarAxes, location
+            )
+            for rec in mvarTable.table.ValueRecord:
+                whichMetrics, metricKey = MVAR_MAPPING.get(rec.ValueTag, (None, None))
+                if whichMetrics is not None:
+                    getattr(source, whichMetrics)[metricKey].value += mvarInstancer[
+                        rec.VarIdx
+                    ]
+
+        sources[sourceIdentifier] = source
+
+    return sources
+
+
+def unpackFVARInstances(font) -> list[tuple[dict[str, float], str]]:
+    fvarTable = font.get("fvar")
+    if fvarTable is None:
+        return []
+
+    nameTable = font["name"]
+
+    instances = []
+
+    for instance in fvarTable.instances:
+        name = getEnglishNameWithFallback(nameTable, [instance.subfamilyNameID], "")
+        if name:
+            instances.append((instance.coordinates, name))
+
+    return instances
+
+
+def findNameForLocationFromInstances(
+    location: dict[str, float], instances: list[tuple[dict[str, float], str]]
+) -> str | None:
+    axisNames = set(location)
+
+    for instanceLoc, name in instances:
+        if axisNames != set(instanceLoc):
+            continue
+
+        if all(
+            abs(axisValue - instanceLoc[axisName]) < 0.1
+            for axisName, axisValue in location.items()
+        ):
+            return name
+
+    return None
+
+
+def mapLocationBackward(
+    location: dict[str, float], axes: list[FontAxis]
+) -> dict[str, float]:
+    return {
+        axis.name: piecewiseLinearMap(
+            location.get(axis.name, axis.defaultValue),
+            dict([(b, a) for a, b in axis.mapping]),
+        )
+        for axis in axes
+    }
+
+
+# Monkeypatch this for deterministic testing
+_USE_SOURCE_INDEX_INSTEAD_OF_UUID = False
+
+
+def makeSourceIdentifier(sourceIndex: int) -> str:
+    if _USE_SOURCE_INDEX_INSTEAD_OF_UUID:
+        return f"font-source-{sourceIndex}"
+    return str(uuid.uuid4())[:8]
+
+
+def getEnglishNameWithFallback(
+    nameTable: Any, nameIDs: list[int], fallback: str
+) -> str:
+    for nameID in nameIDs:
+        nameRecord = nameTable.getName(nameID, 3, 1, 0x409)
+        if nameRecord is not None:
+            return nameRecord.toUnicode()
+
+    return fallback
+
+
+def buildStaticGlyph(glyphSet, glyphName: str) -> StaticGlyph:
     pen = PackedPathPointPen()
     ttGlyph = glyphSet[glyphName]
     ttGlyph.drawPoints(GuessSmoothPointPen(pen))
@@ -341,7 +534,7 @@ def buildStaticGlyph(glyphSet, glyphName):
     return staticGlyph
 
 
-def locationToString(loc):
+def locationToString(loc: dict[str, float]) -> str:
     parts = []
     for k, v in sorted(loc.items()):
         v = round(v, 5)  # enough to differentiate all 2.14 fixed values
@@ -362,7 +555,7 @@ class VarIndexCollector(SimpleT2Decompiler):
         self.vsIndices.add(self.vsIndex)
 
 
-def checkAndFixCFF2Compatibility(glyphName, layers):
+def checkAndFixCFF2Compatibility(glyphName: str, layers: dict[str, Layer]) -> None:
     #
     # https://github.com/fonttools/fonttools/issues/2838
     #
@@ -378,30 +571,37 @@ def checkAndFixCFF2Compatibility(glyphName, layers):
     #
     # This is a somewhat ugly trade-off to keep interpolation compatibility.
     #
-    layers = list(layers.values())
-    firstPath = layers[0].glyph.path
+    layerList = list(layers.values())
+    firstPath = layerList[0].glyph.packedPath
     firstPointTypes = firstPath.pointTypes
-    unpackedContourses = [None] * len(layers)
+    unpackedContourses: list[list[dict] | None] = [None] * len(layerList)
     contourLengths = None
-    for layerIndex, layer in enumerate(layers):
-        if layer.glyph.path.pointTypes != firstPointTypes:
+    unpackedContours: list[dict] | None
+
+    for layerIndex, layer in enumerate(layerList):
+        if layer.glyph.packedPath.pointTypes != firstPointTypes:
             if contourLengths is None:
-                unpackedContourses[0] = firstPath.unpackedContours()
-                contourLengths = [len(c["points"]) for c in unpackedContourses[0]]
-            unpackedContours = layer.glyph.path.unpackedContours()
+                firstContours = firstPath.unpackedContours()
+                unpackedContourses[0] = firstContours
+                contourLengths = [len(c["points"]) for c in firstContours]
+            unpackedContours = layer.glyph.packedPath.unpackedContours()
             unpackedContourses[layerIndex] = unpackedContours
             assert len(contourLengths) == len(unpackedContours)
             contourLengths = [
                 max(cl, len(unpackedContours[i]["points"]))
                 for i, cl in enumerate(contourLengths)
             ]
+
     if contourLengths is None:
         # All good, nothing to do
         return
-    for layerIndex, layer in enumerate(layers):
+
+    for layerIndex, layer in enumerate(layerList):
         if unpackedContourses[layerIndex] is None:
-            unpackedContourses[layerIndex] = layer.glyph.path.unpackedContours()
+            unpackedContourses[layerIndex] = layer.glyph.packedPath.unpackedContours()
         unpackedContours = unpackedContourses[layerIndex]
+        assert unpackedContours is not None
+
         for i, contourLength in enumerate(contourLengths):
             if len(unpackedContours[i]["points"]) + 1 == contourLength:
                 firstPoint = unpackedContours[i]["points"][0]
