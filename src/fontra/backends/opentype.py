@@ -55,7 +55,10 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
 
     def _initialize(self) -> None:
         self.axes = unpackAxes(self.font)
-        self.fontSources = unpackFontSources(self.font, self.axes.axes)
+        fontAxes: list[FontAxis] = [
+            axis for axis in self.axes.axes if isinstance(axis, FontAxis)
+        ]
+        self.fontSources = unpackFontSources(self.font, fontAxes)
         self.fontSourcesInstancer = FontSourcesInstancer(
             fontAxes=self.axes.axes, fontSources=self.fontSources
         )
@@ -79,7 +82,7 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
         self.glyphSet = self.font.getGlyphSet()
         self.variationGlyphSets: dict[str, Any] = {}
 
-    async def aclose(self):
+    async def aclose(self) -> None:
         self.font.close()
 
     async def getGlyphMap(self) -> dict[str, list[int]]:
@@ -365,7 +368,9 @@ MVAR_MAPPING = {
 }
 
 
-def unpackFontSources(font, fontraAxes):
+def unpackFontSources(
+    font: TTFont, fontraAxes: list[FontAxis]
+) -> dict[str, FontSource]:
     nameTable = font["name"]
     fvarTable = font.get("fvar")
     fvarAxes = fvarTable.axes if fvarTable is not None else []
@@ -423,21 +428,25 @@ def unpackFontSources(font, fontraAxes):
 
     sources = {defaultSourceIdentifier: defaultSource}
 
-    for loc in sorted(locations):
-        loc = dict(loc)
+    for locationTuple in sorted(locations):
+        location = dict(locationTuple)
         source = deepcopy(defaultSource)
         sourceIdentifier = makeSourceIdentifier(len(sources))
 
-        source.location = unnormalizeLocation(loc, fontraAxes)
+        source.location = unnormalizeLocation(location, fontraAxes)
 
-        source.name = findNameForLocationFromInstances(
+        sourceName = findNameForLocationFromInstances(
             mapLocationBackward(source.location, fontraAxes), fvarInstances
         )
-        if source.name is None:
-            source.name = locationToString(source.location)
+        if sourceName is None:
+            sourceName = locationToString(source.location)
+
+        source.name = sourceName
 
         if os2Table is not None and mvarTable is not None:
-            mvarInstancer = VarStoreInstancer(mvarTable.table.VarStore, fvarAxes, loc)
+            mvarInstancer = VarStoreInstancer(
+                mvarTable.table.VarStore, fvarAxes, location
+            )
             for rec in mvarTable.table.ValueRecord:
                 whichMetrics, metricKey = MVAR_MAPPING.get(rec.ValueTag, (None, None))
                 if whichMetrics is not None:
@@ -460,14 +469,16 @@ def unpackFVARInstances(font) -> list[tuple[dict[str, float], str]]:
     instances = []
 
     for instance in fvarTable.instances:
-        name = getEnglishNameWithFallback(nameTable, [instance.subfamilyNameID], None)
-        if name is not None:
+        name = getEnglishNameWithFallback(nameTable, [instance.subfamilyNameID], "")
+        if name:
             instances.append((instance.coordinates, name))
 
     return instances
 
 
-def findNameForLocationFromInstances(location, instances) -> str | None:
+def findNameForLocationFromInstances(
+    location: dict[str, float], instances: list[tuple[dict[str, float], str]]
+) -> str | None:
     axisNames = set(location)
 
     for instanceLoc, name in instances:
@@ -483,7 +494,9 @@ def findNameForLocationFromInstances(location, instances) -> str | None:
     return None
 
 
-def mapLocationBackward(location, axes):
+def mapLocationBackward(
+    location: dict[str, float], axes: list[FontAxis]
+) -> dict[str, float]:
     return {
         axis.name: piecewiseLinearMap(
             location.get(axis.name, axis.defaultValue),
@@ -497,13 +510,15 @@ def mapLocationBackward(location, axes):
 _USE_SOURCE_INDEX_INSTEAD_OF_UUID = False
 
 
-def makeSourceIdentifier(sourceIndex):
+def makeSourceIdentifier(sourceIndex: int) -> str:
     if _USE_SOURCE_INDEX_INSTEAD_OF_UUID:
         return f"font-source-{sourceIndex}"
     return str(uuid.uuid4())[:8]
 
 
-def getEnglishNameWithFallback(nameTable, nameIDs, fallback):
+def getEnglishNameWithFallback(
+    nameTable: Any, nameIDs: list[int], fallback: str
+) -> str:
     for nameID in nameIDs:
         nameRecord = nameTable.getName(nameID, 3, 1, 0x409)
         if nameRecord is not None:
@@ -512,7 +527,7 @@ def getEnglishNameWithFallback(nameTable, nameIDs, fallback):
     return fallback
 
 
-def buildStaticGlyph(glyphSet, glyphName):
+def buildStaticGlyph(glyphSet, glyphName: str) -> StaticGlyph:
     pen = PackedPathPointPen()
     ttGlyph = glyphSet[glyphName]
     ttGlyph.drawPoints(GuessSmoothPointPen(pen))
@@ -525,7 +540,7 @@ def buildStaticGlyph(glyphSet, glyphName):
     return staticGlyph
 
 
-def locationToString(loc):
+def locationToString(loc: dict[str, float]) -> str:
     parts = []
     for k, v in sorted(loc.items()):
         v = round(v, 5)  # enough to differentiate all 2.14 fixed values
