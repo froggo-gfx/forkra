@@ -561,7 +561,7 @@ class VarIndexCollector(SimpleT2Decompiler):
         self.vsIndices.add(self.vsIndex)
 
 
-def checkAndFixCFF2Compatibility(glyphName, layers):
+def checkAndFixCFF2Compatibility(glyphName: str, layers: dict[str, Layer]) -> None:
     #
     # https://github.com/fonttools/fonttools/issues/2838
     #
@@ -577,30 +577,37 @@ def checkAndFixCFF2Compatibility(glyphName, layers):
     #
     # This is a somewhat ugly trade-off to keep interpolation compatibility.
     #
-    layers = list(layers.values())
-    firstPath = layers[0].glyph.path
+    layerList = list(layers.values())
+    firstPath = layerList[0].glyph.packedPath
     firstPointTypes = firstPath.pointTypes
-    unpackedContourses = [None] * len(layers)
+    unpackedContourses: list[list[dict] | None] = [None] * len(layerList)
     contourLengths = None
-    for layerIndex, layer in enumerate(layers):
-        if layer.glyph.path.pointTypes != firstPointTypes:
+    unpackedContours: list[dict] | None
+
+    for layerIndex, layer in enumerate(layerList):
+        if layer.glyph.packedPath.pointTypes != firstPointTypes:
             if contourLengths is None:
-                unpackedContourses[0] = firstPath.unpackedContours()
-                contourLengths = [len(c["points"]) for c in unpackedContourses[0]]
-            unpackedContours = layer.glyph.path.unpackedContours()
+                firstContours = firstPath.unpackedContours()
+                unpackedContourses[0] = firstContours
+                contourLengths = [len(c["points"]) for c in firstContours]
+            unpackedContours = layer.glyph.packedPath.unpackedContours()
             unpackedContourses[layerIndex] = unpackedContours
             assert len(contourLengths) == len(unpackedContours)
             contourLengths = [
                 max(cl, len(unpackedContours[i]["points"]))
                 for i, cl in enumerate(contourLengths)
             ]
+
     if contourLengths is None:
         # All good, nothing to do
         return
-    for layerIndex, layer in enumerate(layers):
+
+    for layerIndex, layer in enumerate(layerList):
         if unpackedContourses[layerIndex] is None:
-            unpackedContourses[layerIndex] = layer.glyph.path.unpackedContours()
+            unpackedContourses[layerIndex] = layer.glyph.packedPath.unpackedContours()
         unpackedContours = unpackedContourses[layerIndex]
+        assert unpackedContours is not None
+
         for i, contourLength in enumerate(contourLengths):
             if len(unpackedContours[i]["points"]) + 1 == contourLength:
                 firstPoint = unpackedContours[i]["points"][0]
