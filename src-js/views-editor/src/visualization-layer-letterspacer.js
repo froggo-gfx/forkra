@@ -45,6 +45,28 @@ export const LetterspacerVisualizationLayer = {
       context.stroke();
     }
 
+    // Draw depth limit lines (showing the depth boundary)
+    if (vizData.leftDepthLimit !== null && vizData.leftDepthLimit !== undefined) {
+      context.strokeStyle = "rgba(255, 165, 0, 0.8)"; // Orange for depth limit
+      context.lineWidth = 2;
+      context.setLineDash([5, 5]);
+      context.beginPath();
+      context.moveTo(vizData.leftDepthLimit, vizData.referenceBounds?.minY || 0);
+      context.lineTo(vizData.leftDepthLimit, vizData.referenceBounds?.maxY || 1000);
+      context.stroke();
+    }
+
+    if (vizData.rightDepthLimit !== null && vizData.rightDepthLimit !== undefined) {
+      context.strokeStyle = "rgba(255, 165, 0, 0.8)"; // Orange for depth limit
+      context.lineWidth = 2;
+      context.setLineDash([5, 5]);
+      context.beginPath();
+      context.moveTo(vizData.rightDepthLimit, vizData.referenceBounds?.minY || 0);
+      context.lineTo(vizData.rightDepthLimit, vizData.referenceBounds?.maxY || 1000);
+      context.stroke();
+      context.setLineDash([]);
+    }
+
     // Draw left sidebearing polygon (penetration area)
     if (vizData.leftSBPolygon && vizData.leftSBPolygon.length > 0) {
       context.strokeStyle = "rgba(0, 200, 0, 0.8)";

@@ -20,16 +20,18 @@ function polygonArea(points) {
 
 function setDepth(margins, extreme, maxDepth, isLeft) {
   // Limit depth of margins to maxDepth from extreme
+  // For left: extreme + maxDepth (limit on the right/inward side), use min() to clip
+  // For right: extreme - maxDepth (limit on the left/inward side), use max() to clip
   if (isLeft) {
-    const limit = extreme - maxDepth;
-    return margins.map(p => ({
-      x: Math.max(p.x, limit),
-      y: p.y
-    }));
-  } else {
     const limit = extreme + maxDepth;
     return margins.map(p => ({
       x: Math.min(p.x, limit),
+      y: p.y
+    }));
+  } else {
+    const limit = extreme - maxDepth;
+    return margins.map(p => ({
+      x: Math.max(p.x, limit),
       y: p.y
     }));
   }
@@ -72,6 +74,8 @@ class LetterspacerEngine {
     this.rightExtreme = null;
     this.leftExtremeDepthLimited = null;
     this.rightExtremeDepthLimited = null;
+    this.leftDepthLimit = null;
+    this.rightDepthLimit = null;
   }
 
   computeSpacing(path, bounds, refMinY, refMaxY) {
@@ -109,13 +113,18 @@ class LetterspacerEngine {
     this.leftMarginsProcessed = [...processedLeft];
     this.rightMarginsProcessed = [...processedRight];
 
-    // Calculate depth-limited extremes
+    // Calculate depth limits (how far inward from glyph edge)
+    this.leftDepthLimit = this.leftExtreme + maxDepth;  // Inward from left extreme (rightward)
+    this.rightDepthLimit = this.rightExtreme - maxDepth;  // Inward from right extreme (leftward)
+    
     this.leftExtremeDepthLimited = Math.min(...processedLeft.map(p => p.x));
     this.rightExtremeDepthLimited = Math.max(...processedRight.map(p => p.x));
 
-    // Close polygons at the depth-limited extremes
-    this.leftPolygon = closePolygon(processedLeft, this.leftExtremeDepthLimited, refMinY, refMaxY);
-    this.rightPolygon = closePolygon(processedRight, this.rightExtremeDepthLimited, refMinY, refMaxY);
+    // Close polygons at the ORIGINAL extremes (not the depth limits)
+    // The depth limit only affects how far inward the margins can extend,
+    // but the polygon area is bounded by the original glyph edge
+    this.leftPolygon = closePolygon(processedLeft, this.leftExtreme, refMinY, refMaxY);
+    this.rightPolygon = closePolygon(processedRight, this.rightExtreme, refMinY, refMaxY);
 
     this.lsb = calculateSidebearing(this.leftPolygon, targetArea, amplitudeY);
     this.rsb = calculateSidebearing(this.rightPolygon, targetArea, amplitudeY);
@@ -124,27 +133,13 @@ class LetterspacerEngine {
     this.leftSBLine = this.leftExtremeDepthLimited - this.lsb;
     this.rightSBLine = this.rightExtremeDepthLimited + this.rsb;
 
-    // For visualization: use depth-limited margins
-    this.leftSBPolygon = this.createSBPolygon(processedLeft, this.leftSBLine, refMinY, refMaxY, true);
-    this.rightSBPolygon = this.createSBPolygon(processedRight, this.rightSBLine, refMinY, refMaxY, false);
+    // For visualization: show the actual polygon used by algorithm
+    // The algorithm polygon goes from extreme -> clipped margins -> extreme
+    // This is the actual shape used for area calculation
+    this.leftSBPolygon = [...this.leftPolygon];
+    this.rightSBPolygon = [...this.rightPolygon];
 
     return { lsb: this.lsb, rsb: this.rsb };
-  }
-
-  createSBPolygon(margins, sbLine, minY, maxY, isLeft) {
-    const polygon = [];
-    
-    // Add glyph edge points (margins) - these are the inner boundary
-    for (const p of margins) {
-      polygon.push({ x: p.x, y: p.y });
-    }
-    
-    // Add sidebearing line points in reverse order (outer boundary)
-    for (let i = margins.length - 1; i >= 0; i--) {
-      polygon.push({ x: sbLine, y: margins[i].y });
-    }
-    
-    return polygon;
   }
 
   collectMargins(path, bounds, minY, maxY, freq) {
@@ -467,6 +462,8 @@ export default class LetterspacerPanel extends Panel {
       rsb: engine.rsb,
       leftExtreme: engine.leftExtreme,
       rightExtreme: engine.rightExtreme,
+      leftDepthLimit: engine.leftDepthLimit,
+      rightDepthLimit: engine.rightDepthLimit,
       leftExtremeDepthLimited: engine.leftExtremeDepthLimited,
       rightExtremeDepthLimited: engine.rightExtremeDepthLimited,
       leftMargins: engine.leftMargins,
