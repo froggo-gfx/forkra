@@ -228,6 +228,12 @@ export default class LetterspacerPanel extends Panel {
       applyRSB: 1,
       referenceGlyph: "",
     };
+
+    // Track current and calculated spacing values
+    this.currentLSB = 0;
+    this.currentRSB = 0;
+    this.calculatedLSB = null;
+    this.calculatedRSB = null;
   }
 
   getContentElement() {
@@ -275,43 +281,79 @@ export default class LetterspacerPanel extends Panel {
         label: translate("sidebar.letterspacer.reference"),
         value: this.params.referenceGlyph },
 
+      { type: "divider" },
+
+      // Display current and calculated spacing values
+      { type: "header", 
+        label: `Current: LSB=${this.formatValue(this.currentLSB)}, RSB=${this.formatValue(this.currentRSB)}`,
+        class: "current-values" },
+      
+      { type: "header", 
+        label: `Calculated: LSB=${this.formatValue(this.calculatedLSB)}, RSB=${this.formatValue(this.calculatedRSB)}`,
+        class: "calculated-values" },
+
       { type: "spacer" },
     ];
-
-    const applyButton = html.createDomElement("button", {
-      onclick: () => this.applySpacing(),
-    });
-    applyButton.textContent = translate("sidebar.letterspacer.apply");
-
-    formContents[0].auxiliaryElement = applyButton;
 
     this.infoForm.setFieldDescriptions(formContents);
     this.infoForm.onFieldChange = async (fieldItem, value) => {
       this.params[fieldItem.key] = value;
-
-      if (this.editorController.sceneController && this.editorController.sceneController.sceneModel) {
+      
+      // Update calculated values dynamically
+      await this.updateCalculatedValues();
+      
+      // Update visualization
+      if (this.editorController.sceneController?.sceneModel) {
         this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-        if (this.editorController.canvasController) {
-          this.editorController.canvasController.requestUpdate();
-        }
-      } else if (this.editorController.sceneModel) {
-        this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-        if (this.editorController.canvasController) {
-          this.editorController.canvasController.requestUpdate();
-        }
       }
+      if (this.editorController.canvasController) {
+        this.editorController.canvasController.requestUpdate();
+      }
+      
+      // Update value display without rebuilding the form
+      this.updateValueDisplay();
     };
 
-    if (this.editorController.sceneController && this.editorController.sceneController.sceneModel) {
+    // Calculate and Apply buttons at the bottom
+    const buttonContainer = html.div({ class: "button-container" }, []);
+    
+    const calculateButton = html.button({
+      onclick: () => this.calculateSpacing(),
+      class: "calculate-button"
+    }, ["Calculate"]);
+    
+    const applyButton = html.button({
+      onclick: () => this.applySpacing(),
+      class: "apply-button"
+    }, ["Apply"]);
+    
+    buttonContainer.appendChild(calculateButton);
+    buttonContainer.appendChild(applyButton);
+    
+    this.infoForm.contentElement.appendChild(buttonContainer);
+
+    // Initial calculation and visualization
+    await this.updateCalculatedValues();
+    this.updateValueDisplay();
+    
+    if (this.editorController.sceneController?.sceneModel) {
       this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-      if (this.editorController.canvasController) {
-        this.editorController.canvasController.requestUpdate();
-      }
-    } else if (this.editorController.sceneModel) {
-      this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-      if (this.editorController.canvasController) {
-        this.editorController.canvasController.requestUpdate();
-      }
+    }
+    if (this.editorController.canvasController) {
+      this.editorController.canvasController.requestUpdate();
+    }
+  }
+
+  updateValueDisplay() {
+    // Update the value display elements without rebuilding the form
+    const currentLabel = this.infoForm.contentElement.querySelector(".current-values");
+    const calculatedLabel = this.infoForm.contentElement.querySelector(".calculated-values");
+    
+    if (currentLabel) {
+      currentLabel.textContent = `Current: LSB=${this.formatValue(this.currentLSB)}, RSB=${this.formatValue(this.currentRSB)}`;
+    }
+    if (calculatedLabel) {
+      calculatedLabel.textContent = `Calculated: LSB=${this.formatValue(this.calculatedLSB)}, RSB=${this.formatValue(this.calculatedRSB)}`;
     }
   }
 
@@ -322,6 +364,10 @@ export default class LetterspacerPanel extends Panel {
     const fontMetrics = await this.getFontMetrics();
     const refBounds = await this.getReferenceBounds(fontMetrics);
     const engine = new LetterspacerEngine(this.params, fontMetrics);
+    
+    // Store calculated values from the edit operation
+    let calculatedLSB = null;
+    let calculatedRSB = null;
 
     await this.sceneController.editGlyphAndRecordChanges((glyph) => {
       const layerGlyphs = this.sceneController.getEditingLayerFromGlyphLayers(glyph.layers);
@@ -331,11 +377,16 @@ export default class LetterspacerPanel extends Panel {
         const bounds = path.getBounds?.() || path.getControlBounds?.();
         if (!bounds) continue;
 
+        // Calculate fresh values for this layer
         const { lsb, rsb } = engine.computeSpacing(
           path, bounds, refBounds.minY, refBounds.maxY
         );
 
         if (lsb === null || rsb === null) continue;
+        
+        // Store calculated values
+        calculatedLSB = lsb;
+        calculatedRSB = rsb;
 
         const currentLSB = bounds.xMin;
 
@@ -356,6 +407,21 @@ export default class LetterspacerPanel extends Panel {
 
       return "letterspacer";
     }, undefined, true);
+
+    // Update the stored calculated values
+    this.calculatedLSB = calculatedLSB;
+    this.calculatedRSB = calculatedRSB;
+    
+    // Update current values from the modified glyph
+    const path = positionedGlyph.glyph.path;
+    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    if (bounds) {
+      this.currentLSB = bounds.xMin;
+      this.currentRSB = positionedGlyph.glyph.xAdvance - bounds.xMax;
+    }
+    
+    // Update value display without rebuilding the form
+    this.updateValueDisplay();
 
     if (this.editorController.sceneModel) {
       this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
@@ -437,6 +503,51 @@ export default class LetterspacerPanel extends Panel {
     // Clear the visualization data when glyph is edited
     if (this.editorController.sceneController?.sceneModel) {
       this.editorController.sceneController.sceneModel.letterspacerVisualizationData = null;
+    }
+    if (this.editorController.canvasController) {
+      this.editorController.canvasController.requestUpdate();
+    }
+  }
+
+  formatValue(value) {
+    // Format spacing value for display
+    if (value === null || value === undefined) return "-";
+    return Math.round(value * 10) / 10;
+  }
+
+  async updateCalculatedValues() {
+    // Update current and calculated spacing values
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return;
+
+    // Get current values from glyph
+    const path = positionedGlyph.glyph.path;
+    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    if (!bounds) return;
+
+    this.currentLSB = bounds.xMin;
+    this.currentRSB = positionedGlyph.glyph.xAdvance - bounds.xMax;
+
+    // Calculate new values using letterspacer
+    const fontMetrics = await this.getFontMetrics();
+    const refBounds = await this.getReferenceBounds(fontMetrics);
+    const engine = new LetterspacerEngine(this.params, fontMetrics);
+    const result = engine.computeSpacing(path, bounds, refBounds.minY, refBounds.maxY);
+
+    if (result.lsb !== null && result.rsb !== null) {
+      this.calculatedLSB = result.lsb;
+      this.calculatedRSB = result.rsb;
+    }
+  }
+
+  async calculateSpacing() {
+    // Recalculate spacing after glyph edits
+    await this.updateCalculatedValues();
+    this.updateValueDisplay();
+    
+    // Refresh visualization
+    if (this.editorController.sceneController?.sceneModel) {
+      this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
     }
     if (this.editorController.canvasController) {
       this.editorController.canvasController.requestUpdate();
