@@ -245,7 +245,16 @@ export default class LetterspacerPanel extends Panel {
     await this.fontController.ensureInitialized;
 
     const formContents = [
-      { type: "header", label: translate("sidebar.letterspacer.title") },
+      { 
+        type: "header", 
+        label: translate("sidebar.letterspacer.title"),
+        auxiliaryElement: html.createDomElement("button", {
+          "style": "margin-left: 8px; padding: 2px 8px; font-size: 11px; cursor: pointer;",
+          "onclick": () => this.reverseSpacing(),
+          "data-tooltip": translate("sidebar.letterspacer.reverse.tooltip"),
+          "data-tooltipposition": "left",
+        }, ["Reverse"])
+      },
 
       { type: "edit-number", key: "area",
         label: translate("sidebar.letterspacer.area"),
@@ -431,6 +440,123 @@ export default class LetterspacerPanel extends Panel {
     }
   }
 
+  async reverseSpacing() {
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return;
+
+    const fontMetrics = await this.getFontMetrics();
+    const refBounds = await this.getReferenceBounds(fontMetrics);
+    const path = positionedGlyph.glyph.path;
+    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    if (!bounds) return;
+
+    const currentLSB = bounds.xMin;
+    const currentRSB = positionedGlyph.glyph.xAdvance - bounds.xMax;
+
+    const hitTester = new PathHitTester(path, bounds);
+    const freq = 5;
+    const amplitudeY = refBounds.maxY - refBounds.minY;
+
+    const margins = this.collectMarginsForReverse(
+      hitTester, path, bounds, refBounds.minY, refBounds.maxY, freq
+    );
+
+    if (!margins.leftMargins || !margins.rightMargins) {
+      console.warn("Could not collect margins for reverse calculation");
+      return;
+    }
+
+    let bestParams = { area: 400, depth: 15 };
+    let bestError = Infinity;
+
+    for (let area = 100; area <= 1000; area += 50) {
+      for (let depth = 5; depth <= 100; depth += 5) {
+        const testParams = { ...this.params, depth, area };
+        const testEngine = new LetterspacerEngine(testParams, fontMetrics);
+        const { lsb, rsb } = testEngine.computeSpacing(path, bounds, refBounds.minY, refBounds.maxY);
+
+        if (lsb === null || rsb === null) continue;
+
+        const error = Math.abs(lsb - currentLSB) + Math.abs(rsb - currentRSB);
+
+        if (error < bestError) {
+          bestError = error;
+          bestParams = { area, depth };
+        }
+      }
+    }
+
+    if (bestError > 5) {
+      for (let area = Math.max(50, bestParams.area - 50); area <= Math.min(2000, bestParams.area + 50); area += 10) {
+        for (let depth = Math.max(1, bestParams.depth - 10); depth <= Math.min(150, bestParams.depth + 10); depth += 1) {
+          const testParams = { ...this.params, depth, area };
+          const testEngine = new LetterspacerEngine(testParams, fontMetrics);
+          const { lsb, rsb } = testEngine.computeSpacing(path, bounds, refBounds.minY, refBounds.maxY);
+
+          if (lsb === null || rsb === null) continue;
+
+          const error = Math.abs(lsb - currentLSB) + Math.abs(rsb - currentRSB);
+
+          if (error < bestError) {
+            bestError = error;
+            bestParams = { area, depth };
+          }
+        }
+      }
+    }
+
+    this.params.area = bestParams.area;
+    this.params.depth = bestParams.depth;
+
+    await this.updateCalculatedValues();
+    await this.update();
+    this.updateValueDisplay();
+
+    if (this.editorController.sceneController?.sceneModel) {
+      this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
+    }
+    if (this.editorController.canvasController) {
+      this.editorController.canvasController.requestUpdate();
+    }
+  }
+
+  collectMarginsForReverse(hitTester, path, bounds, minY, maxY, freq) {
+    const leftMargins = [];
+    const rightMargins = [];
+    let leftExtreme = Infinity;
+    let rightExtreme = -Infinity;
+
+    for (let y = minY; y <= maxY; y += freq) {
+      const lineStart = { x: bounds.xMin - 100, y };
+      const lineEnd = { x: bounds.xMax + 100, y };
+
+      const intersections = hitTester.lineIntersections(lineStart, lineEnd);
+
+      if (intersections.length >= 2) {
+        const sorted = intersections
+          .map(i => i.x !== undefined ? i : { x: i.point?.x })
+          .filter(i => i.x !== undefined)
+          .sort((a, b) => a.x - b.x);
+
+        if (sorted.length >= 2) {
+          const left = sorted[0].x;
+          const right = sorted[sorted.length - 1].x;
+
+          leftMargins.push({ x: left, y });
+          rightMargins.push({ x: right, y });
+
+          leftExtreme = Math.min(leftExtreme, left);
+          rightExtreme = Math.max(rightExtreme, right);
+        }
+      }
+    }
+
+    if (leftExtreme === Infinity) leftExtreme = bounds.xMin;
+    if (rightExtreme === -Infinity) rightExtreme = bounds.xMax;
+
+    return { leftMargins, rightMargins, leftExtreme, rightExtreme };
+  }
+
   shiftPath(path, deltaX) {
     const newCoords = new Array(path.coordinates.length);
     for (let i = 0; i < path.coordinates.length; i += 2) {
@@ -543,8 +669,8 @@ export default class LetterspacerPanel extends Panel {
   async calculateSpacing() {
     // Recalculate spacing after glyph edits
     await this.updateCalculatedValues();
-    this.updateValueDisplay();
-    
+    await this.update();
+
     // Refresh visualization
     if (this.editorController.sceneController?.sceneModel) {
       this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();

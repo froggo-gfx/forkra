@@ -424,6 +424,8 @@ export const strings = {
   "sidebar.letterspacer.apply-rsb": "RSB",
   "sidebar.letterspacer.reference": "Reference",
   "sidebar.letterspacer.apply": "Apply",
+  "sidebar.letterspacer.reverse": "Reverse",
+  "sidebar.letterspacer.reverse.tooltip": "Calculate parameters from current sidebearings",
   "sidebar.user-settings": "User Settings",
   "sidebar.user-settings.clipboard": "Clipboard export format",
   "sidebar.user-settings.component.nodes": "Component nodes and handles",
