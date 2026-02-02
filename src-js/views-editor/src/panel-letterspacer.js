@@ -215,6 +215,11 @@ export default class LetterspacerPanel extends Panel {
     this.sceneController = this.editorController.sceneController;
     this.handleSelectionChangeBound = this.handleSelectionChange.bind(this);
 
+    // Listen for glyph edits to clear visualization
+    this.sceneController.addCurrentGlyphChangeListener((event) => {
+      this.clearVisualization();
+    });
+
     this.params = {
       area: 400,
       depth: 15,
@@ -425,6 +430,16 @@ export default class LetterspacerPanel extends Panel {
       if (this.editorController.canvasController) {
         this.editorController.canvasController.requestUpdate();
       }
+    }
+  }
+
+  clearVisualization() {
+    // Clear the visualization data when glyph is edited
+    if (this.editorController.sceneController?.sceneModel) {
+      this.editorController.sceneController.sceneModel.letterspacerVisualizationData = null;
+    }
+    if (this.editorController.canvasController) {
+      this.editorController.canvasController.requestUpdate();
     }
   }
 
