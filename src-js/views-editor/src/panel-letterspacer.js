@@ -18,32 +18,21 @@ function polygonArea(points) {
   return Math.abs(s) * 0.5;
 }
 
-function setDepth(margins, extreme, maxDepth) {
-  // Ограничить глубину margins до maxDepth от extreme
-  return margins.map(p => ({
-    x: Math.max(p.x, extreme - maxDepth),  // для левого
-    y: p.y
-  }));
-}
-
-function diagonize(margins) {
-  // Закрыть открытые каунтеры под 45°
-  const result = [];
-  for (let i = 0; i < margins.length; i++) {
-    result.push(margins[i]);
-    if (i < margins.length - 1) {
-      const curr = margins[i];
-      const next = margins[i + 1];
-      const deltaY = next.y - curr.y;
-      const deltaX = next.x - curr.x;
-      if (Math.abs(deltaX) > deltaY) {
-        // Нужна диагональ
-        const midY = curr.y + Math.abs(deltaX);
-        result.push({ x: curr.x, y: midY });
-      }
-    }
+function setDepth(margins, extreme, maxDepth, isLeft) {
+  // Limit depth of margins to maxDepth from extreme
+  if (isLeft) {
+    const limit = extreme - maxDepth;
+    return margins.map(p => ({
+      x: Math.max(p.x, limit),
+      y: p.y
+    }));
+  } else {
+    const limit = extreme + maxDepth;
+    return margins.map(p => ({
+      x: Math.min(p.x, limit),
+      y: p.y
+    }));
   }
-  return result;
 }
 
 function closePolygon(margins, extreme, minY, maxY) {
@@ -66,59 +55,104 @@ class LetterspacerEngine {
     this.upm = fontMetrics.upm;
     this.xHeight = fontMetrics.xHeight;
     this.angle = fontMetrics.italicAngle || 0;
-    this.scanLines = [];  // Store scan lines for visualization
-    this.leftPolygon = [];  // Store left polygon for visualization
-    this.rightPolygon = [];  // Store right polygon for visualization
-  }
-
-  computeSpacing(path, bounds, refMinY, refMaxY) {
-    const freq = 5;  // шаг сканирования
-    const amplitudeY = refMaxY - refMinY;
-
-    // Clear previous visualization data
     this.scanLines = [];
     this.leftPolygon = [];
     this.rightPolygon = [];
+    this.leftSBPolygon = [];
+    this.rightSBPolygon = [];
+    this.leftSBLine = null;
+    this.rightSBLine = null;
+    this.lsb = null;
+    this.rsb = null;
+    this.leftMargins = [];
+    this.rightMargins = [];
+    this.leftMarginsProcessed = [];
+    this.rightMarginsProcessed = [];
+    this.leftExtreme = null;
+    this.rightExtreme = null;
+    this.leftExtremeDepthLimited = null;
+    this.rightExtremeDepthLimited = null;
+  }
 
-    // Целевая белая площадь
+  computeSpacing(path, bounds, refMinY, refMaxY) {
+    const freq = 5;
+    const amplitudeY = refMaxY - refMinY;
+
+    this.scanLines = [];
+    this.leftPolygon = [];
+    this.rightPolygon = [];
+    this.leftSBPolygon = [];
+    this.rightSBPolygon = [];
+    this.leftMarginsProcessed = [];
+    this.rightMarginsProcessed = [];
+
     const areaUPM = this.params.area * Math.pow(this.upm / 1000, 2);
     const targetArea = (amplitudeY * areaUPM * 100) / this.xHeight;
 
-    // Максимальная глубина
     const maxDepth = this.xHeight * this.params.depth / 100;
 
-    // Собрать margins
-    const { leftMargins, rightMargins, leftExtreme, rightExtreme } =
-      this.collectMargins(path, bounds, refMinY, refMaxY, freq);
+    const margins = this.collectMargins(path, bounds, refMinY, refMaxY, freq);
+    this.leftMargins = margins.leftMargins;
+    this.rightMargins = margins.rightMargins;
+    this.leftExtreme = margins.leftExtreme;
+    this.rightExtreme = margins.rightExtreme;
 
-    if (leftMargins.length < 2 || rightMargins.length < 2) {
+    if (this.leftMargins.length < 2 || this.rightMargins.length < 2) {
       return { lsb: null, rsb: null };
     }
 
-    // Обработка margins
-    let processedLeft = setDepth(leftMargins, leftExtreme, maxDepth);
-    let processedRight = setDepth(rightMargins, rightExtreme, -maxDepth);
+    // Apply depth limit to margins
+    let processedLeft = setDepth(this.leftMargins, this.leftExtreme, maxDepth, true);
+    let processedRight = setDepth(this.rightMargins, this.rightExtreme, maxDepth, false);
 
-    processedLeft = diagonize(processedLeft);
-    processedRight = diagonize(processedRight);
+    // Store processed margins for visualization
+    this.leftMarginsProcessed = [...processedLeft];
+    this.rightMarginsProcessed = [...processedRight];
 
-    // Замкнуть полигоны
-    this.leftPolygon = closePolygon(processedLeft, leftExtreme, refMinY, refMaxY);
-    this.rightPolygon = closePolygon(processedRight, rightExtreme, refMinY, refMaxY);
+    // Calculate depth-limited extremes
+    this.leftExtremeDepthLimited = Math.min(...processedLeft.map(p => p.x));
+    this.rightExtremeDepthLimited = Math.max(...processedRight.map(p => p.x));
 
-    // Вычислить sidebearings
-    const lsb = calculateSidebearing(this.leftPolygon, targetArea, amplitudeY);
-    const rsb = calculateSidebearing(this.rightPolygon, targetArea, amplitudeY);
+    // Close polygons at the depth-limited extremes
+    this.leftPolygon = closePolygon(processedLeft, this.leftExtremeDepthLimited, refMinY, refMaxY);
+    this.rightPolygon = closePolygon(processedRight, this.rightExtremeDepthLimited, refMinY, refMaxY);
 
-    return { lsb, rsb };
+    this.lsb = calculateSidebearing(this.leftPolygon, targetArea, amplitudeY);
+    this.rsb = calculateSidebearing(this.rightPolygon, targetArea, amplitudeY);
+
+    // Calculate sidebearing line positions from depth-limited extremes
+    this.leftSBLine = this.leftExtremeDepthLimited - this.lsb;
+    this.rightSBLine = this.rightExtremeDepthLimited + this.rsb;
+
+    // For visualization: use depth-limited margins
+    this.leftSBPolygon = this.createSBPolygon(processedLeft, this.leftSBLine, refMinY, refMaxY, true);
+    this.rightSBPolygon = this.createSBPolygon(processedRight, this.rightSBLine, refMinY, refMaxY, false);
+
+    return { lsb: this.lsb, rsb: this.rsb };
+  }
+
+  createSBPolygon(margins, sbLine, minY, maxY, isLeft) {
+    const polygon = [];
+    
+    // Add glyph edge points (margins) - these are the inner boundary
+    for (const p of margins) {
+      polygon.push({ x: p.x, y: p.y });
+    }
+    
+    // Add sidebearing line points in reverse order (outer boundary)
+    for (let i = margins.length - 1; i >= 0; i--) {
+      polygon.push({ x: sbLine, y: margins[i].y });
+    }
+    
+    return polygon;
   }
 
   collectMargins(path, bounds, minY, maxY, freq) {
     const hitTester = new PathHitTester(path, bounds);
     const leftMargins = [];
     const rightMargins = [];
-    let leftExtreme = bounds.xMin;
-    let rightExtreme = bounds.xMax;
+    let leftExtreme = Infinity;  // Will be set from actual margins
+    let rightExtreme = -Infinity;  // Will be set from actual margins
 
     // Clear previous scan lines
     this.scanLines = [];
@@ -133,7 +167,7 @@ class LetterspacerEngine {
       this.scanLines.push({
         start: lineStart,
         end: lineEnd,
-        intersections: [...intersections], // Copy the intersections
+        intersections: [...intersections],
         y: y
       });
 
@@ -156,6 +190,10 @@ class LetterspacerEngine {
         }
       }
     }
+
+    // Fallback to bounds if no intersections found
+    if (leftExtreme === Infinity) leftExtreme = bounds.xMin;
+    if (rightExtreme === -Infinity) rightExtreme = bounds.xMax;
 
     return { leftMargins, rightMargins, leftExtreme, rightExtreme };
   }
@@ -186,8 +224,8 @@ export default class LetterspacerPanel extends Panel {
       area: 400,
       depth: 15,
       overshoot: 0,
-      applyLSB: 1,  // 1 for true, 0 for false
-      applyRSB: 1,  // 1 for true, 0 for false
+      applyLSB: 1,
+      applyRSB: 1,
       referenceGlyph: "",
     };
   }
@@ -219,14 +257,14 @@ export default class LetterspacerPanel extends Panel {
 
       { type: "edit-number", key: "applyLSB",
         label: translate("sidebar.letterspacer.apply-lsb"),
-        value: this.params.applyLSB ? 1 : 0,  // Convert boolean to number for display
+        value: this.params.applyLSB ? 1 : 0,
         minValue: 0,
         maxValue: 1,
         integer: true },
 
       { type: "edit-number", key: "applyRSB",
         label: translate("sidebar.letterspacer.apply-rsb"),
-        value: this.params.applyRSB ? 1 : 0,  // Convert boolean to number for display
+        value: this.params.applyRSB ? 1 : 0,
         minValue: 0,
         maxValue: 1,
         integer: true },
@@ -240,47 +278,37 @@ export default class LetterspacerPanel extends Panel {
       { type: "spacer" },
     ];
 
-    // Apply button
     const applyButton = html.createDomElement("button", {
       onclick: () => this.applySpacing(),
     });
     applyButton.textContent = translate("sidebar.letterspacer.apply");
 
-    // Add the apply button to the header
     formContents[0].auxiliaryElement = applyButton;
 
     this.infoForm.setFieldDescriptions(formContents);
     this.infoForm.onFieldChange = async (fieldItem, value) => {
       this.params[fieldItem.key] = value;
 
-      // Update visualization data when parameters change
       if (this.editorController.sceneController && this.editorController.sceneController.sceneModel) {
         this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-        // Request update through the editor's canvas controller
         if (this.editorController.canvasController) {
           this.editorController.canvasController.requestUpdate();
         }
       } else if (this.editorController.sceneModel) {
-        // Fallback to editor controller's scene model
         this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-        // Request update through the editor's canvas controller
         if (this.editorController.canvasController) {
           this.editorController.canvasController.requestUpdate();
         }
       }
     };
 
-    // Also update visualization data when the panel is updated
     if (this.editorController.sceneController && this.editorController.sceneController.sceneModel) {
       this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-      // Request update through the editor's canvas controller
       if (this.editorController.canvasController) {
         this.editorController.canvasController.requestUpdate();
       }
     } else if (this.editorController.sceneModel) {
-      // Fallback to editor controller's scene model
       this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-      // Request update through the editor's canvas controller
       if (this.editorController.canvasController) {
         this.editorController.canvasController.requestUpdate();
       }
@@ -291,13 +319,8 @@ export default class LetterspacerPanel extends Panel {
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) return;
 
-    // Font metrics
     const fontMetrics = await this.getFontMetrics();
-
-    // Reference bounds
     const refBounds = await this.getReferenceBounds(fontMetrics);
-
-    // Engine
     const engine = new LetterspacerEngine(this.params, fontMetrics);
 
     await this.sceneController.editGlyphAndRecordChanges((glyph) => {
@@ -315,16 +338,13 @@ export default class LetterspacerPanel extends Panel {
         if (lsb === null || rsb === null) continue;
 
         const currentLSB = bounds.xMin;
-        const glyphWidth = bounds.xMax - bounds.xMin;
 
         if (this.params.applyLSB) {
           const deltaLSB = lsb - currentLSB;
-          // Сдвинуть path
           this.shiftPath(layerGlyph.path, deltaLSB);
         }
 
         if (this.params.applyRSB || this.params.applyLSB) {
-          // Пересчитать xAdvance
           const newBounds = layerGlyph.path.getBounds?.() || layerGlyph.path.getControlBounds?.();
           if (this.params.applyRSB) {
             layerGlyph.xAdvance = newBounds.xMax + rsb;
@@ -337,10 +357,8 @@ export default class LetterspacerPanel extends Panel {
       return "letterspacer";
     }, undefined, true);
 
-    // Update visualization data after applying changes
     if (this.editorController.sceneModel) {
       this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-      // Request update through the editor's canvas controller
       if (this.editorController.canvasController) {
         this.editorController.canvasController.requestUpdate();
       }
@@ -348,14 +366,11 @@ export default class LetterspacerPanel extends Panel {
   }
 
   shiftPath(path, deltaX) {
-    // Create a new coordinate array with shifted values
     const newCoords = new Array(path.coordinates.length);
     for (let i = 0; i < path.coordinates.length; i += 2) {
-      newCoords[i] = path.coordinates[i] + deltaX;   // x coordinate
-      newCoords[i + 1] = path.coordinates[i + 1];   // y coordinate remains unchanged
+      newCoords[i] = path.coordinates[i] + deltaX;
+      newCoords[i + 1] = path.coordinates[i + 1];
     }
-    
-    // Update the path coordinates properly
     path.coordinates = newCoords;
   }
 
@@ -373,7 +388,6 @@ export default class LetterspacerPanel extends Panel {
   }
 
   async getReferenceBounds(fontMetrics) {
-    // Если указан reference glyph — использовать его bounds
     if (this.params.referenceGlyph) {
       const refGlyph = await this.fontController.getGlyph(this.params.referenceGlyph);
       if (refGlyph) {
@@ -389,7 +403,6 @@ export default class LetterspacerPanel extends Panel {
       }
     }
 
-    // Fallback: использовать xHeight
     const overshoot = fontMetrics.xHeight * this.params.overshoot / 100;
     return {
       minY: -overshoot,
@@ -400,33 +413,26 @@ export default class LetterspacerPanel extends Panel {
   async toggle(on, focus) {
     if (on) {
       this.update();
-      // Add a listener to update visualization when selection changes
       this.sceneController.addEventListener("selectionChanged", this.handleSelectionChangeBound);
     } else {
-      // Remove the listener when panel is turned off
       this.sceneController.removeEventListener("selectionChanged", this.handleSelectionChangeBound);
     }
   }
 
-  // Handle selection changes to update visualization data
   async handleSelectionChange() {
     if (this.editorController.sceneController && this.editorController.sceneController.sceneModel) {
       this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-      // Request update through the editor's canvas controller
       if (this.editorController.canvasController) {
         this.editorController.canvasController.requestUpdate();
       }
     } else if (this.editorController.sceneModel) {
-      // Fallback to editor controller's scene model
       this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-      // Request update through the editor's canvas controller
       if (this.editorController.canvasController) {
         this.editorController.canvasController.requestUpdate();
       }
     }
   }
 
-  // Methods for visualization layer
   getEngine() {
     return this.engine;
   }
@@ -434,41 +440,42 @@ export default class LetterspacerPanel extends Panel {
   async getVisualizationData() {
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) {
-      console.log("No positioned glyph selected for visualization data");
       return null;
     }
 
-    console.log("Generating visualization data for glyph:", positionedGlyph.glyphName);
-
-    // Font metrics
     const fontMetrics = await this.getFontMetrics();
-
-    // Reference bounds
     const refBounds = await this.getReferenceBounds(fontMetrics);
-
-    // Create temporary engine to compute visualization data
     const engine = new LetterspacerEngine(this.params, fontMetrics);
 
     const path = positionedGlyph.glyph.path;
     const bounds = path.getBounds?.() || path.getControlBounds?.();
     if (!bounds) {
-      console.log("No bounds found for glyph path");
       return null;
     }
 
-    console.log("Computing spacing with bounds:", bounds);
-
-    // Compute spacing to populate the visualization data
     engine.computeSpacing(path, bounds, refBounds.minY, refBounds.maxY);
 
     const result = {
       scanLines: engine.scanLines,
       leftPolygon: engine.leftPolygon,
       rightPolygon: engine.rightPolygon,
-      params: this.params
+      leftSBPolygon: engine.leftSBPolygon,
+      rightSBPolygon: engine.rightSBPolygon,
+      leftSBLine: engine.leftSBLine,
+      rightSBLine: engine.rightSBLine,
+      lsb: engine.lsb,
+      rsb: engine.rsb,
+      leftExtreme: engine.leftExtreme,
+      rightExtreme: engine.rightExtreme,
+      leftExtremeDepthLimited: engine.leftExtremeDepthLimited,
+      rightExtremeDepthLimited: engine.rightExtremeDepthLimited,
+      leftMargins: engine.leftMargins,
+      rightMargins: engine.rightMargins,
+      leftMarginsProcessed: engine.leftMarginsProcessed,
+      rightMarginsProcessed: engine.rightMarginsProcessed,
+      params: this.params,
+      referenceBounds: { minY: refBounds.minY, maxY: refBounds.maxY }
     };
-
-    console.log("Generated visualization data with", result.scanLines?.length, "scan lines");
 
     return result;
   }
