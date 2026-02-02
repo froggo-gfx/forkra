@@ -394,8 +394,8 @@ export default class LetterspacerPanel extends Panel {
         if (lsb === null || rsb === null) continue;
         
         // Store calculated values
-        calculatedLSB = lsb;
-        calculatedRSB = rsb;
+        calculatedLSB = Math.round(lsb);
+        calculatedRSB = Math.round(rsb);
 
         const currentLSB = bounds.xMin;
 
@@ -407,9 +407,9 @@ export default class LetterspacerPanel extends Panel {
         if (this.params.applyRSB || this.params.applyLSB) {
           const newBounds = layerGlyph.path.getBounds?.() || layerGlyph.path.getControlBounds?.();
           if (this.params.applyRSB) {
-            layerGlyph.xAdvance = newBounds.xMax + rsb;
+            layerGlyph.xAdvance = Math.round(newBounds.xMax + rsb);
           } else {
-            layerGlyph.xAdvance = newBounds.xMax + (layerGlyph.xAdvance - bounds.xMax);
+            layerGlyph.xAdvance = Math.round(newBounds.xMax + (layerGlyph.xAdvance - bounds.xMax));
           }
         }
       }
@@ -425,8 +425,8 @@ export default class LetterspacerPanel extends Panel {
     const path = positionedGlyph.glyph.path;
     const bounds = path.getBounds?.() || path.getControlBounds?.();
     if (bounds) {
-      this.currentLSB = bounds.xMin;
-      this.currentRSB = positionedGlyph.glyph.xAdvance - bounds.xMax;
+      this.currentLSB = Math.round(bounds.xMin);
+      this.currentRSB = Math.round(positionedGlyph.glyph.xAdvance - bounds.xMax);
     }
     
     // Update value display without rebuilding the form
@@ -508,7 +508,13 @@ export default class LetterspacerPanel extends Panel {
     this.params.area = bestParams.area;
     this.params.depth = bestParams.depth;
 
-    await this.updateCalculatedValues();
+    const finalEngine = new LetterspacerEngine(this.params, fontMetrics);
+    const result = finalEngine.computeSpacing(path, bounds, refBounds.minY, refBounds.maxY);
+    if (result.lsb !== null && result.rsb !== null) {
+      this.calculatedLSB = Math.round(result.lsb);
+      this.calculatedRSB = Math.round(result.rsb);
+    }
+
     await this.update();
     this.updateValueDisplay();
 
@@ -638,7 +644,7 @@ export default class LetterspacerPanel extends Panel {
   formatValue(value) {
     // Format spacing value for display
     if (value === null || value === undefined) return "-";
-    return Math.round(value * 10) / 10;
+    return Math.round(value);
   }
 
   async updateCalculatedValues() {
@@ -651,8 +657,8 @@ export default class LetterspacerPanel extends Panel {
     const bounds = path.getBounds?.() || path.getControlBounds?.();
     if (!bounds) return;
 
-    this.currentLSB = bounds.xMin;
-    this.currentRSB = positionedGlyph.glyph.xAdvance - bounds.xMax;
+    this.currentLSB = Math.round(bounds.xMin);
+    this.currentRSB = Math.round(positionedGlyph.glyph.xAdvance - bounds.xMax);
 
     // Calculate new values using letterspacer
     const fontMetrics = await this.getFontMetrics();
@@ -661,8 +667,8 @@ export default class LetterspacerPanel extends Panel {
     const result = engine.computeSpacing(path, bounds, refBounds.minY, refBounds.maxY);
 
     if (result.lsb !== null && result.rsb !== null) {
-      this.calculatedLSB = result.lsb;
-      this.calculatedRSB = result.rsb;
+      this.calculatedLSB = Math.round(result.lsb);
+      this.calculatedRSB = Math.round(result.rsb);
     }
   }
 
