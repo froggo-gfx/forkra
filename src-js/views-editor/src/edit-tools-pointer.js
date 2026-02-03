@@ -2954,32 +2954,33 @@ export class PointerTool extends BaseTool {
           }
         }
 
-        // Regenerate outline contours
+        // CRITICAL: Regenerate contours INSIDE recordChanges so changes are tracked for undo
         const staticGlyph = layer.glyph;
-        const oldGeneratedIndices = workingSkeletonData.generatedContourIndices || [];
-        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-        for (const idx of sortedIndices) {
-          if (idx < staticGlyph.path.numContours) {
-            staticGlyph.path.deleteContour(idx);
-          }
-        }
-
-        const generatedContours = generateContoursFromSkeleton(workingSkeletonData);
-        const newGeneratedIndices = [];
-        for (const contour of generatedContours) {
-          const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
-          newGeneratedIndices.push(newIndex);
-        }
-        workingSkeletonData.generatedContourIndices = newGeneratedIndices;
-
-        // Record path changes
         const pathChange = recordChanges(staticGlyph, (sg) => {
-          // Path already modified above
+          // Delete old generated contours
+          const oldGeneratedIndices = workingSkeletonData.generatedContourIndices || [];
+          const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+          for (const idx of sortedIndices) {
+            if (idx < sg.path.numContours) {
+              sg.path.deleteContour(idx);
+            }
+          }
+
+          // Generate new contours from skeleton
+          const generatedContours = generateContoursFromSkeleton(workingSkeletonData);
+          const newGeneratedIndices = [];
+          for (const contour of generatedContours) {
+            const newIndex = sg.path.numContours;
+            sg.path.insertContour(sg.path.numContours, packContour(contour));
+            newGeneratedIndices.push(newIndex);
+          }
+          
+          // Update indices in workingSkeletonData for customData
+          workingSkeletonData.generatedContourIndices = newGeneratedIndices;
         });
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
-        // Record skeleton data changes
+        // Record skeleton data changes (after path, so indices are correct)
         const customDataChange = recordChanges(layer, (l) => {
           l.customData[SKELETON_CUSTOM_DATA_KEY] = workingSkeletonData;
         });

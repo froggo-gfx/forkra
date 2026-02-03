@@ -575,64 +575,6 @@ export default class SkeletonParametersPanel extends Panel {
       ),
     });
 
-    // === ANGLE OVERRIDE ===
-    formContents.push({ type: "spacer" });
-    formContents.push({
-      type: "header",
-      label: "Angle",
-    });
-
-    // Determine checkbox states for angle override
-    const isForceHorizontal = forceHorizontalStates.has(true) && forceHorizontalStates.size === 1;
-    const isForceVertical = forceVerticalStates.has(true) && forceVerticalStates.size === 1;
-    const isHorizontalIndeterminate = forceHorizontalStates.size > 1;
-    const isVerticalIndeterminate = forceVerticalStates.size > 1;
-
-    // Force Horizontal checkbox
-    const forceHorizontalCheckbox = html.input({
-      type: "checkbox",
-      id: "force-horizontal-toggle",
-      checked: isHorizontalIndeterminate ? false : isForceHorizontal,
-      onchange: (e) => this._onForceHorizontalToggle(e.target.checked),
-    });
-    if (isHorizontalIndeterminate) {
-      forceHorizontalCheckbox.indeterminate = true;
-    }
-
-    // Force Vertical checkbox
-    const forceVerticalCheckbox = html.input({
-      type: "checkbox",
-      id: "force-vertical-toggle",
-      checked: isVerticalIndeterminate ? false : isForceVertical,
-      onchange: (e) => this._onForceVerticalToggle(e.target.checked),
-    });
-    if (isVerticalIndeterminate) {
-      forceVerticalCheckbox.indeterminate = true;
-    }
-
-    formContents.push({
-      type: "universal-row",
-      field1: {
-        type: "auxiliaryElement",
-        key: "forceHorizontal",
-        auxiliaryElement: html.span({}, [
-          forceHorizontalCheckbox,
-          html.label({ for: "force-horizontal-toggle", style: "margin-left: 4px" }, "Vertical"),
-        ]),
-      },
-      field2: {
-        type: "auxiliaryElement",
-        key: "forceVertical",
-        auxiliaryElement: html.span({}, [
-          forceVerticalCheckbox,
-          html.label({ for: "force-vertical-toggle", style: "margin-left: 4px" }, "Horizontal"),
-        ]),
-      },
-      field3: {
-        type: "spacer",
-      },
-    });
-
     // === EDITABLE RIB POINTS ===
     // Only show when rib points are selected (not just skeleton points)
     if (selectedRibSides.size > 0) {
@@ -775,6 +717,65 @@ export default class SkeletonParametersPanel extends Panel {
         });
       }
     }
+
+    // === ANGLE OVERRIDE ===
+    formContents.push({ type: "divider" });
+    formContents.push({ type: "spacer" });
+    formContents.push({
+      type: "header",
+      label: "Angle",
+    });
+
+    // Determine checkbox states for angle override
+    const isForceHorizontal = forceHorizontalStates.has(true) && forceHorizontalStates.size === 1;
+    const isForceVertical = forceVerticalStates.has(true) && forceVerticalStates.size === 1;
+    const isHorizontalIndeterminate = forceHorizontalStates.size > 1;
+    const isVerticalIndeterminate = forceVerticalStates.size > 1;
+
+    // Force Horizontal checkbox
+    const forceHorizontalCheckbox = html.input({
+      type: "checkbox",
+      id: "force-horizontal-toggle",
+      checked: isHorizontalIndeterminate ? false : isForceHorizontal,
+      onchange: (e) => this._onForceHorizontalToggle(e.target.checked),
+    });
+    if (isHorizontalIndeterminate) {
+      forceHorizontalCheckbox.indeterminate = true;
+    }
+
+    // Force Vertical checkbox
+    const forceVerticalCheckbox = html.input({
+      type: "checkbox",
+      id: "force-vertical-toggle",
+      checked: isVerticalIndeterminate ? false : isForceVertical,
+      onchange: (e) => this._onForceVerticalToggle(e.target.checked),
+    });
+    if (isVerticalIndeterminate) {
+      forceVerticalCheckbox.indeterminate = true;
+    }
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "forceHorizontal",
+        auxiliaryElement: html.span({}, [
+          forceHorizontalCheckbox,
+          html.label({ for: "force-horizontal-toggle", style: "margin-left: 4px" }, "Vertical"),
+        ]),
+      },
+      field2: {
+        type: "auxiliaryElement",
+        key: "forceVertical",
+        auxiliaryElement: html.span({}, [
+          forceVerticalCheckbox,
+          html.label({ for: "force-vertical-toggle", style: "margin-left: 4px" }, "Horizontal"),
+        ]),
+      },
+      field3: {
+        type: "spacer",
+      },
+    });
 
     this.infoForm.setFieldDescriptions(formContents);
 
