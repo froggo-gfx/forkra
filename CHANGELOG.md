@@ -1,6 +1,6 @@
 # Changelog for Fontra
 
-## 2026-02-?? [version 2026.2.0]
+## 2026-02-03 [version 2026.2.0]
 
 - [ufo] Fix creating a single-UFO project. [PR 2405](https://github.com/fontra/fontra/pull/2405)
 - [designspace/ufo] Fix regression in editing OpenType features, caused by unneeded reloading. [PR 2404](https://github.com/fontra/fontra/pull/2404)
