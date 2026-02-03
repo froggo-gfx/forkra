@@ -31,7 +31,7 @@ expectedCustomData = {
 }
 
 
-@pytest.mark.parametrize("extension", [".fontra", ".designspace"])
+@pytest.mark.parametrize("extension", [".fontra", ".designspace", ".ufo"])
 async def test_populate(tmpdir, extension):
     tmpdir = pathlib.Path(tmpdir)
 
