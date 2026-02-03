@@ -250,11 +250,12 @@ export class PointerTool extends BaseTool {
   async handleArrowKeys(event) {
     const sceneController = this.sceneController;
 
-    // Check if we have skeleton points and/or regular points selected
-    const { skeletonPoint: skeletonPointSelection, point: regularPointSelection } =
+    // Check if we have skeleton points, rib points, and/or regular points selected
+    const { skeletonPoint: skeletonPointSelection, skeletonRibPoint: ribPointSelection, point: regularPointSelection } =
       parseSelection(sceneController.selection);
 
     const hasSkeletonPoints = skeletonPointSelection?.size > 0;
+    const hasRibPoints = ribPointSelection?.size > 0;
     const hasRegularPoints = regularPointSelection?.length > 0;
 
     // X+arrows: equalize handles for selected off-curve skeleton points
@@ -263,30 +264,18 @@ export class PointerTool extends BaseTool {
       return;
     }
 
-    if (!hasSkeletonPoints) {
-      // Check if any selected points are editable handles (from skeleton contours)
-      // These need special handling: movement constrained to skeleton handle direction
-      if (hasRegularPoints) {
-        const editableHandles = this._getEditableGeneratedHandlesFromSelection(regularPointSelection);
-        if (editableHandles.length > 0) {
-          await this._handleArrowKeysForEditableHandles(event, editableHandles);
-          return;
-        }
+    // Handle skeleton point nudging (highest priority)
+    if (hasSkeletonPoints) {
+      // Handle skeleton point nudging (combined with regular points in one editGlyph)
+      let [dx, dy] = arrowKeyDeltas[event.key];
+      if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
+        dx *= 100;
+        dy *= 100;
+      } else if (event.shiftKey) {
+        dx *= 10;
+        dy *= 10;
       }
-      // No skeleton points and no editable handles - use default handler
-      return sceneController.handleArrowKeys(event);
-    }
-
-    // Handle skeleton point nudging (combined with regular points in one editGlyph)
-    let [dx, dy] = arrowKeyDeltas[event.key];
-    if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-      dx *= 100;
-      dy *= 100;
-    } else if (event.shiftKey) {
-      dx *= 10;
-      dy *= 10;
-    }
-    const delta = { x: dx, y: dy };
+      const delta = { x: dx, y: dy };
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const editLayerName = sceneController.editingLayerNames?.[0];
@@ -432,7 +421,28 @@ export class PointerTool extends BaseTool {
         broadcast: true,
       };
     });
+    return;
   }
+
+  // Handle rib points (when no skeleton points selected)
+  if (hasRibPoints) {
+    await this._handleArrowKeysForRibPoints(event, ribPointSelection);
+    return;
+  }
+
+  // Check if any selected points are editable handles (from skeleton contours)
+  // These need special handling: movement constrained to skeleton handle direction
+  if (hasRegularPoints) {
+    const editableHandles = this._getEditableGeneratedHandlesFromSelection(regularPointSelection);
+    if (editableHandles.length > 0) {
+      await this._handleArrowKeysForEditableHandles(event, editableHandles);
+      return;
+    }
+  }
+
+  // No skeleton points, rib points, or editable handles - use default handler
+  return sceneController.handleArrowKeys(event);
+}
 
   setCursorForRotationHandle(handleName) {
     this.setCursor(`url('/images/cursor-rotate-${handleName}.svg') 16 16, auto`);
@@ -2754,6 +2764,236 @@ export class PointerTool extends BaseTool {
       return {
         changes: combined,
         undoLabel: "Nudge generated handle",
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Get information about selected rib points for arrow key processing.
+   * @param {Set} ribPointSelection - Set of "contourIdx/pointIdx/side" strings
+   * @returns {Array} Array of rib point info objects
+   */
+  _getSelectedRibPointInfo(ribPointSelection) {
+    const result = [];
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return result;
+
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    if (!editLayerName) return result;
+
+    const varGlyph = positionedGlyph.varGlyph;
+    if (!varGlyph?.glyph?.layers?.[editLayerName]) return result;
+
+    const layer = varGlyph.glyph.layers[editLayerName];
+    const skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonData?.contours?.length) return result;
+
+    for (const key of ribPointSelection) {
+      const parts = key.split("/");
+      if (parts.length !== 3) continue;
+
+      const contourIndex = parseInt(parts[0]);
+      const pointIndex = parseInt(parts[1]);
+      const side = parts[2]; // "left" or "right"
+
+      const contour = skeletonData.contours[contourIndex];
+      if (!contour || pointIndex >= contour.points.length) continue;
+
+      const point = contour.points[pointIndex];
+      if (point.type) continue; // Skip off-curve points
+
+      const defaultWidth = contour.defaultWidth || 20;
+      const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+      const isEditable = point[editableKey] === true;
+
+      // Calculate normal at this point
+      const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
+
+      result.push({
+        contourIndex,
+        pointIndex,
+        side,
+        point,
+        normal,
+        isEditable,
+        defaultWidth,
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Handle arrow key movement for rib points.
+   * For non-editable ribs: changes width only.
+   * For editable ribs: changes nudge (and width if asymmetric).
+   */
+  async _handleArrowKeysForRibPoints(event, ribPointSelection) {
+    const sceneController = this.sceneController;
+
+    // Get rib point info
+    const ribPointsInfo = this._getSelectedRibPointInfo(ribPointSelection);
+    if (ribPointsInfo.length === 0) return;
+
+    // Calculate arrow key delta
+    let [dx, dy] = arrowKeyDeltas[event.key];
+    if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
+      dx *= 100;
+      dy *= 100;
+    } else if (event.shiftKey) {
+      dx *= 10;
+      dy *= 10;
+    }
+    const delta = { x: dx, y: dy };
+
+    console.log('[Rib Arrow Keys] event.key:', event.key, 'delta:', delta, 'shift:', event.shiftKey);
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      // Process each editing layer
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const originalSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const workingSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
+
+        // Apply changes to each selected rib point
+        for (const ribInfo of ribPointsInfo) {
+          const { contourIndex, pointIndex, side, normal, isEditable, defaultWidth } = ribInfo;
+
+          const contour = workingSkeletonData.contours[contourIndex];
+          if (!contour || pointIndex >= contour.points.length) continue;
+
+          const point = contour.points[pointIndex];
+          if (point.type) continue;
+
+          console.log('[Rib Arrow Keys] Processing rib:', { contourIndex, pointIndex, side, isEditable });
+
+          if (isEditable) {
+            // Use EditableRibBehavior for editable ribs
+            const ribHit = {
+              contourIndex,
+              pointIndex,
+              side,
+              normal,
+              onCurvePoint: point,
+            };
+            const behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
+            const change = behavior.applyDelta(delta, null);
+
+            // Apply width changes
+            if (change.halfWidth !== undefined) {
+              if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
+                // Asymmetric mode
+                const widthKey = side === "left" ? "leftWidth" : "rightWidth";
+                point[widthKey] = change.halfWidth;
+              } else {
+                // Symmetric mode - update width property
+                // Calculate total width from both sides
+                const otherSide = side === "left" ? "right" : "left";
+                const otherWidthKey = otherSide === "left" ? "leftWidth" : "rightWidth";
+                const otherHalfWidth = point[otherWidthKey] !== undefined
+                  ? point[otherWidthKey]
+                  : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
+                point.width = change.halfWidth + otherHalfWidth;
+              }
+            }
+
+            // Apply nudge changes
+            if (change.nudge !== undefined) {
+              const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+              point[nudgeKey] = change.nudge;
+            }
+
+            // Apply handle offset compensations if present
+            if (change.handleInOffsetX !== undefined) {
+              const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+              point[handleInXKey] = change.handleInOffsetX;
+            }
+            if (change.handleInOffsetY !== undefined) {
+              const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+              point[handleInYKey] = change.handleInOffsetY;
+            }
+            if (change.handleOutOffsetX !== undefined) {
+              const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+              point[handleOutXKey] = change.handleOutOffsetX;
+            }
+            if (change.handleOutOffsetY !== undefined) {
+              const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+              point[handleOutYKey] = change.handleOutOffsetY;
+            }
+          } else {
+            // Use RibEditBehavior for non-editable ribs (width only)
+            const ribHit = {
+              contourIndex,
+              pointIndex,
+              side,
+              normal,
+              onCurvePoint: point,
+            };
+            const behavior = createRibEditBehavior(originalSkeletonData, ribHit);
+            const change = behavior.applyDelta(delta);
+
+            // Apply width change
+            if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
+              // Asymmetric mode
+              const widthKey = side === "left" ? "leftWidth" : "rightWidth";
+              point[widthKey] = change.halfWidth;
+            } else {
+              // Symmetric mode
+              const otherSide = side === "left" ? "right" : "left";
+              const otherWidthKey = otherSide === "left" ? "leftWidth" : "rightWidth";
+              const otherHalfWidth = point[otherWidthKey] !== undefined
+                ? point[otherWidthKey]
+                : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
+              point.width = change.halfWidth + otherHalfWidth;
+            }
+          }
+        }
+
+        // Regenerate outline contours
+        const staticGlyph = layer.glyph;
+        const oldGeneratedIndices = workingSkeletonData.generatedContourIndices || [];
+        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+        for (const idx of sortedIndices) {
+          if (idx < staticGlyph.path.numContours) {
+            staticGlyph.path.deleteContour(idx);
+          }
+        }
+
+        const generatedContours = generateContoursFromSkeleton(workingSkeletonData);
+        const newGeneratedIndices = [];
+        for (const contour of generatedContours) {
+          const newIndex = staticGlyph.path.numContours;
+          staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
+          newGeneratedIndices.push(newIndex);
+        }
+        workingSkeletonData.generatedContourIndices = newGeneratedIndices;
+
+        // Record path changes
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          // Path already modified above
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        // Record skeleton data changes
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = workingSkeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: translate("action.nudge-selection"),
         broadcast: true,
       };
     });
