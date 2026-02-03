@@ -1,6 +1,6 @@
 import pathlib
 
-from fontra.backends.fontra import FontraBackend
+from fontra.backends import getFileSystemBackend, newFileSystemBackend
 from fontra.backends.populate import populateBackend
 from fontra.core.classes import unstructure
 
@@ -36,13 +36,13 @@ async def test_populate(tmpdir):
 
     backendPath = tmpdir / "test.fontra"
 
-    backend = FontraBackend.createFromPath(backendPath)
+    backend = newFileSystemBackend(backendPath)
 
     await populateBackend(backend)
 
     await backend.aclose()
 
-    reopenedBackend = FontraBackend.fromPath(backendPath)
+    reopenedBackend = getFileSystemBackend(backendPath)
     fontData = unstructure(reopenedBackend.fontData)
 
     assert len(fontData["sources"]) == 1
