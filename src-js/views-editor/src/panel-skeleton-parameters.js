@@ -1729,6 +1729,17 @@ export default class SkeletonParametersPanel extends Panel {
               point[detachedKey] = true;
             } else {
               delete point[detachedKey];
+              // Clear the 2D offset values that were stored when detached was enabled
+              // This prevents cumulative handle shifts when toggling detached state
+              const handleInOffsetXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+              const handleInOffsetYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+              const handleOutOffsetXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+              const handleOutOffsetYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+              
+              delete point[handleInOffsetXKey];
+              delete point[handleInOffsetYKey];
+              delete point[handleOutOffsetXKey];
+              delete point[handleOutOffsetYKey];
             }
           }
         }
