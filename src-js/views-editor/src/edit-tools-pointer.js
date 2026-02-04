@@ -595,6 +595,22 @@ export class PointerTool extends BaseTool {
       return;
     }
 
+    // X+drag: equalize regular handles (non-skeleton)
+    if (this.equalizeMode && !hasSkeletonPointUnderCursor) {
+      const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+      const handleInfo = this._findEqualizeHandleForPath(point, size);
+      if (handleInfo && positionedGlyph) {
+        await this._handleEqualizeHandlesDragForPath(
+          eventStream,
+          initialEvent,
+          handleInfo,
+          positionedGlyph
+        );
+        initialEvent.preventDefault();
+        return;
+      }
+    }
+
     // Check for skeleton Tunni point hit
     const isSkeletonTunniLayerActive =
       this.editor?.visualizationLayersSettings?.model?.["fontra.skeleton.tunni"];
@@ -3681,6 +3697,167 @@ export class PointerTool extends BaseTool {
         broadcast: true,
       };
     });
+  }
+
+  /**
+   * Handle X+drag for equalizing regular (non-skeleton) handles.
+   * The opposite handle mirrors the dragged handle's length while maintaining direction.
+   */
+  async _handleEqualizeHandlesDragForPath(
+    eventStream,
+    initialEvent,
+    handleInfo,
+    positionedGlyph
+  ) {
+    const sceneController = this.sceneController;
+    const { pointIndex, smoothIndex, oppositeIndex } = handleInfo;
+
+    if (!positionedGlyph) return;
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layersData = {};
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.glyph?.path) continue;
+        layersData[editLayerName] = { layer };
+      }
+
+      if (Object.keys(layersData).length === 0) return;
+
+      let accumulatedChanges = new ChangeCollector();
+
+      for await (const event of eventStream) {
+        const currentLocalPoint = sceneController.localPoint(event);
+        const currentGlyphPoint = {
+          x: currentLocalPoint.x - positionedGlyph.x,
+          y: currentLocalPoint.y - positionedGlyph.y,
+        };
+
+        const allChanges = [];
+
+        for (const [editLayerName, data] of Object.entries(layersData)) {
+          const { layer } = data;
+          const path = layer.glyph.path;
+          const smoothPt = path.getPoint(smoothIndex);
+          if (!smoothPt) continue;
+
+          let newDragVec = {
+            x: currentGlyphPoint.x - smoothPt.x,
+            y: currentGlyphPoint.y - smoothPt.y,
+          };
+
+          if (event.shiftKey) {
+            newDragVec = constrainHorVerDiag(newDragVec);
+          }
+
+          const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
+          if (newDragLen < 1) {
+            continue;
+          }
+
+          const newDragPos = {
+            x: Math.round(smoothPt.x + newDragVec.x),
+            y: Math.round(smoothPt.y + newDragVec.y),
+          };
+          const newOppPos = {
+            x: Math.round(smoothPt.x - newDragVec.x),
+            y: Math.round(smoothPt.y - newDragVec.y),
+          };
+
+          const pathChange = recordChanges(layer.glyph, (lg) => {
+            lg.path.setPointPosition(pointIndex, newDragPos.x, newDragPos.y);
+            lg.path.setPointPosition(oppositeIndex, newOppPos.x, newOppPos.y);
+          });
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+        }
+
+        if (allChanges.length === 0) continue;
+
+        const combinedChange = new ChangeCollector().concat(...allChanges);
+        accumulatedChanges = accumulatedChanges.concat(combinedChange);
+        await sendIncrementalChange(combinedChange.change, true);
+      }
+
+      await sendIncrementalChange(accumulatedChanges.change);
+
+      return {
+        changes: accumulatedChanges,
+        undoLabel: "Equalize Handles",
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Find equalizable handle under cursor in regular path.
+   * Returns { pointIndex, smoothIndex, oppositeIndex } or null.
+   */
+  _findEqualizeHandleForPath(point, size) {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.glyph?.path) {
+      return null;
+    }
+
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+
+    const path = positionedGlyph.glyph.path;
+    const pointIndex = path.pointIndexNearPoint(glyphPoint, size);
+    if (pointIndex === undefined) return null;
+
+    const pointType = path.pointTypes[pointIndex];
+    const pointTypeBase = pointType & VarPackedPath.POINT_TYPE_MASK;
+    const isOnCurve = pointTypeBase === VarPackedPath.ON_CURVE;
+    if (isOnCurve || pointTypeBase !== VarPackedPath.OFF_CURVE_CUBIC) {
+      return null;
+    }
+
+    const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
+    const numContourPoints = path.getNumPointsOfContour(contourIndex);
+    const contourStart = pointIndex - contourPointIndex;
+    const contourEnd = contourStart + numContourPoints; // exclusive
+
+    const getPrevIdx = (idx) => (idx > contourStart ? idx - 1 : contourEnd - 1);
+    const getNextIdx = (idx) => (idx < contourEnd - 1 ? idx + 1 : contourStart);
+
+    const prevIdx = getPrevIdx(pointIndex);
+    const nextIdx = getNextIdx(pointIndex);
+
+    const prevType = path.pointTypes[prevIdx] & VarPackedPath.POINT_TYPE_MASK;
+    const nextType = path.pointTypes[nextIdx] & VarPackedPath.POINT_TYPE_MASK;
+    const prevIsOnCurve = prevType === VarPackedPath.ON_CURVE;
+    const nextIsOnCurve = nextType === VarPackedPath.ON_CURVE;
+
+    let smoothIndex = null;
+    let oppositeIndex = null;
+
+    if (prevIsOnCurve) {
+      const prevIsSmooth = (path.pointTypes[prevIdx] & VarPackedPath.SMOOTH_FLAG) !== 0;
+      const oppositeIdx = getPrevIdx(prevIdx);
+      const oppositeType = path.pointTypes[oppositeIdx] & VarPackedPath.POINT_TYPE_MASK;
+      if (prevIsSmooth && oppositeType === VarPackedPath.OFF_CURVE_CUBIC) {
+        smoothIndex = prevIdx;
+        oppositeIndex = oppositeIdx;
+      }
+    }
+
+    if (smoothIndex === null && nextIsOnCurve) {
+      const nextIsSmooth = (path.pointTypes[nextIdx] & VarPackedPath.SMOOTH_FLAG) !== 0;
+      const oppositeIdx = getNextIdx(nextIdx);
+      const oppositeType = path.pointTypes[oppositeIdx] & VarPackedPath.POINT_TYPE_MASK;
+      if (nextIsSmooth && oppositeType === VarPackedPath.OFF_CURVE_CUBIC) {
+        smoothIndex = nextIdx;
+        oppositeIndex = oppositeIdx;
+      }
+    }
+
+    if (smoothIndex === null || oppositeIndex === null) {
+      return null;
+    }
+
+    return { pointIndex, smoothIndex, oppositeIndex };
   }
 
   /**
