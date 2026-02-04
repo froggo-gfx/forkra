@@ -618,7 +618,7 @@ export class SceneController {
       "action.break-skeleton-contour",
       { topic },
       () => this.doBreakSkeletonContour(),
-      () => this._hasClosedSkeletonContourInSelection()
+      () => this._hasBreakableSkeletonContourInSelection()
     );
 
     registerAction(
@@ -1625,6 +1625,31 @@ export class SceneController {
     return false;
   }
 
+  _hasBreakableSkeletonContourInSelection() {
+    const skeletonPointSel = this.contextMenuState.skeletonPointSelection;
+    if (!skeletonPointSel?.size) {
+      return false;
+    }
+
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const editLayerName = this.editingLayerNames?.[0];
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (!skeletonData?.contours) {
+      return false;
+    }
+
+    for (const selKey of skeletonPointSel) {
+      const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+      const contour = skeletonData.contours[contourIdx];
+      const point = contour?.points?.[pointIdx];
+      if (point && !point.type) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   _getClosableSkeletonContour() {
     // Check if we can close a single open skeleton contour
     // (two endpoints selected from the same contour, at same coordinates)
@@ -1774,32 +1799,79 @@ export class SceneController {
       skeletonData = JSON.parse(JSON.stringify(skeletonData));
 
       let numBroken = 0;
+
+      // Group selections by contour to avoid index shifting issues
+      const selectionsByContour = new Map();
       for (const selKey of skeletonPointSel) {
         const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+        if (!selectionsByContour.has(contourIdx)) {
+          selectionsByContour.set(contourIdx, []);
+        }
+        selectionsByContour.get(contourIdx).push(pointIdx);
+      }
+
+      // Process contours in descending order
+      const contourIndices = [...selectionsByContour.keys()].sort((a, b) => b - a);
+      for (const contourIdx of contourIndices) {
         const contour = skeletonData.contours[contourIdx];
-        if (!contour?.isClosed) {
+        if (!contour?.points?.length) continue;
+
+        // Use the first selected point index for this contour
+        const pointIdx = selectionsByContour.get(contourIdx).sort((a, b) => a - b)[0];
+        const breakPointOriginal = contour.points[pointIdx];
+        if (!breakPointOriginal || breakPointOriginal.type) {
+          continue; // only on-curve points can break
+        }
+
+        if (contour.isClosed) {
+          // Rotate points so pointIdx becomes the start
+          const points = contour.points;
+          const rotatedPoints = [...points.slice(pointIdx), ...points.slice(0, pointIdx)];
+
+          // Add a copy of the break point at the end to preserve all segments.
+          // The closed contour's segment from the last on-curve point back to
+          // the break point needs to connect to a physical endpoint.
+          const breakPoint = rotatedPoints[0];
+          if (!breakPoint.type) {
+            // Deep copy the break point for the end
+            const endPoint = JSON.parse(JSON.stringify(breakPoint));
+            // Reset smooth on endpoints - open contour endpoints don't have continuity on both sides
+            delete rotatedPoints[0].smooth;
+            delete endPoint.smooth;
+            rotatedPoints.push(endPoint);
+          }
+
+          contour.points = rotatedPoints;
+          contour.isClosed = false;
+          numBroken++;
           continue;
         }
 
-        // Rotate points so pointIdx becomes the start
-        const points = contour.points;
-        const rotatedPoints = [...points.slice(pointIdx), ...points.slice(0, pointIdx)];
-
-        // Add a copy of the break point at the end to preserve all segments.
-        // The closed contour's segment from the last on-curve point back to
-        // the break point needs to connect to a physical endpoint.
-        const breakPoint = rotatedPoints[0];
-        if (!breakPoint.type) {
-          // Deep copy the break point for the end
-          const endPoint = JSON.parse(JSON.stringify(breakPoint));
-          // Reset smooth on endpoints - open contour endpoints don't have continuity on both sides
-          delete rotatedPoints[0].smooth;
-          delete endPoint.smooth;
-          rotatedPoints.push(endPoint);
+        // Open contour: split into two contours if break point is not an endpoint
+        if (pointIdx <= 0 || pointIdx >= contour.points.length - 1) {
+          continue;
         }
 
-        contour.points = rotatedPoints;
+        const leftPoints = contour.points.slice(0, pointIdx + 1);
+        const rightPoints = contour.points.slice(pointIdx);
+
+        // Duplicate break point for right contour to avoid shared reference
+        rightPoints[0] = JSON.parse(JSON.stringify(rightPoints[0]));
+
+        // Endpoints should not be smooth
+        delete leftPoints[leftPoints.length - 1].smooth;
+        delete rightPoints[0].smooth;
+
+        const baseContour = { ...contour, isClosed: false };
+        contour.points = leftPoints;
         contour.isClosed = false;
+
+        const newContour = {
+          ...baseContour,
+          points: rightPoints,
+        };
+
+        skeletonData.contours.splice(contourIdx + 1, 0, newContour);
         numBroken++;
       }
 
