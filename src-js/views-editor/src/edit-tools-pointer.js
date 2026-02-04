@@ -92,7 +92,7 @@ export class PointerTool extends BaseTool {
   _boundEqualizeKeyUp = null;
 
   handleKeyDown(event) {
-    if (event.key === "q" || event.key === "Q") {
+    if (event.code === "KeyQ" || event.key === "q" || event.key === "Q") {
       if (!this.measureMode) {
         this.measureMode = true;
         this.sceneModel.measureMode = true;
@@ -103,7 +103,7 @@ export class PointerTool extends BaseTool {
       }
       return;
     }
-    if (event.key === "x" || event.key === "X") {
+    if (event.code === "KeyX" || event.key === "x" || event.key === "X") {
       if (!this.equalizeMode) {
         this.equalizeMode = true;
         this._boundEqualizeKeyUp = (e) => this._handleEqualizeKeyUp(e);
@@ -114,7 +114,7 @@ export class PointerTool extends BaseTool {
   }
 
   _handleMeasureKeyUp(event) {
-    if (event.key === "q" || event.key === "Q") {
+    if (event.code === "KeyQ" || event.key === "q" || event.key === "Q") {
       this.measureMode = false;
       this.sceneModel.measureMode = false;
       this.sceneModel.measureHoverSegment = null;
@@ -130,7 +130,7 @@ export class PointerTool extends BaseTool {
   }
 
   _handleEqualizeKeyUp(event) {
-    if (event.key === "x" || event.key === "X") {
+    if (event.code === "KeyX" || event.key === "x" || event.key === "X") {
       this.equalizeMode = false;
       if (this._boundEqualizeKeyUp) {
         window.removeEventListener("keyup", this._boundEqualizeKeyUp);
