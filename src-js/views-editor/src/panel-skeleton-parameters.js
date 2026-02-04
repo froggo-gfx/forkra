@@ -10,7 +10,7 @@ import {
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { parseSelection } from "@fontra/core/utils.js";
-import { packContour } from "@fontra/core/var-path.js";
+import { packContour, VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
 
@@ -1728,18 +1728,71 @@ export default class SkeletonParametersPanel extends Panel {
 
               point[detachedKey] = true;
             } else {
-              delete point[detachedKey];
-              // Clear the 2D offset values that were stored when detached was enabled
-              // This prevents cumulative handle shifts when toggling detached state
+              // When disabling detach, preserve handle positions by converting
+              // offsets from rib-point space to control-point space.
+              const normal = calculateNormalAtSkeletonPoint(contour, pointIdx);
+              const tangent = { x: -normal.y, y: normal.x };
+
+              let halfWidth = getPointHalfWidth(point, defaultWidth, side);
+              if (singleSided && singleSidedDirection === side) {
+                const leftHW = getPointHalfWidth(point, defaultWidth, "left");
+                const rightHW = getPointHalfWidth(point, defaultWidth, "right");
+                halfWidth = leftHW + rightHW;
+              }
+
+              const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+              const nudge = point[nudgeKey] || 0;
+              const sign = side === "left" ? 1 : -1;
+
+              const ribPoint = {
+                x: Math.round(point.x + sign * normal.x * halfWidth + tangent.x * nudge),
+                y: Math.round(point.y + sign * normal.y * halfWidth + tangent.y * nudge),
+              };
+
+              const currentHandlePositions = this._findHandlePositionsForRibPoint(
+                generatedPath, ribPoint, side
+              );
+
+              const tempSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+              const tempPoint = tempSkeletonData.contours?.[contourIdx]?.points?.[pointIdx];
               const handleInOffsetXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
               const handleInOffsetYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
               const handleOutOffsetXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
               const handleOutOffsetYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
-              
-              delete point[handleInOffsetXKey];
-              delete point[handleInOffsetYKey];
-              delete point[handleOutOffsetXKey];
-              delete point[handleOutOffsetYKey];
+
+              if (tempPoint) {
+                delete tempPoint[detachedKey];
+                delete tempPoint[handleInOffsetXKey];
+                delete tempPoint[handleInOffsetYKey];
+                delete tempPoint[handleOutOffsetXKey];
+                delete tempPoint[handleOutOffsetYKey];
+              }
+
+              const baseContours = generateContoursFromSkeleton(tempSkeletonData);
+              const basePath = VarPackedPath.fromUnpackedContours(baseContours);
+              const baseHandlePositions = this._findHandlePositionsForRibPoint(
+                basePath, ribPoint, side
+              );
+
+              if (currentHandlePositions && baseHandlePositions) {
+                for (const handleType of ["in", "out"]) {
+                  const currentPos = currentHandlePositions[handleType];
+                  const basePos = baseHandlePositions[handleType];
+                  if (!currentPos || !basePos) continue;
+
+                  const offsetXKey = side === "left"
+                    ? (handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+                    : (handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+                  const offsetYKey = side === "left"
+                    ? (handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+                    : (handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+
+                  point[offsetXKey] = currentPos.x - basePos.x;
+                  point[offsetYKey] = currentPos.y - basePos.y;
+                }
+              }
+
+              delete point[detachedKey];
             }
           }
         }
