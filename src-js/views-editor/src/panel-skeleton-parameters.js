@@ -731,12 +731,32 @@ export default class SkeletonParametersPanel extends Panel {
     const isForceVertical = forceVerticalStates.has(true) && forceVerticalStates.size === 1;
     const isHorizontalIndeterminate = forceHorizontalStates.size > 1;
     const isVerticalIndeterminate = forceVerticalStates.size > 1;
+    const canOverrideAngle = (() => {
+      if (!hasSelection) return false;
+      for (const { contourIdx, pointIdx } of selectedData.points) {
+        const contour = selectedData.skeletonData?.contours?.[contourIdx];
+        if (!contour?.points?.length) return false;
+        let firstOnCurve = -1;
+        let lastOnCurve = -1;
+        for (let i = 0; i < contour.points.length; i++) {
+          if (!contour.points[i]?.type) {
+            if (firstOnCurve === -1) firstOnCurve = i;
+            lastOnCurve = i;
+          }
+        }
+        if (pointIdx !== firstOnCurve && pointIdx !== lastOnCurve) {
+          return false;
+        }
+      }
+      return true;
+    })();
 
     // Force Horizontal checkbox
     const forceHorizontalCheckbox = html.input({
       type: "checkbox",
       id: "force-horizontal-toggle",
       checked: isHorizontalIndeterminate ? false : isForceHorizontal,
+      disabled: !canOverrideAngle,
       onchange: (e) => this._onForceHorizontalToggle(e.target.checked),
     });
     if (isHorizontalIndeterminate) {
@@ -748,6 +768,7 @@ export default class SkeletonParametersPanel extends Panel {
       type: "checkbox",
       id: "force-vertical-toggle",
       checked: isVerticalIndeterminate ? false : isForceVertical,
+      disabled: !canOverrideAngle,
       onchange: (e) => this._onForceVerticalToggle(e.target.checked),
     });
     if (isVerticalIndeterminate) {
