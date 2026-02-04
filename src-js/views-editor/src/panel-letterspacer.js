@@ -279,6 +279,9 @@ export default class LetterspacerPanel extends Panel {
     this.calculatedLSB = null;
     this.calculatedRSB = null;
     this.visualizationOpacity = 1;
+    this.reverseWarningArmed = false;
+    this.reverseWarningMessage = "";
+    this.reverseWarningTooltip = null;
   }
 
   getContentElement() {
@@ -300,10 +303,8 @@ export default class LetterspacerPanel extends Panel {
         label: translate("sidebar.letterspacer.title"),
         auxiliaryElement: html.createDomElement("button", {
           "style": "margin-left: 8px; padding: 2px 8px; font-size: 11px; cursor: pointer;",
-          "onclick": () => this.reverseSpacing(),
+          "onclick": (event) => this.reverseSpacing(event),
           "disabled": !this.hasCurrentMaster,
-          "data-tooltip": translate("sidebar.letterspacer.reverse.tooltip"),
-          "data-tooltipposition": "left",
         }, ["Reverse"])
       },
 
@@ -789,10 +790,21 @@ export default class LetterspacerPanel extends Panel {
     }
   }
 
-  async reverseSpacing() {
+  async reverseSpacing(event) {
     if (!(await this.hasCurrentMasterForGlyph())) {
       return;
     }
+    const guardInfo = await this.getReverseGuardInfo();
+    if (guardInfo.shouldGuard && !this.reverseWarningArmed) {
+      this.reverseWarningArmed = true;
+      this.reverseWarningMessage = guardInfo.message;
+      this.showReverseWarningTooltip(event?.currentTarget, guardInfo.message);
+      return;
+    }
+    this.reverseWarningArmed = false;
+    this.reverseWarningMessage = "";
+    this.hideReverseWarningTooltip();
+
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) return;
 
@@ -1103,6 +1115,82 @@ export default class LetterspacerPanel extends Panel {
     const panel = this.editorController.getSidebarPanel?.("designspace-navigation");
     if (panel?.refreshSourcesAndStatus) {
       await panel.refreshSourcesAndStatus();
+    }
+  }
+
+  async getReverseGuardInfo() {
+    const sourceId = this.getCurrentSourceIdentifier();
+    const activeSourceIds = await this.getCurrentGlyphSourceIdentifiers();
+    const effectiveSourceId = this.getEffectiveSourceIdentifier(
+      sourceId,
+      activeSourceIds
+    );
+    if (!effectiveSourceId) {
+      return { shouldGuard: false, message: "" };
+    }
+    const values = this.getLetterspacerValuesForSource(effectiveSourceId);
+    if (values.area === LETTERSPACER_DEFAULTS.area) {
+      return { shouldGuard: false, message: "" };
+    }
+    const message =
+      "Will apply reverse value across the whole source. Press again to continue.";
+    return { shouldGuard: true, message };
+  }
+
+  showReverseWarningTooltip(anchor, message) {
+    if (!anchor || !message) {
+      return;
+    }
+    this.hideReverseWarningTooltip();
+
+    const tooltip = document.createElement("div");
+    tooltip.textContent = message;
+    Object.assign(tooltip.style, {
+      position: "fixed",
+      zIndex: "9999",
+      maxWidth: "220px",
+      padding: "8px 10px",
+      borderRadius: "6px",
+      fontSize: "0.85rem",
+      lineHeight: "1.3",
+      color: "var(--tooltip-foreground-color, #fff)",
+      background: "var(--tooltip-background-color, #000)",
+      boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
+      pointerEvents: "none",
+      whiteSpace: "normal",
+      overflowWrap: "anywhere",
+      wordBreak: "break-word",
+      boxSizing: "border-box",
+    });
+
+    document.body.appendChild(tooltip);
+
+    const rect = anchor.getBoundingClientRect();
+    const tipRect = tooltip.getBoundingClientRect();
+    const margin = 8;
+    let left = rect.left - tipRect.width - margin;
+    if (left < margin) {
+      left = rect.right + margin;
+    }
+    if (left + tipRect.width > window.innerWidth - margin) {
+      left = Math.max(margin, window.innerWidth - tipRect.width - margin);
+    }
+    let top = rect.top + rect.height / 2 - tipRect.height / 2;
+    top = Math.min(
+      window.innerHeight - tipRect.height - margin,
+      Math.max(margin, top)
+    );
+
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+
+    this.reverseWarningTooltip = tooltip;
+  }
+
+  hideReverseWarningTooltip() {
+    if (this.reverseWarningTooltip) {
+      this.reverseWarningTooltip.remove();
+      this.reverseWarningTooltip = null;
     }
   }
 }
