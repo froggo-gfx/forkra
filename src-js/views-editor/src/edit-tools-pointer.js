@@ -119,6 +119,8 @@ export class PointerTool extends BaseTool {
       this.sceneModel.measureMode = false;
       this.sceneModel.measureHoverSegment = null;
       this.sceneModel.measureHoverRibPoint = null;
+      this.sceneModel.measureHoverPoints = null;
+      this.sceneModel.measureHoverHandle = null;
       if (this._boundKeyUp) {
         window.removeEventListener("keyup", this._boundKeyUp);
         this._boundKeyUp = null;
@@ -152,8 +154,25 @@ export class PointerTool extends BaseTool {
         if (!this._ribPointsEqual(ribPointHit, this.sceneModel.measureHoverRibPoint)) {
           this.sceneModel.measureHoverRibPoint = ribPointHit;
           this.sceneModel.measureHoverSegment = null;
+          this.sceneModel.measureHoverPoints = null;
+          this.sceneModel.measureHoverHandle = null;
           this.canvasController.requestUpdate();
         }
+        return;
+      }
+
+      // No rib point - check for control point (off-curve)
+      this.sceneModel.measureHoverRibPoint = null;
+      const handleHit = this._findControlPointForMeasure(point, size);
+      if (!this._measurePointsEqual(handleHit, this.sceneModel.measureHoverHandle)) {
+        this.sceneModel.measureHoverHandle = handleHit;
+        if (handleHit) {
+          this.sceneModel.measureHoverSegment = null;
+          this.sceneModel.measureHoverPoints = null;
+          this.canvasController.requestUpdate();
+          return;
+        }
+      } else if (handleHit) {
         return;
       }
 
@@ -164,6 +183,19 @@ export class PointerTool extends BaseTool {
         !this._segmentsEqual(segmentHit, this.sceneModel.measureHoverSegment)
       ) {
         this.sceneModel.measureHoverSegment = segmentHit;
+        this.sceneModel.measureHoverPoints = null;
+        this.sceneModel.measureHoverHandle = null;
+        this.canvasController.requestUpdate();
+      }
+      if (segmentHit) {
+        return;
+      }
+
+      // No segment under cursor - use selection (two points) if available
+      const selectionPoints = this._getMeasurePointsFromSelection();
+      if (!this._measurePointsEqual(selectionPoints, this.sceneModel.measureHoverPoints)) {
+        this.sceneModel.measureHoverPoints = selectionPoints;
+        this.sceneModel.measureHoverHandle = null;
         this.canvasController.requestUpdate();
       }
       return; // Don't do normal hover in measure mode
@@ -4330,6 +4362,153 @@ export class PointerTool extends BaseTool {
   }
 
   /**
+   * Compare two measure points objects for equality.
+   */
+  _measurePointsEqual(mp1, mp2) {
+    if (mp1 === mp2) return true;
+    if (!mp1 || !mp2) return false;
+    return (
+      mp1.type === mp2.type &&
+      mp1.p1?.x === mp2.p1?.x &&
+      mp1.p1?.y === mp2.p1?.y &&
+      mp1.p2?.x === mp2.p2?.x &&
+      mp1.p2?.y === mp2.p2?.y
+    );
+  }
+
+  /**
+   * Find control point (off-curve) under cursor for measure mode.
+   * Returns { p1, p2, type } where p1 is control point, p2 is its on-curve anchor.
+   */
+  _findControlPointForMeasure(point, size) {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.glyph?.path) {
+      return null;
+    }
+
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+
+    // Check skeleton control points first
+    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
+    if (skeletonData?.contours?.length) {
+      for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
+        const contour = skeletonData.contours[contourIdx];
+        const points = contour.points || [];
+        for (let pointIdx = 0; pointIdx < points.length; pointIdx++) {
+          const sp = points[pointIdx];
+          if (!sp?.type) continue; // only off-curve
+          const dist = vector.distance(glyphPoint, sp);
+          if (dist > size) continue;
+
+          const prevIdx = (pointIdx - 1 + points.length) % points.length;
+          const nextIdx = (pointIdx + 1) % points.length;
+          const prevPoint = points[prevIdx];
+          const nextPoint = points[nextIdx];
+          const anchor = !prevPoint?.type ? prevPoint : (!nextPoint?.type ? nextPoint : null);
+          if (!anchor) continue;
+
+          return {
+            p1: { x: sp.x, y: sp.y },
+            p2: { x: anchor.x, y: anchor.y },
+            type: "skeleton",
+          };
+        }
+      }
+    }
+
+    // Check regular path control points (including generated handles)
+    const path = positionedGlyph.glyph.path;
+    const pointIndex = path.pointIndexNearPoint(glyphPoint, size);
+    if (pointIndex === undefined) return null;
+
+    const pointType = path.pointTypes[pointIndex];
+    const isOnCurve = (pointType & 0x03) === 0;
+    if (isOnCurve) return null;
+
+    const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
+    const numContourPoints = path.getNumPointsOfContour(contourIndex);
+    const contourStart = pointIndex - contourPointIndex;
+    const contourEnd = contourStart + numContourPoints; // exclusive
+
+    const getPrevIdx = (idx) => (idx > contourStart ? idx - 1 : contourEnd - 1);
+    const getNextIdx = (idx) => (idx < contourEnd - 1 ? idx + 1 : contourStart);
+
+    const prevIdx = getPrevIdx(pointIndex);
+    const nextIdx = getNextIdx(pointIndex);
+    const prevType = path.pointTypes[prevIdx];
+    const nextType = path.pointTypes[nextIdx];
+    const prevIsOnCurve = (prevType & 0x03) === 0;
+    const nextIsOnCurve = (nextType & 0x03) === 0;
+
+    let anchorIdx;
+    if (prevIsOnCurve) {
+      anchorIdx = prevIdx;
+    } else if (nextIsOnCurve) {
+      anchorIdx = nextIdx;
+    }
+    if (anchorIdx === undefined) return null;
+
+    const handlePos = path.getPoint(pointIndex);
+    const anchorPos = path.getPoint(anchorIdx);
+    if (!handlePos || !anchorPos) return null;
+
+    return {
+      p1: { x: handlePos.x, y: handlePos.y },
+      p2: { x: anchorPos.x, y: anchorPos.y },
+      type: "path",
+    };
+  }
+
+  /**
+   * Get measurement points from current selection (two points).
+   * Supports skeleton points or regular path points.
+   */
+  _getMeasurePointsFromSelection() {
+    const { skeletonPoint, skeletonRibPoint, point: pointSelection } =
+      parseSelection(this.sceneController.selection);
+
+    // Ignore rib point selection for this mode
+    if (skeletonRibPoint?.size) return null;
+
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return null;
+
+    if (skeletonPoint?.size === 2 && (!pointSelection || pointSelection.length === 0)) {
+      const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
+      if (!skeletonData) return null;
+      const [firstKey, secondKey] = [...skeletonPoint];
+      const [c1, p1] = firstKey.split("/").map(Number);
+      const [c2, p2] = secondKey.split("/").map(Number);
+      const pt1 = skeletonData.contours?.[c1]?.points?.[p1];
+      const pt2 = skeletonData.contours?.[c2]?.points?.[p2];
+      if (!pt1 || !pt2) return null;
+      return {
+        p1: { x: pt1.x, y: pt1.y },
+        p2: { x: pt2.x, y: pt2.y },
+        type: "skeleton",
+      };
+    }
+
+    if (pointSelection?.length === 2 && (!skeletonPoint || skeletonPoint.size === 0)) {
+      const path = positionedGlyph.glyph?.path;
+      if (!path) return null;
+      const pt1 = path.getPoint(pointSelection[0]);
+      const pt2 = path.getPoint(pointSelection[1]);
+      if (!pt1 || !pt2) return null;
+      return {
+        p1: { x: pt1.x, y: pt1.y },
+        p2: { x: pt2.x, y: pt2.y },
+        type: "path",
+      };
+    }
+
+    return null;
+  }
+
+  /**
    * Find segment under cursor for measure mode.
    * Returns { p1, p2, type } where p1 and p2 are on-curve endpoints.
    */
@@ -4611,6 +4790,8 @@ export class PointerTool extends BaseTool {
       this.sceneModel.measureMode = false;
       this.sceneModel.measureHoverSegment = null;
       this.sceneModel.measureHoverRibPoint = null;
+      this.sceneModel.measureHoverPoints = null;
+      this.sceneModel.measureHoverHandle = null;
       if (this._boundKeyUp) {
         window.removeEventListener("keyup", this._boundKeyUp);
         this._boundKeyUp = null;
