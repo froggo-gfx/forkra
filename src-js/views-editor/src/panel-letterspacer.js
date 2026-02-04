@@ -1,4 +1,5 @@
 import { PathHitTester } from "@fontra/core/path-hit-tester.js";
+import { recordChanges } from "@fontra/core/change-recorder.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import { Form } from "@fontra/web-components/ui-form.js";
@@ -49,6 +50,35 @@ function calculateSidebearing(polygon, targetArea, amplitudeY) {
   const currentArea = polygonArea(polygon);
   const shortfall = targetArea - currentArea;
   return shortfall / amplitudeY;
+}
+
+function computeTargetAreaFromSidebearing(polygonAreaValue, sidebearing, amplitudeY) {
+  return polygonAreaValue + sidebearing * amplitudeY;
+}
+
+function computeParamAreaFromTargetArea(targetArea, fontMetrics, amplitudeY) {
+  const upmScale = Math.pow(fontMetrics.upm / 1000, 2);
+  if (amplitudeY === 0 || upmScale === 0) return 0;
+  return (targetArea * fontMetrics.xHeight) / (amplitudeY * 100 * upmScale);
+}
+
+const LETTERSPACER_CUSTOM_DATA_KEYS = {
+  area: "fontra.letterspacer.area",
+  depth: "fontra.letterspacer.depth",
+  overshoot: "fontra.letterspacer.overshoot",
+  reference: "fontra.letterspacer.reference",
+};
+
+const LETTERSPACER_DEFAULTS = {
+  area: 400,
+  depth: 15,
+  overshoot: 0,
+  referenceGlyph: "",
+};
+
+function coerceNumber(value, fallback) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
 }
 
 class LetterspacerEngine {
@@ -213,12 +243,26 @@ export default class LetterspacerPanel extends Panel {
     );
     this.fontController = this.editorController.fontController;
     this.sceneController = this.editorController.sceneController;
+    this.sceneSettingsController = this.editorController.sceneSettingsController;
     this.handleSelectionChangeBound = this.handleSelectionChange.bind(this);
 
     // Listen for glyph edits to clear visualization
     this.sceneController.addCurrentGlyphChangeListener((event) => {
       this.clearVisualization();
+      this.refreshPersistedParams();
     });
+
+    this.refreshPersistedParamsBound = this.refreshPersistedParams.bind(this);
+    this.sceneSettingsController.addKeyListener(
+      [
+        "fontLocationSourceMapped",
+        "selectedGlyphName",
+        "selection",
+        "editingLayers",
+        "editLayerName",
+      ],
+      this.refreshPersistedParamsBound
+    );
 
     this.params = {
       area: 400,
@@ -234,6 +278,7 @@ export default class LetterspacerPanel extends Panel {
     this.currentRSB = 0;
     this.calculatedLSB = null;
     this.calculatedRSB = null;
+    this.visualizationOpacity = 1;
   }
 
   getContentElement() {
@@ -244,13 +289,19 @@ export default class LetterspacerPanel extends Panel {
     if (!this.infoForm.contentElement.offsetParent) return;
     await this.fontController.ensureInitialized;
 
-    const formContents = [
+    this._suppressPersist = true;
+    try {
+      await this.loadPersistedParams();
+      this.hasCurrentMaster = await this.hasCurrentMasterForGlyph();
+
+      const formContents = [
       { 
         type: "header", 
         label: translate("sidebar.letterspacer.title"),
         auxiliaryElement: html.createDomElement("button", {
           "style": "margin-left: 8px; padding: 2px 8px; font-size: 11px; cursor: pointer;",
           "onclick": () => this.reverseSpacing(),
+          "disabled": !this.hasCurrentMaster,
           "data-tooltip": translate("sidebar.letterspacer.reverse.tooltip"),
           "data-tooltipposition": "left",
         }, ["Reverse"])
@@ -304,42 +355,52 @@ export default class LetterspacerPanel extends Panel {
       { type: "spacer" },
     ];
 
-    this.infoForm.setFieldDescriptions(formContents);
-    this.infoForm.onFieldChange = async (fieldItem, value) => {
-      this.params[fieldItem.key] = value;
+      this.infoForm.setFieldDescriptions(formContents);
+      this.infoForm.onFieldChange = async (fieldItem, value) => {
+        if (this._suppressPersist) {
+          this.params[fieldItem.key] = value;
+          return;
+        }
+        this.params[fieldItem.key] = value;
+        await this.persistParam(fieldItem.key, value);
       
-      // Update calculated values dynamically
-      await this.updateCalculatedValues();
+        // Update calculated values dynamically
+        await this.updateCalculatedValues();
       
-      // Update visualization
-      if (this.editorController.sceneController?.sceneModel) {
-        this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-      }
-      if (this.editorController.canvasController) {
-        this.editorController.canvasController.requestUpdate();
-      }
+        // Update visualization
+        if (this.editorController.sceneController?.sceneModel) {
+          this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
+        }
+        if (this.editorController.canvasController) {
+          this.editorController.canvasController.requestUpdate();
+        }
       
-      // Update value display without rebuilding the form
-      this.updateValueDisplay();
-    };
+        // Update value display without rebuilding the form
+        this.updateValueDisplay();
+      };
 
-    // Calculate and Apply buttons at the bottom
-    const buttonContainer = html.div({ class: "button-container" }, []);
+      // Calculate and Apply buttons at the bottom
+      const buttonContainer = html.div({ class: "button-container" }, []);
     
-    const calculateButton = html.button({
-      onclick: () => this.calculateSpacing(),
-      class: "calculate-button"
-    }, ["Calculate"]);
+      const calculateButton = html.button({
+        onclick: () => this.calculateSpacing(),
+        class: "calculate-button",
+        disabled: !this.hasCurrentMaster,
+      }, ["Calculate"]);
     
-    const applyButton = html.button({
-      onclick: () => this.applySpacing(),
-      class: "apply-button"
-    }, ["Apply"]);
+      const applyButton = html.button({
+        onclick: () => this.applySpacing(),
+        class: "apply-button",
+        disabled: !this.hasCurrentMaster,
+      }, ["Apply"]);
     
-    buttonContainer.appendChild(calculateButton);
-    buttonContainer.appendChild(applyButton);
+      buttonContainer.appendChild(calculateButton);
+      buttonContainer.appendChild(applyButton);
     
-    this.infoForm.contentElement.appendChild(buttonContainer);
+      this.infoForm.contentElement.appendChild(buttonContainer);
+    } finally {
+      this._suppressPersist = false;
+    }
 
     // Initial calculation and visualization
     await this.updateCalculatedValues();
@@ -367,6 +428,17 @@ export default class LetterspacerPanel extends Panel {
   }
 
   async applySpacing() {
+    if (!(await this.hasCurrentMasterForGlyph())) {
+      return;
+    }
+    this.visualizationOpacity = 1;
+    console.log("[letterspacer] applySpacing start", {
+      glyph: this.sceneController.sceneModel.getSelectedPositionedGlyph()?.glyph?.name,
+      sourceId: this.getCurrentSourceIdentifier(),
+      activeSourceIds: await this.getCurrentGlyphSourceIdentifiers(),
+      editLayerName: this.sceneSettingsController.model.editLayerName,
+      editingLayers: this.sceneSettingsController.model.editingLayers,
+    });
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) return;
 
@@ -393,21 +465,23 @@ export default class LetterspacerPanel extends Panel {
 
         if (lsb === null || rsb === null) continue;
         
-        // Store calculated values
-        calculatedLSB = Math.round(lsb);
-        calculatedRSB = Math.round(rsb);
+        // Store calculated values (rounded to avoid fractional sidebearings)
+        const roundedLSB = Math.round(lsb);
+        const roundedRSB = Math.round(rsb);
+        calculatedLSB = roundedLSB;
+        calculatedRSB = roundedRSB;
 
         const currentLSB = bounds.xMin;
 
         if (this.params.applyLSB) {
-          const deltaLSB = lsb - currentLSB;
+          const deltaLSB = roundedLSB - currentLSB;
           this.shiftPath(layerGlyph.path, deltaLSB);
         }
 
         if (this.params.applyRSB || this.params.applyLSB) {
           const newBounds = layerGlyph.path.getBounds?.() || layerGlyph.path.getControlBounds?.();
           if (this.params.applyRSB) {
-            layerGlyph.xAdvance = Math.round(newBounds.xMax + rsb);
+            layerGlyph.xAdvance = Math.round(newBounds.xMax + roundedRSB);
           } else {
             layerGlyph.xAdvance = Math.round(newBounds.xMax + (layerGlyph.xAdvance - bounds.xMax));
           }
@@ -438,14 +512,305 @@ export default class LetterspacerPanel extends Panel {
         this.editorController.canvasController.requestUpdate();
       }
     }
+
+    // Force interpolation status to refresh after edits
+    const mappedLocation = this.sceneController.sceneSettings.fontLocationSourceMapped;
+    if (mappedLocation) {
+      this.sceneSettingsController.setItem(
+        "fontLocationSourceMapped",
+        { ...mappedLocation },
+        { senderID: this }
+      );
+    }
+
+    console.log("[letterspacer] applySpacing done", {
+      calculatedLSB: this.calculatedLSB,
+      calculatedRSB: this.calculatedRSB,
+      currentLSB: this.currentLSB,
+      currentRSB: this.currentRSB,
+    });
+
+    await this.refreshDesignspacePanel();
+    await this.update();
+  }
+
+  async loadPersistedParams() {
+    await this.ensureLetterspacerSchema();
+    const sourceId = this.getCurrentSourceIdentifier();
+    const activeSourceIds = await this.getCurrentGlyphSourceIdentifiers();
+    const effectiveSourceId = this.getEffectiveSourceIdentifier(
+      sourceId,
+      activeSourceIds
+    );
+    if (effectiveSourceId && this.fontController.sources[effectiveSourceId]) {
+      const sourceCustomData = this.fontController.sources[effectiveSourceId].customData || {};
+      this.params.area = coerceNumber(
+        sourceCustomData[LETTERSPACER_CUSTOM_DATA_KEYS.area],
+        this.params.area ?? LETTERSPACER_DEFAULTS.area
+      );
+      this.params.depth = coerceNumber(
+        sourceCustomData[LETTERSPACER_CUSTOM_DATA_KEYS.depth],
+        this.params.depth ?? LETTERSPACER_DEFAULTS.depth
+      );
+      this.params.overshoot = coerceNumber(
+        sourceCustomData[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot],
+        this.params.overshoot ?? LETTERSPACER_DEFAULTS.overshoot
+      );
+      const referenceValue = sourceCustomData[LETTERSPACER_CUSTOM_DATA_KEYS.reference];
+      this.params.referenceGlyph =
+        typeof referenceValue === "string"
+          ? referenceValue
+          : this.params.referenceGlyph ?? LETTERSPACER_DEFAULTS.referenceGlyph;
+    } else {
+      this.params.overshoot = this.params.overshoot ?? LETTERSPACER_DEFAULTS.overshoot;
+      this.params.referenceGlyph =
+        this.params.referenceGlyph ?? LETTERSPACER_DEFAULTS.referenceGlyph;
+    }
+  }
+
+  getCurrentSourceIdentifier() {
+    const mappedLocation = this.sceneController.sceneSettings.fontLocationSourceMapped || {};
+    const sourceLocation = this.sceneController.sceneSettings.fontLocationSource || {};
+    const hasMappedKeys = Object.keys(mappedLocation).length > 0;
+    const location = hasMappedKeys ? mappedLocation : sourceLocation;
+    return (
+      this.fontController.fontSourcesInstancer?.getSourceIdentifierForLocation(location) ||
+      this.fontController.defaultSourceIdentifier
+    );
+  }
+
+  async getCurrentGlyphSourceIdentifiers() {
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    let varGlyph = positionedGlyph?.varGlyph;
+    if (!varGlyph) {
+      varGlyph = await this.sceneController.sceneModel.getSelectedVariableGlyphController();
+    }
+    if (!varGlyph?.sources) {
+      return [];
+    }
+    const ids = new Set();
+    for (const source of varGlyph.sources) {
+      const id = source.locationBase || source.layerName;
+      if (id && this.fontController.sources?.[id]) {
+        ids.add(id);
+      }
+    }
+    return [...ids];
+  }
+
+  getEffectiveSourceIdentifier(sourceId, activeSourceIds) {
+    if (!sourceId) {
+      return sourceId;
+    }
+    if (!activeSourceIds?.length || activeSourceIds.includes(sourceId)) {
+      return sourceId;
+    }
+    return this.getNearestSourceIdentifier(sourceId, activeSourceIds) || sourceId;
+  }
+
+  getSourceLocationForId(sourceId) {
+    const source = this.fontController.sources[sourceId];
+    if (!source) return this.fontController.fontSourcesInstancer?.defaultSourceLocation || {};
+    const base = this.fontController.fontSourcesInstancer?.defaultSourceLocation || {};
+    return { ...base, ...source.location };
+  }
+
+  getLetterspacerValuesForSource(sourceId) {
+    const source = this.fontController.sources[sourceId];
+    const customData = source?.customData || {};
+    return {
+      area: coerceNumber(customData[LETTERSPACER_CUSTOM_DATA_KEYS.area], LETTERSPACER_DEFAULTS.area),
+      depth: coerceNumber(customData[LETTERSPACER_CUSTOM_DATA_KEYS.depth], LETTERSPACER_DEFAULTS.depth),
+      overshoot: coerceNumber(
+        customData[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot],
+        LETTERSPACER_DEFAULTS.overshoot
+      ),
+      referenceGlyph:
+        typeof customData[LETTERSPACER_CUSTOM_DATA_KEYS.reference] === "string"
+          ? customData[LETTERSPACER_CUSTOM_DATA_KEYS.reference]
+          : LETTERSPACER_DEFAULTS.referenceGlyph,
+    };
+  }
+
+  getNearestSourceIdentifier(targetId, candidateIds) {
+    if (!candidateIds.length) return undefined;
+    const axes = this.fontController.fontAxesSourceSpace || [];
+    const targetLoc = this.getSourceLocationForId(targetId);
+    const defaultId = this.fontController.defaultSourceIdentifier;
+    let bestId = undefined;
+    let bestDist = Infinity;
+    for (const id of candidateIds) {
+      if (id === targetId) continue;
+      const loc = this.getSourceLocationForId(id);
+      let sum = 0;
+      for (const axis of axes) {
+        const a = targetLoc[axis.name] ?? axis.defaultValue ?? 0;
+        const b = loc[axis.name] ?? axis.defaultValue ?? 0;
+        const d = a - b;
+        sum += d * d;
+      }
+      const dist = Math.sqrt(sum);
+      if (dist < bestDist - 1e-9 || (Math.abs(dist - bestDist) < 1e-9 && id === defaultId)) {
+        bestDist = dist;
+        bestId = id;
+      }
+    }
+    if (!bestId && candidateIds.includes(defaultId)) {
+      bestId = defaultId;
+    }
+    return bestId ?? candidateIds[0];
+  }
+
+  getMissingLetterspacerValues(sourceIds) {
+    const sources = this.fontController.sources || {};
+    const idsToCheck =
+      Array.isArray(sourceIds) && sourceIds.length
+        ? sourceIds.filter((id) => sources[id])
+        : Object.keys(sources);
+    const hasKeys = (source) =>
+      source?.customData &&
+      LETTERSPACER_CUSTOM_DATA_KEYS.area in source.customData &&
+      LETTERSPACER_CUSTOM_DATA_KEYS.depth in source.customData &&
+      LETTERSPACER_CUSTOM_DATA_KEYS.overshoot in source.customData &&
+      LETTERSPACER_CUSTOM_DATA_KEYS.reference in source.customData;
+    const candidateIds = idsToCheck.filter((id) => hasKeys(sources[id]));
+    const missing = {};
+    for (const id of idsToCheck) {
+      const source = sources[id];
+      if (hasKeys(source)) {
+        continue;
+      }
+      const nearestId = this.getNearestSourceIdentifier(id, candidateIds);
+      const values = nearestId
+        ? this.getLetterspacerValuesForSource(nearestId)
+        : { ...LETTERSPACER_DEFAULTS };
+      missing[id] = values;
+    }
+    return missing;
+  }
+
+  async ensureLetterspacerSchema() {
+    if (this.fontController.readOnly || this._ensuringSchema) {
+      return;
+    }
+    const activeSourceIds = await this.getCurrentGlyphSourceIdentifiers();
+    if (!activeSourceIds.length) {
+      return;
+    }
+    const missing = this.getMissingLetterspacerValues(activeSourceIds);
+    const missingIds = Object.keys(missing);
+    if (!missingIds.length) {
+      return;
+    }
+    this._ensuringSchema = true;
+    try {
+      const root = { sources: this.fontController.sources };
+      const changes = recordChanges(root, (root) => {
+        for (const id of missingIds) {
+          const source = root.sources[id];
+          const existing = source.customData || {};
+          const next = { ...existing };
+          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.area in next)) {
+            next[LETTERSPACER_CUSTOM_DATA_KEYS.area] = missing[id].area;
+          }
+          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.depth in next)) {
+            next[LETTERSPACER_CUSTOM_DATA_KEYS.depth] = missing[id].depth;
+          }
+          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.overshoot in next)) {
+            next[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot] = missing[id].overshoot;
+          }
+          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.reference in next)) {
+            next[LETTERSPACER_CUSTOM_DATA_KEYS.reference] = missing[id].referenceGlyph;
+          }
+          source.customData = next;
+        }
+      });
+      if (changes.hasChange) {
+        await this.fontController.postChange(
+          changes.change,
+          changes.rollbackChange,
+          "init letterspacer schema",
+          this
+        );
+      }
+    } finally {
+      this._ensuringSchema = false;
+    }
+  }
+
+  async persistParam(key, value) {
+    if (key === "area" || key === "depth" || key === "overshoot" || key === "referenceGlyph") {
+      const sourceId = this.getCurrentSourceIdentifier();
+      const activeSourceIds = await this.getCurrentGlyphSourceIdentifiers();
+      const effectiveSourceId = this.getEffectiveSourceIdentifier(
+        sourceId,
+        activeSourceIds
+      );
+      if (!effectiveSourceId || !this.fontController.sources[effectiveSourceId]) {
+        return;
+      }
+      const targetSourceIds = activeSourceIds.length ? activeSourceIds : [effectiveSourceId];
+      const customKeyMap = {
+        area: LETTERSPACER_CUSTOM_DATA_KEYS.area,
+        depth: LETTERSPACER_CUSTOM_DATA_KEYS.depth,
+        overshoot: LETTERSPACER_CUSTOM_DATA_KEYS.overshoot,
+        referenceGlyph: LETTERSPACER_CUSTOM_DATA_KEYS.reference,
+      };
+      const customKey = customKeyMap[key];
+      const valueToStore =
+        key === "referenceGlyph" ? String(value ?? "") : coerceNumber(value, 0);
+
+      const missing = this.getMissingLetterspacerValues(targetSourceIds);
+      const root = { sources: this.fontController.sources };
+      const changes = recordChanges(root, (root) => {
+        for (const id of targetSourceIds) {
+          const source = root.sources[id];
+          if (!source) {
+            continue;
+          }
+          const existing = source.customData || {};
+          const next = { ...existing };
+          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.area in next)) {
+            next[LETTERSPACER_CUSTOM_DATA_KEYS.area] =
+              missing[id]?.area ?? LETTERSPACER_DEFAULTS.area;
+          }
+          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.depth in next)) {
+            next[LETTERSPACER_CUSTOM_DATA_KEYS.depth] =
+              missing[id]?.depth ?? LETTERSPACER_DEFAULTS.depth;
+          }
+          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.overshoot in next)) {
+            next[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot] =
+              missing[id]?.overshoot ?? LETTERSPACER_DEFAULTS.overshoot;
+          }
+          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.reference in next)) {
+            next[LETTERSPACER_CUSTOM_DATA_KEYS.reference] =
+              missing[id]?.referenceGlyph ?? LETTERSPACER_DEFAULTS.referenceGlyph;
+          }
+          if (id === effectiveSourceId) {
+            next[customKey] = valueToStore;
+          }
+          source.customData = next;
+        }
+      });
+      if (changes.hasChange) {
+        await this.fontController.postChange(
+          changes.change,
+          changes.rollbackChange,
+          `edit letterspacer ${key}`,
+          this
+        );
+      }
+    }
   }
 
   async reverseSpacing() {
+    if (!(await this.hasCurrentMasterForGlyph())) {
+      return;
+    }
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) return;
 
     const fontMetrics = await this.getFontMetrics();
-    const refBounds = await this.getReferenceBounds(fontMetrics);
     const path = positionedGlyph.glyph.path;
     const bounds = path.getBounds?.() || path.getControlBounds?.();
     if (!bounds) return;
@@ -455,10 +820,13 @@ export default class LetterspacerPanel extends Panel {
 
     const hitTester = new PathHitTester(path, bounds);
     const freq = 5;
-    const amplitudeY = refBounds.maxY - refBounds.minY;
+    const minY = bounds.yMin;
+    const maxY = bounds.yMax;
+    const amplitudeY = maxY - minY;
+    if (amplitudeY === 0) return;
 
     const margins = this.collectMarginsForReverse(
-      hitTester, path, bounds, refBounds.minY, refBounds.maxY, freq
+      hitTester, path, bounds, minY, maxY, freq
     );
 
     if (!margins.leftMargins || !margins.rightMargins) {
@@ -466,50 +834,33 @@ export default class LetterspacerPanel extends Panel {
       return;
     }
 
-    let bestParams = { area: 400, depth: 15 };
-    let bestError = Infinity;
+    const maxDepth = fontMetrics.xHeight * this.params.depth / 100;
+    const processedLeft = setDepth(margins.leftMargins, margins.leftExtreme, maxDepth, true);
+    const processedRight = setDepth(margins.rightMargins, margins.rightExtreme, maxDepth, false);
 
-    for (let area = 100; area <= 1000; area += 50) {
-      for (let depth = 5; depth <= 100; depth += 5) {
-        const testParams = { ...this.params, depth, area };
-        const testEngine = new LetterspacerEngine(testParams, fontMetrics);
-        const { lsb, rsb } = testEngine.computeSpacing(path, bounds, refBounds.minY, refBounds.maxY);
-
-        if (lsb === null || rsb === null) continue;
-
-        const error = Math.abs(lsb - currentLSB) + Math.abs(rsb - currentRSB);
-
-        if (error < bestError) {
-          bestError = error;
-          bestParams = { area, depth };
-        }
-      }
+    if (processedLeft.length < 2 || processedRight.length < 2) {
+      console.warn("Insufficient margins for reverse calculation");
+      return;
     }
 
-    if (bestError > 5) {
-      for (let area = Math.max(50, bestParams.area - 50); area <= Math.min(2000, bestParams.area + 50); area += 10) {
-        for (let depth = Math.max(1, bestParams.depth - 10); depth <= Math.min(150, bestParams.depth + 10); depth += 1) {
-          const testParams = { ...this.params, depth, area };
-          const testEngine = new LetterspacerEngine(testParams, fontMetrics);
-          const { lsb, rsb } = testEngine.computeSpacing(path, bounds, refBounds.minY, refBounds.maxY);
+    const leftPolygon = closePolygon(processedLeft, margins.leftExtreme, minY, maxY);
+    const rightPolygon = closePolygon(processedRight, margins.rightExtreme, minY, maxY);
 
-          if (lsb === null || rsb === null) continue;
+    const areaLeft = polygonArea(leftPolygon);
+    const areaRight = polygonArea(rightPolygon);
 
-          const error = Math.abs(lsb - currentLSB) + Math.abs(rsb - currentRSB);
+    const targetAreaLeft = computeTargetAreaFromSidebearing(areaLeft, currentLSB, amplitudeY);
+    const targetAreaRight = computeTargetAreaFromSidebearing(areaRight, currentRSB, amplitudeY);
 
-          if (error < bestError) {
-            bestError = error;
-            bestParams = { area, depth };
-          }
-        }
-      }
-    }
+    const paramAreaLeft = computeParamAreaFromTargetArea(targetAreaLeft, fontMetrics, amplitudeY);
+    const paramAreaRight = computeParamAreaFromTargetArea(targetAreaRight, fontMetrics, amplitudeY);
 
-    this.params.area = bestParams.area;
-    this.params.depth = bestParams.depth;
+    const averagedArea = (paramAreaLeft + paramAreaRight) / 2;
+    this.params.area = Math.max(50, Math.min(2000, Math.round(averagedArea)));
+    await this.persistParam("area", this.params.area);
 
     const finalEngine = new LetterspacerEngine(this.params, fontMetrics);
-    const result = finalEngine.computeSpacing(path, bounds, refBounds.minY, refBounds.maxY);
+    const result = finalEngine.computeSpacing(path, bounds, minY, maxY);
     if (result.lsb !== null && result.rsb !== null) {
       this.calculatedLSB = Math.round(result.lsb);
       this.calculatedRSB = Math.round(result.rsb);
@@ -564,12 +915,10 @@ export default class LetterspacerPanel extends Panel {
   }
 
   shiftPath(path, deltaX) {
-    const newCoords = new Array(path.coordinates.length);
-    for (let i = 0; i < path.coordinates.length; i += 2) {
-      newCoords[i] = path.coordinates[i] + deltaX;
-      newCoords[i + 1] = path.coordinates[i + 1];
+    const coords = path.coordinates;
+    for (let i = 0; i < coords.length; i += 2) {
+      coords[i] += deltaX;
     }
-    path.coordinates = newCoords;
   }
 
   async getFontMetrics() {
@@ -631,14 +980,29 @@ export default class LetterspacerPanel extends Panel {
     }
   }
 
-  clearVisualization() {
-    // Clear the visualization data when glyph is edited
-    if (this.editorController.sceneController?.sceneModel) {
-      this.editorController.sceneController.sceneModel.letterspacerVisualizationData = null;
+  async refreshPersistedParams() {
+    if (!this.infoForm.contentElement.offsetParent) {
+      return;
+    }
+    await this.update();
+  }
+
+  async clearVisualization() {
+    // Fade the visualization when glyph is edited (until Calculate/Apply)
+    this.visualizationOpacity = 0.2;
+    const sceneModel = this.editorController.sceneController?.sceneModel;
+    if (sceneModel?.letterspacerVisualizationData) {
+      sceneModel.letterspacerVisualizationData = {
+        ...sceneModel.letterspacerVisualizationData,
+        opacity: this.visualizationOpacity,
+      };
     }
     if (this.editorController.canvasController) {
       this.editorController.canvasController.requestUpdate();
     }
+
+    await this.refreshDesignspacePanel();
+    await this.update();
   }
 
   formatValue(value) {
@@ -673,7 +1037,11 @@ export default class LetterspacerPanel extends Panel {
   }
 
   async calculateSpacing() {
+    if (!(await this.hasCurrentMasterForGlyph())) {
+      return;
+    }
     // Recalculate spacing after glyph edits
+    this.visualizationOpacity = 1;
     await this.updateCalculatedValues();
     await this.update();
 
@@ -709,6 +1077,7 @@ export default class LetterspacerPanel extends Panel {
     engine.computeSpacing(path, bounds, refBounds.minY, refBounds.maxY);
 
     const result = {
+      opacity: this.visualizationOpacity ?? 1,
       scanLines: engine.scanLines,
       leftPolygon: engine.leftPolygon,
       rightPolygon: engine.rightPolygon,
@@ -733,6 +1102,27 @@ export default class LetterspacerPanel extends Panel {
     };
 
     return result;
+  }
+
+  async hasCurrentMasterForGlyph() {
+    const sourceId = this.getCurrentSourceIdentifier();
+    if (!sourceId) {
+      return false;
+    }
+    const activeSourceIds = await this.getCurrentGlyphSourceIdentifiers();
+    return activeSourceIds.includes(sourceId);
+  }
+
+  async refreshDesignspacePanel() {
+    const panel = this.editorController.getSidebarPanel?.("designspace-navigation");
+    if (!panel) {
+      console.log("[letterspacer] refreshDesignspacePanel: designspace panel not found");
+    }
+    if (panel?.refreshSourcesAndStatus) {
+      console.log("[letterspacer] refreshDesignspacePanel: start");
+      await panel.refreshSourcesAndStatus();
+      console.log("[letterspacer] refreshDesignspacePanel: done");
+    }
   }
 }
 

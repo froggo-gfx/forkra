@@ -25,6 +25,11 @@ export const LetterspacerVisualizationLayer = {
     if (!vizData.scanLines || vizData.scanLines.length === 0) return;
 
     context.save();
+    const opacity =
+      typeof vizData.opacity === "number"
+        ? Math.max(0, Math.min(1, vizData.opacity))
+        : 1;
+    context.globalAlpha *= opacity;
 
     // Draw depth-limited margins (where algorithm actually looks)
     if (vizData.leftMarginsProcessed && vizData.rightMarginsProcessed) {

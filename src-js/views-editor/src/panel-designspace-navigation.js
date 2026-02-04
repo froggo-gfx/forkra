@@ -1856,6 +1856,10 @@ export default class DesignspaceNavigationPanel extends Panel {
   }
 
   async addSourceLayer() {
+    console.log("[designspace] addSourceLayer start", {
+      selectedGlyphName: this.sceneSettings.selectedGlyphName,
+      selectedSourceItem: this.sourcesList.getSelectedItem(),
+    });
     const validateInput = () => {
       const warnings = [];
       if (
@@ -1927,6 +1931,7 @@ export default class DesignspaceNavigationPanel extends Panel {
 
     const result = await dialog.run();
     if (!result) {
+      console.log("[designspace] addSourceLayer cancelled");
       return;
     }
 
@@ -1958,6 +1963,11 @@ export default class DesignspaceNavigationPanel extends Panel {
     this.sceneSettings.editingLayers = {
       [newLayerName]: selectedSourceItem.locationString,
     };
+
+    console.log("[designspace] addSourceLayer done", {
+      newLayerName,
+      editingLayers: this.sceneSettings.editingLayers,
+    });
   }
 
   async removeSourceLayer() {
@@ -2125,6 +2135,50 @@ export default class DesignspaceNavigationPanel extends Panel {
       infoElement.append(msg);
       infoElement.appendChild(html.br());
     }
+  }
+
+  async refreshSourcesAndStatus() {
+    console.log("[designspace] refreshSourcesAndStatus start", {
+      glyph: this.sceneSettings.selectedGlyphName,
+      fontLocation: this.sceneSettings.fontLocationSourceMapped,
+      glyphLocation: this.sceneSettings.glyphLocation,
+      editingLayers: this.sceneSettings.editingLayers,
+    });
+    const varGlyphController =
+      await this.sceneModel.getSelectedVariableGlyphController();
+    console.log("[designspace] refreshSourcesAndStatus pre", {
+      sources: varGlyphController?.sources?.map((s, i) => ({
+        index: i,
+        layerName: s.layerName,
+        inactive: !!s.inactive,
+      })),
+    });
+    await this._updateSources();
+    await this._updateInterpolationErrorInfo();
+    await this._updateSourceLayersList();
+    await this.updateSourceListSelectionFromLocation();
+    this._updateRemoveSourceButtonState();
+    this._updateRemoveSourceLayerButtonState();
+    await this._updateEditingStatus();
+    this.updateInterpolationContributions();
+    const errorCount =
+      this.sourcesList?.items?.filter((item) => item?.interpolationStatus?.error)
+        .length || 0;
+    const errorItems =
+      this.sourcesList?.items
+        ?.filter((item) => item?.interpolationStatus?.error)
+        ?.map((item) => ({
+          sourceIndex: item.sourceIndex,
+          layerName: item.layerName,
+          error: item.interpolationStatus?.error,
+          discreteLocationKey: item.interpolationStatus?.discreteLocationKey,
+        })) || [];
+    console.log("[designspace] refreshSourcesAndStatus done", {
+      sourcesCount: this.sourcesList?.items?.length || 0,
+      errorCount,
+      errorItems,
+      selectedSource: this.sourcesList?.getSelectedItem?.(),
+    });
   }
 }
 
