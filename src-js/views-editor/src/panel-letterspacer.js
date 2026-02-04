@@ -1,4 +1,5 @@
 import { PathHitTester } from "@fontra/core/path-hit-tester.js";
+import { getGlyphInfoFromGlyphName } from "@fontra/core/glyph-data.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
@@ -56,10 +57,10 @@ function computeTargetAreaFromSidebearing(polygonAreaValue, sidebearing, amplitu
   return polygonAreaValue + sidebearing * amplitudeY;
 }
 
-function computeParamAreaFromTargetArea(targetArea, fontMetrics, amplitudeY) {
+function computeParamAreaFromTargetArea(targetArea, fontMetrics, amplitudeY, factor = 1) {
   const upmScale = Math.pow(fontMetrics.upm / 1000, 2);
-  if (amplitudeY === 0 || upmScale === 0) return 0;
-  return (targetArea * fontMetrics.xHeight) / (amplitudeY * 100 * upmScale);
+  if (amplitudeY === 0 || upmScale === 0 || factor === 0) return 0;
+  return (targetArea * fontMetrics.xHeight) / (amplitudeY * 100 * upmScale * factor);
 }
 
 const LETTERSPACER_CUSTOM_DATA_KEYS = {
@@ -75,6 +76,46 @@ const LETTERSPACER_DEFAULTS = {
   overshoot: 0,
   referenceGlyph: "",
 };
+
+const HT_REFERENCE_RULES = [
+  // Letters
+  { script: "*", category: "Letter", subCategory: "Uppercase", factor: 1.25, reference: "H", filter: "*" },
+  { script: "*", category: "Letter", subCategory: "Smallcaps", factor: 1.1, reference: "h.sc", filter: "*" },
+  { script: "*", category: "Letter", subCategory: "Lowercase", factor: 1.0, reference: "x", filter: "*" },
+  { script: "*", category: "Letter", subCategory: "Lowercase", factor: 0.7, reference: "m.sups", filter: ".sups" },
+
+  // Numbers
+  { script: "*", category: "Number", subCategory: "Decimal Digit", factor: 1.2, reference: "one", filter: "*" },
+  { script: "*", category: "Number", subCategory: "Decimal Digit", factor: 1.2, reference: "zero.osf", filter: ".osf" },
+  { script: "*", category: "Number", subCategory: "Fraction", factor: 1.3, reference: "*", filter: "*" },
+  { script: "*", category: "Number", subCategory: "*", factor: 0.8, reference: "*", filter: ".dnom" },
+  { script: "*", category: "Number", subCategory: "*", factor: 0.8, reference: "*", filter: ".numr" },
+  { script: "*", category: "Number", subCategory: "*", factor: 0.8, reference: "*", filter: ".inferior" },
+  { script: "*", category: "Number", subCategory: "*", factor: 0.8, reference: "*", filter: "superior" },
+
+  // Punctuation
+  { script: "*", category: "Punctuation", subCategory: "Other", factor: 1.4, reference: "*", filter: "*" },
+  { script: "*", category: "Punctuation", subCategory: "Parenthesis", factor: 1.2, reference: "*", filter: "*" },
+  { script: "*", category: "Punctuation", subCategory: "Quote", factor: 1.2, reference: "*", filter: "*" },
+  { script: "*", category: "Punctuation", subCategory: "Dash", factor: 1.0, reference: "*", filter: "*" },
+  { script: "*", category: "Punctuation", subCategory: "*", factor: 1.0, reference: "*", filter: "slash" },
+  { script: "*", category: "Punctuation", subCategory: "*", factor: 1.2, reference: "*", filter: "*" },
+
+  // Symbols
+  { script: "*", category: "Symbol", subCategory: "Currency", factor: 1.6, reference: "*", filter: "*" },
+  { script: "*", category: "Symbol", subCategory: "*", factor: 1.5, reference: "*", filter: "*" },
+  { script: "*", category: "Mark", subCategory: "*", factor: 1.0, reference: "*", filter: "*" },
+
+  // Devanagari
+  { script: "devanagari", category: "Letter", subCategory: "Other", factor: 1.0, reference: "devaHeight", filter: "*" },
+  { script: "devanagari", category: "Letter", subCategory: "Ligature", factor: 1.0, reference: "devaHeight", filter: "*" },
+];
+
+function matchesRuleField(ruleValue, glyphValue) {
+  if (ruleValue === "*") return true;
+  if (glyphValue === undefined || glyphValue === null) return false;
+  return String(ruleValue).toLowerCase() === String(glyphValue).toLowerCase();
+}
 
 function coerceNumber(value, fallback) {
   const num = Number(value);
@@ -108,7 +149,7 @@ class LetterspacerEngine {
     this.rightDepthLimit = null;
   }
 
-  computeSpacing(path, bounds, refMinY, refMaxY) {
+  computeSpacing(path, bounds, refMinY, refMaxY, factor = 1) {
     const freq = 5;
     const amplitudeY = refMaxY - refMinY;
 
@@ -120,7 +161,7 @@ class LetterspacerEngine {
     this.leftMarginsProcessed = [];
     this.rightMarginsProcessed = [];
 
-    const areaUPM = this.params.area * Math.pow(this.upm / 1000, 2);
+    const areaUPM = this.params.area * factor * Math.pow(this.upm / 1000, 2);
     const targetArea = (amplitudeY * areaUPM * 100) / this.xHeight;
 
     const maxDepth = this.xHeight * this.params.depth / 100;
@@ -130,6 +171,10 @@ class LetterspacerEngine {
     this.rightMargins = margins.rightMargins;
     this.leftExtreme = margins.leftExtreme;
     this.rightExtreme = margins.rightExtreme;
+
+    if (!margins.hasRefIntersections) {
+      return { lsb: null, rsb: null, noRefIntersections: true };
+    }
 
     if (this.leftMargins.length < 2 || this.rightMargins.length < 2) {
       return { lsb: null, rsb: null };
@@ -169,7 +214,7 @@ class LetterspacerEngine {
     this.leftSBPolygon = [...this.leftPolygon];
     this.rightSBPolygon = [...this.rightPolygon];
 
-    return { lsb: this.lsb, rsb: this.rsb };
+    return { lsb: this.lsb, rsb: this.rsb, noRefIntersections: false };
   }
 
   collectMargins(path, bounds, minY, maxY, freq) {
@@ -178,6 +223,7 @@ class LetterspacerEngine {
     const rightMargins = [];
     let leftExtreme = Infinity;  // Will be set from actual margins
     let rightExtreme = -Infinity;  // Will be set from actual margins
+    let hasRefIntersections = false;
 
     // Clear previous scan lines
     this.scanLines = [];
@@ -197,6 +243,7 @@ class LetterspacerEngine {
       });
 
       if (intersections.length >= 2) {
+        hasRefIntersections = true;
         // Сортируем по x
         const sorted = intersections
           .map(i => i.x !== undefined ? i : { x: i.point?.x })
@@ -220,7 +267,7 @@ class LetterspacerEngine {
     if (leftExtreme === Infinity) leftExtreme = bounds.xMin;
     if (rightExtreme === -Infinity) rightExtreme = bounds.xMax;
 
-    return { leftMargins, rightMargins, leftExtreme, rightExtreme };
+    return { leftMargins, rightMargins, leftExtreme, rightExtreme, hasRefIntersections };
   }
 }
 
@@ -437,12 +484,17 @@ export default class LetterspacerPanel extends Panel {
     if (!positionedGlyph) return;
 
     const fontMetrics = await this.getFontMetrics();
-    const refBounds = await this.getReferenceBounds(fontMetrics);
+    const glyphName = this.getSelectedGlyphName() || positionedGlyph.glyphName;
+    const { referenceGlyph, factor } = this.getReferenceSettings(glyphName);
+    const referenceGlyphController = referenceGlyph
+      ? await this.fontController.getGlyph(referenceGlyph)
+      : null;
     const engine = new LetterspacerEngine(this.params, fontMetrics);
     
     // Store calculated values from the edit operation
     let calculatedLSB = null;
     let calculatedRSB = null;
+    let warnedNoRefZone = false;
 
     await this.sceneController.editGlyphAndRecordChanges((glyph) => {
       const layerGlyphs = this.sceneController.getEditingLayerFromGlyphLayers(glyph.layers);
@@ -452,10 +504,36 @@ export default class LetterspacerPanel extends Panel {
         const bounds = path.getBounds?.() || path.getControlBounds?.();
         if (!bounds) continue;
 
-        // Calculate fresh values for this layer
-        const { lsb, rsb } = engine.computeSpacing(
-          path, bounds, refBounds.minY, refBounds.maxY
+        const refBounds = this.getReferenceBoundsForLayer(
+          referenceGlyph,
+          referenceGlyphController,
+          layerName,
+          layerGlyph,
+          fontMetrics,
+          glyphName
         );
+
+        // Calculate fresh values for this layer
+        const result = engine.computeSpacing(
+          path,
+          bounds,
+          refBounds.minY,
+          refBounds.maxY,
+          factor
+        );
+
+        if (result.noRefIntersections) {
+          if (!warnedNoRefZone) {
+            console.warn(
+              `Letterspacer: glyph outlines are outside the reference zone. ` +
+                `No match with "${refBounds.referenceGlyph || referenceGlyph || glyphName}".`
+            );
+            warnedNoRefZone = true;
+          }
+          continue;
+        }
+
+        const { lsb, rsb } = result;
 
         if (lsb === null || rsb === null) continue;
         
@@ -809,6 +887,8 @@ export default class LetterspacerPanel extends Panel {
     if (!positionedGlyph) return;
 
     const fontMetrics = await this.getFontMetrics();
+    const glyphName = this.getSelectedGlyphName() || positionedGlyph.glyphName;
+    const { factor } = this.getReferenceSettings(glyphName);
     const path = positionedGlyph.glyph.path;
     const bounds = path.getBounds?.() || path.getControlBounds?.();
     if (!bounds) return;
@@ -850,15 +930,25 @@ export default class LetterspacerPanel extends Panel {
     const targetAreaLeft = computeTargetAreaFromSidebearing(areaLeft, currentLSB, amplitudeY);
     const targetAreaRight = computeTargetAreaFromSidebearing(areaRight, currentRSB, amplitudeY);
 
-    const paramAreaLeft = computeParamAreaFromTargetArea(targetAreaLeft, fontMetrics, amplitudeY);
-    const paramAreaRight = computeParamAreaFromTargetArea(targetAreaRight, fontMetrics, amplitudeY);
+    const paramAreaLeft = computeParamAreaFromTargetArea(
+      targetAreaLeft,
+      fontMetrics,
+      amplitudeY,
+      factor
+    );
+    const paramAreaRight = computeParamAreaFromTargetArea(
+      targetAreaRight,
+      fontMetrics,
+      amplitudeY,
+      factor
+    );
 
     const averagedArea = (paramAreaLeft + paramAreaRight) / 2;
     this.params.area = Math.max(50, Math.min(2000, Math.round(averagedArea)));
     await this.persistParam("area", this.params.area);
 
     const finalEngine = new LetterspacerEngine(this.params, fontMetrics);
-    const result = finalEngine.computeSpacing(path, bounds, minY, maxY);
+    const result = finalEngine.computeSpacing(path, bounds, minY, maxY, factor);
     if (result.lsb !== null && result.rsb !== null) {
       this.calculatedLSB = Math.round(result.lsb);
       this.calculatedRSB = Math.round(result.rsb);
@@ -932,26 +1022,119 @@ export default class LetterspacerPanel extends Panel {
     };
   }
 
-  async getReferenceBounds(fontMetrics) {
-    if (this.params.referenceGlyph) {
-      const refGlyph = await this.fontController.getGlyph(this.params.referenceGlyph);
-      if (refGlyph) {
-        const layer = Object.values(refGlyph.layers)[0];
-        const bounds = layer?.glyph?.path?.getBounds?.();
-        if (bounds) {
-          const overshoot = fontMetrics.xHeight * this.params.overshoot / 100;
-          return {
-            minY: bounds.yMin - overshoot,
-            maxY: bounds.yMax + overshoot
-          };
-        }
+  getSelectedGlyphName() {
+    return (
+      this.sceneController.sceneModel?.getSelectedGlyphName?.() ??
+      this.sceneController.sceneSettings?.selectedGlyphName
+    );
+  }
+
+  getReferenceSettings(glyphName) {
+    const manualReference = (this.params.referenceGlyph || "").trim();
+    if (manualReference) {
+      return { referenceGlyph: manualReference, factor: 1 };
+    }
+    return this.getAutoReferenceSettings(glyphName);
+  }
+
+  getAutoReferenceSettings(glyphName) {
+    if (!glyphName) {
+      return { referenceGlyph: "", factor: 1 };
+    }
+    let glyphInfo = getGlyphInfoFromGlyphName(glyphName);
+    if (!glyphInfo && glyphName.includes(".")) {
+      const baseName = glyphName.split(".")[0];
+      glyphInfo = getGlyphInfoFromGlyphName(baseName);
+    }
+    glyphInfo = glyphInfo || {};
+    const category = glyphInfo.category;
+    const subCategory = glyphInfo.subCategory;
+    const script = glyphInfo.script;
+
+    let match = null;
+    for (const rule of HT_REFERENCE_RULES) {
+      if (
+        !matchesRuleField(rule.script, script) ||
+        !matchesRuleField(rule.category, category) ||
+        !matchesRuleField(rule.subCategory, subCategory)
+      ) {
+        continue;
+      }
+
+      if (!match) {
+        match = rule;
+        continue;
+      }
+
+      if (rule.filter && rule.filter !== "*" && glyphName.includes(rule.filter)) {
+        match = rule;
       }
     }
 
+    if (!match) {
+      return { referenceGlyph: glyphName, factor: 1 };
+    }
+
+    const referenceGlyph =
+      match.reference === "*" ? glyphName : match.reference;
+    return {
+      referenceGlyph: referenceGlyph || glyphName,
+      factor: Number(match.factor) || 1,
+    };
+  }
+
+  getLayerBounds(layerGlyph) {
+    if (!layerGlyph) {
+      return null;
+    }
+    const path = layerGlyph.path;
+    return path?.getBounds?.() || path?.getControlBounds?.() || null;
+  }
+
+  getReferenceBoundsForLayer(
+    referenceGlyphName,
+    referenceGlyphController,
+    sourceId,
+    layerGlyph,
+    fontMetrics,
+    glyphName
+  ) {
     const overshoot = fontMetrics.xHeight * this.params.overshoot / 100;
+    const fallbackBounds = this.getLayerBounds(layerGlyph);
+
+    if (referenceGlyphName && referenceGlyphController?.layers) {
+      const refLayer =
+        referenceGlyphController.layers[sourceId] ||
+        Object.values(referenceGlyphController.layers)[0];
+        const refBounds = this.getLayerBounds(refLayer?.glyph);
+        if (refBounds) {
+          return {
+            minY: refBounds.yMin - overshoot,
+            maxY: refBounds.yMax + overshoot,
+            referenceGlyph: referenceGlyphName,
+          };
+        }
+    }
+
+    if (referenceGlyphName) {
+      console.warn(
+        `Letterspacer: reference glyph "${referenceGlyphName}" has no contours. ` +
+          `Using "${glyphName}" instead.`
+      );
+    }
+
+    if (fallbackBounds) {
+      return {
+        minY: fallbackBounds.yMin - overshoot,
+        maxY: fallbackBounds.yMax + overshoot,
+        referenceGlyph: glyphName,
+      };
+    }
+
     return {
       minY: -overshoot,
-      maxY: fontMetrics.xHeight + overshoot
+      maxY: fontMetrics.xHeight + overshoot,
+      referenceGlyph: glyphName,
     };
   }
 
@@ -1009,7 +1192,7 @@ export default class LetterspacerPanel extends Panel {
     return Math.round(value);
   }
 
-  async updateCalculatedValues() {
+  async updateCalculatedValues({ warnOnNoRef = false } = {}) {
     // Update current and calculated spacing values
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) return;
@@ -1024,9 +1207,40 @@ export default class LetterspacerPanel extends Panel {
 
     // Calculate new values using letterspacer
     const fontMetrics = await this.getFontMetrics();
-    const refBounds = await this.getReferenceBounds(fontMetrics);
+    const glyphName = this.getSelectedGlyphName() || positionedGlyph.glyphName;
+    const { referenceGlyph, factor } = this.getReferenceSettings(glyphName);
+    const referenceGlyphController = referenceGlyph
+      ? await this.fontController.getGlyph(referenceGlyph)
+      : null;
+    const sourceId = this.getCurrentSourceIdentifier();
+    const refBounds = this.getReferenceBoundsForLayer(
+      referenceGlyph,
+      referenceGlyphController,
+      sourceId,
+      positionedGlyph.glyph,
+      fontMetrics,
+      glyphName
+    );
     const engine = new LetterspacerEngine(this.params, fontMetrics);
-    const result = engine.computeSpacing(path, bounds, refBounds.minY, refBounds.maxY);
+    const result = engine.computeSpacing(
+      path,
+      bounds,
+      refBounds.minY,
+      refBounds.maxY,
+      factor
+    );
+
+    if (result.noRefIntersections) {
+      this.calculatedLSB = null;
+      this.calculatedRSB = null;
+      if (warnOnNoRef) {
+        console.warn(
+          `Letterspacer: glyph outlines are outside the reference zone. ` +
+            `No match with "${refBounds.referenceGlyph || referenceGlyph || glyphName}".`
+        );
+      }
+      return;
+    }
 
     if (result.lsb !== null && result.rsb !== null) {
       this.calculatedLSB = Math.round(result.lsb);
@@ -1040,7 +1254,7 @@ export default class LetterspacerPanel extends Panel {
     }
     // Recalculate spacing after glyph edits
     this.visualizationOpacity = 1;
-    await this.updateCalculatedValues();
+    await this.updateCalculatedValues({ warnOnNoRef: true });
     await this.update();
 
     // Refresh visualization
@@ -1063,7 +1277,20 @@ export default class LetterspacerPanel extends Panel {
     }
 
     const fontMetrics = await this.getFontMetrics();
-    const refBounds = await this.getReferenceBounds(fontMetrics);
+    const glyphName = this.getSelectedGlyphName() || positionedGlyph.glyphName;
+    const { referenceGlyph, factor } = this.getReferenceSettings(glyphName);
+    const referenceGlyphController = referenceGlyph
+      ? await this.fontController.getGlyph(referenceGlyph)
+      : null;
+    const sourceId = this.getCurrentSourceIdentifier();
+    const refBounds = this.getReferenceBoundsForLayer(
+      referenceGlyph,
+      referenceGlyphController,
+      sourceId,
+      positionedGlyph.glyph,
+      fontMetrics,
+      glyphName
+    );
     const engine = new LetterspacerEngine(this.params, fontMetrics);
 
     const path = positionedGlyph.glyph.path;
@@ -1072,7 +1299,16 @@ export default class LetterspacerPanel extends Panel {
       return null;
     }
 
-    engine.computeSpacing(path, bounds, refBounds.minY, refBounds.maxY);
+    const spacingResult = engine.computeSpacing(
+      path,
+      bounds,
+      refBounds.minY,
+      refBounds.maxY,
+      factor
+    );
+    if (spacingResult.noRefIntersections) {
+      return null;
+    }
 
     const result = {
       opacity: this.visualizationOpacity ?? 1,
