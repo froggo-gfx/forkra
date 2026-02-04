@@ -432,13 +432,6 @@ export default class LetterspacerPanel extends Panel {
       return;
     }
     this.visualizationOpacity = 1;
-    console.log("[letterspacer] applySpacing start", {
-      glyph: this.sceneController.sceneModel.getSelectedPositionedGlyph()?.glyph?.name,
-      sourceId: this.getCurrentSourceIdentifier(),
-      activeSourceIds: await this.getCurrentGlyphSourceIdentifiers(),
-      editLayerName: this.sceneSettingsController.model.editLayerName,
-      editingLayers: this.sceneSettingsController.model.editingLayers,
-    });
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) return;
 
@@ -522,13 +515,6 @@ export default class LetterspacerPanel extends Panel {
         { senderID: this }
       );
     }
-
-    console.log("[letterspacer] applySpacing done", {
-      calculatedLSB: this.calculatedLSB,
-      calculatedRSB: this.calculatedRSB,
-      currentLSB: this.currentLSB,
-      currentRSB: this.currentRSB,
-    });
 
     await this.refreshDesignspacePanel();
     await this.update();
@@ -1115,13 +1101,8 @@ export default class LetterspacerPanel extends Panel {
 
   async refreshDesignspacePanel() {
     const panel = this.editorController.getSidebarPanel?.("designspace-navigation");
-    if (!panel) {
-      console.log("[letterspacer] refreshDesignspacePanel: designspace panel not found");
-    }
     if (panel?.refreshSourcesAndStatus) {
-      console.log("[letterspacer] refreshDesignspacePanel: start");
       await panel.refreshSourcesAndStatus();
-      console.log("[letterspacer] refreshDesignspacePanel: done");
     }
   }
 }
