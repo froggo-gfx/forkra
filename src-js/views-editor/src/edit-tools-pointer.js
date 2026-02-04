@@ -532,7 +532,32 @@ export class PointerTool extends BaseTool {
     const hasSkeletonPointUnderCursor = clickedSkeletonPoint?.size > 0;
 
     const ribHit = this._hitTestRibPoints(initialEvent);
-    if (ribHit && !hasSkeletonPointUnderCursor) {
+    let preferRibOverSkeleton = false;
+    if (ribHit && hasSkeletonPointUnderCursor) {
+      const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+      const skeletonData = positionedGlyph
+        ? getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel)
+        : null;
+      const glyphPoint = positionedGlyph
+        ? {
+            x: point.x - positionedGlyph.x,
+            y: point.y - positionedGlyph.y,
+          }
+        : null;
+
+      const firstKey = clickedSkeletonPoint.values().next().value;
+      if (glyphPoint && skeletonData && firstKey) {
+        const [contourIdx, pointIdx] = firstKey.split("/").map(Number);
+        const skeletonPoint = skeletonData.contours?.[contourIdx]?.points?.[pointIdx];
+        if (skeletonPoint) {
+          const ribDist = vector.distance(glyphPoint, ribHit.point);
+          const skeletonDist = vector.distance(glyphPoint, skeletonPoint);
+          preferRibOverSkeleton = ribDist < skeletonDist;
+        }
+      }
+    }
+
+    if (ribHit && (!hasSkeletonPointUnderCursor || preferRibOverSkeleton)) {
       await this._handleDragRibPoint(eventStream, initialEvent, ribHit);
       initialEvent.preventDefault();
       return;
@@ -647,7 +672,7 @@ export class PointerTool extends BaseTool {
     let initiateDrag = false;
     let initiateRectSelect = false;
 
-    const modeFunc = getSelectModeFunction(event);
+    const modeFunc = getSelectModeFunction(initialEvent);
     const newSelection = modeFunc(sceneController.selection, selection);
     const cleanSel = selection;
 
@@ -657,8 +682,8 @@ export class PointerTool extends BaseTool {
 
     if (
       !selection.size ||
-      event.shiftKey ||
-      event.altKey ||
+      initialEvent.shiftKey ||
+      initialEvent.altKey ||
       !isSuperset(sceneController.selection, cleanSel) ||
       clickingOnSkeletonSegment // Always update selection when clicking on skeleton segment
     ) {

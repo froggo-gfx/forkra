@@ -1093,7 +1093,8 @@ export default class SkeletonParametersPanel extends Panel {
    * @returns {Object|null} Object with points array, skeletonData, layer, editLayerName or null
    */
   _getSelectedSkeletonPoints() {
-    const { skeletonPoint, skeletonRibPoint } = parseSelection(this.sceneController.selection);
+    const { skeletonPoint } = parseSelection(this.sceneController.selection);
+    const selectedRibSides = this._getSelectedRibSides();
 
     // Collect unique point keys from both skeletonPoint and skeletonRibPoint
     const pointKeys = new Set();
@@ -1104,12 +1105,10 @@ export default class SkeletonParametersPanel extends Panel {
       }
     }
 
-    if (skeletonRibPoint) {
-      for (const key of skeletonRibPoint) {
-        // Format: "contourIdx/pointIdx/side" - extract "contourIdx/pointIdx"
-        const parts = key.split("/");
-        pointKeys.add(`${parts[0]}/${parts[1]}`);
-      }
+    for (const key of selectedRibSides) {
+      // Format: "contourIdx/pointIdx/side" - extract "contourIdx/pointIdx"
+      const parts = key.split("/");
+      pointKeys.add(`${parts[0]}/${parts[1]}`);
     }
 
     if (pointKeys.size === 0) return null;
@@ -1137,8 +1136,59 @@ export default class SkeletonParametersPanel extends Panel {
    * @returns {Set} Set of "contourIdx/pointIdx/side" strings for selected rib points
    */
   _getSelectedRibSides() {
-    const { skeletonRibPoint } = parseSelection(this.sceneController.selection);
-    return skeletonRibPoint || new Set();
+    const {
+      skeletonRibPoint,
+      point: pointSelection,
+      editableGeneratedPoint,
+    } = parseSelection(this.sceneController.selection);
+
+    const selectedRibSides = new Set();
+
+    if (skeletonRibPoint) {
+      for (const key of skeletonRibPoint) {
+        selectedRibSides.add(key);
+      }
+    }
+
+    // If selection includes editable generated points, add their rib sides
+    if (editableGeneratedPoint) {
+      for (const key of editableGeneratedPoint) {
+        // Format: "pathPointIndex/skeletonContourIndex/skeletonPointIndex/side"
+        const parts = key.split("/");
+        if (parts.length === 4) {
+          selectedRibSides.add(`${parts[1]}/${parts[2]}/${parts[3]}`);
+        }
+      }
+    }
+
+    // Also map selected generated points (on-curve rib points or off-curve handles)
+    // back to their corresponding rib sides.
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (positionedGlyph && pointSelection?.length) {
+      for (const pointIndex of pointSelection) {
+        const ribInfo = this.sceneController.sceneModel._getEditableRibPointForGeneratedPoint(
+          positionedGlyph,
+          pointIndex
+        );
+        if (ribInfo) {
+          selectedRibSides.add(
+            `${ribInfo.skeletonContourIndex}/${ribInfo.skeletonPointIndex}/${ribInfo.side}`
+          );
+        }
+
+        const handleInfo = this.sceneController.sceneModel._getEditableHandleForGeneratedPoint(
+          positionedGlyph,
+          pointIndex
+        );
+        if (handleInfo) {
+          selectedRibSides.add(
+            `${handleInfo.skeletonContourIndex}/${handleInfo.skeletonPointIndex}/${handleInfo.side}`
+          );
+        }
+      }
+    }
+
+    return selectedRibSides;
   }
 
   /**
@@ -1157,6 +1207,14 @@ export default class SkeletonParametersPanel extends Panel {
     // Selection (just the string representation)
     const sel = this.sceneController.selection;
     parts.push(`s:${sel ? sel.size : 0}`);
+
+    // Include selected rib sides to distinguish skeleton vs rib selection
+    const selectedRibSides = this._getSelectedRibSides();
+    if (selectedRibSides?.size) {
+      parts.push(`rs:${[...selectedRibSides].sort().join(",")}`);
+    } else {
+      parts.push("rs:");
+    }
 
     // Glyph case
     const glyphCase = this._getGlyphCase();
