@@ -21,6 +21,7 @@ import {
   registerVisualizationLayerDefinition,
   strokeLine,
 } from "./visualization-layer-definitions.js";
+import { moveSkeletonData } from "@fontra/core/skeleton-contour-generator.js";
 
 export class MetricsTool {
   identifier = "metrics-tool";
@@ -695,10 +696,15 @@ export class SidebearingEditContext {
       const varGlyphController = await this.fontController.getGlyph(glyphName);
       const varGlyph = varGlyphController.glyph;
       font.glyphs[glyphName] = varGlyph;
-      const layerGlyph = varGlyph.layers[layerName].glyph;
+      const layer = varGlyph.layers[layerName];
+      const layerGlyph = layer.glyph;
       initialValues[glyphName] = {
         xAdvance: layerGlyph.xAdvance,
         reference: layerGlyph.getMoveReference(),
+        // Clone skeleton for restoration during continuous editing
+        skeletonData: layer?.customData?.["fontra.skeleton"]
+          ? JSON.parse(JSON.stringify(layer.customData["fontra.skeleton"]))
+          : null,
       };
     }
 
@@ -730,6 +736,15 @@ export class SidebearingEditContext {
                 -clampedDeltaX,
                 0
               );
+              // Move skeleton data
+              const layer = varGlyph.layers[layerName];
+              if (initialValues[glyphName].skeletonData) {
+                const newSkeletonData = JSON.parse(
+                  JSON.stringify(initialValues[glyphName].skeletonData)
+                );
+                moveSkeletonData(newSkeletonData, -clampedDeltaX, 0);
+                layer.customData["fontra.skeleton"] = newSkeletonData;
+              }
               break;
             }
             case "R": {
@@ -757,6 +772,15 @@ export class SidebearingEditContext {
                 clampedDeltaX / 2,
                 0
               );
+              // Move skeleton data
+              const layer = varGlyph.layers[layerName];
+              if (initialValues[glyphName].skeletonData) {
+                const newSkeletonData = JSON.parse(
+                  JSON.stringify(initialValues[glyphName].skeletonData)
+                );
+                moveSkeletonData(newSkeletonData, clampedDeltaX / 2, 0);
+                layer.customData["fontra.skeleton"] = newSkeletonData;
+              }
               break;
             }
           }
