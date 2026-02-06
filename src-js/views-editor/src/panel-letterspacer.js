@@ -329,6 +329,7 @@ export default class LetterspacerPanel extends Panel {
     this.reverseWarningArmed = false;
     this.reverseWarningMessage = "";
     this.reverseWarningTooltip = null;
+    this.debugLogging = true;
   }
 
   getContentElement() {
@@ -475,6 +476,11 @@ export default class LetterspacerPanel extends Panel {
     }
   }
 
+  logDebug(...args) {
+    if (!this.debugLogging) return;
+    console.log("[letterspacer]", ...args);
+  }
+
   async applySpacing() {
     if (!(await this.hasCurrentMasterForGlyph())) {
       return;
@@ -490,6 +496,15 @@ export default class LetterspacerPanel extends Panel {
       ? await this.fontController.getGlyph(referenceGlyph)
       : null;
     const engine = new LetterspacerEngine(this.params, fontMetrics);
+
+    this.logDebug("applySpacing start", {
+      glyph: glyphName,
+      referenceGlyph,
+      factor,
+      area: this.params.area,
+      depth: this.params.depth,
+      overshoot: this.params.overshoot,
+    });
     
     // Store calculated values from the edit operation
     let calculatedLSB = null;
@@ -512,6 +527,12 @@ export default class LetterspacerPanel extends Panel {
           fontMetrics,
           glyphName
         );
+        this.logDebug("applySpacing refBounds", {
+          layerName,
+          referenceGlyph: refBounds.referenceGlyph,
+          minY: refBounds.minY,
+          maxY: refBounds.maxY,
+        });
 
         // Calculate fresh values for this layer
         const result = engine.computeSpacing(
@@ -530,6 +551,10 @@ export default class LetterspacerPanel extends Panel {
             );
             warnedNoRefZone = true;
           }
+          this.logDebug("applySpacing noRefIntersections", {
+            layerName,
+            referenceGlyph: refBounds.referenceGlyph || referenceGlyph || glyphName,
+          });
           continue;
         }
 
@@ -1048,8 +1073,8 @@ export default class LetterspacerPanel extends Panel {
     }
     glyphInfo = glyphInfo || {};
     const category = glyphInfo.category;
-    const subCategory = glyphInfo.subCategory;
     const script = glyphInfo.script;
+    const subCategory = this.getHtSubCategory(glyphName, glyphInfo);
 
     let match = null;
     for (const rule of HT_REFERENCE_RULES) {
@@ -1072,15 +1097,53 @@ export default class LetterspacerPanel extends Panel {
     }
 
     if (!match) {
+      this.logDebug("referenceRules no match", {
+        glyph: glyphName,
+        category,
+        subCategory,
+        script,
+      });
       return { referenceGlyph: glyphName, factor: 1 };
     }
 
     const referenceGlyph =
       match.reference === "*" ? glyphName : match.reference;
+    this.logDebug("referenceRules match", {
+      glyph: glyphName,
+      category,
+      subCategory,
+      script,
+      referenceGlyph: referenceGlyph || glyphName,
+      factor: Number(match.factor) || 1,
+      rule: match,
+    });
     return {
       referenceGlyph: referenceGlyph || glyphName,
       factor: Number(match.factor) || 1,
     };
+  }
+
+  getHtSubCategory(glyphName, glyphInfo) {
+    const suffixes = glyphName?.split(".").slice(1).map((item) => item.toLowerCase()) || [];
+    if (suffixes.includes("sc") || suffixes.includes("smcp") || suffixes.includes("c2sc")) {
+      return "Smallcaps";
+    }
+
+    if (glyphInfo?.subCategory) {
+      return glyphInfo.subCategory;
+    }
+
+    const caseValue = glyphInfo?.case;
+    if (!caseValue) {
+      return undefined;
+    }
+
+    const normalized = String(caseValue).toLowerCase();
+    if (normalized === "upper") return "Uppercase";
+    if (normalized === "lower") return "Lowercase";
+    if (normalized === "smallcaps") return "Smallcaps";
+
+    return undefined;
   }
 
   getLayerBounds(layerGlyph) {
@@ -1254,6 +1317,12 @@ export default class LetterspacerPanel extends Panel {
     }
     // Recalculate spacing after glyph edits
     this.visualizationOpacity = 1;
+    this.logDebug("calculateSpacing start", {
+      glyph: this.getSelectedGlyphName(),
+      area: this.params.area,
+      depth: this.params.depth,
+      overshoot: this.params.overshoot,
+    });
     await this.updateCalculatedValues({ warnOnNoRef: true });
     await this.update();
 
@@ -1307,6 +1376,10 @@ export default class LetterspacerPanel extends Panel {
       factor
     );
     if (spacingResult.noRefIntersections) {
+      this.logDebug("visualization noRefIntersections", {
+        glyph: glyphName,
+        referenceGlyph: refBounds.referenceGlyph || referenceGlyph || glyphName,
+      });
       return null;
     }
 
