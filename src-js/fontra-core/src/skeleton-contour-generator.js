@@ -7,6 +7,8 @@ const DEFAULT_WIDTH = 80;
 const DEFAULT_CAP_RADIUS_RATIO = 1 / 8;
 const MAX_CAP_RADIUS_RATIO = 1 / 4;
 const DEFAULT_CAP_TENSION = 0.55;
+const DEFAULT_CAP_ANGLE = 0;
+const MAX_CAP_ANGLE = 85;
 
 /**
  * Get the width for a point, with support for asymmetric left/right widths.
@@ -696,17 +698,19 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     const startCapStyle = normalizeCapStyle(startCapStyleRaw);
     const endCapStyle = normalizeCapStyle(endCapStyleRaw);
 
-    const startIsRound = startCapStyle === "round";
-    const endIsRound = endCapStyle === "round";
+      const startIsRound = startCapStyle === "round";
+      const endIsRound = endCapStyle === "round";
+      const startIsSquare = startCapStyle === "square";
+      const endIsSquare = endCapStyle === "square";
 
     let startCap = [];
     let endCap = [];
 
-    if (startIsRound) {
-      let startTangent = getSegmentTangent(segments[0], "start");
-      let leftStart = getFirstOnCurvePoint(leftSide);
-      let rightStart = getFirstOnCurvePoint(rightSide);
-      if (leftStart && rightStart) {
+      if (startIsRound) {
+        let startTangent = getSegmentTangent(segments[0], "start");
+        let leftStart = getFirstOnCurvePoint(leftSide);
+        let rightStart = getFirstOnCurvePoint(rightSide);
+        if (leftStart && rightStart) {
         const capVector = vector.subVectors(leftStart, rightStart);
         const capLength = Math.hypot(capVector.x, capVector.y);
         const capWidth = startCapLeftHW + startCapRightHW;
@@ -840,24 +844,72 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
             ];
           }
         }
-      }
-    } else {
-      startCap = generateCap(
-        firstOnCurvePoint,
-        segments[0],
-        defaultWidth,
-        startCapStyle,
-        "start",
-        startCapLeftHW,
-        startCapRightHW
-      );
-    }
+        }
+      } else if (startIsSquare) {
+        const startAngle =
+          firstOnCurvePoint.capAngle ??
+          skeletonContour.capAngle ??
+          DEFAULT_CAP_ANGLE;
+        const startDistance =
+          firstOnCurvePoint.capDistance ??
+          skeletonContour.capDistance ??
+          0;
+        const clampedAngle = Math.min(Math.max(startAngle, -MAX_CAP_ANGLE), MAX_CAP_ANGLE);
+        const startTangent = getSegmentTangent(segments[0], "start");
+        const capTangent = { x: -startTangent.x, y: -startTangent.y };
+        const capWidth = startCapLeftHW + startCapRightHW;
+        const delta = Math.tan((Math.abs(clampedAngle) * Math.PI) / 180) * capWidth;
+        const hasAngle = Math.abs(clampedAngle) > 0.001;
+        const hasDistance = startDistance > 0.001;
+        let moveLeft = clampedAngle > 0;
+        if (startCapLeftHW < 0.5 && startCapRightHW > 0.5) moveLeft = false;
+        if (startCapRightHW < 0.5 && startCapLeftHW > 0.5) moveLeft = true;
 
-    if (endIsRound) {
-      let endTangent = getSegmentTangent(segments[segments.length - 1], "end");
-      let leftEnd = getLastOnCurvePoint(leftSide);
-      let rightEnd = getLastOnCurvePoint(rightSide);
-      if (leftEnd && rightEnd) {
+        const leftStart = getFirstOnCurvePoint(leftSide);
+        const rightStart = getFirstOnCurvePoint(rightSide);
+        const leftHandleDir = getSideHandleDirection(leftSide, "start");
+        const rightHandleDir = getSideHandleDirection(rightSide, "start");
+        const addLeft = hasDistance || (hasAngle && moveLeft);
+        const addRight = hasDistance || (hasAngle && !moveLeft);
+        const leftDelta = hasAngle && moveLeft ? delta : 0;
+        const rightDelta = hasAngle && !moveLeft ? delta : 0;
+        if (addLeft) {
+          const leftExtra = createSquareCapPoint(
+            leftStart,
+            leftHandleDir,
+            capTangent,
+            hasDistance ? startDistance : 0,
+            leftDelta
+          );
+          if (leftExtra) leftSide.unshift(leftExtra);
+        }
+        if (addRight) {
+          const rightExtra = createSquareCapPoint(
+            rightStart,
+            rightHandleDir,
+            capTangent,
+            hasDistance ? startDistance : 0,
+            rightDelta
+          );
+          if (rightExtra) rightSide.unshift(rightExtra);
+        }
+      } else {
+        startCap = generateCap(
+          firstOnCurvePoint,
+          segments[0],
+          defaultWidth,
+          startCapStyle,
+          "start",
+          startCapLeftHW,
+          startCapRightHW
+        );
+      }
+
+      if (endIsRound) {
+        let endTangent = getSegmentTangent(segments[segments.length - 1], "end");
+        let leftEnd = getLastOnCurvePoint(leftSide);
+        let rightEnd = getLastOnCurvePoint(rightSide);
+        if (leftEnd && rightEnd) {
         const capVector = vector.subVectors(leftEnd, rightEnd);
         const capLength = Math.hypot(capVector.x, capVector.y);
         const capWidth = endCapLeftHW + endCapRightHW;
@@ -993,18 +1045,66 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
             ];
           }
         }
+        }
+      } else if (endIsSquare) {
+        const endAngle =
+          lastOnCurvePoint.capAngle ??
+          skeletonContour.capAngle ??
+          DEFAULT_CAP_ANGLE;
+        const endDistance =
+          lastOnCurvePoint.capDistance ??
+          skeletonContour.capDistance ??
+          0;
+        const clampedAngle = Math.min(Math.max(endAngle, -MAX_CAP_ANGLE), MAX_CAP_ANGLE);
+        const endTangent = getSegmentTangent(segments[segments.length - 1], "end");
+        const capTangent = endTangent;
+        const capWidth = endCapLeftHW + endCapRightHW;
+        const delta = Math.tan((Math.abs(clampedAngle) * Math.PI) / 180) * capWidth;
+        const hasAngle = Math.abs(clampedAngle) > 0.001;
+        const hasDistance = endDistance > 0.001;
+        let moveLeft = clampedAngle > 0;
+        if (endCapLeftHW < 0.5 && endCapRightHW > 0.5) moveLeft = false;
+        if (endCapRightHW < 0.5 && endCapLeftHW > 0.5) moveLeft = true;
+
+        const leftEnd = getLastOnCurvePoint(leftSide);
+        const rightEnd = getLastOnCurvePoint(rightSide);
+        const leftHandleDir = getSideHandleDirection(leftSide, "end");
+        const rightHandleDir = getSideHandleDirection(rightSide, "end");
+        const addLeft = hasDistance || (hasAngle && moveLeft);
+        const addRight = hasDistance || (hasAngle && !moveLeft);
+        const leftDelta = hasAngle && moveLeft ? delta : 0;
+        const rightDelta = hasAngle && !moveLeft ? delta : 0;
+        if (addLeft) {
+          const leftExtra = createSquareCapPoint(
+            leftEnd,
+            leftHandleDir,
+            capTangent,
+            hasDistance ? endDistance : 0,
+            leftDelta
+          );
+          if (leftExtra) leftSide.push(leftExtra);
+        }
+        if (addRight) {
+          const rightExtra = createSquareCapPoint(
+            rightEnd,
+            rightHandleDir,
+            capTangent,
+            hasDistance ? endDistance : 0,
+            rightDelta
+          );
+          if (rightExtra) rightSide.push(rightExtra);
+        }
+      } else {
+        endCap = generateCap(
+          lastOnCurvePoint,
+          segments[segments.length - 1],
+          defaultWidth,
+          endCapStyle,
+          "end",
+          endCapLeftHW,
+          endCapRightHW
+        );
       }
-    } else {
-      endCap = generateCap(
-        lastOnCurvePoint,
-        segments[segments.length - 1],
-        defaultWidth,
-        endCapStyle,
-        "end",
-        endCapLeftHW,
-        endCapRightHW
-      );
-    }
 
     const outlinePoints = [];
     // Left side forward
@@ -1726,7 +1826,6 @@ function createBezierFromPoints(points) {
 
 function normalizeCapStyle(style) {
   if (!style) return "butt";
-  if (style === "square") return "butt"; // Temporary: square behaves like flat
   return style;
 }
 
@@ -1761,6 +1860,80 @@ function getLastOnCurvePoint(points) {
     if (!points[i].type) return points[i];
   }
   return null;
+}
+
+function getSideHandleDirection(points, position) {
+  if (!points || points.length < 2) return null;
+  if (position === "start") {
+    const startIdx = points.findIndex((p) => p && !p.type);
+    if (startIdx < 0) return null;
+    const startPoint = points[startIdx];
+    for (let i = startIdx + 1; i < points.length; i++) {
+      const point = points[i];
+      if (!point) continue;
+      if (!point.type) break;
+      const dir = { x: point.x - startPoint.x, y: point.y - startPoint.y };
+      const len = Math.hypot(dir.x, dir.y);
+      if (len > 0.001) return { x: dir.x / len, y: dir.y / len };
+    }
+    return null;
+  }
+
+  const endIdx = (() => {
+    for (let i = points.length - 1; i >= 0; i--) {
+      if (points[i] && !points[i].type) return i;
+    }
+    return -1;
+  })();
+  if (endIdx < 0) return null;
+  const endPoint = points[endIdx];
+  for (let i = endIdx - 1; i >= 0; i--) {
+    const point = points[i];
+    if (!point) continue;
+    if (!point.type) break;
+    const dir = { x: point.x - endPoint.x, y: point.y - endPoint.y };
+    const len = Math.hypot(dir.x, dir.y);
+    if (len > 0.001) return { x: dir.x / len, y: dir.y / len };
+  }
+  return null;
+}
+
+function createSquareCapPoint(basePoint, handleDir, capTangent, baseDistance, delta) {
+  if (!basePoint) return null;
+  const hasDistance = baseDistance > 0.001;
+  const hasDelta = delta > 0.001;
+  if (!hasDistance && !hasDelta) {
+    return { x: basePoint.x, y: basePoint.y, smooth: false };
+  }
+  let dir = handleDir;
+  if (!dir || Math.hypot(dir.x, dir.y) < 0.001) {
+    dir = capTangent;
+  }
+  let denom = dir.x * capTangent.x + dir.y * capTangent.y;
+  if (denom < 0) {
+    dir = { x: -dir.x, y: -dir.y };
+    denom = -denom;
+  }
+  let t = baseDistance;
+  if (hasDelta) {
+    if (denom < 0.001) {
+      const total = baseDistance + delta;
+      return {
+        x: Math.round(basePoint.x + capTangent.x * total),
+        y: Math.round(basePoint.y + capTangent.y * total),
+        smooth: false,
+      };
+    }
+    t += delta / denom;
+  }
+  if (!(t > 0.001)) {
+    return { x: basePoint.x, y: basePoint.y, smooth: false };
+  }
+  return {
+    x: Math.round(basePoint.x + dir.x * t),
+    y: Math.round(basePoint.y + dir.y * t),
+    smooth: false,
+  };
 }
 
 function rescaleAdjacentHandles(points, onCurvePoint, origPos, direction) {
@@ -1937,7 +2110,16 @@ function computeTunniHandleLengths(startPoint, startDir, endPoint, endDir, tensi
  * @param {number} leftHalfWidth - Half-width on left side
  * @param {number} rightHalfWidth - Half-width on right side
  */
-function generateCap(point, segment, width, capStyle, position, leftHalfWidth = null, rightHalfWidth = null) {
+function generateCap(
+  point,
+  segment,
+  width,
+  capStyle,
+  position,
+  leftHalfWidth = null,
+  rightHalfWidth = null,
+  capAngle = DEFAULT_CAP_ANGLE
+) {
   const halfWidth = width / 2;
   const leftHW = leftHalfWidth ?? halfWidth;
   const rightHW = rightHalfWidth ?? halfWidth;
@@ -1958,6 +2140,7 @@ function generateCap(point, segment, width, capStyle, position, leftHalfWidth = 
   }
 
   const normal = vector.rotateVector90CW(direction);
+  const capTangent = position === "start" ? { x: -direction.x, y: -direction.y } : direction;
 
   if (capStyle === "round") {
     // Semicircular cap using cubic bezier approximation
@@ -2039,26 +2222,22 @@ function generateCap(point, segment, width, capStyle, position, leftHalfWidth = 
       });
     }
   } else if (capStyle === "square") {
-    // Square cap - extend by per-point half-widths
-    if (position === "end") {
-      capPoints.push({
-        x: point.x - normal.x * rightHW + direction.x * avgHW,
-        y: point.y - normal.y * rightHW + direction.y * avgHW,
-      });
-      capPoints.push({
-        x: point.x + normal.x * leftHW + direction.x * avgHW,
-        y: point.y + normal.y * leftHW + direction.y * avgHW,
-      });
-    } else {
-      capPoints.push({
-        x: point.x + normal.x * leftHW - direction.x * avgHW,
-        y: point.y + normal.y * leftHW - direction.y * avgHW,
-      });
-      capPoints.push({
-        x: point.x - normal.x * rightHW - direction.x * avgHW,
-        y: point.y - normal.y * rightHW - direction.y * avgHW,
-      });
-    }
+    // Square cap - extend by per-point half-widths, with optional angle
+    const capWidth = leftHW + rightHW;
+    const clampedAngle = Math.max(-89.9, Math.min(89.9, capAngle ?? 0));
+    const angleRad = (clampedAngle * Math.PI) / 180;
+    const angleShift = (capWidth * Math.tan(angleRad)) / 2;
+    const leftShift = avgHW + angleShift;
+    const rightShift = avgHW - angleShift;
+
+    capPoints.push({
+      x: point.x - normal.x * rightHW + capTangent.x * rightShift,
+      y: point.y - normal.y * rightHW + capTangent.y * rightShift,
+    });
+    capPoints.push({
+      x: point.x + normal.x * leftHW + capTangent.x * leftShift,
+      y: point.y + normal.y * leftHW + capTangent.y * leftShift,
+    });
   }
   // "butt" style needs no extra points
 
@@ -2228,6 +2407,8 @@ export function createSkeletonContour(isClosed = false, defaultWidth = DEFAULT_W
     points: [],
     defaultWidth,
     capStyle: "butt",
+    capAngle: DEFAULT_CAP_ANGLE,
+    capDistance: 0,
   };
 }
 

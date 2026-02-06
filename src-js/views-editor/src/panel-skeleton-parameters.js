@@ -33,9 +33,13 @@ const DEFAULT_WIDTH_LOWERCASE_CONTRAST = 40;
 
 const DEFAULT_CAP_RADIUS_RATIO = 1 / 8;
 const DEFAULT_CAP_TENSION = 0.55;
+const DEFAULT_CAP_ANGLE = 0;
+const DEFAULT_CAP_DISTANCE = 0;
 const CAP_RADIUS_MIN = 1 / 128;
 const CAP_RADIUS_MAX = 1 / 4;
 const CAP_RADIUS_POSITIONS = 20;
+const CAP_ANGLE_MIN = -85;
+const CAP_ANGLE_MAX = 85;
 
 export default class SkeletonParametersPanel extends Panel {
   identifier = "skeleton-parameters";
@@ -415,10 +419,12 @@ export default class SkeletonParametersPanel extends Panel {
     let hasSingleSided = false; // Track if any selected point is in single-sided contour
     let singleSidedDirection = null; // Track single-sided direction ("left" or "right")
 
-    // Track editable states per side based on selected rib points
-    const selectedRibSides = this._getSelectedRibSides();
-    let editableStates = new Set();
-    let detachedStates = new Set(); // Track detached handle states
+      // Track editable states per side based on selected rib points
+      const selectedRibSides = this._getSelectedRibSides();
+      let editableStates = new Set();
+      let detachedStates = new Set(); // Track detached handle states
+      let forceHorizontalStates = new Set();
+      let forceVerticalStates = new Set();
 
     if (hasSelection) {
       const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
@@ -428,11 +434,13 @@ export default class SkeletonParametersPanel extends Panel {
       const leftValues = [];
       const rightValues = [];
 
-      for (const { point, contourIdx, pointIdx } of selectedData.points) {
-        const widths = this._getPointWidths(point, defaultWidth);
-        leftValues.push(Math.round(widths.left));
-        rightValues.push(Math.round(widths.right));
-        asymStates.add(this._isAsymmetric(point));
+        for (const { point, contourIdx, pointIdx } of selectedData.points) {
+          const widths = this._getPointWidths(point, defaultWidth);
+          leftValues.push(Math.round(widths.left));
+          rightValues.push(Math.round(widths.right));
+          asymStates.add(this._isAsymmetric(point));
+          forceHorizontalStates.add(!!point.forceHorizontal);
+          forceVerticalStates.add(!!point.forceVertical);
 
         // Check if contour is single-sided
         const contour = selectedData.skeletonData?.contours?.[contourIdx];
@@ -777,48 +785,145 @@ export default class SkeletonParametersPanel extends Panel {
       auxiliaryElement: capStyleSelect,
     });
 
-    const capRadiusState = this._getSelectedEndpointCapParamState(
-      selectedData,
-      "capRadiusRatio",
-      DEFAULT_CAP_RADIUS_RATIO
-    );
-    const capTensionState = this._getSelectedEndpointCapParamState(
-      selectedData,
-      "capTension",
-      DEFAULT_CAP_TENSION
-    );
+      const capRadiusState = this._getSelectedEndpointCapParamState(
+        selectedData,
+        "capRadiusRatio",
+        DEFAULT_CAP_RADIUS_RATIO
+      );
+      const capTensionState = this._getSelectedEndpointCapParamState(
+        selectedData,
+        "capTension",
+        DEFAULT_CAP_TENSION
+      );
+      const capAngleState = this._getSelectedEndpointCapParamState(
+        selectedData,
+        "capAngle",
+        DEFAULT_CAP_ANGLE
+      );
+      const capDistanceState = this._getSelectedEndpointCapParamState(
+        selectedData,
+        "capDistance",
+        DEFAULT_CAP_DISTANCE
+      );
 
-    const capRadiusValue = capRadiusState.value ?? DEFAULT_CAP_RADIUS_RATIO;
-    const capRadiusIndex = this._capRadiusIndexFromRatio(capRadiusValue);
-    const capRadiusPosition = capRadiusIndex + 1;
-    const defaultCapRadiusIndex = this._capRadiusIndexFromRatio(DEFAULT_CAP_RADIUS_RATIO);
-    const capTensionPercent = Math.round(
-      (capTensionState.value ?? DEFAULT_CAP_TENSION) * 100
-    );
+      const capRadiusValue = capRadiusState.value ?? DEFAULT_CAP_RADIUS_RATIO;
+      const capRadiusIndex = this._capRadiusIndexFromRatio(capRadiusValue);
+      const capRadiusPosition = capRadiusIndex + 1;
+      const defaultCapRadiusIndex = this._capRadiusIndexFromRatio(DEFAULT_CAP_RADIUS_RATIO);
+      const capTensionPercent = Math.round(
+        (capTensionState.value ?? DEFAULT_CAP_TENSION) * 100
+      );
+      const capAngleValue = Math.round(capAngleState.value ?? DEFAULT_CAP_ANGLE);
+      const capDistanceValue = Math.round(capDistanceState.value ?? DEFAULT_CAP_DISTANCE);
+      const showCapRound = !capStyleState.mixed && capValue === "round";
+      const showCapAngle = !capStyleState.mixed && capValue === "square";
+      const showCapDistance = !capStyleState.mixed && capValue === "square";
+      const showForceAngle = !capStyleState.mixed && capValue === "flat";
 
-    formContents.push({
-      type: "edit-number-slider",
-      key: "capRadiusIndex",
-      label: "Cap Radius",
-      value: capRadiusPosition,
-      minValue: 1,
-      defaultValue: defaultCapRadiusIndex + 1,
-      maxValue: CAP_RADIUS_POSITIONS,
-      step: 1,
-      disabled: !capRadiusState.canEdit,
-    });
+      if (showCapRound) {
+        formContents.push({
+          type: "edit-number-slider",
+          key: "capRadiusIndex",
+          label: "Cap Radius",
+          value: capRadiusPosition,
+          minValue: 1,
+          defaultValue: defaultCapRadiusIndex + 1,
+          maxValue: CAP_RADIUS_POSITIONS,
+          step: 1,
+          disabled: !capRadiusState.canEdit,
+        });
 
-    formContents.push({
-      type: "edit-number-slider",
-      key: "capTension",
-      label: "Cap Tension (%)",
-      value: capTensionPercent,
-      minValue: 0,
-      defaultValue: Math.round(DEFAULT_CAP_TENSION * 100),
-      maxValue: 100,
-      step: 5,
-      disabled: !capTensionState.canEdit,
-    });
+        formContents.push({
+          type: "edit-number-slider",
+          key: "capTension",
+          label: "Cap Tension (%)",
+          value: capTensionPercent,
+          minValue: 0,
+          defaultValue: Math.round(DEFAULT_CAP_TENSION * 100),
+          maxValue: 100,
+          step: 5,
+          disabled: !capTensionState.canEdit,
+        });
+      }
+      if (showCapAngle) {
+        formContents.push({
+          type: "edit-number-slider",
+          key: "capAngle",
+          label: "Cap Angle (deg)",
+          value: capAngleValue,
+          minValue: CAP_ANGLE_MIN,
+          defaultValue: DEFAULT_CAP_ANGLE,
+          maxValue: CAP_ANGLE_MAX,
+          step: 1,
+          disabled: !capAngleState.canEdit,
+        });
+      }
+      if (showCapDistance) {
+        formContents.push({
+          type: "edit-number",
+          key: "capDistance",
+          label: "Cap Distance",
+          value: capDistanceValue,
+          minValue: 0,
+          integer: true,
+          disabled: !capDistanceState.canEdit,
+        });
+      }
+      if (showForceAngle) {
+        const forceHorizontal = forceHorizontalStates.size === 1 && forceHorizontalStates.has(true);
+        const forceVertical = forceVerticalStates.size === 1 && forceVerticalStates.has(true);
+        const forceHorizontalIndeterminate = forceHorizontalStates.size > 1;
+        const forceVerticalIndeterminate = forceVerticalStates.size > 1;
+
+        const forceHorizontalCheckbox = html.input({
+          type: "checkbox",
+          id: "force-horizontal-toggle",
+          checked: forceHorizontalIndeterminate ? false : forceHorizontal,
+          disabled: !capStyleState.canEdit,
+          onchange: (e) => this._onForceHorizontalToggle(e.target.checked),
+        });
+        if (forceHorizontalIndeterminate) {
+          forceHorizontalCheckbox.indeterminate = true;
+        }
+
+        const forceVerticalCheckbox = html.input({
+          type: "checkbox",
+          id: "force-vertical-toggle",
+          checked: forceVerticalIndeterminate ? false : forceVertical,
+          disabled: !capStyleState.canEdit,
+          onchange: (e) => this._onForceVerticalToggle(e.target.checked),
+        });
+        if (forceVerticalIndeterminate) {
+          forceVerticalCheckbox.indeterminate = true;
+        }
+
+        formContents.push({
+          type: "universal-row",
+          field1: {
+            type: "auxiliaryElement",
+            key: "forceHorizontal",
+            auxiliaryElement: html.span({}, [
+              forceHorizontalCheckbox,
+              html.label({
+                for: "force-horizontal-toggle",
+                style: `margin-left: 4px${capStyleState.canEdit ? "" : "; opacity: 0.5"}`,
+              }, "Force Vertical"),
+            ]),
+          },
+          field2: {
+            type: "auxiliaryElement",
+            key: "forceVertical",
+            auxiliaryElement: html.span({}, [
+              forceVerticalCheckbox,
+              html.label({
+                for: "force-vertical-toggle",
+                style: `margin-left: 4px${capStyleState.canEdit ? "" : "; opacity: 0.5"}`,
+              }, "Force Horizontal"),
+            ]),
+          },
+          field3: { type: "spacer" },
+        });
+      }
 
     this.infoForm.setFieldDescriptions(formContents);
 
@@ -867,6 +972,24 @@ export default class SkeletonParametersPanel extends Panel {
         } else {
           await this._onCapTensionChange(value);
         }
+      } else if (fieldItem.key === "capAngle") {
+        if (valueStream) {
+          this._isDraggingSlider = true;
+          try {
+            for await (const v of valueStream) {
+              await this._setCapParameterForSelection("capAngle", v);
+            }
+          } finally {
+            this._isDraggingSlider = false;
+          }
+          this.update();
+        } else {
+          await this._setCapParameterForSelection("capAngle", value);
+          this.update();
+        }
+      } else if (fieldItem.key === "capDistance") {
+        await this._setCapParameterForSelection("capDistance", value);
+        this.update();
       } else if (fieldItem.key === "pointWidthScale") {
         // Protect scale slider from form rebuilds during drag
         if (valueStream) {
@@ -1535,21 +1658,25 @@ export default class SkeletonParametersPanel extends Panel {
     if (selectedData) {
       const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
       const defaultWidth = this._getSourceWidth(widthKey, widthFallback);
-      for (const { contourIdx, pointIdx, point } of selectedData.points) {
-        const contour = selectedData.skeletonData?.contours?.[contourIdx];
-        const w = this._getPointWidths(point, defaultWidth);
-        const isAsym = this._isAsymmetric(point);
-        // Include editable and nudge state for Reset button visibility
-        const leftEdit = point.leftEditable ? 1 : 0;
-        const rightEdit = point.rightEditable ? 1 : 0;
-        const leftNudge = point.leftNudge || 0;
-        const rightNudge = point.rightNudge || 0;
-        const capStyle = point.capStyle ?? "";
-        const capRadiusRatio = point.capRadiusRatio ?? contour?.capRadiusRatio ?? "";
-        const capTension = point.capTension ?? contour?.capTension ?? "";
-        parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension}`);
+        for (const { contourIdx, pointIdx, point } of selectedData.points) {
+          const contour = selectedData.skeletonData?.contours?.[contourIdx];
+          const w = this._getPointWidths(point, defaultWidth);
+          const isAsym = this._isAsymmetric(point);
+          // Include editable and nudge state for Reset button visibility
+          const leftEdit = point.leftEditable ? 1 : 0;
+          const rightEdit = point.rightEditable ? 1 : 0;
+          const leftNudge = point.leftNudge || 0;
+          const rightNudge = point.rightNudge || 0;
+          const capStyle = point.capStyle ?? "";
+          const capRadiusRatio = point.capRadiusRatio ?? contour?.capRadiusRatio ?? "";
+          const capTension = point.capTension ?? contour?.capTension ?? "";
+          const capAngle = point.capAngle ?? contour?.capAngle ?? "";
+          const capDistance = point.capDistance ?? contour?.capDistance ?? "";
+          const forceH = point.forceHorizontal ? 1 : 0;
+          const forceV = point.forceVertical ? 1 : 0;
+          parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension},${capAngle},${capDistance},${forceH},${forceV}`);
+        }
       }
-    }
 
     return parts.join("|");
   }
@@ -1811,13 +1938,17 @@ export default class SkeletonParametersPanel extends Panel {
     }
 
     let clampedValue = value;
-    if (paramKey === "capRadiusRatio") {
-      const minValue = CAP_RADIUS_MIN;
-      const maxValue = CAP_RADIUS_MAX;
-      clampedValue = Math.min(Math.max(value, minValue), maxValue);
-    } else if (paramKey === "capTension") {
-      clampedValue = Math.min(Math.max(value, 0.0), 1.0);
-    }
+      if (paramKey === "capRadiusRatio") {
+        const minValue = CAP_RADIUS_MIN;
+        const maxValue = CAP_RADIUS_MAX;
+        clampedValue = Math.min(Math.max(value, minValue), maxValue);
+      } else if (paramKey === "capTension") {
+        clampedValue = Math.min(Math.max(value, 0.0), 1.0);
+      } else if (paramKey === "capAngle") {
+        clampedValue = Math.min(Math.max(value, CAP_ANGLE_MIN), CAP_ANGLE_MAX);
+      } else if (paramKey === "capDistance") {
+        clampedValue = Math.max(0, value);
+      }
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
@@ -1869,7 +2000,11 @@ export default class SkeletonParametersPanel extends Panel {
           ? "Set cap radius"
           : paramKey === "capTension"
             ? "Set cap tension"
-            : "Set cap parameter";
+            : paramKey === "capAngle"
+              ? "Set cap angle"
+              : paramKey === "capDistance"
+                ? "Set cap distance"
+              : "Set cap parameter";
 
       return {
         changes: combined,
