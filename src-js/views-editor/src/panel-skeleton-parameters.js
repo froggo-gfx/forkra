@@ -944,13 +944,14 @@ export default class SkeletonParametersPanel extends Panel {
         if (valueStream) {
           this._isDraggingSlider = true;
           try {
-            for await (const v of valueStream) {
+            const mappedStream = this._mapValueStream(valueStream, (v) => {
               const index = Math.round(v) - 1;
-              const ratio = this._capRadiusRatioFromIndex(index);
-              await this._setCapParameterForSelection("capRadiusRatio", ratio);
-            }
+              return this._capRadiusRatioFromIndex(index);
+            });
+            await this._setCapParameterForSelectionStream("capRadiusRatio", mappedStream);
           } finally {
             this._isDraggingSlider = false;
+            this._blurActiveFormElement();
           }
           this.update();
         } else {
@@ -962,11 +963,11 @@ export default class SkeletonParametersPanel extends Panel {
         if (valueStream) {
           this._isDraggingSlider = true;
           try {
-            for await (const v of valueStream) {
-              await this._setCapParameterForSelection("capTension", v / 100);
-            }
+            const mappedStream = this._mapValueStream(valueStream, (v) => v / 100);
+            await this._setCapParameterForSelectionStream("capTension", mappedStream);
           } finally {
             this._isDraggingSlider = false;
+            this._blurActiveFormElement();
           }
           this.update();
         } else {
@@ -976,11 +977,10 @@ export default class SkeletonParametersPanel extends Panel {
         if (valueStream) {
           this._isDraggingSlider = true;
           try {
-            for await (const v of valueStream) {
-              await this._setCapParameterForSelection("capAngle", v);
-            }
+            await this._setCapParameterForSelectionStream("capAngle", valueStream);
           } finally {
             this._isDraggingSlider = false;
+            this._blurActiveFormElement();
           }
           this.update();
         } else {
@@ -1032,48 +1032,48 @@ export default class SkeletonParametersPanel extends Panel {
             }
 
             this._multiSelectionState = { pointStates, maxLeft, maxRight };
-          } else {
-            this._multiSelectionState = null;
-          }
-          try {
-            let lastProcessedTime = 0;
-            let lastDist = null;
-            const THROTTLE_MS = 32; // ~30fps
-
-            for await (const dist of valueStream) {
-              lastDist = dist;
-              const now = Date.now();
-              // Always apply extreme values immediately (skip throttle)
-              const isExtreme = dist >= 100 || dist <= -100;
-              if (!isExtreme && now - lastProcessedTime < THROTTLE_MS) {
-                continue;
-              }
-              lastProcessedTime = now;
-              await this._setPointDistributionDirect(dist);
+            } else {
+              this._multiSelectionState = null;
             }
-            // Apply final value if skipped
-            if (lastDist !== null) {
-              await this._setPointDistributionDirect(lastDist);
+            try {
+              await this._setPointDistributionStream(valueStream);
+            } finally {
+              this._isDraggingSlider = false;
+              this._multiSelectionState = null;
+              this._blurActiveFormElement();
+              this.update();
             }
-          } finally {
-            this._isDraggingSlider = false;
-            this._multiSelectionState = null;
-            this.update();
-          }
         } else {
           await this._setPointDistributionDirect(value);
         }
       } else {
         this.parameters[fieldItem.key] = value;
       }
-    };
-  }
+      };
+    }
 
-  /**
-   * Get a source width value from the active source's customData.
-   * @param {string} key - The customData key
-   * @param {number} fallback - Default value if not set
-   * @returns {number} The width value
+    _blurActiveFormElement() {
+      const root = this.infoForm?.shadowRoot;
+      const active = root?.activeElement;
+      if (active && typeof active.blur === "function") {
+        active.blur();
+      }
+    }
+
+    _mapValueStream(valueStream, mapper) {
+      const self = this;
+      return (async function* () {
+        for await (const value of valueStream) {
+          yield mapper.call(self, value);
+        }
+      })();
+    }
+
+    /**
+     * Get a source width value from the active source's customData.
+     * @param {string} key - The customData key
+     * @param {number} fallback - Default value if not set
+     * @returns {number} The width value
    */
   _getSourceWidth(key, fallback) {
     const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
@@ -1937,81 +1937,179 @@ export default class SkeletonParametersPanel extends Panel {
       return;
     }
 
-    let clampedValue = value;
-      if (paramKey === "capRadiusRatio") {
-        const minValue = CAP_RADIUS_MIN;
-        const maxValue = CAP_RADIUS_MAX;
-        clampedValue = Math.min(Math.max(value, minValue), maxValue);
-      } else if (paramKey === "capTension") {
-        clampedValue = Math.min(Math.max(value, 0.0), 1.0);
-      } else if (paramKey === "capAngle") {
-        clampedValue = Math.min(Math.max(value, CAP_ANGLE_MIN), CAP_ANGLE_MAX);
-      } else if (paramKey === "capDistance") {
-        clampedValue = Math.max(0, value);
-      }
+    const clampedValue = this._clampCapParam(paramKey, value);
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const allChanges = [];
+      const combined = this._buildCapParameterChanges(
+        glyph,
+        selectedData,
+        paramKey,
+        clampedValue,
+        null,
+        false
+      );
+      if (!combined) return;
 
-      for (const editLayerName of this.sceneController.editingLayerNames) {
-        const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
-
-        const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
-        );
-        let changed = false;
-
-        for (const { contourIdx, pointIdx } of selectedData.points) {
-          const contour = skeletonData.contours[contourIdx];
-          if (!contour || contour.isClosed) continue;
-          const endpoints = this._getContourEndpointIndices(contour);
-          if (!endpoints) continue;
-          if (pointIdx !== endpoints.firstOnCurve && pointIdx !== endpoints.lastOnCurve) {
-            continue;
-          }
-          const point = contour.points[pointIdx];
-          if (!point || point.type) continue;
-          point[paramKey] = clampedValue;
-          changed = true;
-        }
-
-        if (!changed) continue;
-
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          this._regenerateOutlineContours(sg, skeletonData);
-        });
-        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-        const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-        });
-        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-      }
-
-      if (allChanges.length === 0) return;
-
-      const combined = new ChangeCollector().concat(...allChanges);
       await sendIncrementalChange(combined.change);
-
-      const undoLabel =
-        paramKey === "capRadiusRatio"
-          ? "Set cap radius"
-          : paramKey === "capTension"
-            ? "Set cap tension"
-            : paramKey === "capAngle"
-              ? "Set cap angle"
-              : paramKey === "capDistance"
-                ? "Set cap distance"
-              : "Set cap parameter";
 
       return {
         changes: combined,
-        undoLabel,
+        undoLabel: this._capParamUndoLabel(paramKey),
         broadcast: true,
       };
     });
+  }
+
+  async _setCapParameterForSelectionStream(paramKey, valueStream) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) {
+      return;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layerInfo = [];
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        layerInfo.push({
+          editLayerName,
+          layer,
+          originalSkeletonData: JSON.parse(
+            JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          ),
+        });
+      }
+
+      let lastValue = null;
+      for await (const raw of valueStream) {
+        const clampedValue = this._clampCapParam(paramKey, raw);
+        lastValue = clampedValue;
+        const combined = this._buildCapParameterChanges(
+          glyph,
+          selectedData,
+          paramKey,
+          clampedValue,
+          null,
+          false
+        );
+        if (combined) {
+          await sendIncrementalChange(combined.change, true);
+        }
+      }
+
+      if (lastValue === null) return;
+
+      const finalCombined = this._buildCapParameterChanges(
+        glyph,
+        selectedData,
+        paramKey,
+        lastValue,
+        layerInfo,
+        true
+      );
+      if (!finalCombined) return;
+
+      return {
+        changes: finalCombined,
+        undoLabel: this._capParamUndoLabel(paramKey),
+        broadcast: true,
+      };
+    });
+  }
+
+  _clampCapParam(paramKey, value) {
+    if (paramKey === "capRadiusRatio") {
+      return Math.min(Math.max(value, CAP_RADIUS_MIN), CAP_RADIUS_MAX);
+    }
+    if (paramKey === "capTension") {
+      return Math.min(Math.max(value, 0.0), 1.0);
+    }
+    if (paramKey === "capAngle") {
+      return Math.min(Math.max(value, CAP_ANGLE_MIN), CAP_ANGLE_MAX);
+    }
+    if (paramKey === "capDistance") {
+      return Math.max(0, value);
+    }
+    return value;
+  }
+
+  _capParamUndoLabel(paramKey) {
+    return paramKey === "capRadiusRatio"
+      ? "Set cap radius"
+      : paramKey === "capTension"
+        ? "Set cap tension"
+        : paramKey === "capAngle"
+          ? "Set cap angle"
+          : paramKey === "capDistance"
+            ? "Set cap distance"
+            : "Set cap parameter";
+  }
+
+  _buildCapParameterChanges(
+    glyph,
+    selectedData,
+    paramKey,
+    value,
+    layerInfo,
+    resetBaseline
+  ) {
+    const allChanges = [];
+    const layers = layerInfo || this.sceneController.editingLayerNames.map((editLayerName) => {
+      const layer = glyph.layers[editLayerName];
+      if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) return null;
+      return {
+        editLayerName,
+        layer,
+        originalSkeletonData: null,
+      };
+    }).filter(Boolean);
+
+    for (const info of layers) {
+      const { editLayerName, layer } = info;
+      const baseSkeletonData = info.originalSkeletonData
+        ? JSON.parse(JSON.stringify(info.originalSkeletonData))
+        : JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+
+      if (resetBaseline && info.originalSkeletonData) {
+        layer.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+          JSON.stringify(info.originalSkeletonData)
+        );
+        this._regenerateOutlineContours(layer.glyph, layer.customData[SKELETON_CUSTOM_DATA_KEY]);
+      }
+
+      const skeletonData = JSON.parse(JSON.stringify(baseSkeletonData));
+      let changed = false;
+
+      for (const { contourIdx, pointIdx } of selectedData.points) {
+        const contour = skeletonData.contours[contourIdx];
+        if (!contour || contour.isClosed) continue;
+        const endpoints = this._getContourEndpointIndices(contour);
+        if (!endpoints) continue;
+        if (pointIdx !== endpoints.firstOnCurve && pointIdx !== endpoints.lastOnCurve) {
+          continue;
+        }
+        const point = contour.points[pointIdx];
+        if (!point || point.type) continue;
+        point[paramKey] = value;
+        changed = true;
+      }
+
+      if (!changed) continue;
+
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        this._regenerateOutlineContours(sg, skeletonData);
+      });
+      allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+    }
+
+    if (allChanges.length === 0) return null;
+    return new ChangeCollector().concat(...allChanges);
   }
 
   async _onCapRadiusChange(value) {
@@ -3149,92 +3247,184 @@ export default class SkeletonParametersPanel extends Panel {
     const isMulti = this._multiSelectionState && this._multiSelectionState.pointStates.size > 0;
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const allChanges = [];
+        const combined = this._buildPointDistributionChanges(
+          glyph,
+          selectedData,
+          distribution,
+          isMulti,
+          null,
+          false
+        );
+        if (!combined) return;
 
-      // Apply changes to ALL editable layers (multi-source editing support)
+        await sendIncrementalChange(combined.change);
+
+        return {
+          changes: combined,
+          undoLabel: "Set point distribution",
+          broadcast: true,
+        };
+      });
+  }
+
+  async _setPointDistributionStream(valueStream) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) return;
+
+    const isMulti = this._multiSelectionState && this._multiSelectionState.pointStates.size > 0;
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layerInfo = [];
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
         if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
-
-        const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
-        );
-
-        for (const { contourIdx, pointIdx } of selectedData.points) {
-          const contour = skeletonData.contours[contourIdx];
-          if (!contour) continue;
-          const point = contour.points[pointIdx];
-          if (!point) continue;
-
-          const key = `${contourIdx}/${pointIdx}`;
-          const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
-
-          if (isMulti) {
-            // Multi-selection: all points move with same speed, clamp at 0
-            const state = this._multiSelectionState.pointStates.get(key);
-            if (!state) continue;
-
-            const { initialLeft, initialRight } = state;
-            const { maxLeft, maxRight } = this._multiSelectionState;
-
-            let newLeft, newRight;
-
-            if (distribution >= 0) {
-              // Moving right: decrease left widths
-              const delta = (distribution / 100) * maxLeft;
-              newLeft = Math.max(0, initialLeft - delta);
-              // Add to right only what was actually removed from left
-              newRight = initialRight + Math.min(delta, initialLeft);
-            } else {
-              // Moving left: decrease right widths
-              const delta = (Math.abs(distribution) / 100) * maxRight;
-              newRight = Math.max(0, initialRight - delta);
-              // Add to left only what was actually removed from right
-              newLeft = initialLeft + Math.min(delta, initialRight);
-            }
-
-            point.leftWidth = Math.round(newLeft);
-            point.rightWidth = Math.round(newRight);
-            delete point.width;
-          } else {
-            // Single selection: distribution maps directly to left/right ratio
-            const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-            const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-            const totalWidth = leftHW + rightHW;
-
-            const newLeftHW = totalWidth * (0.5 + distribution / 200);
-            const newRightHW = totalWidth - newLeftHW;
-
-            point.leftWidth = Math.max(0, Math.round(newLeftHW));
-            point.rightWidth = Math.max(0, Math.round(newRightHW));
-            delete point.width;
-          }
-        }
-
-        // Record changes for this layer
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          this._regenerateOutlineContours(sg, skeletonData);
+        layerInfo.push({
+          editLayerName,
+          layer,
+          originalSkeletonData: JSON.parse(
+            JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          ),
         });
-        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-        const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
-        });
-        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
 
-      if (allChanges.length === 0) return;
+      let lastDist = null;
+      let lastProcessedTime = 0;
+      const THROTTLE_MS = 32;
 
-      const combined = new ChangeCollector().concat(...allChanges);
-      await sendIncrementalChange(combined.change);
+      for await (const dist of valueStream) {
+        lastDist = dist;
+        const now = Date.now();
+        const isExtreme = dist >= 100 || dist <= -100;
+        if (!isExtreme && now - lastProcessedTime < THROTTLE_MS) {
+          continue;
+        }
+        lastProcessedTime = now;
+        const combined = this._buildPointDistributionChanges(
+          glyph,
+          selectedData,
+          dist,
+          isMulti,
+          null,
+          false
+        );
+        if (combined) {
+          await sendIncrementalChange(combined.change, true);
+        }
+      }
+
+      if (lastDist === null) return;
+
+      const finalCombined = this._buildPointDistributionChanges(
+        glyph,
+        selectedData,
+        lastDist,
+        isMulti,
+        layerInfo,
+        true
+      );
+      if (!finalCombined) return;
 
       return {
-        changes: combined,
+        changes: finalCombined,
         undoLabel: "Set point distribution",
         broadcast: true,
       };
     });
+  }
+
+  _buildPointDistributionChanges(
+    glyph,
+    selectedData,
+    distribution,
+    isMulti,
+    layerInfo,
+    resetBaseline
+  ) {
+    const allChanges = [];
+    const layers = layerInfo || this.sceneController.editingLayerNames.map((editLayerName) => {
+      const layer = glyph.layers[editLayerName];
+      if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) return null;
+      return {
+        editLayerName,
+        layer,
+        originalSkeletonData: null,
+      };
+    }).filter(Boolean);
+
+    for (const info of layers) {
+      const { editLayerName, layer } = info;
+      const baseSkeletonData = info.originalSkeletonData
+        ? JSON.parse(JSON.stringify(info.originalSkeletonData))
+        : JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+
+      if (resetBaseline && info.originalSkeletonData) {
+        layer.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+          JSON.stringify(info.originalSkeletonData)
+        );
+        this._regenerateOutlineContours(layer.glyph, layer.customData[SKELETON_CUSTOM_DATA_KEY]);
+      }
+
+      const skeletonData = JSON.parse(JSON.stringify(baseSkeletonData));
+
+      for (const { contourIdx, pointIdx } of selectedData.points) {
+        const contour = skeletonData.contours[contourIdx];
+        if (!contour) continue;
+        const point = contour.points[pointIdx];
+        if (!point) continue;
+
+        const key = `${contourIdx}/${pointIdx}`;
+        const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
+
+        if (isMulti) {
+          const state = this._multiSelectionState.pointStates.get(key);
+          if (!state) continue;
+
+          const { initialLeft, initialRight } = state;
+          const { maxLeft, maxRight } = this._multiSelectionState;
+
+          let newLeft, newRight;
+
+          if (distribution >= 0) {
+            const delta = (distribution / 100) * maxLeft;
+            newLeft = Math.max(0, initialLeft - delta);
+            newRight = initialRight + Math.min(delta, initialLeft);
+          } else {
+            const delta = (Math.abs(distribution) / 100) * maxRight;
+            newRight = Math.max(0, initialRight - delta);
+            newLeft = initialLeft + Math.min(delta, initialRight);
+          }
+
+          point.leftWidth = Math.round(newLeft);
+          point.rightWidth = Math.round(newRight);
+          delete point.width;
+        } else {
+          const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+          const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+          const totalWidth = leftHW + rightHW;
+
+          const newLeftHW = totalWidth * (0.5 + distribution / 200);
+          const newRightHW = totalWidth - newLeftHW;
+
+          point.leftWidth = Math.max(0, Math.round(newLeftHW));
+          point.rightWidth = Math.max(0, Math.round(newRightHW));
+          delete point.width;
+        }
+      }
+
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        this._regenerateOutlineContours(sg, skeletonData);
+      });
+      allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+    }
+
+    if (allChanges.length === 0) return null;
+    return new ChangeCollector().concat(...allChanges);
   }
 }
 
