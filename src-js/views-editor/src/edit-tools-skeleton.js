@@ -19,8 +19,19 @@ import { BaseTool } from "./edit-tools-base.js";
 const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
 const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
 const SKELETON_WIDTH_LOWERCASE_BASE_KEY = "fontra.skeleton.lowercaseBase";
+const SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY = "fontra.skeleton.capitalDistribution";
+const SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY = "fontra.skeleton.lowercaseDistribution";
+const SKELETON_CAP_RADIUS_RATIO_KEY = "fontra.skeleton.capRadiusRatio";
+const SKELETON_CAP_TENSION_KEY = "fontra.skeleton.capTension";
+const SKELETON_CAP_ANGLE_KEY = "fontra.skeleton.capAngle";
+const SKELETON_CAP_DISTANCE_KEY = "fontra.skeleton.capDistance";
 const DEFAULT_WIDTH_CAPITAL_BASE = 60;
 const DEFAULT_WIDTH_LOWERCASE_BASE = 60;
+const DEFAULT_DISTRIBUTION = 0;
+const DEFAULT_CAP_RADIUS_RATIO = 1 / 8;
+const DEFAULT_CAP_TENSION = 0.55;
+const DEFAULT_CAP_ANGLE = 0;
+const DEFAULT_CAP_DISTANCE = 0;
 
 export class SkeletonPenTool extends BaseTool {
   iconPath = "/images/skeleton-pen.svg";
@@ -158,20 +169,73 @@ export class SkeletonPenTool extends BaseTool {
    * @returns {number} The default width value for new skeleton contours
    */
   _getDefaultSkeletonWidth() {
-    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
     const glyphCase = this._getGlyphCase();
-
-    if (!sourceIdentifier) {
-      return glyphCase === "lower" ? DEFAULT_WIDTH_LOWERCASE_BASE : DEFAULT_WIDTH_CAPITAL_BASE;
+    if (glyphCase === "lower") {
+      return this._getSourceCustomDataValue(
+        SKELETON_WIDTH_LOWERCASE_BASE_KEY,
+        DEFAULT_WIDTH_LOWERCASE_BASE
+      );
     }
+    return this._getSourceCustomDataValue(
+      SKELETON_WIDTH_CAPITAL_BASE_KEY,
+      DEFAULT_WIDTH_CAPITAL_BASE
+    );
+  }
 
+  _getSourceCustomDataValue(key, fallback) {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return fallback;
     const fontController = this.sceneController.sceneModel.fontController;
     const source = fontController.sources[sourceIdentifier];
+    return source?.customData?.[key] ?? fallback;
+  }
 
+  _getDefaultSkeletonDistribution() {
+    const glyphCase = this._getGlyphCase();
     if (glyphCase === "lower") {
-      return source?.customData?.[SKELETON_WIDTH_LOWERCASE_BASE_KEY] ?? DEFAULT_WIDTH_LOWERCASE_BASE;
+      return this._getSourceCustomDataValue(
+        SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY,
+        DEFAULT_DISTRIBUTION
+      );
     }
-    return source?.customData?.[SKELETON_WIDTH_CAPITAL_BASE_KEY] ?? DEFAULT_WIDTH_CAPITAL_BASE;
+    return this._getSourceCustomDataValue(
+      SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY,
+      DEFAULT_DISTRIBUTION
+    );
+  }
+
+  _getDefaultSkeletonCapDefaults() {
+    return {
+      capRadiusRatio: this._getSourceCustomDataValue(
+        SKELETON_CAP_RADIUS_RATIO_KEY,
+        DEFAULT_CAP_RADIUS_RATIO
+      ),
+      capTension: this._getSourceCustomDataValue(
+        SKELETON_CAP_TENSION_KEY,
+        DEFAULT_CAP_TENSION
+      ),
+      capAngle: this._getSourceCustomDataValue(
+        SKELETON_CAP_ANGLE_KEY,
+        DEFAULT_CAP_ANGLE
+      ),
+      capDistance: this._getSourceCustomDataValue(
+        SKELETON_CAP_DISTANCE_KEY,
+        DEFAULT_CAP_DISTANCE
+      ),
+    };
+  }
+
+  _applyDefaultDistributionToPoint(point, contour, fallbackWidth) {
+    const distribution = contour.defaultDistribution;
+    if (!Number.isFinite(distribution) || Math.abs(distribution) < 1e-6) {
+      return;
+    }
+    const clamped = Math.max(-100, Math.min(100, distribution));
+    const totalWidth = contour.defaultWidth ?? fallbackWidth;
+    const left = totalWidth * (0.5 + clamped / 200);
+    const right = totalWidth - left;
+    point.leftWidth = left;
+    point.rightWidth = right;
   }
 
   _insertHandlesEqual(a, b) {
@@ -1132,23 +1196,34 @@ export class SkeletonPenTool extends BaseTool {
         }
 
         // Add point to skeleton
-        if (!creatingNewContour && targetContourIndex < skeletonData.contours.length) {
-          const contour = skeletonData.contours[targetContourIndex];
-          if (insertAtEnd) {
-            contour.points.push({ ...newOnCurve });
-            newPointIndex = contour.points.length - 1;
+          if (!creatingNewContour && targetContourIndex < skeletonData.contours.length) {
+            const contour = skeletonData.contours[targetContourIndex];
+            const fallbackWidth = this._getDefaultSkeletonWidth(skeletonData);
+            const newPoint = { ...newOnCurve };
+            this._applyDefaultDistributionToPoint(newPoint, contour, fallbackWidth);
+            if (insertAtEnd) {
+              contour.points.push(newPoint);
+              newPointIndex = contour.points.length - 1;
+            } else {
+              contour.points.unshift(newPoint);
+              newPointIndex = 0;
+            }
           } else {
-            contour.points.unshift({ ...newOnCurve });
+            // Create new contour with default width from source
+            const defaultWidth = this._getDefaultSkeletonWidth(skeletonData);
+            const newContour = createSkeletonContour(false, defaultWidth);
+            const capDefaults = this._getDefaultSkeletonCapDefaults();
+            newContour.capRadiusRatio = capDefaults.capRadiusRatio;
+            newContour.capTension = capDefaults.capTension;
+            newContour.capAngle = capDefaults.capAngle;
+            newContour.capDistance = capDefaults.capDistance;
+            newContour.defaultDistribution = this._getDefaultSkeletonDistribution();
+            const newPoint = { ...newOnCurve };
+            this._applyDefaultDistributionToPoint(newPoint, newContour, defaultWidth);
+            newContour.points.push(newPoint);
+            skeletonData.contours.push(newContour);
             newPointIndex = 0;
           }
-        } else {
-          // Create new contour with default width from source
-          const defaultWidth = this._getDefaultSkeletonWidth(skeletonData);
-          const newContour = createSkeletonContour(false, defaultWidth);
-          newContour.points.push({ ...newOnCurve });
-          skeletonData.contours.push(newContour);
-          newPointIndex = 0;
-        }
 
         layersData[editLayerName] = { layer, skeletonData };
       }

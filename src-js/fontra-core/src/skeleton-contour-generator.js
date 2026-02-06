@@ -2409,6 +2409,7 @@ export function createSkeletonContour(isClosed = false, defaultWidth = DEFAULT_W
     capStyle: "butt",
     capAngle: DEFAULT_CAP_ANGLE,
     capDistance: 0,
+    defaultDistribution: 0,
   };
 }
 

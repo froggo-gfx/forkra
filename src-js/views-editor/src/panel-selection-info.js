@@ -23,6 +23,39 @@ import { Form } from "@fontra/web-components/ui-form.js";
 import { moveSkeletonData } from "@fontra/core/skeleton-contour-generator.js";
 import Panel from "./panel.js";
 
+const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
+const SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY = "fontra.skeleton.capitalHorizontal";
+const SKELETON_WIDTH_CAPITAL_CONTRAST_KEY = "fontra.skeleton.capitalContrast";
+const SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY = "fontra.skeleton.capitalDistribution";
+const SKELETON_WIDTH_LOWERCASE_BASE_KEY = "fontra.skeleton.lowercaseBase";
+const SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY = "fontra.skeleton.lowercaseHorizontal";
+const SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY = "fontra.skeleton.lowercaseContrast";
+const SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY = "fontra.skeleton.lowercaseDistribution";
+
+const SKELETON_CAP_RADIUS_RATIO_KEY = "fontra.skeleton.capRadiusRatio";
+const SKELETON_CAP_TENSION_KEY = "fontra.skeleton.capTension";
+const SKELETON_CAP_ANGLE_KEY = "fontra.skeleton.capAngle";
+const SKELETON_CAP_DISTANCE_KEY = "fontra.skeleton.capDistance";
+
+const DEFAULT_WIDTH_CAPITAL_BASE = 60;
+const DEFAULT_WIDTH_CAPITAL_HORIZONTAL = 50;
+const DEFAULT_WIDTH_CAPITAL_CONTRAST = 40;
+const DEFAULT_WIDTH_LOWERCASE_BASE = 60;
+const DEFAULT_WIDTH_LOWERCASE_HORIZONTAL = 50;
+const DEFAULT_WIDTH_LOWERCASE_CONTRAST = 40;
+const DEFAULT_DISTRIBUTION = 0;
+
+const DEFAULT_CAP_RADIUS_RATIO = 1 / 8;
+const DEFAULT_CAP_TENSION = 0.55;
+const DEFAULT_CAP_ANGLE = 0;
+const DEFAULT_CAP_DISTANCE = 0;
+const CAP_RADIUS_MIN = 1 / 128;
+const CAP_RADIUS_MAX = 1 / 4;
+const CAP_ANGLE_MIN = -85;
+const CAP_ANGLE_MAX = 85;
+const DISTRIBUTION_MIN = -100;
+const DISTRIBUTION_MAX = 100;
+
 export default class SelectionInfoPanel extends Panel {
   identifier = "selection-info";
   iconPath = "/images/info.svg";
@@ -114,6 +147,39 @@ export default class SelectionInfoPanel extends Panel {
         translate("sidebar.selection-info.multi-source")
       ),
     ];
+  }
+
+  _getSourceCustomDataValue(key, fallback) {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return fallback;
+    const source = this.fontController.sources[sourceIdentifier];
+    return source?.customData?.[key] ?? fallback;
+  }
+
+  async _setSourceCustomDataValue(key, value) {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return;
+
+    const root = { sources: this.fontController.sources };
+    const changes = recordChanges(root, (r) => {
+      if (!r.sources[sourceIdentifier].customData) {
+        r.sources[sourceIdentifier].customData = {};
+      }
+      r.sources[sourceIdentifier].customData[key] = value;
+    });
+
+    if (changes.hasChange) {
+      await this.fontController.postChange(
+        changes.change,
+        changes.rollbackChange,
+        "Set skeleton defaults"
+      );
+    }
+  }
+
+  _clampNumber(value, minValue, maxValue) {
+    if (!Number.isFinite(value)) return minValue;
+    return Math.max(minValue, Math.min(maxValue, value));
   }
 
   async update(senderInfo) {
@@ -214,6 +280,7 @@ export default class SelectionInfoPanel extends Panel {
           value: baseCodePointsStr,
         });
       }
+
       if (instance) {
         formContents.push({
           type: "edit-number",
@@ -385,10 +452,10 @@ export default class SelectionInfoPanel extends Panel {
       );
     }
 
-    for (const index of componentIndices) {
-      if (!instance) {
-        break;
-      }
+      for (const index of componentIndices) {
+        if (!instance) {
+          break;
+        }
       const component = instance.components[index];
       if (!component) {
         // Invalid selection
@@ -425,10 +492,10 @@ export default class SelectionInfoPanel extends Panel {
 
       const baseGlyph = await this.fontController.getGlyph(component.name);
 
-      if (baseGlyph) {
-        const showGlobalAxes =
-          this.sceneController.applicationSettings
-            .alwaysShowGlobalAxesInComponentLocation;
+          if (baseGlyph) {
+            const showGlobalAxes =
+              this.sceneController.applicationSettings
+                .alwaysShowGlobalAxesInComponentLocation;
 
         const fontAxisNames = baseGlyph.continuousFontAxisNames;
         const selectedFontAxisNames = [...fontAxisNames].filter(
@@ -518,10 +585,242 @@ export default class SelectionInfoPanel extends Panel {
               ]
             ),
           });
-          formContents.push(...locationItems);
+            formContents.push(...locationItems);
+          }
         }
       }
-    }
+
+      const canEditSource = !!this.sceneController.editingLayerNames?.[0];
+      const setSourceValue = async (key, value) => {
+        await this._setSourceCustomDataValue(key, value);
+        await this.update();
+      };
+
+      formContents.push({ type: "divider" });
+      formContents.push({
+        type: "header",
+        label: "Skeleton Defaults",
+      });
+
+      formContents.push({
+        type: "header",
+        label: "Widths: Uppercase",
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonCapitalBase",
+        label: "Base",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_CAPITAL_BASE_KEY,
+          DEFAULT_WIDTH_CAPITAL_BASE
+        ),
+        minValue: 1,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), 1, Number.MAX_SAFE_INTEGER);
+          await setSourceValue(SKELETON_WIDTH_CAPITAL_BASE_KEY, value);
+        },
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonCapitalHorizontal",
+        label: "Horizontal",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY,
+          DEFAULT_WIDTH_CAPITAL_HORIZONTAL
+        ),
+        minValue: 1,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), 1, Number.MAX_SAFE_INTEGER);
+          await setSourceValue(SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY, value);
+        },
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonCapitalContrast",
+        label: "Contrast",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_CAPITAL_CONTRAST_KEY,
+          DEFAULT_WIDTH_CAPITAL_CONTRAST
+        ),
+        minValue: 1,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), 1, Number.MAX_SAFE_INTEGER);
+          await setSourceValue(SKELETON_WIDTH_CAPITAL_CONTRAST_KEY, value);
+        },
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonCapitalDistribution",
+        label: "Distribution",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY,
+          DEFAULT_DISTRIBUTION
+        ),
+        minValue: DISTRIBUTION_MIN,
+        maxValue: DISTRIBUTION_MAX,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(
+            Number(rawValue),
+            DISTRIBUTION_MIN,
+            DISTRIBUTION_MAX
+          );
+          await setSourceValue(SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY, value);
+        },
+      });
+
+      formContents.push({
+        type: "header",
+        label: "Widths: Lowercase",
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonLowercaseBase",
+        label: "Base",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_LOWERCASE_BASE_KEY,
+          DEFAULT_WIDTH_LOWERCASE_BASE
+        ),
+        minValue: 1,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), 1, Number.MAX_SAFE_INTEGER);
+          await setSourceValue(SKELETON_WIDTH_LOWERCASE_BASE_KEY, value);
+        },
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonLowercaseHorizontal",
+        label: "Horizontal",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY,
+          DEFAULT_WIDTH_LOWERCASE_HORIZONTAL
+        ),
+        minValue: 1,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), 1, Number.MAX_SAFE_INTEGER);
+          await setSourceValue(SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY, value);
+        },
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonLowercaseContrast",
+        label: "Contrast",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY,
+          DEFAULT_WIDTH_LOWERCASE_CONTRAST
+        ),
+        minValue: 1,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), 1, Number.MAX_SAFE_INTEGER);
+          await setSourceValue(SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY, value);
+        },
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonLowercaseDistribution",
+        label: "Distribution",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY,
+          DEFAULT_DISTRIBUTION
+        ),
+        minValue: DISTRIBUTION_MIN,
+        maxValue: DISTRIBUTION_MAX,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(
+            Number(rawValue),
+            DISTRIBUTION_MIN,
+            DISTRIBUTION_MAX
+          );
+          await setSourceValue(SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY, value);
+        },
+      });
+
+      formContents.push({
+        type: "header",
+        label: "Cap Styles: Square",
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonCapAngle",
+        label: "Angle",
+        value: this._getSourceCustomDataValue(
+          SKELETON_CAP_ANGLE_KEY,
+          DEFAULT_CAP_ANGLE
+        ),
+        minValue: CAP_ANGLE_MIN,
+        maxValue: CAP_ANGLE_MAX,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), CAP_ANGLE_MIN, CAP_ANGLE_MAX);
+          await setSourceValue(SKELETON_CAP_ANGLE_KEY, value);
+        },
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonCapDistance",
+        label: "Distance",
+        value: this._getSourceCustomDataValue(
+          SKELETON_CAP_DISTANCE_KEY,
+          DEFAULT_CAP_DISTANCE
+        ),
+        minValue: 0,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), 0, Number.MAX_SAFE_INTEGER);
+          await setSourceValue(SKELETON_CAP_DISTANCE_KEY, value);
+        },
+      });
+
+      formContents.push({
+        type: "header",
+        label: "Cap Styles: Rounded",
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonCapRadiusRatio",
+        label: "Radius",
+        value: this._getSourceCustomDataValue(
+          SKELETON_CAP_RADIUS_RATIO_KEY,
+          DEFAULT_CAP_RADIUS_RATIO
+        ),
+        numDigits: 4,
+        minValue: CAP_RADIUS_MIN,
+        maxValue: CAP_RADIUS_MAX,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(
+            Number(rawValue),
+            CAP_RADIUS_MIN,
+            CAP_RADIUS_MAX
+          );
+          await setSourceValue(SKELETON_CAP_RADIUS_RATIO_KEY, value);
+        },
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonCapTension",
+        label: "Tension",
+        value: Math.round(
+          this._getSourceCustomDataValue(
+            SKELETON_CAP_TENSION_KEY,
+            DEFAULT_CAP_TENSION
+          ) * 100
+        ),
+        minValue: 0,
+        maxValue: 100,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const percent = this._clampNumber(Number(rawValue), 0, 100);
+          await setSourceValue(SKELETON_CAP_TENSION_KEY, percent / 100);
+        },
+      });
 
     this._formFieldsByKey = {};
     for (const field of formContents) {
@@ -761,7 +1060,10 @@ export default class SelectionInfoPanel extends Panel {
     this.infoForm.onFieldChange = async (fieldItem, value, valueStream) => {
       if (fieldItem.setValuePlain) {
         assert(!valueStream, "unexpected valueStream");
-        fieldItem.setValuePlain(fieldItem, value);
+        const result = fieldItem.setValuePlain(fieldItem, value);
+        if (result && typeof result.then === "function") {
+          await result;
+        }
       } else {
         await this._onFieldChangeForGlyph(
           glyphName,
