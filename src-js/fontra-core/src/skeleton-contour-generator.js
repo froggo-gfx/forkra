@@ -881,6 +881,8 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
             vector.rotateVector90CW(endTangent)
           );
           let capDir = vector.normalizeVector(endNormal); // right -> left
+          // For end caps, flip direction so shelf shifts inward
+          capDir = { x: -capDir.x, y: -capDir.y }; // left -> right
           let tOut = endTangent;
           let tIn = { x: -tOut.x, y: -tOut.y };
 
