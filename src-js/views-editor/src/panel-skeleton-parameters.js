@@ -658,22 +658,55 @@ export default class SkeletonParametersPanel extends Panel {
     });
 
     // Apply Scale button
-    formContents.push({
-      type: "header",
-      label: "",
-      auxiliaryElement: html.button(
-        {
-          onclick: () => this._applyScaleToSelectedPoints(),
-          style: "padding: 2px 8px; cursor: pointer;",
-        },
-        "Apply Scale"
-      ),
-    });
+      formContents.push({
+        type: "header",
+        label: "",
+        auxiliaryElement: html.button(
+          {
+            onclick: () => this._applyScaleToSelectedPoints(),
+            style: "padding: 2px 8px; cursor: pointer;",
+          },
+          "Apply Scale"
+        ),
+      });
 
-    // === EDITABLE RIB POINTS ===
-    // Only show when rib points are selected (not just skeleton points)
-    if (selectedRibSides.size > 0) {
-      formContents.push({ type: "spacer" });
+      const handleUIState = this._getHandleUiState(selectedData, selectedRibSides);
+      if (handleUIState.show) {
+        const handleRow = html.span(
+          {
+            style:
+              "display: flex; align-items: center; gap: 0.25rem; width: 100%; flex-wrap: nowrap;",
+          },
+          [
+            handleUIState.inInput,
+            html.span({ style: "opacity: 0.6;" }, "•"),
+            handleUIState.outInput,
+            html.span({ style: "opacity: 0.6;" }, "@"),
+            handleUIState.angleInput,
+          ]
+        );
+
+        formContents.push({
+          type: "universal-row",
+          label: "Handles",
+          field1: {
+            type: "auxiliaryElement",
+            key: "handleInputsSpacer",
+            auxiliaryElement: html.span({}),
+          },
+          field2: {
+            type: "auxiliaryElement",
+            key: "handleInputs",
+            auxiliaryElement: handleRow,
+          },
+          field3: { type: "spacer" },
+        });
+      }
+
+      // === EDITABLE RIB POINTS ===
+      // Only show when rib points are selected (not just skeleton points)
+      if (selectedRibSides.size > 0) {
+        formContents.push({ type: "spacer" });
 
       const isEditable = editableStates.has(true) && editableStates.size === 1;
       const isEditableIndeterminate = editableStates.size > 1;
@@ -1307,6 +1340,698 @@ export default class SkeletonParametersPanel extends Panel {
     return this._getSourceWidth(key, fallback);
   }
 
+  _getAdjacentHandleIndices(contour, pointIdx) {
+    if (!contour) return { inIndex: null, outIndex: null };
+    const points = contour.points;
+    const count = points.length;
+    if (count === 0) return { inIndex: null, outIndex: null };
+    const isClosed = contour.isClosed;
+
+    const prevIdx = pointIdx - 1;
+    const nextIdx = pointIdx + 1;
+    const inIndex =
+      prevIdx >= 0
+        ? prevIdx
+        : isClosed
+          ? count - 1
+          : null;
+    const outIndex =
+      nextIdx < count
+        ? nextIdx
+        : isClosed
+          ? 0
+          : null;
+
+    const inHandleIndex =
+      inIndex !== null && points[inIndex]?.type ? inIndex : null;
+    const outHandleIndex =
+      outIndex !== null && points[outIndex]?.type ? outIndex : null;
+
+    return { inIndex: inHandleIndex, outIndex: outHandleIndex };
+  }
+
+  _getHandleValuesForPoint(contour, pointIdx) {
+    const anchor = contour?.points?.[pointIdx];
+    if (!anchor || anchor.type) {
+      return null;
+    }
+    const { inIndex, outIndex } = this._getAdjacentHandleIndices(contour, pointIdx);
+    let inLen = null;
+    let outLen = null;
+    let inAngle = null;
+    let outAngle = null;
+
+    if (inIndex !== null) {
+      const handle = contour.points[inIndex];
+      const dx = handle.x - anchor.x;
+      const dy = handle.y - anchor.y;
+      inLen = Math.hypot(dx, dy);
+      inAngle = this._normalizeAngleDegrees((Math.atan2(dy, dx) * 180) / Math.PI);
+    }
+    if (outIndex !== null) {
+      const handle = contour.points[outIndex];
+      const dx = handle.x - anchor.x;
+      const dy = handle.y - anchor.y;
+      outLen = Math.hypot(dx, dy);
+      outAngle = this._normalizeAngleDegrees((Math.atan2(dy, dx) * 180) / Math.PI);
+    }
+
+    const handleCount = (inIndex !== null ? 1 : 0) + (outIndex !== null ? 1 : 0);
+    const angle = outAngle !== null ? outAngle : inAngle;
+
+    return {
+      inIndex,
+      outIndex,
+      inLen,
+      outLen,
+      angle,
+      handleCount,
+    };
+  }
+
+  _getHandleUiState(selectedData, selectedRibSides) {
+    if (!selectedData || !selectedData.points.length) {
+      return { show: false };
+    }
+
+    if (selectedRibSides.size > 0) {
+      return this._getRibHandleUiState(selectedData, selectedRibSides);
+    }
+
+    return this._getSkeletonHandleUiState(selectedData);
+  }
+
+  _getSkeletonHandleUiState(selectedData) {
+    const round1 = (value) => Math.round(value * 10) / 10;
+
+    const inValues = [];
+    const outValues = [];
+    const angleValues = [];
+    let hasIn = false;
+    let hasOut = false;
+    let hasHandles = false;
+    let angleEligible = true;
+
+    for (const { contourIdx, pointIdx, point } of selectedData.points) {
+      const contour = selectedData.skeletonData?.contours?.[contourIdx];
+      if (!contour) continue;
+      const handleInfo = this._getHandleValuesForPoint(contour, pointIdx);
+      if (!handleInfo || handleInfo.handleCount === 0) {
+        continue;
+      }
+      hasHandles = true;
+      if (handleInfo.inLen !== null) {
+        hasIn = true;
+        inValues.push(round1(handleInfo.inLen));
+      }
+      if (handleInfo.outLen !== null) {
+        hasOut = true;
+        outValues.push(round1(handleInfo.outLen));
+      }
+      if (handleInfo.angle !== null) {
+        angleValues.push(round1(handleInfo.angle));
+      }
+      if (!(point.smooth || handleInfo.handleCount === 1)) {
+        angleEligible = false;
+      }
+    }
+
+    if (!hasHandles) {
+      return { show: false };
+    }
+
+    const angleDisabled = !angleEligible;
+
+    const resolveValue = (values, requireAll, totalCount) => {
+      if (!values.length) {
+        return { value: "", mixed: false, disabled: true };
+      }
+      if (requireAll && values.length !== totalCount) {
+        return { value: "", mixed: true, disabled: false };
+      }
+      const allSame = values.every((v) => v === values[0]);
+      if (!allSame) {
+        return { value: "", mixed: true, disabled: false };
+      }
+      return { value: values[0], mixed: false, disabled: false };
+    };
+
+    const handlePointCount = selectedData.points.length;
+    const inState = resolveValue(inValues, true, handlePointCount);
+    const outState = resolveValue(outValues, true, handlePointCount);
+    const angleState = resolveValue(angleValues, true, handlePointCount);
+
+    const inputStyle = "flex: 1 1 0; min-width: 0; width: 4em;";
+
+    const inInput = html.input({
+      type: "number",
+      value: inState.mixed ? "" : inState.value,
+      placeholder: inState.mixed ? "mixed" : hasIn ? "" : "-",
+      disabled: inState.disabled || !hasIn,
+      style: inputStyle,
+      onchange: async (event) => {
+        const value = parseFloat(event.target.value);
+        if (!Number.isFinite(value)) return;
+        await this._setSkeletonHandleLength("in", value);
+        this.update();
+      },
+    });
+
+    const outInput = html.input({
+      type: "number",
+      value: outState.mixed ? "" : outState.value,
+      placeholder: outState.mixed ? "mixed" : hasOut ? "" : "-",
+      disabled: outState.disabled || !hasOut,
+      style: inputStyle,
+      onchange: async (event) => {
+        const value = parseFloat(event.target.value);
+        if (!Number.isFinite(value)) return;
+        await this._setSkeletonHandleLength("out", value);
+        this.update();
+      },
+    });
+
+    const angleInput = html.input({
+      type: "number",
+      value: angleState.mixed ? "" : angleState.value,
+      placeholder: angleState.mixed ? "mixed" : "",
+      disabled: angleDisabled,
+      style: inputStyle,
+      min: 0,
+      max: 90,
+      onchange: async (event) => {
+        const value = parseFloat(event.target.value);
+        if (!Number.isFinite(value)) return;
+        if (angleDisabled) return;
+        await this._setSkeletonHandleAngle(value);
+        this.update();
+      },
+    });
+
+    return {
+      show: true,
+      inInput,
+      outInput,
+      angleInput,
+    };
+  }
+
+  _getRibHandleUiState(selectedData, selectedRibSides) {
+    const round1 = (value) => Math.round(value * 10) / 10;
+    const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
+    const defaultWidth = this._getSourceWidth(widthKey, widthFallback);
+
+    const contours = generateContoursFromSkeleton(selectedData.skeletonData);
+    const path = VarPackedPath.fromUnpackedContours(contours);
+
+    const inValues = [];
+    const outValues = [];
+    const angleValues = [];
+    let hasIn = true;
+    let hasOut = true;
+    let hasHandles = false;
+
+    for (const key of selectedRibSides) {
+      const parts = key.split("/");
+      const contourIdx = Number(parts[0]);
+      const pointIdx = Number(parts[1]);
+      const side = parts[2];
+      const contour = selectedData.skeletonData?.contours?.[contourIdx];
+      if (!contour) continue;
+
+      const ribPoint = this._getRibPointPosition(contour, pointIdx, side, defaultWidth);
+      const handlePositions = this._findHandlePositionsForRibPoint(path, ribPoint, side);
+      if (!handlePositions || (!handlePositions.in && !handlePositions.out)) {
+        hasIn = false;
+        hasOut = false;
+        continue;
+      }
+      hasHandles = true;
+
+      if (handlePositions.in) {
+        const dx = handlePositions.in.x - ribPoint.x;
+        const dy = handlePositions.in.y - ribPoint.y;
+        inValues.push(round1(Math.hypot(dx, dy)));
+        angleValues.push(round1(this._normalizeAngleDegrees((Math.atan2(dy, dx) * 180) / Math.PI)));
+      } else {
+        hasIn = false;
+      }
+      if (handlePositions.out) {
+        const dx = handlePositions.out.x - ribPoint.x;
+        const dy = handlePositions.out.y - ribPoint.y;
+        outValues.push(round1(Math.hypot(dx, dy)));
+        angleValues.push(round1(this._normalizeAngleDegrees((Math.atan2(dy, dx) * 180) / Math.PI)));
+      } else {
+        hasOut = false;
+      }
+    }
+
+    if (!hasHandles) {
+      return { show: false };
+    }
+
+    const resolveValue = (values, requireAll, totalCount) => {
+      if (!values.length) {
+        return { value: "", mixed: false, disabled: true };
+      }
+      if (requireAll && values.length !== totalCount) {
+        return { value: "", mixed: true, disabled: false };
+      }
+      const allSame = values.every((v) => v === values[0]);
+      if (!allSame) {
+        return { value: "", mixed: true, disabled: false };
+      }
+      return { value: values[0], mixed: false, disabled: false };
+    };
+
+    const targetCount = selectedRibSides.size;
+    const inState = resolveValue(inValues, true, targetCount);
+    const outState = resolveValue(outValues, true, targetCount);
+    const angleState = resolveValue(angleValues, true, targetCount);
+
+    const inputStyle = "flex: 1 1 0; min-width: 0; width: 4em;";
+
+    const inInput = html.input({
+      type: "number",
+      value: inState.mixed ? "" : inState.value,
+      placeholder: inState.mixed ? "mixed" : hasIn ? "" : "-",
+      disabled: inState.disabled || !hasIn,
+      style: inputStyle,
+      onchange: async (event) => {
+        const value = parseFloat(event.target.value);
+        if (!Number.isFinite(value)) return;
+        await this._setRibHandleLength("in", value);
+        this.update();
+      },
+    });
+
+    const outInput = html.input({
+      type: "number",
+      value: outState.mixed ? "" : outState.value,
+      placeholder: outState.mixed ? "mixed" : hasOut ? "" : "-",
+      disabled: outState.disabled || !hasOut,
+      style: inputStyle,
+      onchange: async (event) => {
+        const value = parseFloat(event.target.value);
+        if (!Number.isFinite(value)) return;
+        await this._setRibHandleLength("out", value);
+        this.update();
+      },
+    });
+
+    const angleInput = html.input({
+      type: "number",
+      value: angleState.mixed ? "" : angleState.value,
+      placeholder: angleState.mixed ? "mixed" : "",
+      disabled: true,
+      style: inputStyle,
+      min: 0,
+      max: 90,
+    });
+
+    return {
+      show: true,
+      inInput,
+      outInput,
+      angleInput,
+    };
+  }
+
+  _getHandleDirection(anchor, handle, fallbackDir = null) {
+    const dx = handle.x - anchor.x;
+    const dy = handle.y - anchor.y;
+    const len = Math.hypot(dx, dy);
+    if (len > 1e-6) {
+      return { x: dx / len, y: dy / len };
+    }
+    return fallbackDir;
+  }
+
+  _normalizeAngleDegrees(angleDeg) {
+    if (!Number.isFinite(angleDeg)) return 0;
+    let angle = Math.abs(angleDeg) % 180;
+    if (angle > 90) {
+      angle = 180 - angle;
+    }
+    return angle;
+  }
+
+  _getRibPointPosition(contour, pointIdx, side, defaultWidth) {
+    const point = contour?.points?.[pointIdx];
+    if (!point) return null;
+    const normal = calculateNormalAtSkeletonPoint(contour, pointIdx);
+    const tangent = { x: -normal.y, y: normal.x };
+    let halfWidth = getPointHalfWidth(point, defaultWidth, side);
+    if (contour.singleSided && contour.singleSidedDirection === side) {
+      const leftHW = getPointHalfWidth(point, defaultWidth, "left");
+      const rightHW = getPointHalfWidth(point, defaultWidth, "right");
+      halfWidth = leftHW + rightHW;
+    }
+    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+    const nudge = point[nudgeKey] || 0;
+    const sign = side === "left" ? 1 : -1;
+    return {
+      x: Math.round(point.x + sign * normal.x * halfWidth + tangent.x * nudge),
+      y: Math.round(point.y + sign * normal.y * halfWidth + tangent.y * nudge),
+    };
+  }
+
+  _clearRibHandleOffsets(point, side) {
+    const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+    const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+    const handleInOffsetXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+    const handleInOffsetYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+    const handleOutOffsetXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+    const handleOutOffsetYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+    delete point[handleInOffsetKey];
+    delete point[handleOutOffsetKey];
+    delete point[handleInOffsetXKey];
+    delete point[handleInOffsetYKey];
+    delete point[handleOutOffsetXKey];
+    delete point[handleOutOffsetYKey];
+  }
+
+  _setRibHandleOffset(point, side, handleType, offset) {
+    const offsetXKey =
+      side === "left"
+        ? (handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+        : (handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+    const offsetYKey =
+      side === "left"
+        ? (handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+        : (handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+    const offset1DKey =
+      side === "left"
+        ? (handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
+        : (handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
+    point[offsetXKey] = Math.round(offset.x);
+    point[offsetYKey] = Math.round(offset.y);
+    delete point[offset1DKey];
+  }
+
+  async _setSkeletonHandleLength(handleKind, length) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) return;
+    const clamped = Math.max(0, length);
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+        let changed = false;
+
+        for (const { contourIdx, pointIdx, point } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const anchor = contour.points[pointIdx];
+          if (!anchor || anchor.type) continue;
+
+          const { inIndex, outIndex } = this._getAdjacentHandleIndices(contour, pointIdx);
+          const inHandle = inIndex !== null ? contour.points[inIndex] : null;
+          const outHandle = outIndex !== null ? contour.points[outIndex] : null;
+
+          let dirOut = null;
+          let dirIn = null;
+          if (outHandle) {
+            dirOut = this._getHandleDirection(anchor, outHandle, null);
+          }
+          if (inHandle) {
+            dirIn = this._getHandleDirection(anchor, inHandle, null);
+          }
+          if (point.smooth && dirOut && !dirIn) {
+            dirIn = { x: -dirOut.x, y: -dirOut.y };
+          }
+          if (point.smooth && dirIn && !dirOut) {
+            dirOut = { x: -dirIn.x, y: -dirIn.y };
+          }
+
+          if (handleKind === "in" && inHandle && dirIn) {
+            inHandle.x = anchor.x + dirIn.x * clamped;
+            inHandle.y = anchor.y + dirIn.y * clamped;
+            changed = true;
+          } else if (handleKind === "out" && outHandle && dirOut) {
+            outHandle.x = anchor.x + dirOut.x * clamped;
+            outHandle.y = anchor.y + dirOut.y * clamped;
+            changed = true;
+          }
+        }
+
+        if (!changed) continue;
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Set handle length",
+        broadcast: true,
+      };
+    });
+  }
+
+  async _setRibHandleLength(handleKind, length) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) return;
+    const selectedRibSides = this._getSelectedRibSides();
+    if (!selectedRibSides.size) return;
+    const clamped = Math.max(0, length);
+
+    const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
+    const defaultWidth = this._getSourceWidth(widthKey, widthFallback);
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+        const baseSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+        for (const key of selectedRibSides) {
+          const parts = key.split("/");
+          const contourIdx = Number(parts[0]);
+          const pointIdx = Number(parts[1]);
+          const side = parts[2];
+          const contour = baseSkeletonData.contours?.[contourIdx];
+          const point = contour?.points?.[pointIdx];
+          if (!point) continue;
+          this._clearRibHandleOffsets(point, side);
+          const detachedKey = side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+          delete point[detachedKey];
+        }
+
+        const currentContours = generateContoursFromSkeleton(skeletonData);
+        const currentPath = VarPackedPath.fromUnpackedContours(currentContours);
+        const baseContours = generateContoursFromSkeleton(baseSkeletonData);
+        const basePath = VarPackedPath.fromUnpackedContours(baseContours);
+
+        let changed = false;
+
+        for (const key of selectedRibSides) {
+          const parts = key.split("/");
+          const contourIdx = Number(parts[0]);
+          const pointIdx = Number(parts[1]);
+          const side = parts[2];
+          const contour = skeletonData.contours?.[contourIdx];
+          const point = contour?.points?.[pointIdx];
+          if (!contour || !point) continue;
+          const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+          if (!point[editableKey]) continue;
+
+          const ribPoint = this._getRibPointPosition(contour, pointIdx, side, defaultWidth);
+          if (!ribPoint) continue;
+
+          const handlePositions = this._findHandlePositionsForRibPoint(
+            currentPath,
+            ribPoint,
+            side
+          );
+          if (!handlePositions || !handlePositions[handleKind]) continue;
+
+          const baseHandlePositions = this._findHandlePositionsForRibPoint(
+            basePath,
+            ribPoint,
+            side
+          );
+          const baseHandle = baseHandlePositions?.[handleKind];
+
+          const currentHandle = handlePositions[handleKind];
+          let dirX = currentHandle.x - ribPoint.x;
+          let dirY = currentHandle.y - ribPoint.y;
+          const dirLen = Math.hypot(dirX, dirY);
+          if (dirLen < 1e-6 && baseHandle) {
+            dirX = baseHandle.x - ribPoint.x;
+            dirY = baseHandle.y - ribPoint.y;
+          }
+          const finalLen = Math.hypot(dirX, dirY);
+          if (finalLen < 1e-6) continue;
+          dirX /= finalLen;
+          dirY /= finalLen;
+
+          const desiredPos = {
+            x: ribPoint.x + dirX * clamped,
+            y: ribPoint.y + dirY * clamped,
+          };
+
+          const detachedKey = side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+          const isDetached = !!point[detachedKey];
+
+          if (isDetached) {
+            const offset = {
+              x: desiredPos.x - ribPoint.x,
+              y: desiredPos.y - ribPoint.y,
+            };
+            this._setRibHandleOffset(point, side, handleKind, offset);
+          } else if (baseHandle) {
+            const offset = {
+              x: desiredPos.x - baseHandle.x,
+              y: desiredPos.y - baseHandle.y,
+            };
+            this._setRibHandleOffset(point, side, handleKind, offset);
+          }
+
+          changed = true;
+        }
+
+        if (!changed) continue;
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Set rib handle length",
+        broadcast: true,
+      };
+    });
+  }
+
+  async _setSkeletonHandleAngle(angleDeg) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) return;
+    const clampedAngle = Math.max(0, Math.min(90, Math.abs(angleDeg)));
+    const angleRad = (clampedAngle * Math.PI) / 180;
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+        let changed = false;
+
+        for (const { contourIdx, pointIdx, point } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const anchor = contour.points[pointIdx];
+          if (!anchor || anchor.type) continue;
+
+          const { inIndex, outIndex } = this._getAdjacentHandleIndices(contour, pointIdx);
+          const inHandle = inIndex !== null ? contour.points[inIndex] : null;
+          const outHandle = outIndex !== null ? contour.points[outIndex] : null;
+
+          let baseDir = null;
+          if (outHandle) {
+            baseDir = this._getHandleDirection(anchor, outHandle, baseDir);
+          }
+          if (!baseDir && inHandle) {
+            baseDir = this._getHandleDirection(anchor, inHandle, baseDir);
+          }
+          const signX = baseDir ? (Math.sign(baseDir.x) || 1) : 1;
+          const signY = baseDir ? (Math.sign(baseDir.y) || 1) : 1;
+          const dir = { x: Math.cos(angleRad) * signX, y: Math.sin(angleRad) * signY };
+
+          const outLen = outHandle
+            ? Math.hypot(outHandle.x - anchor.x, outHandle.y - anchor.y)
+            : null;
+          const inLen = inHandle
+            ? Math.hypot(inHandle.x - anchor.x, inHandle.y - anchor.y)
+            : null;
+
+          if (outHandle && outLen !== null) {
+            outHandle.x = anchor.x + dir.x * outLen;
+            outHandle.y = anchor.y + dir.y * outLen;
+            changed = true;
+          }
+
+          if (inHandle && inLen !== null) {
+            const useOpposite =
+              point.smooth && outHandle && outLen !== null;
+            const inDir = useOpposite ? { x: -dir.x, y: -dir.y } : dir;
+            inHandle.x = anchor.x + inDir.x * inLen;
+            inHandle.y = anchor.y + inDir.y * inLen;
+            changed = true;
+          }
+        }
+
+        if (!changed) continue;
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Set handle angle",
+        broadcast: true,
+      };
+    });
+  }
   async _setSourceCustomDataValues(values, undoLabel) {
     const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
     if (!sourceIdentifier) return;
@@ -2119,13 +2844,13 @@ export default class SkeletonParametersPanel extends Panel {
     const sel = this.sceneController.selection;
     parts.push(`s:${sel ? sel.size : 0}`);
 
-    // Include selected rib sides to distinguish skeleton vs rib selection
-    const selectedRibSides = this._getSelectedRibSides();
-    if (selectedRibSides?.size) {
-      parts.push(`rs:${[...selectedRibSides].sort().join(",")}`);
-    } else {
-      parts.push("rs:");
-    }
+      // Include selected rib sides to distinguish skeleton vs rib selection
+      const selectedRibSides = this._getSelectedRibSides();
+      if (selectedRibSides?.size) {
+        parts.push(`rs:${[...selectedRibSides].sort().join(",")}`);
+      } else {
+        parts.push("rs:");
+      }
 
     // Glyph case
     const glyphCase = this._getGlyphCase();
@@ -2146,14 +2871,49 @@ export default class SkeletonParametersPanel extends Panel {
           const leftNudge = point.leftNudge || 0;
           const rightNudge = point.rightNudge || 0;
           const capStyle = point.capStyle ?? "";
-          const capRadiusRatio = point.capRadiusRatio ?? contour?.capRadiusRatio ?? "";
-          const capTension = point.capTension ?? contour?.capTension ?? "";
-          const capAngle = point.capAngle ?? contour?.capAngle ?? "";
-          const capDistance = point.capDistance ?? contour?.capDistance ?? "";
-          const forceH = point.forceHorizontal ? 1 : 0;
-          const forceV = point.forceVertical ? 1 : 0;
-          parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension},${capAngle},${capDistance},${forceH},${forceV}`);
+            const capRadiusRatio = point.capRadiusRatio ?? contour?.capRadiusRatio ?? "";
+            const capTension = point.capTension ?? contour?.capTension ?? "";
+            const capAngle = point.capAngle ?? contour?.capAngle ?? "";
+            const capDistance = point.capDistance ?? contour?.capDistance ?? "";
+            const forceH = point.forceHorizontal ? 1 : 0;
+            const forceV = point.forceVertical ? 1 : 0;
+            const handleInfo = this._getHandleValuesForPoint(contour, pointIdx);
+            const handleRound = (v) => (v === null || v === undefined ? "" : Math.round(v * 10) / 10);
+            const handleIn = handleRound(handleInfo?.inLen);
+          const handleOut = handleRound(handleInfo?.outLen);
+          const handleAngle = handleRound(handleInfo?.angle);
+          const smoothFlag = point.smooth ? 1 : 0;
+          parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension},${capAngle},${capDistance},${forceH},${forceV},${smoothFlag},${handleIn},${handleOut},${handleAngle}`);
         }
+      }
+
+      if (selectedRibSides?.size) {
+        const ribParts = [];
+        for (const key of selectedRibSides) {
+          const partsKey = key.split("/");
+          const contourIdx = Number(partsKey[0]);
+          const pointIdx = Number(partsKey[1]);
+          const side = partsKey[2];
+          const contour = selectedData?.skeletonData?.contours?.[contourIdx];
+          const point = contour?.points?.[pointIdx];
+          if (!point) continue;
+          const detachedKey = side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+          const inXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+          const inYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+          const outXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+          const outYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+          const in1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+          const out1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+          const detached = point[detachedKey] ? 1 : 0;
+          const inX = point[inXKey] ?? "";
+          const inY = point[inYKey] ?? "";
+          const outX = point[outXKey] ?? "";
+          const outY = point[outYKey] ?? "";
+          const in1D = point[in1DKey] ?? "";
+          const out1D = point[out1DKey] ?? "";
+          ribParts.push(`${key}:${detached},${inX},${inY},${outX},${outY},${in1D},${out1D}`);
+        }
+        parts.push(`rib:${ribParts.join(";")}`);
       }
 
       const confirmPoint = this._confirmState?.point?.pending ? 1 : 0;
