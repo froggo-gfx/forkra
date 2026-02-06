@@ -654,16 +654,15 @@ export default class LetterspacerPanel extends Panel {
         sourceCustomData[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot],
         this.params.overshoot ?? LETTERSPACER_DEFAULTS.overshoot
       );
-      const referenceValue = sourceCustomData[LETTERSPACER_CUSTOM_DATA_KEYS.reference];
-      this.params.referenceGlyph =
-        typeof referenceValue === "string"
-          ? referenceValue
-          : this.params.referenceGlyph ?? LETTERSPACER_DEFAULTS.referenceGlyph;
     } else {
       this.params.overshoot = this.params.overshoot ?? LETTERSPACER_DEFAULTS.overshoot;
-      this.params.referenceGlyph =
-        this.params.referenceGlyph ?? LETTERSPACER_DEFAULTS.referenceGlyph;
     }
+
+    const referenceValue = await this.getGlyphReferenceValue();
+    this.params.referenceGlyph =
+      typeof referenceValue === "string"
+        ? referenceValue
+        : this.params.referenceGlyph ?? LETTERSPACER_DEFAULTS.referenceGlyph;
   }
 
   getCurrentSourceIdentifier() {
@@ -723,10 +722,6 @@ export default class LetterspacerPanel extends Panel {
         customData[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot],
         LETTERSPACER_DEFAULTS.overshoot
       ),
-      referenceGlyph:
-        typeof customData[LETTERSPACER_CUSTOM_DATA_KEYS.reference] === "string"
-          ? customData[LETTERSPACER_CUSTOM_DATA_KEYS.reference]
-          : LETTERSPACER_DEFAULTS.referenceGlyph,
     };
   }
 
@@ -769,8 +764,7 @@ export default class LetterspacerPanel extends Panel {
       source?.customData &&
       LETTERSPACER_CUSTOM_DATA_KEYS.area in source.customData &&
       LETTERSPACER_CUSTOM_DATA_KEYS.depth in source.customData &&
-      LETTERSPACER_CUSTOM_DATA_KEYS.overshoot in source.customData &&
-      LETTERSPACER_CUSTOM_DATA_KEYS.reference in source.customData;
+      LETTERSPACER_CUSTOM_DATA_KEYS.overshoot in source.customData;
     const candidateIds = idsToCheck.filter((id) => hasKeys(sources[id]));
     const missing = {};
     for (const id of idsToCheck) {
@@ -806,23 +800,20 @@ export default class LetterspacerPanel extends Panel {
       const changes = recordChanges(root, (root) => {
         for (const id of missingIds) {
           const source = root.sources[id];
-          const existing = source.customData || {};
-          const next = { ...existing };
-          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.area in next)) {
-            next[LETTERSPACER_CUSTOM_DATA_KEYS.area] = missing[id].area;
-          }
-          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.depth in next)) {
-            next[LETTERSPACER_CUSTOM_DATA_KEYS.depth] = missing[id].depth;
-          }
-          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.overshoot in next)) {
-            next[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot] = missing[id].overshoot;
-          }
-          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.reference in next)) {
-            next[LETTERSPACER_CUSTOM_DATA_KEYS.reference] = missing[id].referenceGlyph;
-          }
-          source.customData = next;
+        const existing = source.customData || {};
+        const next = { ...existing };
+        if (!(LETTERSPACER_CUSTOM_DATA_KEYS.area in next)) {
+          next[LETTERSPACER_CUSTOM_DATA_KEYS.area] = missing[id].area;
         }
-      });
+        if (!(LETTERSPACER_CUSTOM_DATA_KEYS.depth in next)) {
+          next[LETTERSPACER_CUSTOM_DATA_KEYS.depth] = missing[id].depth;
+        }
+        if (!(LETTERSPACER_CUSTOM_DATA_KEYS.overshoot in next)) {
+          next[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot] = missing[id].overshoot;
+        }
+        source.customData = next;
+      }
+    });
       if (changes.hasChange) {
         await this.fontController.postChange(
           changes.change,
@@ -837,7 +828,11 @@ export default class LetterspacerPanel extends Panel {
   }
 
   async persistParam(key, value) {
-    if (key === "area" || key === "depth" || key === "overshoot" || key === "referenceGlyph") {
+    if (key === "referenceGlyph") {
+      await this.persistGlyphReference(value);
+      return;
+    }
+    if (key === "area" || key === "depth" || key === "overshoot") {
       const sourceId = this.getCurrentSourceIdentifier();
       const activeSourceIds = await this.getCurrentGlyphSourceIdentifiers();
       const effectiveSourceId = this.getEffectiveSourceIdentifier(
@@ -852,11 +847,9 @@ export default class LetterspacerPanel extends Panel {
         area: LETTERSPACER_CUSTOM_DATA_KEYS.area,
         depth: LETTERSPACER_CUSTOM_DATA_KEYS.depth,
         overshoot: LETTERSPACER_CUSTOM_DATA_KEYS.overshoot,
-        referenceGlyph: LETTERSPACER_CUSTOM_DATA_KEYS.reference,
       };
       const customKey = customKeyMap[key];
-      const valueToStore =
-        key === "referenceGlyph" ? String(value ?? "") : coerceNumber(value, 0);
+      const valueToStore = coerceNumber(value, 0);
 
       const missing = this.getMissingLetterspacerValues(targetSourceIds);
       const root = { sources: this.fontController.sources };
@@ -876,19 +869,15 @@ export default class LetterspacerPanel extends Panel {
             next[LETTERSPACER_CUSTOM_DATA_KEYS.depth] =
               missing[id]?.depth ?? LETTERSPACER_DEFAULTS.depth;
           }
-          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.overshoot in next)) {
-            next[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot] =
-              missing[id]?.overshoot ?? LETTERSPACER_DEFAULTS.overshoot;
-          }
-          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.reference in next)) {
-            next[LETTERSPACER_CUSTOM_DATA_KEYS.reference] =
-              missing[id]?.referenceGlyph ?? LETTERSPACER_DEFAULTS.referenceGlyph;
-          }
-          if (id === effectiveSourceId) {
-            next[customKey] = valueToStore;
-          }
-          source.customData = next;
+        if (!(LETTERSPACER_CUSTOM_DATA_KEYS.overshoot in next)) {
+          next[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot] =
+            missing[id]?.overshoot ?? LETTERSPACER_DEFAULTS.overshoot;
         }
+        if (id === effectiveSourceId) {
+          next[customKey] = valueToStore;
+        }
+        source.customData = next;
+      }
       });
       if (changes.hasChange) {
         await this.fontController.postChange(
@@ -899,6 +888,43 @@ export default class LetterspacerPanel extends Panel {
         );
       }
     }
+  }
+
+  async getGlyphReferenceValue() {
+    const varGlyph = await this.getSelectedVarGlyph();
+    return varGlyph?.glyph?.customData?.[LETTERSPACER_CUSTOM_DATA_KEYS.reference];
+  }
+
+  async persistGlyphReference(value) {
+    const glyphName =
+      this.getSelectedGlyphName() ||
+      this.sceneController.sceneModel?.getSelectedPositionedGlyph?.()?.glyphName;
+    if (!glyphName) {
+      return;
+    }
+    const nextValue = String(value ?? "");
+    await this.sceneController.editNamedGlyphAndRecordChanges(glyphName, (glyph) => {
+      const existing = glyph.customData?.[LETTERSPACER_CUSTOM_DATA_KEYS.reference];
+      if (existing === nextValue) {
+        return "edit letterspacer reference";
+      }
+      if (!glyph.customData) {
+        glyph.customData = {};
+      }
+      glyph.customData[LETTERSPACER_CUSTOM_DATA_KEYS.reference] = nextValue;
+      return "edit letterspacer reference";
+    });
+  }
+
+  async getSelectedVarGlyph() {
+    const positionedGlyph = this.sceneController.sceneModel?.getSelectedPositionedGlyph?.();
+    if (positionedGlyph?.varGlyph) {
+      return positionedGlyph.varGlyph;
+    }
+    if (this.sceneController.sceneModel?.getSelectedVariableGlyphController) {
+      return await this.sceneController.sceneModel.getSelectedVariableGlyphController();
+    }
+    return null;
   }
 
   async reverseSpacing(event) {
@@ -1325,14 +1351,15 @@ export default class LetterspacerPanel extends Panel {
     }
     // Recalculate spacing after glyph edits
     this.visualizationOpacity = 1;
-    this.logDebug("calculateSpacing start", {
-      glyph: this.getSelectedGlyphName(),
-      area: this.params.area,
-      depth: this.params.depth,
-      overshoot: this.params.overshoot,
-    });
-    await this.updateCalculatedValues({ warnOnNoRef: true });
-    await this.update();
+      this.logDebug("calculateSpacing start", {
+        glyph: this.getSelectedGlyphName(),
+        area: this.params.area,
+        depth: this.params.depth,
+        overshoot: this.params.overshoot,
+      });
+      await this.updateCalculatedValues({ warnOnNoRef: true });
+      this.updateValueDisplay();
+      await this.update();
 
     // Refresh visualization
     if (this.editorController.sceneController?.sceneModel) {
