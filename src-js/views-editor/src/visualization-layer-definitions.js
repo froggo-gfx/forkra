@@ -2203,7 +2203,13 @@ registerVisualizationLayerDefinition({
   draw: (context, positionedGlyph, parameters, model, controller) => {
     if (!model.measureMode) return;
 
-    const { measureHoverSegment, measureHoverRibPoint, measureShowDirect } = model;
+    const {
+      measureHoverSegment,
+      measureHoverRibPoint,
+      measureHoverHandle,
+      measureHoverPoints,
+      measureShowDirect,
+    } = model;
 
     // Draw rib point width (Q+hover on rib point)
     if (measureHoverRibPoint) {
@@ -2216,9 +2222,23 @@ registerVisualizationLayerDefinition({
       return; // Don't show segment when over rib point
     }
 
+    // Draw control point measurement (Q+hover on off-curve)
+    if (measureHoverHandle) {
+      const { p1, p2, type } = measureHoverHandle;
+      const segmentColor = type === "skeleton" ? parameters.skeletonColor : parameters.pathColor;
+      const dx = p1.x - p2.x;
+      const dy = p1.y - p2.y;
+      const dist = Math.hypot(dx, dy);
+      let angle = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+      if (angle > 90) angle = 180 - angle;
+      const label = `${dist.toFixed(1)}  ${angle.toFixed(1)}°`;
+      drawMeasureLine(context, p2, p1, label, segmentColor, parameters);
+      return;
+    }
+
     // Draw segment hover measurement (Q+hover)
-    if (measureHoverSegment) {
-      const { p1, p2, type } = measureHoverSegment;
+    if (measureHoverSegment || measureHoverPoints) {
+      const { p1, p2, type } = measureHoverSegment || measureHoverPoints;
       // Use skeleton color (blue) for skeleton segments, path color (green) for regular
       const segmentColor = type === "skeleton" ? parameters.skeletonColor : parameters.pathColor;
 

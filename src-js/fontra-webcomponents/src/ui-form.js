@@ -518,6 +518,9 @@ export class Form extends SimpleElement {
     rangeElement.minValue = fieldItem.minValue;
     rangeElement.defaultValue = fieldItem.defaultValue;
     rangeElement.maxValue = fieldItem.maxValue;
+    if (fieldItem.values !== undefined) {
+      rangeElement.values = fieldItem.values;
+    }
     if (fieldItem.step !== undefined) {
       rangeElement.step = fieldItem.step;
     }

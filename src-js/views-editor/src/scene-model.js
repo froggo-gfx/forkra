@@ -56,6 +56,8 @@ export class SceneModel {
     this.measureShowDirect = false; // Alt+Q shows direct distance + angle
     this.measureHoverSegment = null; // { p1, p2, type }
     this.measureHoverRibPoint = null; // { x, y, width, leftWidth, rightWidth }
+    this.measureHoverPoints = null; // { p1, p2, type }
+    this.measureHoverHandle = null; // { p1, p2, type }
 
     this.sceneSettingsController.addKeyListener(
       ["glyphLines", "align", "applyKerning", "selectedGlyph", "editLayerName"],
