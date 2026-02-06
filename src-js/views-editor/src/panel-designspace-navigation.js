@@ -2135,6 +2135,17 @@ export default class DesignspaceNavigationPanel extends Panel {
       infoElement.appendChild(html.br());
     }
   }
+
+  async refreshSourcesAndStatus() {
+    await this._updateSources();
+    await this._updateInterpolationErrorInfo();
+    await this._updateSourceLayersList();
+    await this.updateSourceListSelectionFromLocation();
+    this._updateRemoveSourceButtonState();
+    this._updateRemoveSourceLayerButtonState();
+    await this._updateEditingStatus();
+    this.updateInterpolationContributions();
+  }
 }
 
 function foldNLIAxes(axes) {

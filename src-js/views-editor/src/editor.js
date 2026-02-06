@@ -66,6 +66,7 @@ import { MenuItemDivider, showMenu } from "@fontra/web-components/menu-panel.js"
 import { dialog, dialogSetup, message } from "@fontra/web-components/modal-dialog.js";
 import { parsePluginBasePath } from "@fontra/web-components/plugin-manager.js";
 import { CJKDesignFrame } from "./cjk-design-frame.js";
+import "./visualization-layer-letterspacer.js";
 import { HandTool } from "./edit-tools-hand.js";
 import { KnifeTool } from "./edit-tools-knife.js";
 import { MetricsTool } from "./edit-tools-metrics.js";

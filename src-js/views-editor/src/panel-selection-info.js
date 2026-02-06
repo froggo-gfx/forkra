@@ -21,6 +21,7 @@ import { showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialog } from "@fontra/web-components/modal-dialog.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import { moveSkeletonData } from "@fontra/core/skeleton-contour-generator.js";
+import LetterspacerPanel from "./panel-letterspacer.js";
 import Panel from "./panel.js";
 
 const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
@@ -65,6 +66,10 @@ export default class SelectionInfoPanel extends Panel {
     this.throttledUpdate = throttleCalls((senderID) => this.update(senderID), 100);
     this.fontController = this.editorController.fontController;
     this.sceneController = this.editorController.sceneController;
+    this.letterspacerPanel = new LetterspacerPanel(editorController);
+    if (this.letterspacerHost) {
+      this.letterspacerHost.appendChild(this.letterspacerPanel);
+    }
 
     this.sceneController.sceneSettingsController.addKeyListener(
       [
@@ -106,6 +111,7 @@ export default class SelectionInfoPanel extends Panel {
 
   getContentElement() {
     this.infoForm = new Form();
+    this.letterspacerHost = html.div({});
     return html.div(
       {
         class: "panel",
@@ -113,7 +119,12 @@ export default class SelectionInfoPanel extends Panel {
       [
         html.div(
           { class: "panel-section panel-section--flex panel-section--scrollable" },
-          [this.infoForm]
+          [
+            html.div(
+              { style: "display: flex; flex-direction: column; gap: 0.75em;" },
+              [this.infoForm, this.letterspacerHost]
+            ),
+          ]
         ),
         html.div(
           { class: "panel-section panel-section--checkbox" },
@@ -126,6 +137,9 @@ export default class SelectionInfoPanel extends Panel {
   async toggle(on, focus) {
     if (on) {
       this.update();
+    }
+    if (this.letterspacerPanel?.toggle) {
+      await this.letterspacerPanel.toggle(on, focus);
     }
   }
 
