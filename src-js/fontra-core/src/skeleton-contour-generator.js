@@ -4,6 +4,9 @@ import { VarPackedPath } from "./var-path.js";
 import { fitCubic, chordLengthParameterize, computeMaxError } from "./fit-cubic.js";
 
 const DEFAULT_WIDTH = 80;
+const DEFAULT_CAP_RADIUS_RATIO = 1 / 8;
+const MAX_CAP_RADIUS_RATIO = 1 / 4;
+const DEFAULT_CAP_TENSION = 0.55;
 
 /**
  * Get the width for a point, with support for asymmetric left/right widths.
@@ -688,24 +691,318 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
       }
     }
 
-    const startCap = generateCap(
-      firstOnCurvePoint,
-      segments[0],
-      defaultWidth,
-      capStyle,
-      "start",
-      startCapLeftHW,
-      startCapRightHW
-    );
-    const endCap = generateCap(
-      lastOnCurvePoint,
-      segments[segments.length - 1],
-      defaultWidth,
-      capStyle,
-      "end",
-      endCapLeftHW,
-      endCapRightHW
-    );
+    const startCapStyleRaw = firstOnCurvePoint.capStyle ?? capStyle;
+    const endCapStyleRaw = lastOnCurvePoint.capStyle ?? capStyle;
+    const startCapStyle = normalizeCapStyle(startCapStyleRaw);
+    const endCapStyle = normalizeCapStyle(endCapStyleRaw);
+
+    const startIsRound = startCapStyle === "round";
+    const endIsRound = endCapStyle === "round";
+
+    let startCap = [];
+    let endCap = [];
+
+    if (startIsRound) {
+      let startTangent = getSegmentTangent(segments[0], "start");
+      let leftStart = getFirstOnCurvePoint(leftSide);
+      let rightStart = getFirstOnCurvePoint(rightSide);
+      if (leftStart && rightStart) {
+        const capVector = vector.subVectors(leftStart, rightStart);
+        const capLength = Math.hypot(capVector.x, capVector.y);
+        const capWidth = startCapLeftHW + startCapRightHW;
+        const capRadiusRatio =
+          firstOnCurvePoint.capRadiusRatio ??
+          skeletonContour.capRadiusRatio ??
+          DEFAULT_CAP_RADIUS_RATIO;
+        const capTension =
+          firstOnCurvePoint.capTension ??
+          skeletonContour.capTension ??
+          DEFAULT_CAP_TENSION;
+        const r = capWidth * capRadiusRatio;
+        const maxShift = Math.max(capWidth / 2 - capWidth / 128, 0);
+        const shift = Math.min(r * 2, maxShift);
+        const mergeCap = capRadiusRatio >= MAX_CAP_RADIUS_RATIO - 1e-6;
+        const cornerShift = shift; // move existing corner points inward along skeleton
+        const normalShift = mergeCap ? capWidth / 2 : shift; // move new points along normal only
+        if (capLength > 0.001 && r > 0.001) {
+          let startNormal = getEffectiveNormal(
+            firstOnCurvePoint,
+            vector.rotateVector90CW(startTangent)
+          );
+          let capDir = vector.normalizeVector(startNormal); // right -> left
+          let tOut = { x: -startTangent.x, y: -startTangent.y };
+          let tIn = { x: -tOut.x, y: -tOut.y };
+
+          const origRight = { x: rightStart.x, y: rightStart.y };
+          const origLeft = { x: leftStart.x, y: leftStart.y };
+
+          if (singleSided) {
+            trimCurveAtStart(leftSide, cornerShift);
+            trimCurveAtStart(rightSide, cornerShift);
+            leftStart = getFirstOnCurvePoint(leftSide) || leftStart;
+            rightStart = getFirstOnCurvePoint(rightSide) || rightStart;
+          } else {
+            // Shift existing corner points inward along skeleton
+            rightStart.x = Math.round(rightStart.x + tIn.x * cornerShift);
+            rightStart.y = Math.round(rightStart.y + tIn.y * cornerShift);
+            leftStart.x = Math.round(leftStart.x + tIn.x * cornerShift);
+            leftStart.y = Math.round(leftStart.y + tIn.y * cornerShift);
+            rescaleAdjacentHandles(rightSide, rightStart, origRight, "forward");
+            rescaleAdjacentHandles(leftSide, leftStart, origLeft, "forward");
+          }
+          if (segments[0]?.controlPoints?.length) {
+            rightStart.smooth = true;
+            leftStart.smooth = true;
+          }
+          const rightNormalShift = normalShift;
+          const leftNormalShift = normalShift;
+          const newRight = {
+            x: Math.round(origRight.x + capDir.x * rightNormalShift),
+            y: Math.round(origRight.y + capDir.y * rightNormalShift),
+            smooth: true,
+          };
+          const newLeft = {
+            x: Math.round(origLeft.x - capDir.x * leftNormalShift),
+            y: Math.round(origLeft.y - capDir.y * leftNormalShift),
+            smooth: true,
+          };
+          const midPoint = mergeCap
+            ? {
+                x: Math.round((newRight.x + newLeft.x) / 2),
+                y: Math.round((newRight.y + newLeft.y) / 2),
+                smooth: true,
+              }
+            : null;
+
+          const rightSegHandles = computeTunniHandleLengths(
+            rightStart,
+            tOut,
+            mergeCap ? midPoint : newRight,
+            { x: -capDir.x, y: -capDir.y },
+            capTension
+          );
+          const leftSegHandles = computeTunniHandleLengths(
+            mergeCap ? midPoint : newLeft,
+            capDir,
+            leftStart,
+            tOut,
+            capTension
+          );
+
+          if (mergeCap) {
+            startCap = [
+              {
+                x: Math.round(rightStart.x + tOut.x * rightSegHandles.startLen),
+                y: Math.round(rightStart.y + tOut.y * rightSegHandles.startLen),
+                type: "cubic",
+              },
+              {
+                x: Math.round(midPoint.x - capDir.x * rightSegHandles.endLen),
+                y: Math.round(midPoint.y - capDir.y * rightSegHandles.endLen),
+                type: "cubic",
+              },
+              midPoint,
+              {
+                x: Math.round(midPoint.x + capDir.x * leftSegHandles.startLen),
+                y: Math.round(midPoint.y + capDir.y * leftSegHandles.startLen),
+                type: "cubic",
+              },
+              {
+                x: Math.round(leftStart.x + tOut.x * leftSegHandles.endLen),
+                y: Math.round(leftStart.y + tOut.y * leftSegHandles.endLen),
+                type: "cubic",
+              },
+            ];
+          } else {
+            startCap = [
+              {
+                x: Math.round(rightStart.x + tOut.x * rightSegHandles.startLen),
+                y: Math.round(rightStart.y + tOut.y * rightSegHandles.startLen),
+                type: "cubic",
+              },
+              {
+                x: Math.round(newRight.x - capDir.x * rightSegHandles.endLen),
+                y: Math.round(newRight.y - capDir.y * rightSegHandles.endLen),
+                type: "cubic",
+              },
+              newRight,
+              newLeft,
+              {
+                x: Math.round(newLeft.x + capDir.x * leftSegHandles.startLen),
+                y: Math.round(newLeft.y + capDir.y * leftSegHandles.startLen),
+                type: "cubic",
+              },
+              {
+                x: Math.round(leftStart.x + tOut.x * leftSegHandles.endLen),
+                y: Math.round(leftStart.y + tOut.y * leftSegHandles.endLen),
+                type: "cubic",
+              },
+            ];
+          }
+        }
+      }
+    } else {
+      startCap = generateCap(
+        firstOnCurvePoint,
+        segments[0],
+        defaultWidth,
+        startCapStyle,
+        "start",
+        startCapLeftHW,
+        startCapRightHW
+      );
+    }
+
+    if (endIsRound) {
+      let endTangent = getSegmentTangent(segments[segments.length - 1], "end");
+      let leftEnd = getLastOnCurvePoint(leftSide);
+      let rightEnd = getLastOnCurvePoint(rightSide);
+      if (leftEnd && rightEnd) {
+        const capVector = vector.subVectors(leftEnd, rightEnd);
+        const capLength = Math.hypot(capVector.x, capVector.y);
+        const capWidth = endCapLeftHW + endCapRightHW;
+        const capRadiusRatio =
+          lastOnCurvePoint.capRadiusRatio ??
+          skeletonContour.capRadiusRatio ??
+          DEFAULT_CAP_RADIUS_RATIO;
+        const capTension =
+          lastOnCurvePoint.capTension ??
+          skeletonContour.capTension ??
+          DEFAULT_CAP_TENSION;
+        const r = capWidth * capRadiusRatio;
+        const maxShift = Math.max(capWidth / 2 - capWidth / 128, 0);
+        const shift = Math.min(r * 2, maxShift);
+        const mergeCap = capRadiusRatio >= MAX_CAP_RADIUS_RATIO - 1e-6;
+        const cornerShift = shift; // move existing corner points inward along skeleton
+        const normalShift = mergeCap ? capWidth / 2 : shift; // move new points along normal only
+        if (capLength > 0.001 && r > 0.001) {
+          let endNormal = getEffectiveNormal(
+            lastOnCurvePoint,
+            vector.rotateVector90CW(endTangent)
+          );
+          let capDir = vector.normalizeVector(endNormal); // right -> left
+          let tOut = endTangent;
+          let tIn = { x: -tOut.x, y: -tOut.y };
+
+          const origLeft = { x: leftEnd.x, y: leftEnd.y };
+          const origRight = { x: rightEnd.x, y: rightEnd.y };
+
+          if (singleSided) {
+            trimCurveAtEnd(leftSide, cornerShift);
+            trimCurveAtEnd(rightSide, cornerShift);
+            leftEnd = getLastOnCurvePoint(leftSide) || leftEnd;
+            rightEnd = getLastOnCurvePoint(rightSide) || rightEnd;
+          } else {
+            // Shift existing corner points inward along skeleton
+            leftEnd.x = Math.round(leftEnd.x + tIn.x * cornerShift);
+            leftEnd.y = Math.round(leftEnd.y + tIn.y * cornerShift);
+            rightEnd.x = Math.round(rightEnd.x + tIn.x * cornerShift);
+            rightEnd.y = Math.round(rightEnd.y + tIn.y * cornerShift);
+            rescaleAdjacentHandles(leftSide, leftEnd, origLeft, "backward");
+            rescaleAdjacentHandles(rightSide, rightEnd, origRight, "backward");
+          }
+          if (segments[segments.length - 1]?.controlPoints?.length) {
+            leftEnd.smooth = true;
+            rightEnd.smooth = true;
+          }
+          const leftNormalShift = normalShift;
+          const rightNormalShift = normalShift;
+          const newLeft = {
+            x: Math.round(origLeft.x + capDir.x * leftNormalShift),
+            y: Math.round(origLeft.y + capDir.y * leftNormalShift),
+            smooth: true,
+          };
+          const newRight = {
+            x: Math.round(origRight.x - capDir.x * rightNormalShift),
+            y: Math.round(origRight.y - capDir.y * rightNormalShift),
+            smooth: true,
+          };
+          const midPoint = mergeCap
+            ? {
+                x: Math.round((newLeft.x + newRight.x) / 2),
+                y: Math.round((newLeft.y + newRight.y) / 2),
+                smooth: true,
+              }
+            : null;
+
+          const leftSegHandles = computeTunniHandleLengths(
+            leftEnd,
+            tOut,
+            mergeCap ? midPoint : newLeft,
+            { x: -capDir.x, y: -capDir.y },
+            capTension
+          );
+          const rightSegHandles = computeTunniHandleLengths(
+            mergeCap ? midPoint : newRight,
+            capDir,
+            rightEnd,
+            tOut,
+            capTension
+          );
+
+          if (mergeCap) {
+            endCap = [
+              {
+                x: Math.round(leftEnd.x + tOut.x * leftSegHandles.startLen),
+                y: Math.round(leftEnd.y + tOut.y * leftSegHandles.startLen),
+                type: "cubic",
+              },
+              {
+                x: Math.round(midPoint.x - capDir.x * leftSegHandles.endLen),
+                y: Math.round(midPoint.y - capDir.y * leftSegHandles.endLen),
+                type: "cubic",
+              },
+              midPoint,
+              {
+                x: Math.round(midPoint.x + capDir.x * rightSegHandles.startLen),
+                y: Math.round(midPoint.y + capDir.y * rightSegHandles.startLen),
+                type: "cubic",
+              },
+              {
+                x: Math.round(rightEnd.x + tOut.x * rightSegHandles.endLen),
+                y: Math.round(rightEnd.y + tOut.y * rightSegHandles.endLen),
+                type: "cubic",
+              },
+            ];
+          } else {
+            endCap = [
+              {
+                x: Math.round(leftEnd.x + tOut.x * leftSegHandles.startLen),
+                y: Math.round(leftEnd.y + tOut.y * leftSegHandles.startLen),
+                type: "cubic",
+              },
+              {
+                x: Math.round(newLeft.x - capDir.x * leftSegHandles.endLen),
+                y: Math.round(newLeft.y - capDir.y * leftSegHandles.endLen),
+                type: "cubic",
+              },
+              newLeft,
+              newRight,
+              {
+                x: Math.round(newRight.x + capDir.x * rightSegHandles.startLen),
+                y: Math.round(newRight.y + capDir.y * rightSegHandles.startLen),
+                type: "cubic",
+              },
+              {
+                x: Math.round(rightEnd.x + tOut.x * rightSegHandles.endLen),
+                y: Math.round(rightEnd.y + tOut.y * rightSegHandles.endLen),
+                type: "cubic",
+              },
+            ];
+          }
+        }
+      }
+    } else {
+      endCap = generateCap(
+        lastOnCurvePoint,
+        segments[segments.length - 1],
+        defaultWidth,
+        endCapStyle,
+        "end",
+        endCapLeftHW,
+        endCapRightHW
+      );
+    }
 
     const outlinePoints = [];
     // Left side forward
@@ -1423,6 +1720,209 @@ function createBezierFromPoints(points) {
     const p2 = points[points.length - 2];
     return new Bezier(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
   }
+}
+
+function normalizeCapStyle(style) {
+  if (!style) return "butt";
+  if (style === "square") return "butt"; // Temporary: square behaves like flat
+  return style;
+}
+
+function getSegmentTangent(segment, position) {
+  if (segment.controlPoints.length === 0) {
+    const direction = vector.normalizeVector(
+      vector.subVectors(segment.endPoint, segment.startPoint)
+    );
+    return direction;
+  }
+  const bezier = createBezierFromPoints([
+    segment.startPoint,
+    ...segment.controlPoints,
+    segment.endPoint,
+  ]);
+  const t = position === "start" ? 0 : 1;
+  const deriv = bezier.derivative(t);
+  return vector.normalizeVector({ x: deriv.x, y: deriv.y });
+}
+
+function getFirstOnCurvePoint(points) {
+  if (!points) return null;
+  for (const point of points) {
+    if (!point.type) return point;
+  }
+  return null;
+}
+
+function getLastOnCurvePoint(points) {
+  if (!points) return null;
+  for (let i = points.length - 1; i >= 0; i--) {
+    if (!points[i].type) return points[i];
+  }
+  return null;
+}
+
+function rescaleAdjacentHandles(points, onCurvePoint, origPos, direction) {
+  if (!points || !onCurvePoint || !origPos) return;
+  const idx = points.indexOf(onCurvePoint);
+  if (idx === -1) return;
+  const step = direction === "backward" ? -1 : 1;
+
+  let neighborIdx = null;
+  for (let i = idx + step; i >= 0 && i < points.length; i += step) {
+    if (!points[i]?.type) {
+      neighborIdx = i;
+      break;
+    }
+  }
+  if (neighborIdx === null) return;
+
+  const neighbor = points[neighborIdx];
+  const distBefore = Math.hypot(neighbor.x - origPos.x, neighbor.y - origPos.y);
+  const distAfter = Math.hypot(neighbor.x - onCurvePoint.x, neighbor.y - onCurvePoint.y);
+  const scale = distBefore > 0.001 ? distAfter / distBefore : 1;
+
+  for (let i = idx + step; i !== neighborIdx; i += step) {
+    const point = points[i];
+    if (!point?.type) break;
+    const offsetX = point.x - origPos.x;
+    const offsetY = point.y - origPos.y;
+    point.x = Math.round(onCurvePoint.x + offsetX * scale);
+    point.y = Math.round(onCurvePoint.y + offsetY * scale);
+  }
+}
+
+function findTAtLength(bezier, targetLen, steps = 80) {
+  const lut = bezier.getLUT(steps);
+  let prev = lut[0];
+  let accumulated = 0;
+
+  for (let i = 1; i < lut.length; i++) {
+    const curr = lut[i];
+    const segLen = Math.hypot(curr.x - prev.x, curr.y - prev.y);
+    if (accumulated + segLen >= targetLen) {
+      const ratio = segLen > 0.001 ? (targetLen - accumulated) / segLen : 0;
+      return prev.t + (curr.t - prev.t) * ratio;
+    }
+    accumulated += segLen;
+    prev = curr;
+  }
+
+  return 1;
+}
+
+function getCurveSegmentIndices(points, fromEnd = false) {
+  if (!points || points.length < 2) return null;
+  if (!fromEnd) {
+    let startIdx = -1;
+    for (let i = 0; i < points.length; i++) {
+      if (!points[i]?.type) {
+        startIdx = i;
+        break;
+      }
+    }
+    if (startIdx < 0) return null;
+    let endIdx = -1;
+    for (let i = startIdx + 1; i < points.length; i++) {
+      if (!points[i]?.type) {
+        endIdx = i;
+        break;
+      }
+    }
+    if (endIdx < 0) return null;
+    return { startIdx, endIdx };
+  }
+
+  let endIdx = -1;
+  for (let i = points.length - 1; i >= 0; i--) {
+    if (!points[i]?.type) {
+      endIdx = i;
+      break;
+    }
+  }
+  if (endIdx < 0) return null;
+  let startIdx = -1;
+  for (let i = endIdx - 1; i >= 0; i--) {
+    if (!points[i]?.type) {
+      startIdx = i;
+      break;
+    }
+  }
+  if (startIdx < 0) return null;
+  return { startIdx, endIdx };
+}
+
+function applySegmentPoints(points, startIdx, endIdx, newPoints) {
+  const controlCount = endIdx - startIdx - 1;
+  if (newPoints.length !== controlCount + 2) return false;
+
+  const writePoint = (idx, src) => {
+    points[idx].x = Math.round(src.x);
+    points[idx].y = Math.round(src.y);
+  };
+
+  writePoint(startIdx, newPoints[0]);
+  for (let i = 0; i < controlCount; i++) {
+    writePoint(startIdx + 1 + i, newPoints[1 + i]);
+  }
+  writePoint(endIdx, newPoints[newPoints.length - 1]);
+  return true;
+}
+
+function trimCurveAtStart(points, distance) {
+  if (!points || distance <= 0.001) return false;
+  const segment = getCurveSegmentIndices(points, false);
+  if (!segment) return false;
+  const { startIdx, endIdx } = segment;
+  const controls = points.slice(startIdx + 1, endIdx);
+  const bezier = createBezierFromPoints([points[startIdx], ...controls, points[endIdx]]);
+  const totalLen = bezier.length();
+  if (!(totalLen > 0.001)) return false;
+
+  const targetLen = Math.min(distance, Math.max(totalLen - 0.001, 0));
+  if (!(targetLen > 0.001)) return false;
+
+  const t = findTAtLength(bezier, targetLen);
+  const split = bezier.split(t);
+  return applySegmentPoints(points, startIdx, endIdx, split.right.points);
+}
+
+function trimCurveAtEnd(points, distance) {
+  if (!points || distance <= 0.001) return false;
+  const segment = getCurveSegmentIndices(points, true);
+  if (!segment) return false;
+  const { startIdx, endIdx } = segment;
+  const controls = points.slice(startIdx + 1, endIdx);
+  const bezier = createBezierFromPoints([points[startIdx], ...controls, points[endIdx]]);
+  const totalLen = bezier.length();
+  if (!(totalLen > 0.001)) return false;
+
+  const targetLen = Math.max(totalLen - distance, 0.001);
+  if (!(targetLen > 0.001)) return false;
+
+  const t = findTAtLength(bezier, targetLen);
+  const split = bezier.split(t);
+  return applySegmentPoints(points, startIdx, endIdx, split.left.points);
+}
+
+function computeTunniHandleLengths(startPoint, startDir, endPoint, endDir, tension) {
+  const dir1 = vector.normalizeVector(startDir);
+  const dir2 = vector.normalizeVector(endDir);
+  const line1End = vector.addVectors(startPoint, dir1);
+  const line2End = vector.addVectors(endPoint, dir2);
+
+  const intersection = vector.intersect(startPoint, line1End, endPoint, line2End);
+  if (intersection && Number.isFinite(intersection.t1) && Number.isFinite(intersection.t2)) {
+    const distStartToTunni = Math.abs(intersection.t1);
+    const distEndToTunni = Math.abs(intersection.t2);
+    return {
+      startLen: distStartToTunni * tension,
+      endLen: distEndToTunni * tension,
+    };
+  }
+
+  const distTotal = vector.distance(startPoint, endPoint);
+  const fallbackLen = (distTotal * tension) / 2;
+  return { startLen: fallbackLen, endLen: fallbackLen };
 }
 
 /**
