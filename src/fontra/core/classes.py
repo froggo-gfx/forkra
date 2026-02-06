@@ -4,6 +4,7 @@ import sys
 from dataclasses import dataclass, field, is_dataclass, replace
 from enum import Enum
 from functools import partial
+from types import NoneType
 from typing import Any, Optional, Union, get_args, get_origin, get_type_hints
 
 import cattrs
@@ -248,6 +249,11 @@ class StaticGlyph:
     def convertToPaths(self):
         return replace(self, path=self.path.asPath())
 
+    @property
+    def packedPath(self) -> PackedPath:
+        assert isinstance(self.path, PackedPath)
+        return self.path
+
 
 @dataclass(kw_only=True)
 class Component:
@@ -305,7 +311,7 @@ def makeSchema(*classes, schema=None):
             fieldDef = dict(type=tp)
             if is_dataclass(tp):
                 makeSchema(tp, schema=schema)
-            elif tp.__name__ == "Optional":
+            elif isOptionalType(tp):
                 [subtype, _] = get_args(tp)
                 fieldDef["type"] = subtype
                 fieldDef["optional"] = True
@@ -334,6 +340,21 @@ def makeSchema(*classes, schema=None):
                 makeSchema(tp, schema=schema)
             classFields[name] = fieldDef
     return schema
+
+
+def isOptionalType(tp):
+    if tp.__name__ == "Optional":
+        # type is spelled as Optional[sometype] in Python <= 3.13
+        return True
+
+    if tp.__name__ != "Union":
+        return False
+
+    # type is spelled as Optional[sometype] in Python >= 3.14
+    # *or* as sometype | None
+    assert tp.__name__ == "Union"
+    args = get_args(tp)
+    return len(args) == 2 and args[1] is NoneType
 
 
 # cattrs hooks + structure/unstructure support

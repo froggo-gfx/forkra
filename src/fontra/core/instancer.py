@@ -444,11 +444,18 @@ class GlyphInstancer:
     @cached_property
     def deltas(self) -> DiscreteDeltas:
         layerGlyphs = self.activeLayerGlyphs
-        if not areGuidelinesCompatible(layerGlyphs) or any(
-            g.backgroundImage is not None for g in layerGlyphs
+        if (
+            not areGuidelinesCompatible(layerGlyphs)
+            or any(g.backgroundImage is not None for g in layerGlyphs)
+            or anchorsNeedSorting(layerGlyphs)
         ):
             layerGlyphs = [
-                replace(layerGlyph, guidelines=[], backgroundImage=None)
+                replace(
+                    layerGlyph,
+                    anchors=sorted(layerGlyph.anchors, key=lambda a: a.name or ""),
+                    guidelines=[],
+                    backgroundImage=None,
+                )
                 for layerGlyph in layerGlyphs
             ]
 
@@ -702,6 +709,20 @@ def areCustomDatasCompatible(parents):
             return False
 
     return True
+
+
+def anchorsNeedSorting(layerGlyphs):
+    if not layerGlyphs:
+        return False
+
+    referenceAnchorNames = [a.name for a in layerGlyphs[0].anchors]
+
+    for layerGlyph in layerGlyphs[1:]:
+        anchorNames = [a.name for a in layerGlyph.anchors]
+        if anchorNames != referenceAnchorNames:
+            return True
+
+    return False
 
 
 @dataclass

@@ -1025,6 +1025,9 @@ class KerningTool extends MetricsBaseTool {
       (change, isExternalChange) => {
         if (isExternalChange) {
           this.undoStack.clear();
+          this.fontController.getKerningController("kern").then((kerningController) => {
+            this.kerningController = kerningController;
+          });
         }
       },
       false
@@ -1175,13 +1178,14 @@ class KerningTool extends MetricsBaseTool {
       ]
     );
     if (result === "goToNearestSource") {
-      this.editor.goToNearestSource();
+      this.editor.goToNearestSource(false);
     }
   }
 
   getSourceIdentifier() {
     return this.fontController.fontSourcesInstancer.getSourceIdentifierForLocation(
-      this.sceneSettings.fontLocationSourceMapped
+      this.sceneSettings.fontLocationSourceMapped,
+      false
     );
   }
 

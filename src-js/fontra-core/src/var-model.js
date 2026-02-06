@@ -2,7 +2,7 @@
 
 import { VariationError } from "./errors.js";
 import { isSuperset } from "./set-ops.js";
-import { clamp, reversedEnumerate } from "./utils.js";
+import { clamp, reversedEnumerate, round } from "./utils.js";
 import { addItemwise, mulScalar, subItemwise } from "./var-funcs.js";
 
 export class VariationModel {
@@ -283,11 +283,25 @@ function sorted(a) {
 }
 
 export function locationToString(loc) {
+  // Return a deterministic and unique *identifier* for a location.
   const sortedLoc = {};
   for (const key of Object.keys(loc).sort()) {
     sortedLoc[key] = loc[key];
   }
   return JSON.stringify(sortedLoc);
+}
+
+export function locationToName(location, defaultName = "default") {
+  // Return a plausible human-readable *name* for a location. The axis values
+  // are rounded, so there is no guarantee these names are unique.
+  return (
+    Object.entries(location)
+      .map(([name, value]) => {
+        value = round(value, 1);
+        return `${name}=${value}`;
+      })
+      .join(",") || defaultName
+  );
 }
 
 export function normalizeValue(v, lower, dflt, upper) {
@@ -340,16 +354,16 @@ export function unnormalizeLocation(location, axisList) {
   // The opposite of normalizeLocation
   const out = {};
   for (const axis of axisList) {
-    let v = location[axis.name];
-    if (v === undefined) {
-      v = axis.defaultValue;
-    }
-    out[axis.name] = unnormalizeValue(
-      v,
-      axis.minValue,
-      clamp(axis.defaultValue, axis.minValue, axis.maxValue),
-      clamp(axis.maxValue, axis.minValue, axis.maxValue)
-    );
+    const v = location[axis.name];
+    out[axis.name] =
+      v === undefined
+        ? axis.defaultValue
+        : unnormalizeValue(
+            v,
+            axis.minValue,
+            clamp(axis.defaultValue, axis.minValue, axis.maxValue),
+            clamp(axis.maxValue, axis.minValue, axis.maxValue)
+          );
   }
   return out;
 }
@@ -561,7 +575,9 @@ export function mapAxesFromUserSpaceToSourceSpace(axes) {
         newAxis[prop] = piecewiseLinearMap(axis[prop], mappingDict);
       }
       if (axis.values) {
-        axis.values.map((value) => piecewiseLinearMap(value, mappingDict));
+        newAxis.values = axis.values.map((value) =>
+          piecewiseLinearMap(value, mappingDict)
+        );
       }
     }
     return newAxis;
