@@ -20,9 +20,16 @@ const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
 const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
 const SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY = "fontra.skeleton.capitalHorizontal";
 const SKELETON_WIDTH_CAPITAL_CONTRAST_KEY = "fontra.skeleton.capitalContrast";
+const SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY = "fontra.skeleton.capitalDistribution";
 const SKELETON_WIDTH_LOWERCASE_BASE_KEY = "fontra.skeleton.lowercaseBase";
 const SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY = "fontra.skeleton.lowercaseHorizontal";
 const SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY = "fontra.skeleton.lowercaseContrast";
+const SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY = "fontra.skeleton.lowercaseDistribution";
+
+const SKELETON_CAP_RADIUS_RATIO_KEY = "fontra.skeleton.capRadiusRatio";
+const SKELETON_CAP_TENSION_KEY = "fontra.skeleton.capTension";
+const SKELETON_CAP_ANGLE_KEY = "fontra.skeleton.capAngle";
+const SKELETON_CAP_DISTANCE_KEY = "fontra.skeleton.capDistance";
 
 const DEFAULT_WIDTH_CAPITAL_BASE = 60;
 const DEFAULT_WIDTH_CAPITAL_HORIZONTAL = 50;
@@ -30,6 +37,7 @@ const DEFAULT_WIDTH_CAPITAL_CONTRAST = 40;
 const DEFAULT_WIDTH_LOWERCASE_BASE = 60;
 const DEFAULT_WIDTH_LOWERCASE_HORIZONTAL = 50;
 const DEFAULT_WIDTH_LOWERCASE_CONTRAST = 40;
+const DEFAULT_DISTRIBUTION = 0;
 
 const DEFAULT_CAP_RADIUS_RATIO = 1 / 8;
 const DEFAULT_CAP_TENSION = 0.55;
@@ -79,6 +87,13 @@ export default class SkeletonParametersPanel extends Panel {
 
     // Cache for avoiding unnecessary form rebuilds
     this._lastStateSignature = null;
+
+    // Confirmation state for "Set Global" actions
+    this._confirmState = {
+      point: { pending: false, context: null },
+      square: { pending: false, context: null },
+      round: { pending: false, context: null },
+    };
 
     // Listen to selection changes to update UI
     // Skip update if dragging slider to prevent form rebuild interrupting drag
@@ -132,6 +147,95 @@ export default class SkeletonParametersPanel extends Panel {
     }
 
     const formContents = [];
+
+    // === CURRENT GLYPH ===
+    const glyphCase = this._getGlyphCase();
+    const glyphCaseLabel = glyphCase === "lower" ? "Lowercase" : "Uppercase";
+    const widthBaseKey =
+      glyphCase === "lower"
+        ? SKELETON_WIDTH_LOWERCASE_BASE_KEY
+        : SKELETON_WIDTH_CAPITAL_BASE_KEY;
+    const widthHorizontalKey =
+      glyphCase === "lower"
+        ? SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY
+        : SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY;
+    const widthContrastKey =
+      glyphCase === "lower"
+        ? SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY
+        : SKELETON_WIDTH_CAPITAL_CONTRAST_KEY;
+    const widthDistributionKey =
+      glyphCase === "lower"
+        ? SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY
+        : SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY;
+    const widthBase = this._getSourceWidth(
+      widthBaseKey,
+      glyphCase === "lower" ? DEFAULT_WIDTH_LOWERCASE_BASE : DEFAULT_WIDTH_CAPITAL_BASE
+    );
+    const widthHorizontal = this._getSourceWidth(
+      widthHorizontalKey,
+      glyphCase === "lower"
+        ? DEFAULT_WIDTH_LOWERCASE_HORIZONTAL
+        : DEFAULT_WIDTH_CAPITAL_HORIZONTAL
+    );
+    const widthContrast = this._getSourceWidth(
+      widthContrastKey,
+      glyphCase === "lower"
+        ? DEFAULT_WIDTH_LOWERCASE_CONTRAST
+        : DEFAULT_WIDTH_CAPITAL_CONTRAST
+    );
+    const distribution = this._getSourceCustomDataValue(
+      widthDistributionKey,
+      DEFAULT_DISTRIBUTION
+    );
+    const capRadiusRatio = this._getSourceCustomDataValue(
+      SKELETON_CAP_RADIUS_RATIO_KEY,
+      DEFAULT_CAP_RADIUS_RATIO
+    );
+    const capTension = this._getSourceCustomDataValue(
+      SKELETON_CAP_TENSION_KEY,
+      DEFAULT_CAP_TENSION
+    );
+    const capAngle = this._getSourceCustomDataValue(
+      SKELETON_CAP_ANGLE_KEY,
+      DEFAULT_CAP_ANGLE
+    );
+    const capDistance = this._getSourceCustomDataValue(
+      SKELETON_CAP_DISTANCE_KEY,
+      DEFAULT_CAP_DISTANCE
+    );
+    const capRadiusText = Math.round(capRadiusRatio * 10000) / 10000;
+    const capTensionText = `${Math.round(capTension * 100)}%`;
+
+    formContents.push({
+      type: "header",
+      label: "Current Glyph",
+    });
+    formContents.push({
+      type: "text",
+      key: "currentGlyphCase",
+      label: "Case",
+      value: glyphCaseLabel,
+    });
+    formContents.push({
+      type: "text",
+      key: "currentGlyphWidths",
+      label: "Default widths",
+      value: `Base ${widthBase}, Horizontal ${widthHorizontal}, Contrast ${widthContrast}`,
+    });
+    formContents.push({
+      type: "text",
+      key: "currentGlyphDistribution",
+      label: "Default distribution",
+      value: `${distribution}`,
+    });
+    formContents.push({
+      type: "text",
+      key: "currentGlyphCaps",
+      label: "Default caps",
+      value: `Square angle ${capAngle}°, distance ${capDistance}; Round radius ${capRadiusText}, tension ${capTensionText}`,
+    });
+
+    formContents.push({ type: "divider" });
 
     // Sync single-sided state from skeleton data on form rebuild
     this._syncSingleSidedState();
@@ -343,6 +447,7 @@ export default class SkeletonParametersPanel extends Panel {
     const selectedData = this._getSelectedSkeletonPoints();
     const hasSelection = selectedData && selectedData.points.length > 0;
     const multiSelection = hasSelection && selectedData.points.length > 1;
+    const selectionContext = this._getSelectionContextKey();
 
     // Get values: from selected points or defaults
     let left, right, leftMixed = false, rightMixed = false;
@@ -419,6 +524,9 @@ export default class SkeletonParametersPanel extends Panel {
     // Determine checkbox state
     const isAsym = this.pointParameters.asymmetrical;
     const isIndeterminate = asymStates.size > 1; // Mixed asym states
+    const canSetPointGlobal = hasSelection && !leftMixed && !rightMixed;
+
+    this._ensureConfirmState("point", `${selectionContext}|point`);
 
     // Header with Asymmetrical toggle
     // Disabled for single-sided contours (asym doesn't make sense there)
@@ -476,26 +584,70 @@ export default class SkeletonParametersPanel extends Panel {
     });
 
     // Distribution slider (only in asymmetric mode)
-    if (isAsym && !isIndeterminate) {
-      // When values are mixed, show slider at neutral (0) position
-      const distributionMixed = leftMixed || rightMixed;
-      const distribution = distributionMixed ? 0 : this._calculateDistribution(left, right);
+      if (isAsym && !isIndeterminate) {
+        // When values are mixed, show slider at neutral (0) position
+        const distributionMixed = leftMixed || rightMixed;
+        const distribution = distributionMixed ? 0 : this._calculateDistribution(left, right);
+        formContents.push({
+          type: "edit-number-slider",
+          key: "pointDistribution",
+          label: "Distribution",
+          value: distribution,
+          minValue: -100,
+          defaultValue: 0,
+          maxValue: 100,
+          step: 2,
+        });
+      }
+
+      const pointMakeGlobalButton = html.button(
+        {
+          style: "font-size: 11px; padding: 2px 6px; margin-right: 6px;",
+          disabled: !hasSelection,
+          onclick: async () => {
+            this._clearConfirmState("point");
+            await this._applyGlobalPointDefaultsToSelection();
+            this.update();
+          },
+        },
+        "Make Global"
+      );
+      const pointSetGlobalLabel = this._confirmState.point.pending ? "Confirm" : "Set Global";
+      const pointSetGlobalButton = html.button(
+        {
+          style: "font-size: 11px; padding: 2px 6px;",
+          disabled: !canSetPointGlobal,
+          onclick: async () => {
+            const context = `${this._getSelectionContextKey()}|point`;
+            if (!this._confirmState.point.pending || this._confirmState.point.context !== context) {
+              this._confirmState.point.pending = true;
+              this._confirmState.point.context = context;
+              this.update();
+              return;
+            }
+            this._clearConfirmState("point");
+            await this._setGlobalFromPointSelection(left, right);
+            this.update();
+          },
+        },
+        pointSetGlobalLabel
+      );
+
+      formContents.push({
+        type: "universal-row",
+        field1: {
+          type: "auxiliaryElement",
+          key: "pointMakeGlobal",
+          auxiliaryElement: html.span({}, [pointMakeGlobalButton, pointSetGlobalButton]),
+        },
+        field2: { type: "spacer" },
+        field3: { type: "spacer" },
+      });
+
+      // Scale slider (last)
       formContents.push({
         type: "edit-number-slider",
-        key: "pointDistribution",
-        label: "Distribution",
-        value: distribution,
-        minValue: -100,
-        defaultValue: 0,
-        maxValue: 100,
-        step: 2,
-      });
-    }
-
-    // Scale slider (last)
-    formContents.push({
-      type: "edit-number-slider",
-      key: "pointWidthScale",
+        key: "pointWidthScale",
       label: "Scale",
       value: this.pointParameters.scaleValue,
       minValue: 0.2,
@@ -747,15 +899,36 @@ export default class SkeletonParametersPanel extends Panel {
       );
       const capAngleValue = Math.round(capAngleState.value ?? DEFAULT_CAP_ANGLE);
       const capDistanceValue = Math.round(capDistanceState.value ?? DEFAULT_CAP_DISTANCE);
-      const showCapRound = !capStyleState.mixed && capValue === "round";
-      const showCapAngle = !capStyleState.mixed && capValue === "square";
-      const showCapDistance = !capStyleState.mixed && capValue === "square";
-      const showForceAngle = !capStyleState.mixed && capValue === "flat";
+        const showCapRound = !capStyleState.mixed && capValue === "round";
+        const showCapAngle = !capStyleState.mixed && capValue === "square";
+        const showCapDistance = !capStyleState.mixed && capValue === "square";
+        const showForceAngle = !capStyleState.mixed && capValue === "flat";
+        const canSetRoundGlobal =
+          capRadiusState.canEdit &&
+          capTensionState.canEdit &&
+          !capRadiusState.mixed &&
+          !capTensionState.mixed;
+        const canSetSquareGlobal =
+          capAngleState.canEdit &&
+          capDistanceState.canEdit &&
+          !capAngleState.mixed &&
+          !capDistanceState.mixed;
 
-      if (showCapRound) {
-        formContents.push({
-          type: "edit-number-slider",
-          key: "capRadiusIndex",
+        if (showCapRound) {
+          this._ensureConfirmState("round", `${selectionContext}|cap:round`);
+        } else {
+          this._clearConfirmState("round");
+        }
+        if (showCapAngle || showCapDistance) {
+          this._ensureConfirmState("square", `${selectionContext}|cap:square`);
+        } else {
+          this._clearConfirmState("square");
+        }
+
+        if (showCapRound) {
+          formContents.push({
+            type: "edit-number-slider",
+            key: "capRadiusIndex",
           label: "Cap Radius",
           value: capRadiusPosition,
           minValue: 1,
@@ -765,22 +938,68 @@ export default class SkeletonParametersPanel extends Panel {
           disabled: !capRadiusState.canEdit,
         });
 
-        formContents.push({
-          type: "edit-number-slider",
-          key: "capTension",
-          label: "Cap Tension (%)",
-          value: capTensionPercent,
-          minValue: 0,
-          defaultValue: Math.round(DEFAULT_CAP_TENSION * 100),
-          maxValue: 100,
-          step: 5,
-          disabled: !capTensionState.canEdit,
-        });
-      }
-      if (showCapAngle) {
-        formContents.push({
-          type: "edit-number-slider",
-          key: "capAngle",
+          formContents.push({
+            type: "edit-number-slider",
+            key: "capTension",
+            label: "Cap Tension (%)",
+            value: capTensionPercent,
+            minValue: 0,
+            defaultValue: Math.round(DEFAULT_CAP_TENSION * 100),
+            maxValue: 100,
+            step: 5,
+            disabled: !capTensionState.canEdit,
+          });
+
+          const roundMakeGlobalButton = html.button(
+            {
+              style: "font-size: 11px; padding: 2px 6px; margin-right: 6px;",
+              disabled: !capRadiusState.canEdit || !capTensionState.canEdit,
+              onclick: async () => {
+                this._clearConfirmState("round");
+                await this._applyGlobalRoundDefaultsToSelection();
+                this.update();
+              },
+            },
+            "Make Global"
+          );
+          const roundSetGlobalLabel = this._confirmState.round.pending ? "Confirm" : "Set Global";
+          const roundSetGlobalButton = html.button(
+            {
+              style: "font-size: 11px; padding: 2px 6px;",
+              disabled: !canSetRoundGlobal,
+              onclick: async () => {
+                const context = `${this._getSelectionContextKey()}|cap:round`;
+                if (!this._confirmState.round.pending || this._confirmState.round.context !== context) {
+                  this._confirmState.round.pending = true;
+                  this._confirmState.round.context = context;
+                  this.update();
+                  return;
+                }
+                this._clearConfirmState("round");
+                await this._setGlobalFromRoundSelection(
+                  capRadiusState.value ?? DEFAULT_CAP_RADIUS_RATIO,
+                  capTensionState.value ?? DEFAULT_CAP_TENSION
+                );
+                this.update();
+              },
+            },
+            roundSetGlobalLabel
+          );
+          formContents.push({
+            type: "universal-row",
+            field1: {
+              type: "auxiliaryElement",
+              key: "roundMakeGlobal",
+              auxiliaryElement: html.span({}, [roundMakeGlobalButton, roundSetGlobalButton]),
+            },
+            field2: { type: "spacer" },
+            field3: { type: "spacer" },
+          });
+        }
+        if (showCapAngle) {
+          formContents.push({
+            type: "edit-number-slider",
+            key: "capAngle",
           label: "Cap Angle (deg)",
           value: capAngleValue,
           minValue: CAP_ANGLE_MIN,
@@ -790,17 +1009,64 @@ export default class SkeletonParametersPanel extends Panel {
           disabled: !capAngleState.canEdit,
         });
       }
-      if (showCapDistance) {
-        formContents.push({
-          type: "edit-number",
-          key: "capDistance",
-          label: "Cap Distance",
-          value: capDistanceValue,
-          minValue: 0,
-          integer: true,
-          disabled: !capDistanceState.canEdit,
-        });
-      }
+        if (showCapDistance) {
+          formContents.push({
+            type: "edit-number",
+            key: "capDistance",
+            label: "Cap Distance",
+            value: capDistanceValue,
+            minValue: 0,
+            integer: true,
+            disabled: !capDistanceState.canEdit,
+          });
+        }
+        if (showCapAngle || showCapDistance) {
+          const squareMakeGlobalButton = html.button(
+            {
+              style: "font-size: 11px; padding: 2px 6px; margin-right: 6px;",
+              disabled: !capAngleState.canEdit || !capDistanceState.canEdit,
+              onclick: async () => {
+                this._clearConfirmState("square");
+                await this._applyGlobalSquareDefaultsToSelection();
+                this.update();
+              },
+            },
+            "Make Global"
+          );
+          const squareSetGlobalLabel = this._confirmState.square.pending ? "Confirm" : "Set Global";
+          const squareSetGlobalButton = html.button(
+            {
+              style: "font-size: 11px; padding: 2px 6px;",
+              disabled: !canSetSquareGlobal,
+              onclick: async () => {
+                const context = `${this._getSelectionContextKey()}|cap:square`;
+                if (!this._confirmState.square.pending || this._confirmState.square.context !== context) {
+                  this._confirmState.square.pending = true;
+                  this._confirmState.square.context = context;
+                  this.update();
+                  return;
+                }
+                this._clearConfirmState("square");
+                await this._setGlobalFromSquareSelection(
+                  capAngleState.value ?? DEFAULT_CAP_ANGLE,
+                  capDistanceState.value ?? DEFAULT_CAP_DISTANCE
+                );
+                this.update();
+              },
+            },
+            squareSetGlobalLabel
+          );
+          formContents.push({
+            type: "universal-row",
+            field1: {
+              type: "auxiliaryElement",
+              key: "squareMakeGlobal",
+              auxiliaryElement: html.span({}, [squareMakeGlobalButton, squareSetGlobalButton]),
+            },
+            field2: { type: "spacer" },
+            field3: { type: "spacer" },
+          });
+        }
       if (showForceAngle) {
         const forceHorizontal = forceHorizontalStates.size === 1 && forceHorizontalStates.has(true);
         const forceVertical = forceVerticalStates.size === 1 && forceVerticalStates.has(true);
@@ -992,14 +1258,36 @@ export default class SkeletonParametersPanel extends Panel {
       }
     }
 
-    _mapValueStream(valueStream, mapper) {
-      const self = this;
-      return (async function* () {
-        for await (const value of valueStream) {
-          yield mapper.call(self, value);
-        }
-      })();
+  _mapValueStream(valueStream, mapper) {
+    const self = this;
+    return (async function* () {
+      for await (const value of valueStream) {
+        yield mapper.call(self, value);
+      }
+    })();
+  }
+
+  _getSelectionContextKey() {
+    const sel = this.sceneController.selection;
+    if (!sel || sel.size === 0) return "";
+    return [...sel].sort().join("|");
+  }
+
+  _ensureConfirmState(kind, context) {
+    const state = this._confirmState?.[kind];
+    if (!state) return;
+    if (state.pending && state.context !== context) {
+      state.pending = false;
+      state.context = null;
     }
+  }
+
+  _clearConfirmState(kind) {
+    const state = this._confirmState?.[kind];
+    if (!state) return;
+    state.pending = false;
+    state.context = null;
+  }
 
     /**
      * Get a source width value from the active source's customData.
@@ -1013,6 +1301,33 @@ export default class SkeletonParametersPanel extends Panel {
 
     const source = this.fontController.sources[sourceIdentifier];
     return source?.customData?.[key] ?? fallback;
+  }
+
+  _getSourceCustomDataValue(key, fallback) {
+    return this._getSourceWidth(key, fallback);
+  }
+
+  async _setSourceCustomDataValues(values, undoLabel) {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return;
+
+    const root = { sources: this.fontController.sources };
+    const changes = recordChanges(root, (r) => {
+      if (!r.sources[sourceIdentifier].customData) {
+        r.sources[sourceIdentifier].customData = {};
+      }
+      for (const [key, value] of Object.entries(values)) {
+        r.sources[sourceIdentifier].customData[key] = value;
+      }
+    });
+
+    if (changes.hasChange) {
+      await this.fontController.postChange(
+        changes.change,
+        changes.rollbackChange,
+        undoLabel || "Set skeleton defaults"
+      );
+    }
   }
 
   /**
@@ -1042,6 +1357,231 @@ export default class SkeletonParametersPanel extends Panel {
       key: SKELETON_WIDTH_CAPITAL_BASE_KEY,
       fallback: DEFAULT_WIDTH_CAPITAL_BASE,
     };
+  }
+
+  _getDefaultDistributionForGlyph() {
+    const glyphCase = this._getGlyphCase();
+    if (glyphCase === "lower") {
+      return this._getSourceCustomDataValue(
+        SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY,
+        DEFAULT_DISTRIBUTION
+      );
+    }
+    return this._getSourceCustomDataValue(
+      SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY,
+      DEFAULT_DISTRIBUTION
+    );
+  }
+
+  async _applyGlobalPointDefaultsToSelection() {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) return;
+
+    const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
+    const totalWidth = Math.round(this._getSourceWidth(widthKey, widthFallback));
+    const distribution = this._getDefaultDistributionForGlyph();
+    const clampedDist = Math.max(-100, Math.min(100, distribution));
+    const left = Math.round(totalWidth * (0.5 + clampedDist / 200));
+    const right = totalWidth - left;
+    const useAsym = Math.abs(clampedDist) > 1e-6;
+    if (useAsym) {
+      this.pointParameters.asymmetrical = true;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          if (contour.singleSided) {
+            point.width = totalWidth;
+            delete point.leftWidth;
+            delete point.rightWidth;
+          } else if (useAsym) {
+            point.leftWidth = left;
+            point.rightWidth = right;
+            delete point.width;
+          } else {
+            point.width = totalWidth;
+            delete point.leftWidth;
+            delete point.rightWidth;
+          }
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Apply global point defaults",
+        broadcast: true,
+      };
+    });
+  }
+
+  async _setGlobalFromPointSelection(left, right) {
+    if (!Number.isFinite(left) || !Number.isFinite(right)) return;
+    const totalWidth = Math.round(left + right);
+    const distribution = this._calculateDistribution(left, right);
+    const glyphCase = this._getGlyphCase();
+    const widthKey =
+      glyphCase === "lower"
+        ? SKELETON_WIDTH_LOWERCASE_BASE_KEY
+        : SKELETON_WIDTH_CAPITAL_BASE_KEY;
+    const distributionKey =
+      glyphCase === "lower"
+        ? SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY
+        : SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY;
+    await this._setSourceCustomDataValues(
+      {
+        [widthKey]: totalWidth,
+        [distributionKey]: distribution,
+      },
+      "Set skeleton defaults"
+    );
+  }
+
+  async _setCapParametersForSelection(paramValues, undoLabel) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) return;
+
+    const clampedValues = {};
+    for (const [key, value] of Object.entries(paramValues)) {
+      clampedValues[key] = this._clampCapParam(key, value);
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+        let changed = false;
+
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour || contour.isClosed) continue;
+          const endpoints = this._getContourEndpointIndices(contour);
+          if (!endpoints) continue;
+          if (pointIdx !== endpoints.firstOnCurve && pointIdx !== endpoints.lastOnCurve) {
+            continue;
+          }
+          const point = contour.points[pointIdx];
+          if (!point || point.type) continue;
+          for (const [key, value] of Object.entries(clampedValues)) {
+            point[key] = value;
+          }
+          changed = true;
+        }
+
+        if (!changed) continue;
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: undoLabel || "Set cap parameters",
+        broadcast: true,
+      };
+    });
+  }
+
+  async _applyGlobalRoundDefaultsToSelection() {
+    const capRadiusRatio = this._getSourceCustomDataValue(
+      SKELETON_CAP_RADIUS_RATIO_KEY,
+      DEFAULT_CAP_RADIUS_RATIO
+    );
+    const capTension = this._getSourceCustomDataValue(
+      SKELETON_CAP_TENSION_KEY,
+      DEFAULT_CAP_TENSION
+    );
+    await this._setCapParametersForSelection(
+      { capRadiusRatio, capTension },
+      "Apply global round caps"
+    );
+  }
+
+  async _applyGlobalSquareDefaultsToSelection() {
+    const capAngle = this._getSourceCustomDataValue(
+      SKELETON_CAP_ANGLE_KEY,
+      DEFAULT_CAP_ANGLE
+    );
+    const capDistance = this._getSourceCustomDataValue(
+      SKELETON_CAP_DISTANCE_KEY,
+      DEFAULT_CAP_DISTANCE
+    );
+    await this._setCapParametersForSelection(
+      { capAngle, capDistance },
+      "Apply global square caps"
+    );
+  }
+
+  async _setGlobalFromRoundSelection(capRadiusRatio, capTension) {
+    await this._setSourceCustomDataValues(
+      {
+        [SKELETON_CAP_RADIUS_RATIO_KEY]: this._clampCapParam(
+          "capRadiusRatio",
+          capRadiusRatio
+        ),
+        [SKELETON_CAP_TENSION_KEY]: this._clampCapParam("capTension", capTension),
+      },
+      "Set global round caps"
+    );
+  }
+
+  async _setGlobalFromSquareSelection(capAngle, capDistance) {
+    await this._setSourceCustomDataValues(
+      {
+        [SKELETON_CAP_ANGLE_KEY]: this._clampCapParam("capAngle", capAngle),
+        [SKELETON_CAP_DISTANCE_KEY]: this._clampCapParam("capDistance", capDistance),
+      },
+      "Set global square caps"
+    );
   }
 
   /**
@@ -1563,8 +2103,14 @@ export default class SkeletonParametersPanel extends Panel {
   _computeStateSignature() {
     const parts = [];
 
-    // Source widths
-    parts.push(`w:${this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE)},${this._getSourceWidth(SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY, DEFAULT_WIDTH_CAPITAL_HORIZONTAL)},${this._getSourceWidth(SKELETON_WIDTH_CAPITAL_CONTRAST_KEY, DEFAULT_WIDTH_CAPITAL_CONTRAST)},${this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_BASE_KEY, DEFAULT_WIDTH_LOWERCASE_BASE)},${this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY, DEFAULT_WIDTH_LOWERCASE_HORIZONTAL)},${this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY, DEFAULT_WIDTH_LOWERCASE_CONTRAST)}`);
+      // Source widths and defaults
+      parts.push(`w:${this._getSourceWidth(SKELETON_WIDTH_CAPITAL_BASE_KEY, DEFAULT_WIDTH_CAPITAL_BASE)},${this._getSourceWidth(SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY, DEFAULT_WIDTH_CAPITAL_HORIZONTAL)},${this._getSourceWidth(SKELETON_WIDTH_CAPITAL_CONTRAST_KEY, DEFAULT_WIDTH_CAPITAL_CONTRAST)},${this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_BASE_KEY, DEFAULT_WIDTH_LOWERCASE_BASE)},${this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY, DEFAULT_WIDTH_LOWERCASE_HORIZONTAL)},${this._getSourceWidth(SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY, DEFAULT_WIDTH_LOWERCASE_CONTRAST)}`);
+      parts.push(
+        `wd:${this._getSourceCustomDataValue(SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY, DEFAULT_DISTRIBUTION)},${this._getSourceCustomDataValue(SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY, DEFAULT_DISTRIBUTION)}`
+      );
+      parts.push(
+        `capd:${this._getSourceCustomDataValue(SKELETON_CAP_RADIUS_RATIO_KEY, DEFAULT_CAP_RADIUS_RATIO)},${this._getSourceCustomDataValue(SKELETON_CAP_TENSION_KEY, DEFAULT_CAP_TENSION)},${this._getSourceCustomDataValue(SKELETON_CAP_ANGLE_KEY, DEFAULT_CAP_ANGLE)},${this._getSourceCustomDataValue(SKELETON_CAP_DISTANCE_KEY, DEFAULT_CAP_DISTANCE)}`
+      );
 
     // Single-sided state
     parts.push(`ss:${this._getCurrentSingleSided()},${this._getCurrentSingleSidedDirection()}`);
@@ -1585,11 +2131,11 @@ export default class SkeletonParametersPanel extends Panel {
     const glyphCase = this._getGlyphCase();
     parts.push(`gc:${glyphCase}`);
 
-    // Selected skeleton points state (including editable and nudge)
-    const selectedData = this._getSelectedSkeletonPoints();
-    if (selectedData) {
-      const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
-      const defaultWidth = this._getSourceWidth(widthKey, widthFallback);
+      // Selected skeleton points state (including editable and nudge)
+      const selectedData = this._getSelectedSkeletonPoints();
+      if (selectedData) {
+        const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
+        const defaultWidth = this._getSourceWidth(widthKey, widthFallback);
         for (const { contourIdx, pointIdx, point } of selectedData.points) {
           const contour = selectedData.skeletonData?.contours?.[contourIdx];
           const w = this._getPointWidths(point, defaultWidth);
@@ -1610,8 +2156,13 @@ export default class SkeletonParametersPanel extends Panel {
         }
       }
 
-    return parts.join("|");
-  }
+      const confirmPoint = this._confirmState?.point?.pending ? 1 : 0;
+      const confirmSquare = this._confirmState?.square?.pending ? 1 : 0;
+      const confirmRound = this._confirmState?.round?.pending ? 1 : 0;
+      parts.push(`confirm:${confirmPoint},${confirmSquare},${confirmRound}`);
+
+      return parts.join("|");
+    }
 
   /**
    * Get the half-widths for a point.
