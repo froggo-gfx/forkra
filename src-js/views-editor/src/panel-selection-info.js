@@ -122,7 +122,7 @@ export default class SelectionInfoPanel extends Panel {
           [
             html.div(
               { style: "display: flex; flex-direction: column; gap: 0.75em;" },
-              [this.infoForm, this.letterspacerHost]
+              [this.infoForm]
             ),
           ]
         ),
@@ -404,6 +404,12 @@ export default class SelectionInfoPanel extends Panel {
         ...this._setupDimensionsInfo(glyphController, pointIndices, componentIndices)
       );
     }
+
+    // Add the letterspacer panel after dimensions and before skeleton defaults
+    formContents.push({
+      type: "single-icon",
+      element: this.letterspacerHost
+    });
 
     for (const index of backgroundImageIndices) {
       assert(index === 0, "only a single bg image is supported");
