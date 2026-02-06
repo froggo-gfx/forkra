@@ -160,57 +160,28 @@ export function formatDistanceAndAngle(distance, angle) {
 // - a=AC, b=AT, c=BD, d=BT
  // - T is Tunni point (intersection of lines AC and BD)
 export function calculateTension(offCurvePointA, onCurvePointA, offCurvePointB, onCurvePointB, isSelectedOffCurve = false) {
-   // Debug: Log input parameters only when an off-curve point is selected
-   if (isSelectedOffCurve) {
-     console.log("=== calculateTension Debug ===");
-     console.log("Selected Off-Curve Point (C):", offCurvePointA);
-     console.log("Coordinates:", offCurvePointA.x, ",", offCurvePointA.y);
-     console.log("Connected On-Curve Point (A):", onCurvePointA);
-     console.log("Coordinates:", onCurvePointA.x, ",", onCurvePointA.y);
-     console.log("Other Off-Curve Point (D):", offCurvePointB);
-     console.log("Coordinates:", offCurvePointB.x, ",", offCurvePointB.y);
-     console.log("Other On-Curve Point (B):", onCurvePointB);
-     console.log("Coordinates:", onCurvePointB.x, ",", onCurvePointB.y);
-   }
    
    // Calculate a = AC (distance from on-curve point A to off-curve point C)
    const aDx = offCurvePointA.x - onCurvePointA.x;
    const aDy = offCurvePointA.y - onCurvePointA.y;
    const a = Math.hypot(aDx, aDy);
-   if (isSelectedOffCurve) {
-     console.log("a = AC =", a);
-   }
    
    // Handle degenerate case with improved floating point precision handling
    const epsilon = 1e-10;
    if (Math.abs(a) < epsilon) {
-     if (isSelectedOffCurve) {
-       console.log("Degenerate case: a is very small or zero, returning 0");
-     }
      return 0;
    }
    
    // Calculate intersection point T of lines AC and BD
    // Line AC: from onCurvePointA (A) to offCurvePointA (C)
    // Line BD: from onCurvePointB (B) to offCurvePointB (D)
-   if (isSelectedOffCurve) {
-     console.log("Calculating intersection of lines AC and BD");
-     console.log("Line AC: A", onCurvePointA, "to C", offCurvePointA);
-     console.log("Line BD: B", onCurvePointB, "to D", offCurvePointB);
-   }
    const pointT = lineIntersection(
      onCurvePointA, offCurvePointA,
      onCurvePointB, offCurvePointB
    );
-   if (isSelectedOffCurve) {
-     console.log("T (intersection point):", pointT);
-   }
    
    // If lines are parallel or collinear, return 0
    if (!pointT) {
-     if (isSelectedOffCurve) {
-       console.log("Lines are parallel or collinear, returning 0");
-     }
      return 0;
    }
    
@@ -220,23 +191,14 @@ export function calculateTension(offCurvePointA, onCurvePointA, offCurvePointB, 
    const bDx = pointT.x - onCurvePointA.x;
    const bDy = pointT.y - onCurvePointA.y;
    const b = Math.hypot(bDx, bDy);
-   if (isSelectedOffCurve) {
-     console.log("b = AT =", b);
-   }
    
    // c = distance from B to D
    const cDx = offCurvePointB.x - onCurvePointB.x;
    const cDy = offCurvePointB.y - onCurvePointB.y;
    const c = Math.hypot(cDx, cDy);
-   if (isSelectedOffCurve) {
-     console.log("c = BD =", c);
-   }
    
    // Check for degenerate case with c
    if (Math.abs(c) < epsilon) {
-     if (isSelectedOffCurve) {
-       console.log("Degenerate case: c is very small or zero, returning 0");
-     }
      return 0;
    }
    
@@ -244,31 +206,17 @@ export function calculateTension(offCurvePointA, onCurvePointA, offCurvePointB, 
    const dDx = pointT.x - onCurvePointB.x;
    const dDy = pointT.y - onCurvePointB.y;
    const d = Math.hypot(dDx, dDy);
-   if (isSelectedOffCurve) {
-     console.log("d = BT =", d);
-   }
    
    // Calculate Tunni tension τ = 2 (a*c) / (a*d + b*c)
    const numerator = 2 * (a * c);
    const denominator = (a * d) + (b * c);
-   if (isSelectedOffCurve) {
-     console.log("Numerator: 2 * a * c =", numerator);
-     console.log("Denominator: (a * d) + (b * c) =", denominator);
-   }
    
    // Handle case where denominator is zero or very small with improved handling
    if (Math.abs(denominator) < epsilon) {
-     if (isSelectedOffCurve) {
-       console.log("Denominator is very small or zero, returning 0");
-     }
      return 0;
    }
    
    const tension = numerator / denominator;
-   if (isSelectedOffCurve) {
-     console.log("Final tension value:", tension);
-     console.log("=== End calculateTension Debug ===");
-   }
    
    // Return tension value (can be any real number)
    return tension;
@@ -1016,38 +964,6 @@ function parseSelection(selection) {
   }
   return result;
 }
-// Test function to verify line intersection fix
-function testLineIntersection() {
-  // Test case from the bug report
-  const A = {x: 100, y: 0};   // onCurvePointA
-  const B = {x: 0, y: 100};   // onCurvePointB
-  const C = {x: 100, y: 50};  // offCurvePointA
-  const D = {x: 50, y: 100};  // offCurvePointB
-  
-  console.log("Testing line intersection fix...");
-  console.log("A (onCurvePointA):", A);
-  console.log("B (onCurvePointB):", B);
-  console.log("C (offCurvePointA):", C);
-  console.log("D (offCurvePointB):", D);
-  
-  // Line AC: from A(100, 0) to C(100, 50) - Vertical line at x=100
-  // Line BD: from B(0, 100) to D(50, 100) - Horizontal line at y=100
-  // Expected intersection: (100, 100)
-  
-  const intersection = lineIntersection(A, C, B, D);
-  console.log("Calculated intersection:", intersection);
-  
-  if (intersection && 
-      Math.abs(intersection.x - 100) < 0.001 && 
-      Math.abs(intersection.y - 100) < 0.001) {
-    console.log("✅ Test PASSED: Intersection is correct");
-  } else {
-    console.log("❌ Test FAILED: Intersection is incorrect");
-  }
-}
-
-// Run the test
-testLineIntersection();
 // Additional tension calculation functions that need to be imported from tunni-calculations.js
 
 /**
@@ -1221,7 +1137,6 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
  const showAngle = model.sceneSettings?.showTunniAngle ?? true;
  
  // Debug logging to see if the function is being called and what values we're getting
- // console.log("drawTunniLabels called", { showDistance, showTension, showAngle, model });
   
   // Save context state
  context.save();
@@ -1345,7 +1260,6 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
             context.restore();
           } catch (error) {
             // Skip segments where tension calculation fails
-            console.warn("Failed to calculate handle tensions:", error);
           }
         }
       }
@@ -1480,7 +1394,6 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
           context.restore();
         } catch (error) {
           // Skip if calculation fails
-          console.warn("Failed to calculate off-curve distance/angle:", error);
         }
       }
     }

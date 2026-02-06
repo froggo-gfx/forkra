@@ -477,10 +477,6 @@ export default class LetterspacerPanel extends Panel {
     }
   }
 
-  logDebug(...args) {
-    if (!this.debugLogging) return;
-    console.log("[letterspacer]", ...args);
-  }
 
   async applySpacing() {
     if (!(await this.hasCurrentMasterForGlyph())) {
@@ -498,14 +494,6 @@ export default class LetterspacerPanel extends Panel {
       : null;
     const engine = new LetterspacerEngine(this.params, fontMetrics);
 
-    this.logDebug("applySpacing start", {
-      glyph: glyphName,
-      referenceGlyph,
-      factor,
-      area: this.params.area,
-      depth: this.params.depth,
-      overshoot: this.params.overshoot,
-    });
     
     // Store calculated values from the edit operation
     let calculatedLSB = null;
@@ -528,12 +516,6 @@ export default class LetterspacerPanel extends Panel {
           fontMetrics,
           glyphName
         );
-        this.logDebug("applySpacing refBounds", {
-          layerName,
-          referenceGlyph: refBounds.referenceGlyph,
-          minY: refBounds.minY,
-          maxY: refBounds.maxY,
-        });
 
         // Calculate fresh values for this layer
         const result = engine.computeSpacing(
@@ -546,16 +528,8 @@ export default class LetterspacerPanel extends Panel {
 
         if (result.noRefIntersections) {
           if (!warnedNoRefZone) {
-            console.warn(
-              `Letterspacer: glyph outlines are outside the reference zone. ` +
-                `No match with "${refBounds.referenceGlyph || referenceGlyph || glyphName}".`
-            );
             warnedNoRefZone = true;
           }
-          this.logDebug("applySpacing noRefIntersections", {
-            layerName,
-            referenceGlyph: refBounds.referenceGlyph || referenceGlyph || glyphName,
-          });
           continue;
         }
 
@@ -967,7 +941,6 @@ export default class LetterspacerPanel extends Panel {
     );
 
     if (!margins.leftMargins || !margins.rightMargins) {
-      console.warn("Could not collect margins for reverse calculation");
       return;
     }
 
@@ -976,7 +949,6 @@ export default class LetterspacerPanel extends Panel {
     const processedRight = setDepth(margins.rightMargins, margins.rightExtreme, maxDepth, false);
 
     if (processedLeft.length < 2 || processedRight.length < 2) {
-      console.warn("Insufficient margins for reverse calculation");
       return;
     }
 
@@ -1131,26 +1103,11 @@ export default class LetterspacerPanel extends Panel {
     }
 
     if (!match) {
-      this.logDebug("referenceRules no match", {
-        glyph: glyphName,
-        category,
-        subCategory,
-        script,
-      });
       return { referenceGlyph: glyphName, factor: 1 };
     }
 
     const referenceGlyph =
       match.reference === "*" ? glyphName : match.reference;
-    this.logDebug("referenceRules match", {
-      glyph: glyphName,
-      category,
-      subCategory,
-      script,
-      referenceGlyph: referenceGlyph || glyphName,
-      factor: Number(match.factor) || 1,
-      rule: match,
-    });
     return {
       referenceGlyph: referenceGlyph || glyphName,
       factor: Number(match.factor) || 1,
@@ -1214,10 +1171,6 @@ export default class LetterspacerPanel extends Panel {
     }
 
     if (referenceGlyphName) {
-      console.warn(
-        `Letterspacer: reference glyph "${referenceGlyphName}" has no contours. ` +
-          `Using "${glyphName}" instead.`
-      );
     }
 
     if (fallbackBounds) {
@@ -1331,10 +1284,6 @@ export default class LetterspacerPanel extends Panel {
       this.calculatedLSB = null;
       this.calculatedRSB = null;
       if (warnOnNoRef) {
-        console.warn(
-          `Letterspacer: glyph outlines are outside the reference zone. ` +
-            `No match with "${refBounds.referenceGlyph || referenceGlyph || glyphName}".`
-        );
       }
       return;
     }
@@ -1351,12 +1300,6 @@ export default class LetterspacerPanel extends Panel {
     }
     // Recalculate spacing after glyph edits
     this.visualizationOpacity = 1;
-      this.logDebug("calculateSpacing start", {
-        glyph: this.getSelectedGlyphName(),
-        area: this.params.area,
-        depth: this.params.depth,
-        overshoot: this.params.overshoot,
-      });
       await this.updateCalculatedValues({ warnOnNoRef: true });
       this.updateValueDisplay();
       await this.update();
@@ -1411,10 +1354,6 @@ export default class LetterspacerPanel extends Panel {
       factor
     );
     if (spacingResult.noRefIntersections) {
-      this.logDebug("visualization noRefIntersections", {
-        glyph: glyphName,
-        referenceGlyph: refBounds.referenceGlyph || referenceGlyph || glyphName,
-      });
       return null;
     }
 
