@@ -52,6 +52,7 @@ import {
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import {
   skeletonTunniHitTest,
+  buildSegmentsFromSkeletonPoints,
   calculateSkeletonControlPointsFromTunniDelta,
   calculateSkeletonOnCurveFromTunni,
   calculateSkeletonEqualizedControlPoints,
@@ -4964,18 +4965,31 @@ export class PointerTool extends BaseTool {
   _measurePointsEqual(mp1, mp2) {
     if (mp1 === mp2) return true;
     if (!mp1 || !mp2) return false;
+    const tension1 = mp1.tensionContext;
+    const tension2 = mp2.tensionContext;
+    const sameTensionContext =
+      (!tension1 && !tension2) ||
+      (tension1 &&
+        tension2 &&
+        tension1.hoveredHandleSide === tension2.hoveredHandleSide &&
+        JSON.stringify(tension1.segmentPoints) === JSON.stringify(tension2.segmentPoints));
     return (
       mp1.type === mp2.type &&
       mp1.p1?.x === mp2.p1?.x &&
       mp1.p1?.y === mp2.p1?.y &&
       mp1.p2?.x === mp2.p2?.x &&
-      mp1.p2?.y === mp2.p2?.y
+      mp1.p2?.y === mp2.p2?.y &&
+      sameTensionContext
     );
   }
 
   /**
    * Find control point (off-curve) under cursor for measure mode.
-   * Returns { p1, p2, type } where p1 is control point, p2 is its on-curve anchor.
+   * Returns { p1, p2, type, tensionContext? } where:
+   * - p1 is control point
+   * - p2 is its on-curve anchor
+   * - tensionContext stores canonical cubic segment data for stable tension
+   *   calculation: { segmentPoints: [p1,p2,p3,p4], hoveredHandleSide }.
    */
   _findControlPointForMeasure(point, size) {
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
@@ -4994,22 +5008,28 @@ export class PointerTool extends BaseTool {
       for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
         const contour = skeletonData.contours[contourIdx];
         const points = contour.points || [];
+        const numPoints = points.length;
+        const getPointAt = (idx) => {
+          if (contour.isClosed) {
+            return points[(idx + numPoints) % numPoints];
+          }
+          return idx >= 0 && idx < numPoints ? points[idx] : null;
+        };
         for (let pointIdx = 0; pointIdx < points.length; pointIdx++) {
           const sp = points[pointIdx];
           if (!sp?.type) continue; // only off-curve
           const dist = vector.distance(glyphPoint, sp);
           if (dist > size) continue;
 
-          const prevIdx = (pointIdx - 1 + points.length) % points.length;
-          const nextIdx = (pointIdx + 1) % points.length;
-          const prevPoint = points[prevIdx];
-          const nextPoint = points[nextIdx];
+          const prevPoint = getPointAt(pointIdx - 1);
+          const nextPoint = getPointAt(pointIdx + 1);
           const anchor = !prevPoint?.type ? prevPoint : (!nextPoint?.type ? nextPoint : null);
           if (!anchor) continue;
 
           return {
             p1: { x: sp.x, y: sp.y },
             p2: { x: anchor.x, y: anchor.y },
+            tensionContext: this._buildSkeletonTensionContext(contour, pointIdx),
             type: "skeleton",
           };
         }
@@ -5026,19 +5046,30 @@ export class PointerTool extends BaseTool {
     if (isOnCurve) return null;
 
     const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
+    const contourInfo = path.contourInfo[contourIndex];
     const numContourPoints = path.getNumPointsOfContour(contourIndex);
     const contourStart = pointIndex - contourPointIndex;
     const contourEnd = contourStart + numContourPoints; // exclusive
 
-    const getPrevIdx = (idx) => (idx > contourStart ? idx - 1 : contourEnd - 1);
-    const getNextIdx = (idx) => (idx < contourEnd - 1 ? idx + 1 : contourStart);
+    const getPrevIdx = (idx) => {
+      if (idx > contourStart) {
+        return idx - 1;
+      }
+      return contourInfo.isClosed ? contourEnd - 1 : null;
+    };
+    const getNextIdx = (idx) => {
+      if (idx < contourEnd - 1) {
+        return idx + 1;
+      }
+      return contourInfo.isClosed ? contourStart : null;
+    };
 
     const prevIdx = getPrevIdx(pointIndex);
     const nextIdx = getNextIdx(pointIndex);
-    const prevType = path.pointTypes[prevIdx];
-    const nextType = path.pointTypes[nextIdx];
-    const prevIsOnCurve = (prevType & 0x03) === 0;
-    const nextIsOnCurve = (nextType & 0x03) === 0;
+    const prevType = prevIdx == null ? null : path.pointTypes[prevIdx];
+    const nextType = nextIdx == null ? null : path.pointTypes[nextIdx];
+    const prevIsOnCurve = prevType != null && (prevType & 0x03) === 0;
+    const nextIsOnCurve = nextType != null && (nextType & 0x03) === 0;
 
     let anchorIdx;
     if (prevIsOnCurve) {
@@ -5055,8 +5086,79 @@ export class PointerTool extends BaseTool {
     return {
       p1: { x: handlePos.x, y: handlePos.y },
       p2: { x: anchorPos.x, y: anchorPos.y },
+      tensionContext: this._buildPathTensionContext(path, contourIndex, pointIndex),
       type: "path",
     };
+  }
+
+  _buildPathTensionContext(path, contourIndex, hoveredPointIndex) {
+    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
+      if (!segment?.points || segment.points.length !== 4) {
+        continue;
+      }
+      const parentIndices = segment.parentPointIndices || [];
+      if (parentIndices.length !== 4) {
+        continue;
+      }
+      const off1IsCubic = (path.pointTypes[parentIndices[1]] & 0x03) === 0x02;
+      const off2IsCubic = (path.pointTypes[parentIndices[2]] & 0x03) === 0x02;
+      if (!off1IsCubic || !off2IsCubic) {
+        continue;
+      }
+      let hoveredHandleSide = null;
+      if (parentIndices[1] === hoveredPointIndex) {
+        hoveredHandleSide = "start";
+      } else if (parentIndices[2] === hoveredPointIndex) {
+        hoveredHandleSide = "end";
+      }
+      if (!hoveredHandleSide) {
+        continue;
+      }
+      return {
+        segmentPoints: segment.points.map((pt) => ({ x: pt.x, y: pt.y })),
+        hoveredHandleSide,
+      };
+    }
+    return null;
+  }
+
+  _buildSkeletonTensionContext(contour, hoveredPointIndex) {
+    const points = contour?.points || [];
+    if (!points.length) return null;
+
+    const segments = buildSegmentsFromSkeletonPoints(points, !!contour?.isClosed);
+    for (const segment of segments) {
+      const controlIndices = segment.controlIndices || [];
+      if (controlIndices.length !== 2 || segment.controlPoints?.length !== 2) {
+        continue;
+      }
+
+      let hoveredHandleSide = null;
+      if (controlIndices[0] === hoveredPointIndex) {
+        hoveredHandleSide = "start";
+      } else if (controlIndices[1] === hoveredPointIndex) {
+        hoveredHandleSide = "end";
+      }
+      if (!hoveredHandleSide) {
+        continue;
+      }
+
+      const segmentPoints = [
+        segment.startPoint,
+        segment.controlPoints[0],
+        segment.controlPoints[1],
+        segment.endPoint,
+      ];
+      if (segmentPoints.some((pt) => !pt)) {
+        continue;
+      }
+
+      return {
+        segmentPoints: segmentPoints.map((pt) => ({ x: pt.x, y: pt.y })),
+        hoveredHandleSide,
+      };
+    }
+    return null;
   }
 
   /**

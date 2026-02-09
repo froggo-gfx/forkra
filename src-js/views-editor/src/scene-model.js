@@ -57,7 +57,7 @@ export class SceneModel {
     this.measureHoverSegment = null; // { p1, p2, type }
     this.measureHoverRibPoint = null; // { x, y, width, leftWidth, rightWidth }
     this.measureHoverPoints = null; // { p1, p2, type }
-    this.measureHoverHandle = null; // { p1, p2, type }
+    this.measureHoverHandle = null; // { p1, p2, type, tensionContext? }
 
     this.sceneSettingsController.addKeyListener(
       ["glyphLines", "align", "applyKerning", "selectedGlyph", "editLayerName"],
