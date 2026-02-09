@@ -367,7 +367,9 @@ export class Form extends SimpleElement {
   _addEditNumberExpression(valueElement, fieldItem, allowEmptyField = false) {
     this._lastValidFieldValues[fieldItem.key] = fieldItem.value;
     const inputElement = document.createElement("input");
-    inputElement.value = maybeRoundToString(fieldItem.value, fieldItem.numDigits);
+    inputElement.value =
+      fieldItem.displayValue ??
+      maybeRoundToString(fieldItem.value, fieldItem.numDigits);
 
     if (fieldItem["data-tooltip"]) {
       // data-tooltip doesn't work for input number,
@@ -376,66 +378,83 @@ export class Form extends SimpleElement {
     }
 
     inputElement.disabled = fieldItem.disabled;
-    inputElement.onkeydown = (event) => {
-      const increment = event.shiftKey ? 10 : 1;
-      switch (event.key) {
-        case "ArrowUp": {
-          event.preventDefault();
-          let value = Number(event.target.value) + increment;
-          if (fieldItem.maxValue != undefined) {
-            value = Math.min(value, fieldItem.maxValue);
+      inputElement.onkeydown = (event) => {
+        const increment = event.shiftKey ? 10 : 1;
+        switch (event.key) {
+          case "ArrowUp": {
+            event.preventDefault();
+            const numericValue = Number(event.target.value);
+            if (Number.isNaN(numericValue)) {
+              return;
+            }
+            let value = numericValue + increment;
+            if (fieldItem.maxValue != undefined) {
+              value = Math.min(value, fieldItem.maxValue);
+            }
+            event.target.value = value;
+            this._fieldChanging(fieldItem, value, undefined);
+            break;
           }
-          event.target.value = value;
-          this._fieldChanging(fieldItem, value, undefined);
-          break;
-        }
-        case "ArrowDown": {
-          event.preventDefault();
-          let value = Number(event.target.value) - increment;
-          if (fieldItem.minValue != undefined) {
-            value = Math.max(value, fieldItem.minValue);
+          case "ArrowDown": {
+            event.preventDefault();
+            const numericValue = Number(event.target.value);
+            if (Number.isNaN(numericValue)) {
+              return;
+            }
+            let value = numericValue - increment;
+            if (fieldItem.minValue != undefined) {
+              value = Math.max(value, fieldItem.minValue);
+            }
+            event.target.value = value;
+            this._fieldChanging(fieldItem, value, undefined);
+            break;
           }
-          event.target.value = value;
-          this._fieldChanging(fieldItem, value, undefined);
-          break;
         }
-      }
-    };
+      };
 
     inputElement.oninput = (event) => {
       inputElement.setCustomValidity("");
     };
 
-    inputElement.onchange = async (event) => {
-      let value, valueObject, validitationError;
-      if (allowEmptyField && inputElement.value === "") {
-        value = null;
-      } else {
-        assert(fieldItem.evaluateExpression);
-        value = await fieldItem.evaluateExpression(inputElement.value);
-        if (typeof value !== "number" && typeof value !== "string") {
-          valueObject = value;
-          value = value.value;
-          if (valueObject.error) {
-            validitationError = valueObject.error;
-            value = this._lastValidFieldValues[fieldItem.key];
-            valueObject = undefined;
+      inputElement.onchange = async (event) => {
+        let value, valueObject, validitationError;
+        if (allowEmptyField && inputElement.value === "") {
+          value = null;
+        } else {
+          assert(fieldItem.evaluateExpression);
+          value = await fieldItem.evaluateExpression(inputElement.value);
+          if (typeof value !== "number" && typeof value !== "string") {
+            valueObject = value;
+            value = value.value;
+            if (valueObject.error) {
+              validitationError = valueObject.error;
+              value = this._lastValidFieldValues[fieldItem.key];
+              valueObject = undefined;
+            } else {
+              const displayValue =
+                valueObject.displayValue ||
+                (valueObject.displayName
+                  ? `${valueObject.displayName} (${maybeRoundToString(
+                      value,
+                      fieldItem.numDigits
+                    )})`
+                  : maybeRoundToString(value, fieldItem.numDigits));
+              inputElement.value = displayValue;
+            }
           }
-          inputElement.value = maybeRoundToString(value, fieldItem.numDigits);
-        }
 
-        if (!valueObject) {
-          if (isNaN(value)) {
-            value = this._lastValidFieldValues[fieldItem.key];
-            inputElement.value = maybeRoundToString(value, fieldItem.numDigits);
-          }
-          if (fieldItem.minValue != undefined && value < fieldItem.minValue) {
-            validitationError = "value below minimum";
-          } else if (fieldItem.maxValue != undefined && value > fieldItem.maxValue) {
-            validitationError = "value above minimum";
+          if (!valueObject) {
+            if (isNaN(value)) {
+              value = this._lastValidFieldValues[fieldItem.key];
+              inputElement.value = maybeRoundToString(value, fieldItem.numDigits);
+            }
+            if (fieldItem.minValue != undefined && value < fieldItem.minValue) {
+              validitationError = "value below minimum";
+            } else if (fieldItem.maxValue != undefined && value > fieldItem.maxValue) {
+              validitationError = "value above minimum";
+            }
           }
         }
-      }
 
       inputElement.setCustomValidity(validitationError || "");
 

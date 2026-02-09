@@ -20,6 +20,7 @@ import {
 import { showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialog } from "@fontra/web-components/modal-dialog.js";
 import { Form } from "@fontra/web-components/ui-form.js";
+import { clearRepresentationCache } from "@fontra/core/representation-cache.js";
 import { moveSkeletonData } from "@fontra/core/skeleton-contour-generator.js";
 import LetterspacerPanel from "./panel-letterspacer.js";
 import Panel from "./panel.js";
@@ -37,6 +38,7 @@ const SKELETON_CAP_RADIUS_RATIO_KEY = "fontra.skeleton.capRadiusRatio";
 const SKELETON_CAP_TENSION_KEY = "fontra.skeleton.capTension";
 const SKELETON_CAP_ANGLE_KEY = "fontra.skeleton.capAngle";
 const SKELETON_CAP_DISTANCE_KEY = "fontra.skeleton.capDistance";
+const SIDEBEARING_VARIABLES_KEY = "fontra.sidebearingVars";
 
 const DEFAULT_WIDTH_CAPITAL_BASE = 60;
 const DEFAULT_WIDTH_CAPITAL_HORIZONTAL = 50;
@@ -196,6 +198,165 @@ export default class SelectionInfoPanel extends Panel {
     return Math.max(minValue, Math.min(maxValue, value));
   }
 
+  _applyLeftMargin(layerGlyph, layerGlyphController, value, layer) {
+    clearRepresentationCache(layerGlyphController);
+    const translationX = maybeClampValue(
+      value - layerGlyphController.leftMargin,
+      -layerGlyph.xAdvance,
+      undefined
+    );
+    for (const i of range(0, layerGlyph.path.coordinates.length, 2)) {
+      layerGlyph.path.coordinates[i] += translationX;
+    }
+    for (const compo of layerGlyph.components) {
+      compo.transformation.translateX += translationX;
+    }
+    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    if (skeletonData) {
+      const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+      moveSkeletonData(newSkeletonData, translationX, 0);
+      layer.customData["fontra.skeleton"] = newSkeletonData;
+    }
+    layerGlyph.xAdvance += translationX;
+  }
+
+  _applyRightMargin(layerGlyph, layerGlyphController, value) {
+    clearRepresentationCache(layerGlyphController);
+    const translationX = maybeClampValue(
+      value - layerGlyphController.rightMargin,
+      -layerGlyph.xAdvance,
+      undefined
+    );
+    layerGlyph.xAdvance += translationX;
+  }
+
+  _getPendingSidebearingVariables() {
+    if (!this.infoForm || !this.fontController?.glyphMap) {
+      return {};
+    }
+    const pending = {};
+    if (this.infoForm.hasKey('["leftMargin"]')) {
+      const expression = this.infoForm.getValue('["leftMargin"]');
+      const parsed = parseSidebearingVariableRef(
+        expression,
+        "leftMargin",
+        this.fontController.glyphMap
+      );
+      if (parsed) {
+        pending.left = { glyph: parsed.glyph, side: parsed.side };
+      }
+    }
+    if (this.infoForm.hasKey('["rightMargin"]')) {
+      const expression = this.infoForm.getValue('["rightMargin"]');
+      const parsed = parseSidebearingVariableRef(
+        expression,
+        "rightMargin",
+        this.fontController.glyphMap
+      );
+      if (parsed) {
+        pending.right = { glyph: parsed.glyph, side: parsed.side };
+      }
+    }
+    return pending;
+  }
+
+  async _updateSidebearingVariables(glyphName, varGlyphController) {
+    if (!glyphName || !varGlyphController) {
+      return;
+    }
+    const { locations } = this._getEditingLocations(varGlyphController);
+    const getGlyphFunc = this.fontController.getGlyph.bind(this.fontController);
+    const pendingVars = this._getPendingSidebearingVariables();
+    const updatesByLayer = {};
+    for (const [layerName, location] of Object.entries(locations)) {
+      const layer = varGlyphController.glyph.layers?.[layerName];
+      const vars = { ...(layer?.customData?.[SIDEBEARING_VARIABLES_KEY] || {}) };
+      if (pendingVars.left) {
+        vars.left = { ...(vars.left || {}), ...pendingVars.left };
+      }
+      if (pendingVars.right) {
+        vars.right = { ...(vars.right || {}), ...pendingVars.right };
+      }
+      if (!vars.left && !vars.right) continue;
+      const updates = {};
+      for (const sideKey of ["left", "right"]) {
+        const entry = vars[sideKey];
+        if (!entry?.glyph || !entry.side) {
+          continue;
+        }
+        const metricProperty = entry.side === "left" ? "leftMargin" : "rightMargin";
+        const referencedGlyph = await this.fontController.getGlyph(entry.glyph);
+        if (!referencedGlyph) {
+          continue;
+        }
+        const instanceController = await referencedGlyph.instantiateController(
+          location,
+          layerName,
+          getGlyphFunc
+        );
+        const newValue = instanceController?.[metricProperty];
+        if (newValue == undefined) {
+          continue;
+        }
+        updates[sideKey] = { ...entry, value: newValue };
+      }
+      if (Object.keys(updates).length) {
+        updatesByLayer[layerName] = updates;
+      }
+    }
+    if (!Object.keys(updatesByLayer).length) {
+      return;
+    }
+
+    const layerControllers = {};
+    for (const [layerName, layerGlyph] of Object.entries(
+      this.sceneController.getEditingLayerFromGlyphLayers(
+        varGlyphController.glyph.layers
+      )
+    )) {
+      const layerGlyphController = await this.fontController.getLayerGlyphController(
+        glyphName,
+        layerName,
+        varGlyphController.getSourceIndexForLayerName(layerName)
+      );
+      layerControllers[layerName] = layerGlyphController;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const changes = recordChanges(glyph, (g) => {
+        for (const [layerName, updates] of Object.entries(updatesByLayer)) {
+          const layer = g.layers[layerName];
+          if (!layer) continue;
+          const layerGlyph = layer.glyph;
+          const layerGlyphController = layerControllers[layerName];
+          if (!layerGlyphController) continue;
+          if (updates.left) {
+            this._applyLeftMargin(layerGlyph, layerGlyphController, updates.left.value, layer);
+          }
+          if (updates.right) {
+            this._applyRightMargin(layerGlyph, layerGlyphController, updates.right.value);
+          }
+          const customData = layer.customData || (layer.customData = {});
+          const vars = { ...(customData[SIDEBEARING_VARIABLES_KEY] || {}) };
+          if (updates.left) {
+            vars.left = updates.left;
+          }
+          if (updates.right) {
+            vars.right = updates.right;
+          }
+          customData[SIDEBEARING_VARIABLES_KEY] = vars;
+        }
+      });
+      return {
+        changes: changes,
+        undoLabel: "update sidebearings",
+        broadcast: true,
+      };
+    });
+
+    await this.update();
+  }
+
   async update(senderInfo) {
     if (
       senderInfo?.senderID === this &&
@@ -225,10 +386,26 @@ export default class SelectionInfoPanel extends Panel {
     const instance = glyphController?.instance;
     this.haveInstance = !!instance;
 
-    const selectedGlyphInfo = this.sceneController.sceneModel.getSelectedGlyphInfo();
-    const varGlyphController =
-      await this.sceneController.sceneModel.getSelectedVariableGlyphController();
-    const glyphLocked = !!varGlyphController?.glyph.customData["fontra.glyph.locked"];
+      const selectedGlyphInfo = this.sceneController.sceneModel.getSelectedGlyphInfo();
+      const varGlyphController =
+        await this.sceneController.sceneModel.getSelectedVariableGlyphController();
+      const glyphLocked = !!varGlyphController?.glyph.customData["fontra.glyph.locked"];
+      const editLayerName = this.sceneController.editingLayerNames?.[0];
+      const editLayer = editLayerName
+        ? varGlyphController?.glyph?.layers?.[editLayerName]
+        : null;
+      const sidebearingVars = editLayer?.customData?.[SIDEBEARING_VARIABLES_KEY];
+      const leftSidebearingDisplay = formatSidebearingVariableDisplay(
+        sidebearingVars?.left,
+        "left",
+        1
+      );
+      const rightSidebearingDisplay = formatSidebearingVariableDisplay(
+        sidebearingVars?.right,
+        "right",
+        1
+      );
+      const hasSidebearingVars = !!sidebearingVars?.left || !!sidebearingVars?.right;
 
     if (
       selectedGlyphInfo?.isUndefined &&
@@ -314,66 +491,62 @@ export default class SelectionInfoPanel extends Panel {
           type: "edit-number-x-y",
           key: '["sidebearings"]',
           label: translate("sidebar.selection-info.sidebearings"),
-          fieldX: {
-            key: '["leftMargin"]',
-            value: glyphController.leftMargin,
-            numDigits: 1,
-            disabled: glyphController.leftMargin == undefined,
-            evaluateExpression: async (expression) =>
-              await this._evaluateMetricsExpression(
-                expression,
-                varGlyphController,
-                "leftMargin"
-              ),
-            getValue: (layerGlyph, layerGlyphController, fieldItem) => {
-              return layerGlyphController.leftMargin;
+            fieldX: {
+              key: '["leftMargin"]',
+              value: glyphController.leftMargin,
+              numDigits: 1,
+              disabled: glyphController.leftMargin == undefined,
+              displayValue: leftSidebearingDisplay || undefined,
+              sidebearingVarSide: "left",
+              evaluateExpression: async (expression) =>
+                await this._evaluateMetricsExpression(
+                  expression,
+                  varGlyphController,
+                  "leftMargin"
+                ),
+              getValue: (layerGlyph, layerGlyphController, fieldItem) => {
+                return layerGlyphController.leftMargin;
+              },
+              setValue: (layerGlyph, layerGlyphController, fieldItem, value, layer) => {
+                this._applyLeftMargin(layerGlyph, layerGlyphController, value, layer);
+              },
             },
-            setValue: (layerGlyph, layerGlyphController, fieldItem, value, layer) => {
-              const translationX = maybeClampValue(
-                value - layerGlyphController.leftMargin,
-                -layerGlyph.xAdvance,
-                undefined
-              );
-              for (const i of range(0, layerGlyph.path.coordinates.length, 2)) {
-                layerGlyph.path.coordinates[i] += translationX;
-              }
-              for (const compo of layerGlyph.components) {
-                compo.transformation.translateX += translationX;
-              }
-              // Move skeleton data if present
-              const skeletonData = layer?.customData?.["fontra.skeleton"];
-              if (skeletonData) {
-                const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
-                moveSkeletonData(newSkeletonData, translationX, 0);
-                layer.customData["fontra.skeleton"] = newSkeletonData;
-              }
-              layerGlyph.xAdvance += translationX;
+            fieldY: {
+              key: '["rightMargin"]',
+              value: glyphController.rightMargin,
+              numDigits: 1,
+              evaluateExpression: async (expression) =>
+                await this._evaluateMetricsExpression(
+                  expression,
+                  varGlyphController,
+                  "rightMargin"
+                ),
+              disabled: glyphController.rightMargin == undefined,
+              displayValue: rightSidebearingDisplay || undefined,
+              sidebearingVarSide: "right",
+              getValue: (layerGlyph, layerGlyphController, fieldItem) => {
+                return layerGlyphController.rightMargin;
+              },
+              setValue: (layerGlyph, layerGlyphController, fieldItem, value) => {
+                this._applyRightMargin(layerGlyph, layerGlyphController, value);
+              },
             },
-          },
-          fieldY: {
-            key: '["rightMargin"]',
-            value: glyphController.rightMargin,
-            numDigits: 1,
-            evaluateExpression: async (expression) =>
-              await this._evaluateMetricsExpression(
-                expression,
-                varGlyphController,
-                "rightMargin"
-              ),
-            disabled: glyphController.rightMargin == undefined,
-            getValue: (layerGlyph, layerGlyphController, fieldItem) => {
-              return layerGlyphController.rightMargin;
-            },
-            setValue: (layerGlyph, layerGlyphController, fieldItem, value) => {
-              const translationX = maybeClampValue(
-                value - layerGlyphController.rightMargin,
-                -layerGlyph.xAdvance,
-                undefined
-              );
-              layerGlyph.xAdvance += translationX;
-            },
-          },
-        });
+          });
+          if (hasSidebearingVars) {
+            const updateButton = html.createDomElement("button", {
+              "class": "ui-form-sidebearing-update",
+              "style":
+                "padding: 0.2rem 0.6rem; font-size: 0.85em; cursor: pointer; max-width: 8rem;",
+              "disabled": glyphLocked || this.fontController.readOnly ? "disabled" : undefined,
+              "onclick": async (event) => {
+                await this._updateSidebearingVariables(glyphName, varGlyphController);
+              },
+            }, ["Update"]);
+            formContents.push({
+              type: "single-icon",
+              element: html.div({ class: "ui-form-center" }, [updateButton]),
+            });
+          }
         formContents.push({
           type: "edit-text-double",
           key: '["kern-l-r"]',
@@ -1168,6 +1341,9 @@ export default class SelectionInfoPanel extends Panel {
     if (["xAdvance", "leftMargin", "rightMargin"].includes(changePath[0])) {
       this._updateGlyphMetrics(glyphName, changePath[0]);
     }
+    if (fieldItem.sidebearingVarSide) {
+      await this.update();
+    }
   }
 
   async _updateGlyphMetrics(glyphName, changedKey) {
@@ -1191,8 +1367,9 @@ export default class SelectionInfoPanel extends Panel {
       leftMargin: "rightMargin",
       rightMargin: "leftMargin",
     };
-
-    let value = Number(expression);
+    const rawExpression = typeof expression === "string" ? expression : "";
+    const strippedExpression = stripDisplaySuffix(rawExpression);
+    let value = Number(strippedExpression);
     if (!isNaN(value)) {
       return value;
     }
@@ -1209,7 +1386,7 @@ export default class SelectionInfoPanel extends Panel {
     );
 
     try {
-      const dummyResult = compute(expression, undefined, namespace);
+      const dummyResult = compute(strippedExpression, undefined, namespace);
     } catch (e) {
       return { error: e.message };
     }
@@ -1239,11 +1416,11 @@ export default class SelectionInfoPanel extends Panel {
       }
     }
 
-    return {
+    const result = {
       getValue: (layerName) => {
         try {
           return ensureFiniteNumber(
-            compute(expression, undefined, layerVariables[layerName])
+            compute(strippedExpression, undefined, layerVariables[layerName])
           );
         } catch (e) {
           console.error(e);
@@ -1251,9 +1428,21 @@ export default class SelectionInfoPanel extends Panel {
         return 0;
       },
       value: ensureFiniteNumber(
-        compute(expression, undefined, layerVariables[mainLayerName])
+        compute(strippedExpression, undefined, layerVariables[mainLayerName])
       ),
     };
+    if (sidebearingOpposites[metricProperty]) {
+      const parsed = parseSidebearingVariableRef(
+        strippedExpression,
+        metricProperty,
+        this.fontController.glyphMap
+      );
+      if (parsed) {
+        result.variableRef = { glyph: parsed.glyph, side: parsed.side };
+        result.displayName = parsed.displayName;
+      }
+    }
+    return result;
   }
 
   _getEditingLocations(varGlyphController) {
@@ -1371,6 +1560,10 @@ function deleteNestedValue(subject, path) {
 function applyNewValue(glyph, layerInfo, value, fieldItem, absolute) {
   const setFieldValue = fieldItem.setValue || defaultSetFieldValue;
   const deleteFieldValue = fieldItem.deleteValue || defaultDeleteFieldValue;
+  const sidebearingVarSide = fieldItem.sidebearingVarSide;
+  const variableRef =
+    value && typeof value === "object" && value.variableRef ? value.variableRef : null;
+  const hasVariableRef = !!(sidebearingVarSide && variableRef);
 
   const primaryOrgValue = layerInfo[0].orgValue;
   const isNumber = typeof primaryOrgValue === "number";
@@ -1398,6 +1591,32 @@ function applyNewValue(glyph, layerInfo, value, fieldItem, absolute) {
           layers[layerName]
         );
       }
+      if (sidebearingVarSide) {
+        const layer = layers[layerName];
+        if (!layer) {
+          continue;
+        }
+        const customData = layer.customData || (layer.customData = {});
+        const existingVars = customData[SIDEBEARING_VARIABLES_KEY];
+        if (hasVariableRef) {
+          const layerValue = value?.getValue ? value.getValue(layerName) : value;
+          const vars = { ...(existingVars || {}) };
+          vars[sidebearingVarSide] = {
+            glyph: variableRef.glyph,
+            side: variableRef.side,
+            value: layerValue,
+          };
+          customData[SIDEBEARING_VARIABLES_KEY] = vars;
+        } else if (existingVars?.[sidebearingVarSide]) {
+          const vars = { ...existingVars };
+          delete vars[sidebearingVarSide];
+          if (!vars.left && !vars.right) {
+            delete customData[SIDEBEARING_VARIABLES_KEY];
+          } else {
+            customData[SIDEBEARING_VARIABLES_KEY] = vars;
+          }
+        }
+      }
     }
   });
 }
@@ -1410,6 +1629,58 @@ function maybeClampValue(value, min, max) {
     value = Math.min(value, max);
   }
   return value;
+}
+
+function maybeRoundToString(value, digits) {
+  return value == undefined
+    ? ""
+    : digits == undefined
+      ? String(value)
+      : String(round(value, digits));
+}
+
+function stripDisplaySuffix(expression) {
+  if (typeof expression !== "string") return "";
+  const trimmed = expression.trim();
+  const match = trimmed.match(/^(.*?)(?:\s*\(\s*-?\d+(?:\.\d+)?\s*\)\s*)$/);
+  return match ? match[1].trim() : trimmed;
+}
+
+function formatSidebearingVariableDisplay(entry, fieldSide, numDigits) {
+  if (!entry?.glyph) return null;
+  const displayName =
+    entry.side && entry.side !== fieldSide ? `${entry.glyph}!` : entry.glyph;
+  const valueString = Number.isFinite(entry.value)
+    ? maybeRoundToString(entry.value, numDigits)
+    : "";
+  return valueString ? `${displayName} (${valueString})` : displayName;
+}
+
+function parseSidebearingVariableRef(expression, metricProperty, glyphMap) {
+  const opposites = { leftMargin: "rightMargin", rightMargin: "leftMargin" };
+  const opposite = opposites[metricProperty];
+  if (!opposite || !glyphMap) {
+    return null;
+  }
+  const stripped = stripDisplaySuffix(expression);
+  const trimmed = stripped.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const hasBang = trimmed.endsWith("!");
+  const glyphName = hasBang ? trimmed.slice(0, -1) : trimmed;
+  if (!glyphName || glyphMap[glyphName] === undefined) {
+    return null;
+  }
+  if (trimmed !== (hasBang ? glyphName + "!" : glyphName)) {
+    return null;
+  }
+  const metricForRef = hasBang ? opposite : metricProperty;
+  return {
+    glyph: glyphName,
+    side: metricForRef === "leftMargin" ? "left" : "right",
+    displayName: trimmed,
+  };
 }
 
 function makeCodePointsString(codePoints) {
