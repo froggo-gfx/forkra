@@ -71,6 +71,10 @@ const LETTERSPACER_CUSTOM_DATA_KEYS = {
   reference: "fontra.letterspacer.reference",
 };
 
+const LETTERSPACER_FONT_CUSTOM_DATA_KEYS = {
+  enabled: "fontra.letterspacer.enabled",
+};
+
 const LETTERSPACER_DEFAULTS = {
   area: 400,
   depth: 15,
@@ -375,7 +379,7 @@ export default class LetterspacerPanel extends Panel {
     return controls;
   }
 
-  setAlgorithmEnabled(enabled) {
+  async setAlgorithmEnabled(enabled) {
     const nextValue = !!enabled;
     if (this.algorithmEnabled === nextValue) {
       return;
@@ -386,6 +390,7 @@ export default class LetterspacerPanel extends Panel {
       this.calculatedRSB = null;
       this.clearVisualizationData();
     }
+    await this.persistAlgorithmEnabled(nextValue);
     this.update();
   }
 
@@ -395,6 +400,7 @@ export default class LetterspacerPanel extends Panel {
 
     this._suppressPersist = true;
     try {
+      await this.loadAlgorithmEnabled();
       if (this.algorithmEnabled) {
         await this.loadPersistedParams();
       }
@@ -719,6 +725,38 @@ export default class LetterspacerPanel extends Panel {
       typeof referenceValue === "string"
         ? referenceValue
         : LETTERSPACER_DEFAULTS.referenceGlyph;
+  }
+
+  async loadAlgorithmEnabled() {
+    const value =
+      this.fontController?.customData?.[LETTERSPACER_FONT_CUSTOM_DATA_KEYS.enabled];
+    if (value === undefined || value === null) {
+      return;
+    }
+    this.algorithmEnabled = !!value;
+  }
+
+  async persistAlgorithmEnabled(enabled) {
+    if (this.fontController.readOnly) {
+      return;
+    }
+    const nextValue = !!enabled;
+    const root = { customData: this.fontController.customData || {} };
+    const changes = recordChanges(root, (root) => {
+      const existing = root.customData || {};
+      root.customData = {
+        ...existing,
+        [LETTERSPACER_FONT_CUSTOM_DATA_KEYS.enabled]: nextValue,
+      };
+    });
+    if (changes.hasChange) {
+      await this.fontController.postChange(
+        changes.change,
+        changes.rollbackChange,
+        "edit letterspacer enabled",
+        this
+      );
+    }
   }
 
   getCurrentSourceIdentifier() {
