@@ -1945,18 +1945,25 @@ export default class DesignspaceNavigationPanel extends Panel {
       return;
     }
 
-    const currentLayerGlyph = (await this.sceneModel.getSelectedStaticGlyphController())
-      ?.instance;
+    const currentLayerController =
+      await this.sceneModel.getSelectedStaticGlyphController();
+    const currentLayer =
+      inputController.model.copyCurrentLayer && currentLayerController?.layerName
+        ? currentLayerController?.varGlyph?.glyph?.layers?.[
+            currentLayerController.layerName
+          ]
+        : null;
 
-    const newLayer = Layer.fromObject({
-      glyph: StaticGlyph.fromObject(
-        inputController.model.copyCurrentLayer && currentLayerGlyph
-          ? currentLayerGlyph
-          : {
-              xAdvance: glyph.layers[selectedSourceItem.layerName].glyph.xAdvance,
-            }
-      ),
-    });
+    let newLayer;
+    if (currentLayer) {
+      newLayer = Layer.fromObject(currentLayer);
+    } else {
+      newLayer = Layer.fromObject({
+        glyph: StaticGlyph.fromObject({
+          xAdvance: glyph.layers[selectedSourceItem.layerName].glyph.xAdvance,
+        }),
+      });
+    }
 
     await this.sceneController.editGlyphAndRecordChanges((glyph) => {
       glyph.layers[newLayerName] = newLayer;
