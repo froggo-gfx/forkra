@@ -8,6 +8,7 @@ import {
   registerVisualizationLayerDefinition,
   strokeLine,
 } from "./visualization-layer-definitions.js";
+import { themeLookup } from "./theme-lookup.js";
 
 let thePowerRulerTool; // singleton
 
@@ -20,23 +21,13 @@ registerVisualizationLayerDefinition({
   userSwitchable: true,
   defaultOn: true,
   zIndex: 600,
-  screenParameters: { strokeWidth: 1, fontSize: 12, intersectionRadius: 4 },
-  colors: {
-    strokeColor: "#0004",
-    insideBlobColor: "#FFFB",
-    insideTextColor: "#000B",
-    outsideBlobColor: "#000B",
-    outsideTextColor: "#FFFB",
-    intersectionColor: "#F085",
+  screenParameters: {
+    strokeWidth: themeLookup.powerRuler.sizes.strokeWidth,
+    fontSize: themeLookup.powerRuler.sizes.fontSize,
+    intersectionRadius: themeLookup.powerRuler.sizes.intersectionRadius,
   },
-  colorsDarkMode: {
-    strokeColor: "#FFF6",
-    insideBlobColor: "#444B",
-    insideTextColor: "#FFFB",
-    outsideBlobColor: "#FFFB",
-    outsideTextColor: "#444B",
-    intersectionColor: "#F696",
-  },
+  colors: themeLookup.powerRuler.light,
+  colorsDarkMode: themeLookup.powerRuler.dark,
   draw: (context, positionedGlyph, parameters, model, controller) =>
     thePowerRulerTool?.draw(context, positionedGlyph, parameters, model, controller),
 });

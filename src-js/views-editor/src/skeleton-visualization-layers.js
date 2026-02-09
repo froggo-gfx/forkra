@@ -13,6 +13,7 @@ import {
   fillRoundNode,
   fillSquareNode,
 } from "./visualization-layer-definitions.js";
+import { themeLookup } from "./theme-lookup.js";
 import {
   buildSegmentsFromSkeletonPoints,
   calculateSkeletonTunniPoint,
@@ -135,9 +136,13 @@ registerVisualizationLayerDefinition({
   userSwitchable: true,
   defaultOn: true,
   zIndex: 450,
-  screenParameters: { strokeWidth: 1.5 },
-  colors: { strokeColor: "#0080FF" },
-  colorsDarkMode: { strokeColor: "#00BFFF" },
+  screenParameters: {
+    strokeWidth: themeLookup.skeletonGeometry.sizes.skeletonStrokeWidth,
+  },
+  colors: { strokeColor: themeLookup.skeletonGeometry.colors.skeletonCurveColor },
+  colorsDarkMode: {
+    strokeColor: themeLookup.skeletonGeometry.colors.skeletonCurveColor,
+  },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
     if (!skeletonData?.contours?.length) {
@@ -164,9 +169,9 @@ registerVisualizationLayerDefinition({
   userSwitchable: true,
   defaultOn: true,
   zIndex: 452,
-  screenParameters: { strokeWidth: 1 },
-  colors: { strokeColor: "rgba(0, 128, 255, 0.4)" },
-  colorsDarkMode: { strokeColor: "rgba(0, 191, 255, 0.4)" },
+  screenParameters: { strokeWidth: themeLookup.skeletonGeometry.sizes.ribStrokeWidth },
+  colors: { strokeColor: themeLookup.skeletonGeometry.colors.ribLineColor },
+  colorsDarkMode: { strokeColor: themeLookup.skeletonGeometry.colors.ribLineColor },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
     if (!skeletonData?.contours?.length) {
@@ -250,27 +255,29 @@ registerVisualizationLayerDefinition({
   defaultOn: true,
   zIndex: 560,
   screenParameters: {
-    pointSize: 10,
-    editablePointSize: 12,
+    pointSize: themeLookup.skeletonGeometry.sizes.ribPointSize,
+    editablePointSize: themeLookup.skeletonGeometry.sizes.ribEditablePointSize,
     strokeWidth: 2,
   },
   colors: {
-    strokeColor: "rgba(220, 60, 120, 0.7)",
-    hoveredColor: "rgba(220, 60, 120, 1.0)",
-    selectedColor: "rgba(255, 64, 0, 0.9)",
-    // Editable rib points - more saturated purple
-    editableStrokeColor: "rgba(160, 40, 180, 0.9)",
-    editableHoveredColor: "rgba(160, 40, 180, 1.0)",
-    editableSelectedColor: "rgba(160, 40, 180, 1.0)",
+    strokeColor: themeLookup.skeletonGeometry.colors.ribPointColor,
+    hoveredColor: themeLookup.skeletonGeometry.colors.ribPointHoverColor,
+    selectedColor: themeLookup.skeletonGeometry.colors.selectedRibPointColor,
+    editableStrokeColor: themeLookup.skeletonGeometry.colors.ribPointEditableColor,
+    editableHoveredColor:
+      themeLookup.skeletonGeometry.colors.ribPointEditableHoverColor,
+    editableSelectedColor:
+      themeLookup.skeletonGeometry.colors.ribPointEditableSelectedColor,
   },
   colorsDarkMode: {
-    strokeColor: "rgba(220, 100, 140, 0.7)",
-    hoveredColor: "rgba(220, 100, 140, 1.0)",
-    selectedColor: "rgba(255, 96, 64, 0.9)",
-    // Editable rib points - more saturated purple
-    editableStrokeColor: "rgba(180, 80, 200, 0.9)",
-    editableHoveredColor: "rgba(180, 80, 200, 1.0)",
-    editableSelectedColor: "rgba(180, 80, 200, 1.0)",
+    strokeColor: themeLookup.skeletonGeometry.colors.ribPointColor,
+    hoveredColor: themeLookup.skeletonGeometry.colors.ribPointHoverColor,
+    selectedColor: themeLookup.skeletonGeometry.colors.selectedRibPointColor,
+    editableStrokeColor: themeLookup.skeletonGeometry.colors.ribPointEditableColor,
+    editableHoveredColor:
+      themeLookup.skeletonGeometry.colors.ribPointEditableHoverColor,
+    editableSelectedColor:
+      themeLookup.skeletonGeometry.colors.ribPointEditableSelectedColor,
   },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
@@ -410,22 +417,29 @@ registerVisualizationLayerDefinition({
   defaultOn: true,
   zIndex: 550,
   screenParameters: {
-    cornerSize: 7,
-    smoothSize: 7,
-    handleSize: 5,
+    cornerSize: themeLookup.skeletonGeometry.sizes.skeletonPointSize,
+    smoothSize: themeLookup.skeletonGeometry.sizes.skeletonPointSize,
+    handleSize: themeLookup.skeletonGeometry.sizes.skeletonControlPointSize,
   },
-  colors: { fillColor: "#0080FF" },
-  colorsDarkMode: { fillColor: "#00BFFF" },
+  colors: {
+    pointColor: themeLookup.skeletonGeometry.colors.skeletonPointColor,
+    controlPointColor: themeLookup.skeletonGeometry.colors.skeletonControlPointColor,
+  },
+  colorsDarkMode: {
+    pointColor: themeLookup.skeletonGeometry.colors.skeletonPointColor,
+    controlPointColor: themeLookup.skeletonGeometry.colors.skeletonControlPointColor,
+  },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
     if (!skeletonData?.contours?.length) {
       return;
     }
 
-    context.fillStyle = parameters.fillColor;
-
     for (const contour of skeletonData.contours) {
       for (const point of contour.points) {
+        context.fillStyle = point.type
+          ? parameters.controlPointColor
+          : parameters.pointColor;
         if (!point.type && !point.smooth) {
           // Corner on-curve point - square
           fillSquareNode(context, point, parameters.cornerSize);
@@ -449,9 +463,15 @@ registerVisualizationLayerDefinition({
   userSwitchable: true,
   defaultOn: true,
   zIndex: 545,
-  screenParameters: { strokeWidth: 1 },
-  colors: { strokeColor: "rgba(0, 128, 255, 0.6)" },
-  colorsDarkMode: { strokeColor: "rgba(0, 191, 255, 0.6)" },
+  screenParameters: {
+    strokeWidth: themeLookup.skeletonGeometry.sizes.skeletonHandleStrokeWidth,
+  },
+  colors: {
+    strokeColor: themeLookup.skeletonGeometry.colors.skeletonHandleLineColor,
+  },
+  colorsDarkMode: {
+    strokeColor: themeLookup.skeletonGeometry.colors.skeletonHandleLineColor,
+  },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
     if (!skeletonData?.contours?.length) {
@@ -514,20 +534,24 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   zIndex: 555,
   screenParameters: {
-    cornerSize: 8,
-    smoothSize: 8,
-    handleSize: 6,
+    cornerSize: themeLookup.skeletonGeometry.sizes.skeletonPointSize + 1,
+    smoothSize: themeLookup.skeletonGeometry.sizes.skeletonPointSize + 1,
+    handleSize: themeLookup.skeletonGeometry.sizes.skeletonControlPointSize + 1,
     strokeWidth: 1.5,
     underlayOffset: 2,
   },
   colors: {
-    hoveredColor: "#00BFFF",
-    selectedColor: "#FF4000",
+    hoveredColor: themeLookup.skeletonGeometry.colors.skeletonCurveColor,
+    selectedPointColor: themeLookup.skeletonGeometry.colors.selectedSkeletonPointColor,
+    selectedControlPointColor:
+      themeLookup.skeletonGeometry.colors.selectedSkeletonControlPointColor,
     underColor: "rgba(255, 255, 255, 0.9)",
   },
   colorsDarkMode: {
-    hoveredColor: "#00BFFF",
-    selectedColor: "#FF6040",
+    hoveredColor: themeLookup.skeletonGeometry.colors.skeletonCurveColor,
+    selectedPointColor: themeLookup.skeletonGeometry.colors.selectedSkeletonPointColor,
+    selectedControlPointColor:
+      themeLookup.skeletonGeometry.colors.selectedSkeletonControlPointColor,
     underColor: "rgba(0, 0, 0, 0.6)",
   },
   draw: (context, positionedGlyph, parameters, model, controller) => {
@@ -560,7 +584,9 @@ registerVisualizationLayerDefinition({
             fillRoundNode(context, point, size);
 
             // Draw selected node
-            context.fillStyle = parameters.selectedColor;
+            context.fillStyle = point.type
+              ? parameters.selectedControlPointColor
+              : parameters.selectedPointColor;
             if (!point.type && !point.smooth) {
               fillSquareNode(context, point, parameters.cornerSize);
             } else if (!point.type) {

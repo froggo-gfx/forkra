@@ -54,6 +54,7 @@ import {
   OFFCURVE_DISTANCE_BADGE_RADIUS,
   OFFCURVE_DISTANCE_FONT_SIZE
 } from "@fontra/core/distance-angle.js";
+import { themeLookup } from "./theme-lookup.js";
 
 export const visualizationLayerDefinitions = [];
 
@@ -869,8 +870,8 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   zIndex: 500,
   screenParameters: { strokeWidth: 1 },
-  colors: { fillColor: "#0001" },
-  colorsDarkMode: { fillColor: "#FFF3" },
+  colors: { fillColor: themeLookup.baseGeometry.colors.fillColor },
+  colorsDarkMode: { fillColor: themeLookup.baseGeometry.colors.fillColor },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     context.fillStyle = parameters.fillColor;
     context.fill(positionedGlyph.glyph.closedContoursPath2d);
@@ -1283,9 +1284,9 @@ registerVisualizationLayerDefinition({
   name: "Bezier handles",
   selectionFunc: glyphSelector("editing"),
   zIndex: 500,
-  screenParameters: { strokeWidth: 1 },
-  colors: { color: "#BBB" },
-  colorsDarkMode: { color: "#777" },
+  screenParameters: { strokeWidth: themeLookup.baseGeometry.sizes.handleStrokeWidth },
+  colors: { color: themeLookup.baseGeometry.colors.handleLineColor },
+  colorsDarkMode: { color: themeLookup.baseGeometry.colors.handleLineColor },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const glyph = positionedGlyph.glyph;
     context.strokeStyle = parameters.color;
@@ -1297,21 +1298,84 @@ registerVisualizationLayerDefinition({
 });
 
 registerVisualizationLayerDefinition({
+  identifier: "fontra.selected.handles",
+  name: "Selected Bezier handles",
+  selectionFunc: glyphSelector("editing"),
+  zIndex: 510,
+  screenParameters: { strokeWidth: themeLookup.baseGeometry.sizes.handleStrokeWidth },
+  colors: { color: themeLookup.baseGeometry.colors.selectedHandleLineColor },
+  colorsDarkMode: { color: themeLookup.baseGeometry.colors.selectedHandleLineColor },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    const glyph = positionedGlyph.glyph;
+    const { point: selectedPointIndices } = parseSelection(model.selection);
+    if (!selectedPointIndices?.length) {
+      return;
+    }
+    const selectedSet = new Set(selectedPointIndices);
+    context.strokeStyle = parameters.color;
+    context.lineWidth = parameters.strokeWidth;
+
+    for (let contourIndex = 0; contourIndex < glyph.path.numContours; contourIndex++) {
+      for (const segment of glyph.path.iterContourDecomposedSegments(contourIndex)) {
+        if (segment.type === "line") {
+          continue;
+        }
+        const points = segment.points || [];
+        const indices = segment.parentPointIndices || [];
+        if (segment.type === "cubic" && indices.length >= 4 && points.length >= 4) {
+          const [i0, i1, i2, i3] = indices;
+          const [p0, p1, p2, p3] = points;
+          if (selectedSet.has(i0) || selectedSet.has(i1)) {
+            strokeLine(context, p0.x, p0.y, p1.x, p1.y);
+          }
+          if (selectedSet.has(i3) || selectedSet.has(i2)) {
+            strokeLine(context, p3.x, p3.y, p2.x, p2.y);
+          }
+        } else if (
+          segment.type === "quad" &&
+          indices.length >= 3 &&
+          points.length >= 3
+        ) {
+          const [i0, i1, i2] = indices;
+          if (selectedSet.has(i0) || selectedSet.has(i1) || selectedSet.has(i2)) {
+            const [p0, p1, p2] = points;
+            strokeLine(context, p0.x, p0.y, p1.x, p1.y);
+            strokeLine(context, p2.x, p2.y, p1.x, p1.y);
+          }
+        }
+      }
+    }
+  },
+});
+
+registerVisualizationLayerDefinition({
   identifier: "fontra.nodes",
   name: "Nodes",
   selectionFunc: glyphSelector("editing"),
   zIndex: 500,
-  screenParameters: { cornerSize: 8, smoothSize: 8, handleSize: 6.5 },
-  colors: { color: "#BBB" },
-  colorsDarkMode: { color: "#BBB" },
+  screenParameters: {
+    cornerSize: themeLookup.baseGeometry.sizes.pointSize,
+    smoothSize: themeLookup.baseGeometry.sizes.pointSize,
+    handleSize: themeLookup.baseGeometry.sizes.controlPointSize,
+  },
+  colors: {
+    pointColor: themeLookup.baseGeometry.colors.pointColor,
+    controlPointColor: themeLookup.baseGeometry.colors.controlPointColor,
+  },
+  colorsDarkMode: {
+    pointColor: themeLookup.baseGeometry.colors.pointColor,
+    controlPointColor: themeLookup.baseGeometry.colors.controlPointColor,
+  },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const glyph = positionedGlyph.glyph;
     const cornerSize = parameters.cornerSize;
     const smoothSize = parameters.smoothSize;
     const handleSize = parameters.handleSize;
 
-    context.fillStyle = parameters.color;
     for (const pt of glyph.path.iterPoints()) {
+      context.fillStyle = pt.type
+        ? parameters.controlPointColor
+        : parameters.pointColor;
       fillNode(context, pt, cornerSize, smoothSize, handleSize);
     }
   },
@@ -1323,15 +1387,25 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   zIndex: 500,
   screenParameters: {
-    cornerSize: 8,
-    smoothSize: 8,
-    handleSize: 6.5,
+    cornerSize: themeLookup.baseGeometry.sizes.pointSize,
+    smoothSize: themeLookup.baseGeometry.sizes.pointSize,
+    handleSize: themeLookup.baseGeometry.sizes.controlPointSize,
     strokeWidth: 1,
     hoverStrokeOffset: 4,
     underlayOffset: 2,
   },
-  colors: { hoveredColor: "#BBB", selectedColor: "#000", underColor: "#FFFA" },
-  colorsDarkMode: { hoveredColor: "#BBB", selectedColor: "#FFF", underColor: "#0008" },
+  colors: {
+    hoveredColor: themeLookup.baseGeometry.colors.hoveredPointStrokeColor,
+    selectedPointColor: themeLookup.baseGeometry.colors.selectedPointColor,
+    selectedControlPointColor: themeLookup.baseGeometry.colors.selectedControlPointColor,
+    underColor: "#FFFA",
+  },
+  colorsDarkMode: {
+    hoveredColor: themeLookup.baseGeometry.colors.hoveredPointStrokeColor,
+    selectedPointColor: themeLookup.baseGeometry.colors.selectedPointColor,
+    selectedControlPointColor: themeLookup.baseGeometry.colors.selectedControlPointColor,
+    underColor: "#FFFA",
+  },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const glyph = positionedGlyph.glyph;
     const cornerSize = parameters.cornerSize;
@@ -1354,8 +1428,10 @@ registerVisualizationLayerDefinition({
       );
     }
     // Selected nodes
-    context.fillStyle = parameters.selectedColor;
     for (const pt of iterPointsByIndex(glyph.path, selectedPointIndices)) {
+      context.fillStyle = pt.type
+        ? parameters.selectedControlPointColor
+        : parameters.selectedPointColor;
       fillNode(context, pt, cornerSize, smoothSize, handleSize);
     }
     // Hovered nodes
@@ -1664,10 +1740,10 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   zIndex: 490,
   screenParameters: {
-    strokeWidth: 3,
+    strokeWidth: themeLookup.baseGeometry.sizes.curveUnderStrokeWidth,
   },
-  colors: { color: "#FFF6" },
-  colorsDarkMode: { color: "#0004" },
+  colors: { color: themeLookup.baseGeometry.colors.curveUnderStrokeColor },
+  colorsDarkMode: { color: themeLookup.baseGeometry.colors.curveUnderStrokeColor },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     context.lineJoin = "round";
     context.lineWidth = parameters.strokeWidth;
@@ -1682,10 +1758,10 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   zIndex: 500,
   screenParameters: {
-    strokeWidth: 1,
+    strokeWidth: themeLookup.baseGeometry.sizes.curveStrokeWidth,
   },
-  colors: { color: "#000" },
-  colorsDarkMode: { color: "#FFF" },
+  colors: { color: themeLookup.baseGeometry.colors.curveStrokeColor },
+  colorsDarkMode: { color: themeLookup.baseGeometry.colors.curveStrokeColor },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     context.lineJoin = "round";
     context.lineWidth = parameters.strokeWidth;
