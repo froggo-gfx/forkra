@@ -654,9 +654,18 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // const alignedLeftSide = alignHandleDirections(leftSide, segments, true);
     // const alignedRightSide = alignHandleDirections(reversedRight, segments, false);
 
+    // In single-sided mode one side is expected to match skeleton exactly.
+    // Skip post-adjustment that can slightly move handles/points.
+    const leftContourPoints = singleSided
+      ? leftSide
+      : enforceSmoothColinearity(leftSide, true);
+    const rightContourPoints = singleSided
+      ? reversedRight
+      : enforceSmoothColinearity(reversedRight, true);
+
     let contours = [
-      { points: enforceSmoothColinearity(leftSide, true), isClosed: true },
-      { points: enforceSmoothColinearity(reversedRight, true), isClosed: true },
+      { points: leftContourPoints, isClosed: true },
+      { points: rightContourPoints, isClosed: true },
     ];
 
     // Apply reverse if flag is set
@@ -1119,7 +1128,11 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // DISABLED for performance testing - alignHandleDirections is O(n³)
     // const alignedOutlinePoints = alignHandleDirections(outlinePoints, segments, null);
 
-    let contour = { points: enforceSmoothColinearity(outlinePoints, true), isClosed: true };
+    // Keep exact skeleton overlap on collapsed side in single-sided mode.
+    const finalPoints = singleSided
+      ? outlinePoints
+      : enforceSmoothColinearity(outlinePoints, true);
+    let contour = { points: finalPoints, isClosed: true };
 
     // Apply reverse if flag is set
     if (reversed) {
@@ -1335,6 +1348,17 @@ function generateOffsetPointsForSegment(
   const left = [];
   const right = [];
 
+  const isCollapsedSide = (halfWidth) => halfWidth < 0.5;
+  const projectPoint = (basePoint, normal, halfWidth, sign) => {
+    if (isCollapsedSide(halfWidth)) {
+      return { x: basePoint.x, y: basePoint.y };
+    }
+    return {
+      x: Math.round(basePoint.x + sign * normal.x * halfWidth),
+      y: Math.round(basePoint.y + sign * normal.y * halfWidth),
+    };
+  };
+
   if (segment.controlPoints.length === 0) {
     // Line segment - simple offset with per-point widths
     const direction = vector.normalizeVector(
@@ -1357,17 +1381,11 @@ function generateOffsetPointsForSegment(
       // Copy smooth property from skeleton point, round to UPM grid
       // Use per-point half-widths for left and right sides
       // Apply nudge offset if point is editable
-      let startLeftPt = {
-        x: Math.round(segment.startPoint.x + startNormal.x * startLeftHW),
-        y: Math.round(segment.startPoint.y + startNormal.y * startLeftHW),
-      };
+      let startLeftPt = projectPoint(segment.startPoint, startNormal, startLeftHW, 1);
       startLeftPt = applyNudgeToRibPoint(startLeftPt, segment.startPoint, startNormal, "left", startLeftHW);
       left.push({ ...startLeftPt, smooth: segment.startPoint.smooth });
 
-      let startRightPt = {
-        x: Math.round(segment.startPoint.x - startNormal.x * startRightHW),
-        y: Math.round(segment.startPoint.y - startNormal.y * startRightHW),
-      };
+      let startRightPt = projectPoint(segment.startPoint, startNormal, startRightHW, -1);
       startRightPt = applyNudgeToRibPoint(startRightPt, segment.startPoint, startNormal, "right", startRightHW);
       right.push({ ...startRightPt, smooth: segment.startPoint.smooth });
     }
@@ -1387,17 +1405,11 @@ function generateOffsetPointsForSegment(
       // Copy smooth property from skeleton point, round to UPM grid
       // Use per-point half-widths for left and right sides
       // Apply nudge offset if point is editable
-      let endLeftPt = {
-        x: Math.round(segment.endPoint.x + endNormal.x * endLeftHW),
-        y: Math.round(segment.endPoint.y + endNormal.y * endLeftHW),
-      };
+      let endLeftPt = projectPoint(segment.endPoint, endNormal, endLeftHW, 1);
       endLeftPt = applyNudgeToRibPoint(endLeftPt, segment.endPoint, endNormal, "left", endLeftHW);
       left.push({ ...endLeftPt, smooth: segment.endPoint.smooth });
 
-      let endRightPt = {
-        x: Math.round(segment.endPoint.x - endNormal.x * endRightHW),
-        y: Math.round(segment.endPoint.y - endNormal.y * endRightHW),
-      };
+      let endRightPt = projectPoint(segment.endPoint, endNormal, endRightHW, -1);
       endRightPt = applyNudgeToRibPoint(endRightPt, segment.endPoint, endNormal, "right", endRightHW);
       right.push({ ...endRightPt, smooth: segment.endPoint.smooth });
     }
@@ -1448,28 +1460,16 @@ function generateOffsetPointsForSegment(
 
     // Fixed endpoint positions (using corner-aware normals and per-point widths), rounded to UPM grid
     // Apply nudge offset if points are editable
-    let fixedStartLeft = {
-      x: Math.round(segment.startPoint.x + startNormal.x * startLeftHW),
-      y: Math.round(segment.startPoint.y + startNormal.y * startLeftHW),
-    };
+    let fixedStartLeft = projectPoint(segment.startPoint, startNormal, startLeftHW, 1);
     fixedStartLeft = applyNudgeToRibPoint(fixedStartLeft, segment.startPoint, startNormal, "left", startLeftHW);
 
-    let fixedStartRight = {
-      x: Math.round(segment.startPoint.x - startNormal.x * startRightHW),
-      y: Math.round(segment.startPoint.y - startNormal.y * startRightHW),
-    };
+    let fixedStartRight = projectPoint(segment.startPoint, startNormal, startRightHW, -1);
     fixedStartRight = applyNudgeToRibPoint(fixedStartRight, segment.startPoint, startNormal, "right", startRightHW);
 
-    let fixedEndLeft = {
-      x: Math.round(segment.endPoint.x + endNormal.x * endLeftHW),
-      y: Math.round(segment.endPoint.y + endNormal.y * endLeftHW),
-    };
+    let fixedEndLeft = projectPoint(segment.endPoint, endNormal, endLeftHW, 1);
     fixedEndLeft = applyNudgeToRibPoint(fixedEndLeft, segment.endPoint, endNormal, "left", endLeftHW);
 
-    let fixedEndRight = {
-      x: Math.round(segment.endPoint.x - endNormal.x * endRightHW),
-      y: Math.round(segment.endPoint.y - endNormal.y * endRightHW),
-    };
+    let fixedEndRight = projectPoint(segment.endPoint, endNormal, endRightHW, -1);
     fixedEndRight = applyNudgeToRibPoint(fixedEndRight, segment.endPoint, endNormal, "right", endRightHW);
 
     // Helper to add offset curves to output array
@@ -1477,16 +1477,24 @@ function generateOffsetPointsForSegment(
       const side = isLeftSide ? "left" : "right";
       // When halfWidth is near zero, contour should exactly match skeleton
       // Copy control points directly instead of using offset curves
-      if (sideHalfWidth < 0.5 && segment.controlPoints.length > 0) {
+      if (isCollapsedSide(sideHalfWidth) && segment.controlPoints.length > 0) {
         if (shouldAddStart) {
-          output.push({ x: fixedStart.x, y: fixedStart.y, smooth: smoothStart });
+          output.push({
+            x: segment.startPoint.x,
+            y: segment.startPoint.y,
+            smooth: smoothStart,
+          });
         }
-        // Copy skeleton control points (they're already at the right positions since offset is ~0)
+        // Collapsed side must stay exactly on skeleton geometry.
         for (const cp of segment.controlPoints) {
-          output.push({ x: Math.round(cp.x), y: Math.round(cp.y), type: "cubic" });
+          output.push({ x: cp.x, y: cp.y, type: "cubic" });
         }
         if (shouldAddEnd) {
-          output.push({ x: fixedEnd.x, y: fixedEnd.y, smooth: smoothEnd });
+          output.push({
+            x: segment.endPoint.x,
+            y: segment.endPoint.y,
+            smooth: smoothEnd,
+          });
         }
         return;
       }
