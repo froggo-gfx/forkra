@@ -636,7 +636,7 @@ export default class LetterspacerPanel extends Panel {
     this.params.referenceGlyph =
       typeof referenceValue === "string"
         ? referenceValue
-        : this.params.referenceGlyph ?? LETTERSPACER_DEFAULTS.referenceGlyph;
+        : LETTERSPACER_DEFAULTS.referenceGlyph;
   }
 
   getCurrentSourceIdentifier() {
