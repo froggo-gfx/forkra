@@ -3682,10 +3682,18 @@ export class PointerTool extends BaseTool {
             );
 
             if (result) {
-              workContour.points[segment.startIndex].x = result.newStartPoint.x;
-              workContour.points[segment.startIndex].y = result.newStartPoint.y;
-              workContour.points[segment.endIndex].x = result.newEndPoint.x;
-              workContour.points[segment.endIndex].y = result.newEndPoint.y;
+              workContour.points[segment.startIndex].x = Math.round(
+                result.newStartPoint.x
+              );
+              workContour.points[segment.startIndex].y = Math.round(
+                result.newStartPoint.y
+              );
+              workContour.points[segment.endIndex].x = Math.round(
+                result.newEndPoint.x
+              );
+              workContour.points[segment.endIndex].y = Math.round(
+                result.newEndPoint.y
+              );
             }
           } else {
             // Midpoint Tunni: move control points
@@ -3697,10 +3705,10 @@ export class PointerTool extends BaseTool {
 
             if (newCps) {
               const [cp1Idx, cp2Idx] = segment.controlIndices;
-              workContour.points[cp1Idx].x = newCps[0].x;
-              workContour.points[cp1Idx].y = newCps[0].y;
-              workContour.points[cp2Idx].x = newCps[1].x;
-              workContour.points[cp2Idx].y = newCps[1].y;
+              workContour.points[cp1Idx].x = Math.round(newCps[0].x);
+              workContour.points[cp1Idx].y = Math.round(newCps[0].y);
+              workContour.points[cp2Idx].x = Math.round(newCps[1].x);
+              workContour.points[cp2Idx].y = Math.round(newCps[1].y);
             }
           }
 
@@ -3778,10 +3786,10 @@ export class PointerTool extends BaseTool {
         const newCps = calculateSkeletonEqualizedControlPoints(layerSegment);
         if (newCps) {
           const [cp1Idx, cp2Idx] = segment.controlIndices;
-          contour.points[cp1Idx].x = newCps[0].x;
-          contour.points[cp1Idx].y = newCps[0].y;
-          contour.points[cp2Idx].x = newCps[1].x;
-          contour.points[cp2Idx].y = newCps[1].y;
+          contour.points[cp1Idx].x = Math.round(newCps[0].x);
+          contour.points[cp1Idx].y = Math.round(newCps[0].y);
+          contour.points[cp2Idx].x = Math.round(newCps[1].x);
+          contour.points[cp2Idx].y = Math.round(newCps[1].y);
         }
 
         // Regenerate outline
