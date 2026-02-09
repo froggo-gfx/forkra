@@ -331,10 +331,62 @@ export default class LetterspacerPanel extends Panel {
     this.reverseWarningMessage = "";
     this.reverseWarningTooltip = null;
     this.debugLogging = true;
+    this.algorithmEnabled = true;
   }
 
   getContentElement() {
     return html.div({ class: "panel" }, []);
+  }
+
+  buildHeaderControls() {
+    const toggleInput = html.input({
+      type: "checkbox",
+      checked: this.algorithmEnabled,
+      onchange: (event) => this.setAlgorithmEnabled(event.target.checked),
+    });
+    const toggleLabel = html.label(
+      {
+        style:
+          "display: flex; align-items: center; gap: 0.35rem; font-weight: normal; font-size: 0.85rem;",
+        title: "Enable letterspacer",
+      },
+      [toggleInput, html.span({ style: "font-weight: normal;" }, ["Enabled"])]
+    );
+
+    const controls = html.div(
+      { style: "display: flex; align-items: center; gap: 0.5rem;" },
+      [toggleLabel]
+    );
+
+    if (this.algorithmEnabled) {
+      const reverseButton = html.createDomElement(
+        "button",
+        {
+          style:
+            "margin-left: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;",
+          onclick: (event) => this.reverseSpacing(event),
+          disabled: !this.hasCurrentMaster,
+        },
+        ["Reverse"]
+      );
+      controls.appendChild(reverseButton);
+    }
+
+    return controls;
+  }
+
+  setAlgorithmEnabled(enabled) {
+    const nextValue = !!enabled;
+    if (this.algorithmEnabled === nextValue) {
+      return;
+    }
+    this.algorithmEnabled = nextValue;
+    if (!this.algorithmEnabled) {
+      this.calculatedLSB = null;
+      this.calculatedRSB = null;
+      this.clearVisualizationData();
+    }
+    this.update();
   }
 
   async update(senderInfo) {
@@ -343,67 +395,72 @@ export default class LetterspacerPanel extends Panel {
 
     this._suppressPersist = true;
     try {
-      await this.loadPersistedParams();
-      this.hasCurrentMaster = await this.hasCurrentMasterForGlyph();
+      if (this.algorithmEnabled) {
+        await this.loadPersistedParams();
+      }
+      this.hasCurrentMaster = this.algorithmEnabled
+        ? await this.hasCurrentMasterForGlyph()
+        : false;
 
+      const headerControls = this.buildHeaderControls();
       const formContents = [
-      { 
-        type: "header", 
-        label: translate("sidebar.letterspacer.title"),
-        auxiliaryElement: html.createDomElement("button", {
-          "style": "margin-left: 8px; padding: 2px 8px; font-size: 11px; cursor: pointer;",
-          "onclick": (event) => this.reverseSpacing(event),
-          "disabled": !this.hasCurrentMaster,
-        }, ["Reverse"])
-      },
+        {
+          type: "header",
+          label: translate("sidebar.letterspacer.title"),
+          auxiliaryElement: headerControls,
+        },
+      ];
 
-      { type: "edit-number", key: "area",
-        label: translate("sidebar.letterspacer.area"),
-        value: this.params.area },
+      if (this.algorithmEnabled) {
+        formContents.push(
+          { type: "edit-number", key: "area",
+            label: translate("sidebar.letterspacer.area"),
+            value: this.params.area },
 
-      { type: "edit-number", key: "depth",
-        label: translate("sidebar.letterspacer.depth"),
-        value: this.params.depth },
+          { type: "edit-number", key: "depth",
+            label: translate("sidebar.letterspacer.depth"),
+            value: this.params.depth },
 
-      { type: "edit-number", key: "overshoot",
-        label: translate("sidebar.letterspacer.overshoot"),
-        value: this.params.overshoot },
+          { type: "edit-number", key: "overshoot",
+            label: translate("sidebar.letterspacer.overshoot"),
+            value: this.params.overshoot },
 
-      { type: "divider" },
+          { type: "divider" },
 
-      { type: "edit-number", key: "applyLSB",
-        label: translate("sidebar.letterspacer.apply-lsb"),
-        value: this.params.applyLSB ? 1 : 0,
-        minValue: 0,
-        maxValue: 1,
-        integer: true },
+          { type: "edit-number", key: "applyLSB",
+            label: translate("sidebar.letterspacer.apply-lsb"),
+            value: this.params.applyLSB ? 1 : 0,
+            minValue: 0,
+            maxValue: 1,
+            integer: true },
 
-      { type: "edit-number", key: "applyRSB",
-        label: translate("sidebar.letterspacer.apply-rsb"),
-        value: this.params.applyRSB ? 1 : 0,
-        minValue: 0,
-        maxValue: 1,
-        integer: true },
+          { type: "edit-number", key: "applyRSB",
+            label: translate("sidebar.letterspacer.apply-rsb"),
+            value: this.params.applyRSB ? 1 : 0,
+            minValue: 0,
+            maxValue: 1,
+            integer: true },
 
-      { type: "divider" },
+          { type: "divider" },
 
-      { type: "edit-text", key: "referenceGlyph",
-        label: translate("sidebar.letterspacer.reference"),
-        value: this.params.referenceGlyph },
+          { type: "edit-text", key: "referenceGlyph",
+            label: translate("sidebar.letterspacer.reference"),
+            value: this.params.referenceGlyph },
 
-      { type: "divider" },
+          { type: "divider" },
 
-      // Display current and calculated spacing values
-      { type: "header", 
-        label: `Current: LSB=${this.formatValue(this.currentLSB)}, RSB=${this.formatValue(this.currentRSB)}`,
-        class: "current-values" },
-      
-      { type: "header", 
-        label: `Calculated: LSB=${this.formatValue(this.calculatedLSB)}, RSB=${this.formatValue(this.calculatedRSB)}`,
-        class: "calculated-values" },
+          // Display current and calculated spacing values
+          { type: "header",
+            label: `Current: LSB=${this.formatValue(this.currentLSB)}, RSB=${this.formatValue(this.currentRSB)}`,
+            class: "current-values" },
+          
+          { type: "header",
+            label: `Calculated: LSB=${this.formatValue(this.calculatedLSB)}, RSB=${this.formatValue(this.calculatedRSB)}`,
+            class: "calculated-values" },
 
-      { type: "spacer" },
-    ];
+          { type: "spacer" },
+        );
+      }
 
       this.infoForm.setFieldDescriptions(formContents);
       this.infoForm.onFieldChange = async (fieldItem, value) => {
@@ -411,56 +468,54 @@ export default class LetterspacerPanel extends Panel {
           this.params[fieldItem.key] = value;
           return;
         }
+        if (!this.algorithmEnabled) {
+          return;
+        }
         this.params[fieldItem.key] = value;
         await this.persistParam(fieldItem.key, value);
-      
-        // Update calculated values dynamically
-        await this.updateCalculatedValues();
-      
-        // Update visualization
-        if (this.editorController.sceneController?.sceneModel) {
-          this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
+
+        if (
+          fieldItem.key === "area" ||
+          fieldItem.key === "depth" ||
+          fieldItem.key === "overshoot" ||
+          fieldItem.key === "referenceGlyph"
+        ) {
+          this.calculatedLSB = null;
+          this.calculatedRSB = null;
+          this.clearVisualizationData();
         }
-        if (this.editorController.canvasController) {
-          this.editorController.canvasController.requestUpdate();
-        }
-      
+
         // Update value display without rebuilding the form
         this.updateValueDisplay();
       };
 
-      // Calculate and Apply buttons at the bottom
-      const buttonContainer = html.div({ class: "button-container" }, []);
-    
-      const calculateButton = html.button({
-        onclick: () => this.calculateSpacing(),
-        class: "calculate-button",
-        disabled: !this.hasCurrentMaster,
-      }, ["Calculate"]);
-    
-      const applyButton = html.button({
-        onclick: () => this.applySpacing(),
-        class: "apply-button",
-        disabled: !this.hasCurrentMaster,
-      }, ["Apply"]);
-    
-      buttonContainer.appendChild(calculateButton);
-      buttonContainer.appendChild(applyButton);
-    
-      this.infoForm.contentElement.appendChild(buttonContainer);
+      if (this.algorithmEnabled) {
+        // Calculate and Apply buttons at the bottom
+        const buttonContainer = html.div({ class: "button-container" }, []);
+      
+        const calculateButton = html.button({
+          onclick: () => this.calculateSpacing(),
+          class: "calculate-button",
+          disabled: !this.hasCurrentMaster,
+        }, ["Calculate"]);
+      
+        const applyButton = html.button({
+          onclick: () => this.applySpacing(),
+          class: "apply-button",
+          disabled: !this.hasCurrentMaster,
+        }, ["Apply"]);
+      
+        buttonContainer.appendChild(calculateButton);
+        buttonContainer.appendChild(applyButton);
+      
+        this.infoForm.contentElement.appendChild(buttonContainer);
+      }
     } finally {
       this._suppressPersist = false;
     }
 
-    // Initial calculation and visualization
-    await this.updateCalculatedValues();
-    this.updateValueDisplay();
-    
-    if (this.editorController.sceneController?.sceneModel) {
-      this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-    }
-    if (this.editorController.canvasController) {
-      this.editorController.canvasController.requestUpdate();
+    if (this.algorithmEnabled) {
+      this.updateValueDisplay();
     }
   }
 
@@ -477,8 +532,35 @@ export default class LetterspacerPanel extends Panel {
     }
   }
 
+  clearVisualizationData() {
+    const sceneModel =
+      this.editorController.sceneController?.sceneModel || this.editorController.sceneModel;
+    if (sceneModel?.letterspacerVisualizationData) {
+      sceneModel.letterspacerVisualizationData = null;
+    }
+    if (this.editorController.canvasController) {
+      this.editorController.canvasController.requestUpdate();
+    }
+  }
+
+  async updateCurrentValues() {
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return false;
+
+    const path = positionedGlyph.glyph.path;
+    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    if (!bounds) return false;
+
+    this.currentLSB = Math.round(bounds.xMin);
+    this.currentRSB = Math.round(positionedGlyph.glyph.xAdvance - bounds.xMax);
+    return true;
+  }
+
 
   async applySpacing() {
+    if (!this.algorithmEnabled) {
+      return;
+    }
     if (!(await this.hasCurrentMasterForGlyph())) {
       return;
     }
@@ -902,6 +984,9 @@ export default class LetterspacerPanel extends Panel {
   }
 
   async reverseSpacing(event) {
+    if (!this.algorithmEnabled) {
+      return;
+    }
     if (!(await this.hasCurrentMasterForGlyph())) {
       return;
     }
@@ -1198,17 +1283,7 @@ export default class LetterspacerPanel extends Panel {
   }
 
   async handleSelectionChange() {
-    if (this.editorController.sceneController && this.editorController.sceneController.sceneModel) {
-      this.editorController.sceneController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-      if (this.editorController.canvasController) {
-        this.editorController.canvasController.requestUpdate();
-      }
-    } else if (this.editorController.sceneModel) {
-      this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-      if (this.editorController.canvasController) {
-        this.editorController.canvasController.requestUpdate();
-      }
-    }
+    this.clearVisualizationData();
   }
 
   async refreshPersistedParams() {
@@ -1219,6 +1294,10 @@ export default class LetterspacerPanel extends Panel {
   }
 
   async clearVisualization() {
+    if (!this.algorithmEnabled) {
+      this.clearVisualizationData();
+      return;
+    }
     // Fade the visualization when glyph is edited (until Calculate/Apply)
     this.visualizationOpacity = 0.2;
     const sceneModel = this.editorController.sceneController?.sceneModel;
@@ -1247,15 +1326,15 @@ export default class LetterspacerPanel extends Panel {
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) return;
 
-    // Get current values from glyph
+    const hasBounds = await this.updateCurrentValues();
+    if (!hasBounds) return;
+    if (!this.algorithmEnabled) return;
+
+    // Calculate new values using letterspacer
     const path = positionedGlyph.glyph.path;
     const bounds = path.getBounds?.() || path.getControlBounds?.();
     if (!bounds) return;
 
-    this.currentLSB = Math.round(bounds.xMin);
-    this.currentRSB = Math.round(positionedGlyph.glyph.xAdvance - bounds.xMax);
-
-    // Calculate new values using letterspacer
     const fontMetrics = await this.getFontMetrics();
     const glyphName = this.getSelectedGlyphName() || positionedGlyph.glyphName;
     const { referenceGlyph, factor } = this.getReferenceSettings(glyphName);
@@ -1295,14 +1374,17 @@ export default class LetterspacerPanel extends Panel {
   }
 
   async calculateSpacing() {
+    if (!this.algorithmEnabled) {
+      return;
+    }
     if (!(await this.hasCurrentMasterForGlyph())) {
       return;
     }
     // Recalculate spacing after glyph edits
     this.visualizationOpacity = 1;
-      await this.updateCalculatedValues({ warnOnNoRef: true });
-      this.updateValueDisplay();
-      await this.update();
+    await this.updateCalculatedValues({ warnOnNoRef: true });
+    this.updateValueDisplay();
+    await this.update();
 
     // Refresh visualization
     if (this.editorController.sceneController?.sceneModel) {
@@ -1318,6 +1400,9 @@ export default class LetterspacerPanel extends Panel {
   }
 
   async getVisualizationData() {
+    if (!this.algorithmEnabled) {
+      return null;
+    }
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) {
       return null;
