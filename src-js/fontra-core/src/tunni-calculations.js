@@ -31,6 +31,13 @@ function drawRoundRect(context, x, y, width, height, radii) {
  context.fill();
 }
 
+function getSkeletonGeneratedContourIndexSet(positionedGlyph, editLayerName) {
+  const layerName = editLayerName || positionedGlyph?.glyph?.layerName;
+  const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[layerName];
+  const indices = layer?.customData?.["fontra.skeleton"]?.generatedContourIndices || [];
+  return new Set(indices);
+}
+
 // Grid Snap Utility Function
 export function snapToGrid(point) {
   return {
@@ -601,18 +608,32 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
  * @param {Function} distance - Function to calculate distance between two points
  * @returns {Object|null} Object with tunniPoint, segment, and segmentPoints if hit, null otherwise
  */
-export function findTunniPointHit(point, size, positionedGlyph, calculateTunniPoint, distance) {
+export function findTunniPointHit(
+  point,
+  size,
+  positionedGlyph,
+  calculateTunniPoint,
+  distance,
+  options = {}
+) {
   if (!positionedGlyph) {
     return null;
   }
   
   const path = positionedGlyph.glyph.path;
+  const generatedContourIndices = getSkeletonGeneratedContourIndexSet(
+    positionedGlyph,
+    options.editLayerName
+  );
   
   // The point is already in the glyph coordinate system when passed from the pointer tool
   const glyphPoint = point;
   
   // Iterate through ALL contours and check if the point is near any Tunni point
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
     for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
       // Process each segment in the contour
       if (segment.points.length === 4) {
@@ -661,14 +682,31 @@ export function findTunniPointHit(point, size, positionedGlyph, calculateTunniPo
 export async function handleEqualizeDistances(point, size, sceneModel, findTunniPointHit, equalizeSegmentDistances) {
   // First check if we clicked on an existing Tunni point
   const positionedGlyph = sceneModel.getSelectedPositionedGlyph();
- const hit = findTunniPointHit(point, size, positionedGlyph, calculateTunniPoint, distance);
+  if (!positionedGlyph?.glyph?.path) {
+    return;
+  }
+  const hit = findTunniPointHit(point, size, positionedGlyph, calculateTunniPoint, distance, {
+    editLayerName: sceneModel.sceneSettings?.editLayerName,
+  });
   if (hit) {
     await equalizeSegmentDistances(hit.segment, hit.segmentPoints, sceneModel, positionedGlyph);
     return;
   }
   
   // If not, check if we clicked near a cubic segment
- const pathHit = sceneModel.pathHitAtPoint(point, size);
+  const pathHit = sceneModel.pathHitAtPoint(point, size);
+  const generatedContourIndices = getSkeletonGeneratedContourIndexSet(
+    positionedGlyph,
+    sceneModel.sceneSettings?.editLayerName
+  );
+  if (pathHit.segment?.parentPointIndices?.length) {
+    const [hitContourIndex] = positionedGlyph.glyph.path.getContourAndPointIndex(
+      pathHit.segment.parentPointIndices[0]
+    );
+    if (generatedContourIndices.has(hitContourIndex)) {
+      return;
+    }
+  }
   if (pathHit.segment && pathHit.segment.points.length === 4) {
     // Check if it's a cubic segment (two off-curve points)
     const pointTypes = pathHit.segment.parentPointIndices.map(
@@ -770,7 +808,9 @@ export function handleTunniPointMouseDown(event, sceneController, visualizationL
  
  // First check if we clicked on an existing Tunni point
  // Use the same hit testing function that's used for hover detection to ensure consistency
- const hit = tunniLayerHitTest(glyphPoint, size, positionedGlyph);
+  const hit = tunniLayerHitTest(glyphPoint, size, positionedGlyph, {
+    editLayerName: sceneController.sceneModel?.sceneSettings?.editLayerName,
+  });
  if (!hit) {
    return null;
  }
@@ -984,18 +1024,25 @@ export function handleTunniPointMouseUp(initialState, sceneController) {
  * @param {Object} positionedGlyph - The positioned glyph to test against
  * @returns {Object|null} Hit result object if Tunni point is near the given point, null otherwise
  */
-export function tunniLayerHitTest(point, size, positionedGlyph) {
+export function tunniLayerHitTest(point, size, positionedGlyph, options = {}) {
   if (!positionedGlyph || !positionedGlyph.glyph || !positionedGlyph.glyph.path) {
     return null;
   }
   
   const path = positionedGlyph.glyph.path;
+  const generatedContourIndices = getSkeletonGeneratedContourIndexSet(
+    positionedGlyph,
+    options.editLayerName
+  );
   
   // The point is already in the glyph coordinate system when passed from the pointer tool
   const glyphPoint = point;
   
   // Iterate through ALL contours and check if the point is near any Tunni point
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
     for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
       // Process each segment in the contour
       if (segment.points.length === 4) {
@@ -1069,7 +1116,9 @@ export function handleTrueTunniPointMouseDown(event, sceneController, visualizat
   
   // First check if we clicked on an existing true Tunni point
   // Use the same hit testing function that's used for hover detection to ensure consistency
-  const hit = tunniLayerHitTest(glyphPoint, size, positionedGlyph);
+  const hit = tunniLayerHitTest(glyphPoint, size, positionedGlyph, {
+    editLayerName: sceneController.sceneModel?.sceneSettings?.editLayerName,
+  });
   if (!hit || hit.hitType !== "true-tunni-point") {
     return null;
   }

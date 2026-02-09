@@ -1119,6 +1119,13 @@ function drawRoundRect(context, x, y, width, height, radii) {
  context.fill();
 }
 
+function getSkeletonGeneratedContourIndexSet(positionedGlyph, model) {
+  const layerName = model?.sceneSettings?.editLayerName || positionedGlyph?.glyph?.layerName;
+  const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[layerName];
+  const indices = layer?.customData?.["fontra.skeleton"]?.generatedContourIndices || [];
+  return new Set(indices);
+}
+
 /**
  * Draw Tunni handle tension visualization
  * @param {CanvasRenderingContext2D} context - The canvas context
@@ -1129,6 +1136,7 @@ function drawRoundRect(context, x, y, width, height, radii) {
  */
 export function drawTunniLabels(context, positionedGlyph, parameters, model, controller) {
   const path = positionedGlyph.glyph.path;
+  const generatedContourIndices = getSkeletonGeneratedContourIndexSet(positionedGlyph, model);
  
  // Extract visibility settings from model or controller
  // Try multiple ways to access scene settings to ensure compatibility
@@ -1143,6 +1151,9 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
   
   // Iterate through all contours
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
     // Iterate through all segments in the contour
     for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
       // Check if it's a cubic segment (4 points)
@@ -1274,6 +1285,10 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
     // Check if this is an off-curve point
     if (pointType !== 0) { // Not an on-curve point
       const offCurvePoint = path.getPoint(pointIndex);
+      const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
+      if (generatedContourIndices.has(contourIndex)) {
+        continue;
+      }
       
       // Check if this point was already processed as part of a cubic segment
       // We need to check if this point is part of any cubic segment to avoid duplication
@@ -1281,6 +1296,9 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
       
       // Iterate through all contours to check if this point is part of a cubic segment
       for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+        if (generatedContourIndices.has(contourIndex)) {
+          continue;
+        }
         for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
           if (segment.points.length === 4) {
             // Check if it's a cubic segment (two off-curve points)
@@ -1308,7 +1326,6 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
       }
       
       // Get contour information
-      const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
       const contourInfo = path.contourInfo[contourIndex];
       const startPoint = contourIndex === 0 ? 0 : path.contourInfo[contourIndex - 1].endPoint + 1;
       const endPoint = contourInfo.endPoint;

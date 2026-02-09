@@ -260,7 +260,9 @@ export class PointerTool extends BaseTool {
           x: point.x - positionedGlyph.x,
           y: point.y - positionedGlyph.y,
         };
-        const tunniHit = tunniLayerHitTest(glyphPoint, size, positionedGlyph);
+        const tunniHit = tunniLayerHitTest(glyphPoint, size, positionedGlyph, {
+          editLayerName: this.sceneModel.sceneSettings?.editLayerName,
+        });
         if (tunniHit) {
           // Only register the hit if the corresponding layer is active
           if (tunniHit.hitType === "tunni-point" && isTunniCombinedLayerActive) {
