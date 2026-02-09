@@ -2233,9 +2233,12 @@ registerVisualizationLayerDefinition({
       if (angle > 90) angle = 180 - angle;
       const tension = calculateHandleMeasureTension(measureHoverHandle);
       const tensionText = tension == null ? "n/a" : tension.toFixed(2);
-      const label = `${dist.toFixed(1)}  ${tensionText}  ${angle.toFixed(1)}\u00B0`;
+      const label = `${dist.toFixed(1)}\n${tensionText}\n${angle.toFixed(1)}\u00B0`;
       drawMeasureGuideLine(context, p2, p1, segmentColor, parameters);
-      drawMeasureLabel(context, p1.x, p1.y, label, segmentColor, parameters);
+      drawMeasureLabel(context, p1.x, p1.y, label, segmentColor, parameters, {
+        offsetY: 8,
+        alignBottom: true,
+      });
       return;
     }
 
@@ -2381,9 +2384,10 @@ function calculateHandleMeasureTension(measureHoverHandle) {
 }
 
 
-function drawMeasureLabel(context, x, y, label, color, parameters) {
+function drawMeasureLabel(context, x, y, label, color, parameters, options = {}) {
   // Draw label at point with small offset above
-  const offsetY = 15;
+  const offsetY = options.offsetY ?? 15;
+  const alignBottom = options.alignBottom ?? false;
 
   context.save();
   context.scale(1, -1);
@@ -2392,15 +2396,22 @@ function drawMeasureLabel(context, x, y, label, color, parameters) {
   context.textAlign = "center";
   context.textBaseline = "middle";
 
-  // Measure text for background
-  const textWidth = context.measureText(label).width;
+  const lines = String(label).split("\n");
+  const lineHeight = parameters.fontSize + 2;
+  const totalHeight = lines.length * lineHeight;
+
+  // Measure text for background (max width across lines)
+  let textWidth = 0;
+  for (const line of lines) {
+    textWidth = Math.max(textWidth, context.measureText(line).width);
+  }
   const padding = 4;
 
-  const labelY = -y - offsetY;
+  const labelY = alignBottom ? -y - offsetY - totalHeight / 2 : -y - offsetY;
   const bgX = x - textWidth / 2 - padding;
-  const bgY = labelY - parameters.fontSize / 2 - padding;
+  const bgY = labelY - totalHeight / 2 - padding;
   const bgW = textWidth + padding * 2;
-  const bgH = parameters.fontSize + padding * 2;
+  const bgH = totalHeight + padding * 2;
 
   // Draw background with rounded corners
   const radius = 3;
@@ -2416,7 +2427,10 @@ function drawMeasureLabel(context, x, y, label, color, parameters) {
 
   // Draw text
   context.fillStyle = parameters.textColor;
-  context.fillText(label, x, labelY);
+  for (let i = 0; i < lines.length; i++) {
+    const lineY = labelY + (i - (lines.length - 1) / 2) * lineHeight;
+    context.fillText(lines[i], x, lineY);
+  }
   context.restore();
 }
 
