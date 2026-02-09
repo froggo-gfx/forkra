@@ -1491,9 +1491,21 @@ export class PointerTool extends BaseTool {
 
     // Handle regular selection (with optional skeleton selection)
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const initialPoint = sceneController.localPoint(initialEvent);
-      const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
-      let behaviorName = getBehaviorName(initialEvent);
+        const initialPoint = sceneController.localPoint(initialEvent);
+        const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+        let behaviorName = getBehaviorName(initialEvent);
+        const initialClickedPointIndex =
+          this.sceneController.sceneModel.initialClickedPointIndex;
+        let equalizeHandleInfo = null;
+        if (positionedGlyph && initialClickedPointIndex !== undefined) {
+          const candidate = this._findEqualizeHandleForPath(
+            initialPoint,
+            sceneController.mouseClickMargin
+          );
+          if (candidate && candidate.pointIndex === initialClickedPointIndex) {
+            equalizeHandleInfo = candidate;
+          }
+        }
 
       // Setup for regular point editing
       const layerInfo = Object.entries(
@@ -1516,8 +1528,23 @@ export class PointerTool extends BaseTool {
         };
       });
 
-      assert(layerInfo.length >= 1, "no layer to edit");
-      layerInfo[0].isPrimaryLayer = true;
+        assert(layerInfo.length >= 1, "no layer to edit");
+        layerInfo[0].isPrimaryLayer = true;
+        const equalizeRollbackByLayer = new Map();
+        let equalizeUsed = false;
+        if (equalizeHandleInfo) {
+          for (const layer of layerInfo) {
+            const oppositePoint = layer.layerGlyph.path.getPoint(
+              equalizeHandleInfo.oppositeIndex
+            );
+            if (oppositePoint) {
+              equalizeRollbackByLayer.set(layer.layerName, {
+                x: oppositePoint.x,
+                y: oppositePoint.y,
+              });
+            }
+          }
+        }
 
       // Setup for skeleton editing (if we have skeleton selection too)
       let skeletonEditState = null;
@@ -1586,15 +1613,58 @@ export class PointerTool extends BaseTool {
           y: currentPoint.y - initialPoint.y,
         };
 
-        const deepEditChanges = [];
+          const deepEditChanges = [];
 
-        // Apply regular point changes
-        for (const layer of layerInfo) {
-          const layerEditChange = layer.editBehavior.makeChangeForDelta(delta);
-          applyChange(layer.layerGlyph, layerEditChange);
-          deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
-          layer.shouldConnect = layer.connectDetector.shouldConnect(layer.isPrimaryLayer);
-        }
+          // Apply regular point changes
+          for (const layer of layerInfo) {
+            const layerEditChange = layer.editBehavior.makeChangeForDelta(delta);
+            applyChange(layer.layerGlyph, layerEditChange);
+            deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
+            layer.shouldConnect = layer.connectDetector.shouldConnect(layer.isPrimaryLayer);
+          }
+          // X-equalize during drag for regular handles (mid-drag activation supported)
+          if (this.equalizeMode && equalizeHandleInfo && positionedGlyph) {
+            const { pointIndex, smoothIndex, oppositeIndex } = equalizeHandleInfo;
+            const currentGlyphPoint = {
+              x: currentPoint.x - positionedGlyph.x,
+              y: currentPoint.y - positionedGlyph.y,
+            };
+            for (const layer of layerInfo) {
+              const path = layer.layerGlyph.path;
+              const smoothPt = path.getPoint(smoothIndex);
+              if (!smoothPt) continue;
+              let newDragVec = {
+                x: currentGlyphPoint.x - smoothPt.x,
+                y: currentGlyphPoint.y - smoothPt.y,
+              };
+              if (event.shiftKey) {
+                newDragVec = constrainHorVerDiag(newDragVec);
+              }
+              const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
+              if (newDragLen < 1) {
+                continue;
+              }
+              const newDragPos = {
+                x: Math.round(smoothPt.x + newDragVec.x),
+                y: Math.round(smoothPt.y + newDragVec.y),
+              };
+              const newOppPos = {
+                x: Math.round(smoothPt.x - newDragVec.x),
+                y: Math.round(smoothPt.y - newDragVec.y),
+              };
+              const equalizeChanges = [
+                { f: "=xy", a: [pointIndex, newDragPos.x, newDragPos.y] },
+                { f: "=xy", a: [oppositeIndex, newOppPos.x, newOppPos.y] },
+              ];
+              for (const change of equalizeChanges) {
+                applyChange(layer.layerGlyph.path, change);
+              }
+              deepEditChanges.push(
+                consolidateChanges(equalizeChanges, layer.changePath)
+              );
+              equalizeUsed = true;
+            }
+          }
 
         // Apply skeleton changes
         if (skeletonEditState) {
@@ -1707,12 +1777,33 @@ export class PointerTool extends BaseTool {
         await sendIncrementalChange(editChange, true);
       }
 
-      const rollbackParts = layerInfo.map((layer) =>
-        consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
-      );
-      if (skeletonEditState?.firstFrameRollback) {
-        rollbackParts.push(...skeletonEditState.firstFrameRollback);
-      }
+        const rollbackParts = layerInfo.map((layer) =>
+          consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
+        );
+        if (skeletonEditState?.firstFrameRollback) {
+          rollbackParts.push(...skeletonEditState.firstFrameRollback);
+        }
+        if (equalizeUsed && equalizeHandleInfo) {
+          for (const layer of layerInfo) {
+            const oppositePoint = equalizeRollbackByLayer.get(layer.layerName);
+            if (!oppositePoint) continue;
+            rollbackParts.push(
+              consolidateChanges(
+                [
+                  {
+                    f: "=xy",
+                    a: [
+                      equalizeHandleInfo.oppositeIndex,
+                      oppositePoint.x,
+                      oppositePoint.y,
+                    ],
+                  },
+                ],
+                layer.changePath
+              )
+            );
+          }
+        }
       let changes = ChangeCollector.fromChanges(
         editChange,
         consolidateChanges(rollbackParts)
@@ -1980,6 +2071,49 @@ export class PointerTool extends BaseTool {
         );
       }
 
+      const initialClickedSkeletonPoint =
+        this.sceneController.sceneModel.initialClickedSkeletonPoint;
+      let equalizeSkeletonInfo = null;
+      if (initialClickedSkeletonPoint) {
+        const { contourIdx, pointIdx } = initialClickedSkeletonPoint;
+        const firstLayerData = Object.values(layersData)[0];
+        const contour = firstLayerData?.original?.contours?.[contourIdx];
+        const clickedPoint = contour?.points?.[pointIdx];
+        if (contour && clickedPoint?.type === "cubic") {
+          const numPoints = contour.points.length;
+          const prevIndex = (pointIdx - 1 + numPoints) % numPoints;
+          const nextIndex = (pointIdx + 1) % numPoints;
+          const prevPoint = contour.points[prevIndex];
+          const nextPoint = contour.points[nextIndex];
+          let smoothIndex = null;
+          let oppositeIndex = null;
+          if (!prevPoint?.type && prevPoint?.smooth) {
+            const prevPrevIndex = (prevIndex - 1 + numPoints) % numPoints;
+            const prevPrevPoint = contour.points[prevPrevIndex];
+            if (prevPrevPoint?.type === "cubic") {
+              smoothIndex = prevIndex;
+              oppositeIndex = prevPrevIndex;
+            }
+          }
+          if (smoothIndex === null && !nextPoint?.type && nextPoint?.smooth) {
+            const nextNextIndex = (nextIndex + 1) % numPoints;
+            const nextNextPoint = contour.points[nextNextIndex];
+            if (nextNextPoint?.type === "cubic") {
+              smoothIndex = nextIndex;
+              oppositeIndex = nextNextIndex;
+            }
+          }
+          if (smoothIndex !== null && oppositeIndex !== null) {
+            equalizeSkeletonInfo = {
+              contourIndex: contourIdx,
+              pointIndex: pointIdx,
+              smoothIndex,
+              oppositeIndex,
+            };
+          }
+        }
+      }
+
       // Accumulate changes (following Pen Tool pattern)
       let accumulatedChanges = new ChangeCollector();
 
@@ -2029,6 +2163,37 @@ export class PointerTool extends BaseTool {
             for (const { pointIndex, x, y } of changes) {
               contour.points[pointIndex].x = x;
               contour.points[pointIndex].y = y;
+            }
+          }
+
+          if (this.equalizeMode && equalizeSkeletonInfo) {
+            const { contourIndex, pointIndex, smoothIndex, oppositeIndex } =
+              equalizeSkeletonInfo;
+            const workContour = working.contours[contourIndex];
+            const smoothPt = workContour?.points?.[smoothIndex];
+            if (smoothPt) {
+              let newDragVec = {
+                x: currentGlyphPoint.x - smoothPt.x,
+                y: currentGlyphPoint.y - smoothPt.y,
+              };
+              if (event.shiftKey) {
+                newDragVec = constrainHorVerDiag(newDragVec);
+              }
+              const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
+              if (newDragLen >= 1) {
+                workContour.points[pointIndex].x = Math.round(
+                  smoothPt.x + newDragVec.x
+                );
+                workContour.points[pointIndex].y = Math.round(
+                  smoothPt.y + newDragVec.y
+                );
+                workContour.points[oppositeIndex].x = Math.round(
+                  smoothPt.x - newDragVec.x
+                );
+                workContour.points[oppositeIndex].y = Math.round(
+                  smoothPt.y - newDragVec.y
+                );
+              }
             }
           }
 
