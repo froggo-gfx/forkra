@@ -276,6 +276,8 @@ export const strings = {
   "sidebar.designspace-navigation": "Designspaceナビゲーション",
   "sidebar.designspace-navigation.speedpunk": "SpeedPunk",
   "sidebar.designspace-navigation.speedpunk.peak-height": "Peak height (UPM)",
+  "sidebar.designspace-navigation.speedpunk.sharpness": "Sharpness",
+  "sidebar.designspace-navigation.speedpunk.opacity": "Opacity",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "レイヤー名:",
   "sidebar.designspace-navigation.dialog.add-source.label.source-name": "ソース名:",
   "sidebar.designspace-navigation.dialog.add-source.ok-button-title": "追加",

@@ -1837,13 +1837,18 @@ registerVisualizationLayerDefinition({
      context.save();
      context.lineCap = 'round';
      context.lineJoin = 'round';
-     context.globalAlpha = 0.5;
 
      const zoomFactor = controller.magnification || 1.0;
      const peakHeightGlyphUnits =
        model.sceneSettings?.speedPunkPeakHeightUpm ??
        model.sceneSettings?.speedPunkPeakHeightPx ??
        24;
+     const sharpness = Math.max(0.1, model.sceneSettings?.speedPunkSharpness ?? 1);
+     const opacity = Math.max(
+       0,
+       Math.min(1, model.sceneSettings?.speedPunkOpacity ?? 0.5)
+     );
+     context.globalAlpha = opacity;
      
      // Count total curve segments in the glyph
      const totalCurveCount = countCurveSegments(path);
@@ -2092,7 +2097,12 @@ registerVisualizationLayerDefinition({
              const mag = Math.hypot(nx, ny) || 1;
              nx /= mag; ny /= mag;
 
-             const normalizedHeight = Math.abs(samples[s].curvature) / segmentPeakAbsCurvature;
+             const rawNormalizedHeight =
+               Math.abs(samples[s].curvature) / segmentPeakAbsCurvature;
+             const normalizedHeight = Math.pow(
+               Math.max(0, Math.min(1, rawNormalizedHeight)),
+               sharpness
+             );
              const h = -normalizedHeight * peakHeightGlyphUnits;
              offCurve.push({ x: x + nx * h, y: y + ny * h });
            }
@@ -2161,7 +2171,12 @@ registerVisualizationLayerDefinition({
              const mag = Math.hypot(nx, ny) || 1;
              nx /= mag; ny /= mag;
 
-             const normalizedHeight = Math.abs(samples[s].curvature) / segmentPeakAbsCurvature;
+             const rawNormalizedHeight =
+               Math.abs(samples[s].curvature) / segmentPeakAbsCurvature;
+             const normalizedHeight = Math.pow(
+               Math.max(0, Math.min(1, rawNormalizedHeight)),
+               sharpness
+             );
              const h = -normalizedHeight * peakHeightGlyphUnits;
              offCurveQ.push({ x: x + nx * h, y: y + ny * h });
          }

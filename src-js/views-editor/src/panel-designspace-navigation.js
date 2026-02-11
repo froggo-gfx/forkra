@@ -69,6 +69,12 @@ const LIST_HEADER_ANIMATION_STYLE = `
 const SPEEDPUNK_PEAK_HEIGHT_DEFAULT_UPM = 24;
 const SPEEDPUNK_PEAK_HEIGHT_MIN_UPM = 1;
 const SPEEDPUNK_PEAK_HEIGHT_MAX_UPM = 1000;
+const SPEEDPUNK_SHARPNESS_DEFAULT = 1;
+const SPEEDPUNK_SHARPNESS_MIN = 0.1;
+const SPEEDPUNK_SHARPNESS_MAX = 4;
+const SPEEDPUNK_OPACITY_DEFAULT = 0.5;
+const SPEEDPUNK_OPACITY_MIN = 0;
+const SPEEDPUNK_OPACITY_MAX = 1;
 
 export default class DesignspaceNavigationPanel extends Panel {
   identifier = "designspace-navigation";
@@ -276,6 +282,34 @@ export default class DesignspaceNavigationPanel extends Panel {
               max: SPEEDPUNK_PEAK_HEIGHT_MAX_UPM,
               step: 1,
             }),
+            html.label(
+              {
+                for: "speedpunk-sharpness-input",
+                style: "white-space: nowrap;",
+              },
+              [translate("sidebar.designspace-navigation.speedpunk.sharpness")]
+            ),
+            html.input({
+              id: "speedpunk-sharpness-input",
+              type: "number",
+              min: SPEEDPUNK_SHARPNESS_MIN,
+              max: SPEEDPUNK_SHARPNESS_MAX,
+              step: 0.1,
+            }),
+            html.label(
+              {
+                for: "speedpunk-opacity-input",
+                style: "white-space: nowrap;",
+              },
+              [translate("sidebar.designspace-navigation.speedpunk.opacity")]
+            ),
+            html.input({
+              id: "speedpunk-opacity-input",
+              type: "number",
+              min: SPEEDPUNK_OPACITY_MIN,
+              max: SPEEDPUNK_OPACITY_MAX,
+              step: 0.05,
+            }),
           ]
         ),
       },
@@ -310,6 +344,14 @@ export default class DesignspaceNavigationPanel extends Panel {
     return this.accordion.querySelector("#speedpunk-peak-height-input");
   }
 
+  get speedPunkSharpnessInput() {
+    return this.accordion.querySelector("#speedpunk-sharpness-input");
+  }
+
+  get speedPunkOpacityInput() {
+    return this.accordion.querySelector("#speedpunk-opacity-input");
+  }
+
   _normalizeSpeedPunkPeakHeightUpm(value) {
     if (!Number.isFinite(value)) {
       return SPEEDPUNK_PEAK_HEIGHT_DEFAULT_UPM;
@@ -318,6 +360,22 @@ export default class DesignspaceNavigationPanel extends Panel {
       SPEEDPUNK_PEAK_HEIGHT_MIN_UPM,
       Math.min(SPEEDPUNK_PEAK_HEIGHT_MAX_UPM, Math.round(value))
     );
+  }
+
+  _normalizeSpeedPunkSharpness(value) {
+    if (!Number.isFinite(value)) {
+      return SPEEDPUNK_SHARPNESS_DEFAULT;
+    }
+    const clamped = Math.max(SPEEDPUNK_SHARPNESS_MIN, Math.min(SPEEDPUNK_SHARPNESS_MAX, value));
+    return Math.round(clamped * 10) / 10;
+  }
+
+  _normalizeSpeedPunkOpacity(value) {
+    if (!Number.isFinite(value)) {
+      return SPEEDPUNK_OPACITY_DEFAULT;
+    }
+    const clamped = Math.max(SPEEDPUNK_OPACITY_MIN, Math.min(SPEEDPUNK_OPACITY_MAX, value));
+    return Math.round(clamped * 100) / 100;
   }
 
   _updateSpeedPunkPeakHeightInput(value) {
@@ -333,10 +391,34 @@ export default class DesignspaceNavigationPanel extends Panel {
     input.value = String(normalized);
   }
 
+  _updateSpeedPunkSharpnessInput(value) {
+    const input = this.speedPunkSharpnessInput;
+    if (!input) {
+      return;
+    }
+    const normalized = this._normalizeSpeedPunkSharpness(
+      value ?? this.sceneSettings.speedPunkSharpness
+    );
+    input.value = String(normalized);
+  }
+
+  _updateSpeedPunkOpacityInput(value) {
+    const input = this.speedPunkOpacityInput;
+    if (!input) {
+      return;
+    }
+    const normalized = this._normalizeSpeedPunkOpacity(
+      value ?? this.sceneSettings.speedPunkOpacity
+    );
+    input.value = String(normalized);
+  }
+
   setup() {
     this._setFontLocationValues();
     this.glyphAxesElement.values = this.sceneSettings.glyphLocation;
     this._updateSpeedPunkPeakHeightInput();
+    this._updateSpeedPunkSharpnessInput();
+    this._updateSpeedPunkOpacityInput();
 
     this.speedPunkPeakHeightInput.addEventListener("input", (event) => {
       const parsedValue = Number(event.target.value);
@@ -360,6 +442,54 @@ export default class DesignspaceNavigationPanel extends Panel {
 
     this.sceneSettingsController.addKeyListener("speedPunkPeakHeightUpm", (event) => {
       this._updateSpeedPunkPeakHeightInput(event.newValue);
+    });
+
+    this.speedPunkSharpnessInput.addEventListener("input", (event) => {
+      const parsedValue = Number(event.target.value);
+      if (!Number.isFinite(parsedValue)) {
+        return;
+      }
+      const normalizedValue = this._normalizeSpeedPunkSharpness(parsedValue);
+      this.sceneSettingsController.setItem("speedPunkSharpness", normalizedValue, {
+        senderID: this,
+      });
+    });
+
+    this.speedPunkSharpnessInput.addEventListener("change", () => {
+      const parsedValue = Number(this.speedPunkSharpnessInput.value);
+      const normalizedValue = this._normalizeSpeedPunkSharpness(parsedValue);
+      this.sceneSettingsController.setItem("speedPunkSharpness", normalizedValue, {
+        senderID: this,
+      });
+      this._updateSpeedPunkSharpnessInput(normalizedValue);
+    });
+
+    this.sceneSettingsController.addKeyListener("speedPunkSharpness", (event) => {
+      this._updateSpeedPunkSharpnessInput(event.newValue);
+    });
+
+    this.speedPunkOpacityInput.addEventListener("input", (event) => {
+      const parsedValue = Number(event.target.value);
+      if (!Number.isFinite(parsedValue)) {
+        return;
+      }
+      const normalizedValue = this._normalizeSpeedPunkOpacity(parsedValue);
+      this.sceneSettingsController.setItem("speedPunkOpacity", normalizedValue, {
+        senderID: this,
+      });
+    });
+
+    this.speedPunkOpacityInput.addEventListener("change", () => {
+      const parsedValue = Number(this.speedPunkOpacityInput.value);
+      const normalizedValue = this._normalizeSpeedPunkOpacity(parsedValue);
+      this.sceneSettingsController.setItem("speedPunkOpacity", normalizedValue, {
+        senderID: this,
+      });
+      this._updateSpeedPunkOpacityInput(normalizedValue);
+    });
+
+    this.sceneSettingsController.addKeyListener("speedPunkOpacity", (event) => {
+      this._updateSpeedPunkOpacityInput(event.newValue);
     });
 
     this.fontAxesElement.addEventListener(

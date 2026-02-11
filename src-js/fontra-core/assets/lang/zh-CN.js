@@ -262,6 +262,8 @@ export const strings = {
   "sidebar.designspace-navigation": "Designspace 导航",
   "sidebar.designspace-navigation.speedpunk": "SpeedPunk",
   "sidebar.designspace-navigation.speedpunk.peak-height": "Peak height (UPM)",
+  "sidebar.designspace-navigation.speedpunk.sharpness": "Sharpness",
+  "sidebar.designspace-navigation.speedpunk.opacity": "Opacity",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "图层：",
   "sidebar.designspace-navigation.dialog.add-source.label.source-name": "源名称：",
   "sidebar.designspace-navigation.dialog.add-source.ok-button-title": "添加",
