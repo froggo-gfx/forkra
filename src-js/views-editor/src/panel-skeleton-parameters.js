@@ -30,6 +30,8 @@ const SKELETON_CAP_RADIUS_RATIO_KEY = "fontra.skeleton.capRadiusRatio";
 const SKELETON_CAP_TENSION_KEY = "fontra.skeleton.capTension";
 const SKELETON_CAP_ANGLE_KEY = "fontra.skeleton.capAngle";
 const SKELETON_CAP_DISTANCE_KEY = "fontra.skeleton.capDistance";
+const SKELETON_CORNER_REACH_SOURCE_KEY = "fontra.skeleton.cornerReach";
+const SKELETON_ROUNDNESS_STRENGTH_SOURCE_KEY = "fontra.skeleton.roundnessStrength";
 
 const DEFAULT_WIDTH_CAPITAL_BASE = 60;
 const DEFAULT_WIDTH_CAPITAL_HORIZONTAL = 50;
@@ -51,6 +53,14 @@ const CAP_ANGLE_MAX = 85;
 const DEFAULT_CORNER_ROUNDNESS = 0;
 const CORNER_ROUND_MIN = 0;
 const CORNER_ROUND_MAX = 1;
+const DEFAULT_CORNER_TRIM_RATIO_DEBUG = 0.49;
+const CORNER_TRIM_RATIO_DEBUG_MIN = 0.05;
+const CORNER_TRIM_RATIO_DEBUG_MAX = 0.99;
+const DEFAULT_CORNER_RADIUS_BOOST_DEBUG = 1;
+const CORNER_RADIUS_BOOST_DEBUG_MIN = 0.1;
+const CORNER_RADIUS_BOOST_DEBUG_MAX = 4.0;
+const SKELETON_CORNER_REACH_DATA_KEY = "cornerReach";
+const SKELETON_ROUNDNESS_STRENGTH_DATA_KEY = "roundnessStrength";
 
 export default class SkeletonParametersPanel extends Panel {
   identifier = "skeleton-parameters";
@@ -863,6 +873,12 @@ export default class SkeletonParametersPanel extends Panel {
     const cornerRoundPercent = Math.round(
       (cornerRoundState.value ?? DEFAULT_CORNER_ROUNDNESS) * 100
     );
+    const cornerTrimRatioDebugPercent = Math.round(
+      this._getCornerTrimRatioDebug() * 100
+    );
+    const cornerRadiusBoostDebugPercent = Math.round(
+      this._getCornerRadiusBoostDebug() * 100
+    );
     const cornerRoundAux =
       cornerRoundState.mixed
         ? html.span({ style: "font-size: 11px; opacity: 0.7;" }, "mixed")
@@ -883,6 +899,26 @@ export default class SkeletonParametersPanel extends Panel {
       maxValue: 100,
       step: 1,
       disabled: !cornerRoundState.canEdit,
+    });
+    formContents.push({
+      type: "edit-number-slider",
+      key: "cornerTrimRatioDebugPercent",
+      label: "Corner Reach (%)",
+      value: cornerTrimRatioDebugPercent,
+      minValue: Math.round(CORNER_TRIM_RATIO_DEBUG_MIN * 100),
+      defaultValue: Math.round(DEFAULT_CORNER_TRIM_RATIO_DEBUG * 100),
+      maxValue: Math.round(CORNER_TRIM_RATIO_DEBUG_MAX * 100),
+      step: 1,
+    });
+    formContents.push({
+      type: "edit-number-slider",
+      key: "cornerRadiusBoostDebugPercent",
+      label: "Roundness Strength (%)",
+      value: cornerRadiusBoostDebugPercent,
+      minValue: Math.round(CORNER_RADIUS_BOOST_DEBUG_MIN * 100),
+      defaultValue: Math.round(DEFAULT_CORNER_RADIUS_BOOST_DEBUG * 100),
+      maxValue: Math.round(CORNER_RADIUS_BOOST_DEBUG_MAX * 100),
+      step: 1,
     });
 
     const capStyleState = this._getSelectedEndpointCapStyleState(selectedData);
@@ -1202,6 +1238,36 @@ export default class SkeletonParametersPanel extends Panel {
           await this._setCornerRoundnessForSelection(value / 100);
           this.update();
         }
+      } else if (fieldItem.key === "cornerTrimRatioDebugPercent") {
+        if (valueStream) {
+          this._isDraggingSlider = true;
+          try {
+            const mappedStream = this._mapValueStream(valueStream, (v) => v / 100);
+            await this._setCornerTrimRatioDebugStream(mappedStream);
+          } finally {
+            this._isDraggingSlider = false;
+            this._blurActiveFormElement();
+          }
+          this.update();
+        } else {
+          await this._setCornerTrimRatioDebug(value / 100);
+          this.update();
+        }
+      } else if (fieldItem.key === "cornerRadiusBoostDebugPercent") {
+        if (valueStream) {
+          this._isDraggingSlider = true;
+          try {
+            const mappedStream = this._mapValueStream(valueStream, (v) => v / 100);
+            await this._setCornerRadiusBoostDebugStream(mappedStream);
+          } finally {
+            this._isDraggingSlider = false;
+            this._blurActiveFormElement();
+          }
+          this.update();
+        } else {
+          await this._setCornerRadiusBoostDebug(value / 100);
+          this.update();
+        }
       } else if (fieldItem.key === "capRadiusIndex") {
         if (valueStream) {
           this._isDraggingSlider = true;
@@ -1315,11 +1381,24 @@ export default class SkeletonParametersPanel extends Panel {
     }
 
     _blurActiveFormElement() {
-      const root = this.infoForm?.shadowRoot;
-      const active = root?.activeElement;
-      if (active && typeof active.blur === "function") {
-        active.blur();
-      }
+      const blurDeepActive = (root) => {
+        if (!root) return;
+        const active = root.activeElement;
+        if (!active) return;
+        if (active.shadowRoot) {
+          blurDeepActive(active.shadowRoot);
+        }
+        if (typeof active.blur === "function") {
+          active.blur();
+        }
+      };
+
+      blurDeepActive(this.infoForm?.shadowRoot);
+      blurDeepActive(document);
+      queueMicrotask(() => {
+        blurDeepActive(this.infoForm?.shadowRoot);
+        blurDeepActive(document);
+      });
     }
 
   _mapValueStream(valueStream, mapper) {
@@ -1369,6 +1448,15 @@ export default class SkeletonParametersPanel extends Panel {
 
   _getSourceCustomDataValue(key, fallback) {
     return this._getSourceWidth(key, fallback);
+  }
+
+  _getActiveSkeletonData() {
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) return null;
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    if (!editLayerName) return null;
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    return layer?.customData?.[SKELETON_CUSTOM_DATA_KEY] ?? null;
   }
 
   _getAdjacentHandleIndices(contour, pointIdx) {
@@ -1572,7 +1660,7 @@ export default class SkeletonParametersPanel extends Panel {
     const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
     const defaultWidth = this._getSourceWidth(widthKey, widthFallback);
 
-    const contours = generateContoursFromSkeleton(selectedData.skeletonData);
+    const contours = this._generateContoursWithCornerSettings(selectedData.skeletonData);
     const path = VarPackedPath.fromUnpackedContours(contours);
 
     const inValues = [];
@@ -1875,9 +1963,9 @@ export default class SkeletonParametersPanel extends Panel {
           delete point[detachedKey];
         }
 
-        const currentContours = generateContoursFromSkeleton(skeletonData);
+        const currentContours = this._generateContoursWithCornerSettings(skeletonData);
         const currentPath = VarPackedPath.fromUnpackedContours(currentContours);
-        const baseContours = generateContoursFromSkeleton(baseSkeletonData);
+        const baseContours = this._generateContoursWithCornerSettings(baseSkeletonData);
         const basePath = VarPackedPath.fromUnpackedContours(baseContours);
 
         let changed = false;
@@ -2894,6 +2982,9 @@ export default class SkeletonParametersPanel extends Panel {
       parts.push(
         `capd:${this._getSourceCustomDataValue(SKELETON_CAP_RADIUS_RATIO_KEY, DEFAULT_CAP_RADIUS_RATIO)},${this._getSourceCustomDataValue(SKELETON_CAP_TENSION_KEY, DEFAULT_CAP_TENSION)},${this._getSourceCustomDataValue(SKELETON_CAP_ANGLE_KEY, DEFAULT_CAP_ANGLE)},${this._getSourceCustomDataValue(SKELETON_CAP_DISTANCE_KEY, DEFAULT_CAP_DISTANCE)}`
       );
+      parts.push(
+        `cdbg:${this._getCornerTrimRatioDebug()},${this._getCornerRadiusBoostDebug()}`
+      );
 
     // Single-sided state
     parts.push(`ss:${this._getCurrentSingleSided()},${this._getCurrentSingleSidedDirection()}`);
@@ -3027,7 +3118,28 @@ export default class SkeletonParametersPanel extends Panel {
   /**
    * Helper to regenerate outline contours from skeleton data.
    */
+  _ensureCornerSettingsOnSkeletonData(skeletonData) {
+    if (!skeletonData) return;
+    if (!Number.isFinite(skeletonData[SKELETON_CORNER_REACH_DATA_KEY])) {
+      skeletonData[SKELETON_CORNER_REACH_DATA_KEY] = DEFAULT_CORNER_TRIM_RATIO_DEBUG;
+    }
+    if (!Number.isFinite(skeletonData[SKELETON_ROUNDNESS_STRENGTH_DATA_KEY])) {
+      skeletonData[SKELETON_ROUNDNESS_STRENGTH_DATA_KEY] =
+        DEFAULT_CORNER_RADIUS_BOOST_DEBUG;
+    }
+  }
+
+  _generateContoursWithCornerSettings(skeletonData) {
+    this._ensureCornerSettingsOnSkeletonData(skeletonData);
+    return generateContoursFromSkeleton(skeletonData);
+  }
+
+  /**
+   * Helper to regenerate outline contours from skeleton data.
+   */
   _regenerateOutlineContours(staticGlyph, skeletonData) {
+    this._ensureCornerSettingsOnSkeletonData(skeletonData);
+
     const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
     const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
     for (const idx of sortedIndices) {
@@ -3036,7 +3148,7 @@ export default class SkeletonParametersPanel extends Panel {
       }
     }
 
-    const generatedContours = generateContoursFromSkeleton(skeletonData);
+    const generatedContours = this._generateContoursWithCornerSettings(skeletonData);
     const newGeneratedIndices = [];
     for (const contour of generatedContours) {
       const newIndex = staticGlyph.path.numContours;
@@ -3326,16 +3438,266 @@ export default class SkeletonParametersPanel extends Panel {
     return Math.min(Math.max(value, CORNER_ROUND_MIN), CORNER_ROUND_MAX);
   }
 
-  _buildCornerRoundnessChanges(glyph, selectedData, value) {
+  _getCornerTrimRatioDebug() {
+    const skeletonData = this._getActiveSkeletonData();
+    if (skeletonData) {
+      if (Number.isFinite(skeletonData[SKELETON_CORNER_REACH_DATA_KEY])) {
+        return this._clampCornerTrimRatioDebug(
+          skeletonData[SKELETON_CORNER_REACH_DATA_KEY]
+        );
+      }
+      return DEFAULT_CORNER_TRIM_RATIO_DEBUG;
+    }
+    const sourceValue = this._getSourceCustomDataValue(
+      SKELETON_CORNER_REACH_SOURCE_KEY,
+      DEFAULT_CORNER_TRIM_RATIO_DEBUG
+    );
+    return this._clampCornerTrimRatioDebug(sourceValue);
+  }
+
+  _getCornerRadiusBoostDebug() {
+    const skeletonData = this._getActiveSkeletonData();
+    if (skeletonData) {
+      if (Number.isFinite(skeletonData[SKELETON_ROUNDNESS_STRENGTH_DATA_KEY])) {
+        return this._clampCornerRadiusBoostDebug(
+          skeletonData[SKELETON_ROUNDNESS_STRENGTH_DATA_KEY]
+        );
+      }
+      return DEFAULT_CORNER_RADIUS_BOOST_DEBUG;
+    }
+    const sourceValue = this._getSourceCustomDataValue(
+      SKELETON_ROUNDNESS_STRENGTH_SOURCE_KEY,
+      DEFAULT_CORNER_RADIUS_BOOST_DEBUG
+    );
+    return this._clampCornerRadiusBoostDebug(sourceValue);
+  }
+
+  _clampCornerTrimRatioDebug(value) {
+    if (!Number.isFinite(value)) {
+      return DEFAULT_CORNER_TRIM_RATIO_DEBUG;
+    }
+    return Math.min(
+      Math.max(value, CORNER_TRIM_RATIO_DEBUG_MIN),
+      CORNER_TRIM_RATIO_DEBUG_MAX
+    );
+  }
+
+  _clampCornerRadiusBoostDebug(value) {
+    if (!Number.isFinite(value)) {
+      return DEFAULT_CORNER_RADIUS_BOOST_DEBUG;
+    }
+    return Math.min(
+      Math.max(value, CORNER_RADIUS_BOOST_DEBUG_MIN),
+      CORNER_RADIUS_BOOST_DEBUG_MAX
+    );
+  }
+
+  _buildCornerDebugChanges(glyph, dataKey, value, layerInfo, resetBaseline) {
     const allChanges = [];
-
-    for (const editLayerName of this.sceneController.editingLayerNames) {
+    const layers = layerInfo || this.sceneController.editingLayerNames.map((editLayerName) => {
       const layer = glyph.layers[editLayerName];
-      if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+      if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) return null;
+      return {
+        editLayerName,
+        layer,
+        originalSkeletonData: null,
+      };
+    }).filter(Boolean);
 
-      const skeletonData = JSON.parse(
-        JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+    for (const info of layers) {
+      const { editLayerName, layer } = info;
+      const baseSkeletonData = info.originalSkeletonData
+        ? JSON.parse(JSON.stringify(info.originalSkeletonData))
+        : JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+
+      if (resetBaseline && info.originalSkeletonData) {
+        layer.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+          JSON.stringify(info.originalSkeletonData)
+        );
+        this._regenerateOutlineContours(layer.glyph, layer.customData[SKELETON_CUSTOM_DATA_KEY]);
+      }
+
+      const skeletonData = JSON.parse(JSON.stringify(baseSkeletonData));
+      skeletonData[dataKey] = value;
+
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        this._regenerateOutlineContours(sg, skeletonData);
+      });
+      allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+    }
+
+    if (allChanges.length === 0) return null;
+    return new ChangeCollector().concat(...allChanges);
+  }
+
+  async _persistCornerDebugDefault(dataKey, value) {
+    if (dataKey === SKELETON_CORNER_REACH_DATA_KEY) {
+      await this._setSourceCustomDataValues(
+        { [SKELETON_CORNER_REACH_SOURCE_KEY]: value },
+        "Set corner defaults"
       );
+    } else if (dataKey === SKELETON_ROUNDNESS_STRENGTH_DATA_KEY) {
+      await this._setSourceCustomDataValues(
+        { [SKELETON_ROUNDNESS_STRENGTH_SOURCE_KEY]: value },
+        "Set corner defaults"
+      );
+    }
+  }
+
+  async _applyCornerDebugValue(dataKey, value, undoLabel) {
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const combined = this._buildCornerDebugChanges(
+        glyph,
+        dataKey,
+        value,
+        null,
+        false
+      );
+      if (!combined) return;
+
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel,
+        broadcast: true,
+      };
+    });
+    await this._persistCornerDebugDefault(dataKey, value);
+  }
+
+  async _applyCornerDebugValueStream(dataKey, valueStream, clampFn, undoLabel) {
+    let finalValue = null;
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layerInfo = [];
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        layerInfo.push({
+          editLayerName,
+          layer,
+          originalSkeletonData: JSON.parse(
+            JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          ),
+        });
+      }
+
+      let lastValue = null;
+
+      for await (const rawValue of valueStream) {
+        const clampedValue = clampFn.call(this, rawValue);
+        lastValue = clampedValue;
+
+        const combined = this._buildCornerDebugChanges(
+          glyph,
+          dataKey,
+          clampedValue,
+          null,
+          false
+        );
+        if (combined) {
+          await sendIncrementalChange(combined.change, true);
+        }
+      }
+
+      if (lastValue === null) return;
+      finalValue = lastValue;
+
+      const finalCombined = this._buildCornerDebugChanges(
+        glyph,
+        dataKey,
+        lastValue,
+        layerInfo,
+        true
+      );
+      if (!finalCombined) return;
+
+      return {
+        changes: finalCombined,
+        undoLabel,
+        broadcast: true,
+      };
+    });
+    // Source defaults are not part of glyph undo stack; persist once at drag end.
+    if (Number.isFinite(finalValue)) {
+      await this._persistCornerDebugDefault(dataKey, finalValue);
+    }
+  }
+
+  async _setCornerTrimRatioDebug(value) {
+    const clampedValue = this._clampCornerTrimRatioDebug(value);
+    await this._applyCornerDebugValue(
+      SKELETON_CORNER_REACH_DATA_KEY,
+      clampedValue,
+      "Set corner reach"
+    );
+  }
+
+  async _setCornerTrimRatioDebugStream(valueStream) {
+    await this._applyCornerDebugValueStream(
+      SKELETON_CORNER_REACH_DATA_KEY,
+      valueStream,
+      this._clampCornerTrimRatioDebug,
+      "Set corner reach"
+    );
+  }
+
+  async _setCornerRadiusBoostDebug(value) {
+    const clampedValue = this._clampCornerRadiusBoostDebug(value);
+    await this._applyCornerDebugValue(
+      SKELETON_ROUNDNESS_STRENGTH_DATA_KEY,
+      clampedValue,
+      "Set roundness strength"
+    );
+  }
+
+  async _setCornerRadiusBoostDebugStream(valueStream) {
+    await this._applyCornerDebugValueStream(
+      SKELETON_ROUNDNESS_STRENGTH_DATA_KEY,
+      valueStream,
+      this._clampCornerRadiusBoostDebug,
+      "Set roundness strength"
+    );
+  }
+
+  _buildCornerRoundnessChanges(
+    glyph,
+    selectedData,
+    value,
+    layerInfo,
+    resetBaseline
+  ) {
+    const allChanges = [];
+    const layers = layerInfo || this.sceneController.editingLayerNames.map((editLayerName) => {
+      const layer = glyph.layers[editLayerName];
+      if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) return null;
+      return {
+        editLayerName,
+        layer,
+        originalSkeletonData: null,
+      };
+    }).filter(Boolean);
+
+    for (const info of layers) {
+      const { editLayerName, layer } = info;
+      const baseSkeletonData = info.originalSkeletonData
+        ? JSON.parse(JSON.stringify(info.originalSkeletonData))
+        : JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+
+      if (resetBaseline && info.originalSkeletonData) {
+        layer.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+          JSON.stringify(info.originalSkeletonData)
+        );
+        this._regenerateOutlineContours(layer.glyph, layer.customData[SKELETON_CUSTOM_DATA_KEY]);
+      }
+
+      const skeletonData = JSON.parse(JSON.stringify(baseSkeletonData));
       let changed = false;
 
       for (const { contourIdx, pointIdx } of selectedData.points) {
@@ -3382,7 +3744,9 @@ export default class SkeletonParametersPanel extends Panel {
       const combined = this._buildCornerRoundnessChanges(
         glyph,
         selectedData,
-        clampedValue
+        clampedValue,
+        null,
+        false
       );
       if (!combined) return;
 
@@ -3403,6 +3767,19 @@ export default class SkeletonParametersPanel extends Panel {
     }
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layerInfo = [];
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        layerInfo.push({
+          editLayerName,
+          layer,
+          originalSkeletonData: JSON.parse(
+            JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          ),
+        });
+      }
+
       let lastValue = null;
 
       for await (const rawValue of valueStream) {
@@ -3411,7 +3788,9 @@ export default class SkeletonParametersPanel extends Panel {
         const combined = this._buildCornerRoundnessChanges(
           glyph,
           selectedData,
-          clampedValue
+          clampedValue,
+          null,
+          false
         );
         if (combined) {
           await sendIncrementalChange(combined.change, true);
@@ -3423,7 +3802,9 @@ export default class SkeletonParametersPanel extends Panel {
       const finalCombined = this._buildCornerRoundnessChanges(
         glyph,
         selectedData,
-        lastValue
+        lastValue,
+        layerInfo,
+        true
       );
       if (!finalCombined) return;
 
@@ -3924,7 +4305,7 @@ export default class SkeletonParametersPanel extends Panel {
                 delete tempPoint[handleOutOffsetYKey];
               }
 
-              const baseContours = generateContoursFromSkeleton(tempSkeletonData);
+              const baseContours = this._generateContoursWithCornerSettings(tempSkeletonData);
               const basePath = VarPackedPath.fromUnpackedContours(baseContours);
               const baseHandlePositions = this._findHandlePositionsForRibPoint(
                 basePath, ribPoint, side

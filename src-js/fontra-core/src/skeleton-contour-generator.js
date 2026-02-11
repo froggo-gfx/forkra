@@ -13,6 +13,25 @@ const DEFAULT_CORNER_ROUNDNESS = 0;
 const MIN_CORNER_TRIM = 0.5;
 const MAX_CORNER_TRIM_RATIO = 0.49;
 const MAX_HANDLE_TRIM_RATIO = 0.99;
+const DEFAULT_CORNER_RADIUS_BOOST = 1;
+const MIN_CORNER_RADIUS_BOOST = 0.1;
+const MAX_CORNER_RADIUS_BOOST = 4;
+const SKELETON_CORNER_REACH_DATA_KEY = "cornerReach";
+const SKELETON_ROUNDNESS_STRENGTH_DATA_KEY = "roundnessStrength";
+
+function clampCornerTrimRatio(value) {
+  if (!Number.isFinite(value)) {
+    return MAX_CORNER_TRIM_RATIO;
+  }
+  return Math.min(Math.max(value, 0.05), 0.99);
+}
+
+function clampCornerRadiusBoost(value) {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_CORNER_RADIUS_BOOST;
+  }
+  return Math.min(Math.max(value, MIN_CORNER_RADIUS_BOOST), MAX_CORNER_RADIUS_BOOST);
+}
 
 /**
  * Get the width for a point, with support for asymmetric left/right widths.
@@ -665,7 +684,7 @@ function findNextOnCurveIndex(points, index, isClosed) {
   return null;
 }
 
-function roundSharpCornersOnSide(sidePoints, { isClosed }) {
+function roundSharpCornersOnSide(sidePoints, { isClosed, cornerTrimRatio, cornerRadiusBoost }) {
   const points = sidePoints.map((point) => ({ ...point }));
   if (points.length < 3) {
     return points;
@@ -744,29 +763,31 @@ function roundSharpCornersOnSide(sidePoints, { isClosed }) {
 
     const distPrevOn = vector.distance(corner, points[prevOnIndex]);
     const distNextOn = vector.distance(corner, points[nextOnIndex]);
-    let maxTrimIn = distPrevOn * MAX_CORNER_TRIM_RATIO;
-    let maxTrimOut = distNextOn * MAX_CORNER_TRIM_RATIO;
+    const handleTrimRatio = MAX_HANDLE_TRIM_RATIO;
+    const minTrim = MIN_CORNER_TRIM;
+    let maxTrimIn = distPrevOn * cornerTrimRatio;
+    let maxTrimOut = distNextOn * cornerTrimRatio;
 
     if (prevHandleIndex !== null) {
       maxTrimIn = Math.min(
         maxTrimIn,
-        vector.distance(corner, points[prevHandleIndex]) * MAX_HANDLE_TRIM_RATIO
+        vector.distance(corner, points[prevHandleIndex]) * handleTrimRatio
       );
     }
     if (nextHandleIndex !== null) {
       maxTrimOut = Math.min(
         maxTrimOut,
-        vector.distance(corner, points[nextHandleIndex]) * MAX_HANDLE_TRIM_RATIO
+        vector.distance(corner, points[nextHandleIndex]) * handleTrimRatio
       );
     }
 
     const maxTrim = Math.min(maxTrimIn, maxTrimOut);
-    if (!(maxTrim > MIN_CORNER_TRIM)) {
+    if (!(maxTrim > minTrim)) {
       i++;
       continue;
     }
 
-    const wantedRadius = cornerRoundBase * cornerRoundness;
+    const wantedRadius = cornerRoundBase * cornerRoundness * cornerRadiusBoost;
     if (!(wantedRadius > 0.001)) {
       i++;
       continue;
@@ -774,7 +795,7 @@ function roundSharpCornersOnSide(sidePoints, { isClosed }) {
 
     const wantedTrim = wantedRadius / tanHalf;
     const trim = Math.min(wantedTrim, maxTrim);
-    if (!(trim > MIN_CORNER_TRIM)) {
+    if (!(trim > minTrim)) {
       i++;
       continue;
     }
@@ -852,6 +873,13 @@ export function generateContoursFromSkeleton(skeletonData) {
     return [];
   }
 
+  const cornerTrimRatio = clampCornerTrimRatio(
+    skeletonData[SKELETON_CORNER_REACH_DATA_KEY]
+  );
+  const cornerRadiusBoost = clampCornerRadiusBoost(
+    skeletonData[SKELETON_ROUNDNESS_STRENGTH_DATA_KEY]
+  );
+
   const generatedContours = [];
 
   for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
@@ -862,6 +890,8 @@ export function generateContoursFromSkeleton(skeletonData) {
 
     const outlineContours = generateOutlineFromSkeletonContour(skeletonContour, {
       contourIndex,
+      cornerTrimRatio,
+      cornerRadiusBoost,
     });
     // generateOutlineFromSkeletonContour now returns an array of contours
     // (1 for open skeleton, 2 for closed skeleton)
@@ -889,6 +919,8 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
     reversed = false,
     singleSided = false,
     singleSidedDirection = "left",
+    cornerTrimRatio = MAX_CORNER_TRIM_RATIO,
+    cornerRadiusBoost = DEFAULT_CORNER_RADIUS_BOOST,
   } = skeletonContour;
 
   if (points.length < 2) {
@@ -967,8 +999,20 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
     rightSide.push(...offsetPoints.right);
   }
 
-  let roundedLeftSide = roundSharpCornersOnSide(leftSide, { isClosed });
-  let roundedRightSide = roundSharpCornersOnSide(rightSide, { isClosed });
+  let roundedLeftSide = roundSharpCornersOnSide(leftSide, {
+    isClosed,
+    cornerTrimRatio: clampCornerTrimRatio(options.cornerTrimRatio ?? cornerTrimRatio),
+    cornerRadiusBoost: clampCornerRadiusBoost(
+      options.cornerRadiusBoost ?? cornerRadiusBoost
+    ),
+  });
+  let roundedRightSide = roundSharpCornersOnSide(rightSide, {
+    isClosed,
+    cornerTrimRatio: clampCornerTrimRatio(options.cornerTrimRatio ?? cornerTrimRatio),
+    cornerRadiusBoost: clampCornerRadiusBoost(
+      options.cornerRadiusBoost ?? cornerRadiusBoost
+    ),
+  });
 
   if (isClosed) {
     // For closed skeleton: TWO separate contours (outer and inner)
@@ -3101,6 +3145,8 @@ export function createEmptySkeletonData() {
     version: 1,
     contours: [],
     generatedContourIndices: [],
+    [SKELETON_CORNER_REACH_DATA_KEY]: MAX_CORNER_TRIM_RATIO,
+    [SKELETON_ROUNDNESS_STRENGTH_DATA_KEY]: DEFAULT_CORNER_RADIUS_BOOST,
   };
 }
 
