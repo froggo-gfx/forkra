@@ -726,11 +726,33 @@ export default class SkeletonParametersPanel extends Panel {
 
       const isEditable = editableStates.has(true) && editableStates.size === 1;
       const isEditableIndeterminate = editableStates.size > 1;
+      let hasRoundedCapEndpoint = false;
+      let hasEditableEligibleRibSide = false;
+
+      if (selectedData?.skeletonData) {
+        for (const ribKey of selectedRibSides) {
+          const [contourIdxRaw, pointIdxRaw] = ribKey.split("/");
+          const contourIdx = Number(contourIdxRaw);
+          const pointIdx = Number(pointIdxRaw);
+          const contour = selectedData.skeletonData.contours?.[contourIdx];
+          const point = contour?.points?.[pointIdx];
+          if (!point) continue;
+          if (this._isRoundedCapEndpoint(contour, pointIdx, point)) {
+            hasRoundedCapEndpoint = true;
+          } else {
+            hasEditableEligibleRibSide = true;
+          }
+        }
+      }
+
+      const editableDisabledByRoundCap =
+        hasRoundedCapEndpoint && !hasEditableEligibleRibSide;
 
       const editableCheckbox = html.input({
         type: "checkbox",
         id: "editable-toggle",
-        checked: isEditableIndeterminate ? false : isEditable,
+        checked: editableDisabledByRoundCap ? false : (isEditableIndeterminate ? false : isEditable),
+        disabled: editableDisabledByRoundCap,
         onchange: (e) => this._onEditableToggle(e.target.checked, selectedRibSides),
       });
       if (isEditableIndeterminate) {
@@ -740,7 +762,8 @@ export default class SkeletonParametersPanel extends Panel {
       // Detach Handles checkbox - only visible when editable
       const isDetached = detachedStates.has(true) && detachedStates.size === 1;
       const isDetachedIndeterminate = detachedStates.size > 1;
-      const showDetachOption = isEditable || isEditableIndeterminate;
+      const showDetachOption =
+        !editableDisabledByRoundCap && (isEditable || isEditableIndeterminate);
 
       const detachCheckbox = showDetachOption ? html.input({
         type: "checkbox",
@@ -758,7 +781,7 @@ export default class SkeletonParametersPanel extends Panel {
 
       // Build reset buttons array
       const resetButtons = [];
-      if ((isEditable || isEditableIndeterminate) && hasNudge) {
+      if (!editableDisabledByRoundCap && (isEditable || isEditableIndeterminate) && hasNudge) {
         resetButtons.push(
           html.button(
             {
@@ -769,7 +792,11 @@ export default class SkeletonParametersPanel extends Panel {
           )
         );
       }
-      if ((isEditable || isEditableIndeterminate) && hasHandleOffsets) {
+      if (
+        !editableDisabledByRoundCap &&
+        (isEditable || isEditableIndeterminate) &&
+        hasHandleOffsets
+      ) {
         resetButtons.push(
           html.button(
             {
@@ -790,7 +817,10 @@ export default class SkeletonParametersPanel extends Panel {
             editableCheckbox,
             html.label({
               for: "editable-toggle",
-              style: "margin-left: 4px",
+              style: `margin-left: 4px${editableDisabledByRoundCap ? "; opacity: 0.5" : ""}`,
+              title: editableDisabledByRoundCap
+                ? "Editable ribs are not available for round cap endpoints"
+                : undefined,
             }, "Editable"),
           ]),
         },
@@ -2741,6 +2771,25 @@ export default class SkeletonParametersPanel extends Panel {
     return { firstOnCurve, lastOnCurve };
   }
 
+  _getEffectiveCapStyle(contour, point) {
+    const capStyle = point?.capStyle ?? contour?.capStyle ?? "butt";
+    return capStyle === "flat" ? "butt" : capStyle;
+  }
+
+  _isRoundedCapEndpoint(contour, pointIdx, point) {
+    if (!contour || contour.isClosed || !point || point.type) {
+      return false;
+    }
+    const endpoints = this._getContourEndpointIndices(contour);
+    if (!endpoints) {
+      return false;
+    }
+    if (pointIdx !== endpoints.firstOnCurve && pointIdx !== endpoints.lastOnCurve) {
+      return false;
+    }
+    return this._getEffectiveCapStyle(contour, point) === "round";
+  }
+
   _isCornerRoundEditableForPoint(contour, pointIdx, point) {
     if (!contour || !point || point.type || point.smooth) {
       return false;
@@ -3313,6 +3362,11 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point || point.type) continue;
           point.capStyle = capStyle;
+          if (capStyle === "round") {
+            // Round caps at endpoints must not keep editable rib state.
+            this._disableEditableSide(point, "left");
+            this._disableEditableSide(point, "right");
+          }
           changed = true;
         }
 
@@ -4090,6 +4144,11 @@ export default class SkeletonParametersPanel extends Panel {
           if (!contour) continue;
           const point = contour.points[pointIdx];
           if (!point) continue;
+          const roundedCapEndpoint = this._isRoundedCapEndpoint(
+            contour,
+            pointIdx,
+            point
+          );
 
           // Update editable state for each selected side
           for (const side of sides) {
@@ -4113,6 +4172,11 @@ export default class SkeletonParametersPanel extends Panel {
             const handleOutOffsetSavedKey = side === "left" ? "leftHandleOutOffsetSaved" : "rightHandleOutOffsetSaved";
 
             if (checked) {
+              if (roundedCapEndpoint) {
+                // Do not allow enabling editable ribs on round cap endpoints.
+                this._disableEditableSide(point, side);
+                continue;
+              }
               point[editableKey] = true;
               // Restore saved values if they exist
               if (point[nudgeSavedKey] !== undefined) {
