@@ -84,14 +84,20 @@ function getCornerRoundness(point) {
   return clampCornerRoundness(point?.cornerRoundness ?? DEFAULT_CORNER_ROUNDNESS);
 }
 
-function buildGeneratedOnCurve(basePoint, smooth, skeletonPoint, halfWidth) {
+function buildGeneratedOnCurve(
+  basePoint,
+  smooth,
+  skeletonPoint,
+  halfWidth,
+  cornerRoundBaseOverride = undefined
+) {
   const generatedPoint = {
     x: basePoint.x,
     y: basePoint.y,
     smooth,
   };
   const cornerRoundness = getCornerRoundness(skeletonPoint);
-  const cornerRoundBase = Math.max(0, halfWidth ?? 0);
+  const cornerRoundBase = Math.max(0, cornerRoundBaseOverride ?? halfWidth ?? 0);
   if (cornerRoundness > 0 && cornerRoundBase >= 0.5) {
     generatedPoint.cornerRoundness = cornerRoundness;
     generatedPoint.cornerRoundBase = cornerRoundBase;
@@ -992,7 +998,9 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
       {
         contourIndex: options.contourIndex ?? null,
         segmentIndex: i,
-      }
+      },
+      singleSided,
+      singleSidedDirection
     );
 
     leftSide.push(...offsetPoints.left);
@@ -1998,7 +2006,9 @@ function generateOffsetPointsForSegment(
   startRightHalfWidth = null,
   endLeftHalfWidth = null,
   endRightHalfWidth = null,
-  debugContext = null
+  debugContext = null,
+  singleSided = false,
+  singleSidedDirection = "left"
 ) {
   // Use provided half-widths or fall back to width/2
   const halfWidth = width / 2;
@@ -2007,10 +2017,33 @@ function generateOffsetPointsForSegment(
   const endLeftHW = endLeftHalfWidth ?? halfWidth;
   const endRightHW = endRightHalfWidth ?? halfWidth;
 
+  const isCollapsedSide = (value) => value < 0.5;
+  const collapsedSideInSingleSided = singleSided
+    ? singleSidedDirection === "left"
+      ? "right"
+      : "left"
+    : null;
+  const getCornerRoundBaseForSide = (side, halfWidthValue, oppositeHalfWidthValue) => {
+    if (!singleSided || side !== collapsedSideInSingleSided) {
+      return halfWidthValue;
+    }
+    if (!isCollapsedSide(halfWidthValue)) {
+      return halfWidthValue;
+    }
+    return Math.max(halfWidthValue, oppositeHalfWidthValue ?? 0);
+  };
+
+  const startLeftRoundBase = getCornerRoundBaseForSide("left", startLeftHW, startRightHW);
+  const startRightRoundBase = getCornerRoundBaseForSide(
+    "right",
+    startRightHW,
+    startLeftHW
+  );
+  const endLeftRoundBase = getCornerRoundBaseForSide("left", endLeftHW, endRightHW);
+  const endRightRoundBase = getCornerRoundBaseForSide("right", endRightHW, endLeftHW);
+
   const left = [];
   const right = [];
-
-  const isCollapsedSide = (halfWidth) => halfWidth < 0.5;
   const projectPoint = (basePoint, normal, halfWidth, sign) => {
     if (isCollapsedSide(halfWidth)) {
       return { x: basePoint.x, y: basePoint.y };
@@ -2050,7 +2083,8 @@ function generateOffsetPointsForSegment(
           startLeftPt,
           segment.startPoint.smooth,
           segment.startPoint,
-          startLeftHW
+          startLeftHW,
+          startLeftRoundBase
         )
       );
 
@@ -2061,7 +2095,8 @@ function generateOffsetPointsForSegment(
           startRightPt,
           segment.startPoint.smooth,
           segment.startPoint,
-          startRightHW
+          startRightHW,
+          startRightRoundBase
         )
       );
     }
@@ -2088,7 +2123,8 @@ function generateOffsetPointsForSegment(
           endLeftPt,
           segment.endPoint.smooth,
           segment.endPoint,
-          endLeftHW
+          endLeftHW,
+          endLeftRoundBase
         )
       );
 
@@ -2099,7 +2135,8 @@ function generateOffsetPointsForSegment(
           endRightPt,
           segment.endPoint.smooth,
           segment.endPoint,
-          endRightHW
+          endRightHW,
+          endRightRoundBase
         )
       );
     }
@@ -2175,7 +2212,9 @@ function generateOffsetPointsForSegment(
       sideHalfWidth,
       isLeftSide,
       startHalfWidth,
-      endHalfWidth
+      endHalfWidth,
+      startRoundBase,
+      endRoundBase
     ) => {
       const side = isLeftSide ? "left" : "right";
       // When halfWidth is near zero, contour should exactly match skeleton
@@ -2187,7 +2226,8 @@ function generateOffsetPointsForSegment(
               segment.startPoint,
               smoothStart,
               segment.startPoint,
-              startHalfWidth
+              startHalfWidth,
+              startRoundBase
             )
           );
         }
@@ -2201,7 +2241,8 @@ function generateOffsetPointsForSegment(
               segment.endPoint,
               smoothEnd,
               segment.endPoint,
-              endHalfWidth
+              endHalfWidth,
+              endRoundBase
             )
           );
         }
@@ -2216,7 +2257,8 @@ function generateOffsetPointsForSegment(
               fixedStart,
               smoothStart,
               segment.startPoint,
-              startHalfWidth
+              startHalfWidth,
+              startRoundBase
             )
           );
         }
@@ -2226,7 +2268,8 @@ function generateOffsetPointsForSegment(
               fixedEnd,
               smoothEnd,
               segment.endPoint,
-              endHalfWidth
+              endHalfWidth,
+              endRoundBase
             )
           );
         }
@@ -2247,7 +2290,8 @@ function generateOffsetPointsForSegment(
               fixedStart,
               smoothStart,
               segment.startPoint,
-              startHalfWidth
+              startHalfWidth,
+              startRoundBase
             )
           );
         }
@@ -2431,7 +2475,8 @@ function generateOffsetPointsForSegment(
               fixedEnd,
               smoothEnd,
               segment.endPoint,
-              endHalfWidth
+              endHalfWidth,
+              endRoundBase
             )
           );
         }
@@ -2471,7 +2516,8 @@ function generateOffsetPointsForSegment(
               fixedStart,
               smoothStart,
               segment.startPoint,
-              startHalfWidth
+              startHalfWidth,
+              startRoundBase
             )
           );
         }
@@ -2556,7 +2602,8 @@ function generateOffsetPointsForSegment(
                 fixedEnd,
                 smoothEnd,
                 segment.endPoint,
-                endHalfWidth
+                endHalfWidth,
+                endRoundBase
               )
             );
           }
@@ -2590,7 +2637,9 @@ function generateOffsetPointsForSegment(
       avgLeftHW,
       true, // isLeftSide
       startLeftHW,
-      endLeftHW
+      endLeftHW,
+      startLeftRoundBase,
+      endLeftRoundBase
     );
 
     addOffsetCurves(
@@ -2605,7 +2654,9 @@ function generateOffsetPointsForSegment(
       avgRightHW,
       false, // isLeftSide
       startRightHW,
-      endRightHW
+      endRightHW,
+      startRightRoundBase,
+      endRightRoundBase
     );
   }
 
