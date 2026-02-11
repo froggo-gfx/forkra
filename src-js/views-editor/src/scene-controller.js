@@ -538,6 +538,9 @@ export class SceneController {
 
   setupSettingsListeners() {
     //// grid
+    if (!Array.isArray(window.coarseGridValues) || !window.coarseGridValues.length) {
+      window.coarseGridValues = [5, 10, 15, 20, 25, 30, 35, 40];
+    }
     this.sceneSettingsController.addKeyListener("coarseGridSpacing", () =>
     this.canvasController.requestUpdate()
     );
@@ -670,8 +673,24 @@ export class SceneController {
         "action.decrease-coarse-grid",
         { titleKey: "action.decrease-coarse-grid", defaultShortCuts: [{ baseKey: "f" }] },
         () => {
-        const v = this.sceneSettings.coarseGridSpacing;
-        if (v > 5) this.sceneSettingsController.setItem("coarseGridSpacing", v - 5);
+        const values =
+          Array.isArray(window.coarseGridValues) && window.coarseGridValues.length
+            ? window.coarseGridValues
+            : [5, 10, 15, 20, 25, 30, 35, 40];
+        const current = this.sceneSettings.coarseGridSpacing;
+        let index = values.findIndex((value) => value === current);
+        if (index < 0) {
+          index = values.reduce(
+            (bestIndex, value, candidateIndex) =>
+              Math.abs(value - current) < Math.abs(values[bestIndex] - current)
+                ? candidateIndex
+                : bestIndex,
+            0
+          );
+        }
+        if (index > 0) {
+          this.sceneSettingsController.setItem("coarseGridSpacing", values[index - 1]);
+        }
         }
         );
     
@@ -679,8 +698,24 @@ export class SceneController {
         "action.increase-coarse-grid",
         { titleKey: "action.increase-coarse-grid", defaultShortCuts: [{ baseKey: "g" }] },
         () => {
-        const v = this.sceneSettings.coarseGridSpacing;
-        if (v < 40) this.sceneSettingsController.setItem("coarseGridSpacing", v + 5);
+        const values =
+          Array.isArray(window.coarseGridValues) && window.coarseGridValues.length
+            ? window.coarseGridValues
+            : [5, 10, 15, 20, 25, 30, 35, 40];
+        const current = this.sceneSettings.coarseGridSpacing;
+        let index = values.findIndex((value) => value === current);
+        if (index < 0) {
+          index = values.reduce(
+            (bestIndex, value, candidateIndex) =>
+              Math.abs(value - current) < Math.abs(values[bestIndex] - current)
+                ? candidateIndex
+                : bestIndex,
+            0
+          );
+        }
+        if (index < values.length - 1) {
+          this.sceneSettingsController.setItem("coarseGridSpacing", values[index + 1]);
+        }
         }
         );
     

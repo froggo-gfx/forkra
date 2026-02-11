@@ -37,7 +37,7 @@ import {
 import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
 import { VarPackedPath, packContour } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
-import { EditBehaviorFactory, constrainHorVerDiag } from "./edit-behavior.js";
+import { EditBehaviorFactory, constrainHorVerDiag, makeRoundFunc } from "./edit-behavior.js";
 import {
   createSkeletonEditBehavior,
   getSkeletonBehaviorName,
@@ -1689,6 +1689,7 @@ export class PointerTool extends BaseTool {
         }
 
         const currentPoint = sceneController.localPoint(event);
+        const roundFunc = makeRoundFunc(event);
         const delta = {
           x: currentPoint.x - initialPoint.x,
           y: currentPoint.y - initialPoint.y,
@@ -1764,7 +1765,7 @@ export class PointerTool extends BaseTool {
 
           // Apply behavior changes
           for (const behavior of behaviors) {
-            const changes = behavior.applyDelta(delta);
+            const changes = behavior.applyDelta(delta, roundFunc);
             const contour = workingSkeletonData.contours[behavior.contourIndex];
             for (const { pointIndex, x, y } of changes) {
               contour.points[pointIndex].x = x;
@@ -2200,6 +2201,7 @@ export class PointerTool extends BaseTool {
 
       // Drag loop
       for await (const event of eventStream) {
+        const roundFunc = makeRoundFunc(event);
         const currentLocalPoint = sceneController.localPoint(event);
         const currentGlyphPoint = {
           x: currentLocalPoint.x - positionedGlyph.x,
@@ -2239,7 +2241,7 @@ export class PointerTool extends BaseTool {
 
           // Apply behavior changes
           for (const behavior of behaviors) {
-            const changes = behavior.applyDelta(delta);
+            const changes = behavior.applyDelta(delta, roundFunc);
             const contour = working.contours[behavior.contourIndex];
             for (const { pointIndex, x, y } of changes) {
               contour.points[pointIndex].x = x;
@@ -2262,16 +2264,16 @@ export class PointerTool extends BaseTool {
               }
               const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
               if (newDragLen >= 1) {
-                workContour.points[pointIndex].x = Math.round(
+                workContour.points[pointIndex].x = roundFunc(
                   smoothPt.x + newDragVec.x
                 );
-                workContour.points[pointIndex].y = Math.round(
+                workContour.points[pointIndex].y = roundFunc(
                   smoothPt.y + newDragVec.y
                 );
-                workContour.points[oppositeIndex].x = Math.round(
+                workContour.points[oppositeIndex].x = roundFunc(
                   smoothPt.x - newDragVec.x
                 );
-                workContour.points[oppositeIndex].y = Math.round(
+                workContour.points[oppositeIndex].y = roundFunc(
                   smoothPt.y - newDragVec.y
                 );
               }
@@ -2556,6 +2558,7 @@ export class PointerTool extends BaseTool {
 
       // Drag loop
       for await (const event of eventStream) {
+        const roundFunc = makeRoundFunc(event);
         const currentLocalPoint = sceneController.localPoint(event);
         const currentGlyphPoint = {
           x: currentLocalPoint.x - positionedGlyph.x,
@@ -2576,7 +2579,7 @@ export class PointerTool extends BaseTool {
 
           // Apply each behavior to update all target points
           for (const { behavior, target } of ribBehaviors) {
-            const change = behavior.applyDelta(delta, constrainMode);
+            const change = behavior.applyDelta(delta, constrainMode, roundFunc);
 
             const contour = working.contours[target.contourIndex];
             const point = contour.points[target.pointIndex];
@@ -3106,6 +3109,7 @@ export class PointerTool extends BaseTool {
 
       // Drag loop
       for await (const event of eventStream) {
+        const roundFunc = makeRoundFunc(event);
         const currentLocalPoint = sceneController.localPoint(event);
         const currentGlyphPoint = {
           x: currentLocalPoint.x - positionedGlyph.x,
@@ -3124,7 +3128,7 @@ export class PointerTool extends BaseTool {
           const { layer, working, behaviors } = data;
 
           for (const { behavior, editablePoint } of behaviors) {
-            const change = behavior.applyDelta(delta, constrainMode);
+            const change = behavior.applyDelta(delta, constrainMode, roundFunc);
             const contour = working.contours[editablePoint.skeletonContourIndex];
             const point = contour.points[editablePoint.skeletonPointIndex];
             const side = editablePoint.side;
@@ -3325,6 +3329,7 @@ export class PointerTool extends BaseTool {
 
       // Drag loop
       for await (const event of eventStream) {
+        const roundFunc = makeRoundFunc(event);
         const currentLocalPoint = sceneController.localPoint(event);
         const currentGlyphPoint = {
           x: currentLocalPoint.x - positionedGlyph.x,
@@ -3353,18 +3358,20 @@ export class PointerTool extends BaseTool {
                 point,
                 equalizeState.draggedState,
                 targetLength,
-                equalizeState.anchorPos
+                equalizeState.anchorPos,
+                roundFunc
               );
               this._applyEditableHandleEqualizedLength(
                 point,
                 equalizeState.oppositeState,
                 targetLength,
-                equalizeState.anchorPos
+                equalizeState.anchorPos,
+                roundFunc
               );
               continue;
             }
 
-            const change = behavior.applyDelta(delta);
+            const change = behavior.applyDelta(delta, roundFunc);
 
             // Check if handle is in detached mode
             const detachedKey = editableHandle.side === "left" ? "leftHandleDetached" : "rightHandleDetached";
@@ -3387,8 +3394,8 @@ export class PointerTool extends BaseTool {
               // Use original values since delta is cumulative from drag start
               const originalPoint = data.original.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
               const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
-              point[offsetXKey] = (originalPoint[offsetXKey] || 0) + Math.round(skeletonHandleDir.x * projectedDelta);
-              point[offsetYKey] = (originalPoint[offsetYKey] || 0) + Math.round(skeletonHandleDir.y * projectedDelta);
+              point[offsetXKey] = (originalPoint[offsetXKey] || 0) + roundFunc(skeletonHandleDir.x * projectedDelta);
+              point[offsetYKey] = (originalPoint[offsetYKey] || 0) + roundFunc(skeletonHandleDir.y * projectedDelta);
             } else {
               // Normal mode: clear 2D offsets (they have priority), set 1D offset
               delete point[offsetXKey];
@@ -3979,7 +3986,7 @@ export class PointerTool extends BaseTool {
     };
   }
 
-  _applyEditableHandleEqualizedLength(point, state, targetLength, anchorPos) {
+  _applyEditableHandleEqualizedLength(point, state, targetLength, anchorPos, roundFunc = Math.round) {
     const desiredPos = {
       x: anchorPos.x + state.direction.x * targetLength,
       y: anchorPos.y + state.direction.y * targetLength,
@@ -3987,8 +3994,8 @@ export class PointerTool extends BaseTool {
 
     if (state.detachedMode) {
       // Detached mode stores absolute handle positions in rib-point space.
-      point[state.keys.offsetXKey] = Math.round(desiredPos.x - anchorPos.x);
-      point[state.keys.offsetYKey] = Math.round(desiredPos.y - anchorPos.y);
+      point[state.keys.offsetXKey] = roundFunc(desiredPos.x - anchorPos.x);
+      point[state.keys.offsetYKey] = roundFunc(desiredPos.y - anchorPos.y);
       return;
     }
 
@@ -3997,9 +4004,9 @@ export class PointerTool extends BaseTool {
     const baseControlPos = state.baseControlPos || desiredPos;
     const relX = desiredPos.x - baseControlPos.x;
     const relY = desiredPos.y - baseControlPos.y;
-    point[state.keys.offsetXKey] = Math.round(relX);
-    point[state.keys.offsetYKey] = Math.round(relY);
-    point[state.keys.offset1DKey] = Math.round(relX * state.skeletonDir.x + relY * state.skeletonDir.y);
+    point[state.keys.offsetXKey] = roundFunc(relX);
+    point[state.keys.offsetYKey] = roundFunc(relY);
+    point[state.keys.offset1DKey] = roundFunc(relX * state.skeletonDir.x + relY * state.skeletonDir.y);
   }
 
   /**
@@ -4119,6 +4126,7 @@ export class PointerTool extends BaseTool {
       let accumulatedChanges = new ChangeCollector();
 
       for await (const event of eventStream) {
+        const roundFunc = makeRoundFunc(event);
         const currentLocalPoint = sceneController.localPoint(event);
         const currentGlyphPoint = {
           x: currentLocalPoint.x - positionedGlyph.x,
@@ -4150,13 +4158,15 @@ export class PointerTool extends BaseTool {
             point,
             draggedState,
             targetLength,
-            anchorPos
+            anchorPos,
+            roundFunc
           );
           this._applyEditableHandleEqualizedLength(
             point,
             oppositeState,
             targetLength,
-            anchorPos
+            anchorPos,
+            roundFunc
           );
 
           const staticGlyph = layer.glyph;
@@ -4267,6 +4277,7 @@ export class PointerTool extends BaseTool {
 
       // Drag loop
       for await (const event of eventStream) {
+        const roundFunc = makeRoundFunc(event);
         const currentLocalPoint = sceneController.localPoint(event);
         const currentGlyphPoint = {
           x: currentLocalPoint.x - positionedGlyph.x,
@@ -4318,16 +4329,16 @@ export class PointerTool extends BaseTool {
             );
 
             if (result) {
-              workContour.points[segment.startIndex].x = Math.round(
+              workContour.points[segment.startIndex].x = roundFunc(
                 result.newStartPoint.x
               );
-              workContour.points[segment.startIndex].y = Math.round(
+              workContour.points[segment.startIndex].y = roundFunc(
                 result.newStartPoint.y
               );
-              workContour.points[segment.endIndex].x = Math.round(
+              workContour.points[segment.endIndex].x = roundFunc(
                 result.newEndPoint.x
               );
-              workContour.points[segment.endIndex].y = Math.round(
+              workContour.points[segment.endIndex].y = roundFunc(
                 result.newEndPoint.y
               );
             }
@@ -4341,10 +4352,10 @@ export class PointerTool extends BaseTool {
 
             if (newCps) {
               const [cp1Idx, cp2Idx] = segment.controlIndices;
-              workContour.points[cp1Idx].x = Math.round(newCps[0].x);
-              workContour.points[cp1Idx].y = Math.round(newCps[0].y);
-              workContour.points[cp2Idx].x = Math.round(newCps[1].x);
-              workContour.points[cp2Idx].y = Math.round(newCps[1].y);
+              workContour.points[cp1Idx].x = roundFunc(newCps[0].x);
+              workContour.points[cp1Idx].y = roundFunc(newCps[0].y);
+              workContour.points[cp2Idx].x = roundFunc(newCps[1].x);
+              workContour.points[cp2Idx].y = roundFunc(newCps[1].y);
             }
           }
 
@@ -4688,6 +4699,7 @@ export class PointerTool extends BaseTool {
 
       // Drag loop
       for await (const event of eventStream) {
+        const roundFunc = makeRoundFunc(event);
         const currentLocalPoint = sceneController.localPoint(event);
         const currentGlyphPoint = {
           x: currentLocalPoint.x - positionedGlyph.x,
@@ -4730,12 +4742,12 @@ export class PointerTool extends BaseTool {
           }
 
           // Update dragged point, round to UPM grid
-          workContour.points[pointIndex].x = Math.round(smoothPt.x + newDragVec.x);
-          workContour.points[pointIndex].y = Math.round(smoothPt.y + newDragVec.y);
+          workContour.points[pointIndex].x = roundFunc(smoothPt.x + newDragVec.x);
+          workContour.points[pointIndex].y = roundFunc(smoothPt.y + newDragVec.y);
 
           // Update opposite point: same length, opposite direction, round to UPM grid
-          workContour.points[oppositeIndex].x = Math.round(smoothPt.x - newDragVec.x);
-          workContour.points[oppositeIndex].y = Math.round(smoothPt.y - newDragVec.y);
+          workContour.points[oppositeIndex].x = roundFunc(smoothPt.x - newDragVec.x);
+          workContour.points[oppositeIndex].y = roundFunc(smoothPt.y - newDragVec.y);
 
           // Record changes for this layer
           const staticGlyph = layer.glyph;

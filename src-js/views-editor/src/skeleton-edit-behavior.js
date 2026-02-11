@@ -446,7 +446,8 @@ export class SkeletonEditBehavior {
     contourIndex,
     selectedPointIndices,
     behaviorName = "default",
-    enableScalingEdit = false
+    enableScalingEdit = false,
+    roundFunc = Math.round
   ) {
     this.skeletonData = skeletonData;
     this.contourIndex = contourIndex;
@@ -460,6 +461,7 @@ export class SkeletonEditBehavior {
     this.matchTree = behavior.matchTree;
     this.constrainDelta = behavior.constrainDelta || ((v) => v);
     this.enableScalingEdit = enableScalingEdit;
+    this.roundFunc = roundFunc;
 
     // Mark selected points
     this._preparePoints();
@@ -733,7 +735,7 @@ export class SkeletonEditBehavior {
    * Apply a delta to all affected points
    * Returns array of { pointIndex, x, y } for changed points
    */
-  applyDelta(delta) {
+  applyDelta(delta, roundFunc = this.roundFunc) {
     const editedPoints = [...this.points]; // Copy for mutation
     const changes = [];
 
@@ -786,8 +788,8 @@ export class SkeletonEditBehavior {
 
       changes.push({
         pointIndex,
-        x: Math.round(newPoint.x),
-        y: Math.round(newPoint.y),
+        x: roundFunc(newPoint.x),
+        y: roundFunc(newPoint.y),
       });
     }
 
@@ -814,7 +816,8 @@ export class SkeletonEditBehavior {
 export function createSkeletonEditBehavior(
   skeletonData,
   selectedSkeletonPoints,
-  behaviorName = "default"
+  behaviorName = "default",
+  roundFunc = Math.round
 ) {
   // Group selected points by contour
   const byContour = new Map();
@@ -832,7 +835,14 @@ export function createSkeletonEditBehavior(
   for (const [contourIdx, pointIndices] of byContour) {
     if (contourIdx < skeletonData.contours.length) {
       behaviors.push(
-        new SkeletonEditBehavior(skeletonData, contourIdx, pointIndices, behaviorName)
+        new SkeletonEditBehavior(
+          skeletonData,
+          contourIdx,
+          pointIndices,
+          behaviorName,
+          false,
+          roundFunc
+        )
       );
     }
   }
@@ -862,13 +872,22 @@ export class RibEditBehavior {
    * @param {Object} normal - The normal vector at this point
    * @param {Object} onCurvePoint - The on-curve point position
    */
-  constructor(skeletonData, contourIndex, pointIndex, side, normal, onCurvePoint) {
+  constructor(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint,
+    roundFunc = Math.round
+  ) {
     this.skeletonData = skeletonData;
     this.contourIndex = contourIndex;
     this.pointIndex = pointIndex;
     this.side = side;
     this.normal = normal;
     this.onCurvePoint = onCurvePoint;
+    this.roundFunc = roundFunc;
 
     const contour = skeletonData.contours[contourIndex];
     const point = contour.points[pointIndex];
@@ -910,7 +929,7 @@ export class RibEditBehavior {
    * @param {Object} delta - The drag delta {x, y}
    * @returns {Object} { halfWidth, widthChange } - New half-width and width change object
    */
-  applyDelta(delta) {
+  applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
     // Project delta onto normal
     const sign = this.side === "left" ? 1 : -1;
     const dot = delta.x * this.normal.x + delta.y * this.normal.y;
@@ -929,7 +948,7 @@ export class RibEditBehavior {
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
       side: this.side,
-      halfWidth: Math.round(newHalfWidth),
+      halfWidth: roundFunc(newHalfWidth),
     };
   }
 
@@ -960,7 +979,8 @@ export function createRibEditBehavior(skeletonData, ribHit) {
     pointIndex,
     side,
     normal,
-    onCurvePoint
+    onCurvePoint,
+    ribHit.roundFunc || Math.round
   );
 }
 
@@ -978,7 +998,15 @@ export class EditableRibBehavior {
    * @param {Object} normal - The normal vector at this point
    * @param {Object} onCurvePoint - The on-curve point position
    */
-  constructor(skeletonData, contourIndex, pointIndex, side, normal, onCurvePoint) {
+  constructor(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint,
+    roundFunc = Math.round
+  ) {
     this.skeletonData = skeletonData;
     this.contourIndex = contourIndex;
     this.pointIndex = pointIndex;
@@ -986,6 +1014,7 @@ export class EditableRibBehavior {
     this.normal = normal;
     this.tangent = { x: -normal.y, y: normal.x }; // Perpendicular to normal
     this.onCurvePoint = onCurvePoint;
+    this.roundFunc = roundFunc;
 
     const contour = skeletonData.contours[contourIndex];
     const point = contour.points[pointIndex];
@@ -1097,7 +1126,7 @@ export class EditableRibBehavior {
    * @param {string|null} constrainMode - null (free), "tangent" (nudge only), or "normal" (width only)
    * @returns {Object} { halfWidth, nudge, isAsymmetric, handleInOffsetX/Y, handleOutOffsetX/Y }
    */
-  applyDelta(delta, constrainMode = null) {
+  applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
     let newNudge = this.originalNudge;
     let newHalfWidth = this.originalHalfWidth;
 
@@ -1141,8 +1170,8 @@ export class EditableRibBehavior {
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
       side: this.side,
-      halfWidth: Math.round(newHalfWidth),
-      nudge: Math.round(newNudge),
+      halfWidth: roundFunc(newHalfWidth),
+      nudge: roundFunc(newNudge),
       isAsymmetric: this.isAsymmetric,
     };
 
@@ -1200,7 +1229,8 @@ export function createEditableRibBehavior(skeletonData, ribHit) {
     pointIndex,
     side,
     normal,
-    onCurvePoint
+    onCurvePoint,
+    ribHit.roundFunc || Math.round
   );
 }
 
@@ -1230,7 +1260,8 @@ export class InterpolatingRibBehavior {
     side,
     normal,
     onCurvePoint,
-    interpolationAxis = null
+    interpolationAxis = null,
+    roundFunc = Math.round
   ) {
     this.skeletonData = skeletonData;
     this.contourIndex = contourIndex;
@@ -1240,6 +1271,7 @@ export class InterpolatingRibBehavior {
     this.tangent = { x: -normal.y, y: normal.x };
     this.onCurvePoint = onCurvePoint;
     this.interpolationAxis = interpolationAxis || null;
+    this.roundFunc = roundFunc;
 
     const contour = skeletonData.contours[contourIndex];
     const point = contour.points[pointIndex];
@@ -1411,7 +1443,7 @@ export class InterpolatingRibBehavior {
    * @param {Object} delta - The drag delta {x, y}
    * @returns {Object} { nudge, handleInOffsetX/Y, handleOutOffsetX/Y, isInterpolation }
    */
-  applyDelta(delta) {
+  applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
     // Project drag delta onto the handle-handle line direction
     const deltaAlongLine = delta.x * this.lineDir.x + delta.y * this.lineDir.y;
 
@@ -1435,12 +1467,12 @@ export class InterpolatingRibBehavior {
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
       side: this.side,
-      halfWidth: Math.round(this.originalHalfWidth),  // Keep width unchanged
-      nudge: Math.round(newNudge),
-      handleInOffsetX: Math.round(newHandleInOffsetX),
-      handleInOffsetY: Math.round(newHandleInOffsetY),
-      handleOutOffsetX: Math.round(newHandleOutOffsetX),
-      handleOutOffsetY: Math.round(newHandleOutOffsetY),
+      halfWidth: roundFunc(this.originalHalfWidth),  // Keep width unchanged
+      nudge: roundFunc(newNudge),
+      handleInOffsetX: roundFunc(newHandleInOffsetX),
+      handleInOffsetY: roundFunc(newHandleInOffsetY),
+      handleOutOffsetX: roundFunc(newHandleOutOffsetX),
+      handleOutOffsetY: roundFunc(newHandleOutOffsetY),
       isAsymmetric: false,
       isInterpolation: true,
     };
@@ -1481,7 +1513,8 @@ export function createInterpolatingRibBehavior(skeletonData, ribHit, interpolati
     side,
     normal,
     onCurvePoint,
-    interpolationAxis
+    interpolationAxis,
+    ribHit.roundFunc || Math.round
   );
 }
 
@@ -1498,13 +1531,22 @@ export class EditableHandleBehavior {
    * @param {string} handleType - "in" or "out" (incoming or outgoing handle)
    * @param {Object} skeletonHandleDir - Normalized direction of skeleton handle
    */
-  constructor(skeletonData, contourIndex, pointIndex, side, handleType, skeletonHandleDir) {
+  constructor(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    handleType,
+    skeletonHandleDir,
+    roundFunc = Math.round
+  ) {
     this.skeletonData = skeletonData;
     this.contourIndex = contourIndex;
     this.pointIndex = pointIndex;
     this.side = side;
     this.handleType = handleType;
     this.skeletonHandleDir = skeletonHandleDir;
+    this.roundFunc = roundFunc;
 
     const contour = skeletonData.contours[contourIndex];
     const point = contour.points[pointIndex];
@@ -1542,7 +1584,7 @@ export class EditableHandleBehavior {
    * @param {Object} delta - The drag delta {x, y}
    * @returns {Object} { contourIndex, pointIndex, side, handleType, offset }
    */
-  applyDelta(delta) {
+  applyDelta(delta, roundFunc = this.roundFunc) {
     // Project delta onto skeleton handle direction
     const projectedDelta = delta.x * this.skeletonHandleDir.x + delta.y * this.skeletonHandleDir.y;
     const newOffset = this.originalOffset + projectedDelta;
@@ -1552,7 +1594,7 @@ export class EditableHandleBehavior {
       pointIndex: this.pointIndex,
       side: this.side,
       handleType: this.handleType,
-      offset: Math.round(newOffset),
+      offset: roundFunc(newOffset),
     };
   }
 
@@ -1584,6 +1626,7 @@ export function createEditableHandleBehavior(skeletonData, handleInfo, skeletonH
     handleInfo.skeletonPointIndex,
     handleInfo.side,
     handleInfo.handleType,
-    skeletonHandleDir
+    skeletonHandleDir,
+    handleInfo.roundFunc || Math.round
   );
 }

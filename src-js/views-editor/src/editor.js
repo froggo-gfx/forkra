@@ -183,7 +183,7 @@ export class EditorController extends ViewController {
       ],
       (event) => {
         if (event.senderInfo?.senderID !== this && !event.senderInfo?.adjustViewBox) {
-          this.updateWindowLocation(); // scheduled with delay
+          this.updateWindowLocation?.(); // scheduled with delay
         }
       }
     );

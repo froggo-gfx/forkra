@@ -47,6 +47,7 @@ import { InlineSVG } from "@fontra/web-components/inline-svg.js";
 import { showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialog, dialogSetup, message } from "@fontra/web-components/modal-dialog.js";
 import { Accordion } from "@fontra/web-components/ui-accordion.js";
+import "@fontra/web-components/range-slider.js";
 
 import { NumberFormatter } from "@fontra/core/formatters.js";
 import Panel from "./panel.js";
@@ -75,6 +76,11 @@ const SPEEDPUNK_SHARPNESS_MAX = 4;
 const SPEEDPUNK_OPACITY_DEFAULT = 0.5;
 const SPEEDPUNK_OPACITY_MIN = 0;
 const SPEEDPUNK_OPACITY_MAX = 1;
+const COARSE_GRID_FONT_CUSTOM_DATA_KEY = "fontra.coarseGrid.settings";
+const COARSE_GRID_DEFAULT_BASE = 5;
+const COARSE_GRID_DEFAULT_INCREMENT = 5;
+const COARSE_GRID_DEFAULT_STEP_COUNT = 8;
+const COARSE_GRID_DEFAULT_SPACING = 10;
 
 export default class DesignspaceNavigationPanel extends Panel {
   identifier = "designspace-navigation";
@@ -91,6 +97,13 @@ export default class DesignspaceNavigationPanel extends Panel {
       () => this._updateResetAllAxesButtonState(),
       100
     );
+    this._coarseGridSettings = {
+      custom: false,
+      base: COARSE_GRID_DEFAULT_BASE,
+      increment: COARSE_GRID_DEFAULT_INCREMENT,
+      spacing: COARSE_GRID_DEFAULT_SPACING,
+    };
+    this._isApplyingCoarseGridSettings = false;
 
     this.fontController.ensureInitialized.then(() => {
       this.setup();
@@ -313,6 +326,85 @@ export default class DesignspaceNavigationPanel extends Panel {
           ]
         ),
       },
+      {
+        id: "coarse-grid-accordion-item",
+        label: "Coarse Grid",
+        open: false,
+        content: html.div(
+          {
+            style: `
+              display: grid;
+              grid-template-columns: auto 1fr;
+              gap: 0.5em;
+              align-items: center;
+            `,
+          },
+          [
+            html.label(
+              {
+                for: "coarse-grid-spacing-input",
+                style: "white-space: nowrap;",
+              },
+              ["Spacing"]
+            ),
+            html.createDomElement("range-slider", {
+              id: "coarse-grid-spacing-input",
+              type: "range",
+            }),
+            html.label(
+              {
+                for: "coarse-grid-custom-toggle",
+                style: "white-space: nowrap;",
+              },
+              ["Custom"]
+            ),
+            html.input({
+              id: "coarse-grid-custom-toggle",
+              type: "checkbox",
+            }),
+            html.div(),
+            html.div(
+              {
+                id: "coarse-grid-custom-fields",
+                style: `
+                  display: none;
+                  grid-template-columns: auto 1fr;
+                  gap: 0.5em;
+                  align-items: center;
+                `,
+              },
+              [
+                html.label(
+                  {
+                    for: "coarse-grid-base-input",
+                    style: "white-space: nowrap;",
+                  },
+                  ["Base"]
+                ),
+                html.input({
+                  id: "coarse-grid-base-input",
+                  type: "number",
+                  min: 1,
+                  step: 1,
+                }),
+                html.label(
+                  {
+                    for: "coarse-grid-increment-input",
+                    style: "white-space: nowrap;",
+                  },
+                  ["Increment"]
+                ),
+                html.input({
+                  id: "coarse-grid-increment-input",
+                  type: "number",
+                  min: 1,
+                  step: 1,
+                }),
+              ]
+            ),
+          ]
+        ),
+      },
     ];
 
     return html.div({ class: "panel" }, [
@@ -350,6 +442,260 @@ export default class DesignspaceNavigationPanel extends Panel {
 
   get speedPunkOpacityInput() {
     return this.accordion.querySelector("#speedpunk-opacity-input");
+  }
+
+  get coarseGridSpacingInput() {
+    return this.accordion.querySelector("#coarse-grid-spacing-input");
+  }
+
+  get coarseGridCustomToggle() {
+    return this.accordion.querySelector("#coarse-grid-custom-toggle");
+  }
+
+  get coarseGridCustomFields() {
+    return this.accordion.querySelector("#coarse-grid-custom-fields");
+  }
+
+  get coarseGridBaseInput() {
+    return this.accordion.querySelector("#coarse-grid-base-input");
+  }
+
+  get coarseGridIncrementInput() {
+    return this.accordion.querySelector("#coarse-grid-increment-input");
+  }
+
+  _normalizeCoarseGridBase(value) {
+    if (!Number.isFinite(value)) {
+      return COARSE_GRID_DEFAULT_BASE;
+    }
+    return Math.max(1, Math.round(value));
+  }
+
+  _normalizeCoarseGridIncrement(value) {
+    if (!Number.isFinite(value)) {
+      return COARSE_GRID_DEFAULT_INCREMENT;
+    }
+    return Math.max(1, Math.round(value));
+  }
+
+  _buildCoarseGridValues(settings = this._coarseGridSettings) {
+    if (!settings.custom) {
+      return [...range(
+        COARSE_GRID_DEFAULT_BASE,
+        COARSE_GRID_DEFAULT_BASE +
+          COARSE_GRID_DEFAULT_INCREMENT * COARSE_GRID_DEFAULT_STEP_COUNT,
+        COARSE_GRID_DEFAULT_INCREMENT
+      )];
+    }
+
+    const values = [];
+    for (let i = 0; i < COARSE_GRID_DEFAULT_STEP_COUNT; i++) {
+      values.push(settings.base + i * settings.increment);
+    }
+    return values;
+  }
+
+  _snapCoarseGridSpacing(value, values = this._buildCoarseGridValues()) {
+    if (!values.length) {
+      return COARSE_GRID_DEFAULT_SPACING;
+    }
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+      return values[Math.min(1, values.length - 1)];
+    }
+    let closest = values[0];
+    let closestDistance = Math.abs(numericValue - closest);
+    for (const candidate of values) {
+      const distance = Math.abs(numericValue - candidate);
+      if (distance < closestDistance) {
+        closest = candidate;
+        closestDistance = distance;
+      }
+    }
+    return closest;
+  }
+
+  _normalizeCoarseGridSettings(rawSettings = this.fontController?.customData?.[
+    COARSE_GRID_FONT_CUSTOM_DATA_KEY
+  ]) {
+    const custom = !!rawSettings?.custom;
+    const base = this._normalizeCoarseGridBase(Number(rawSettings?.base));
+    const increment = this._normalizeCoarseGridIncrement(Number(rawSettings?.increment));
+    const settings = {
+      custom,
+      base,
+      increment,
+      spacing: COARSE_GRID_DEFAULT_SPACING,
+    };
+    const values = this._buildCoarseGridValues(settings);
+    settings.spacing = this._snapCoarseGridSpacing(rawSettings?.spacing, values);
+    return settings;
+  }
+
+  _updateCoarseGridCustomFieldsVisibility() {
+    const fields = this.coarseGridCustomFields;
+    if (!fields) {
+      return;
+    }
+    fields.style.display = this._coarseGridSettings.custom ? "grid" : "none";
+  }
+
+  _syncCoarseGridControls() {
+    const settings = this._coarseGridSettings;
+    const values = this._buildCoarseGridValues(settings);
+    const spacing = this._snapCoarseGridSpacing(settings.spacing, values);
+    const spacingInput = this.coarseGridSpacingInput;
+
+    this._isApplyingCoarseGridSettings = true;
+    try {
+      if (spacingInput) {
+        spacingInput.values = values;
+        spacingInput.minValue = values[0];
+        spacingInput.maxValue = values[values.length - 1];
+        spacingInput.step = 1;
+        spacingInput.defaultValue = values[Math.min(1, values.length - 1)];
+        spacingInput.value = spacing;
+      }
+
+      const customToggle = this.coarseGridCustomToggle;
+      if (customToggle) {
+        customToggle.checked = settings.custom;
+      }
+
+      const baseInput = this.coarseGridBaseInput;
+      if (baseInput) {
+        baseInput.value = String(settings.base);
+      }
+
+      const incrementInput = this.coarseGridIncrementInput;
+      if (incrementInput) {
+        incrementInput.value = String(settings.increment);
+      }
+
+      this._updateCoarseGridCustomFieldsVisibility();
+      window.coarseGridValues = values;
+      this.sceneSettingsController.setItem("coarseGridSpacing", spacing, { senderID: this });
+      this._coarseGridSettings = {
+        ...settings,
+        spacing,
+      };
+    } finally {
+      this._isApplyingCoarseGridSettings = false;
+    }
+  }
+
+  async _persistCoarseGridSettings() {
+    if (this.fontController.readOnly) {
+      return;
+    }
+    const nextSettings = {
+      custom: !!this._coarseGridSettings.custom,
+      base: this._normalizeCoarseGridBase(this._coarseGridSettings.base),
+      increment: this._normalizeCoarseGridIncrement(this._coarseGridSettings.increment),
+      spacing: this._coarseGridSettings.spacing,
+    };
+    const currentSettings = this.fontController.customData?.[COARSE_GRID_FONT_CUSTOM_DATA_KEY];
+    if (objectsEqual(currentSettings, nextSettings)) {
+      return;
+    }
+    await this.fontController.performEdit(
+      "edit coarse grid settings",
+      "customData",
+      (root) => {
+        if (!root.customData) {
+          root.customData = {};
+        }
+        root.customData[COARSE_GRID_FONT_CUSTOM_DATA_KEY] = { ...nextSettings };
+      },
+      this
+    );
+  }
+
+  _applyCoarseGridPresetInput() {
+    const base = this._normalizeCoarseGridBase(Number(this.coarseGridBaseInput?.value));
+    const increment = this._normalizeCoarseGridIncrement(
+      Number(this.coarseGridIncrementInput?.value)
+    );
+    const values = this._buildCoarseGridValues({
+      ...this._coarseGridSettings,
+      base,
+      increment,
+    });
+    const spacing = this._snapCoarseGridSpacing(this.sceneSettings.coarseGridSpacing, values);
+    this._coarseGridSettings = {
+      ...this._coarseGridSettings,
+      base,
+      increment,
+      spacing,
+    };
+    this._syncCoarseGridControls();
+    void this._persistCoarseGridSettings();
+  }
+
+  _setupCoarseGridControls() {
+    this._coarseGridSettings = this._normalizeCoarseGridSettings();
+    this._syncCoarseGridControls();
+
+    const spacingInput = this.coarseGridSpacingInput;
+    if (spacingInput) {
+      spacingInput.onChangeCallback = (event) => {
+        const values = this._buildCoarseGridValues();
+        const spacing = this._snapCoarseGridSpacing(event.value, values);
+        this._coarseGridSettings = {
+          ...this._coarseGridSettings,
+          spacing,
+        };
+        this.sceneSettingsController.setItem("coarseGridSpacing", spacing, { senderID: this });
+        if (event.dragEnd || !event.isDragging) {
+          void this._persistCoarseGridSettings();
+        }
+      };
+    }
+
+    const customToggle = this.coarseGridCustomToggle;
+    if (customToggle) {
+      customToggle.addEventListener("change", (event) => {
+        const custom = !!event.target.checked;
+        const values = this._buildCoarseGridValues({
+          ...this._coarseGridSettings,
+          custom,
+        });
+        const spacing = this._snapCoarseGridSpacing(this.sceneSettings.coarseGridSpacing, values);
+        this._coarseGridSettings = {
+          ...this._coarseGridSettings,
+          custom,
+          spacing,
+        };
+        this._syncCoarseGridControls();
+        void this._persistCoarseGridSettings();
+      });
+    }
+
+    const onPresetInput = () => this._applyCoarseGridPresetInput();
+    if (this.coarseGridBaseInput) {
+      this.coarseGridBaseInput.addEventListener("change", onPresetInput);
+    }
+    if (this.coarseGridIncrementInput) {
+      this.coarseGridIncrementInput.addEventListener("change", onPresetInput);
+    }
+
+    this.sceneSettingsController.addKeyListener("coarseGridSpacing", (event) => {
+      if (this._isApplyingCoarseGridSettings) {
+        return;
+      }
+      const values = this._buildCoarseGridValues();
+      const spacing = this._snapCoarseGridSpacing(event.newValue, values);
+      this._coarseGridSettings = {
+        ...this._coarseGridSettings,
+        spacing,
+      };
+      if (this.coarseGridSpacingInput) {
+        this.coarseGridSpacingInput.value = spacing;
+      }
+      if (event.senderInfo?.senderID !== this) {
+        void this._persistCoarseGridSettings();
+      }
+    });
   }
 
   _normalizeSpeedPunkPeakHeightUpm(value) {
@@ -419,6 +765,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     this._updateSpeedPunkPeakHeightInput();
     this._updateSpeedPunkSharpnessInput();
     this._updateSpeedPunkOpacityInput();
+    this._setupCoarseGridControls();
 
     this.speedPunkPeakHeightInput.addEventListener("input", (event) => {
       const parsedValue = Number(event.target.value);
@@ -737,6 +1084,8 @@ export default class DesignspaceNavigationPanel extends Panel {
         // the statusFieldDefinitions may have changed, better update the col defs, too
         this.sourcesList.columnDescriptions = this._setupSourceListColumnDescriptions();
         this._updateSources();
+        this._coarseGridSettings = this._normalizeCoarseGridSettings();
+        this._syncCoarseGridControls();
       }
     );
 
