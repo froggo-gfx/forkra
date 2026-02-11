@@ -19,6 +19,8 @@ import {
   calculateSkeletonTrueTunniPoint,
 } from "./skeleton-tunni-calculations.js";
 
+const DEFAULT_SKELETON_WIDTH = 80;
+
 /**
  * Get skeleton data from a positioned glyph's editing layer.
  */
@@ -41,6 +43,17 @@ export function getSkeletonDataFromGlyph(positionedGlyph, model) {
   }
 
   return getSkeletonData(layer);
+}
+
+function projectRibPoint(point, normal, halfWidth, side, nudge = 0) {
+  const sign = side === "left" ? 1 : -1;
+  const tangent = { x: -normal.y, y: normal.x };
+  const baseX = Math.round(point.x + sign * normal.x * halfWidth);
+  const baseY = Math.round(point.y + sign * normal.y * halfWidth);
+  return {
+    x: Math.round(baseX + tangent.x * nudge),
+    y: Math.round(baseY + tangent.y * nudge),
+  };
 }
 
 /**
@@ -177,7 +190,7 @@ registerVisualizationLayerDefinition({
     context.lineWidth = parameters.strokeWidth;
 
     for (const contour of skeletonData.contours) {
-      const defaultWidth = contour.defaultWidth || 20;
+      const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
       const singleSided = contour.singleSided ?? false;
       const singleSidedDirection = contour.singleSidedDirection ?? "left";
 
@@ -286,7 +299,7 @@ registerVisualizationLayerDefinition({
 
     for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
       const contour = skeletonData.contours[contourIndex];
-      const defaultWidth = contour.defaultWidth || 20;
+      const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
       const singleSided = contour.singleSided ?? false;
       const singleSidedDirection = contour.singleSidedDirection ?? "left";
 
@@ -311,25 +324,19 @@ registerVisualizationLayerDefinition({
         if (singleSided) {
           // Single-sided mode: only one rib point at total width
           const totalWidth = leftHW + rightHW;
-          const tangent = { x: -normal.y, y: normal.x };
+          const canNudge = totalWidth >= 0.5;
           let ribPoint, ribKey, isEditable;
 
           if (singleSidedDirection === "left") {
             // Only apply nudge if editable is true (matches generator behavior)
-            const nudge = isLeftEditable ? (point.leftNudge || 0) : 0;
-            ribPoint = {
-              x: Math.round(point.x + normal.x * totalWidth + tangent.x * nudge),
-              y: Math.round(point.y + normal.y * totalWidth + tangent.y * nudge),
-            };
+            const nudge = (isLeftEditable && canNudge) ? (point.leftNudge || 0) : 0;
+            ribPoint = projectRibPoint(point, normal, totalWidth, "left", nudge);
             ribKey = leftKey;
             isEditable = isLeftEditable;
           } else {
             // Only apply nudge if editable is true (matches generator behavior)
-            const nudge = isRightEditable ? (point.rightNudge || 0) : 0;
-            ribPoint = {
-              x: Math.round(point.x - normal.x * totalWidth + tangent.x * nudge),
-              y: Math.round(point.y - normal.y * totalWidth + tangent.y * nudge),
-            };
+            const nudge = (isRightEditable && canNudge) ? (point.rightNudge || 0) : 0;
+            ribPoint = projectRibPoint(point, normal, totalWidth, "right", nudge);
             ribKey = rightKey;
             isEditable = isRightEditable;
           }
@@ -351,18 +358,11 @@ registerVisualizationLayerDefinition({
         } else {
           // Normal mode: two rib points
           // Only apply nudge offset if editable is true (matches generator behavior)
-          const tangent = { x: -normal.y, y: normal.x };
-          const leftNudge = isLeftEditable ? (point.leftNudge || 0) : 0;
-          const rightNudge = isRightEditable ? (point.rightNudge || 0) : 0;
+          const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (point.leftNudge || 0) : 0;
+          const rightNudge = (isRightEditable && rightHW >= 0.5) ? (point.rightNudge || 0) : 0;
 
-          const leftRibPoint = {
-            x: Math.round(point.x + normal.x * leftHW + tangent.x * leftNudge),
-            y: Math.round(point.y + normal.y * leftHW + tangent.y * leftNudge),
-          };
-          const rightRibPoint = {
-            x: Math.round(point.x - normal.x * rightHW + tangent.x * rightNudge),
-            y: Math.round(point.y - normal.y * rightHW + tangent.y * rightNudge),
-          };
+          const leftRibPoint = projectRibPoint(point, normal, leftHW, "left", leftNudge);
+          const rightRibPoint = projectRibPoint(point, normal, rightHW, "right", rightNudge);
 
           // Draw left rib point
           const leftPointSize = isLeftEditable ? parameters.editablePointSize : parameters.pointSize;

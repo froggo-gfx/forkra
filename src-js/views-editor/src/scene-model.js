@@ -32,6 +32,19 @@ import {
 import * as vector from "@fontra/core/vector.js";
 import { Bezier } from "bezier-js";
 
+const DEFAULT_SKELETON_WIDTH = 80;
+
+function projectRibPoint(point, normal, halfWidth, side, nudge = 0) {
+  const sign = side === "left" ? 1 : -1;
+  const tangent = { x: -normal.y, y: normal.x };
+  const baseX = Math.round(point.x + sign * normal.x * halfWidth);
+  const baseY = Math.round(point.y + sign * normal.y * halfWidth);
+  return {
+    x: Math.round(baseX + tangent.x * nudge),
+    y: Math.round(baseY + tangent.y * nudge),
+  };
+}
+
 export class SceneModel {
   constructor(
     fontController,
@@ -800,7 +813,7 @@ export class SceneModel {
     // Iterate through skeleton contours and find matching editable rib point
     for (let skeletonContourIndex = 0; skeletonContourIndex < skeletonData.contours.length; skeletonContourIndex++) {
       const contour = skeletonData.contours[skeletonContourIndex];
-      const defaultWidth = contour.defaultWidth || 20;
+      const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
       const singleSided = contour.singleSided ?? false;
       const singleSidedDirection = contour.singleSidedDirection ?? "left";
 
@@ -811,7 +824,6 @@ export class SceneModel {
         if (skeletonPoint.type) continue;
 
         const normal = calculateNormalAtSkeletonPoint(contour, skeletonPointIndex);
-        const tangent = { x: -normal.y, y: normal.x };
 
         // Check both sides
         for (const side of ["left", "right"]) {
@@ -835,12 +847,17 @@ export class SceneModel {
           const nudge = skeletonPoint[nudgeKey] || 0;
 
           const sign = side === "left" ? 1 : -1;
-          const expectedX = Math.round(skeletonPoint.x + sign * normal.x * halfWidth + tangent.x * nudge);
-          const expectedY = Math.round(skeletonPoint.y + sign * normal.y * halfWidth + tangent.y * nudge);
+          const expectedPoint = projectRibPoint(
+            skeletonPoint,
+            normal,
+            halfWidth,
+            side,
+            nudge
+          );
 
           // Check if position matches
-          const dx = Math.abs(pointPos.x - expectedX);
-          const dy = Math.abs(pointPos.y - expectedY);
+          const dx = Math.abs(pointPos.x - expectedPoint.x);
+          const dy = Math.abs(pointPos.y - expectedPoint.y);
 
           if (dx <= tolerance && dy <= tolerance) {
             return {
@@ -932,7 +949,7 @@ export class SceneModel {
 
     for (let skeletonContourIndex = 0; skeletonContourIndex < skeletonData.contours.length; skeletonContourIndex++) {
       const contour = skeletonData.contours[skeletonContourIndex];
-      const defaultWidth = contour.defaultWidth || 20;
+      const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
       const singleSided = contour.singleSided ?? false;
       const singleSidedDirection = contour.singleSidedDirection ?? "left";
 
@@ -943,7 +960,6 @@ export class SceneModel {
         if (skeletonPoint.type) continue;
 
         const normal = calculateNormalAtSkeletonPoint(contour, skeletonPointIndex);
-        const tangent = { x: -normal.y, y: normal.x };
 
         for (const side of ["left", "right"]) {
           const editableKey = side === "left" ? "leftEditable" : "rightEditable";
@@ -964,11 +980,16 @@ export class SceneModel {
           const nudge = skeletonPoint[nudgeKey] || 0;
 
           const sign = side === "left" ? 1 : -1;
-          const expectedAnchorX = Math.round(skeletonPoint.x + sign * normal.x * halfWidth + tangent.x * nudge);
-          const expectedAnchorY = Math.round(skeletonPoint.y + sign * normal.y * halfWidth + tangent.y * nudge);
+          const expectedAnchor = projectRibPoint(
+            skeletonPoint,
+            normal,
+            halfWidth,
+            side,
+            nudge
+          );
 
-          const dx = Math.abs(anchorPos.x - expectedAnchorX);
-          const dy = Math.abs(anchorPos.y - expectedAnchorY);
+          const dx = Math.abs(anchorPos.x - expectedAnchor.x);
+          const dy = Math.abs(anchorPos.y - expectedAnchor.y);
 
           if (dx <= tolerance && dy <= tolerance) {
             // For right side, generated contour direction is opposite to skeleton
@@ -1552,7 +1573,7 @@ export class SceneModel {
 
         for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
           const contour = skeletonData.contours[contourIdx];
-          const defaultWidth = contour.defaultWidth || 20;
+          const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
           const singleSided = contour.singleSided ?? false;
           const singleSidedDirection = contour.singleSidedDirection ?? "left";
 
@@ -1562,7 +1583,6 @@ export class SceneModel {
             if (point.type) continue;
 
             const normal = calculateNormalAtSkeletonPoint(contour, pointIdx);
-            const tangent = { x: -normal.y, y: normal.x };
 
             for (const side of ["left", "right"]) {
               let halfWidth = getPointHalfWidth(point, defaultWidth, side);
@@ -1580,19 +1600,17 @@ export class SceneModel {
               const isEditable = side === "left" ? point.leftEditable : point.rightEditable;
               const nudge = isEditable ? (side === "left" ? point.leftNudge || 0 : point.rightNudge || 0) : 0;
 
-              const sign = side === "left" ? 1 : -1;
-              const ribX = Math.round(point.x + sign * normal.x * halfWidth + tangent.x * nudge);
-              const ribY = Math.round(point.y + sign * normal.y * halfWidth + tangent.y * nudge);
+              const ribPoint = projectRibPoint(point, normal, halfWidth, side, nudge);
 
               // Check if rib point is within rectangle
               if (
-                ribX >= selRect.xMin &&
-                ribX <= selRect.xMax &&
-                ribY >= selRect.yMin &&
-                ribY <= selRect.yMax
+                ribPoint.x >= selRect.xMin &&
+                ribPoint.x <= selRect.xMax &&
+                ribPoint.y >= selRect.yMin &&
+                ribPoint.y <= selRect.yMax
               ) {
                 // Select the one closest to the current corner (where cursor is)
-                const distSq = (ribX - targetX) ** 2 + (ribY - targetY) ** 2;
+                const distSq = (ribPoint.x - targetX) ** 2 + (ribPoint.y - targetY) ** 2;
                 if (distSq < closestDistSq) {
                   closestDistSq = distSq;
                   closestRibPointKey = `skeletonRibPoint/${contourIdx}/${pointIdx}/${side}`;

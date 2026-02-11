@@ -473,8 +473,11 @@ export default class SkeletonParametersPanel extends Panel {
 
         for (const { point, contourIdx, pointIdx } of selectedData.points) {
           const widths = this._getPointWidths(point, defaultWidth);
-          leftValues.push(Math.round(widths.left));
-          rightValues.push(Math.round(widths.right));
+          // Keep raw half-widths for state aggregation.
+          // In single-sided mode the UI displays totalWidth = left + right, and
+          // rounding halves first causes odd widths to jump to the next even value.
+          leftValues.push(widths.left);
+          rightValues.push(widths.right);
           asymStates.add(this._isAsymmetric(point));
           forceHorizontalStates.add(!!point.forceHorizontal);
           forceVerticalStates.add(!!point.forceVertical);
@@ -710,26 +713,11 @@ export default class SkeletonParametersPanel extends Panel {
 
       const isEditable = editableStates.has(true) && editableStates.size === 1;
       const isEditableIndeterminate = editableStates.size > 1;
-      let hasEditableUnlocked = true;
-      if (selectedData) {
-        hasEditableUnlocked = false;
-        for (const key of selectedRibSides) {
-          const parts = key.split("/");
-          const contourIdx = Number(parts[0]);
-          const pointIdx = Number(parts[1]);
-          const contour = selectedData.skeletonData?.contours?.[contourIdx];
-          if (!this._isCapStyleEditableLocked(contour, pointIdx)) {
-            hasEditableUnlocked = true;
-            break;
-          }
-        }
-      }
 
       const editableCheckbox = html.input({
         type: "checkbox",
         id: "editable-toggle",
         checked: isEditableIndeterminate ? false : isEditable,
-        disabled: !hasEditableUnlocked,
         onchange: (e) => this._onEditableToggle(e.target.checked, selectedRibSides),
       });
       if (isEditableIndeterminate) {
@@ -789,8 +777,7 @@ export default class SkeletonParametersPanel extends Panel {
             editableCheckbox,
             html.label({
               for: "editable-toggle",
-              style: `margin-left: 4px${hasEditableUnlocked ? "" : "; opacity: 0.5"}`,
-              title: hasEditableUnlocked ? undefined : "Editable is disabled for round/square caps",
+              style: "margin-left: 4px",
             }, "Editable"),
           ]),
         },
@@ -2686,18 +2673,6 @@ export default class SkeletonParametersPanel extends Panel {
     return { canEdit: true, mixed: false, value: singleValue };
   }
 
-  _isCapStyleEditableLocked(contour, pointIdx) {
-    if (!contour || contour.isClosed) return false;
-    const endpoints = this._getContourEndpointIndices(contour);
-    if (!endpoints) return false;
-    if (pointIdx !== endpoints.firstOnCurve && pointIdx !== endpoints.lastOnCurve) {
-      return false;
-    }
-    const point = contour.points?.[pointIdx];
-    const capStyle = point?.capStyle ?? contour.capStyle ?? "butt";
-    return capStyle === "round" || capStyle === "square";
-  }
-
   _disableEditableSide(point, side) {
     const editableKey = side === "left" ? "leftEditable" : "rightEditable";
     const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
@@ -2883,7 +2858,9 @@ export default class SkeletonParametersPanel extends Panel {
           const handleOut = handleRound(handleInfo?.outLen);
           const handleAngle = handleRound(handleInfo?.angle);
           const smoothFlag = point.smooth ? 1 : 0;
-          parts.push(`${contourIdx}/${pointIdx}:${Math.round(w.left)},${Math.round(w.right)},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension},${capAngle},${capDistance},${forceH},${forceV},${smoothFlag},${handleIn},${handleOut},${handleAngle}`);
+          const signatureLeft = Math.round(w.left * 1000) / 1000;
+          const signatureRight = Math.round(w.right * 1000) / 1000;
+          parts.push(`${contourIdx}/${pointIdx}:${signatureLeft},${signatureRight},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension},${capAngle},${capDistance},${forceH},${forceV},${smoothFlag},${handleIn},${handleOut},${handleAngle}`);
         }
       }
 
@@ -3138,10 +3115,6 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point || point.type) continue;
           point.capStyle = capStyle;
-          if (capStyle === "round" || capStyle === "square") {
-            this._disableEditableSide(point, "left");
-            this._disableEditableSide(point, "right");
-          }
           changed = true;
         }
 
@@ -3534,7 +3507,6 @@ export default class SkeletonParametersPanel extends Panel {
           if (!contour) continue;
           const point = contour.points[pointIdx];
           if (!point) continue;
-          const isLocked = this._isCapStyleEditableLocked(contour, pointIdx);
 
           // Update editable state for each selected side
           for (const side of sides) {
@@ -3556,11 +3528,6 @@ export default class SkeletonParametersPanel extends Panel {
             const nudgeSavedKey = side === "left" ? "leftNudgeSaved" : "rightNudgeSaved";
             const handleInOffsetSavedKey = side === "left" ? "leftHandleInOffsetSaved" : "rightHandleInOffsetSaved";
             const handleOutOffsetSavedKey = side === "left" ? "leftHandleOutOffsetSaved" : "rightHandleOutOffsetSaved";
-
-            if (isLocked) {
-              this._disableEditableSide(point, side);
-              continue;
-            }
 
             if (checked) {
               point[editableKey] = true;

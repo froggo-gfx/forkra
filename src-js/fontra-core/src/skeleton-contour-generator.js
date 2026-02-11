@@ -205,6 +205,12 @@ const SAMPLES_PER_CURVE = 5;
 const MIN_ERROR_PERCENT = 0.02; // 2% — initial strict threshold
 const MAX_ERROR_PERCENT = 0.15; // 15% — maximum allowed
 const ERROR_STEP_PERCENT = 0.02; // 2% — step increase
+const NEAR_ZERO_HANDLE_THRESHOLD = 1.25;
+const NEAR_ZERO_HANDLE_TARGET = 1;
+const MAX_HANDLE_TO_CHORD_RATIO = 2.0;
+const MAX_NEAR_ZERO_ROTATION_DEG = 35;
+const SKELETON_DEBUG_PREFIX = "[SKELETON GEN DEBUG]";
+const ENABLE_EXPERIMENTAL_HANDLE_STABILIZATION = false;
 
 /**
  * Enforce colinearity for smooth points in a contour.
@@ -217,10 +223,24 @@ const ERROR_STEP_PERCENT = 0.02; // 2% — step increase
  * @param {boolean} isClosed - Whether the contour is closed
  * @returns {Array} - Modified points array
  */
-function enforceSmoothColinearity(points, isClosed) {
+function enforceSmoothColinearity(
+  points,
+  isClosed,
+  options = {}
+) {
+  const {
+    includeLinearNeighborCases = true,
+    maxHandleRotationDeg = 60,
+    minReliableHandleLength = 0.75,
+  } = options;
   if (!points || points.length < 2) return points;
 
   const numPoints = points.length;
+  const hasRotationLimit =
+    Number.isFinite(maxHandleRotationDeg) && maxHandleRotationDeg < 179.999;
+  const maxRotationCos = hasRotationLimit
+    ? Math.cos((Math.max(0, maxHandleRotationDeg) * Math.PI) / 180)
+    : -1;
 
   // Process all smooth points
   for (let i = 0; i < numPoints; i++) {
@@ -260,11 +280,20 @@ function enforceSmoothColinearity(points, isClosed) {
         const dirIn = { x: vecIn.x / lenIn, y: vecIn.y / lenIn };
         const dirOut = { x: vecOut.x / lenOut, y: vecOut.y / lenOut };
 
-        // Calculate average tangent direction
-        // We want the handles to be opposite, so we average dirIn and -dirOut
+        // Near-zero handles are numerically unstable: don't let them rotate long handles.
+        const inIsTiny = lenIn < minReliableHandleLength;
+        const outIsTiny = lenOut < minReliableHandleLength;
+        if (inIsTiny || outIsTiny) {
+          // Near-zero handles are too noisy for direction enforcement.
+          // Leave them untouched to avoid accidental flips.
+          continue;
+        }
+
+        // Use length-weighted direction so long handles dominate and short handles
+        // don't cause direction flips when they approach zero length.
         const avgDir = vector.normalizeVector({
-          x: dirIn.x - dirOut.x,
-          y: dirIn.y - dirOut.y,
+          x: dirIn.x * lenIn - dirOut.x * lenOut,
+          y: dirIn.y * lenIn - dirOut.y * lenOut,
         });
 
         // If directions are nearly opposite (already colinear), skip
@@ -272,6 +301,17 @@ function enforceSmoothColinearity(points, isClosed) {
         if (dot > -0.999) { // Not nearly opposite
           // If avgDir is zero (handles point same direction), use perpendicular
           if (Math.hypot(avgDir.x, avgDir.y) >= 0.001) {
+            // Avoid large handle flips: only enforce when required rotation is bounded.
+            const prevTargetAlignment = dirIn.x * avgDir.x + dirIn.y * avgDir.y;
+            const nextTargetAlignment = -dirOut.x * avgDir.x - dirOut.y * avgDir.y;
+            if (
+              hasRotationLimit &&
+              (prevTargetAlignment < maxRotationCos ||
+                nextTargetAlignment < maxRotationCos)
+            ) {
+              continue;
+            }
+
             // Adjust handle positions to be colinear through the on-curve point
             points[prevIdx] = {
               ...prevPoint,
@@ -289,7 +329,7 @@ function enforceSmoothColinearity(points, isClosed) {
       }
     }
     // Case 2: One neighbor is on-curve (linear segment) and one is off-curve (smooth-linear transition)
-    else if (prevIsOnCurve && !nextIsOnCurve) {
+    else if (includeLinearNeighborCases && prevIsOnCurve && !nextIsOnCurve) {
       // Smooth point with linear segment before and curve after
       // The smooth point should act as a pivot: the off-curve handle should be collinear
       // with the linear segment, extending its direction
@@ -316,7 +356,7 @@ function enforceSmoothColinearity(points, isClosed) {
         };
       }
     }
-    else if (!prevIsOnCurve && nextIsOnCurve) {
+    else if (includeLinearNeighborCases && !prevIsOnCurve && nextIsOnCurve) {
       // Smooth point with curve before and linear segment after
       // The previous off-curve handle should be collinear with the next linear segment
       const linearVec = { x: nextPoint.x - point.x, y: nextPoint.y - point.y }; // Vector from smooth point to next linear point
@@ -343,7 +383,7 @@ function enforceSmoothColinearity(points, isClosed) {
       }
     }
     // Case 3: Both neighbors are on-curve (smooth point between two linear segments)
-    else if (prevIsOnCurve && nextIsOnCurve) {
+    else if (includeLinearNeighborCases && prevIsOnCurve && nextIsOnCurve) {
       // This case typically shouldn't happen in generated contours from skeleton,
       // but we handle it for completeness - smooth point between two linear segments
       // In this case, the smooth point should maintain angle bisector behavior
@@ -538,12 +578,15 @@ export function generateContoursFromSkeleton(skeletonData) {
 
   const generatedContours = [];
 
-  for (const skeletonContour of skeletonData.contours) {
+  for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
+    const skeletonContour = skeletonData.contours[contourIndex];
     if (skeletonContour.points.length < 2) {
       continue;
     }
 
-    const outlineContours = generateOutlineFromSkeletonContour(skeletonContour);
+    const outlineContours = generateOutlineFromSkeletonContour(skeletonContour, {
+      contourIndex,
+    });
     // generateOutlineFromSkeletonContour now returns an array of contours
     // (1 for open skeleton, 2 for closed skeleton)
     if (outlineContours?.length) {
@@ -561,7 +604,7 @@ export function generateContoursFromSkeleton(skeletonData) {
  *   - For open skeleton: returns 1 contour (stroke with caps)
  *   - For closed skeleton: returns 2 contours (outer and inner)
  */
-export function generateOutlineFromSkeletonContour(skeletonContour) {
+export function generateOutlineFromSkeletonContour(skeletonContour, options = {}) {
   const {
     points,
     isClosed,
@@ -637,7 +680,11 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
       startLeftHalfWidth,
       startRightHalfWidth,
       endLeftHalfWidth,
-      endRightHalfWidth
+      endRightHalfWidth,
+      {
+        contourIndex: options.contourIndex ?? null,
+        segmentIndex: i,
+      }
     );
 
     leftSide.push(...offsetPoints.left);
@@ -654,14 +701,14 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // const alignedLeftSide = alignHandleDirections(leftSide, segments, true);
     // const alignedRightSide = alignHandleDirections(reversedRight, segments, false);
 
-    // In single-sided mode one side is expected to match skeleton exactly.
-    // Skip post-adjustment that can slightly move handles/points.
-    const leftContourPoints = singleSided
-      ? leftSide
-      : enforceSmoothColinearity(leftSide, true);
-    const rightContourPoints = singleSided
-      ? reversedRight
-      : enforceSmoothColinearity(reversedRight, true);
+    const leftContourPoints = enforceSmoothColinearity(leftSide, true, {
+      includeLinearNeighborCases: false,
+      maxHandleRotationDeg: 60,
+    });
+    const rightContourPoints = enforceSmoothColinearity(reversedRight, true, {
+      includeLinearNeighborCases: false,
+      maxHandleRotationDeg: 60,
+    });
 
     let contours = [
       { points: leftContourPoints, isClosed: true },
@@ -735,8 +782,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
         const maxShift = Math.max(capWidth / 2 - capWidth / 128, 0);
         const shift = Math.min(r * 2, maxShift);
         const mergeCap = capRadiusRatio >= MAX_CAP_RADIUS_RATIO - 1e-6;
-        const cornerShift = shift; // move existing corner points inward along skeleton
-        const normalShift = mergeCap ? capWidth / 2 : shift; // move new points along normal only
+        const normalShift = mergeCap ? capWidth / 2 : shift;
         if (capLength > 0.001 && r > 0.001) {
           let startNormal = getEffectiveNormal(
             firstOnCurvePoint,
@@ -744,39 +790,26 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
           );
           let capDir = vector.normalizeVector(startNormal); // right -> left
           let tOut = { x: -startTangent.x, y: -startTangent.y };
-          let tIn = { x: -tOut.x, y: -tOut.y };
 
           const origRight = { x: rightStart.x, y: rightStart.y };
           const origLeft = { x: leftStart.x, y: leftStart.y };
 
-          if (singleSided) {
-            trimCurveAtStart(leftSide, cornerShift);
-            trimCurveAtStart(rightSide, cornerShift);
-            leftStart = getFirstOnCurvePoint(leftSide) || leftStart;
-            rightStart = getFirstOnCurvePoint(rightSide) || rightStart;
-          } else {
-            // Shift existing corner points inward along skeleton
-            rightStart.x = Math.round(rightStart.x + tIn.x * cornerShift);
-            rightStart.y = Math.round(rightStart.y + tIn.y * cornerShift);
-            leftStart.x = Math.round(leftStart.x + tIn.x * cornerShift);
-            leftStart.y = Math.round(leftStart.y + tIn.y * cornerShift);
-            rescaleAdjacentHandles(rightSide, rightStart, origRight, "forward");
-            rescaleAdjacentHandles(leftSide, leftStart, origLeft, "forward");
-          }
+          // Preserve existing outline endpoints for round caps.
+          // This keeps endpoint control anchored to skeleton-generated side geometry.
           if (segments[0]?.controlPoints?.length) {
             rightStart.smooth = true;
             leftStart.smooth = true;
           }
-          const rightNormalShift = normalShift;
-          const leftNormalShift = normalShift;
+          const tipNormalShift = normalShift;
+          const tipTangentShift = shift;
           const newRight = {
-            x: Math.round(origRight.x + capDir.x * rightNormalShift),
-            y: Math.round(origRight.y + capDir.y * rightNormalShift),
+            x: Math.round(origRight.x + capDir.x * tipNormalShift + tOut.x * tipTangentShift),
+            y: Math.round(origRight.y + capDir.y * tipNormalShift + tOut.y * tipTangentShift),
             smooth: true,
           };
           const newLeft = {
-            x: Math.round(origLeft.x - capDir.x * leftNormalShift),
-            y: Math.round(origLeft.y - capDir.y * leftNormalShift),
+            x: Math.round(origLeft.x - capDir.x * tipNormalShift + tOut.x * tipTangentShift),
+            y: Math.round(origLeft.y - capDir.y * tipNormalShift + tOut.y * tipTangentShift),
             smooth: true,
           };
           const midPoint = mergeCap
@@ -934,8 +967,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
         const maxShift = Math.max(capWidth / 2 - capWidth / 128, 0);
         const shift = Math.min(r * 2, maxShift);
         const mergeCap = capRadiusRatio >= MAX_CAP_RADIUS_RATIO - 1e-6;
-        const cornerShift = shift; // move existing corner points inward along skeleton
-        const normalShift = mergeCap ? capWidth / 2 : shift; // move new points along normal only
+        const normalShift = mergeCap ? capWidth / 2 : shift;
         if (capLength > 0.001 && r > 0.001) {
           let endNormal = getEffectiveNormal(
             lastOnCurvePoint,
@@ -945,39 +977,26 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
           // For end caps, flip direction so shelf shifts inward
           capDir = { x: -capDir.x, y: -capDir.y }; // left -> right
           let tOut = endTangent;
-          let tIn = { x: -tOut.x, y: -tOut.y };
 
           const origLeft = { x: leftEnd.x, y: leftEnd.y };
           const origRight = { x: rightEnd.x, y: rightEnd.y };
 
-          if (singleSided) {
-            trimCurveAtEnd(leftSide, cornerShift);
-            trimCurveAtEnd(rightSide, cornerShift);
-            leftEnd = getLastOnCurvePoint(leftSide) || leftEnd;
-            rightEnd = getLastOnCurvePoint(rightSide) || rightEnd;
-          } else {
-            // Shift existing corner points inward along skeleton
-            leftEnd.x = Math.round(leftEnd.x + tIn.x * cornerShift);
-            leftEnd.y = Math.round(leftEnd.y + tIn.y * cornerShift);
-            rightEnd.x = Math.round(rightEnd.x + tIn.x * cornerShift);
-            rightEnd.y = Math.round(rightEnd.y + tIn.y * cornerShift);
-            rescaleAdjacentHandles(leftSide, leftEnd, origLeft, "backward");
-            rescaleAdjacentHandles(rightSide, rightEnd, origRight, "backward");
-          }
+          // Preserve existing outline endpoints for round caps.
+          // This keeps endpoint control anchored to skeleton-generated side geometry.
           if (segments[segments.length - 1]?.controlPoints?.length) {
             leftEnd.smooth = true;
             rightEnd.smooth = true;
           }
-          const leftNormalShift = normalShift;
-          const rightNormalShift = normalShift;
+          const tipNormalShift = normalShift;
+          const tipTangentShift = shift;
           const newLeft = {
-            x: Math.round(origLeft.x + capDir.x * leftNormalShift),
-            y: Math.round(origLeft.y + capDir.y * leftNormalShift),
+            x: Math.round(origLeft.x + capDir.x * tipNormalShift + tOut.x * tipTangentShift),
+            y: Math.round(origLeft.y + capDir.y * tipNormalShift + tOut.y * tipTangentShift),
             smooth: true,
           };
           const newRight = {
-            x: Math.round(origRight.x - capDir.x * rightNormalShift),
-            y: Math.round(origRight.y - capDir.y * rightNormalShift),
+            x: Math.round(origRight.x - capDir.x * tipNormalShift + tOut.x * tipTangentShift),
+            y: Math.round(origRight.y - capDir.y * tipNormalShift + tOut.y * tipTangentShift),
             smooth: true,
           };
           const midPoint = mergeCap
@@ -1128,10 +1147,10 @@ export function generateOutlineFromSkeletonContour(skeletonContour) {
     // DISABLED for performance testing - alignHandleDirections is O(n³)
     // const alignedOutlinePoints = alignHandleDirections(outlinePoints, segments, null);
 
-    // Keep exact skeleton overlap on collapsed side in single-sided mode.
-    const finalPoints = singleSided
-      ? outlinePoints
-      : enforceSmoothColinearity(outlinePoints, true);
+    const finalPoints = enforceSmoothColinearity(outlinePoints, true, {
+      includeLinearNeighborCases: false,
+      maxHandleRotationDeg: 60,
+    });
     let contour = { points: finalPoints, isClosed: true };
 
     // Apply reverse if flag is set
@@ -1228,14 +1247,296 @@ function buildSegmentsFromPoints(points, isClosed) {
   return segments;
 }
 
+function getSkeletonDebugState() {
+  if (typeof globalThis === "undefined") {
+    return { enabled: false, filter: null };
+  }
+  const enabledFlag = globalThis.__fontraSkeletonDebug;
+  return {
+    // Enabled by default for active geometry debugging.
+    enabled: enabledFlag === undefined ? true : !!enabledFlag,
+    filter: globalThis.__fontraSkeletonDebugFilter || null,
+  };
+}
+
+function shouldLogSkeletonDebug(debugContext) {
+  const debugState = getSkeletonDebugState();
+  if (!debugState.enabled) return false;
+  const filter = debugState.filter;
+  if (!filter) return true;
+  if (
+    filter.contourIndex !== undefined &&
+    debugContext?.contourIndex !== filter.contourIndex
+  ) {
+    return false;
+  }
+  if (
+    filter.segmentIndex !== undefined &&
+    debugContext?.segmentIndex !== filter.segmentIndex
+  ) {
+    return false;
+  }
+  if (filter.side !== undefined && debugContext?.side !== filter.side) {
+    return false;
+  }
+  return true;
+}
+
+function logSkeletonDebug(debugContext, payload) {
+  if (!shouldLogSkeletonDebug(debugContext)) return;
+  const message = {
+    contourIndex: debugContext?.contourIndex ?? null,
+    segmentIndex: debugContext?.segmentIndex ?? null,
+    side: debugContext?.side ?? null,
+    ...payload,
+  };
+  // Log as a single string to avoid collapsed object entries in DevTools.
+  console.log(`${SKELETON_DEBUG_PREFIX} ${JSON.stringify(message)}`);
+}
+
+function normalizeDirectionOrFallback(direction, fallbackDirection) {
+  const len = Math.hypot(direction?.x || 0, direction?.y || 0);
+  if (len >= 1e-9) {
+    return { x: direction.x / len, y: direction.y / len };
+  }
+  const fallbackLen = Math.hypot(fallbackDirection?.x || 0, fallbackDirection?.y || 0);
+  if (fallbackLen >= 1e-9) {
+    return { x: fallbackDirection.x / fallbackLen, y: fallbackDirection.y / fallbackLen };
+  }
+  return { x: 1, y: 0 };
+}
+
+function rotateDirection(direction, angleRad) {
+  const c = Math.cos(angleRad);
+  const s = Math.sin(angleRad);
+  return {
+    x: direction.x * c - direction.y * s,
+    y: direction.x * s + direction.y * c,
+  };
+}
+
+function clampNearZeroDirection(candidateDir, referenceDir) {
+  const ref = normalizeDirectionOrFallback(referenceDir, { x: 1, y: 0 });
+  const cand = normalizeDirectionOrFallback(candidateDir, ref);
+  const maxRotationRad = (MAX_NEAR_ZERO_ROTATION_DEG * Math.PI) / 180;
+  const cosMax = Math.cos(maxRotationRad);
+
+  const dot = Math.max(-1, Math.min(1, cand.x * ref.x + cand.y * ref.y));
+  const result = {
+    direction: cand,
+    preventedFlip: false,
+    clampedRotation: false,
+  };
+
+  if (dot < 0) {
+    result.direction = ref;
+    result.preventedFlip = true;
+    result.clampedRotation = true;
+    return result;
+  }
+
+  if (dot >= cosMax) {
+    return result;
+  }
+
+  const cross = ref.x * cand.y - ref.y * cand.x;
+  const sign = cross >= 0 ? 1 : -1;
+  result.direction = rotateDirection(ref, sign * maxRotationRad);
+  result.clampedRotation = true;
+  return result;
+}
+
+function stabilizeSingleCubicHandles(
+  fixedStart,
+  fixedEnd,
+  handle1,
+  handle2,
+  startReferenceDirection = null,
+  endReferenceDirection = null,
+  startFallbackDirection = null,
+  endFallbackDirection = null
+) {
+  const chord = { x: fixedEnd.x - fixedStart.x, y: fixedEnd.y - fixedStart.y };
+  const chordLength = Math.hypot(chord.x, chord.y);
+  const chordDir = normalizeDirectionOrFallback(chord, { x: 1, y: 0 });
+  const maxHandleLength = Math.max(
+    NEAR_ZERO_HANDLE_TARGET,
+    chordLength * MAX_HANDLE_TO_CHORD_RATIO
+  );
+
+  const processHandle = (anchor, otherAnchor, handlePoint, referenceDirection, fallbackDirection) => {
+    let vec = { x: handlePoint.x - anchor.x, y: handlePoint.y - anchor.y };
+    const originalLength = Math.hypot(vec.x, vec.y);
+    let length = originalLength;
+
+    const info = {
+      originalLength,
+      stabilizedLength: originalLength,
+      clampedByChord: false,
+      nearZeroAdjusted: false,
+      preventedFlip: false,
+      clampedRotation: false,
+    };
+
+    if (length > maxHandleLength && length > 1e-9) {
+      const scale = maxHandleLength / length;
+      vec = { x: vec.x * scale, y: vec.y * scale };
+      length = maxHandleLength;
+      info.clampedByChord = true;
+    }
+
+    if (length < NEAR_ZERO_HANDLE_THRESHOLD) {
+      const fallback = normalizeDirectionOrFallback(fallbackDirection, {
+        x: otherAnchor.x - anchor.x,
+        y: otherAnchor.y - anchor.y,
+      });
+      const reference = normalizeDirectionOrFallback(referenceDirection, fallback);
+      const candidate = length >= 1e-9 ? { x: vec.x / length, y: vec.y / length } : reference;
+      const clamped = clampNearZeroDirection(candidate, reference);
+      vec = {
+        x: clamped.direction.x * NEAR_ZERO_HANDLE_TARGET,
+        y: clamped.direction.y * NEAR_ZERO_HANDLE_TARGET,
+      };
+      info.nearZeroAdjusted = true;
+      info.preventedFlip = clamped.preventedFlip;
+      info.clampedRotation = clamped.clampedRotation;
+      length = NEAR_ZERO_HANDLE_TARGET;
+    }
+
+    info.stabilizedLength = length;
+    return {
+      point: { x: anchor.x + vec.x, y: anchor.y + vec.y },
+      info,
+    };
+  };
+
+  const startFallback = normalizeDirectionOrFallback(startFallbackDirection, chordDir);
+  const endFallback = normalizeDirectionOrFallback(endFallbackDirection, {
+    x: -chordDir.x,
+    y: -chordDir.y,
+  });
+
+  const stabilizedStart = processHandle(
+    fixedStart,
+    fixedEnd,
+    handle1,
+    startReferenceDirection,
+    startFallback
+  );
+  const stabilizedEnd = processHandle(
+    fixedEnd,
+    fixedStart,
+    handle2,
+    endReferenceDirection,
+    endFallback
+  );
+
+  return {
+    handle1: stabilizedStart.point,
+    handle2: stabilizedEnd.point,
+    debug: {
+      chordLength,
+      maxHandleLength,
+      start: stabilizedStart.info,
+      end: stabilizedEnd.info,
+    },
+  };
+}
+
+function lockNearZeroHandleDirection(
+  anchor,
+  handlePoint,
+  referenceDirection,
+  maxLength = Infinity,
+  preferMinimalOnFlip = false
+) {
+  const ref = normalizeDirectionOrFallback(referenceDirection, { x: 1, y: 0 });
+  const minimalGridStep = getMinimumGridStepFromDirection(ref);
+  const minimalGridLength = minimalGridStep.length;
+  const vec = {
+    x: handlePoint.x - anchor.x,
+    y: handlePoint.y - anchor.y,
+  };
+  const length = Math.hypot(vec.x, vec.y);
+  const along = vec.x * ref.x + vec.y * ref.y;
+  const preventedFlip = along < 0;
+  const projectedLength = Math.abs(along);
+  const nearZeroLocked = projectedLength < NEAR_ZERO_HANDLE_THRESHOLD;
+  const forcedNonZero = projectedLength < minimalGridLength;
+  const forcedMinimal = forcedNonZero || (preferMinimalOnFlip && preventedFlip);
+
+  let finalLength;
+  let clampedByMax = false;
+  let point;
+  if (forcedMinimal) {
+    point = {
+      x: anchor.x + minimalGridStep.x,
+      y: anchor.y + minimalGridStep.y,
+    };
+    finalLength = minimalGridLength;
+  } else {
+    finalLength = projectedLength;
+    clampedByMax = finalLength > maxLength;
+    if (clampedByMax) {
+      finalLength = maxLength;
+    }
+    point = {
+      x: anchor.x + ref.x * finalLength,
+      y: anchor.y + ref.y * finalLength,
+    };
+  }
+
+  return {
+    point,
+    info: {
+      nearZeroLocked,
+      preventedFlip,
+      forcedNonZero,
+      forcedMinimal,
+      originalLength: length,
+      projectedLength,
+      finalLength,
+      clampedByMax,
+      preferMinimalOnFlip,
+      minimalGridStepX: minimalGridStep.x,
+      minimalGridStepY: minimalGridStep.y,
+      minimalGridLength,
+      referenceDot: length > 1e-9 ? along / length : 1,
+    },
+  };
+}
+
+function getMinimumGridStepFromDirection(direction) {
+  const dir = normalizeDirectionOrFallback(direction, { x: 1, y: 0 });
+
+  let stepX = Math.abs(dir.x) >= 0.5 ? (dir.x >= 0 ? 1 : -1) : 0;
+  let stepY = Math.abs(dir.y) >= 0.5 ? (dir.y >= 0 ? 1 : -1) : 0;
+
+  // Prevent zero-length steps for shallow directions.
+  if (stepX === 0 && stepY === 0) {
+    if (Math.abs(dir.x) >= Math.abs(dir.y)) {
+      stepX = dir.x >= 0 ? 1 : -1;
+    } else {
+      stepY = dir.y >= 0 ? 1 : -1;
+    }
+  }
+
+  return {
+    x: stepX,
+    y: stepY,
+    length: Math.hypot(stepX, stepY),
+  };
+}
+
 /**
  * Try to simplify multiple offset curves into a single cubic bezier.
  * Uses fitCubic for approximation with adaptive error tolerance.
  * @param {Array} offsetCurves - Array of Bezier objects from bezier.offset()
  * @param {number} halfWidth - Half of the stroke width
+ * @param {Object|null} debugContext - Optional debug metadata for console logs
  * @returns {Bezier|null} - Simplified Bezier or null if simplification is disabled/not needed
  */
-function simplifyOffsetCurves(offsetCurves, halfWidth) {
+function simplifyOffsetCurves(offsetCurves, halfWidth, debugContext = null) {
   if (!SIMPLIFY_OFFSET_CURVES || !offsetCurves || offsetCurves.length === 0) {
     return null;
   }
@@ -1244,9 +1545,15 @@ function simplifyOffsetCurves(offsetCurves, halfWidth) {
   // This ensures simplification still works when one side collapses to skeleton
   const effectiveHalfWidth = Math.max(halfWidth, 1);
 
-  // If only one curve with 4 points (cubic), no simplification needed
+  // If already one cubic, keep it as is to preserve 1-segment topology.
   if (offsetCurves.length === 1 && offsetCurves[0].points.length === 4) {
-    return null;
+    logSkeletonDebug(debugContext, {
+      stage: "simplifyOffsetCurvesBypass",
+      offsetCurveCount: 1,
+      sampleCount: 0,
+      halfWidth,
+    });
+    return offsetCurves[0];
   }
 
   // 1. Sample points on all offset curves
@@ -1278,14 +1585,32 @@ function simplifyOffsetCurves(offsetCurves, halfWidth) {
   for (let errorThreshold = minError; errorThreshold <= maxError; errorThreshold += step) {
     const bezier = fitCubic(samplePoints, leftTangent, rightTangent, errorThreshold);
     const [actualError] = computeMaxError(samplePoints, bezier, params);
-    if (actualError < errorThreshold) {
+    if (actualError <= errorThreshold) {
+      logSkeletonDebug(debugContext, {
+        stage: "simplifyOffsetCurves",
+        offsetCurveCount: offsetCurves.length,
+        sampleCount: samplePoints.length,
+        halfWidth,
+        errorThreshold,
+        actualErrorSq: actualError,
+      });
       return bezier; // fits within current threshold
     }
   }
 
   // Even maxError didn't help — return the last result anyway
   // One curve is better than many segments
-  return fitCubic(samplePoints, leftTangent, rightTangent, maxError);
+  const fallback = fitCubic(samplePoints, leftTangent, rightTangent, maxError);
+  const [fallbackErrorSq] = computeMaxError(samplePoints, fallback, params);
+  logSkeletonDebug(debugContext, {
+    stage: "simplifyOffsetCurvesFallback",
+    offsetCurveCount: offsetCurves.length,
+    sampleCount: samplePoints.length,
+    halfWidth,
+    maxError,
+    fallbackErrorSq,
+  });
+  return fallback;
 }
 
 /**
@@ -1323,6 +1648,7 @@ export function getEffectiveNormal(point, calculatedNormal) {
  * @param {number} startRightHalfWidth - Half-width on right side at start point
  * @param {number} endLeftHalfWidth - Half-width on left side at end point
  * @param {number} endRightHalfWidth - Half-width on right side at end point
+ * @param {Object|null} debugContext - Optional debug metadata for console logs
  */
 function generateOffsetPointsForSegment(
   segment,
@@ -1336,7 +1662,8 @@ function generateOffsetPointsForSegment(
   startLeftHalfWidth = null,
   startRightHalfWidth = null,
   endLeftHalfWidth = null,
-  endRightHalfWidth = null
+  endRightHalfWidth = null,
+  debugContext = null
 ) {
   // Use provided half-widths or fall back to width/2
   const halfWidth = width / 2;
@@ -1511,7 +1838,10 @@ function generateOffsetPointsForSegment(
       }
 
       // Try to simplify multiple offset curves into a single cubic bezier
-      const simplifiedCurve = simplifyOffsetCurves(curves, sideHalfWidth);
+      const simplifiedCurve = simplifyOffsetCurves(curves, sideHalfWidth, {
+        ...debugContext,
+        side,
+      });
       if (simplifiedCurve) {
         // Use the simplified curve
         const pts = simplifiedCurve.points;
@@ -1537,12 +1867,12 @@ function generateOffsetPointsForSegment(
 
         // Apply handles relative to fixed positions
         let adjustedHandle1 = {
-          x: Math.round(fixedStart.x + h1Offset.x),
-          y: Math.round(fixedStart.y + h1Offset.y),
+          x: fixedStart.x + h1Offset.x,
+          y: fixedStart.y + h1Offset.y,
         };
         let adjustedHandle2 = {
-          x: Math.round(fixedEnd.x + h2Offset.x),
-          y: Math.round(fixedEnd.y + h2Offset.y),
+          x: fixedEnd.x + h2Offset.x,
+          y: fixedEnd.y + h2Offset.y,
         };
 
         // Apply handle offsets if the skeleton points are editable
@@ -1560,6 +1890,140 @@ function generateOffsetPointsForSegment(
           );
         }
 
+        const rawStartLength = Math.hypot(
+          adjustedHandle1.x - fixedStart.x,
+          adjustedHandle1.y - fixedStart.y
+        );
+        const rawEndLength = Math.hypot(
+          adjustedHandle2.x - fixedEnd.x,
+          adjustedHandle2.y - fixedEnd.y
+        );
+
+        // Always protect near-zero handles from 180° direction flips.
+        // Start handle follows outgoing tangent; end handle follows incoming tangent.
+        const startTangentFallback = getSegmentTangent(segment, "start");
+        const endTangentFallback = getSegmentTangent(segment, "end");
+        const startReferenceDir = startHandleDir ?? startTangentFallback;
+        const endReferenceDir =
+          endHandleDir ?? { x: -endTangentFallback.x, y: -endTangentFallback.y };
+        const chordLength = Math.hypot(
+          fixedEnd.x - fixedStart.x,
+          fixedEnd.y - fixedStart.y
+        );
+        const maxHandleLength = Math.max(
+          NEAR_ZERO_HANDLE_TARGET,
+          chordLength * MAX_HANDLE_TO_CHORD_RATIO
+        );
+        const startNearZeroLock = lockNearZeroHandleDirection(
+          fixedStart,
+          adjustedHandle1,
+          startReferenceDir,
+          maxHandleLength,
+          true
+        );
+        const endNearZeroLock = lockNearZeroHandleDirection(
+          fixedEnd,
+          adjustedHandle2,
+          endReferenceDir,
+          maxHandleLength,
+          true
+        );
+        adjustedHandle1 = startNearZeroLock.point;
+        adjustedHandle2 = endNearZeroLock.point;
+
+        let stabilizedHandles = null;
+        if (ENABLE_EXPERIMENTAL_HANDLE_STABILIZATION) {
+          stabilizedHandles = stabilizeSingleCubicHandles(
+            fixedStart,
+            fixedEnd,
+            adjustedHandle1,
+            adjustedHandle2,
+            startHandleDir ?? {
+              x: adjustedHandle1.x - fixedStart.x,
+              y: adjustedHandle1.y - fixedStart.y,
+            },
+            endHandleDir ?? {
+              x: adjustedHandle2.x - fixedEnd.x,
+              y: adjustedHandle2.y - fixedEnd.y,
+            },
+            startTangentFallback,
+            { x: -endTangentFallback.x, y: -endTangentFallback.y }
+          );
+          adjustedHandle1 = stabilizedHandles.handle1;
+          adjustedHandle2 = stabilizedHandles.handle2;
+        }
+
+        // Quantize generated handles back to UPM grid for consistent behavior.
+        adjustedHandle1 = {
+          x: Math.round(adjustedHandle1.x),
+          y: Math.round(adjustedHandle1.y),
+        };
+        adjustedHandle2 = {
+          x: Math.round(adjustedHandle2.x),
+          y: Math.round(adjustedHandle2.y),
+        };
+
+        logSkeletonDebug(
+          {
+            ...debugContext,
+            side,
+          },
+          {
+            stage: "singleCubicHandles",
+            stabilizationEnabled: ENABLE_EXPERIMENTAL_HANDLE_STABILIZATION,
+            rawStartLength,
+            rawEndLength,
+            finalStartLength: Math.hypot(
+              adjustedHandle1.x - fixedStart.x,
+              adjustedHandle1.y - fixedStart.y
+            ),
+            finalEndLength: Math.hypot(
+              adjustedHandle2.x - fixedEnd.x,
+              adjustedHandle2.y - fixedEnd.y
+            ),
+            clampedByChordStart: stabilizedHandles?.debug.start.clampedByChord ?? false,
+            clampedByChordEnd: stabilizedHandles?.debug.end.clampedByChord ?? false,
+            nearZeroAdjustedStart:
+              startNearZeroLock.info.nearZeroLocked ||
+              (stabilizedHandles?.debug.start.nearZeroAdjusted ?? false),
+            nearZeroAdjustedEnd:
+              endNearZeroLock.info.nearZeroLocked ||
+              (stabilizedHandles?.debug.end.nearZeroAdjusted ?? false),
+            nearZeroForcedNonZeroStart: startNearZeroLock.info.forcedNonZero,
+            nearZeroForcedNonZeroEnd: endNearZeroLock.info.forcedNonZero,
+            nearZeroForcedMinimalStart: startNearZeroLock.info.forcedMinimal,
+            nearZeroForcedMinimalEnd: endNearZeroLock.info.forcedMinimal,
+            nearZeroRefDotStart: startNearZeroLock.info.referenceDot,
+            nearZeroRefDotEnd: endNearZeroLock.info.referenceDot,
+            projectedStartLength: startNearZeroLock.info.projectedLength,
+            projectedEndLength: endNearZeroLock.info.projectedLength,
+            nearZeroMinGridLengthStart: startNearZeroLock.info.minimalGridLength,
+            nearZeroMinGridLengthEnd: endNearZeroLock.info.minimalGridLength,
+            nearZeroGridStepStart: [
+              startNearZeroLock.info.minimalGridStepX,
+              startNearZeroLock.info.minimalGridStepY,
+            ],
+            nearZeroGridStepEnd: [
+              endNearZeroLock.info.minimalGridStepX,
+              endNearZeroLock.info.minimalGridStepY,
+            ],
+            clampedByMaxStart: startNearZeroLock.info.clampedByMax,
+            clampedByMaxEnd: endNearZeroLock.info.clampedByMax,
+            nearZeroPreventedFlipStart: startNearZeroLock.info.preventedFlip,
+            nearZeroPreventedFlipEnd: endNearZeroLock.info.preventedFlip,
+            nearZeroPreferMinimalOnFlipStart:
+              startNearZeroLock.info.preferMinimalOnFlip,
+            nearZeroPreferMinimalOnFlipEnd:
+              endNearZeroLock.info.preferMinimalOnFlip,
+            preventedFlipStart: stabilizedHandles?.debug.start.preventedFlip ?? false,
+            preventedFlipEnd: stabilizedHandles?.debug.end.preventedFlip ?? false,
+            clampedRotationStart: stabilizedHandles?.debug.start.clampedRotation ?? false,
+            clampedRotationEnd: stabilizedHandles?.debug.end.clampedRotation ?? false,
+            chordLength: stabilizedHandles?.debug.chordLength ?? chordLength,
+            maxHandleLength: stabilizedHandles?.debug.maxHandleLength ?? maxHandleLength,
+          }
+        );
+
         output.push({ x: adjustedHandle1.x, y: adjustedHandle1.y, type: "cubic" });
         output.push({ x: adjustedHandle2.x, y: adjustedHandle2.y, type: "cubic" });
         if (shouldAddEnd) {
@@ -1573,6 +2037,17 @@ function generateOffsetPointsForSegment(
       }
 
       // Fallback: use original curves without simplification
+      logSkeletonDebug(
+        {
+          ...debugContext,
+          side,
+        },
+        {
+          stage: "multiCurveFallbackUnexpected",
+          curveCount: curves.length,
+        }
+      );
+
       // Track actual start position for each curve (for handle adjustment)
       let currentStart = fixedStart;
 
@@ -1942,149 +2417,6 @@ function createSquareCapPoint(basePoint, handleDir, capTangent, baseDistance, de
     y: Math.round(basePoint.y + dir.y * t),
     smooth: false,
   };
-}
-
-function rescaleAdjacentHandles(points, onCurvePoint, origPos, direction) {
-  if (!points || !onCurvePoint || !origPos) return;
-  const idx = points.indexOf(onCurvePoint);
-  if (idx === -1) return;
-  const step = direction === "backward" ? -1 : 1;
-
-  let neighborIdx = null;
-  for (let i = idx + step; i >= 0 && i < points.length; i += step) {
-    if (!points[i]?.type) {
-      neighborIdx = i;
-      break;
-    }
-  }
-  if (neighborIdx === null) return;
-
-  const neighbor = points[neighborIdx];
-  const distBefore = Math.hypot(neighbor.x - origPos.x, neighbor.y - origPos.y);
-  const distAfter = Math.hypot(neighbor.x - onCurvePoint.x, neighbor.y - onCurvePoint.y);
-  const scale = distBefore > 0.001 ? distAfter / distBefore : 1;
-
-  for (let i = idx + step; i !== neighborIdx; i += step) {
-    const point = points[i];
-    if (!point?.type) break;
-    const offsetX = point.x - origPos.x;
-    const offsetY = point.y - origPos.y;
-    point.x = Math.round(onCurvePoint.x + offsetX * scale);
-    point.y = Math.round(onCurvePoint.y + offsetY * scale);
-  }
-}
-
-function findTAtLength(bezier, targetLen, steps = 80) {
-  const lut = bezier.getLUT(steps);
-  let prev = lut[0];
-  let accumulated = 0;
-
-  for (let i = 1; i < lut.length; i++) {
-    const curr = lut[i];
-    const segLen = Math.hypot(curr.x - prev.x, curr.y - prev.y);
-    if (accumulated + segLen >= targetLen) {
-      const ratio = segLen > 0.001 ? (targetLen - accumulated) / segLen : 0;
-      return prev.t + (curr.t - prev.t) * ratio;
-    }
-    accumulated += segLen;
-    prev = curr;
-  }
-
-  return 1;
-}
-
-function getCurveSegmentIndices(points, fromEnd = false) {
-  if (!points || points.length < 2) return null;
-  if (!fromEnd) {
-    let startIdx = -1;
-    for (let i = 0; i < points.length; i++) {
-      if (!points[i]?.type) {
-        startIdx = i;
-        break;
-      }
-    }
-    if (startIdx < 0) return null;
-    let endIdx = -1;
-    for (let i = startIdx + 1; i < points.length; i++) {
-      if (!points[i]?.type) {
-        endIdx = i;
-        break;
-      }
-    }
-    if (endIdx < 0) return null;
-    return { startIdx, endIdx };
-  }
-
-  let endIdx = -1;
-  for (let i = points.length - 1; i >= 0; i--) {
-    if (!points[i]?.type) {
-      endIdx = i;
-      break;
-    }
-  }
-  if (endIdx < 0) return null;
-  let startIdx = -1;
-  for (let i = endIdx - 1; i >= 0; i--) {
-    if (!points[i]?.type) {
-      startIdx = i;
-      break;
-    }
-  }
-  if (startIdx < 0) return null;
-  return { startIdx, endIdx };
-}
-
-function applySegmentPoints(points, startIdx, endIdx, newPoints) {
-  const controlCount = endIdx - startIdx - 1;
-  if (newPoints.length !== controlCount + 2) return false;
-
-  const writePoint = (idx, src) => {
-    points[idx].x = Math.round(src.x);
-    points[idx].y = Math.round(src.y);
-  };
-
-  writePoint(startIdx, newPoints[0]);
-  for (let i = 0; i < controlCount; i++) {
-    writePoint(startIdx + 1 + i, newPoints[1 + i]);
-  }
-  writePoint(endIdx, newPoints[newPoints.length - 1]);
-  return true;
-}
-
-function trimCurveAtStart(points, distance) {
-  if (!points || distance <= 0.001) return false;
-  const segment = getCurveSegmentIndices(points, false);
-  if (!segment) return false;
-  const { startIdx, endIdx } = segment;
-  const controls = points.slice(startIdx + 1, endIdx);
-  const bezier = createBezierFromPoints([points[startIdx], ...controls, points[endIdx]]);
-  const totalLen = bezier.length();
-  if (!(totalLen > 0.001)) return false;
-
-  const targetLen = Math.min(distance, Math.max(totalLen - 0.001, 0));
-  if (!(targetLen > 0.001)) return false;
-
-  const t = findTAtLength(bezier, targetLen);
-  const split = bezier.split(t);
-  return applySegmentPoints(points, startIdx, endIdx, split.right.points);
-}
-
-function trimCurveAtEnd(points, distance) {
-  if (!points || distance <= 0.001) return false;
-  const segment = getCurveSegmentIndices(points, true);
-  if (!segment) return false;
-  const { startIdx, endIdx } = segment;
-  const controls = points.slice(startIdx + 1, endIdx);
-  const bezier = createBezierFromPoints([points[startIdx], ...controls, points[endIdx]]);
-  const totalLen = bezier.length();
-  if (!(totalLen > 0.001)) return false;
-
-  const targetLen = Math.max(totalLen - distance, 0.001);
-  if (!(targetLen > 0.001)) return false;
-
-  const t = findTAtLength(bezier, targetLen);
-  const split = bezier.split(t);
-  return applySegmentPoints(points, startIdx, endIdx, split.left.points);
 }
 
 function computeTunniHandleLengths(startPoint, startDir, endPoint, endDir, tension) {
