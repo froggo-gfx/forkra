@@ -2447,16 +2447,18 @@ export class PointerTool extends BaseTool {
               let behavior;
               if (useInterpolation) {
                 // Find adjacent handles in the generated path
-                const handles = this._findHandlesForRibPointFromSkeleton(
+                const interpolationAxis = this._findHandlesForRibPointFromSkeleton(
                   data.layer.glyph.path,
                   skeletonPoint,
                   normal,
                   contour,
                   tp.side
                 );
-                if (handles) {
+                if (interpolationAxis) {
                   behavior = createInterpolatingRibBehavior(
-                    data.original, ribHitForPoint, handles.prevHandle, handles.nextHandle
+                    data.original,
+                    ribHitForPoint,
+                    interpolationAxis
                   );
                 } else {
                   // Fallback to normal behavior if handles not found
@@ -2497,16 +2499,18 @@ export class PointerTool extends BaseTool {
             let behavior;
             if (useInterpolation) {
               // Find adjacent handles in the generated path
-              const handles = this._findHandlesForRibPointFromSkeleton(
+              const interpolationAxis = this._findHandlesForRibPointFromSkeleton(
                 data.layer.glyph.path,
                 skeletonPoint,
                 normal,
                 contour,
                 tp.side
               );
-              if (handles) {
+              if (interpolationAxis) {
                 behavior = createInterpolatingRibBehavior(
-                  data.original, ribHitForPoint, handles.prevHandle, handles.nextHandle
+                  data.original,
+                  ribHitForPoint,
+                  interpolationAxis
                 );
               } else {
                 // Fallback to normal behavior if handles not found
@@ -2729,50 +2733,201 @@ export class PointerTool extends BaseTool {
   }
 
   /**
-   * Find adjacent handles for a rib point by computing its expected position
-   * and searching in the generated path.
+   * Build interpolation axis data for a rib point in generated path coordinates.
+   * Supports:
+   * - two handles: axis is handle-to-handle
+   * - one handle: axis is segment-anchor-to-handle
+   * @param {Object} path - The generated path
+   * @param {number} ribPointIndex - Index of the rib point in the generated path
+   * @returns {Object|null} Axis data for InterpolatingRibBehavior
+   */
+  _buildRibInterpolationAxis(path, ribPointIndex) {
+    const numPoints = path?.numPoints ?? 0;
+    if (ribPointIndex < 0 || ribPointIndex >= numPoints) {
+      return null;
+    }
+
+    const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(ribPointIndex);
+    const numContourPoints = path.getNumPointsOfContour(contourIndex);
+    const contourStart = ribPointIndex - contourPointIndex;
+
+    const wrapIndex = (idx) => {
+      const relative = idx - contourStart;
+      const wrapped = ((relative % numContourPoints) + numContourPoints) % numContourPoints;
+      return contourStart + wrapped;
+    };
+
+    const prevIdx = wrapIndex(ribPointIndex - 1);
+    const nextIdx = wrapIndex(ribPointIndex + 1);
+
+    const prevType = path.pointTypes[prevIdx] & VarPackedPath.POINT_TYPE_MASK;
+    const nextType = path.pointTypes[nextIdx] & VarPackedPath.POINT_TYPE_MASK;
+    const prevIsOnCurve = prevType === VarPackedPath.ON_CURVE;
+    const nextIsOnCurve = nextType === VarPackedPath.ON_CURVE;
+
+    const prevHandle = !prevIsOnCurve ? path.getPoint(prevIdx) : null;
+    const nextHandle = !nextIsOnCurve ? path.getPoint(nextIdx) : null;
+    const ribPoint = path.getPoint(ribPointIndex);
+
+    let segmentAnchor = null;
+    if (prevHandle && !nextHandle) {
+      segmentAnchor = nextIsOnCurve ? path.getPoint(nextIdx) : null;
+    } else if (nextHandle && !prevHandle) {
+      segmentAnchor = prevIsOnCurve ? path.getPoint(prevIdx) : null;
+    }
+
+    let lineStart = null;
+    let lineEnd = null;
+
+    if (prevHandle && nextHandle) {
+      lineStart = prevHandle;
+      lineEnd = nextHandle;
+    } else if (prevHandle || nextHandle) {
+      lineStart = segmentAnchor || ribPoint;
+      lineEnd = prevHandle || nextHandle;
+    } else {
+      return null;
+    }
+
+    const axisDx = lineEnd.x - lineStart.x;
+    const axisDy = lineEnd.y - lineStart.y;
+    if (Math.hypot(axisDx, axisDy) < 0.001) {
+      return null;
+    }
+
+    return {
+      prevHandle,
+      nextHandle,
+      segmentAnchor,
+      lineStart,
+      lineEnd,
+      hasPrevHandle: !!prevHandle,
+      hasNextHandle: !!nextHandle,
+    };
+  }
+
+  /**
+   * Find interpolation axis for a rib point by computing its expected generated position
+   * and inspecting adjacent points in the generated contour.
    * @param {Object} path - The generated glyph path
    * @param {Object} skeletonPoint - The skeleton point {x, y, ...}
    * @param {Object} normal - The normal vector at this point
    * @param {Object} contour - The skeleton contour
    * @param {string} side - "left" or "right"
-   * @returns {Object|null} { prevHandle, nextHandle } or null
+   * @returns {Object|null} Axis data for InterpolatingRibBehavior
    */
   _findHandlesForRibPointFromSkeleton(path, skeletonPoint, normal, contour, side) {
-    const points = contour.points;
-    const pointIndex = points.findIndex(p => p === skeletonPoint || (p.x === skeletonPoint.x && p.y === skeletonPoint.y));
-    if (pointIndex < 0) {
+    if (!path || !contour?.points?.length || !skeletonPoint) {
       return null;
     }
 
-    // Build on-curve indices from skeleton points
-    const onCurveIndices = [];
-    for (let i = 0; i < points.length; i++) {
-      if (!points[i].type) onCurveIndices.push(i);
+    const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+    let halfWidth = getPointHalfWidth(skeletonPoint, defaultWidth, side);
+    if (contour.singleSided) {
+      const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+      const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+      halfWidth = leftHW + rightHW;
+    }
+    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+    const nudge = skeletonPoint[nudgeKey] || 0;
+
+    const expectedRibPoint = projectRibPoint(
+      skeletonPoint,
+      normal,
+      halfWidth,
+      side,
+      nudge
+    );
+
+    const ribPointIndex = path.pointIndexNearPoint(expectedRibPoint, 3);
+    if (ribPointIndex !== undefined) {
+      const axisFromPath = this._buildRibInterpolationAxis(path, ribPointIndex);
+      if (axisFromPath) {
+        return axisFromPath;
+      }
     }
 
-    // Find position of our point in on-curve list
-    const posInOnCurve = onCurveIndices.indexOf(pointIndex);
-    if (posInOnCurve < 0) {
+    // Fallback: derive axis from skeleton topology.
+    const points = contour.points;
+    const pointIndex = points.findIndex(
+      (p) => p === skeletonPoint || (p.x === skeletonPoint.x && p.y === skeletonPoint.y)
+    );
+    if (pointIndex < 0) {
       return null;
     }
 
     let prevHandle = null;
     let nextHandle = null;
+    let segmentAnchor = null;
+    const isClosed = !!contour.isClosed;
 
-    // Incoming handle: off-curve before current point
-    const prevIdx = (pointIndex - 1 + points.length) % points.length;
-    if (points[prevIdx]?.type) {
-      prevHandle = this._offsetSkeletonHandle(points[prevIdx], skeletonPoint, normal, contour, side);
+    const prevIdx = isClosed || pointIndex > 0 ? (pointIndex - 1 + points.length) % points.length : null;
+    if (prevIdx !== null && points[prevIdx]?.type) {
+      prevHandle = this._offsetSkeletonHandle(
+        points[prevIdx],
+        skeletonPoint,
+        normal,
+        contour,
+        side
+      );
     }
 
-    // Outgoing handle: off-curve after current point
-    const nextIdx = (pointIndex + 1) % points.length;
-    if (points[nextIdx]?.type) {
-      nextHandle = this._offsetSkeletonHandle(points[nextIdx], skeletonPoint, normal, contour, side);
+    const nextIdx = isClosed || pointIndex < points.length - 1 ? (pointIndex + 1) % points.length : null;
+    if (nextIdx !== null && points[nextIdx]?.type) {
+      nextHandle = this._offsetSkeletonHandle(
+        points[nextIdx],
+        skeletonPoint,
+        normal,
+        contour,
+        side
+      );
     }
 
-    return (prevHandle || nextHandle) ? { prevHandle, nextHandle } : null;
+    if (prevHandle && !nextHandle && nextIdx !== null && !points[nextIdx]?.type) {
+      segmentAnchor = this._offsetSkeletonOnCurve(
+        points[nextIdx],
+        contour,
+        nextIdx,
+        side
+      );
+    } else if (nextHandle && !prevHandle && prevIdx !== null && !points[prevIdx]?.type) {
+      segmentAnchor = this._offsetSkeletonOnCurve(
+        points[prevIdx],
+        contour,
+        prevIdx,
+        side
+      );
+    }
+
+    if (!prevHandle && !nextHandle) {
+      return null;
+    }
+
+    let lineStart = null;
+    let lineEnd = null;
+    if (prevHandle && nextHandle) {
+      lineStart = prevHandle;
+      lineEnd = nextHandle;
+    } else {
+      lineStart = segmentAnchor || expectedRibPoint;
+      lineEnd = prevHandle || nextHandle;
+    }
+
+    const axisDx = lineEnd.x - lineStart.x;
+    const axisDy = lineEnd.y - lineStart.y;
+    if (Math.hypot(axisDx, axisDy) < 0.001) {
+      return null;
+    }
+
+    return {
+      prevHandle,
+      nextHandle,
+      segmentAnchor,
+      lineStart,
+      lineEnd,
+      hasPrevHandle: !!prevHandle,
+      hasNextHandle: !!nextHandle,
+    };
   }
 
   _offsetSkeletonHandle(skelHandle, skelOnCurve, normal, contour, side) {
@@ -2786,6 +2941,20 @@ export class PointerTool extends BaseTool {
       x: skelHandle.x + sign * normal.x * halfWidth,
       y: skelHandle.y + sign * normal.y * halfWidth,
     };
+  }
+
+  _offsetSkeletonOnCurve(skeletonOnCurve, contour, pointIndex, side) {
+    const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
+    const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+    let halfWidth = getPointHalfWidth(skeletonOnCurve, defaultWidth, side);
+    if (contour.singleSided) {
+      const leftHW = getPointHalfWidth(skeletonOnCurve, defaultWidth, "left");
+      const rightHW = getPointHalfWidth(skeletonOnCurve, defaultWidth, "right");
+      halfWidth = leftHW + rightHW;
+    }
+    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+    const nudge = skeletonOnCurve[nudgeKey] || 0;
+    return projectRibPoint(skeletonOnCurve, normal, halfWidth, side, nudge);
   }
 
   /**
@@ -2815,51 +2984,20 @@ export class PointerTool extends BaseTool {
   }
 
   /**
-   * Find adjacent handles (off-curve points) for a rib point in the generated path.
+   * Find interpolation axis for a rib point in the generated path.
    * @param {Object} path - The generated path
    * @param {number} ribPointIndex - Index of the rib point in the path
-   * @returns {Object|null} { prevHandle, nextHandle } or null if not found
+   * @returns {Object|null} Axis data for InterpolatingRibBehavior
    */
   _findAdjacentHandlesForRibPoint(path, ribPointIndex) {
-    const numPoints = path.numPoints;
-
-    if (ribPointIndex < 0 || ribPointIndex >= numPoints) {
-      return null;
-    }
-
-    // Get contour range for this point
-    const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(ribPointIndex);
-    const numContourPoints = path.getNumPointsOfContour(contourIndex);
-    const contourStart = ribPointIndex - contourPointIndex;
-
-    // Helper to wrap index within contour
-    const wrapIndex = (idx) => {
-      const relative = idx - contourStart;
-      const wrapped = ((relative % numContourPoints) + numContourPoints) % numContourPoints;
-      return contourStart + wrapped;
-    };
-
-    // Check immediate neighbors (prev and next)
-    const prevIdx = wrapIndex(ribPointIndex - 1);
-    const nextIdx = wrapIndex(ribPointIndex + 1);
-
-    const prevType = path.pointTypes[prevIdx];
-    const nextType = path.pointTypes[nextIdx];
-    const prevIsOnCurve = (prevType & 0x03) === 0;
-    const nextIsOnCurve = (nextType & 0x03) === 0;
-
-    // For generated skeleton contours, immediate neighbors should be handles
-    const prevHandle = !prevIsOnCurve ? path.getPoint(prevIdx) : null;
-    const nextHandle = !nextIsOnCurve ? path.getPoint(nextIdx) : null;
-
-    if (!prevHandle || !nextHandle) return null;
-    return { prevHandle, nextHandle };
+    return this._buildRibInterpolationAxis(path, ribPointIndex);
   }
 
   /**
    * Handle dragging editable generated points (from skeleton contours).
    * Updates skeleton data (nudge, width) based on point movement.
-   * When Alt is held, the rib point slides along the line between its adjacent handles.
+   * When Alt is held, the rib point slides along interpolation axis:
+   * handle-handle, or segment-handle for single-handle smooth cases.
    */
   async _handleDragEditableGeneratedPoints(eventStream, initialEvent, editablePoints) {
     const sceneController = this.sceneController;
@@ -2875,16 +3013,19 @@ export class PointerTool extends BaseTool {
       y: localPoint.y - positionedGlyph.y,
     };
 
-    // If using interpolation, find adjacent handles for each editable rib point
+    // If using interpolation, build axis data for each editable rib point
     const generatedPath = positionedGlyph.glyph.path;
 
-    const editablePointsWithHandles = useInterpolation
-      ? editablePoints.map(ep => {
+    const editablePointsWithInterpolation = useInterpolation
+      ? editablePoints.map((ep) => {
           // ep.pointIndex is the index in the generated path
-          const handles = this._findAdjacentHandlesForRibPoint(generatedPath, ep.pointIndex);
-          return { ...ep, handles };
+          const interpolationAxis = this._findAdjacentHandlesForRibPoint(
+            generatedPath,
+            ep.pointIndex
+          );
+          return { ...ep, interpolationAxis };
         })
-      : editablePoints.map(ep => ({ ...ep, handles: null }));
+      : editablePoints.map((ep) => ({ ...ep, interpolationAxis: null }));
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const layersData = {};
@@ -2906,7 +3047,7 @@ export class PointerTool extends BaseTool {
 
       // Create behaviors for each editable point in each layer
       for (const data of Object.values(layersData)) {
-        for (const ep of editablePointsWithHandles) {
+        for (const ep of editablePointsWithInterpolation) {
           const contour = data.original.contours[ep.skeletonContourIndex];
           const skeletonPoint = contour?.points[ep.skeletonPointIndex];
           if (!skeletonPoint) continue;
@@ -2920,11 +3061,13 @@ export class PointerTool extends BaseTool {
             onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
           };
 
-          // Use interpolating behavior if Alt is pressed and handles are found
+          // Use interpolating behavior if Alt is pressed and axis data is found
           let behavior;
-          if (useInterpolation && ep.handles) {
+          if (useInterpolation && ep.interpolationAxis) {
             behavior = createInterpolatingRibBehavior(
-              data.original, ribHit, ep.handles.prevHandle, ep.handles.nextHandle
+              data.original,
+              ribHit,
+              ep.interpolationAxis
             );
           } else {
             behavior = createEditableRibBehavior(data.original, ribHit);

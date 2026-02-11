@@ -1206,7 +1206,9 @@ export function createEditableRibBehavior(skeletonData, ribHit) {
 
 /**
  * InterpolatingRibBehavior - Handles dragging of editable rib points with Alt key.
- * The rib point slides along the line between its two adjacent handles (off-curve points).
+ * The rib point slides along an interpolation axis:
+ * - two handles: line between handles
+ * - one handle: line between segment anchor and handle
  * Handles remain fixed in place while the rib point moves between them.
  * Uses 2D handle offsets for precise compensation.
  */
@@ -1218,10 +1220,18 @@ export class InterpolatingRibBehavior {
    * @param {string} side - "left" or "right"
    * @param {Object} normal - The normal vector at this point
    * @param {Object} onCurvePoint - The skeleton on-curve point position {x, y}
-   * @param {Object} prevHandle - Previous handle position {x, y}
-   * @param {Object} nextHandle - Next handle position {x, y}
+   * @param {Object|null} interpolationAxis - Axis data:
+   *   { prevHandle, nextHandle, segmentAnchor, lineStart, lineEnd, hasPrevHandle, hasNextHandle }
    */
-  constructor(skeletonData, contourIndex, pointIndex, side, normal, onCurvePoint, prevHandle, nextHandle) {
+  constructor(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint,
+    interpolationAxis = null
+  ) {
     this.skeletonData = skeletonData;
     this.contourIndex = contourIndex;
     this.pointIndex = pointIndex;
@@ -1229,22 +1239,25 @@ export class InterpolatingRibBehavior {
     this.normal = normal;
     this.tangent = { x: -normal.y, y: normal.x };
     this.onCurvePoint = onCurvePoint;
-    this.prevHandle = prevHandle;
-    this.nextHandle = nextHandle;
+    this.interpolationAxis = interpolationAxis || null;
 
     const contour = skeletonData.contours[contourIndex];
     const point = contour.points[pointIndex];
     const points = contour.points;
+    const isClosed = !!contour.isClosed;
     const defaultWidth = contour.defaultWidth || 20;
 
     // Compute skeleton handle directions for 1D to 2D conversion
     // These are needed to correctly interpret existing 1D offsets
     this.skeletonHandleInDir = null;
     this.skeletonHandleOutDir = null;
+    this.hasIncomingHandle = false;
+    this.hasOutgoingHandle = false;
 
-    // Incoming handle (previous point if it's off-curve)
-    const prevIdx = (pointIndex - 1 + points.length) % points.length;
-    if (points[prevIdx]?.type) {
+    // Incoming handle (previous point if it's off-curve). Respect open contour endpoints.
+    const prevIdx = isClosed || pointIndex > 0 ? (pointIndex - 1 + points.length) % points.length : null;
+    if (prevIdx !== null && points[prevIdx]?.type) {
+      this.hasIncomingHandle = true;
       const dx = points[prevIdx].x - point.x;
       const dy = points[prevIdx].y - point.y;
       const len = Math.hypot(dx, dy);
@@ -1253,9 +1266,10 @@ export class InterpolatingRibBehavior {
       }
     }
 
-    // Outgoing handle (next point if it's off-curve)
-    const nextIdx = (pointIndex + 1) % points.length;
-    if (points[nextIdx]?.type) {
+    // Outgoing handle (next point if it's off-curve). Respect open contour endpoints.
+    const nextIdx = isClosed || pointIndex < points.length - 1 ? (pointIndex + 1) % points.length : null;
+    if (nextIdx !== null && points[nextIdx]?.type) {
+      this.hasOutgoingHandle = true;
       const dx = points[nextIdx].x - point.x;
       const dy = points[nextIdx].y - point.y;
       const len = Math.hypot(dx, dy);
@@ -1323,16 +1337,49 @@ export class InterpolatingRibBehavior {
     // Calculate current rib point position
     this._recalculateRibPos();
 
-    // Calculate the line direction from prevHandle to nextHandle
+    // Choose interpolation axis.
+    const prevHandle = this.interpolationAxis?.prevHandle || null;
+    const nextHandle = this.interpolationAxis?.nextHandle || null;
+    const segmentAnchor = this.interpolationAxis?.segmentAnchor || null;
+    let lineStart = this.interpolationAxis?.lineStart || null;
+    let lineEnd = this.interpolationAxis?.lineEnd || null;
+
+    if (!lineStart || !lineEnd) {
+      if (prevHandle && nextHandle) {
+        lineStart = prevHandle;
+        lineEnd = nextHandle;
+      } else if (prevHandle || nextHandle) {
+        lineStart = segmentAnchor || this.originalRibPos;
+        lineEnd = prevHandle || nextHandle;
+      }
+    }
+
+    if (!lineStart || !lineEnd) {
+      lineStart = this.originalRibPos;
+      lineEnd = {
+        x: this.originalRibPos.x + this.tangent.x,
+        y: this.originalRibPos.y + this.tangent.y,
+      };
+    }
+
+    this.hasIncomingHandle =
+      this.interpolationAxis?.hasPrevHandle ?? this.hasIncomingHandle;
+    this.hasOutgoingHandle =
+      this.interpolationAxis?.hasNextHandle ?? this.hasOutgoingHandle;
+
+    // Calculate the line direction from selected axis endpoints.
     this.lineDir = {
-      x: nextHandle.x - prevHandle.x,
-      y: nextHandle.y - prevHandle.y,
+      x: lineEnd.x - lineStart.x,
+      y: lineEnd.y - lineStart.y,
     };
     this.lineLength = Math.hypot(this.lineDir.x, this.lineDir.y);
 
     if (this.lineLength > 0.001) {
       this.lineDir.x /= this.lineLength;
       this.lineDir.y /= this.lineLength;
+    } else {
+      this.lineDir = { ...this.tangent };
+      this.lineLength = 1;
     }
   }
 
@@ -1379,10 +1426,10 @@ export class InterpolatingRibBehavior {
     const handleOffsetDeltaX = -this.tangent.x * deltaNudge;
     const handleOffsetDeltaY = -this.tangent.y * deltaNudge;
 
-    const newHandleInOffsetX = this.originalHandleInOffsetX + handleOffsetDeltaX;
-    const newHandleInOffsetY = this.originalHandleInOffsetY + handleOffsetDeltaY;
-    const newHandleOutOffsetX = this.originalHandleOutOffsetX + handleOffsetDeltaX;
-    const newHandleOutOffsetY = this.originalHandleOutOffsetY + handleOffsetDeltaY;
+    const newHandleInOffsetX = this.originalHandleInOffsetX + (this.hasIncomingHandle ? handleOffsetDeltaX : 0);
+    const newHandleInOffsetY = this.originalHandleInOffsetY + (this.hasIncomingHandle ? handleOffsetDeltaY : 0);
+    const newHandleOutOffsetX = this.originalHandleOutOffsetX + (this.hasOutgoingHandle ? handleOffsetDeltaX : 0);
+    const newHandleOutOffsetY = this.originalHandleOutOffsetY + (this.hasOutgoingHandle ? handleOffsetDeltaY : 0);
 
     return {
       contourIndex: this.contourIndex,
@@ -1422,11 +1469,10 @@ export class InterpolatingRibBehavior {
  * Create an InterpolatingRibBehavior for Alt+drag of editable rib points.
  * @param {Object} skeletonData - The skeleton data
  * @param {Object} ribHit - Hit test result
- * @param {Object} prevHandle - Previous handle position {x, y}
- * @param {Object} nextHandle - Next handle position {x, y}
+ * @param {Object|null} interpolationAxis - Axis data
  * @returns {InterpolatingRibBehavior} The behavior instance
  */
-export function createInterpolatingRibBehavior(skeletonData, ribHit, prevHandle, nextHandle) {
+export function createInterpolatingRibBehavior(skeletonData, ribHit, interpolationAxis = null) {
   const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
   return new InterpolatingRibBehavior(
     skeletonData,
@@ -1435,8 +1481,7 @@ export function createInterpolatingRibBehavior(skeletonData, ribHit, prevHandle,
     side,
     normal,
     onCurvePoint,
-    prevHandle,
-    nextHandle
+    interpolationAxis
   );
 }
 
