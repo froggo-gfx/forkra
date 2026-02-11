@@ -768,11 +768,30 @@ registerVisualizationLayerDefinition({
   colors: { strokeColor: "#8888" },
   colorsDarkMode: { strokeColor: "#AAA8" },
   draw: (context, positionedGlyph, parameters, model, controller) => {
+    let x, y;
+
     const pointIndex = model.initialClickedPointIndex;
-    if (pointIndex === undefined) {
+    const skeletonPoint = model.initialClickedSkeletonPoint;
+
+    if (pointIndex !== undefined) {
+      // Regular path point
+      ({ x, y } = positionedGlyph.glyph.path.getPoint(pointIndex));
+    } else if (skeletonPoint) {
+      // Skeleton point - get coordinates from skeleton data
+      const editLayerName =
+        model.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+      const layer = positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName];
+      const skeletonData = layer?.customData?.["fontra.skeleton"];
+      const point = skeletonData?.contours?.[skeletonPoint.contourIdx]?.points?.[skeletonPoint.pointIdx];
+      if (point) {
+        ({ x, y } = point);
+      }
+    }
+
+    if (x === undefined || y === undefined) {
       return;
     }
-    const { x, y } = positionedGlyph.glyph.path.getPoint(pointIndex);
+
     context.strokeStyle = parameters.strokeColor;
     context.lineWidth = parameters.strokeWidth;
     context.setLineDash(parameters.lineDash);
@@ -1663,6 +1682,202 @@ registerVisualizationLayerDefinition({
   },
 });
 
+// Measure overlay layer (Q-key measurement tool)
+registerVisualizationLayerDefinition({
+  identifier: "fontra.measure.overlay",
+  name: "Measure Overlay",
+  selectionFunc: glyphSelector("editing"),
+  zIndex: 650, // Above other layers
+  screenParameters: {
+    strokeWidth: 1,
+    fontSize: 14,
+    dashPattern: [4, 4],
+  },
+  colors: {
+    textColor: "#333",
+    textBgColor: "#FFFFFF",
+    textBorderColor: "rgba(0, 0, 0, 0.25)",
+    skeletonColor: "#0066FF",
+    pathColor: "#22AA44",
+  },
+  colorsDarkMode: {
+    textColor: "#EEE",
+    textBgColor: "#333333",
+    textBorderColor: "rgba(255, 255, 255, 0.25)",
+    skeletonColor: "#4499FF",
+    pathColor: "#44CC66",
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    if (!model.measureMode) return;
+
+    const {
+      measureHoverSegment,
+      measureHoverRibPoint,
+      measureHoverHandle,
+      measureHoverPoints,
+      measureShowDirect,
+    } = model;
+
+    // Draw rib point width (Q+hover on rib point)
+    if (measureHoverRibPoint) {
+      const { x, y, width, leftWidth, rightWidth } = measureHoverRibPoint;
+      const isAsym = Math.abs(leftWidth - rightWidth) > 0.01;
+      const label = isAsym
+        ? `${leftWidth.toFixed(1)} | ${rightWidth.toFixed(1)}`
+        : width.toFixed(1);
+      drawMeasureLabel(context, x, y, label, parameters.skeletonColor, parameters);
+      return; // Don't show segment when over rib point
+    }
+
+    // Draw control point measurement (Q+hover on off-curve)
+    if (measureHoverHandle) {
+      const { p1, p2, type } = measureHoverHandle;
+      const segmentColor = type === "skeleton" ? parameters.skeletonColor : parameters.pathColor;
+      const dx = p1.x - p2.x;
+      const dy = p1.y - p2.y;
+      const dist = Math.hypot(dx, dy);
+      let angle = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+      if (angle > 90) angle = 180 - angle;
+      const label = `${dist.toFixed(1)}  ${angle.toFixed(1)}°`;
+      drawMeasureLine(context, p2, p1, label, segmentColor, parameters);
+      return;
+    }
+
+    // Draw segment hover measurement (Q+hover)
+    if (measureHoverSegment || measureHoverPoints) {
+      const { p1, p2, type } = measureHoverSegment || measureHoverPoints;
+      // Use skeleton color (blue) for skeleton segments, path color (green) for regular
+      const segmentColor = type === "skeleton" ? parameters.skeletonColor : parameters.pathColor;
+
+      if (measureShowDirect) {
+        // Alt+Q: direct distance line + angle
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const dist = Math.hypot(dx, dy);
+        let angle = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+        if (angle > 90) angle = 180 - angle;
+        const label = `${dist.toFixed(1)}  ${angle.toFixed(1)}°`;
+        drawMeasureLine(context, p1, p2, label, segmentColor, parameters);
+      } else {
+        // Q: projected distances (dx, dy)
+        const dx = Math.abs(p2.x - p1.x);
+        const dy = Math.abs(p2.y - p1.y);
+
+        // Determine corner point based on segment orientation
+        const cornerPoint = { x: p2.x, y: p1.y };
+
+        // Horizontal projection line (dx)
+        if (dx > 0.5) {
+          drawMeasureLine(
+            context,
+            p1,
+            cornerPoint,
+            dx.toFixed(1),
+            segmentColor,
+            parameters
+          );
+        }
+        // Vertical projection line (dy)
+        if (dy > 0.5) {
+          drawMeasureLine(
+            context,
+            cornerPoint,
+            p2,
+            dy.toFixed(1),
+            segmentColor,
+            parameters
+          );
+        }
+      }
+    }
+  },
+});
+
+function drawMeasureLine(context, p1, p2, label, color, parameters) {
+  // Draw dashed line
+  context.strokeStyle = color;
+  context.lineWidth = parameters.strokeWidth;
+  context.setLineDash(parameters.dashPattern);
+  strokeLine(context, p1.x, p1.y, p2.x, p2.y);
+  context.setLineDash([]);
+
+  // Draw label at midpoint with background
+  const midX = (p1.x + p2.x) / 2;
+  const midY = (p1.y + p2.y) / 2;
+
+  context.save();
+  context.scale(1, -1);
+
+  context.font = `500 ${parameters.fontSize}px fontra-ui-regular, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  // Measure text for background
+  const textWidth = context.measureText(label).width;
+  const padding = 4;
+
+  const bgX = midX - textWidth / 2 - padding;
+  const bgY = -midY - parameters.fontSize / 2 - padding;
+  const bgW = textWidth + padding * 2;
+  const bgH = parameters.fontSize + padding * 2;
+
+  // Draw background with rounded corners
+  const radius = 3;
+  context.beginPath();
+  context.roundRect(bgX, bgY, bgW, bgH, radius);
+  context.fillStyle = parameters.textBgColor;
+  context.fill();
+
+  // Draw subtle border
+  context.strokeStyle = parameters.textBorderColor;
+  context.lineWidth = 1;
+  context.stroke();
+
+  // Draw text
+  context.fillStyle = parameters.textColor;
+  context.fillText(label, midX, -midY);
+  context.restore();
+}
+
+function drawMeasureLabel(context, x, y, label, color, parameters) {
+  // Draw label at point with small offset above
+  const offsetY = 15;
+
+  context.save();
+  context.scale(1, -1);
+
+  context.font = `500 ${parameters.fontSize}px fontra-ui-regular, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  // Measure text for background
+  const textWidth = context.measureText(label).width;
+  const padding = 4;
+
+  const labelY = -y - offsetY;
+  const bgX = x - textWidth / 2 - padding;
+  const bgY = labelY - parameters.fontSize / 2 - padding;
+  const bgW = textWidth + padding * 2;
+  const bgH = parameters.fontSize + padding * 2;
+
+  // Draw background with rounded corners
+  const radius = 3;
+  context.beginPath();
+  context.roundRect(bgX, bgY, bgW, bgH, radius);
+  context.fillStyle = parameters.textBgColor;
+  context.fill();
+
+  // Draw subtle border
+  context.strokeStyle = parameters.textBorderColor;
+  context.lineWidth = 1;
+  context.stroke();
+
+  // Draw text
+  context.fillStyle = parameters.textColor;
+  context.fillText(label, x, labelY);
+  context.restore();
+}
+
 //
 // allGlyphsCleanVisualizationLayerDefinition is not registered, but used
 // separately for the "clean" display.
@@ -1702,7 +1917,7 @@ function strokeNode(context, pt, cornerNodeSize, smoothNodeSize, handleNodeSize)
   }
 }
 
-function fillSquareNode(context, pt, nodeSize) {
+export function fillSquareNode(context, pt, nodeSize) {
   context.fillRect(pt.x - nodeSize / 2, pt.y - nodeSize / 2, nodeSize, nodeSize);
 }
 

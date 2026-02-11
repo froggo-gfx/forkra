@@ -228,6 +228,7 @@ export class RangeSlider extends html.UnlitElement {
     step: {},
     onChangeCallback: { type: Function },
     values: {},
+    allowInputBeyondRange: { type: Boolean },
   };
 
   constructor() {
@@ -244,9 +245,18 @@ export class RangeSlider extends html.UnlitElement {
     this.onChangeCallback = () => {};
     this.values = [];
     this.disabled = false;
+    this.allowInputBeyondRange = false;
   }
 
   get valueFormatted() {
+    // Derive decimal places from step if it's a number
+    if (this.step !== "any" && typeof this.step === "number") {
+      const stepStr = this.step.toString();
+      const decimalIndex = stepStr.indexOf(".");
+      const decimalPlaces = decimalIndex >= 0 ? stepStr.length - decimalIndex - 1 : 0;
+      return round(this.value, decimalPlaces);
+    }
+    // Fallback to range-based heuristic
     const minMaxRange = this.maxValue - this.minValue;
     const decimalPlaces = minMaxRange < 100 ? 3 : 2;
     return round(this.value, decimalPlaces);
@@ -288,6 +298,15 @@ export class RangeSlider extends html.UnlitElement {
 
   getValueFromEventTarget(event) {
     let value = event.target.valueAsNumber;
+    // When allowInputBeyondRange is set and the user typed in the number input,
+    // accept any numeric value without clamping to slider min/max.
+    if (
+      this.allowInputBeyondRange &&
+      event.target === this.numberInput &&
+      !isNaN(value)
+    ) {
+      return value;
+    }
     const isValid = event.target.reportValidity();
     if (isValid && this.isDiscrete()) {
       if (event.target === this.rangeInput) {
@@ -360,7 +379,9 @@ export class RangeSlider extends html.UnlitElement {
     event.preventDefault();
     event.stopImmediatePropagation();
 
-    value = clamp(value, this.minValue, this.maxValue);
+    if (!this.allowInputBeyondRange || event.target === this.rangeInput) {
+      value = clamp(value, this.minValue, this.maxValue);
+    }
 
     if (dispatch) {
       this.onChangeCallback({ value });
@@ -405,8 +426,7 @@ export class RangeSlider extends html.UnlitElement {
               value,
               step: this.step,
               required: "required",
-              min: this.minValue,
-              max: this.maxValue,
+              ...(this.allowInputBeyondRange ? {} : { min: this.minValue, max: this.maxValue }),
               pattern: "[0-9]+",
               onkeydown: (event) => this.onKeyDown(event),
               onchange: (event) => {
