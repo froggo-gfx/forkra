@@ -75,9 +75,7 @@ import {
   handleTunniPointMouseDrag,
   handleTunniPointMouseUp,
   tunniLayerHitTest,
-  calculateEqualizedControlPoints,
-  areDistancesEqualized,
-  equalizeSegmentDistances,
+  equalizeThenQuantizeSegmentControlPoints,
   handleTrueTunniPointMouseDown,
   handleTrueTunniPointMouseDrag,
   handleTrueTunniPointMouseUp,
@@ -631,15 +629,13 @@ export class PointerTool extends BaseTool {
     // If we clicked on a Tunni point, handle the drag operation to provide visual feedback during drag
     // while maintaining a single undo record
     if (tunniInitialState) {
-      // Check if Ctrl+Shift keys are pressed to equalize control point distances
-      // Only for current handle, not for true Tunni point
+      // Ctrl+Shift+click on midpoint Tunni:
+      // equalize control point distances first, then quantize handles to grid.
+      // Only for midpoint Tunni, not for true Tunni point (intersection).
       if (!isTrueTunniPoint && initialEvent.ctrlKey && initialEvent.shiftKey) {
-        // Equalize the control point distances instead of starting drag
-        await equalizeSegmentDistances(
+        await equalizeThenQuantizeSegmentControlPoints(
           tunniInitialState.tunniPointHit.segment,
           tunniInitialState.originalSegmentPoints,
-          sceneController.sceneModel,
-          sceneController.sceneModel.getSelectedPositionedGlyph(),
           sceneController
         );
         return;

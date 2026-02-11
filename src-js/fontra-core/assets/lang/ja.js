@@ -274,6 +274,8 @@ export const strings = {
   "shortcuts.tooltip.reset-to-default": "デフォルトにリセット",
   "shortcuts.warning.exists": "このショートカットはすでに使われています: %0",
   "sidebar.designspace-navigation": "Designspaceナビゲーション",
+  "sidebar.designspace-navigation.speedpunk": "SpeedPunk",
+  "sidebar.designspace-navigation.speedpunk.peak-height": "Peak height (UPM)",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "レイヤー名:",
   "sidebar.designspace-navigation.dialog.add-source.label.source-name": "ソース名:",
   "sidebar.designspace-navigation.dialog.add-source.ok-button-title": "追加",

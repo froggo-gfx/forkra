@@ -779,6 +779,116 @@ export async function equalizeSegmentDistances(segment, segmentPoints, sceneMode
 }
 
 /**
+ * Quantize the control points (handles) of a cubic segment to integer grid positions.
+ * @param {Object} segment - The segment containing parent point indices
+ * @param {Object} sceneController - Scene controller to perform edits
+ */
+export async function quantizeSegmentControlPoints(segment, sceneController) {
+  try {
+    await sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+      let changed = false;
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        const path = layerGlyph.path;
+        if (!path || !segment?.parentPointIndices) {
+          continue;
+        }
+
+        const controlPoint1Index = segment.parentPointIndices[1];
+        const controlPoint2Index = segment.parentPointIndices[2];
+        if (controlPoint1Index === undefined || controlPoint2Index === undefined) {
+          continue;
+        }
+
+        const cp1 = path.getPoint(controlPoint1Index);
+        const cp2 = path.getPoint(controlPoint2Index);
+        if (!cp1 || !cp2) {
+          continue;
+        }
+
+        const q1 = snapToGrid(cp1);
+        const q2 = snapToGrid(cp2);
+
+        if (cp1.x !== q1.x || cp1.y !== q1.y) {
+          path.setPointPosition(controlPoint1Index, q1.x, q1.y);
+          changed = true;
+        }
+        if (cp2.x !== q2.x || cp2.y !== q2.y) {
+          path.setPointPosition(controlPoint2Index, q2.x, q2.y);
+          changed = true;
+        }
+      }
+      return changed ? "Quantize Tunni Control Points" : undefined;
+    });
+  } catch (error) {
+    console.error("Error quantizing Tunni control points:", error);
+    throw error;
+  }
+}
+
+/**
+ * Equalize control point distances first, then quantize both control points to grid.
+ * Runs as a single recorded edit.
+ * @param {Object} segment - The segment containing parent point indices
+ * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
+ * @param {Object} sceneController - Scene controller to perform edits
+ */
+export async function equalizeThenQuantizeSegmentControlPoints(
+  segment,
+  segmentPoints,
+  sceneController
+) {
+  try {
+    // Equalize from the current segment geometry, then quantize to integer grid.
+    const equalizedControlPoints = calculateEqualizedControlPoints(segmentPoints);
+    const quantizedControlPoints = [
+      snapToGrid(equalizedControlPoints[0]),
+      snapToGrid(equalizedControlPoints[1]),
+    ];
+
+    await sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+      let changed = false;
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        const path = layerGlyph.path;
+        if (!path || !segment?.parentPointIndices) {
+          continue;
+        }
+
+        const controlPoint1Index = segment.parentPointIndices[1];
+        const controlPoint2Index = segment.parentPointIndices[2];
+        if (controlPoint1Index === undefined || controlPoint2Index === undefined) {
+          continue;
+        }
+
+        const cp1 = path.getPoint(controlPoint1Index);
+        const cp2 = path.getPoint(controlPoint2Index);
+        if (!cp1 || !cp2) {
+          continue;
+        }
+
+        const q1 = quantizedControlPoints[0];
+        const q2 = quantizedControlPoints[1];
+
+        if (cp1.x !== q1.x || cp1.y !== q1.y) {
+          path.setPointPosition(controlPoint1Index, q1.x, q1.y);
+          changed = true;
+        }
+        if (cp2.x !== q2.x || cp2.y !== q2.y) {
+          path.setPointPosition(controlPoint2Index, q2.x, q2.y);
+          changed = true;
+        }
+      }
+
+      return changed
+        ? "Equalize and Quantize Tunni Control Points"
+        : undefined;
+    });
+  } catch (error) {
+    console.error("Error equalizing and quantizing Tunni control points:", error);
+    throw error;
+  }
+}
+
+/**
  * Handles mouse down event when clicking on a Tunni point
  * @param {Object} event - Mouse event
  * @param {Object} sceneController - Scene controller for scene access

@@ -66,6 +66,10 @@ const LIST_HEADER_ANIMATION_STYLE = `
 }
 `;
 
+const SPEEDPUNK_PEAK_HEIGHT_DEFAULT_UPM = 24;
+const SPEEDPUNK_PEAK_HEIGHT_MIN_UPM = 1;
+const SPEEDPUNK_PEAK_HEIGHT_MAX_UPM = 1000;
+
 export default class DesignspaceNavigationPanel extends Panel {
   identifier = "designspace-navigation";
   iconPath = "/images/sliders.svg";
@@ -244,6 +248,37 @@ export default class DesignspaceNavigationPanel extends Panel {
           ]
         ),
       },
+      {
+        id: "speedpunk-accordion-item",
+        label: translate("sidebar.designspace-navigation.speedpunk"),
+        open: false,
+        content: html.div(
+          {
+            style: `
+              display: grid;
+              grid-template-columns: auto 1fr;
+              gap: 0.5em;
+              align-items: center;
+            `,
+          },
+          [
+            html.label(
+              {
+                for: "speedpunk-peak-height-input",
+                style: "white-space: nowrap;",
+              },
+              [translate("sidebar.designspace-navigation.speedpunk.peak-height")]
+            ),
+            html.input({
+              id: "speedpunk-peak-height-input",
+              type: "number",
+              min: SPEEDPUNK_PEAK_HEIGHT_MIN_UPM,
+              max: SPEEDPUNK_PEAK_HEIGHT_MAX_UPM,
+              step: 1,
+            }),
+          ]
+        ),
+      },
     ];
 
     return html.div({ class: "panel" }, [
@@ -271,9 +306,61 @@ export default class DesignspaceNavigationPanel extends Panel {
     return this.accordion.querySelector("#glyph-layers-accordion-item");
   }
 
+  get speedPunkPeakHeightInput() {
+    return this.accordion.querySelector("#speedpunk-peak-height-input");
+  }
+
+  _normalizeSpeedPunkPeakHeightUpm(value) {
+    if (!Number.isFinite(value)) {
+      return SPEEDPUNK_PEAK_HEIGHT_DEFAULT_UPM;
+    }
+    return Math.max(
+      SPEEDPUNK_PEAK_HEIGHT_MIN_UPM,
+      Math.min(SPEEDPUNK_PEAK_HEIGHT_MAX_UPM, Math.round(value))
+    );
+  }
+
+  _updateSpeedPunkPeakHeightInput(value) {
+    const input = this.speedPunkPeakHeightInput;
+    if (!input) {
+      return;
+    }
+    const normalized = this._normalizeSpeedPunkPeakHeightUpm(
+      value ??
+        this.sceneSettings.speedPunkPeakHeightUpm ??
+        this.sceneSettings.speedPunkPeakHeightPx
+    );
+    input.value = String(normalized);
+  }
+
   setup() {
     this._setFontLocationValues();
     this.glyphAxesElement.values = this.sceneSettings.glyphLocation;
+    this._updateSpeedPunkPeakHeightInput();
+
+    this.speedPunkPeakHeightInput.addEventListener("input", (event) => {
+      const parsedValue = Number(event.target.value);
+      if (!Number.isFinite(parsedValue)) {
+        return;
+      }
+      const normalizedValue = this._normalizeSpeedPunkPeakHeightUpm(parsedValue);
+      this.sceneSettingsController.setItem("speedPunkPeakHeightUpm", normalizedValue, {
+        senderID: this,
+      });
+    });
+
+    this.speedPunkPeakHeightInput.addEventListener("change", () => {
+      const parsedValue = Number(this.speedPunkPeakHeightInput.value);
+      const normalizedValue = this._normalizeSpeedPunkPeakHeightUpm(parsedValue);
+      this.sceneSettingsController.setItem("speedPunkPeakHeightUpm", normalizedValue, {
+        senderID: this,
+      });
+      this._updateSpeedPunkPeakHeightInput(normalizedValue);
+    });
+
+    this.sceneSettingsController.addKeyListener("speedPunkPeakHeightUpm", (event) => {
+      this._updateSpeedPunkPeakHeightInput(event.newValue);
+    });
 
     this.fontAxesElement.addEventListener(
       "locationChanged",

@@ -274,6 +274,8 @@ export const strings = {
   "shortcuts.tooltip.reset-to-default": "Reset to default",
   "shortcuts.warning.exists": "Shortcut exists for: %0",
   "sidebar.designspace-navigation": "Designspace Navigation",
+  "sidebar.designspace-navigation.speedpunk": "SpeedPunk",
+  "sidebar.designspace-navigation.speedpunk.peak-height": "Peak height (UPM)",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "Layer:",
   "sidebar.designspace-navigation.dialog.add-source.label.source-name": "Source name:",
   "sidebar.designspace-navigation.dialog.add-source.ok-button-title": "Add",

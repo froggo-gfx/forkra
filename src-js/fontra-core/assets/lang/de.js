@@ -276,6 +276,8 @@ export const strings = {
   "shortcuts.tooltip.reset-to-default": "Zurücksetzen zu 'Default'",
   "shortcuts.warning.exists": "Tastaturkurzbefehl existiert bereits für: %0",
   "sidebar.designspace-navigation": "Designspace Navigation",
+  "sidebar.designspace-navigation.speedpunk": "SpeedPunk",
+  "sidebar.designspace-navigation.speedpunk.peak-height": "Peak height (UPM)",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "Layer:",
   "sidebar.designspace-navigation.dialog.add-source.label.source-name": "Source Name:",
   "sidebar.designspace-navigation.dialog.add-source.ok-button-title": "Hinzufügen",

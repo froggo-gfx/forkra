@@ -278,6 +278,8 @@ export const strings = {
   "shortcuts.tooltip.reset-to-default": "Reset to default",
   "shortcuts.warning.exists": "Le raccourci clavier existe pour %0",
   "sidebar.designspace-navigation": "Navigation du designspace",
+  "sidebar.designspace-navigation.speedpunk": "SpeedPunk",
+  "sidebar.designspace-navigation.speedpunk.peak-height": "Peak height (UPM)",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "Layer:",
   "sidebar.designspace-navigation.dialog.add-source.label.source-name":
     "Nom de source:",

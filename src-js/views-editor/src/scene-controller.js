@@ -123,6 +123,7 @@ export class SceneController {
       showTunniDistance: true,
       showTunniTension: true,
       showTunniAngle: false,
+      speedPunkPeakHeightUpm: 24,
     });
     this.sceneSettings = this.sceneSettingsController.model;
 
@@ -530,6 +531,10 @@ export class SceneController {
     this.sceneSettingsController.addKeyListener("coarseGridSpacing", (event) => {
     window.coarseGridSpacing = event.newValue;
     });
+
+    this.sceneSettingsController.addKeyListener("speedPunkPeakHeightUpm", () =>
+      this.canvasController.requestUpdate()
+    );
 
     this.sceneSettingsController.addKeyListener("selectedGlyph", (event) => {
       this._resetStoredGlyphPosition();

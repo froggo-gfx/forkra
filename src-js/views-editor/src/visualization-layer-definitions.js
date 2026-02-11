@@ -1724,12 +1724,13 @@ registerVisualizationLayerDefinition({
 //// speedpunk
 // Add new functions before the main draw function
 function calculateSegmentBudget(numCurves, zoomFactor, baseSegments = 400, minSegmentsPerCurve = 5) {
-  // Apply zoom-based scaling: increase budget at higher zoom for smoother ribbons
-  const zoomAdjustedBudget = Math.ceil(baseSegments * Math.sqrt(zoomFactor));
-  
+  // Keep the sampling budget zoom-independent to keep SpeedPunk geometry stable.
+  // zoomFactor is intentionally ignored.
+  void zoomFactor;
+
   // Divide budget among curves, respecting minimum
  const stepsPerSegment = Math.max(
-    Math.floor(zoomAdjustedBudget / Math.max(numCurves, 1)),
+    Math.floor(baseSegments / Math.max(numCurves, 1)),
     minSegmentsPerCurve
   );
   
@@ -1839,21 +1840,28 @@ registerVisualizationLayerDefinition({
      context.globalAlpha = 0.5;
 
      const zoomFactor = controller.magnification || 1.0;
-     const dampeningFactor = Math.pow(zoomFactor, +(parameters.zoomDampening || 1.2));
-     const heightMultiplier = (parameters.drawfactor || 5.0) *
-                              (parameters.curveGain || 1.0) *
-                              dampeningFactor;
-     //const heightMultiplier = (parameters.drawfactor || 10.0) * (parameters.curveGain || 1.0);
+     const peakHeightGlyphUnits =
+       model.sceneSettings?.speedPunkPeakHeightUpm ??
+       model.sceneSettings?.speedPunkPeakHeightPx ??
+       24;
      
      // Count total curve segments in the glyph
      const totalCurveCount = countCurveSegments(path);
 
      // Calculate adaptive segment budget
+     const unscaledBaseSegmentBudget = Math.max(
+       1,
+       Math.round((parameters.baseSegmentBudget || 400) * zoomFactor)
+     );
+     const unscaledMinSegmentsPerCurve = Math.max(
+       1,
+       Math.round((parameters.minSegmentsPerCurve || 5) * zoomFactor)
+     );
      const stepsPerSegment = calculateSegmentBudget(
        totalCurveCount,
        zoomFactor,
-       parameters.baseSegmentBudget || 400,
-       parameters.minSegmentsPerCurve || 5
+       unscaledBaseSegmentBudget,
+       unscaledMinSegmentsPerCurve
      );
 
      // Optional: Log for debugging (remove in production)
@@ -1918,7 +1926,7 @@ registerVisualizationLayerDefinition({
        averageCurveLength = curveCount > 0 ? totalLength / curveCount : 0;
      }
 
-     // First pass: collect global curvature range if needed
+     // Optional pass: collect global curvature range for color normalization.
      let globalMinAbs = Infinity;
      let globalMaxAbs = -Infinity;
      
@@ -2063,6 +2071,7 @@ registerVisualizationLayerDefinition({
            const absVals = samples.map(s => Math.abs(s.curvature));
            const minAbsSegment = Math.min(...absVals);
            const maxAbsSegment = Math.max(...absVals);
+           const segmentPeakAbsCurvature = maxAbsSegment > 1e-12 ? maxAbsSegment : 1;
 
            // Use global or per-segment normalization
            const minAbs = useGlobalNormalization ? globalMinAbs : minAbsSegment;
@@ -2083,8 +2092,8 @@ registerVisualizationLayerDefinition({
              const mag = Math.hypot(nx, ny) || 1;
              nx /= mag; ny /= mag;
 
-             // use signed height if desired; curvature in file is absolute, so sign=1.
-             const h = Math.sign(samples[s].curvature) * Math.abs(samples[s].curvature) * heightMultiplier * -180000;
+             const normalizedHeight = Math.abs(samples[s].curvature) / segmentPeakAbsCurvature;
+             const h = -normalizedHeight * peakHeightGlyphUnits;
              offCurve.push({ x: x + nx * h, y: y + ny * h });
            }
 
@@ -2133,6 +2142,7 @@ registerVisualizationLayerDefinition({
            const absVals = samples.map(s => Math.abs(s.curvature));
            const minAbsSegment = Math.min(...absVals);
            const maxAbsSegment = Math.max(...absVals);
+           const segmentPeakAbsCurvature = maxAbsSegment > 1e-12 ? maxAbsSegment : 1;
 
            // Use global or per-segment normalization
            const minAbs = useGlobalNormalization ? globalMinAbs : minAbsSegment;
@@ -2151,7 +2161,8 @@ registerVisualizationLayerDefinition({
              const mag = Math.hypot(nx, ny) || 1;
              nx /= mag; ny /= mag;
 
-             const h = Math.sign(samples[s].curvature) * Math.abs(samples[s].curvature) * heightMultiplier * -48000;
+             const normalizedHeight = Math.abs(samples[s].curvature) / segmentPeakAbsCurvature;
+             const h = -normalizedHeight * peakHeightGlyphUnits;
              offCurveQ.push({ x: x + nx * h, y: y + ny * h });
          }
 
