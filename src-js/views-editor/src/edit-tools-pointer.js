@@ -856,7 +856,51 @@ export class PointerTool extends BaseTool {
     }
 
     if (ribHit && (!hasSkeletonPointUnderCursor || preferRibOverSkeleton)) {
-      await this._handleDragRibPoint(eventStream, initialEvent, ribHit);
+      const clickedRibShortKey = `${ribHit.contourIndex}/${ribHit.pointIndex}/${ribHit.side}`;
+      const clickedRibFullKey = `skeletonRibPoint/${clickedRibShortKey}`;
+      let targetRibSelection;
+
+      if (initialEvent.shiftKey) {
+        const modeFunc = getSelectModeFunction(initialEvent);
+        sceneController.selection = modeFunc(sceneController.selection, new Set([clickedRibFullKey]));
+
+        if (!(await shouldInitiateDrag(eventStream, initialEvent))) {
+          initialEvent.preventDefault();
+          return;
+        }
+
+        const updatedRibSelection =
+          parseSelection(sceneController.selection).skeletonRibPoint || new Set();
+        if (!updatedRibSelection.size || !updatedRibSelection.has(clickedRibShortKey)) {
+          initialEvent.preventDefault();
+          return;
+        }
+        targetRibSelection = updatedRibSelection;
+      } else {
+        const currentRibSelection =
+          parseSelection(sceneController.selection).skeletonRibPoint || new Set();
+        const clickedWasSelected = currentRibSelection.has(clickedRibShortKey);
+        targetRibSelection =
+          clickedWasSelected && currentRibSelection.size
+            ? new Set(currentRibSelection)
+            : new Set([clickedRibShortKey]);
+
+        sceneController.selection = new Set(
+          [...targetRibSelection].map((key) => `skeletonRibPoint/${key}`)
+        );
+
+        if (!(await shouldInitiateDrag(eventStream, initialEvent))) {
+          initialEvent.preventDefault();
+          return;
+        }
+      }
+
+      await this._handleDragRibPoint(
+        eventStream,
+        initialEvent,
+        ribHit,
+        targetRibSelection
+      );
       initialEvent.preventDefault();
       return;
     }
@@ -2269,7 +2313,7 @@ export class PointerTool extends BaseTool {
    * Handle dragging a rib point (width control point).
    * Constrains movement to the normal direction and updates point width.
    */
-  async _handleDragRibPoint(eventStream, initialEvent, ribHit) {
+  async _handleDragRibPoint(eventStream, initialEvent, ribHit, selectedRibSides) {
     const sceneController = this.sceneController;
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
 
@@ -2284,70 +2328,76 @@ export class PointerTool extends BaseTool {
       y: localPoint.y - positionedGlyph.y,
     };
 
-    // Capture pre-existing skeleton point selection before overwriting
-    const { skeletonPoint: preSelectedPoints } = parseSelection(sceneController.selection);
-
     // Use first layer for structural checks
     const editLayerNameForCheck = sceneController.editingLayerNames?.[0];
     const layerForCheck = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerNameForCheck];
     const skeletonDataForCheck = layerForCheck?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (!skeletonDataForCheck?.contours?.length) return;
 
-    // Build set of target points: always include the dragged point, plus any pre-selected
-    const targetPointsMap = new Map(); // key "ci/pi" -> target info
+    const defaultRibKey = `${ribHit.contourIndex}/${ribHit.pointIndex}/${ribHit.side}`;
+    const selectedRibKeys =
+      selectedRibSides?.size > 0 ? new Set(selectedRibSides) : new Set([defaultRibKey]);
 
-    const addTargetPoint = (ci, pi) => {
-      const key = `${ci}/${pi}`;
+    // Build set of target rib points from explicit rib-side selection.
+    const targetPointsMap = new Map(); // key "ci/pi/side" -> target info
+    const addTargetRibPoint = (ci, pi, side) => {
+      const key = `${ci}/${pi}/${side}`;
       if (targetPointsMap.has(key)) return;
-      const contour = skeletonDataForCheck?.contours?.[ci];
+      const contour = skeletonDataForCheck.contours?.[ci];
       const pt = contour?.points?.[pi];
       if (!pt || pt.type) return; // skip off-curve points
+
       const isAsym = pt.leftWidth !== undefined || pt.rightWidth !== undefined;
       const isSingleSided = contour.singleSided ?? false;
-      // Per-side editable: check based on dragSide (determined later)
-      const isLeftEditable = pt.leftEditable === true;
-      const isRightEditable = pt.rightEditable === true;
+      const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+
       targetPointsMap.set(key, {
+        ribKey: key,
         contourIndex: ci,
         pointIndex: pi,
+        side,
         isAsymmetric: isAsym,
         isSingleSided,
-        isLeftEditable,
-        isRightEditable,
+        isEditable: pt[editableKey] === true,
       });
     };
 
-    addTargetPoint(ribHit.contourIndex, ribHit.pointIndex);
-    // Only include pre-selected points if Shift is held (additive selection)
-    if (initialEvent.shiftKey && preSelectedPoints) {
-      for (const key of preSelectedPoints) {
-        const [ci, pi] = key.split("/").map(Number);
-        addTargetPoint(ci, pi);
+    for (const key of selectedRibKeys) {
+      const [ci, pi, side] = key.split("/");
+      const contourIndex = Number(ci);
+      const pointIndex = Number(pi);
+      if (!Number.isInteger(contourIndex) || !Number.isInteger(pointIndex)) {
+        continue;
       }
+      if (side !== "left" && side !== "right") {
+        continue;
+      }
+      addTargetRibPoint(contourIndex, pointIndex, side);
     }
 
     const targetPoints = [...targetPointsMap.values()];
-    const dragSide = ribHit.side; // "left" or "right"
+    if (!targetPoints.length) return;
 
-    // Build visual selection: rib point keys for all targets
-    const newSelection = new Set();
-    for (const tp of targetPoints) {
-      const leftKey = `skeletonRibPoint/${tp.contourIndex}/${tp.pointIndex}/left`;
-      const rightKey = `skeletonRibPoint/${tp.contourIndex}/${tp.pointIndex}/right`;
-      if (tp.isSingleSided) {
-        // Single-sided: one rib on the direction side
-        newSelection.add(dragSide === "left" ? leftKey : rightKey);
-      } else if (tp.isAsymmetric) {
-        // Asymmetric: only the dragged side
-        newSelection.add(dragSide === "left" ? leftKey : rightKey);
-      } else {
-        // Symmetric: only select the clicked side (not both)
-        // This allows per-side editable toggle even for symmetric points
-        newSelection.add(dragSide === "left" ? leftKey : rightKey);
-      }
+    // Keep the rib-side selection explicit during drag.
+    sceneController.selection = new Set(
+      targetPoints.map((tp) => `skeletonRibPoint/${tp.ribKey}`)
+    );
+
+    const allTargetsEditable = targetPoints.every((tp) => tp.isEditable);
+    const belongsToSingleSegment = this._selectedRibTargetsBelongToSingleSegment(
+      targetPoints,
+      skeletonDataForCheck
+    );
+    const movementAllowed = allTargetsEditable || belongsToSingleSegment;
+    if (!movementAllowed) {
+      return;
     }
-    sceneController.selection = newSelection;
 
-    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const previousCursor = this.canvasController.canvas.style.cursor;
+    this.canvasController.canvas.style.cursor = "crosshair";
+
+    try {
+      await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       // Setup data for ALL editable layers (multi-source editing support)
       const layersData = {};
       for (const editLayerName of sceneController.editingLayerNames) {
@@ -2376,13 +2426,13 @@ export class PointerTool extends BaseTool {
           const ribHitForPoint = {
             contourIndex: tp.contourIndex,
             pointIndex: tp.pointIndex,
-            side: dragSide,
+            side: tp.side,
             normal,
             onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
           };
 
           // Check if this side is editable
-          const sideIsEditable = (dragSide === "left" && tp.isLeftEditable) || (dragSide === "right" && tp.isRightEditable);
+          const sideIsEditable = tp.isEditable;
 
           if (tp.isSingleSided) {
             // For single-sided, create behavior with totalWidth as the effective width
@@ -2402,7 +2452,7 @@ export class PointerTool extends BaseTool {
                   skeletonPoint,
                   normal,
                   contour,
-                  dragSide
+                  tp.side
                 );
                 if (handles) {
                   behavior = createInterpolatingRibBehavior(
@@ -2432,7 +2482,7 @@ export class PointerTool extends BaseTool {
                 data.original,
                 tp.contourIndex,
                 tp.pointIndex,
-                dragSide,
+                tp.side,
                 normal,
                 { x: skeletonPoint.x, y: skeletonPoint.y }
               );
@@ -2452,7 +2502,7 @@ export class PointerTool extends BaseTool {
                 skeletonPoint,
                 normal,
                 contour,
-                dragSide
+                tp.side
               );
               if (handles) {
                 behavior = createInterpolatingRibBehavior(
@@ -2524,9 +2574,10 @@ export class PointerTool extends BaseTool {
 
             const contour = working.contours[target.contourIndex];
             const point = contour.points[target.pointIndex];
+            const side = target.side;
 
             // Check if this side is editable
-            const sideIsEditable = (dragSide === "left" && target.isLeftEditable) || (dragSide === "right" && target.isRightEditable);
+            const sideIsEditable = target.isEditable;
 
             if (target.isSingleSided) {
               // Single-sided: halfWidth from behavior is the new totalWidth
@@ -2536,7 +2587,7 @@ export class PointerTool extends BaseTool {
               delete point.rightWidth;
               // Also apply nudge if editable
               if (sideIsEditable && change.nudge !== undefined) {
-                if (dragSide === "left") {
+                if (side === "left") {
                   point.leftNudge = change.nudge;
                 } else {
                   point.rightNudge = change.nudge;
@@ -2544,7 +2595,7 @@ export class PointerTool extends BaseTool {
               }
               // Apply 2D handle offset compensation for interpolation or editable drag (single-sided)
               if (sideIsEditable && (change.isInterpolation || change.hasHandleOffsets)) {
-                if (dragSide === "left") {
+                if (side === "left") {
                   point.leftHandleInOffsetX = change.handleInOffsetX;
                   point.leftHandleInOffsetY = change.handleInOffsetY;
                   point.leftHandleOutOffsetX = change.handleOutOffsetX;
@@ -2564,7 +2615,7 @@ export class PointerTool extends BaseTool {
               // Editable mode: behavior determines if width changes based on symmetric/asymmetric
               if (change.isAsymmetric) {
                 // Asymmetric: update per-side width and nudge
-                if (dragSide === "left") {
+                if (side === "left") {
                   point.leftWidth = change.halfWidth;
                   point.leftNudge = change.nudge;
                 } else {
@@ -2574,7 +2625,7 @@ export class PointerTool extends BaseTool {
                 delete point.width;
               } else {
                 // Symmetric: only update nudge, keep width unchanged
-                if (dragSide === "left") {
+                if (side === "left") {
                   point.leftNudge = change.nudge;
                 } else {
                   point.rightNudge = change.nudge;
@@ -2584,7 +2635,7 @@ export class PointerTool extends BaseTool {
 
               // Apply 2D handle offset compensation for interpolation or editable drag
               if (change.isInterpolation || change.hasHandleOffsets) {
-                if (dragSide === "left") {
+                if (side === "left") {
                   point.leftHandleInOffsetX = change.handleInOffsetX;
                   point.leftHandleInOffsetY = change.handleInOffsetY;
                   point.leftHandleOutOffsetX = change.handleOutOffsetX;
@@ -2604,7 +2655,7 @@ export class PointerTool extends BaseTool {
               }
             } else if (target.isAsymmetric) {
               // Asymmetric: update only the dragged side
-              if (dragSide === "left") {
+              if (side === "left") {
                 point.leftWidth = change.halfWidth;
               } else {
                 point.rightWidth = change.halfWidth;
@@ -2644,7 +2695,10 @@ export class PointerTool extends BaseTool {
         undoLabel: translate("edit-tools-pointer.undo.change-skeleton-width"),
         broadcast: true,
       };
-    });
+      });
+    } finally {
+      this.canvasController.canvas.style.cursor = previousCursor || "default";
+    }
   }
 
   /**
@@ -3423,6 +3477,44 @@ export class PointerTool extends BaseTool {
     return result;
   }
 
+  _selectedRibTargetsBelongToSingleSegment(targets, skeletonData) {
+    if (!targets?.length) {
+      return false;
+    }
+    if (targets.length === 1) {
+      return true;
+    }
+    if (targets.length !== 2) {
+      return false;
+    }
+
+    const [a, b] = targets;
+    if (
+      a.contourIndex !== b.contourIndex ||
+      a.side !== b.side ||
+      a.pointIndex === b.pointIndex
+    ) {
+      return false;
+    }
+
+    const contour = skeletonData?.contours?.[a.contourIndex];
+    if (!contour?.points?.length) {
+      return false;
+    }
+
+    const segments = buildSegmentsFromSkeletonPoints(contour.points, !!contour.isClosed);
+    for (const segment of segments) {
+      const sameDirection =
+        segment.startIndex === a.pointIndex && segment.endIndex === b.pointIndex;
+      const oppositeDirection =
+        segment.startIndex === b.pointIndex && segment.endIndex === a.pointIndex;
+      if (sameDirection || oppositeDirection) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /**
    * Handle arrow key movement for rib points.
    * For non-editable ribs: changes width only.
@@ -3435,6 +3527,23 @@ export class PointerTool extends BaseTool {
     const ribPointsInfo = this._getSelectedRibPointInfo(ribPointSelection);
     if (ribPointsInfo.length === 0) return;
 
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const editLayerName = sceneController.editingLayerNames?.[0];
+    const skeletonData =
+      positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName]?.customData?.[
+        SKELETON_CUSTOM_DATA_KEY
+      ];
+    if (!skeletonData?.contours?.length) return;
+
+    const allTargetsEditable = ribPointsInfo.every((ribInfo) => ribInfo.isEditable);
+    const belongsToSingleSegment = this._selectedRibTargetsBelongToSingleSegment(
+      ribPointsInfo,
+      skeletonData
+    );
+    if (!allTargetsEditable && !belongsToSingleSegment) {
+      return;
+    }
+
     // Calculate arrow key delta
     let [dx, dy] = arrowKeyDeltas[event.key];
     if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
@@ -3445,8 +3554,6 @@ export class PointerTool extends BaseTool {
       dy *= 10;
     }
     const delta = { x: dx, y: dy };
-
-    console.log('[Rib Arrow Keys] event.key:', event.key, 'delta:', delta, 'shift:', event.shiftKey);
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
@@ -3468,8 +3575,6 @@ export class PointerTool extends BaseTool {
 
           const point = contour.points[pointIndex];
           if (point.type) continue;
-
-          console.log('[Rib Arrow Keys] Processing rib:', { contourIndex, pointIndex, side, isEditable });
 
           if (isEditable) {
             // Use EditableRibBehavior for editable ribs

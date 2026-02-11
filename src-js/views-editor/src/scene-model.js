@@ -1559,72 +1559,8 @@ export class SceneModel {
       }
     }
 
-    // Add rib points within rectangle ONLY if no other points were selected
-    if (selection.size === 0 && editLayerName && positionedGlyph.varGlyph?.glyph?.layers) {
-      const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-      const skeletonData = layer?.customData?.["fontra.skeleton"];
-      if (skeletonData?.contours?.length) {
-        // Find rib point closest to cursor position
-        // cursorPoint is in screen coords, convert to glyph coords
-        const targetX = cursorPoint ? cursorPoint.x - positionedGlyph.x : selRect.xMax;
-        const targetY = cursorPoint ? cursorPoint.y - positionedGlyph.y : selRect.yMax;
-        let closestRibPointKey = null;
-        let closestDistSq = Infinity;
-
-        for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
-          const contour = skeletonData.contours[contourIdx];
-          const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
-          const singleSided = contour.singleSided ?? false;
-          const singleSidedDirection = contour.singleSidedDirection ?? "left";
-
-          for (let pointIdx = 0; pointIdx < contour.points.length; pointIdx++) {
-            const point = contour.points[pointIdx];
-            // Only on-curve points have rib points
-            if (point.type) continue;
-
-            const normal = calculateNormalAtSkeletonPoint(contour, pointIdx);
-
-            for (const side of ["left", "right"]) {
-              let halfWidth = getPointHalfWidth(point, defaultWidth, side);
-
-              // Handle single-sided mode
-              if (singleSided) {
-                if (singleSidedDirection !== side) continue;
-                const leftHW = getPointHalfWidth(point, defaultWidth, "left");
-                const rightHW = getPointHalfWidth(point, defaultWidth, "right");
-                halfWidth = leftHW + rightHW;
-              }
-
-              if (halfWidth < 0.5) continue;
-
-              const isEditable = side === "left" ? point.leftEditable : point.rightEditable;
-              const nudge = isEditable ? (side === "left" ? point.leftNudge || 0 : point.rightNudge || 0) : 0;
-
-              const ribPoint = projectRibPoint(point, normal, halfWidth, side, nudge);
-
-              // Check if rib point is within rectangle
-              if (
-                ribPoint.x >= selRect.xMin &&
-                ribPoint.x <= selRect.xMax &&
-                ribPoint.y >= selRect.yMin &&
-                ribPoint.y <= selRect.yMax
-              ) {
-                // Select the one closest to the current corner (where cursor is)
-                const distSq = (ribPoint.x - targetX) ** 2 + (ribPoint.y - targetY) ** 2;
-                if (distSq < closestDistSq) {
-                  closestDistSq = distSq;
-                  closestRibPointKey = `skeletonRibPoint/${contourIdx}/${pointIdx}/${side}`;
-                }
-              }
-            }
-          }
-        }
-
-        if (closestRibPointKey) {
-          selection.add(closestRibPointKey);
-        }
-      }
-    }
+    // Rib points are intentionally excluded from rectangle selection.
+    // Multi-selection for rib points is supported only via Shift+click.
 
     return selection;
   }
