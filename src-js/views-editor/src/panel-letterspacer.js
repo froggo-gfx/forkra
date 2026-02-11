@@ -391,7 +391,8 @@ export default class LetterspacerPanel extends Panel {
       this.clearVisualizationData();
     }
     await this.persistAlgorithmEnabled(nextValue);
-    this.update();
+    await this.refreshDesignspacePanel();
+    await this.update();
   }
 
   async update(senderInfo) {
@@ -743,11 +744,10 @@ export default class LetterspacerPanel extends Panel {
     const nextValue = !!enabled;
     const root = { customData: this.fontController.customData || {} };
     const changes = recordChanges(root, (root) => {
-      const existing = root.customData || {};
-      root.customData = {
-        ...existing,
-        [LETTERSPACER_FONT_CUSTOM_DATA_KEYS.enabled]: nextValue,
-      };
+      if (!root.customData) {
+        root.customData = {};
+      }
+      root.customData[LETTERSPACER_FONT_CUSTOM_DATA_KEYS.enabled] = nextValue;
     });
     if (changes.hasChange) {
       await this.fontController.postChange(

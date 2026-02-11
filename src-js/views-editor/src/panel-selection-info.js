@@ -138,7 +138,9 @@ export default class SelectionInfoPanel extends Panel {
 
   async toggle(on, focus) {
     if (on) {
-      this.update();
+      // Ensure the Selection Info form is fully rebuilt before nested
+      // Letterspacer panel runs its own visibility-gated update.
+      await this.update();
     }
     if (this.letterspacerPanel?.toggle) {
       await this.letterspacerPanel.toggle(on, focus);
