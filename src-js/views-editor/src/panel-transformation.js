@@ -13,7 +13,9 @@ import {
   getSelectionByContour,
 } from "@fontra/core/path-functions.js";
 import { rectCenter, rectSize, unionRect } from "@fontra/core/rectangle.js";
-import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
+import {
+  generateContoursFromSkeleton,
+} from "@fontra/core/skeleton-contour-generator.js";
 import { Transform } from "@fontra/core/transform.js";
 import {
   enumerate,
@@ -28,7 +30,10 @@ import { packContour, VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import Panel from "./panel.js";
-import { SkeletonEditBehavior } from "./skeleton-edit-behavior.js";
+import {
+  createEditableHandleBehavior,
+  SkeletonEditBehavior,
+} from "./skeleton-edit-behavior.js";
 
 export default class TransformationPanel extends Panel {
   identifier = "selection-transformation";
@@ -1216,14 +1221,15 @@ export default class TransformationPanel extends Panel {
     this.infoForm.setValue("originYButton", null);
   }
 
-  _splitSelection(layerGlyphController, selection) {
+  _splitSelection(layerGlyphController, selection, pointIndicesOverride = null) {
     let {
-      point: pointIndices,
+      point: parsedPointIndices,
       component: componentIndices,
       anchor: anchorIndices,
       backgroundImage: backgroundImageIndices,
     } = parseSelection(selection);
-    pointIndices = pointIndices || [];
+    const pointIndices =
+      pointIndicesOverride !== null ? pointIndicesOverride : parsedPointIndices || [];
 
     const points = [];
     const contours = [];
@@ -1244,6 +1250,13 @@ export default class TransformationPanel extends Panel {
 
     let contourIndex = 0;
     for (const pointIndex of pointIndices) {
+      const pointType = path.pointTypes[pointIndex] & VarPackedPath.POINT_TYPE_MASK;
+      const isOnCurve = pointType === VarPackedPath.ON_CURVE;
+      if (!isOnCurve) {
+        points.push(pointIndex);
+        continue;
+      }
+
       while (path.contourInfo[contourIndex].endPoint < pointIndex) {
         contourIndex++;
       }
@@ -1279,8 +1292,40 @@ export default class TransformationPanel extends Panel {
   }
 
   _collectMovableObjects(moveDescriptor, controller) {
+    const parsedSelection = parseSelection(this.sceneController.selection);
+    const selectedPointIndices = parsedSelection.point || [];
+    const sceneModel = this.sceneController.sceneModel;
+    const positionedGlyph = sceneModel.getSelectedPositionedGlyph();
+
+    const regularPointIndices = [];
+    const generatedHandleSelection = [];
+
+    for (const pointIndex of selectedPointIndices) {
+      const handleInfo = positionedGlyph
+        ? sceneModel._getEditableHandleForGeneratedPoint(positionedGlyph, pointIndex)
+        : null;
+      if (handleInfo) {
+        generatedHandleSelection.push({ pointIndex, ...handleInfo });
+        continue;
+      }
+
+      const ribInfo = positionedGlyph
+        ? sceneModel._getEditableRibPointForGeneratedPoint(positionedGlyph, pointIndex, true)
+        : null;
+      if (ribInfo) {
+        // Rib points are intentionally excluded from align/distribute operations.
+        continue;
+      }
+
+      regularPointIndices.push(pointIndex);
+    }
+
     const { points, contours, components, anchors, backgroundImages } =
-      this._splitSelection(controller, this.sceneController.selection);
+      this._splitSelection(
+        controller,
+        this.sceneController.selection,
+        regularPointIndices
+      );
 
     const movableObjects = [];
     for (const pointIndex of points) {
@@ -1306,34 +1351,42 @@ export default class TransformationPanel extends Panel {
       movableObjects.push(new MovableObject(individualSelection));
     }
 
-    // Add skeleton points
-    const { skeletonPoint: skeletonPoints } = parseSelection(
-      this.sceneController.selection
-    );
-    if (skeletonPoints?.size) {
-      // Get skeleton data from the editing layer
-      const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
-      const editLayerName = this.sceneController.sceneSettings?.editLayerName ||
-        positionedGlyph?.glyph?.layerName;
+    const skeletonPoints = parsedSelection.skeletonPoint;
+    const editLayerName =
+      this.sceneController.sceneSettings?.editLayerName ||
+      positionedGlyph?.glyph?.layerName;
+    const skeletonLayer =
+      editLayerName && positionedGlyph?.varGlyph?.glyph?.layers
+        ? positionedGlyph.varGlyph.glyph.layers[editLayerName]
+        : null;
+    const skeletonData = skeletonLayer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
 
-      if (editLayerName && positionedGlyph?.varGlyph?.glyph?.layers) {
-        const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-        const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    if (skeletonData?.contours && skeletonPoints?.size) {
+      for (const selKey of skeletonPoints) {
+        const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+        const contour = skeletonData.contours[contourIdx];
+        if (!contour) continue;
+        const point = contour.points[pointIdx];
+        if (!point) continue;
+        movableObjects.push(
+          new SkeletonMovableObject(contourIdx, pointIdx, { x: point.x, y: point.y })
+        );
+      }
+    }
 
-        if (skeletonData?.contours) {
-          for (const selKey of skeletonPoints) {
-            const [contourIdx, pointIdx] = selKey.split("/").map(Number);
-            const contour = skeletonData.contours[contourIdx];
-            if (contour) {
-              const point = contour.points[pointIdx];
-              if (point) {
-                movableObjects.push(
-                  new SkeletonMovableObject(contourIdx, pointIdx, { x: point.x, y: point.y })
-                );
-              }
-            }
-          }
-        }
+    if (generatedHandleSelection.length) {
+      for (const handleSel of generatedHandleSelection) {
+        const generatedPoint = positionedGlyph?.glyph?.path?.getPoint(handleSel.pointIndex);
+        if (!generatedPoint) continue;
+        movableObjects.push(
+          new SkeletonRibHandleMovableObject(
+            handleSel.skeletonContourIndex,
+            handleSel.skeletonPointIndex,
+            handleSel.side,
+            handleSel.handleType,
+            { x: generatedPoint.x, y: generatedPoint.y }
+          )
+        );
       }
     }
 
@@ -1385,12 +1438,15 @@ export default class TransformationPanel extends Panel {
           this.transformParameters.customDistributionSpacing
         );
 
-        // Separate skeleton and regular objects
-        const skeletonMoves = [];
+        // Separate skeleton-related and regular objects
+        const skeletonPointMoves = [];
+        const skeletonRibHandleMoves = [];
         const regularMoves = [];
         for (const [delta, movableObject] of zip(deltas, movableObjects)) {
           if (movableObject instanceof SkeletonMovableObject) {
-            skeletonMoves.push({ delta, obj: movableObject });
+            skeletonPointMoves.push({ delta, obj: movableObject });
+          } else if (movableObject instanceof SkeletonRibHandleMovableObject) {
+            skeletonRibHandleMoves.push({ delta, obj: movableObject });
           } else {
             regularMoves.push({ delta, obj: movableObject });
           }
@@ -1412,15 +1468,18 @@ export default class TransformationPanel extends Panel {
           rollbackChanges.push(consolidateChanges(rollbackChange, ["layers", layerName, "glyph"]));
         }
 
-        // Process skeleton objects in batch (single regeneration)
-        if (skeletonMoves.length > 0) {
+        // Process all skeleton-related objects in one batch (single regeneration)
+        if (
+          skeletonPointMoves.length > 0 ||
+          skeletonRibHandleMoves.length > 0
+        ) {
           const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
           if (skeletonData) {
             // Deep clone skeleton data once
             const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
 
-            // Apply all skeleton point deltas
-            for (const { delta, obj } of skeletonMoves) {
+            // Apply skeleton point deltas
+            for (const { delta, obj } of skeletonPointMoves) {
               const contour = newSkeletonData.contours?.[obj.contourIdx];
               if (!contour) continue;
 
@@ -1435,6 +1494,11 @@ export default class TransformationPanel extends Panel {
                 contour.points[pointIndex].x = x;
                 contour.points[pointIndex].y = y;
               }
+            }
+
+            // Apply editable rib-handle deltas
+            for (const { delta, obj } of skeletonRibHandleMoves) {
+              applySkeletonRibHandleDelta(newSkeletonData, obj, delta);
             }
 
             // Regenerate contours ONCE for all skeleton changes
@@ -1643,6 +1707,145 @@ class SkeletonMovableObject {
 
     return [editChange, rollbackChange];
   }
+}
+
+class SkeletonRibHandleMovableObject {
+  constructor(contourIdx, pointIdx, side, handleType, point) {
+    this.contourIdx = contourIdx;
+    this.pointIdx = pointIdx;
+    this.side = side;
+    this.handleType = handleType;
+    this.point = point;
+  }
+
+  computeBounds(staticGlyphController, getBackgroundImageBoundsFunc) {
+    return {
+      xMin: this.point.x,
+      yMin: this.point.y,
+      xMax: this.point.x,
+      yMax: this.point.y,
+    };
+  }
+}
+
+function applySkeletonRibHandleDelta(newSkeletonData, handleObject, delta) {
+  const contour = newSkeletonData?.contours?.[handleObject.contourIdx];
+  const point = contour?.points?.[handleObject.pointIdx];
+  if (!contour || !point || point.type) {
+    return;
+  }
+
+  const skeletonHandleDir = getSkeletonHandleDirectionForPoint(
+    contour,
+    handleObject.pointIdx,
+    handleObject.handleType
+  );
+  if (!skeletonHandleDir) {
+    return;
+  }
+
+  const behavior = createEditableHandleBehavior(
+    newSkeletonData,
+    {
+      skeletonContourIndex: handleObject.contourIdx,
+      skeletonPointIndex: handleObject.pointIdx,
+      side: handleObject.side,
+      handleType: handleObject.handleType,
+    },
+    skeletonHandleDir
+  );
+  const change = behavior.applyDelta(delta);
+  const { offset1DKey, offsetXKey, offsetYKey } = getEditableHandleOffsetKeys(
+    handleObject.side,
+    handleObject.handleType
+  );
+
+  const detachedKey =
+    handleObject.side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+  const isDetached = !!point[detachedKey];
+
+  if (isDetached) {
+    const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
+    point[offsetXKey] =
+      (point[offsetXKey] || 0) + Math.round(skeletonHandleDir.x * projectedDelta);
+    point[offsetYKey] =
+      (point[offsetYKey] || 0) + Math.round(skeletonHandleDir.y * projectedDelta);
+  } else {
+    delete point[offsetXKey];
+    delete point[offsetYKey];
+    point[offset1DKey] = change.offset;
+  }
+}
+
+function getEditableHandleOffsetKeys(side, handleType) {
+  const offset1DKey =
+    side === "left"
+      ? handleType === "in"
+        ? "leftHandleInOffset"
+        : "leftHandleOutOffset"
+      : handleType === "in"
+        ? "rightHandleInOffset"
+        : "rightHandleOutOffset";
+  const offsetXKey =
+    side === "left"
+      ? handleType === "in"
+        ? "leftHandleInOffsetX"
+        : "leftHandleOutOffsetX"
+      : handleType === "in"
+        ? "rightHandleInOffsetX"
+        : "rightHandleOutOffsetX";
+  const offsetYKey =
+    side === "left"
+      ? handleType === "in"
+        ? "leftHandleInOffsetY"
+        : "leftHandleOutOffsetY"
+      : handleType === "in"
+        ? "rightHandleInOffsetY"
+        : "rightHandleOutOffsetY";
+  return { offset1DKey, offsetXKey, offsetYKey };
+}
+
+function getSkeletonHandleDirectionForPoint(contour, pointIndex, handleType) {
+  const points = contour.points;
+  const numPoints = points.length;
+  const isClosed = contour.isClosed;
+
+  const skeletonPoint = points[pointIndex];
+  if (!skeletonPoint || skeletonPoint.type) return null;
+
+  let controlPoint = null;
+
+  if (handleType === "out") {
+    const nextIdx = (pointIndex + 1) % numPoints;
+    if (isClosed || pointIndex < numPoints - 1) {
+      const nextPt = points[nextIdx];
+      if (nextPt?.type === "cubic") {
+        controlPoint = nextPt;
+      }
+    }
+  } else {
+    const prevIdx = (pointIndex - 1 + numPoints) % numPoints;
+    if (isClosed || pointIndex > 0) {
+      const prevPt = points[prevIdx];
+      if (prevPt?.type === "cubic") {
+        controlPoint = prevPt;
+      }
+    }
+  }
+
+  if (!controlPoint) {
+    return null;
+  }
+
+  const dir = {
+    x: controlPoint.x - skeletonPoint.x,
+    y: controlPoint.y - skeletonPoint.y,
+  };
+  const length = Math.hypot(dir.x, dir.y);
+
+  if (length < 0.001) return null;
+
+  return { x: dir.x / length, y: dir.y / length };
 }
 
 // Define moveDescriptor objects

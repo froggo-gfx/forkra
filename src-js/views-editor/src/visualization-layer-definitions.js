@@ -1,6 +1,10 @@
 import { guessGlyphPlaceholderString } from "@fontra/core/glyph-data.js";
 import { translate } from "@fontra/core/localization.js";
 import { rectToPoints } from "@fontra/core/rectangle.js";
+import {
+  calculateNormalAtSkeletonPoint,
+  getPointHalfWidth,
+} from "@fontra/core/skeleton-contour-generator.js";
 import { difference, isSuperset, union } from "@fontra/core/set-ops.js";
 import { decomposedToTransform } from "@fontra/core/transform.js";
 import {
@@ -56,6 +60,7 @@ import {
 } from "@fontra/core/distance-angle.js";
 
 export const visualizationLayerDefinitions = [];
+const DEFAULT_SKELETON_WIDTH = 80;
 
 export function registerVisualizationLayerDefinition(newLayerDef) {
   let index = 0;
@@ -811,6 +816,7 @@ registerVisualizationLayerDefinition({
 
     const pointIndex = model.initialClickedPointIndex;
     const skeletonPoint = model.initialClickedSkeletonPoint;
+    const skeletonRibPoint = model.initialClickedSkeletonRibPoint;
 
     if (pointIndex !== undefined) {
       // Regular path point
@@ -824,6 +830,15 @@ registerVisualizationLayerDefinition({
       const point = skeletonData?.contours?.[skeletonPoint.contourIdx]?.points?.[skeletonPoint.pointIdx];
       if (point) {
         ({ x, y } = point);
+      }
+    } else if (skeletonRibPoint) {
+      const ribPointPosition = getCurrentSkeletonRibPointPosition(
+        positionedGlyph,
+        model,
+        skeletonRibPoint
+      );
+      if (ribPointPosition) {
+        ({ x, y } = ribPointPosition);
       }
     }
 
@@ -841,6 +856,59 @@ registerVisualizationLayerDefinition({
     strokeLine(context, xMin + dx, y, xMax + dx, y);
   },
 });
+
+function getCurrentSkeletonRibPointPosition(positionedGlyph, model, ribPointRef) {
+  const { contourIdx, pointIdx, side } = ribPointRef || {};
+  if (!Number.isInteger(contourIdx) || !Number.isInteger(pointIdx)) {
+    return null;
+  }
+  if (side !== "left" && side !== "right") {
+    return null;
+  }
+
+  const editLayerName =
+    model.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+  const layer = positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName];
+  const skeletonData = layer?.customData?.["fontra.skeleton"];
+  const contour = skeletonData?.contours?.[contourIdx];
+  const point = contour?.points?.[pointIdx];
+  if (!contour || !point || point.type) {
+    return null;
+  }
+
+  const normal = calculateNormalAtSkeletonPoint(contour, pointIdx);
+  const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+  const singleSided = contour.singleSided ?? false;
+  const singleSidedDirection = contour.singleSidedDirection ?? "left";
+
+  const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+  const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+  const sideIsEditable = point[editableKey] === true;
+
+  let halfWidth = getPointHalfWidth(point, defaultWidth, side);
+  let nudge = sideIsEditable ? point[nudgeKey] || 0 : 0;
+
+  if (singleSided) {
+    if (singleSidedDirection !== side) {
+      return null;
+    }
+    const leftHW = getPointHalfWidth(point, defaultWidth, "left");
+    const rightHW = getPointHalfWidth(point, defaultWidth, "right");
+    halfWidth = leftHW + rightHW;
+    if (halfWidth < 0.5) {
+      return null;
+    }
+  } else if (halfWidth < 0.5) {
+    return null;
+  }
+
+  const sign = side === "left" ? 1 : -1;
+  const tangent = { x: -normal.y, y: normal.x };
+  return {
+    x: Math.round(point.x + sign * normal.x * halfWidth + tangent.x * nudge),
+    y: Math.round(point.y + sign * normal.y * halfWidth + tangent.y * nudge),
+  };
+}
 
 registerVisualizationLayerDefinition({
   identifier: "fontra.ghostpath",

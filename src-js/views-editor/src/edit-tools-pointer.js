@@ -575,8 +575,19 @@ export class PointerTool extends BaseTool {
       // Check if Tunni visualization layer is active and if we're hovering over a Tunni point
       // This check is only relevant when called from hover event, so we don't check it here
       // since this method is also called from other contexts
+      const hoverSelection = this.sceneController.hoverSelection;
       if (
-      this.sceneController.hoverSelection?.size ||
+        hoverSelection?.size &&
+        [...hoverSelection].some((selectionKey) =>
+          selectionKey.startsWith("skeletonRibPoint/")
+        )
+      ) {
+        this.canvasController.canvas.style.cursor = "pointer";
+        return;
+      }
+
+      if (
+      hoverSelection?.size ||
       this.sceneController.hoverPathHit
     ) {
       this.canvasController.canvas.style.cursor = "pointer";
@@ -895,12 +906,21 @@ export class PointerTool extends BaseTool {
         }
       }
 
-      await this._handleDragRibPoint(
-        eventStream,
-        initialEvent,
-        ribHit,
-        targetRibSelection
-      );
+      this.sceneController.sceneModel.initialClickedSkeletonRibPoint = {
+        contourIdx: ribHit.contourIndex,
+        pointIdx: ribHit.pointIndex,
+        side: ribHit.side,
+      };
+      try {
+        await this._handleDragRibPoint(
+          eventStream,
+          initialEvent,
+          ribHit,
+          targetRibSelection
+        );
+      } finally {
+        delete this.sceneController.sceneModel.initialClickedSkeletonRibPoint;
+      }
       initialEvent.preventDefault();
       return;
     }
@@ -1495,7 +1515,8 @@ export class PointerTool extends BaseTool {
       );
 
       const modeFunc = getSelectModeFunction(modifierEvent);
-      sceneController.selection = modeFunc(initialSelection, selection);
+      const nextSelection = modeFunc(initialSelection, selection);
+      sceneController.selection = stripRibSelectionWhenPointSelectionExists(nextSelection);
     }
     sceneController.selectionRect = undefined;
     this._selectionBeforeSingleClick = undefined;
@@ -2398,7 +2419,7 @@ export class PointerTool extends BaseTool {
     }
 
     const previousCursor = this.canvasController.canvas.style.cursor;
-    this.canvasController.canvas.style.cursor = "crosshair";
+    this.canvasController.canvas.style.cursor = "pointer";
 
     try {
       await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
@@ -2558,6 +2579,7 @@ export class PointerTool extends BaseTool {
 
       // Drag loop
       for await (const event of eventStream) {
+        this.canvasController.canvas.style.cursor = "pointer";
         const roundFunc = makeRoundFunc(event);
         const currentLocalPoint = sceneController.localPoint(event);
         const currentGlyphPoint = {
@@ -3032,7 +3054,11 @@ export class PointerTool extends BaseTool {
         })
       : editablePoints.map((ep) => ({ ...ep, interpolationAxis: null }));
 
-    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const previousCursor = this.canvasController.canvas.style.cursor;
+    this.canvasController.canvas.style.cursor = "pointer";
+
+    try {
+      await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const layersData = {};
 
       for (const editLayerName of sceneController.editingLayerNames) {
@@ -3109,6 +3135,7 @@ export class PointerTool extends BaseTool {
 
       // Drag loop
       for await (const event of eventStream) {
+        this.canvasController.canvas.style.cursor = "pointer";
         const roundFunc = makeRoundFunc(event);
         const currentLocalPoint = sceneController.localPoint(event);
         const currentGlyphPoint = {
@@ -3198,7 +3225,10 @@ export class PointerTool extends BaseTool {
         undoLabel: "Edit generated point",
         broadcast: true,
       };
-    });
+      });
+    } finally {
+      this.canvasController.canvas.style.cursor = previousCursor || "default";
+    }
   }
 
   /**
@@ -3217,7 +3247,11 @@ export class PointerTool extends BaseTool {
       y: localPoint.y - positionedGlyph.y,
     };
 
-    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const previousCursor = this.canvasController.canvas.style.cursor;
+    this.canvasController.canvas.style.cursor = "pointer";
+
+    try {
+      await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const layersData = {};
 
       for (const editLayerName of sceneController.editingLayerNames) {
@@ -3428,7 +3462,10 @@ export class PointerTool extends BaseTool {
         undoLabel: "Edit generated handle",
         broadcast: true,
       };
-    });
+      });
+    } finally {
+      this.canvasController.canvas.style.cursor = previousCursor || "default";
+    }
   }
 
   /**
@@ -6326,6 +6363,23 @@ function getTransformHandles(transformBounds, margin) {
   }
 
   return handles;
+}
+
+function stripRibSelectionWhenPointSelectionExists(selection) {
+  if (!selection?.size) {
+    return selection;
+  }
+
+  const { point, skeletonPoint, skeletonRibPoint } = parseSelection(selection);
+  const hasRegularOrSkeletonPoints = !!point?.length || !!skeletonPoint?.size;
+
+  if (!hasRegularOrSkeletonPoints || !skeletonRibPoint?.size) {
+    return selection;
+  }
+
+  return new Set(
+    [...selection].filter((selectionKey) => !selectionKey.startsWith("skeletonRibPoint/"))
+  );
 }
 
 /**

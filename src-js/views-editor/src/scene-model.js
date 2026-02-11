@@ -770,13 +770,18 @@ export class SceneModel {
   }
 
   /**
-   * Check if a generated point corresponds to an editable rib point.
+   * Check if a generated point corresponds to a rib point.
    * Returns rib point info if found, null otherwise.
    * @param {Object} positionedGlyph - The positioned glyph
    * @param {number} pointIndex - The point index in glyph.path
+   * @param {boolean} includeNonEditable - Include non-editable ribs when true
    * @returns {Object|null} {skeletonContourIndex, skeletonPointIndex, side} or null
    */
-  _getEditableRibPointForGeneratedPoint(positionedGlyph, pointIndex) {
+  _getEditableRibPointForGeneratedPoint(
+    positionedGlyph,
+    pointIndex,
+    includeNonEditable = false
+  ) {
     if (!positionedGlyph?.varGlyph?.glyph?.layers) {
       return null;
     }
@@ -828,7 +833,7 @@ export class SceneModel {
         // Check both sides
         for (const side of ["left", "right"]) {
           const editableKey = side === "left" ? "leftEditable" : "rightEditable";
-          if (!skeletonPoint[editableKey]) continue;
+          if (!includeNonEditable && !skeletonPoint[editableKey]) continue;
 
           // Compute expected rib point position
           let halfWidth = getPointHalfWidth(skeletonPoint, defaultWidth, side);
@@ -844,7 +849,7 @@ export class SceneModel {
           if (halfWidth < 0.5) continue; // Skip zero-width sides
 
           const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-          const nudge = skeletonPoint[nudgeKey] || 0;
+          const nudge = skeletonPoint[editableKey] ? skeletonPoint[nudgeKey] || 0 : 0;
 
           const sign = side === "left" ? 1 : -1;
           const expectedPoint = projectRibPoint(
@@ -1500,6 +1505,7 @@ export class SceneModel {
 
   selectionAtRect(selRect, pointFilterFunc, cursorPoint = null) {
     const selection = new Set();
+    const ribPointSelection = new Set();
     if (!this.selectedGlyph?.isEditing) {
       return selection;
     }
@@ -1507,12 +1513,27 @@ export class SceneModel {
     if (!positionedGlyph) {
       return selection;
     }
+    const path = positionedGlyph.glyph.path;
     selRect = offsetRect(selRect, -positionedGlyph.x, -positionedGlyph.y);
-    for (const hit of positionedGlyph.glyph.path.iterPointsInRect(selRect)) {
+    for (const hit of path.iterPointsInRect(selRect)) {
       if (!pointFilterFunc || pointFilterFunc(hit)) {
-        // Skip points from skeleton-generated contours
-        if (!this._isPointInSkeletonGeneratedContour(positionedGlyph, hit.pointIndex)) {
-          selection.add(`point/${hit.pointIndex}`);
+        const pointIndex = hit.pointIndex;
+
+        // Skeleton-generated contour points are not regular points.
+        // If they match rib points, add rib selection keys instead.
+        if (this._isPointInSkeletonGeneratedContour(positionedGlyph, pointIndex)) {
+          const ribInfo = this._getEditableRibPointForGeneratedPoint(
+            positionedGlyph,
+            pointIndex,
+            true
+          );
+          if (ribInfo) {
+            ribPointSelection.add(
+              `skeletonRibPoint/${ribInfo.skeletonContourIndex}/${ribInfo.skeletonPointIndex}/${ribInfo.side}`
+            );
+          }
+        } else {
+          selection.add(`point/${pointIndex}`);
         }
       }
     }
@@ -1559,8 +1580,16 @@ export class SceneModel {
       }
     }
 
-    // Rib points are intentionally excluded from rectangle selection.
-    // Multi-selection for rib points is supported only via Shift+click.
+    const { point, skeletonPoint } = parseSelection(selection);
+    const hasRegularOrSkeletonPoints = !!point?.length || !!skeletonPoint?.size;
+
+    // If regular or skeleton points are in the box, ignore rib points.
+    // Otherwise allow rib-only box selection.
+    if (!hasRegularOrSkeletonPoints) {
+      for (const ribSelectionKey of ribPointSelection) {
+        selection.add(ribSelectionKey);
+      }
+    }
 
     return selection;
   }
