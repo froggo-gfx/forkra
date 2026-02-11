@@ -9,6 +9,10 @@ const MAX_CAP_RADIUS_RATIO = 1 / 4;
 const DEFAULT_CAP_TENSION = 0.55;
 const DEFAULT_CAP_ANGLE = 0;
 const MAX_CAP_ANGLE = 85;
+const DEFAULT_CORNER_ROUNDNESS = 0;
+const MIN_CORNER_TRIM = 0.5;
+const MAX_CORNER_TRIM_RATIO = 0.49;
+const MAX_HANDLE_TRIM_RATIO = 0.99;
 
 /**
  * Get the width for a point, with support for asymmetric left/right widths.
@@ -48,6 +52,49 @@ export function getPointHalfWidth(point, defaultWidth, side) {
     return point.width / 2;
   }
   return defaultWidth / 2;
+}
+
+function clampCornerRoundness(value) {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_CORNER_ROUNDNESS;
+  }
+  return Math.min(Math.max(value, 0), 1);
+}
+
+function getCornerRoundness(point) {
+  return clampCornerRoundness(point?.cornerRoundness ?? DEFAULT_CORNER_ROUNDNESS);
+}
+
+function buildGeneratedOnCurve(basePoint, smooth, skeletonPoint, halfWidth) {
+  const generatedPoint = {
+    x: basePoint.x,
+    y: basePoint.y,
+    smooth,
+  };
+  const cornerRoundness = getCornerRoundness(skeletonPoint);
+  const cornerRoundBase = Math.max(0, halfWidth ?? 0);
+  if (cornerRoundness > 0 && cornerRoundBase >= 0.5) {
+    generatedPoint.cornerRoundness = cornerRoundness;
+    generatedPoint.cornerRoundBase = cornerRoundBase;
+  }
+  return generatedPoint;
+}
+
+function stripCornerRoundMetadata(points) {
+  return points.map((point) => {
+    if (!point || point.type) {
+      return point;
+    }
+    if (point.cornerRoundness === undefined && point.cornerRoundBase === undefined) {
+      return point;
+    }
+    const {
+      cornerRoundness: _cornerRoundness,
+      cornerRoundBase: _cornerRoundBase,
+      ...rest
+    } = point;
+    return rest;
+  });
 }
 
 /**
@@ -566,6 +613,235 @@ function alignHandleDirections(points, segments, isLeftSide) {
   return alignedPoints;
 }
 
+function getPrevIndex(points, index, isClosed) {
+  if (!points.length) {
+    return null;
+  }
+  if (index > 0) {
+    return index - 1;
+  }
+  return isClosed ? points.length - 1 : null;
+}
+
+function getNextIndex(points, index, isClosed) {
+  if (!points.length) {
+    return null;
+  }
+  if (index < points.length - 1) {
+    return index + 1;
+  }
+  return isClosed ? 0 : null;
+}
+
+function findPrevOnCurveIndex(points, index, isClosed) {
+  let cursor = getPrevIndex(points, index, isClosed);
+  if (cursor === null) {
+    return null;
+  }
+  const visited = new Set();
+  while (cursor !== null && !visited.has(cursor)) {
+    visited.add(cursor);
+    if (!points[cursor]?.type) {
+      return cursor;
+    }
+    cursor = getPrevIndex(points, cursor, isClosed);
+  }
+  return null;
+}
+
+function findNextOnCurveIndex(points, index, isClosed) {
+  let cursor = getNextIndex(points, index, isClosed);
+  if (cursor === null) {
+    return null;
+  }
+  const visited = new Set();
+  while (cursor !== null && !visited.has(cursor)) {
+    visited.add(cursor);
+    if (!points[cursor]?.type) {
+      return cursor;
+    }
+    cursor = getNextIndex(points, cursor, isClosed);
+  }
+  return null;
+}
+
+function roundSharpCornersOnSide(sidePoints, { isClosed }) {
+  const points = sidePoints.map((point) => ({ ...point }));
+  if (points.length < 3) {
+    return points;
+  }
+
+  let i = 0;
+  while (i < points.length) {
+    const corner = points[i];
+    if (!corner || corner.type || corner.smooth) {
+      i++;
+      continue;
+    }
+
+    const cornerRoundness = clampCornerRoundness(corner.cornerRoundness);
+    const cornerRoundBase = Math.max(0, corner.cornerRoundBase ?? 0);
+    if (cornerRoundness <= 0 || cornerRoundBase < 0.5) {
+      i++;
+      continue;
+    }
+
+    const prevOnIndex = findPrevOnCurveIndex(points, i, isClosed);
+    const nextOnIndex = findNextOnCurveIndex(points, i, isClosed);
+    if (prevOnIndex === null || nextOnIndex === null) {
+      i++;
+      continue;
+    }
+
+    const prevNeighborIndex = getPrevIndex(points, i, isClosed);
+    const nextNeighborIndex = getNextIndex(points, i, isClosed);
+    const prevHandleIndex =
+      prevNeighborIndex !== null && points[prevNeighborIndex]?.type
+        ? prevNeighborIndex
+        : null;
+    const nextHandleIndex =
+      nextNeighborIndex !== null && points[nextNeighborIndex]?.type
+        ? nextNeighborIndex
+        : null;
+
+    const prevReference = prevHandleIndex !== null ? points[prevHandleIndex] : points[prevOnIndex];
+    const nextReference = nextHandleIndex !== null ? points[nextHandleIndex] : points[nextOnIndex];
+    if (!prevReference || !nextReference) {
+      i++;
+      continue;
+    }
+
+    const dirInAway = vector.normalizeVector(
+      vector.subVectors(prevReference, corner)
+    );
+    const dirOutAway = vector.normalizeVector(
+      vector.subVectors(nextReference, corner)
+    );
+    if (
+      !Number.isFinite(dirInAway.x) ||
+      !Number.isFinite(dirInAway.y) ||
+      !Number.isFinite(dirOutAway.x) ||
+      !Number.isFinite(dirOutAway.y)
+    ) {
+      i++;
+      continue;
+    }
+
+    const betaCos = Math.min(
+      Math.max(vector.dotVector(dirInAway, dirOutAway), -1),
+      1
+    );
+    const beta = Math.acos(betaCos);
+    if (!(beta > 1e-4 && beta < Math.PI - 1e-4)) {
+      i++;
+      continue;
+    }
+    const tanHalf = Math.tan(beta / 2);
+    if (!(tanHalf > 1e-6)) {
+      i++;
+      continue;
+    }
+
+    const distPrevOn = vector.distance(corner, points[prevOnIndex]);
+    const distNextOn = vector.distance(corner, points[nextOnIndex]);
+    let maxTrimIn = distPrevOn * MAX_CORNER_TRIM_RATIO;
+    let maxTrimOut = distNextOn * MAX_CORNER_TRIM_RATIO;
+
+    if (prevHandleIndex !== null) {
+      maxTrimIn = Math.min(
+        maxTrimIn,
+        vector.distance(corner, points[prevHandleIndex]) * MAX_HANDLE_TRIM_RATIO
+      );
+    }
+    if (nextHandleIndex !== null) {
+      maxTrimOut = Math.min(
+        maxTrimOut,
+        vector.distance(corner, points[nextHandleIndex]) * MAX_HANDLE_TRIM_RATIO
+      );
+    }
+
+    const maxTrim = Math.min(maxTrimIn, maxTrimOut);
+    if (!(maxTrim > MIN_CORNER_TRIM)) {
+      i++;
+      continue;
+    }
+
+    const wantedRadius = cornerRoundBase * cornerRoundness;
+    if (!(wantedRadius > 0.001)) {
+      i++;
+      continue;
+    }
+
+    const wantedTrim = wantedRadius / tanHalf;
+    const trim = Math.min(wantedTrim, maxTrim);
+    if (!(trim > MIN_CORNER_TRIM)) {
+      i++;
+      continue;
+    }
+
+    const startPoint = {
+      x: Math.round(corner.x + dirInAway.x * trim),
+      y: Math.round(corner.y + dirInAway.y * trim),
+      smooth: true,
+    };
+    const endPoint = {
+      x: Math.round(corner.x + dirOutAway.x * trim),
+      y: Math.round(corner.y + dirOutAway.y * trim),
+      smooth: true,
+    };
+
+    const startTangent = { x: -dirInAway.x, y: -dirInAway.y };
+    const endTangent = { x: dirOutAway.x, y: dirOutAway.y };
+    const handleLengths = computeTunniHandleLengths(
+      startPoint,
+      startTangent,
+      endPoint,
+      { x: -endTangent.x, y: -endTangent.y },
+      DEFAULT_CAP_TENSION
+    );
+
+    const handleIn = {
+      x: Math.round(startPoint.x + startTangent.x * handleLengths.startLen),
+      y: Math.round(startPoint.y + startTangent.y * handleLengths.startLen),
+      type: "cubic",
+    };
+    const handleOut = {
+      x: Math.round(endPoint.x - endTangent.x * handleLengths.endLen),
+      y: Math.round(endPoint.y - endTangent.y * handleLengths.endLen),
+      type: "cubic",
+    };
+
+    const deltaIn = {
+      x: startPoint.x - corner.x,
+      y: startPoint.y - corner.y,
+    };
+    const deltaOut = {
+      x: endPoint.x - corner.x,
+      y: endPoint.y - corner.y,
+    };
+
+    if (prevHandleIndex !== null) {
+      points[prevHandleIndex] = {
+        ...points[prevHandleIndex],
+        x: Math.round(points[prevHandleIndex].x + deltaIn.x),
+        y: Math.round(points[prevHandleIndex].y + deltaIn.y),
+      };
+    }
+    if (nextHandleIndex !== null) {
+      points[nextHandleIndex] = {
+        ...points[nextHandleIndex],
+        x: Math.round(points[nextHandleIndex].x + deltaOut.x),
+        y: Math.round(points[nextHandleIndex].y + deltaOut.y),
+      };
+    }
+
+    points.splice(i, 1, startPoint, handleIn, handleOut, endPoint);
+    i += 4;
+  }
+
+  return points;
+}
+
 /**
  * Generates outline contours from skeleton data.
  * @param {Object} skeletonData - The skeleton data from customData["fontra.skeleton"]
@@ -691,24 +967,35 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
     rightSide.push(...offsetPoints.right);
   }
 
+  let roundedLeftSide = roundSharpCornersOnSide(leftSide, { isClosed });
+  let roundedRightSide = roundSharpCornersOnSide(rightSide, { isClosed });
+
   if (isClosed) {
     // For closed skeleton: TWO separate contours (outer and inner)
     // The inner contour needs to be reversed for correct winding direction
     // (outer = counter-clockwise, inner = clockwise for proper fill)
-    const reversedRight = [...rightSide].reverse();
+    const reversedRight = [...roundedRightSide].reverse();
 
     // DISABLED for performance testing - alignHandleDirections is O(n³)
     // const alignedLeftSide = alignHandleDirections(leftSide, segments, true);
     // const alignedRightSide = alignHandleDirections(reversedRight, segments, false);
 
-    const leftContourPoints = enforceSmoothColinearity(leftSide, true, {
+    const leftContourPoints = enforceSmoothColinearity(
+      stripCornerRoundMetadata(roundedLeftSide),
+      true,
+      {
       includeLinearNeighborCases: false,
       maxHandleRotationDeg: 60,
-    });
-    const rightContourPoints = enforceSmoothColinearity(reversedRight, true, {
+      }
+    );
+    const rightContourPoints = enforceSmoothColinearity(
+      stripCornerRoundMetadata(reversedRight),
+      true,
+      {
       includeLinearNeighborCases: false,
       maxHandleRotationDeg: 60,
-    });
+      }
+    );
 
     let contours = [
       { points: leftContourPoints, isClosed: true },
@@ -764,8 +1051,8 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
 
       if (startIsRound) {
         let startTangent = getSegmentTangent(segments[0], "start");
-        let leftStart = getFirstOnCurvePoint(leftSide);
-        let rightStart = getFirstOnCurvePoint(rightSide);
+        let leftStart = getFirstOnCurvePoint(roundedLeftSide);
+        let rightStart = getFirstOnCurvePoint(roundedRightSide);
         if (leftStart && rightStart) {
         const capVector = vector.subVectors(leftStart, rightStart);
         const capLength = Math.hypot(capVector.x, capVector.y);
@@ -907,10 +1194,10 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
         if (startCapLeftHW < 0.5 && startCapRightHW > 0.5) moveLeft = false;
         if (startCapRightHW < 0.5 && startCapLeftHW > 0.5) moveLeft = true;
 
-        const leftStart = getFirstOnCurvePoint(leftSide);
-        const rightStart = getFirstOnCurvePoint(rightSide);
-        const leftHandleDir = getSideHandleDirection(leftSide, "start");
-        const rightHandleDir = getSideHandleDirection(rightSide, "start");
+        const leftStart = getFirstOnCurvePoint(roundedLeftSide);
+        const rightStart = getFirstOnCurvePoint(roundedRightSide);
+        const leftHandleDir = getSideHandleDirection(roundedLeftSide, "start");
+        const rightHandleDir = getSideHandleDirection(roundedRightSide, "start");
         const addLeft = hasDistance || (hasAngle && moveLeft);
         const addRight = hasDistance || (hasAngle && !moveLeft);
         const leftDelta = hasAngle && moveLeft ? delta : 0;
@@ -923,7 +1210,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
             hasDistance ? startDistance : 0,
             leftDelta
           );
-          if (leftExtra) leftSide.unshift(leftExtra);
+          if (leftExtra) roundedLeftSide.unshift(leftExtra);
         }
         if (addRight) {
           const rightExtra = createSquareCapPoint(
@@ -933,7 +1220,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
             hasDistance ? startDistance : 0,
             rightDelta
           );
-          if (rightExtra) rightSide.unshift(rightExtra);
+          if (rightExtra) roundedRightSide.unshift(rightExtra);
         }
       } else {
         startCap = generateCap(
@@ -949,8 +1236,8 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
 
       if (endIsRound) {
         let endTangent = getSegmentTangent(segments[segments.length - 1], "end");
-        let leftEnd = getLastOnCurvePoint(leftSide);
-        let rightEnd = getLastOnCurvePoint(rightSide);
+        let leftEnd = getLastOnCurvePoint(roundedLeftSide);
+        let rightEnd = getLastOnCurvePoint(roundedRightSide);
         if (leftEnd && rightEnd) {
         const capVector = vector.subVectors(leftEnd, rightEnd);
         const capLength = Math.hypot(capVector.x, capVector.y);
@@ -1094,10 +1381,10 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
         if (endCapLeftHW < 0.5 && endCapRightHW > 0.5) moveLeft = false;
         if (endCapRightHW < 0.5 && endCapLeftHW > 0.5) moveLeft = true;
 
-        const leftEnd = getLastOnCurvePoint(leftSide);
-        const rightEnd = getLastOnCurvePoint(rightSide);
-        const leftHandleDir = getSideHandleDirection(leftSide, "end");
-        const rightHandleDir = getSideHandleDirection(rightSide, "end");
+        const leftEnd = getLastOnCurvePoint(roundedLeftSide);
+        const rightEnd = getLastOnCurvePoint(roundedRightSide);
+        const leftHandleDir = getSideHandleDirection(roundedLeftSide, "end");
+        const rightHandleDir = getSideHandleDirection(roundedRightSide, "end");
         const addLeft = hasDistance || (hasAngle && moveLeft);
         const addRight = hasDistance || (hasAngle && !moveLeft);
         const leftDelta = hasAngle && moveLeft ? delta : 0;
@@ -1110,7 +1397,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
             hasDistance ? endDistance : 0,
             leftDelta
           );
-          if (leftExtra) leftSide.push(leftExtra);
+          if (leftExtra) roundedLeftSide.push(leftExtra);
         }
         if (addRight) {
           const rightExtra = createSquareCapPoint(
@@ -1120,7 +1407,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
             hasDistance ? endDistance : 0,
             rightDelta
           );
-          if (rightExtra) rightSide.push(rightExtra);
+          if (rightExtra) roundedRightSide.push(rightExtra);
         }
       } else {
         endCap = generateCap(
@@ -1136,21 +1423,25 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
 
     const outlinePoints = [];
     // Left side forward
-    outlinePoints.push(...leftSide);
+    outlinePoints.push(...roundedLeftSide);
     // End cap
     outlinePoints.push(...endCap);
     // Right side backward
-    outlinePoints.push(...rightSide.reverse());
+    outlinePoints.push(...roundedRightSide.reverse());
     // Start cap
     outlinePoints.push(...startCap);
 
     // DISABLED for performance testing - alignHandleDirections is O(n³)
     // const alignedOutlinePoints = alignHandleDirections(outlinePoints, segments, null);
 
-    const finalPoints = enforceSmoothColinearity(outlinePoints, true, {
+    const finalPoints = enforceSmoothColinearity(
+      stripCornerRoundMetadata(outlinePoints),
+      true,
+      {
       includeLinearNeighborCases: false,
       maxHandleRotationDeg: 60,
-    });
+      }
+    );
     let contour = { points: finalPoints, isClosed: true };
 
     // Apply reverse if flag is set
@@ -1710,11 +2001,25 @@ function generateOffsetPointsForSegment(
       // Apply nudge offset if point is editable
       let startLeftPt = projectPoint(segment.startPoint, startNormal, startLeftHW, 1);
       startLeftPt = applyNudgeToRibPoint(startLeftPt, segment.startPoint, startNormal, "left", startLeftHW);
-      left.push({ ...startLeftPt, smooth: segment.startPoint.smooth });
+      left.push(
+        buildGeneratedOnCurve(
+          startLeftPt,
+          segment.startPoint.smooth,
+          segment.startPoint,
+          startLeftHW
+        )
+      );
 
       let startRightPt = projectPoint(segment.startPoint, startNormal, startRightHW, -1);
       startRightPt = applyNudgeToRibPoint(startRightPt, segment.startPoint, startNormal, "right", startRightHW);
-      right.push({ ...startRightPt, smooth: segment.startPoint.smooth });
+      right.push(
+        buildGeneratedOnCurve(
+          startRightPt,
+          segment.startPoint.smooth,
+          segment.startPoint,
+          startRightHW
+        )
+      );
     }
 
     // Add end point offset:
@@ -1734,11 +2039,25 @@ function generateOffsetPointsForSegment(
       // Apply nudge offset if point is editable
       let endLeftPt = projectPoint(segment.endPoint, endNormal, endLeftHW, 1);
       endLeftPt = applyNudgeToRibPoint(endLeftPt, segment.endPoint, endNormal, "left", endLeftHW);
-      left.push({ ...endLeftPt, smooth: segment.endPoint.smooth });
+      left.push(
+        buildGeneratedOnCurve(
+          endLeftPt,
+          segment.endPoint.smooth,
+          segment.endPoint,
+          endLeftHW
+        )
+      );
 
       let endRightPt = projectPoint(segment.endPoint, endNormal, endRightHW, -1);
       endRightPt = applyNudgeToRibPoint(endRightPt, segment.endPoint, endNormal, "right", endRightHW);
-      right.push({ ...endRightPt, smooth: segment.endPoint.smooth });
+      right.push(
+        buildGeneratedOnCurve(
+          endRightPt,
+          segment.endPoint.smooth,
+          segment.endPoint,
+          endRightHW
+        )
+      );
     }
   } else {
     // Bezier segment - use bezier.offset() for mathematically correct offset
@@ -1800,28 +2119,47 @@ function generateOffsetPointsForSegment(
     fixedEndRight = applyNudgeToRibPoint(fixedEndRight, segment.endPoint, endNormal, "right", endRightHW);
 
     // Helper to add offset curves to output array
-    const addOffsetCurves = (curves, output, fixedStart, fixedEnd, shouldAddStart, shouldAddEnd, smoothStart, smoothEnd, sideHalfWidth, isLeftSide) => {
+    const addOffsetCurves = (
+      curves,
+      output,
+      fixedStart,
+      fixedEnd,
+      shouldAddStart,
+      shouldAddEnd,
+      smoothStart,
+      smoothEnd,
+      sideHalfWidth,
+      isLeftSide,
+      startHalfWidth,
+      endHalfWidth
+    ) => {
       const side = isLeftSide ? "left" : "right";
       // When halfWidth is near zero, contour should exactly match skeleton
       // Copy control points directly instead of using offset curves
       if (isCollapsedSide(sideHalfWidth) && segment.controlPoints.length > 0) {
         if (shouldAddStart) {
-          output.push({
-            x: segment.startPoint.x,
-            y: segment.startPoint.y,
-            smooth: smoothStart,
-          });
+          output.push(
+            buildGeneratedOnCurve(
+              segment.startPoint,
+              smoothStart,
+              segment.startPoint,
+              startHalfWidth
+            )
+          );
         }
         // Collapsed side must stay exactly on skeleton geometry.
         for (const cp of segment.controlPoints) {
           output.push({ x: cp.x, y: cp.y, type: "cubic" });
         }
         if (shouldAddEnd) {
-          output.push({
-            x: segment.endPoint.x,
-            y: segment.endPoint.y,
-            smooth: smoothEnd,
-          });
+          output.push(
+            buildGeneratedOnCurve(
+              segment.endPoint,
+              smoothEnd,
+              segment.endPoint,
+              endHalfWidth
+            )
+          );
         }
         return;
       }
@@ -1829,10 +2167,24 @@ function generateOffsetPointsForSegment(
       // Fallback: if bezier.offset() returns empty result, add straight line
       if (!curves || curves.length === 0) {
         if (shouldAddStart) {
-          output.push({ x: fixedStart.x, y: fixedStart.y, smooth: smoothStart });
+          output.push(
+            buildGeneratedOnCurve(
+              fixedStart,
+              smoothStart,
+              segment.startPoint,
+              startHalfWidth
+            )
+          );
         }
         if (shouldAddEnd) {
-          output.push({ x: fixedEnd.x, y: fixedEnd.y, smooth: smoothEnd });
+          output.push(
+            buildGeneratedOnCurve(
+              fixedEnd,
+              smoothEnd,
+              segment.endPoint,
+              endHalfWidth
+            )
+          );
         }
         return;
       }
@@ -1846,11 +2198,14 @@ function generateOffsetPointsForSegment(
         // Use the simplified curve
         const pts = simplifiedCurve.points;
         if (shouldAddStart) {
-          output.push({
-            x: fixedStart.x,
-            y: fixedStart.y,
-            smooth: smoothStart,
-          });
+          output.push(
+            buildGeneratedOnCurve(
+              fixedStart,
+              smoothStart,
+              segment.startPoint,
+              startHalfWidth
+            )
+          );
         }
         // Adjust control points to match the fixed endpoints
         // The offset curve was generated with average width, but endpoints use real widths
@@ -2027,11 +2382,14 @@ function generateOffsetPointsForSegment(
         output.push({ x: adjustedHandle1.x, y: adjustedHandle1.y, type: "cubic" });
         output.push({ x: adjustedHandle2.x, y: adjustedHandle2.y, type: "cubic" });
         if (shouldAddEnd) {
-          output.push({
-            x: fixedEnd.x,
-            y: fixedEnd.y,
-            smooth: smoothEnd,
-          });
+          output.push(
+            buildGeneratedOnCurve(
+              fixedEnd,
+              smoothEnd,
+              segment.endPoint,
+              endHalfWidth
+            )
+          );
         }
         return;
       }
@@ -2064,11 +2422,14 @@ function generateOffsetPointsForSegment(
 
         // Add start point only for first curve if shouldAddStart
         if (isFirstCurve && shouldAddStart) {
-          output.push({
-            x: fixedStart.x,
-            y: fixedStart.y,
-            smooth: smoothStart,
-          });
+          output.push(
+            buildGeneratedOnCurve(
+              fixedStart,
+              smoothStart,
+              segment.startPoint,
+              startHalfWidth
+            )
+          );
         }
 
         // Add control points based on curve type, adjusted for fixed endpoints
@@ -2146,11 +2507,14 @@ function generateOffsetPointsForSegment(
         if (isLastCurve) {
           // Last curve - use fixed end position if shouldAddEnd
           if (shouldAddEnd) {
-            output.push({
-              x: fixedEnd.x,
-              y: fixedEnd.y,
-              smooth: smoothEnd,
-            });
+            output.push(
+              buildGeneratedOnCurve(
+                fixedEnd,
+                smoothEnd,
+                segment.endPoint,
+                endHalfWidth
+              )
+            );
           }
         } else {
           // Intermediate curve - add endpoint (it becomes next curve's start)
@@ -2180,7 +2544,9 @@ function generateOffsetPointsForSegment(
       segment.startPoint.smooth,
       segment.endPoint.smooth,
       avgLeftHW,
-      true  // isLeftSide
+      true, // isLeftSide
+      startLeftHW,
+      endLeftHW
     );
 
     addOffsetCurves(
@@ -2193,7 +2559,9 @@ function generateOffsetPointsForSegment(
       segment.startPoint.smooth,
       segment.endPoint.smooth,
       avgRightHW,
-      false  // isLeftSide
+      false, // isLeftSide
+      startRightHW,
+      endRightHW
     );
   }
 

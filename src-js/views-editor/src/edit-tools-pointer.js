@@ -1302,6 +1302,8 @@ export class PointerTool extends BaseTool {
 
           if (!hasPrevHandle && !hasNextHandle) continue;
 
+          // Keep point.cornerRoundness intact so toggling smooth on/off does not
+          // destroy user-defined corner rounding values.
           point.smooth = newSmooth;
 
           // If switching to smooth, align handle(s) to be collinear

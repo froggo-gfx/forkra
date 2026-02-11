@@ -48,6 +48,9 @@ const CAP_RADIUS_MAX = 1 / 4;
 const CAP_RADIUS_POSITIONS = 20;
 const CAP_ANGLE_MIN = -85;
 const CAP_ANGLE_MAX = 85;
+const DEFAULT_CORNER_ROUNDNESS = 0;
+const CORNER_ROUND_MIN = 0;
+const CORNER_ROUND_MAX = 1;
 
 export default class SkeletonParametersPanel extends Panel {
   identifier = "skeleton-parameters";
@@ -856,6 +859,32 @@ export default class SkeletonParametersPanel extends Panel {
     formContents.push({ type: "divider" });
     formContents.push({ type: "spacer" });
 
+    const cornerRoundState = this._getSelectedCornerRoundState(selectedData);
+    const cornerRoundPercent = Math.round(
+      (cornerRoundState.value ?? DEFAULT_CORNER_ROUNDNESS) * 100
+    );
+    const cornerRoundAux =
+      cornerRoundState.mixed
+        ? html.span({ style: "font-size: 11px; opacity: 0.7;" }, "mixed")
+        : undefined;
+
+    formContents.push({
+      type: "header",
+      label: "Corner Rounding",
+      auxiliaryElement: cornerRoundAux,
+    });
+    formContents.push({
+      type: "edit-number-slider",
+      key: "cornerRoundnessPercent",
+      label: "Corner Round (%)",
+      value: cornerRoundState.mixed ? 0 : cornerRoundPercent,
+      minValue: 0,
+      defaultValue: 0,
+      maxValue: 100,
+      step: 1,
+      disabled: !cornerRoundState.canEdit,
+    });
+
     const capStyleState = this._getSelectedEndpointCapStyleState(selectedData);
     const capValue = capStyleState.value || "flat";
     const capOptions = [];
@@ -1158,6 +1187,21 @@ export default class SkeletonParametersPanel extends Panel {
         await this._setDefaultSkeletonWidth(sourceWidthKeyMap[fieldItem.key], value);
       } else if (fieldItem.key === "pointWidthLeft" || fieldItem.key === "pointWidthRight") {
         await this._setPointWidth(fieldItem.key, value);
+      } else if (fieldItem.key === "cornerRoundnessPercent") {
+        if (valueStream) {
+          this._isDraggingSlider = true;
+          try {
+            const mappedStream = this._mapValueStream(valueStream, (v) => v / 100);
+            await this._setCornerRoundnessForSelectionStream(mappedStream);
+          } finally {
+            this._isDraggingSlider = false;
+            this._blurActiveFormElement();
+          }
+          this.update();
+        } else {
+          await this._setCornerRoundnessForSelection(value / 100);
+          this.update();
+        }
       } else if (fieldItem.key === "capRadiusIndex") {
         if (valueStream) {
           this._isDraggingSlider = true;
@@ -2609,6 +2653,45 @@ export default class SkeletonParametersPanel extends Panel {
     return { firstOnCurve, lastOnCurve };
   }
 
+  _isCornerRoundEditableForPoint(contour, pointIdx, point) {
+    if (!contour || !point || point.type || point.smooth) {
+      return false;
+    }
+    if (contour.isClosed) {
+      return true;
+    }
+    const endpoints = this._getContourEndpointIndices(contour);
+    if (!endpoints) {
+      return false;
+    }
+    return pointIdx !== endpoints.firstOnCurve && pointIdx !== endpoints.lastOnCurve;
+  }
+
+  _getSelectedCornerRoundState(selectedData) {
+    if (!selectedData || selectedData.points.length === 0) {
+      return { canEdit: false, mixed: false, value: DEFAULT_CORNER_ROUNDNESS };
+    }
+
+    const values = new Set();
+
+    for (const { contourIdx, pointIdx, point } of selectedData.points) {
+      const contour = selectedData.skeletonData?.contours?.[contourIdx];
+      if (!this._isCornerRoundEditableForPoint(contour, pointIdx, point)) {
+        return { canEdit: false, mixed: false, value: DEFAULT_CORNER_ROUNDNESS };
+      }
+      const value = this._clampCornerRoundness(
+        point.cornerRoundness ?? DEFAULT_CORNER_ROUNDNESS
+      );
+      values.add(value);
+    }
+
+    if (values.size > 1) {
+      return { canEdit: true, mixed: true, value: null };
+    }
+    const [singleValue] = values;
+    return { canEdit: true, mixed: false, value: singleValue };
+  }
+
   _getSelectedEndpointCapStyleState(selectedData) {
     if (!selectedData || selectedData.points.length === 0) {
       return { canEdit: false, mixed: false, value: "flat" };
@@ -2848,10 +2931,13 @@ export default class SkeletonParametersPanel extends Panel {
           const capStyle = point.capStyle ?? "";
             const capRadiusRatio = point.capRadiusRatio ?? contour?.capRadiusRatio ?? "";
             const capTension = point.capTension ?? contour?.capTension ?? "";
-            const capAngle = point.capAngle ?? contour?.capAngle ?? "";
-            const capDistance = point.capDistance ?? contour?.capDistance ?? "";
-            const forceH = point.forceHorizontal ? 1 : 0;
-            const forceV = point.forceVertical ? 1 : 0;
+          const capAngle = point.capAngle ?? contour?.capAngle ?? "";
+          const capDistance = point.capDistance ?? contour?.capDistance ?? "";
+          const cornerRoundness = this._clampCornerRoundness(
+            point.cornerRoundness ?? DEFAULT_CORNER_ROUNDNESS
+          );
+          const forceH = point.forceHorizontal ? 1 : 0;
+          const forceV = point.forceVertical ? 1 : 0;
             const handleInfo = this._getHandleValuesForPoint(contour, pointIdx);
             const handleRound = (v) => (v === null || v === undefined ? "" : Math.round(v * 10) / 10);
             const handleIn = handleRound(handleInfo?.inLen);
@@ -2860,7 +2946,7 @@ export default class SkeletonParametersPanel extends Panel {
           const smoothFlag = point.smooth ? 1 : 0;
           const signatureLeft = Math.round(w.left * 1000) / 1000;
           const signatureRight = Math.round(w.right * 1000) / 1000;
-          parts.push(`${contourIdx}/${pointIdx}:${signatureLeft},${signatureRight},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension},${capAngle},${capDistance},${forceH},${forceV},${smoothFlag},${handleIn},${handleOut},${handleAngle}`);
+          parts.push(`${contourIdx}/${pointIdx}:${signatureLeft},${signatureRight},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension},${capAngle},${capDistance},${cornerRoundness},${forceH},${forceV},${smoothFlag},${handleIn},${handleOut},${handleAngle}`);
         }
       }
 
@@ -3228,6 +3314,122 @@ export default class SkeletonParametersPanel extends Panel {
       return {
         changes: finalCombined,
         undoLabel: this._capParamUndoLabel(paramKey),
+        broadcast: true,
+      };
+    });
+  }
+
+  _clampCornerRoundness(value) {
+    if (!Number.isFinite(value)) {
+      return DEFAULT_CORNER_ROUNDNESS;
+    }
+    return Math.min(Math.max(value, CORNER_ROUND_MIN), CORNER_ROUND_MAX);
+  }
+
+  _buildCornerRoundnessChanges(glyph, selectedData, value) {
+    const allChanges = [];
+
+    for (const editLayerName of this.sceneController.editingLayerNames) {
+      const layer = glyph.layers[editLayerName];
+      if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+      const skeletonData = JSON.parse(
+        JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+      );
+      let changed = false;
+
+      for (const { contourIdx, pointIdx } of selectedData.points) {
+        const contour = skeletonData.contours[contourIdx];
+        const point = contour?.points?.[pointIdx];
+        if (!this._isCornerRoundEditableForPoint(contour, pointIdx, point)) {
+          continue;
+        }
+        if (value <= 0) {
+          delete point.cornerRoundness;
+        } else {
+          point.cornerRoundness = value;
+        }
+        changed = true;
+      }
+
+      if (!changed) continue;
+
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        this._regenerateOutlineContours(sg, skeletonData);
+      });
+      allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+    }
+
+    if (allChanges.length === 0) return null;
+    return new ChangeCollector().concat(...allChanges);
+  }
+
+  async _setCornerRoundnessForSelection(value) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) {
+      return;
+    }
+
+    const clampedValue = this._clampCornerRoundness(value);
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const combined = this._buildCornerRoundnessChanges(
+        glyph,
+        selectedData,
+        clampedValue
+      );
+      if (!combined) return;
+
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Set corner roundness",
+        broadcast: true,
+      };
+    });
+  }
+
+  async _setCornerRoundnessForSelectionStream(valueStream) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) {
+      return;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      let lastValue = null;
+
+      for await (const rawValue of valueStream) {
+        const clampedValue = this._clampCornerRoundness(rawValue);
+        lastValue = clampedValue;
+        const combined = this._buildCornerRoundnessChanges(
+          glyph,
+          selectedData,
+          clampedValue
+        );
+        if (combined) {
+          await sendIncrementalChange(combined.change, true);
+        }
+      }
+
+      if (lastValue === null) return;
+
+      const finalCombined = this._buildCornerRoundnessChanges(
+        glyph,
+        selectedData,
+        lastValue
+      );
+      if (!finalCombined) return;
+
+      return {
+        changes: finalCombined,
+        undoLabel: "Set corner roundness",
         broadcast: true,
       };
     });
