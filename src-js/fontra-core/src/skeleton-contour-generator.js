@@ -320,6 +320,7 @@ function enforceSmoothColinearity(
 
     // Only process on-curve smooth points
     if (point.type || !point.smooth) continue;
+    if (point.skipColinear) continue;
 
     // Find adjacent points (could be on-curve or off-curve)
     const prevIdx = (i - 1 + numPoints) % numPoints;
@@ -1117,12 +1118,17 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
           firstOnCurvePoint.capTension ??
           skeletonContour.capTension ??
           DEFAULT_CAP_TENSION;
-        const r = capWidth * capRadiusRatio;
-        const maxShift = Math.max(capWidth / 2 - capWidth / 128, 0);
-        const shift = Math.min(r * 2, maxShift);
-        const mergeCap = capRadiusRatio >= MAX_CAP_RADIUS_RATIO - 1e-6;
-        const normalShift = mergeCap ? capWidth / 2 : shift;
-        if (capLength > 0.001 && r > 0.001) {
+        const clampedCapRadiusRatio = Math.min(
+          Math.max(capRadiusRatio, 0),
+          MAX_CAP_RADIUS_RATIO
+        );
+        const radiusFactor =
+          MAX_CAP_RADIUS_RATIO > 0 ? clampedCapRadiusRatio / MAX_CAP_RADIUS_RATIO : 0;
+        const maxProjectionShift = Math.max(capWidth / 2 - capWidth / 128, 0);
+        const mergeCapAtMax = radiusFactor >= 1 - 1e-6;
+        const mergeCap = false;
+        const normalShift = (capWidth / 2) * radiusFactor;
+        if (capLength > 0.001 && capWidth > 0.001) {
           let startNormal = getEffectiveNormal(
             firstOnCurvePoint,
             vector.rotateVector90CW(startTangent)
@@ -1140,17 +1146,44 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
             leftStart.smooth = true;
           }
           const tipNormalShift = normalShift;
-          const tipTangentShift = shift;
+          const tipTangentShift = maxProjectionShift;
+          const projectedTangentShift = maxProjectionShift * (1 - radiusFactor);
           const newRight = {
             x: Math.round(origRight.x + capDir.x * tipNormalShift + tOut.x * tipTangentShift),
             y: Math.round(origRight.y + capDir.y * tipNormalShift + tOut.y * tipTangentShift),
             smooth: true,
+            skipColinear: true,
           };
           const newLeft = {
             x: Math.round(origLeft.x - capDir.x * tipNormalShift + tOut.x * tipTangentShift),
             y: Math.round(origLeft.y - capDir.y * tipNormalShift + tOut.y * tipTangentShift),
             smooth: true,
+            skipColinear: true,
           };
+          if (mergeCapAtMax) {
+            const mid = {
+              x: Math.round((newRight.x + newLeft.x) / 2),
+              y: Math.round((newRight.y + newLeft.y) / 2),
+            };
+            newRight.x = mid.x;
+            newRight.y = mid.y;
+            newLeft.x = mid.x;
+            newLeft.y = mid.y;
+          }
+          const projectedRight = {
+            x: Math.round(origRight.x + tOut.x * projectedTangentShift),
+            y: Math.round(origRight.y + tOut.y * projectedTangentShift),
+            smooth: true,
+            skipColinear: true,
+          };
+          const projectedLeft = {
+            x: Math.round(origLeft.x + tOut.x * projectedTangentShift),
+            y: Math.round(origLeft.y + tOut.y * projectedTangentShift),
+            smooth: true,
+            skipColinear: true,
+          };
+          const newRightHandleDir = { x: -capDir.x, y: -capDir.y };
+          const newLeftHandleDir = { x: capDir.x, y: capDir.y };
           const midPoint = mergeCap
             ? {
                 x: Math.round((newRight.x + newLeft.x) / 2),
@@ -1159,22 +1192,21 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
               }
             : null;
 
-          const rightSegHandles = computeTunniHandleLengths(
-            rightStart,
-            tOut,
-            mergeCap ? midPoint : newRight,
-            { x: -capDir.x, y: -capDir.y },
-            capTension
-          );
-          const leftSegHandles = computeTunniHandleLengths(
-            mergeCap ? midPoint : newLeft,
-            capDir,
-            leftStart,
-            tOut,
-            capTension
-          );
-
           if (mergeCap) {
+            const rightSegHandles = computeTunniHandleLengths(
+              rightStart,
+              tOut,
+              midPoint,
+              { x: -capDir.x, y: -capDir.y },
+              capTension
+            );
+            const leftSegHandles = computeTunniHandleLengths(
+              midPoint,
+              capDir,
+              leftStart,
+              tOut,
+              capTension
+            );
             startCap = [
               {
                 x: Math.round(rightStart.x + tOut.x * rightSegHandles.startLen),
@@ -1199,29 +1231,48 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
               },
             ];
           } else {
+            // Non-merged round cap: preserve max projection with two projected side points
+            // plus two rib-tip points so cap radius can still vary via capRadiusRatio.
+            const projectedHandleDir = { x: tOut.x, y: tOut.y };
+            const rightCornerSegHandles = computeTunniHandleLengths(
+              projectedRight,
+              projectedHandleDir,
+              newRight,
+              newRightHandleDir,
+              capTension
+            );
+            const leftCornerSegHandles = computeTunniHandleLengths(
+              newLeft,
+              newLeftHandleDir,
+              projectedLeft,
+              projectedHandleDir,
+              capTension
+            );
             startCap = [
+              projectedRight,
               {
-                x: Math.round(rightStart.x + tOut.x * rightSegHandles.startLen),
-                y: Math.round(rightStart.y + tOut.y * rightSegHandles.startLen),
+                x: Math.round(projectedRight.x + projectedHandleDir.x * rightCornerSegHandles.startLen),
+                y: Math.round(projectedRight.y + projectedHandleDir.y * rightCornerSegHandles.startLen),
                 type: "cubic",
               },
               {
-                x: Math.round(newRight.x - capDir.x * rightSegHandles.endLen),
-                y: Math.round(newRight.y - capDir.y * rightSegHandles.endLen),
+                x: Math.round(newRight.x + newRightHandleDir.x * rightCornerSegHandles.endLen),
+                y: Math.round(newRight.y + newRightHandleDir.y * rightCornerSegHandles.endLen),
                 type: "cubic",
               },
               newRight,
               newLeft,
               {
-                x: Math.round(newLeft.x + capDir.x * leftSegHandles.startLen),
-                y: Math.round(newLeft.y + capDir.y * leftSegHandles.startLen),
+                x: Math.round(newLeft.x + newLeftHandleDir.x * leftCornerSegHandles.startLen),
+                y: Math.round(newLeft.y + newLeftHandleDir.y * leftCornerSegHandles.startLen),
                 type: "cubic",
               },
               {
-                x: Math.round(leftStart.x + tOut.x * leftSegHandles.endLen),
-                y: Math.round(leftStart.y + tOut.y * leftSegHandles.endLen),
+                x: Math.round(projectedLeft.x + projectedHandleDir.x * leftCornerSegHandles.endLen),
+                y: Math.round(projectedLeft.y + projectedHandleDir.y * leftCornerSegHandles.endLen),
                 type: "cubic",
               },
+              projectedLeft,
             ];
           }
         }
@@ -1302,12 +1353,17 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
           lastOnCurvePoint.capTension ??
           skeletonContour.capTension ??
           DEFAULT_CAP_TENSION;
-        const r = capWidth * capRadiusRatio;
-        const maxShift = Math.max(capWidth / 2 - capWidth / 128, 0);
-        const shift = Math.min(r * 2, maxShift);
-        const mergeCap = capRadiusRatio >= MAX_CAP_RADIUS_RATIO - 1e-6;
-        const normalShift = mergeCap ? capWidth / 2 : shift;
-        if (capLength > 0.001 && r > 0.001) {
+        const clampedCapRadiusRatio = Math.min(
+          Math.max(capRadiusRatio, 0),
+          MAX_CAP_RADIUS_RATIO
+        );
+        const radiusFactor =
+          MAX_CAP_RADIUS_RATIO > 0 ? clampedCapRadiusRatio / MAX_CAP_RADIUS_RATIO : 0;
+        const maxProjectionShift = Math.max(capWidth / 2 - capWidth / 128, 0);
+        const mergeCapAtMax = radiusFactor >= 1 - 1e-6;
+        const mergeCap = false;
+        const normalShift = (capWidth / 2) * radiusFactor;
+        if (capLength > 0.001 && capWidth > 0.001) {
           let endNormal = getEffectiveNormal(
             lastOnCurvePoint,
             vector.rotateVector90CW(endTangent)
@@ -1327,17 +1383,44 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
             rightEnd.smooth = true;
           }
           const tipNormalShift = normalShift;
-          const tipTangentShift = shift;
+          const tipTangentShift = maxProjectionShift;
+          const projectedTangentShift = maxProjectionShift * (1 - radiusFactor);
           const newLeft = {
             x: Math.round(origLeft.x + capDir.x * tipNormalShift + tOut.x * tipTangentShift),
             y: Math.round(origLeft.y + capDir.y * tipNormalShift + tOut.y * tipTangentShift),
             smooth: true,
+            skipColinear: true,
           };
           const newRight = {
             x: Math.round(origRight.x - capDir.x * tipNormalShift + tOut.x * tipTangentShift),
             y: Math.round(origRight.y - capDir.y * tipNormalShift + tOut.y * tipTangentShift),
             smooth: true,
+            skipColinear: true,
           };
+          if (mergeCapAtMax) {
+            const mid = {
+              x: Math.round((newLeft.x + newRight.x) / 2),
+              y: Math.round((newLeft.y + newRight.y) / 2),
+            };
+            newLeft.x = mid.x;
+            newLeft.y = mid.y;
+            newRight.x = mid.x;
+            newRight.y = mid.y;
+          }
+          const projectedLeft = {
+            x: Math.round(origLeft.x + tOut.x * projectedTangentShift),
+            y: Math.round(origLeft.y + tOut.y * projectedTangentShift),
+            smooth: true,
+            skipColinear: true,
+          };
+          const projectedRight = {
+            x: Math.round(origRight.x + tOut.x * projectedTangentShift),
+            y: Math.round(origRight.y + tOut.y * projectedTangentShift),
+            smooth: true,
+            skipColinear: true,
+          };
+          const newLeftHandleDir = { x: -capDir.x, y: -capDir.y };
+          const newRightHandleDir = { x: capDir.x, y: capDir.y };
           const midPoint = mergeCap
             ? {
                 x: Math.round((newLeft.x + newRight.x) / 2),
@@ -1346,22 +1429,21 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
               }
             : null;
 
-          const leftSegHandles = computeTunniHandleLengths(
-            leftEnd,
-            tOut,
-            mergeCap ? midPoint : newLeft,
-            { x: -capDir.x, y: -capDir.y },
-            capTension
-          );
-          const rightSegHandles = computeTunniHandleLengths(
-            mergeCap ? midPoint : newRight,
-            capDir,
-            rightEnd,
-            tOut,
-            capTension
-          );
-
           if (mergeCap) {
+            const leftSegHandles = computeTunniHandleLengths(
+              leftEnd,
+              tOut,
+              midPoint,
+              { x: -capDir.x, y: -capDir.y },
+              capTension
+            );
+            const rightSegHandles = computeTunniHandleLengths(
+              midPoint,
+              capDir,
+              rightEnd,
+              tOut,
+              capTension
+            );
             endCap = [
               {
                 x: Math.round(leftEnd.x + tOut.x * leftSegHandles.startLen),
@@ -1386,29 +1468,48 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
               },
             ];
           } else {
+            // Non-merged round cap: preserve max projection with two projected side points
+            // plus two rib-tip points so cap radius can still vary via capRadiusRatio.
+            const projectedHandleDir = { x: tOut.x, y: tOut.y };
+            const leftCornerSegHandles = computeTunniHandleLengths(
+              projectedLeft,
+              projectedHandleDir,
+              newLeft,
+              newLeftHandleDir,
+              capTension
+            );
+            const rightCornerSegHandles = computeTunniHandleLengths(
+              newRight,
+              newRightHandleDir,
+              projectedRight,
+              projectedHandleDir,
+              capTension
+            );
             endCap = [
+              projectedLeft,
               {
-                x: Math.round(leftEnd.x + tOut.x * leftSegHandles.startLen),
-                y: Math.round(leftEnd.y + tOut.y * leftSegHandles.startLen),
+                x: Math.round(projectedLeft.x + projectedHandleDir.x * leftCornerSegHandles.startLen),
+                y: Math.round(projectedLeft.y + projectedHandleDir.y * leftCornerSegHandles.startLen),
                 type: "cubic",
               },
               {
-                x: Math.round(newLeft.x - capDir.x * leftSegHandles.endLen),
-                y: Math.round(newLeft.y - capDir.y * leftSegHandles.endLen),
+                x: Math.round(newLeft.x + newLeftHandleDir.x * leftCornerSegHandles.endLen),
+                y: Math.round(newLeft.y + newLeftHandleDir.y * leftCornerSegHandles.endLen),
                 type: "cubic",
               },
               newLeft,
               newRight,
               {
-                x: Math.round(newRight.x + capDir.x * rightSegHandles.startLen),
-                y: Math.round(newRight.y + capDir.y * rightSegHandles.startLen),
+                x: Math.round(newRight.x + newRightHandleDir.x * rightCornerSegHandles.startLen),
+                y: Math.round(newRight.y + newRightHandleDir.y * rightCornerSegHandles.startLen),
                 type: "cubic",
               },
               {
-                x: Math.round(rightEnd.x + tOut.x * rightSegHandles.endLen),
-                y: Math.round(rightEnd.y + tOut.y * rightSegHandles.endLen),
+                x: Math.round(projectedRight.x + projectedHandleDir.x * rightCornerSegHandles.endLen),
+                y: Math.round(projectedRight.y + projectedHandleDir.y * rightCornerSegHandles.endLen),
                 type: "cubic",
               },
+              projectedRight,
             ];
           }
         }
