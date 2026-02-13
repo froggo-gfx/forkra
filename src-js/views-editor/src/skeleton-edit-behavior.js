@@ -986,8 +986,8 @@ export function createRibEditBehavior(skeletonData, ribHit) {
 
 /**
  * EditableRibBehavior - Handles dragging of editable rib points.
- * - If point is symmetric: only nudge (tangent movement), width stays the same
- * - If point is asymmetric: free movement (width + nudge)
+ * - Width follows normal component, nudge follows tangent component.
+ * - Constrain modes can lock width or nudge.
  */
 export class EditableRibBehavior {
   /**
@@ -1020,10 +1020,6 @@ export class EditableRibBehavior {
     const point = contour.points[pointIndex];
     const points = contour.points;
     const defaultWidth = contour.defaultWidth || 20;
-
-    // Determine if point is symmetric or asymmetric
-    // Asymmetric = has leftWidth or rightWidth defined
-    this.isAsymmetric = point.leftWidth !== undefined || point.rightWidth !== undefined;
 
     // Store original half-width
     if (side === "left") {
@@ -1118,13 +1114,11 @@ export class EditableRibBehavior {
 
   /**
    * Apply drag delta and return changes to width and nudge.
-   * - Symmetric: only nudge changes, width stays original
-   * - Asymmetric: both width and nudge can change
    * - With constrainMode: lock to tangent or normal direction
    * Also compensates 2D handle offsets when nudge changes to keep handles stationary.
    * @param {Object} delta - The drag delta {x, y}
    * @param {string|null} constrainMode - null (free), "tangent" (nudge only), or "normal" (width only)
-   * @returns {Object} { halfWidth, nudge, isAsymmetric, handleInOffsetX/Y, handleOutOffsetX/Y }
+   * @returns {Object} { halfWidth, nudge, handleInOffsetX/Y, handleOutOffsetX/Y }
    */
   applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
     let newNudge = this.originalNudge;
@@ -1137,16 +1131,13 @@ export class EditableRibBehavior {
     }
     // Constrain to normal: only width changes
     else if (constrainMode === "normal") {
-      if (this.isAsymmetric) {
-        const sign = this.side === "left" ? 1 : -1;
-        const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
-        const normalDelta = sign * normalDot;
-        newHalfWidth = this.originalHalfWidth + normalDelta;
-        if (newHalfWidth < this.minHalfWidth) {
-          newHalfWidth = this.minHalfWidth;
-        }
+      const sign = this.side === "left" ? 1 : -1;
+      const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
+      const normalDelta = sign * normalDot;
+      newHalfWidth = this.originalHalfWidth + normalDelta;
+      if (newHalfWidth < this.minHalfWidth) {
+        newHalfWidth = this.minHalfWidth;
       }
-      // For symmetric points, normal constraint has no effect (width locked)
     }
     // Free movement (no constraint)
     else {
@@ -1154,15 +1145,12 @@ export class EditableRibBehavior {
       const tangentDot = delta.x * this.tangent.x + delta.y * this.tangent.y;
       newNudge = this.originalNudge + tangentDot;
 
-      // Only allow width change if asymmetric
-      if (this.isAsymmetric) {
-        const sign = this.side === "left" ? 1 : -1;
-        const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
-        const normalDelta = sign * normalDot;
-        newHalfWidth = this.originalHalfWidth + normalDelta;
-        if (newHalfWidth < this.minHalfWidth) {
-          newHalfWidth = this.minHalfWidth;
-        }
+      const sign = this.side === "left" ? 1 : -1;
+      const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
+      const normalDelta = sign * normalDot;
+      newHalfWidth = this.originalHalfWidth + normalDelta;
+      if (newHalfWidth < this.minHalfWidth) {
+        newHalfWidth = this.minHalfWidth;
       }
     }
 
@@ -1172,7 +1160,6 @@ export class EditableRibBehavior {
       side: this.side,
       halfWidth: roundFunc(newHalfWidth),
       nudge: roundFunc(newNudge),
-      isAsymmetric: this.isAsymmetric,
     };
 
     // Note: we don't compensate handle offsets here.
@@ -1463,19 +1450,18 @@ export class InterpolatingRibBehavior {
     const newHandleOutOffsetX = this.originalHandleOutOffsetX + (this.hasOutgoingHandle ? handleOffsetDeltaX : 0);
     const newHandleOutOffsetY = this.originalHandleOutOffsetY + (this.hasOutgoingHandle ? handleOffsetDeltaY : 0);
 
-    return {
-      contourIndex: this.contourIndex,
-      pointIndex: this.pointIndex,
-      side: this.side,
-      halfWidth: roundFunc(this.originalHalfWidth),  // Keep width unchanged
-      nudge: roundFunc(newNudge),
-      handleInOffsetX: roundFunc(newHandleInOffsetX),
-      handleInOffsetY: roundFunc(newHandleInOffsetY),
-      handleOutOffsetX: roundFunc(newHandleOutOffsetX),
-      handleOutOffsetY: roundFunc(newHandleOutOffsetY),
-      isAsymmetric: false,
-      isInterpolation: true,
-    };
+      return {
+        contourIndex: this.contourIndex,
+        pointIndex: this.pointIndex,
+        side: this.side,
+        halfWidth: roundFunc(this.originalHalfWidth),  // Keep width unchanged
+        nudge: roundFunc(newNudge),
+        handleInOffsetX: roundFunc(newHandleInOffsetX),
+        handleInOffsetY: roundFunc(newHandleInOffsetY),
+        handleOutOffsetX: roundFunc(newHandleOutOffsetX),
+        handleOutOffsetY: roundFunc(newHandleOutOffsetY),
+        isInterpolation: true,
+      };
   }
 
   /**

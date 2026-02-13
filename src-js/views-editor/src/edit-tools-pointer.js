@@ -180,6 +180,59 @@ function resetWidthStateFromOriginal(origPoint, workPoint) {
   } else {
     workPoint.rightWidth = origPoint.rightWidth;
   }
+  if (origPoint.widthLinked === undefined) {
+    delete workPoint.widthLinked;
+  } else {
+    workPoint.widthLinked = origPoint.widthLinked;
+  }
+}
+
+function hasAsymmetricWidths(point) {
+  return point.leftWidth !== undefined || point.rightWidth !== undefined;
+}
+
+function isWidthLinked(point) {
+  if (point.widthLinked !== undefined) {
+    return !!point.widthLinked;
+  }
+  return !hasAsymmetricWidths(point);
+}
+
+function applyLinkedWidthDelta(
+  point,
+  basePoint,
+  defaultWidth,
+  side,
+  delta,
+  linked,
+  roundFunc = Math.round
+) {
+  const baseLeft = getPointHalfWidth(basePoint, defaultWidth, "left");
+  const baseRight = getPointHalfWidth(basePoint, defaultWidth, "right");
+  const baseHasAsym = hasAsymmetricWidths(basePoint);
+
+  if (linked) {
+    const newLeft = Math.max(1, roundFunc(baseLeft + delta));
+    const newRight = Math.max(1, roundFunc(baseRight + delta));
+    if (baseHasAsym) {
+      point.leftWidth = newLeft;
+      point.rightWidth = newRight;
+      delete point.width;
+    } else {
+      point.width = Math.max(2, newLeft + newRight);
+      delete point.leftWidth;
+      delete point.rightWidth;
+    }
+    return;
+  }
+
+  const newLeft =
+    side === "left" ? Math.max(1, roundFunc(baseLeft + delta)) : Math.max(1, roundFunc(baseLeft));
+  const newRight =
+    side === "right" ? Math.max(1, roundFunc(baseRight + delta)) : Math.max(1, roundFunc(baseRight));
+  point.leftWidth = newLeft;
+  point.rightWidth = newRight;
+  delete point.width;
 }
 
 function applyFixedRibDragToSkeletonData(
@@ -274,25 +327,17 @@ function applyFixedRibDragToSkeletonData(
           continue;
         }
 
-        const isAsymmetric =
-          origPoint.leftWidth !== undefined || origPoint.rightWidth !== undefined;
-
-        if (isAsymmetric) {
-          if (anchorSide === "left") {
-            const clamped = Math.max(1, roundFunc(leftHW - d));
-            workPoint.leftWidth = clamped;
-          } else {
-            const clamped = Math.max(1, roundFunc(rightHW + d));
-            workPoint.rightWidth = clamped;
-          }
-          delete workPoint.width;
-        } else {
-          const raw = anchorSide === "left" ? leftHW - d : rightHW + d;
-          const clamped = Math.max(1, roundFunc(raw));
-          workPoint.width = clamped * 2;
-          delete workPoint.leftWidth;
-          delete workPoint.rightWidth;
-        }
+        const linked = isWidthLinked(origPoint);
+        const delta = anchorSide === "left" ? -d : d;
+        applyLinkedWidthDelta(
+          workPoint,
+          origPoint,
+          defaultWidth,
+          anchorSide,
+          delta,
+          linked,
+          roundFunc
+        );
       }
     }
 
@@ -2684,19 +2729,19 @@ export class PointerTool extends BaseTool {
       const pt = contour?.points?.[pi];
       if (!pt || pt.type) return; // skip off-curve points
 
-      const isAsym = pt.leftWidth !== undefined || pt.rightWidth !== undefined;
-      const isSingleSided = contour.singleSided ?? false;
-      const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+        const isLinked = isWidthLinked(pt);
+        const isSingleSided = contour.singleSided ?? false;
+        const editableKey = side === "left" ? "leftEditable" : "rightEditable";
 
-      targetPointsMap.set(key, {
-        ribKey: key,
-        contourIndex: ci,
-        pointIndex: pi,
-        side,
-        isAsymmetric: isAsym,
-        isSingleSided,
-        isEditable: pt[editableKey] === true,
-      });
+        targetPointsMap.set(key, {
+          ribKey: key,
+          contourIndex: ci,
+          pointIndex: pi,
+          side,
+          isLinked,
+          isSingleSided,
+          isEditable: pt[editableKey] === true,
+        });
     };
 
     for (const key of selectedRibKeys) {
@@ -2806,15 +2851,13 @@ export class PointerTool extends BaseTool {
               }
               // Override to track totalWidth for width changes
               // Use setOriginalHalfWidth for InterpolatingRibBehavior to recalculate ribPos
-              if (behavior.setOriginalHalfWidth) {
-                behavior.setOriginalHalfWidth(totalWidth);
-              } else {
-                behavior.originalHalfWidth = totalWidth;
-              }
-              behavior.minHalfWidth = 2;
-              // Force asymmetric mode to allow width changes in single-sided
-              behavior.isAsymmetric = true;
-              data.ribBehaviors.push({ behavior, target: tp });
+                if (behavior.setOriginalHalfWidth) {
+                  behavior.setOriginalHalfWidth(totalWidth);
+                } else {
+                  behavior.originalHalfWidth = totalWidth;
+                }
+                behavior.minHalfWidth = 2;
+                data.ribBehaviors.push({ behavior, target: tp });
             } else {
               // Non-editable single-sided: constrained to normal direction
               const behavior = new RibEditBehavior(
@@ -2955,25 +2998,26 @@ export class PointerTool extends BaseTool {
                 }
               }
             } else if (sideIsEditable) {
-              // Editable mode: behavior determines if width changes based on symmetric/asymmetric
-              if (change.isAsymmetric) {
-                // Asymmetric: update per-side width and nudge
-                if (side === "left") {
-                  point.leftWidth = change.halfWidth;
-                  point.leftNudge = change.nudge;
-                } else {
-                  point.rightWidth = change.halfWidth;
-                  point.rightNudge = change.nudge;
-                }
-                delete point.width;
+              const baseContour = data.original.contours[target.contourIndex];
+              const basePoint = baseContour?.points[target.pointIndex];
+              if (basePoint) {
+                const defaultWidth = baseContour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+                const delta = change.halfWidth - behavior.originalHalfWidth;
+                applyLinkedWidthDelta(
+                  point,
+                  basePoint,
+                  defaultWidth,
+                  side,
+                  delta,
+                  target.isLinked,
+                  roundFunc
+                );
+              }
+
+              if (side === "left") {
+                point.leftNudge = change.nudge;
               } else {
-                // Symmetric: only update nudge, keep width unchanged
-                if (side === "left") {
-                  point.leftNudge = change.nudge;
-                } else {
-                  point.rightNudge = change.nudge;
-                }
-                // Don't touch width - it stays symmetric
+                point.rightNudge = change.nudge;
               }
 
               // Apply 2D handle offset compensation for interpolation or editable drag
@@ -2996,19 +3040,22 @@ export class PointerTool extends BaseTool {
                   delete point.rightHandleOutOffset;
                 }
               }
-            } else if (target.isAsymmetric) {
-              // Asymmetric: update only the dragged side
-              if (side === "left") {
-                point.leftWidth = change.halfWidth;
-              } else {
-                point.rightWidth = change.halfWidth;
-              }
-              delete point.width;
             } else {
-              // Symmetric: update full width (both sides)
-              point.width = change.halfWidth * 2;
-              delete point.leftWidth;
-              delete point.rightWidth;
+              const baseContour = data.original.contours[target.contourIndex];
+              const basePoint = baseContour?.points[target.pointIndex];
+              if (basePoint) {
+                const defaultWidth = baseContour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+                const delta = change.halfWidth - behavior.originalHalfWidth;
+                applyLinkedWidthDelta(
+                  point,
+                  basePoint,
+                  defaultWidth,
+                  side,
+                  delta,
+                  target.isLinked,
+                  roundFunc
+                );
+              }
             }
           }
 
@@ -3472,23 +3519,27 @@ export class PointerTool extends BaseTool {
             const point = contour.points[editablePoint.skeletonPointIndex];
             const side = editablePoint.side;
 
-            // Apply changes based on symmetric/asymmetric mode
-            if (change.isAsymmetric) {
-              if (side === "left") {
-                point.leftWidth = change.halfWidth;
-                point.leftNudge = change.nudge;
-              } else {
-                point.rightWidth = change.halfWidth;
-                point.rightNudge = change.nudge;
-              }
-              delete point.width;
+            const baseContour = data.original.contours[editablePoint.skeletonContourIndex];
+            const basePoint = baseContour?.points[editablePoint.skeletonPointIndex];
+            if (basePoint) {
+              const defaultWidth = baseContour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+              const delta = change.halfWidth - behavior.originalHalfWidth;
+              const linked = isWidthLinked(basePoint);
+              applyLinkedWidthDelta(
+                point,
+                basePoint,
+                defaultWidth,
+                side,
+                delta,
+                linked,
+                roundFunc
+              );
+            }
+
+            if (side === "left") {
+              point.leftNudge = change.nudge;
             } else {
-              // Symmetric: only update nudge
-              if (side === "left") {
-                point.leftNudge = change.nudge;
-              } else {
-                point.rightNudge = change.nudge;
-              }
+              point.rightNudge = change.nudge;
             }
 
             // Apply 2D handle offset compensation for interpolation or editable drag
@@ -4019,7 +4070,7 @@ export class PointerTool extends BaseTool {
   /**
    * Handle arrow key movement for rib points.
    * For non-editable ribs: changes width only.
-   * For editable ribs: changes nudge (and width if asymmetric).
+   * For editable ribs: changes nudge and width (per linked state).
    */
   async _handleArrowKeysForRibPoints(event, ribPointSelection) {
     const sceneController = this.sceneController;
@@ -4077,40 +4128,38 @@ export class PointerTool extends BaseTool {
           const point = contour.points[pointIndex];
           if (point.type) continue;
 
-          if (isEditable) {
-            // Use EditableRibBehavior for editable ribs
-            const ribHit = {
-              contourIndex,
-              pointIndex,
-              side,
-              normal,
-              onCurvePoint: point,
-            };
-            const behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
-            const change = behavior.applyDelta(delta, null);
+            if (isEditable) {
+              // Use EditableRibBehavior for editable ribs
+              const ribHit = {
+                contourIndex,
+                pointIndex,
+                side,
+                normal,
+                onCurvePoint: point,
+              };
+              const behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
+              const change = behavior.applyDelta(delta, null);
 
-            // Apply width changes
-            if (change.halfWidth !== undefined) {
-              if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
-                // Asymmetric mode
-                const widthKey = side === "left" ? "leftWidth" : "rightWidth";
-                point[widthKey] = change.halfWidth;
-              } else {
-                // Symmetric mode - update width property
-                // Calculate total width from both sides
-                const otherSide = side === "left" ? "right" : "left";
-                const otherWidthKey = otherSide === "left" ? "leftWidth" : "rightWidth";
-                const otherHalfWidth = point[otherWidthKey] !== undefined
-                  ? point[otherWidthKey]
-                  : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
-                point.width = change.halfWidth + otherHalfWidth;
+              const baseContour = originalSkeletonData.contours[contourIndex];
+              const basePoint = baseContour?.points[pointIndex];
+              if (basePoint) {
+                const linked = isWidthLinked(basePoint);
+                const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
+                applyLinkedWidthDelta(
+                  point,
+                  basePoint,
+                  defaultWidth,
+                  side,
+                  deltaWidth,
+                  linked,
+                  Math.round
+                );
               }
-            }
 
-            // Apply nudge changes
-            if (change.nudge !== undefined) {
-              const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-              point[nudgeKey] = change.nudge;
+              // Apply nudge changes
+              if (change.nudge !== undefined) {
+                const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+                point[nudgeKey] = change.nudge;
             }
 
             // Apply handle offset compensations if present
@@ -4139,24 +4188,25 @@ export class PointerTool extends BaseTool {
               normal,
               onCurvePoint: point,
             };
-            const behavior = createRibEditBehavior(originalSkeletonData, ribHit);
-            const change = behavior.applyDelta(delta);
+              const behavior = createRibEditBehavior(originalSkeletonData, ribHit);
+              const change = behavior.applyDelta(delta);
 
-            // Apply width change
-            if (point.leftWidth !== undefined || point.rightWidth !== undefined) {
-              // Asymmetric mode
-              const widthKey = side === "left" ? "leftWidth" : "rightWidth";
-              point[widthKey] = change.halfWidth;
-            } else {
-              // Symmetric mode
-              const otherSide = side === "left" ? "right" : "left";
-              const otherWidthKey = otherSide === "left" ? "leftWidth" : "rightWidth";
-              const otherHalfWidth = point[otherWidthKey] !== undefined
-                ? point[otherWidthKey]
-                : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
-              point.width = change.halfWidth + otherHalfWidth;
+              const baseContour = originalSkeletonData.contours[contourIndex];
+              const basePoint = baseContour?.points[pointIndex];
+              if (basePoint) {
+                const linked = isWidthLinked(basePoint);
+                const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
+                applyLinkedWidthDelta(
+                  point,
+                  basePoint,
+                  defaultWidth,
+                  side,
+                  deltaWidth,
+                  linked,
+                  Math.round
+                );
+              }
             }
-          }
         }
 
         // CRITICAL: Regenerate contours INSIDE recordChanges so changes are tracked for undo

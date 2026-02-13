@@ -88,7 +88,7 @@ export default class SkeletonParametersPanel extends Panel {
 
     // Point parameters state
     this.pointParameters = {
-      asymmetrical: false,
+      linked: true,
       scaleValue: 1.0,
     };
 
@@ -466,8 +466,8 @@ export default class SkeletonParametersPanel extends Panel {
     const selectionContext = this._getSelectionContextKey();
 
     // Get values: from selected points or defaults
-    let left, right, leftMixed = false, rightMixed = false;
-    let asymStates = new Set(); // Track asymmetric states across selection
+    let left, right, total, leftMixed = false, rightMixed = false, totalMixed = false;
+    let linkedStates = new Set(); // Track linked states across selection
     // Cap style states are computed on demand below
     let hasSingleSided = false; // Track if any selected point is in single-sided contour
     let singleSidedDirection = null; // Track single-sided direction ("left" or "right")
@@ -484,8 +484,9 @@ export default class SkeletonParametersPanel extends Panel {
       const defaultWidth = this._getSourceWidth(widthKey, widthFallback);
 
       // Collect all values from selected points
-      const leftValues = [];
-      const rightValues = [];
+        const leftValues = [];
+        const rightValues = [];
+        const totalValues = [];
 
         for (const { point, contourIdx, pointIdx } of selectedData.points) {
           const widths = this._getPointWidths(point, defaultWidth);
@@ -494,7 +495,8 @@ export default class SkeletonParametersPanel extends Panel {
           // rounding halves first causes odd widths to jump to the next even value.
           leftValues.push(widths.left);
           rightValues.push(widths.right);
-          asymStates.add(this._isAsymmetric(point));
+          totalValues.push(widths.left + widths.right);
+          linkedStates.add(this._isWidthLinked(point));
           forceHorizontalStates.add(!!point.forceHorizontal);
           forceVerticalStates.add(!!point.forceVertical);
 
@@ -518,44 +520,48 @@ export default class SkeletonParametersPanel extends Panel {
       }
 
       // Check if values are mixed
-      const allLeftSame = leftValues.every(v => v === leftValues[0]);
-      const allRightSame = rightValues.every(v => v === rightValues[0]);
+        const allLeftSame = leftValues.every(v => v === leftValues[0]);
+        const allRightSame = rightValues.every(v => v === rightValues[0]);
+        const allTotalSame = totalValues.every(v => v === totalValues[0]);
 
-      left = allLeftSame ? leftValues[0] : null;
-      right = allRightSame ? rightValues[0] : null;
-      leftMixed = !allLeftSame;
-      rightMixed = !allRightSame;
+        left = allLeftSame ? leftValues[0] : null;
+        right = allRightSame ? rightValues[0] : null;
+        total = allTotalSame ? totalValues[0] : null;
+        leftMixed = !allLeftSame;
+        rightMixed = !allRightSame;
+        totalMixed = !allTotalSame;
 
       // Sync UI state from selection
       // If all points have same state, sync to that state
       // If mixed, keep current UI state (will show indeterminate)
-      if (asymStates.size === 1) {
-        this.pointParameters.asymmetrical = asymStates.has(true);
-      }
+        if (linkedStates.size === 1) {
+          this.pointParameters.linked = linkedStates.has(true);
+        }
     } else {
       // No selection - show Source Width / 2
       const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
       const defaultWide = this._getSourceWidth(widthKey, widthFallback);
       left = defaultWide / 2;
       right = defaultWide / 2;
+      total = defaultWide;
     }
 
     // Determine checkbox state
-    const isAsym = this.pointParameters.asymmetrical;
-    const isIndeterminate = asymStates.size > 1; // Mixed asym states
+    const isLinked = this.pointParameters.linked;
+    const isIndeterminate = linkedStates.size > 1; // Mixed linked states
     const canSetPointGlobal = hasSelection && !leftMixed && !rightMixed;
 
     this._ensureConfirmState("point", `${selectionContext}|point`);
 
-    // Header with Asymmetrical toggle
-    // Disabled for single-sided contours (asym doesn't make sense there)
+    // Header with Linked toggle
+    // Disabled for single-sided contours (linked doesn't make sense there)
     // When indeterminate, set checked=false so first click turns ON
     const checkbox = html.input({
       type: "checkbox",
-      id: "asymmetrical-toggle",
-      checked: isIndeterminate ? false : isAsym,
+      id: "linked-toggle",
+      checked: isIndeterminate ? false : isLinked,
       disabled: hasSingleSided,
-      onchange: (e) => this._onAsymmetricalToggle(e.target.checked),
+      onchange: (e) => this._onLinkedToggle(e.target.checked),
     });
     // Set indeterminate state after creation (can't be set via attribute)
     if (isIndeterminate) {
@@ -567,19 +573,29 @@ export default class SkeletonParametersPanel extends Panel {
       label: "Point Parameters",
       auxiliaryElement: html.span({}, [
         checkbox,
-        html.label({
-          for: "asymmetrical-toggle",
-          style: `margin-left: 4px${hasSingleSided ? "; opacity: 0.5" : ""}`,
-          title: hasSingleSided ? "Asymmetric mode not available for single-sided contours" : undefined,
-        }, "Asym"),
-      ]),
-    });
+          html.label({
+            for: "linked-toggle",
+            style: `margin-left: 4px${hasSingleSided ? "; opacity: 0.5" : ""}`,
+            title: hasSingleSided ? "Linked mode not available for single-sided contours" : undefined,
+          }, "Linked"),
+        ]),
+      });
 
     // Width fields (Left / Right) - show "mixed" placeholder if values differ
     // In single-sided mode: active side shows full width, inactive side is disabled
-    const totalWidth = (left ?? 0) + (right ?? 0);
+    const totalWidth = total ?? (left ?? 0) + (right ?? 0);
     const leftDisabled = hasSingleSided && singleSidedDirection === "right";
     const rightDisabled = hasSingleSided && singleSidedDirection === "left";
+
+    formContents.push({
+      type: "edit-number",
+      key: "pointWidthTotal",
+      label: "Total",
+      value: totalMixed ? null : Math.round(totalWidth),
+      placeholder: totalMixed ? "mixed" : undefined,
+      minValue: 2,
+      allowEmptyField: totalMixed,
+    });
 
     formContents.push({
       type: "edit-number",
@@ -602,8 +618,8 @@ export default class SkeletonParametersPanel extends Panel {
       disabled: rightDisabled,
     });
 
-    // Distribution slider (only in asymmetric mode)
-      if (isAsym && !isIndeterminate) {
+    // Distribution slider (always available, except single-sided)
+      if (!hasSingleSided) {
         // When values are mixed, show slider at neutral (0) position
         const distributionMixed = leftMixed || rightMixed;
         const distribution = distributionMixed ? 0 : this._calculateDistribution(left, right);
@@ -1268,8 +1284,10 @@ export default class SkeletonParametersPanel extends Panel {
       };
       if (sourceWidthKeyMap[fieldItem.key]) {
         await this._setDefaultSkeletonWidth(sourceWidthKeyMap[fieldItem.key], value);
-      } else if (fieldItem.key === "pointWidthLeft" || fieldItem.key === "pointWidthRight") {
-        await this._setPointWidth(fieldItem.key, value);
+        } else if (fieldItem.key === "pointWidthTotal") {
+          await this._setPointTotalWidth(value);
+        } else if (fieldItem.key === "pointWidthLeft" || fieldItem.key === "pointWidthRight") {
+          await this._setPointWidth(fieldItem.key, value);
       } else if (fieldItem.key === "cornerRoundnessPercent") {
         if (valueStream) {
           this._isDraggingSlider = true;
@@ -2289,9 +2307,6 @@ export default class SkeletonParametersPanel extends Panel {
     const left = Math.round(totalWidth * (0.5 + clampedDist / 200));
     const right = totalWidth - left;
     const useAsym = Math.abs(clampedDist) > 1e-6;
-    if (useAsym) {
-      this.pointParameters.asymmetrical = true;
-    }
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
@@ -2309,6 +2324,7 @@ export default class SkeletonParametersPanel extends Panel {
           if (!contour) continue;
           const point = contour.points[pointIdx];
           if (!point) continue;
+          const wasLinked = this._isWidthLinked(point);
 
           if (contour.singleSided) {
             point.width = totalWidth;
@@ -2322,6 +2338,10 @@ export default class SkeletonParametersPanel extends Panel {
             point.width = totalWidth;
             delete point.leftWidth;
             delete point.rightWidth;
+          }
+
+          if (point.widthLinked === undefined) {
+            point.widthLinked = wasLinked;
           }
         }
 
@@ -3118,7 +3138,7 @@ export default class SkeletonParametersPanel extends Panel {
         for (const { contourIdx, pointIdx, point } of selectedData.points) {
           const contour = selectedData.skeletonData?.contours?.[contourIdx];
           const w = this._getPointWidths(point, defaultWidth);
-          const isAsym = this._isAsymmetric(point);
+            const isLinked = this._isWidthLinked(point);
           // Include editable and nudge state for Reset button visibility
           const leftEdit = point.leftEditable ? 1 : 0;
           const rightEdit = point.rightEditable ? 1 : 0;
@@ -3145,7 +3165,7 @@ export default class SkeletonParametersPanel extends Panel {
           const smoothFlag = point.smooth ? 1 : 0;
           const signatureLeft = Math.round(w.left * 1000) / 1000;
           const signatureRight = Math.round(w.right * 1000) / 1000;
-            parts.push(`${contourIdx}/${pointIdx}:${signatureLeft},${signatureRight},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension},${capAngle},${capDistance},${cornerRoundness},${cornerAsymmetry},${forceH},${forceV},${smoothFlag},${handleIn},${handleOut},${handleAngle}`);
+              parts.push(`${contourIdx}/${pointIdx}:${signatureLeft},${signatureRight},${isLinked},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension},${capAngle},${capDistance},${cornerRoundness},${cornerAsymmetry},${forceH},${forceV},${smoothFlag},${handleIn},${handleOut},${handleAngle}`);
           }
         }
 
@@ -3224,6 +3244,20 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
+   * Check if a point's widths are linked.
+   * Linked means edits apply to both sides together.
+   * Defaults to linked when no per-side widths are stored.
+   * @param {Object} point - The skeleton point
+   * @returns {boolean} True if linked
+   */
+  _isWidthLinked(point) {
+    if (point.widthLinked !== undefined) {
+      return !!point.widthLinked;
+    }
+    return !(point.leftWidth !== undefined || point.rightWidth !== undefined);
+  }
+
+  /**
    * Helper to regenerate outline contours from skeleton data.
    */
   _ensureCornerSettingsOnSkeletonData(skeletonData) {
@@ -3267,12 +3301,12 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Handle asymmetrical toggle change.
-   * When clicked from indeterminate state (mixed asym flags), sets all to checked (asym).
-   * Then subsequent clicks toggle between all-asym and all-symmetric.
+   * Handle linked toggle change.
+   * When clicked from indeterminate state (mixed linked flags), sets all to checked.
+   * Then subsequent clicks toggle between all-linked and all-unlinked.
    */
-  async _onAsymmetricalToggle(checked) {
-    this.pointParameters.asymmetrical = checked;
+  async _onLinkedToggle(checked) {
+    this.pointParameters.linked = checked;
 
     const selectedData = this._getSelectedSkeletonPoints();
     if (!selectedData) {
@@ -3280,7 +3314,7 @@ export default class SkeletonParametersPanel extends Panel {
       return;
     }
 
-    // Convert selected points to/from asymmetric mode
+    // Set linked flag for selected points (no width conversion)
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
 
@@ -3299,24 +3333,7 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
-
-          if (checked) {
-            // Convert to asymmetric: split width into leftWidth/rightWidth
-            // Preserve existing values if already asymmetric
-            const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-            const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-            point.leftWidth = leftHW;
-            point.rightWidth = rightHW;
-            delete point.width;
-          } else {
-            // Convert to symmetric: combine leftWidth/rightWidth into width
-            const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-            const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-            point.width = leftHW + rightHW;
-            delete point.leftWidth;
-            delete point.rightWidth;
-          }
+          point.widthLinked = checked;
         }
 
         // Record changes for this layer
@@ -3339,7 +3356,7 @@ export default class SkeletonParametersPanel extends Panel {
 
       return {
         changes: combined,
-        undoLabel: checked ? "Enable asymmetric width" : "Disable asymmetric width",
+          undoLabel: checked ? "Enable linked width" : "Disable linked width",
         broadcast: true,
       };
     });
@@ -5123,7 +5140,6 @@ export default class SkeletonParametersPanel extends Panel {
     if (!selectedData) return;
 
     const isLeft = key === "pointWidthLeft";
-    const isAsym = this.pointParameters.asymmetrical;
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
@@ -5143,35 +5159,55 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
+          const defaultWidth =
+            contour.defaultWidth ||
+            this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
 
           // Check if contour is single-sided
           const isSingleSided = contour.singleSided ?? false;
+          const isLinked = this._isWidthLinked(point);
+          const hasAsym = this._isAsymmetric(point);
+          const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+          const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
 
           if (isSingleSided) {
             // Single-sided mode: the value is the full width, store as symmetric
             point.width = value;
             delete point.leftWidth;
             delete point.rightWidth;
-          } else if (isAsym) {
-            // Asymmetric mode - edit individual sides
+          } else if (isLinked) {
+            // Linked: update both sides by the same delta
+            if (hasAsym) {
+              const delta = value - (isLeft ? leftHW : rightHW);
+              const newLeft = Math.max(1, Math.round(leftHW + delta));
+              const newRight = Math.max(1, Math.round(rightHW + delta));
+              point.leftWidth = newLeft;
+              point.rightWidth = newRight;
+              delete point.width;
+            } else {
+              const newHalf = Math.max(1, Math.round(value));
+              point.width = Math.max(2, newHalf * 2);
+              delete point.leftWidth;
+              delete point.rightWidth;
+            }
+          } else {
+            // Unlinked: update only the edited side
             if (isLeft) {
-              point.leftWidth = value;
+              point.leftWidth = Math.max(1, Math.round(value));
               if (point.rightWidth === undefined) {
-                point.rightWidth = point.width ? point.width / 2 : value;
+                point.rightWidth = Math.round(rightHW);
               }
             } else {
-              point.rightWidth = value;
+              point.rightWidth = Math.max(1, Math.round(value));
               if (point.leftWidth === undefined) {
-                point.leftWidth = point.width ? point.width / 2 : value;
+                point.leftWidth = Math.round(leftHW);
               }
             }
             delete point.width;
-          } else {
-            // Symmetric mode - change both sides together
-            point.width = value * 2;
-            delete point.leftWidth;
-            delete point.rightWidth;
+          }
+
+          if (point.widthLinked === undefined) {
+            point.widthLinked = isLinked;
           }
         }
 
@@ -5339,6 +5375,82 @@ export default class SkeletonParametersPanel extends Panel {
           broadcast: true,
         };
       });
+    }
+
+  async _setPointTotalWidth(value) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) return;
+
+    const totalValue = Math.max(2, Math.round(value));
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      // Apply changes to ALL editable layers (multi-source editing support)
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
+
+          const defaultWidth =
+            contour.defaultWidth ||
+            this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
+          const isSingleSided = contour.singleSided ?? false;
+          const isLinked = this._isWidthLinked(point);
+          const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+          const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+
+          if (isSingleSided) {
+            point.width = totalValue;
+            delete point.leftWidth;
+            delete point.rightWidth;
+          } else {
+            const distribution = this._calculateDistribution(leftHW, rightHW);
+            const newLeftHW = totalValue * (0.5 + distribution / 200);
+            const newRightHW = totalValue - newLeftHW;
+            point.leftWidth = Math.max(1, Math.round(newLeftHW));
+            point.rightWidth = Math.max(1, Math.round(newRightHW));
+            delete point.width;
+          }
+
+          if (point.widthLinked === undefined) {
+            point.widthLinked = isLinked;
+          }
+        }
+
+        // Record changes for this layer
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Set point total width",
+        broadcast: true,
+      };
+    });
   }
 
   async _setPointDistributionStream(valueStream) {
@@ -5443,11 +5555,12 @@ export default class SkeletonParametersPanel extends Panel {
       for (const { contourIdx, pointIdx } of selectedData.points) {
         const contour = skeletonData.contours[contourIdx];
         if (!contour) continue;
-        const point = contour.points[pointIdx];
-        if (!point) continue;
+          const point = contour.points[pointIdx];
+          if (!point) continue;
 
-        const key = `${contourIdx}/${pointIdx}`;
-        const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
+          const key = `${contourIdx}/${pointIdx}`;
+          const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
+          const wasLinked = this._isWidthLinked(point);
 
         if (isMulti) {
           const state = this._multiSelectionState.pointStates.get(key);
@@ -5468,10 +5581,10 @@ export default class SkeletonParametersPanel extends Panel {
             newLeft = initialLeft + Math.min(delta, initialRight);
           }
 
-          point.leftWidth = Math.round(newLeft);
-          point.rightWidth = Math.round(newRight);
-          delete point.width;
-        } else {
+            point.leftWidth = Math.round(newLeft);
+            point.rightWidth = Math.round(newRight);
+            delete point.width;
+          } else {
           const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
           const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
           const totalWidth = leftHW + rightHW;
@@ -5479,11 +5592,15 @@ export default class SkeletonParametersPanel extends Panel {
           const newLeftHW = totalWidth * (0.5 + distribution / 200);
           const newRightHW = totalWidth - newLeftHW;
 
-          point.leftWidth = Math.max(0, Math.round(newLeftHW));
-          point.rightWidth = Math.max(0, Math.round(newRightHW));
-          delete point.width;
+            point.leftWidth = Math.max(0, Math.round(newLeftHW));
+            point.rightWidth = Math.max(0, Math.round(newRightHW));
+            delete point.width;
+          }
+
+          if (point.widthLinked === undefined) {
+            point.widthLinked = wasLinked;
+          }
         }
-      }
 
       const staticGlyph = layer.glyph;
       const pathChange = recordChanges(staticGlyph, (sg) => {
