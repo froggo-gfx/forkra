@@ -53,6 +53,9 @@ const CAP_ANGLE_MAX = 85;
 const DEFAULT_CORNER_ROUNDNESS = 0;
 const CORNER_ROUND_MIN = 0;
 const CORNER_ROUND_MAX = 1;
+const DEFAULT_CORNER_ASYMMETRY = 0;
+const CORNER_ASYMMETRY_MIN = -1;
+const CORNER_ASYMMETRY_MAX = 1;
 const DEFAULT_CORNER_TRIM_RATIO_DEBUG = 0.49;
 const CORNER_TRIM_RATIO_DEBUG_MIN = 0.05;
 const CORNER_TRIM_RATIO_DEBUG_MAX = 0.99;
@@ -900,9 +903,12 @@ export default class SkeletonParametersPanel extends Panel {
     formContents.push({ type: "spacer" });
 
     const cornerRoundState = this._getSelectedCornerRoundState(selectedData);
+    const cornerAsymmetryState = this._getSelectedCornerAsymmetryState(selectedData);
     const cornerRoundPercent = Math.round(
       (cornerRoundState.value ?? DEFAULT_CORNER_ROUNDNESS) * 100
     );
+    const cornerAsymmetryValue =
+      cornerAsymmetryState.value ?? DEFAULT_CORNER_ASYMMETRY;
     const cornerTrimRatioDebugPercent = Math.round(
       this._getCornerTrimRatioDebug() * 100
     );
@@ -910,7 +916,7 @@ export default class SkeletonParametersPanel extends Panel {
       this._getCornerRadiusBoostDebug() * 100
     );
     const cornerRoundAux =
-      cornerRoundState.mixed
+      cornerRoundState.mixed || cornerAsymmetryState.mixed
         ? html.span({ style: "font-size: 11px; opacity: 0.7;" }, "mixed")
         : undefined;
 
@@ -929,6 +935,17 @@ export default class SkeletonParametersPanel extends Panel {
       maxValue: 100,
       step: 1,
       disabled: !cornerRoundState.canEdit,
+    });
+    formContents.push({
+      type: "edit-number-slider",
+      key: "cornerAsymmetry",
+      label: "Corner Asymmetry",
+      value: cornerAsymmetryState.mixed ? 0 : cornerAsymmetryValue,
+      minValue: CORNER_ASYMMETRY_MIN,
+      defaultValue: DEFAULT_CORNER_ASYMMETRY,
+      maxValue: CORNER_ASYMMETRY_MAX,
+      step: 1,
+      disabled: !cornerAsymmetryState.canEdit,
     });
     formContents.push({
       type: "edit-number-slider",
@@ -1266,6 +1283,20 @@ export default class SkeletonParametersPanel extends Panel {
           this.update();
         } else {
           await this._setCornerRoundnessForSelection(value / 100);
+          this.update();
+        }
+      } else if (fieldItem.key === "cornerAsymmetry") {
+        if (valueStream) {
+          this._isDraggingSlider = true;
+          try {
+            await this._setCornerAsymmetryForSelectionStream(valueStream);
+          } finally {
+            this._isDraggingSlider = false;
+            this._blurActiveFormElement();
+          }
+          this.update();
+        } else {
+          await this._setCornerAsymmetryForSelection(value);
           this.update();
         }
       } else if (fieldItem.key === "cornerTrimRatioDebugPercent") {
@@ -2829,6 +2860,31 @@ export default class SkeletonParametersPanel extends Panel {
     return { canEdit: true, mixed: false, value: singleValue };
   }
 
+  _getSelectedCornerAsymmetryState(selectedData) {
+    if (!selectedData || selectedData.points.length === 0) {
+      return { canEdit: false, mixed: false, value: DEFAULT_CORNER_ASYMMETRY };
+    }
+
+    const values = new Set();
+
+    for (const { contourIdx, pointIdx, point } of selectedData.points) {
+      const contour = selectedData.skeletonData?.contours?.[contourIdx];
+      if (!this._isCornerRoundEditableForPoint(contour, pointIdx, point)) {
+        return { canEdit: false, mixed: false, value: DEFAULT_CORNER_ASYMMETRY };
+      }
+      const value = this._clampCornerAsymmetry(
+        point.cornerAsymmetry ?? DEFAULT_CORNER_ASYMMETRY
+      );
+      values.add(value);
+    }
+
+    if (values.size > 1) {
+      return { canEdit: true, mixed: true, value: null };
+    }
+    const [singleValue] = values;
+    return { canEdit: true, mixed: false, value: singleValue };
+  }
+
   _getSelectedEndpointCapStyleState(selectedData) {
     if (!selectedData || selectedData.points.length === 0) {
       return { canEdit: false, mixed: false, value: "flat" };
@@ -3072,12 +3128,15 @@ export default class SkeletonParametersPanel extends Panel {
             const capRadiusRatio = point.capRadiusRatio ?? contour?.capRadiusRatio ?? "";
             const capTension = point.capTension ?? contour?.capTension ?? "";
           const capAngle = point.capAngle ?? contour?.capAngle ?? "";
-          const capDistance = point.capDistance ?? contour?.capDistance ?? "";
-          const cornerRoundness = this._clampCornerRoundness(
-            point.cornerRoundness ?? DEFAULT_CORNER_ROUNDNESS
-          );
-          const forceH = point.forceHorizontal ? 1 : 0;
-          const forceV = point.forceVertical ? 1 : 0;
+            const capDistance = point.capDistance ?? contour?.capDistance ?? "";
+            const cornerRoundness = this._clampCornerRoundness(
+              point.cornerRoundness ?? DEFAULT_CORNER_ROUNDNESS
+            );
+            const cornerAsymmetry = this._clampCornerAsymmetry(
+              point.cornerAsymmetry ?? DEFAULT_CORNER_ASYMMETRY
+            );
+            const forceH = point.forceHorizontal ? 1 : 0;
+            const forceV = point.forceVertical ? 1 : 0;
             const handleInfo = this._getHandleValuesForPoint(contour, pointIdx);
             const handleRound = (v) => (v === null || v === undefined ? "" : Math.round(v * 10) / 10);
             const handleIn = handleRound(handleInfo?.inLen);
@@ -3086,9 +3145,9 @@ export default class SkeletonParametersPanel extends Panel {
           const smoothFlag = point.smooth ? 1 : 0;
           const signatureLeft = Math.round(w.left * 1000) / 1000;
           const signatureRight = Math.round(w.right * 1000) / 1000;
-          parts.push(`${contourIdx}/${pointIdx}:${signatureLeft},${signatureRight},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension},${capAngle},${capDistance},${cornerRoundness},${forceH},${forceV},${smoothFlag},${handleIn},${handleOut},${handleAngle}`);
+            parts.push(`${contourIdx}/${pointIdx}:${signatureLeft},${signatureRight},${isAsym},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension},${capAngle},${capDistance},${cornerRoundness},${cornerAsymmetry},${forceH},${forceV},${smoothFlag},${handleIn},${handleOut},${handleAngle}`);
+          }
         }
-      }
 
       if (selectedRibSides?.size) {
         const ribParts = [];
@@ -3492,6 +3551,13 @@ export default class SkeletonParametersPanel extends Panel {
     return Math.min(Math.max(value, CORNER_ROUND_MIN), CORNER_ROUND_MAX);
   }
 
+  _clampCornerAsymmetry(value) {
+    if (!Number.isFinite(value)) {
+      return DEFAULT_CORNER_ASYMMETRY;
+    }
+    return Math.min(Math.max(value, CORNER_ASYMMETRY_MIN), CORNER_ASYMMETRY_MAX);
+  }
+
   _getCornerTrimRatioDebug() {
     const skeletonData = this._getActiveSkeletonData();
     if (skeletonData) {
@@ -3783,6 +3849,75 @@ export default class SkeletonParametersPanel extends Panel {
     }
 
     if (allChanges.length === 0) return null;
+      return new ChangeCollector().concat(...allChanges);
+    }
+
+  _buildCornerAsymmetryChanges(
+    glyph,
+    selectedData,
+    value,
+    layerInfo,
+    resetBaseline
+  ) {
+    const allChanges = [];
+    const layers = layerInfo || this.sceneController.editingLayerNames.map((editLayerName) => {
+      const layer = glyph.layers[editLayerName];
+      if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) return null;
+      return {
+        editLayerName,
+        layer,
+        originalSkeletonData: null,
+      };
+    }).filter(Boolean);
+
+    const clampedValue = this._clampCornerAsymmetry(value);
+    const normalizedValue = Math.abs(clampedValue) < 1e-6 ? 0 : clampedValue;
+
+    for (const info of layers) {
+      const { editLayerName, layer } = info;
+      const baseSkeletonData = info.originalSkeletonData
+        ? JSON.parse(JSON.stringify(info.originalSkeletonData))
+        : JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+
+      if (resetBaseline && info.originalSkeletonData) {
+        layer.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+          JSON.stringify(info.originalSkeletonData)
+        );
+        this._regenerateOutlineContours(layer.glyph, layer.customData[SKELETON_CUSTOM_DATA_KEY]);
+      }
+
+      const skeletonData = JSON.parse(JSON.stringify(baseSkeletonData));
+      let changed = false;
+
+      for (const { contourIdx, pointIdx } of selectedData.points) {
+        const contour = skeletonData.contours[contourIdx];
+        const point = contour?.points?.[pointIdx];
+        if (!this._isCornerRoundEditableForPoint(contour, pointIdx, point)) {
+          continue;
+        }
+        if (normalizedValue === 0) {
+          delete point.cornerAsymmetry;
+        } else {
+          point.cornerAsymmetry = normalizedValue;
+        }
+        changed = true;
+      }
+
+      if (!changed) continue;
+
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        this._regenerateOutlineContours(sg, skeletonData);
+      });
+      allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      const customDataChange = recordChanges(layer, (l) => {
+        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+      });
+      allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+    }
+
+    if (allChanges.length === 0) return null;
     return new ChangeCollector().concat(...allChanges);
   }
 
@@ -3809,6 +3944,32 @@ export default class SkeletonParametersPanel extends Panel {
       return {
         changes: combined,
         undoLabel: "Set corner roundness",
+        broadcast: true,
+      };
+      });
+    }
+
+  async _setCornerAsymmetryForSelection(value) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) {
+      return;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const combined = this._buildCornerAsymmetryChanges(
+        glyph,
+        selectedData,
+        value,
+        null,
+        false
+      );
+      if (!combined) return;
+
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Set corner asymmetry",
         broadcast: true,
       };
     });
@@ -3862,9 +4023,65 @@ export default class SkeletonParametersPanel extends Panel {
       );
       if (!finalCombined) return;
 
+        return {
+          changes: finalCombined,
+          undoLabel: "Set corner roundness",
+          broadcast: true,
+        };
+      });
+    }
+
+  async _setCornerAsymmetryForSelectionStream(valueStream) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) {
+      return;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layerInfo = [];
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        layerInfo.push({
+          editLayerName,
+          layer,
+          originalSkeletonData: JSON.parse(
+            JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          ),
+        });
+      }
+
+      let lastValue = null;
+
+      for await (const rawValue of valueStream) {
+        const clampedValue = this._clampCornerAsymmetry(rawValue);
+        lastValue = clampedValue;
+        const combined = this._buildCornerAsymmetryChanges(
+          glyph,
+          selectedData,
+          clampedValue,
+          null,
+          false
+        );
+        if (combined) {
+          await sendIncrementalChange(combined.change, true);
+        }
+      }
+
+      if (lastValue === null) return;
+
+      const finalCombined = this._buildCornerAsymmetryChanges(
+        glyph,
+        selectedData,
+        lastValue,
+        layerInfo,
+        true
+      );
+      if (!finalCombined) return;
+
       return {
         changes: finalCombined,
-        undoLabel: "Set corner roundness",
+        undoLabel: "Set corner asymmetry",
         broadcast: true,
       };
     });

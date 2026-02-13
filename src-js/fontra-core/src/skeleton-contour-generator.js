@@ -10,6 +10,7 @@ const DEFAULT_CAP_TENSION = 0.55;
 const DEFAULT_CAP_ANGLE = 0;
 const MAX_CAP_ANGLE = 85;
 const DEFAULT_CORNER_ROUNDNESS = 0;
+const DEFAULT_CORNER_ASYMMETRY = 0;
 const MIN_CORNER_TRIM = 0.5;
 const MAX_CORNER_TRIM_RATIO = 0.49;
 const MAX_HANDLE_TRIM_RATIO = 0.99;
@@ -84,6 +85,17 @@ function getCornerRoundness(point) {
   return clampCornerRoundness(point?.cornerRoundness ?? DEFAULT_CORNER_ROUNDNESS);
 }
 
+function clampCornerAsymmetry(value) {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_CORNER_ASYMMETRY;
+  }
+  return Math.min(Math.max(value, -1), 1);
+}
+
+function getCornerAsymmetry(point) {
+  return clampCornerAsymmetry(point?.cornerAsymmetry ?? DEFAULT_CORNER_ASYMMETRY);
+}
+
 function buildGeneratedOnCurve(
   basePoint,
   smooth,
@@ -97,10 +109,14 @@ function buildGeneratedOnCurve(
     smooth,
   };
   const cornerRoundness = getCornerRoundness(skeletonPoint);
+  const cornerAsymmetry = getCornerAsymmetry(skeletonPoint);
   const cornerRoundBase = Math.max(0, cornerRoundBaseOverride ?? halfWidth ?? 0);
   if (cornerRoundness > 0 && cornerRoundBase >= 0.5) {
     generatedPoint.cornerRoundness = cornerRoundness;
     generatedPoint.cornerRoundBase = cornerRoundBase;
+  }
+  if (cornerAsymmetry !== 0) {
+    generatedPoint.cornerAsymmetry = cornerAsymmetry;
   }
   return generatedPoint;
 }
@@ -110,12 +126,17 @@ function stripCornerRoundMetadata(points) {
     if (!point || point.type) {
       return point;
     }
-    if (point.cornerRoundness === undefined && point.cornerRoundBase === undefined) {
+    if (
+      point.cornerRoundness === undefined &&
+      point.cornerRoundBase === undefined &&
+      point.cornerAsymmetry === undefined
+    ) {
       return point;
     }
     const {
       cornerRoundness: _cornerRoundness,
       cornerRoundBase: _cornerRoundBase,
+      cornerAsymmetry: _cornerAsymmetry,
       ...rest
     } = point;
     return rest;
@@ -691,7 +712,10 @@ function findNextOnCurveIndex(points, index, isClosed) {
   return null;
 }
 
-function roundSharpCornersOnSide(sidePoints, { isClosed, cornerTrimRatio, cornerRadiusBoost }) {
+function roundSharpCornersOnSide(
+  sidePoints,
+  { isClosed, cornerTrimRatio, cornerRadiusBoost, side }
+) {
   const points = sidePoints.map((point) => ({ ...point }));
   if (points.length < 3) {
     return points;
@@ -705,7 +729,19 @@ function roundSharpCornersOnSide(sidePoints, { isClosed, cornerTrimRatio, corner
       continue;
     }
 
-    const cornerRoundness = clampCornerRoundness(corner.cornerRoundness);
+    const baseRoundness = clampCornerRoundness(corner.cornerRoundness);
+    const cornerAsymmetry = getCornerAsymmetry(corner);
+    let cornerRoundness = baseRoundness;
+    if (cornerRoundness > 0 && side && cornerAsymmetry !== 0) {
+      let scale = 1;
+      if (side === "left" && cornerAsymmetry < 0) {
+        scale = 1 + cornerAsymmetry;
+      } else if (side === "right" && cornerAsymmetry > 0) {
+        scale = 1 - cornerAsymmetry;
+      }
+      scale = Math.min(Math.max(scale, 0), 1);
+      cornerRoundness = cornerRoundness * scale;
+    }
     const cornerRoundBase = Math.max(0, corner.cornerRoundBase ?? 0);
     if (cornerRoundness <= 0 || cornerRoundBase < 0.5) {
       i++;
@@ -1014,6 +1050,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
     cornerRadiusBoost: clampCornerRadiusBoost(
       options.cornerRadiusBoost ?? cornerRadiusBoost
     ),
+    side: "left",
   });
   let roundedRightSide = roundSharpCornersOnSide(rightSide, {
     isClosed,
@@ -1021,6 +1058,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
     cornerRadiusBoost: clampCornerRadiusBoost(
       options.cornerRadiusBoost ?? cornerRadiusBoost
     ),
+    side: "right",
   });
 
   if (isClosed) {
