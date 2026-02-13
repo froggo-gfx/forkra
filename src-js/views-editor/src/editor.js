@@ -2,6 +2,7 @@ import {
   doPerformAction,
   getActionIdentifierFromKeyEvent,
   registerAction,
+  registerActionInfo,
   registerActionCallbacks,
 } from "@fontra/core/actions.js";
 import { Backend } from "@fontra/core/backend-api.js";
@@ -612,6 +613,42 @@ export class EditorController extends ViewController {
         );
       }
     }
+
+    {
+      const topic = "0055-action-topics.realtime-hotkeys";
+      registerActionInfo(
+        "action.realtime.measure",
+        {
+          topic,
+          titleKey: "shortcuts.realtime.measure",
+          defaultShortCuts: [{ baseKey: "q" }],
+        }
+      );
+      registerActionInfo(
+        "action.realtime.equalize",
+        {
+          topic,
+          titleKey: "shortcuts.realtime.equalize",
+          defaultShortCuts: [{ baseKey: "x" }],
+        }
+      );
+        registerActionInfo(
+          "action.realtime.fixed-rib",
+          {
+            topic,
+            titleKey: "shortcuts.realtime.fixed-rib",
+            defaultShortCuts: [{ baseKey: "d" }],
+          }
+        );
+        registerActionInfo(
+          "action.realtime.fixed-rib-compress",
+          {
+            topic,
+            titleKey: "shortcuts.realtime.fixed-rib-compress",
+            defaultShortCuts: [{ baseKey: "s" }],
+          }
+        );
+      }
 
     registerAction(
       "action.canvas.clean-view-and-hand-tool",

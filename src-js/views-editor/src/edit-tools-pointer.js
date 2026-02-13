@@ -11,6 +11,7 @@ import {
   calculateNormalAtSkeletonPoint,
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
+import { getBaseKeyFromKeyEvent, getShortCuts } from "@fontra/core/actions.js";
 import {
   centeredRect,
   normalizeRect,
@@ -87,6 +88,10 @@ const transformHandleSize = 8;
 const rotationHandleSizeFactor = 1.2;
 const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
 const DEFAULT_SKELETON_WIDTH = 80;
+const REALTIME_MEASURE_ACTION = "action.realtime.measure";
+const REALTIME_EQUALIZE_ACTION = "action.realtime.equalize";
+const REALTIME_FIXED_RIB_ACTION = "action.realtime.fixed-rib";
+const REALTIME_FIXED_RIB_COMPRESS_ACTION = "action.realtime.fixed-rib-compress";
 
 function projectRibPoint(point, normal, halfWidth, side, nudge = 0) {
   const sign = side === "left" ? 1 : -1;
@@ -97,6 +102,241 @@ function projectRibPoint(point, normal, halfWidth, side, nudge = 0) {
     x: Math.round(baseX + tangent.x * nudge),
     y: Math.round(baseY + tangent.y * nudge),
   };
+}
+
+function matchEventModifiers(shortCut, event) {
+  const expectedModifiers = { ...shortCut };
+  if (shortCut.commandKey) {
+    expectedModifiers[commandKeyProperty] = true;
+  }
+  return ["metaKey", "ctrlKey", "shiftKey", "altKey"].every(
+    (modifierProp) => !!expectedModifiers[modifierProp] === !!event[modifierProp]
+  );
+}
+
+function eventMatchesActionShortCut(actionIdentifier, event) {
+  const shortCuts = getShortCuts(actionIdentifier);
+  if (!shortCuts?.length) return false;
+  const baseKey = getBaseKeyFromKeyEvent(event);
+  for (const shortCut of shortCuts) {
+    if (!shortCut?.baseKey) continue;
+    if (shortCut.baseKey !== baseKey) continue;
+    if (!matchEventModifiers(shortCut, event)) continue;
+    return true;
+  }
+  return false;
+}
+
+function eventMatchesActionBaseKey(actionIdentifier, event) {
+  const shortCuts = getShortCuts(actionIdentifier);
+  if (!shortCuts?.length) return false;
+  const baseKey = getBaseKeyFromKeyEvent(event);
+  return shortCuts.some((shortCut) => shortCut?.baseKey === baseKey);
+}
+
+function findPrevOnCurveIndex(points, startIndex, isClosed) {
+  for (let i = startIndex - 1; i >= 0; i--) {
+    if (points[i] && !points[i].type) {
+      return i;
+    }
+  }
+  if (!isClosed) return null;
+  for (let i = points.length - 1; i > startIndex; i--) {
+    if (points[i] && !points[i].type) {
+      return i;
+    }
+  }
+  return null;
+}
+
+function findNextOnCurveIndex(points, startIndex, isClosed) {
+  for (let i = startIndex + 1; i < points.length; i++) {
+    if (points[i] && !points[i].type) {
+      return i;
+    }
+  }
+  if (!isClosed) return null;
+  for (let i = 0; i < startIndex; i++) {
+    if (points[i] && !points[i].type) {
+      return i;
+    }
+  }
+  return null;
+}
+
+function resetWidthStateFromOriginal(origPoint, workPoint) {
+  if (origPoint.width === undefined) {
+    delete workPoint.width;
+  } else {
+    workPoint.width = origPoint.width;
+  }
+  if (origPoint.leftWidth === undefined) {
+    delete workPoint.leftWidth;
+  } else {
+    workPoint.leftWidth = origPoint.leftWidth;
+  }
+  if (origPoint.rightWidth === undefined) {
+    delete workPoint.rightWidth;
+  } else {
+    workPoint.rightWidth = origPoint.rightWidth;
+  }
+}
+
+function applyFixedRibDragToSkeletonData(
+  originalSkeletonData,
+  workingSkeletonData,
+  selectedSkeletonPoints,
+  clickedSkeletonPoint,
+  dragDelta,
+  roundFunc,
+  options = {}
+) {
+  if (!selectedSkeletonPoints?.size || !clickedSkeletonPoint) {
+    return false;
+  }
+
+  const { contourIdx, pointIdx } = clickedSkeletonPoint;
+  const clickedContour = originalSkeletonData.contours?.[contourIdx];
+  const clickedPoint = clickedContour?.points?.[pointIdx];
+  if (!clickedContour || !clickedPoint || clickedPoint.type) {
+    return false;
+  }
+
+  const clickedNormal = calculateNormalAtSkeletonPoint(clickedContour, pointIdx);
+  const normalLen = Math.hypot(clickedNormal.x, clickedNormal.y);
+  if (!(normalLen > 1e-6)) {
+    return false;
+  }
+
+  const d = dragDelta.x * clickedNormal.x + dragDelta.y * clickedNormal.y;
+  const hasMovement = Math.abs(d) >= 1e-6;
+
+  const selectedByContour = new Map();
+  for (const key of selectedSkeletonPoints) {
+    const [ci, pi] = key.split("/").map(Number);
+    if (!selectedByContour.has(ci)) {
+      selectedByContour.set(ci, new Set());
+    }
+    selectedByContour.get(ci).add(pi);
+  }
+
+  for (const [ci, pointSet] of selectedByContour) {
+    const origContour = originalSkeletonData.contours?.[ci];
+    const workContour = workingSkeletonData.contours?.[ci];
+    if (!origContour || !workContour) continue;
+
+    const points = origContour.points;
+    const isClosed = !!origContour.isClosed;
+    const defaultWidth = origContour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+    const singleSided = origContour.singleSided ?? false;
+    const singleSidedDirection = origContour.singleSidedDirection ?? "left";
+    const anchorToDragSide = !!options.anchorToDragSide;
+    const anchorSide = singleSided
+      ? singleSidedDirection
+      : anchorToDragSide
+        ? d >= 0
+          ? "left"
+          : "right"
+        : d >= 0
+          ? "right"
+          : "left";
+
+    for (let pi = 0; pi < points.length; pi++) {
+      const origPoint = points[pi];
+      const workPoint = workContour.points[pi];
+      if (!origPoint || !workPoint) continue;
+      resetWidthStateFromOriginal(origPoint, workPoint);
+    }
+
+    const onCurveDeltas = new Map();
+    if (hasMovement) {
+      for (const pi of pointSet) {
+        const origPoint = points[pi];
+        if (!origPoint || origPoint.type) continue;
+
+        const normal = calculateNormalAtSkeletonPoint(origContour, pi);
+        const len = Math.hypot(normal.x, normal.y);
+        if (!(len > 1e-6)) continue;
+
+        onCurveDeltas.set(pi, { dx: normal.x * d, dy: normal.y * d });
+
+        const workPoint = workContour.points[pi];
+        const leftHW = getPointHalfWidth(origPoint, defaultWidth, "left");
+        const rightHW = getPointHalfWidth(origPoint, defaultWidth, "right");
+
+        if (singleSided) {
+          const total = leftHW + rightHW;
+          const raw = anchorSide === "left" ? total - d : total + d;
+          const clamped = Math.max(2, roundFunc(raw));
+          workPoint.width = clamped;
+          delete workPoint.leftWidth;
+          delete workPoint.rightWidth;
+          continue;
+        }
+
+        const isAsymmetric =
+          origPoint.leftWidth !== undefined || origPoint.rightWidth !== undefined;
+
+        if (isAsymmetric) {
+          if (anchorSide === "left") {
+            const clamped = Math.max(1, roundFunc(leftHW - d));
+            workPoint.leftWidth = clamped;
+          } else {
+            const clamped = Math.max(1, roundFunc(rightHW + d));
+            workPoint.rightWidth = clamped;
+          }
+          delete workPoint.width;
+        } else {
+          const raw = anchorSide === "left" ? leftHW - d : rightHW + d;
+          const clamped = Math.max(1, roundFunc(raw));
+          workPoint.width = clamped * 2;
+          delete workPoint.leftWidth;
+          delete workPoint.rightWidth;
+        }
+      }
+    }
+
+    if (hasMovement) {
+      for (let pi = 0; pi < points.length; pi++) {
+        const origPoint = points[pi];
+        const workPoint = workContour.points[pi];
+        if (!origPoint || !workPoint) continue;
+
+      let delta = null;
+      if (!origPoint.type) {
+        delta = onCurveDeltas.get(pi) || null;
+      } else {
+        const prevOn = findPrevOnCurveIndex(points, pi, isClosed);
+        const nextOn = findNextOnCurveIndex(points, pi, isClosed);
+        const hasPrevHandle =
+          prevOn !== null &&
+          (pi === prevOn + 1 ||
+            (isClosed && prevOn === points.length - 1 && pi === 0));
+        const hasNextHandle =
+          nextOn !== null &&
+          (pi === nextOn - 1 ||
+            (isClosed && nextOn === 0 && pi === points.length - 1));
+        const prevDelta = hasPrevHandle ? onCurveDeltas.get(prevOn) : null;
+        const nextDelta = hasNextHandle ? onCurveDeltas.get(nextOn) : null;
+        if (prevDelta && nextDelta) {
+          delta = {
+            dx: (prevDelta.dx + nextDelta.dx) / 2,
+            dy: (prevDelta.dy + nextDelta.dy) / 2,
+          };
+        } else {
+          delta = prevDelta || nextDelta;
+        }
+      }
+
+        if (delta && (delta.dx || delta.dy)) {
+          workPoint.x = roundFunc(origPoint.x + delta.dx);
+          workPoint.y = roundFunc(origPoint.y + delta.dy);
+        }
+      }
+    }
+  }
+
+  return true;
 }
 
 export class PointerTools {
@@ -112,39 +352,63 @@ export class PointerTool extends BaseTool {
   measureMode = false;
   _boundKeyUp = null;
 
-  // Equalize handles mode (X-key) properties
-  equalizeMode = false;
-  _boundEqualizeKeyUp = null;
+    // Equalize handles mode (X-key) properties
+    equalizeMode = false;
+    _boundEqualizeKeyUp = null;
 
-  handleKeyDown(event) {
-    if (event.code === "KeyQ" || event.key === "q" || event.key === "Q") {
-      if (!this.measureMode) {
-        this.measureMode = true;
-        this.sceneModel.measureMode = true;
-        this.sceneModel.measureShowDirect = event.altKey;
-        this._boundKeyUp = (e) => this._handleMeasureKeyUp(e);
-        window.addEventListener("keyup", this._boundKeyUp);
-        this.canvasController.requestUpdate();
-      }
-      return;
-    }
-    if (event.code === "KeyX" || event.key === "x" || event.key === "X") {
-      if (!this.equalizeMode) {
-        this.equalizeMode = true;
-        this._boundEqualizeKeyUp = (e) => this._handleEqualizeKeyUp(e);
-        window.addEventListener("keyup", this._boundEqualizeKeyUp);
-      }
-      return;
-    }
-  }
+    // Fixed rib drag mode (F-key) properties
+    fixedRibMode = false;
+    _boundFixedRibKeyUp = null;
 
-  _handleMeasureKeyUp(event) {
-    if (event.code === "KeyQ" || event.key === "q" || event.key === "Q") {
-      this.measureMode = false;
-      this.sceneModel.measureMode = false;
-      this.sceneModel.measureHoverSegment = null;
-      this.sceneModel.measureHoverRibPoint = null;
-      this.sceneModel.measureHoverPoints = null;
+    // Fixed rib compress mode (S-key) properties
+    fixedRibCompressMode = false;
+    _boundFixedRibCompressKeyUp = null;
+
+    handleKeyDown(event) {
+      if (eventMatchesActionShortCut(REALTIME_MEASURE_ACTION, event)) {
+        if (!this.measureMode) {
+          this.measureMode = true;
+          this.sceneModel.measureMode = true;
+          this.sceneModel.measureShowDirect = event.altKey;
+          this._boundKeyUp = (e) => this._handleMeasureKeyUp(e);
+          window.addEventListener("keyup", this._boundKeyUp);
+          this.canvasController.requestUpdate();
+        }
+        return;
+      }
+      if (eventMatchesActionShortCut(REALTIME_EQUALIZE_ACTION, event)) {
+        if (!this.equalizeMode) {
+          this.equalizeMode = true;
+          this._boundEqualizeKeyUp = (e) => this._handleEqualizeKeyUp(e);
+          window.addEventListener("keyup", this._boundEqualizeKeyUp);
+        }
+        return;
+      }
+      if (eventMatchesActionShortCut(REALTIME_FIXED_RIB_ACTION, event)) {
+        if (!this.fixedRibMode) {
+          this.fixedRibMode = true;
+          this._boundFixedRibKeyUp = (e) => this._handleFixedRibKeyUp(e);
+          window.addEventListener("keyup", this._boundFixedRibKeyUp);
+        }
+        return;
+      }
+      if (eventMatchesActionShortCut(REALTIME_FIXED_RIB_COMPRESS_ACTION, event)) {
+        if (!this.fixedRibCompressMode) {
+          this.fixedRibCompressMode = true;
+          this._boundFixedRibCompressKeyUp = (e) => this._handleFixedRibCompressKeyUp(e);
+          window.addEventListener("keyup", this._boundFixedRibCompressKeyUp);
+        }
+        return;
+      }
+    }
+
+    _handleMeasureKeyUp(event) {
+      if (eventMatchesActionBaseKey(REALTIME_MEASURE_ACTION, event)) {
+        this.measureMode = false;
+        this.sceneModel.measureMode = false;
+        this.sceneModel.measureHoverSegment = null;
+        this.sceneModel.measureHoverRibPoint = null;
+        this.sceneModel.measureHoverPoints = null;
       this.sceneModel.measureHoverHandle = null;
       if (this._boundKeyUp) {
         window.removeEventListener("keyup", this._boundKeyUp);
@@ -152,17 +416,37 @@ export class PointerTool extends BaseTool {
       }
       this.canvasController.requestUpdate();
     }
-  }
+    }
 
-  _handleEqualizeKeyUp(event) {
-    if (event.code === "KeyX" || event.key === "x" || event.key === "X") {
-      this.equalizeMode = false;
-      if (this._boundEqualizeKeyUp) {
-        window.removeEventListener("keyup", this._boundEqualizeKeyUp);
-        this._boundEqualizeKeyUp = null;
+    _handleEqualizeKeyUp(event) {
+      if (eventMatchesActionBaseKey(REALTIME_EQUALIZE_ACTION, event)) {
+        this.equalizeMode = false;
+        if (this._boundEqualizeKeyUp) {
+          window.removeEventListener("keyup", this._boundEqualizeKeyUp);
+          this._boundEqualizeKeyUp = null;
+        }
       }
     }
-  }
+
+    _handleFixedRibKeyUp(event) {
+      if (eventMatchesActionBaseKey(REALTIME_FIXED_RIB_ACTION, event)) {
+        this.fixedRibMode = false;
+        if (this._boundFixedRibKeyUp) {
+          window.removeEventListener("keyup", this._boundFixedRibKeyUp);
+          this._boundFixedRibKeyUp = null;
+        }
+      }
+    }
+
+    _handleFixedRibCompressKeyUp(event) {
+      if (eventMatchesActionBaseKey(REALTIME_FIXED_RIB_COMPRESS_ACTION, event)) {
+        this.fixedRibCompressMode = false;
+        if (this._boundFixedRibCompressKeyUp) {
+          window.removeEventListener("keyup", this._boundFixedRibCompressKeyUp);
+          this._boundFixedRibCompressKeyUp = null;
+        }
+      }
+    }
 
   handleHover(event) {
     const sceneController = this.sceneController;
@@ -1770,9 +2054,9 @@ export class PointerTool extends BaseTool {
           }
 
         // Apply skeleton changes
-        if (skeletonEditState) {
-          const { originalSkeletonData, workingSkeletonData, behaviors, layer, editLayerName } =
-            skeletonEditState;
+          if (skeletonEditState) {
+            const { originalSkeletonData, workingSkeletonData, behaviors, layer, editLayerName } =
+              skeletonEditState;
 
           // Reset working data to original
           for (let ci = 0; ci < originalSkeletonData.contours.length; ci++) {
@@ -1784,15 +2068,29 @@ export class PointerTool extends BaseTool {
             }
           }
 
-          // Apply behavior changes
-          for (const behavior of behaviors) {
-            const changes = behavior.applyDelta(delta, roundFunc);
-            const contour = workingSkeletonData.contours[behavior.contourIndex];
-            for (const { pointIndex, x, y } of changes) {
-              contour.points[pointIndex].x = x;
-              contour.points[pointIndex].y = y;
+            const appliedFixedRib = this.fixedRibMode || this.fixedRibCompressMode
+              ? applyFixedRibDragToSkeletonData(
+                  originalSkeletonData,
+                  workingSkeletonData,
+                  effectiveSkeletonPointSelection,
+                  this.sceneController.sceneModel.initialClickedSkeletonPoint,
+                  delta,
+                  roundFunc,
+                  { anchorToDragSide: this.fixedRibCompressMode }
+                )
+              : false;
+
+            if (!appliedFixedRib) {
+              // Apply behavior changes
+              for (const behavior of behaviors) {
+                const changes = behavior.applyDelta(delta, roundFunc);
+                const contour = workingSkeletonData.contours[behavior.contourIndex];
+                for (const { pointIndex, x, y } of changes) {
+                  contour.points[pointIndex].x = x;
+                  contour.points[pointIndex].y = y;
+                }
+              }
             }
-          }
 
           // Regenerate outline and update customData
           const staticGlyph = layer.glyph;
@@ -2244,11 +2542,11 @@ export class PointerTool extends BaseTool {
           }
         }
 
-        const allChanges = [];
+          const allChanges = [];
 
-        // Apply changes to ALL editable layers
-        for (const [editLayerName, data] of Object.entries(layersData)) {
-          const { layer, original, working, behaviors } = data;
+          // Apply changes to ALL editable layers
+          for (const [editLayerName, data] of Object.entries(layersData)) {
+            const { layer, original, working, behaviors } = data;
 
           // Reset working data to original before applying changes
           for (let ci = 0; ci < original.contours.length; ci++) {
@@ -2260,15 +2558,29 @@ export class PointerTool extends BaseTool {
             }
           }
 
-          // Apply behavior changes
-          for (const behavior of behaviors) {
-            const changes = behavior.applyDelta(delta, roundFunc);
-            const contour = working.contours[behavior.contourIndex];
-            for (const { pointIndex, x, y } of changes) {
-              contour.points[pointIndex].x = x;
-              contour.points[pointIndex].y = y;
+            const appliedFixedRib = this.fixedRibMode || this.fixedRibCompressMode
+              ? applyFixedRibDragToSkeletonData(
+                  original,
+                  working,
+                  selectedSkeletonPoints,
+                  initialClickedSkeletonPoint,
+                  delta,
+                  roundFunc,
+                  { anchorToDragSide: this.fixedRibCompressMode }
+                )
+              : false;
+
+            if (!appliedFixedRib) {
+              // Apply behavior changes
+              for (const behavior of behaviors) {
+                const changes = behavior.applyDelta(delta, roundFunc);
+                const contour = working.contours[behavior.contourIndex];
+                for (const { pointIndex, x, y } of changes) {
+                  contour.points[pointIndex].x = x;
+                  contour.points[pointIndex].y = y;
+                }
+              }
             }
-          }
 
           if (this.equalizeMode && equalizeSkeletonInfo) {
             const { contourIndex, pointIndex, smoothIndex, oppositeIndex } =
