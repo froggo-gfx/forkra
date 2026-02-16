@@ -68,10 +68,37 @@ const SKELETON_ROUNDNESS_STRENGTH_DATA_KEY = "roundnessStrength";
 export default class SkeletonParametersPanel extends Panel {
   identifier = "skeleton-parameters";
   iconPath = "/tabler-icons/bone.svg";
+  static stylesForm = `
+    .skeleton-width-anchor {
+      display: inline-grid;
+      grid-auto-flow: column;
+      gap: 0.2em;
+      padding: 0.1em;
+      border-radius: 0.35em;
+      background-color: var(--text-input-background-color);
+      border: 1px solid var(--text-input-background-color-dark);
+    }
+
+    .skeleton-width-anchor button {
+      font-family: "fontra-ui-regular";
+      font-size: 0.9em;
+      border: none;
+      background: transparent;
+      padding: 0.15em 0.5em;
+      border-radius: 0.25em;
+      cursor: pointer;
+      color: var(--text-input-foreground-color);
+    }
+
+    .skeleton-width-anchor button.selected {
+      background-color: var(--text-input-background-color-dark);
+    }
+  `;
 
   constructor(editorController) {
     super(editorController);
     this.infoForm = new Form();
+    this.infoForm.appendStyle(SkeletonParametersPanel.stylesForm);
     this.contentElement.appendChild(
       html.div(
         { class: "panel-section panel-section--flex panel-section--scrollable" },
@@ -89,6 +116,7 @@ export default class SkeletonParametersPanel extends Panel {
     // Point parameters state
     this.pointParameters = {
       linked: true,
+      widthAnchor: "center",
       scaleValue: 1.0,
     };
 
@@ -471,6 +499,8 @@ export default class SkeletonParametersPanel extends Panel {
     // Cap style states are computed on demand below
     let hasSingleSided = false; // Track if any selected point is in single-sided contour
     let singleSidedDirection = null; // Track single-sided direction ("left" or "right")
+    let allSingleSided = hasSelection; // Track if all selected points are single-sided
+    const singleSidedDirectionSet = new Set();
 
       // Track editable states per side based on selected rib points
       const selectedRibSides = this._getSelectedRibSides();
@@ -488,8 +518,8 @@ export default class SkeletonParametersPanel extends Panel {
         const rightValues = [];
         const totalValues = [];
 
-        for (const { point, contourIdx, pointIdx } of selectedData.points) {
-          const widths = this._getPointWidths(point, defaultWidth);
+      for (const { point, contourIdx, pointIdx } of selectedData.points) {
+        const widths = this._getPointWidths(point, defaultWidth);
           // Keep raw half-widths for state aggregation.
           // In single-sided mode the UI displays totalWidth = left + right, and
           // rounding halves first causes odd widths to jump to the next even value.
@@ -504,7 +534,9 @@ export default class SkeletonParametersPanel extends Panel {
         const contour = selectedData.skeletonData?.contours?.[contourIdx];
         if (contour?.singleSided) {
           hasSingleSided = true;
-          singleSidedDirection = contour.singleSidedDirection ?? "left";
+          singleSidedDirectionSet.add(contour.singleSidedDirection ?? "left");
+        } else if (hasSelection) {
+          allSingleSided = false;
         }
 
         // Collect editable and detached states for selected rib sides
@@ -517,6 +549,12 @@ export default class SkeletonParametersPanel extends Panel {
           editableStates.add(!!point.rightEditable);
           detachedStates.add(!!point.rightHandleDetached);
         }
+      }
+
+      if (allSingleSided && singleSidedDirectionSet.size === 1) {
+        singleSidedDirection = [...singleSidedDirectionSet][0];
+      } else {
+        singleSidedDirection = null;
       }
 
       // Check if values are mixed
@@ -580,6 +618,54 @@ export default class SkeletonParametersPanel extends Panel {
           }, "Linked"),
         ]),
       });
+
+    const singleSidedUniform = hasSelection && allSingleSided && !!singleSidedDirection;
+    const anchorOptions = singleSidedUniform
+      ? (singleSidedDirection === "left" ? ["left", "center"] : ["center", "right"])
+      : ["left", "center", "right"];
+    let currentAnchor = this.pointParameters.widthAnchor || "center";
+    if (!anchorOptions.includes(currentAnchor)) {
+      currentAnchor = "center";
+      this.pointParameters.widthAnchor = "center";
+    }
+
+    const anchorControl = html.div({ class: "skeleton-width-anchor" }, []);
+    for (const option of anchorOptions) {
+      const label = option === "left" ? "L" : option === "right" ? "R" : "Center";
+      anchorControl.appendChild(
+        html.button(
+          {
+            type: "button",
+            class: option === currentAnchor ? "selected" : "",
+            onclick: () => {
+              this.pointParameters.widthAnchor = option;
+              this.update();
+            },
+          },
+          [label]
+        )
+      );
+    }
+
+    formContents.push({
+      type: "universal-row",
+      label: "Anchor",
+      field1: {
+        type: "auxiliaryElement",
+        key: "anchorSpacerLabel",
+        auxiliaryElement: html.span({}),
+      },
+      field2: {
+        type: "auxiliaryElement",
+        key: "anchorControl",
+        auxiliaryElement: anchorControl,
+      },
+      field3: {
+        type: "auxiliaryElement",
+        key: "anchorSpacerValue",
+        auxiliaryElement: html.span({}),
+      },
+    });
 
     // Width fields (Left / Right) - show "mixed" placeholder if values differ
     // In single-sided mode: active side shows full width, inactive side is disabled
@@ -1566,6 +1652,71 @@ export default class SkeletonParametersPanel extends Panel {
       outIndex !== null && points[outIndex]?.type ? outIndex : null;
 
     return { inIndex: inHandleIndex, outIndex: outHandleIndex };
+  }
+
+  _moveSkeletonPointAndHandles(contour, pointIdx, dx, dy) {
+    if (!contour) return;
+    const points = contour.points;
+    const point = points?.[pointIdx];
+    if (!point) return;
+
+    const newX = Math.round(point.x + dx);
+    const newY = Math.round(point.y + dy);
+    point.x = newX;
+    point.y = newY;
+
+    const { inIndex, outIndex } = this._getAdjacentHandleIndices(contour, pointIdx);
+    if (inIndex !== null) {
+      const handleIn = points[inIndex];
+      handleIn.x = Math.round(handleIn.x + dx);
+      handleIn.y = Math.round(handleIn.y + dy);
+    }
+    if (outIndex !== null) {
+      const handleOut = points[outIndex];
+      handleOut.x = Math.round(handleOut.x + dx);
+      handleOut.y = Math.round(handleOut.y + dy);
+    }
+  }
+
+  _getWidthAnchorSide(contour) {
+    const anchor = this.pointParameters.widthAnchor || "center";
+    if (anchor === "center") return null;
+    if (contour?.singleSided) {
+      return contour.singleSidedDirection ?? "left";
+    }
+    return anchor;
+  }
+
+  _applyWidthAnchorTranslation(
+    contour,
+    originalContour,
+    pointIdx,
+    oldLeft,
+    oldRight,
+    newLeft,
+    newRight
+  ) {
+    const anchorSide = this._getWidthAnchorSide(contour);
+    if (!anchorSide || !contour || !originalContour) return;
+
+    const isSingleSided = contour.singleSided ?? false;
+    let delta = 0;
+
+    if (isSingleSided) {
+      const oldTotal = oldLeft + oldRight;
+      const newTotal = newLeft + newRight;
+      delta = anchorSide === "left" ? oldTotal - newTotal : newTotal - oldTotal;
+    } else {
+      delta = anchorSide === "left" ? oldLeft - newLeft : newRight - oldRight;
+    }
+
+    if (Math.abs(delta) < 1e-6) return;
+
+    const normal = calculateNormalAtSkeletonPoint(originalContour, pointIdx);
+    const normalLen = Math.hypot(normal.x, normal.y);
+    if (!(normalLen > 1e-6)) return;
+
+    this._moveSkeletonPointAndHandles(contour, pointIdx, normal.x * delta, normal.y * delta);
   }
 
   _getHandleValuesForPoint(contour, pointIdx) {
@@ -3198,13 +3349,14 @@ export default class SkeletonParametersPanel extends Panel {
         parts.push(`rib:${ribParts.join(";")}`);
       }
 
-      const confirmPoint = this._confirmState?.point?.pending ? 1 : 0;
-      const confirmSquare = this._confirmState?.square?.pending ? 1 : 0;
-      const confirmRound = this._confirmState?.round?.pending ? 1 : 0;
-      parts.push(`confirm:${confirmPoint},${confirmSquare},${confirmRound}`);
+        const confirmPoint = this._confirmState?.point?.pending ? 1 : 0;
+        const confirmSquare = this._confirmState?.square?.pending ? 1 : 0;
+        const confirmRound = this._confirmState?.round?.pending ? 1 : 0;
+        parts.push(`confirm:${confirmPoint},${confirmSquare},${confirmRound}`);
+        parts.push(`anchor:${this.pointParameters.widthAnchor || "center"}`);
 
-      return parts.join("|");
-    }
+        return parts.join("|");
+      }
 
   /**
    * Get the half-widths for a point.
@@ -5161,26 +5313,30 @@ export default class SkeletonParametersPanel extends Panel {
         const layer = glyph.layers[editLayerName];
         if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
 
+        const originalSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(originalSkeletonData)
         );
 
         for (const { contourIdx, pointIdx } of selectedData.points) {
+          const originalContour = originalSkeletonData.contours?.[contourIdx];
           const contour = skeletonData.contours[contourIdx];
-          if (!contour) continue;
+          if (!contour || !originalContour) continue;
           const point = contour.points[pointIdx];
-          if (!point) continue;
+          const originalPoint = originalContour.points?.[pointIdx];
+          if (!point || !originalPoint) continue;
 
           const defaultWidth =
-            contour.defaultWidth ||
+            originalContour.defaultWidth ||
             this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
 
           // Check if contour is single-sided
           const isSingleSided = contour.singleSided ?? false;
           const isLinked = this._isWidthLinked(point);
           const hasAsym = this._isAsymmetric(point);
-          const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-          const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+          const oldWidths = this._getPointWidths(originalPoint, defaultWidth);
+          const leftHW = oldWidths.left;
+          const rightHW = oldWidths.right;
 
           if (isSingleSided) {
             // Single-sided mode: the value is the full width, store as symmetric
@@ -5221,6 +5377,17 @@ export default class SkeletonParametersPanel extends Panel {
             delete point.width;
             this._clearEditableWhenCollapsed(point, point.leftWidth, point.rightWidth);
           }
+
+          const newWidths = this._getPointWidths(point, defaultWidth);
+          this._applyWidthAnchorTranslation(
+            contour,
+            originalContour,
+            pointIdx,
+            leftHW,
+            rightHW,
+            newWidths.left,
+            newWidths.right
+          );
 
           if (point.widthLinked === undefined) {
             point.widthLinked = isLinked;
@@ -5408,23 +5575,27 @@ export default class SkeletonParametersPanel extends Panel {
         const layer = glyph.layers[editLayerName];
         if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
 
+        const originalSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(originalSkeletonData)
         );
 
         for (const { contourIdx, pointIdx } of selectedData.points) {
+          const originalContour = originalSkeletonData.contours?.[contourIdx];
           const contour = skeletonData.contours[contourIdx];
-          if (!contour) continue;
+          if (!contour || !originalContour) continue;
           const point = contour.points[pointIdx];
-          if (!point) continue;
+          const originalPoint = originalContour.points?.[pointIdx];
+          if (!point || !originalPoint) continue;
 
           const defaultWidth =
-            contour.defaultWidth ||
+            originalContour.defaultWidth ||
             this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
           const isSingleSided = contour.singleSided ?? false;
           const isLinked = this._isWidthLinked(point);
-          const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-          const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+          const oldWidths = this._getPointWidths(originalPoint, defaultWidth);
+          const leftHW = oldWidths.left;
+          const rightHW = oldWidths.right;
 
           if (isSingleSided) {
             point.width = totalValue;
@@ -5440,6 +5611,17 @@ export default class SkeletonParametersPanel extends Panel {
             delete point.width;
             this._clearEditableWhenCollapsed(point, point.leftWidth, point.rightWidth);
           }
+
+          const newWidths = this._getPointWidths(point, defaultWidth);
+          this._applyWidthAnchorTranslation(
+            contour,
+            originalContour,
+            pointIdx,
+            leftHW,
+            rightHW,
+            newWidths.left,
+            newWidths.right
+          );
 
           if (point.widthLinked === undefined) {
             point.widthLinked = isLinked;
