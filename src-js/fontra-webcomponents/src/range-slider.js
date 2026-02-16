@@ -228,6 +228,7 @@ export class RangeSlider extends html.UnlitElement {
     step: {},
     onChangeCallback: { type: Function },
     values: {},
+    displayValue: {},
     allowInputBeyondRange: { type: Boolean },
   };
 
@@ -245,6 +246,7 @@ export class RangeSlider extends html.UnlitElement {
     this.onChangeCallback = () => {};
     this.values = [];
     this.disabled = false;
+    this.displayValue = null;
     this.allowInputBeyondRange = false;
   }
 
@@ -275,7 +277,13 @@ export class RangeSlider extends html.UnlitElement {
       this.updateIsAtDefault();
     }
     if (this.numberInput) {
-      this.numberInput.value = this.valueFormatted;
+      if (this.displayValue !== null && this.displayValue !== undefined) {
+        this.numberInput.value = "";
+        this.numberInput.placeholder = this.displayValue;
+      } else {
+        this.numberInput.value = this.valueFormatted;
+        this.numberInput.placeholder = "";
+      }
     }
   }
 
@@ -411,6 +419,9 @@ export class RangeSlider extends html.UnlitElement {
       maxValue = this.maxValue;
       value = this.valueFormatted;
     }
+    const hasDisplayValue = this.displayValue !== null && this.displayValue !== undefined;
+    const numberInputValue = hasDisplayValue ? "" : value;
+    const numberInputPlaceholder = hasDisplayValue ? this.displayValue : "";
     const isAtDefault = this.value == this.defaultValue;
     return html.div(
       {
@@ -423,7 +434,8 @@ export class RangeSlider extends html.UnlitElement {
               disabled: this.disabled,
               type: "number",
               class: "slider-numeric-input",
-              value,
+              value: numberInputValue,
+              placeholder: numberInputPlaceholder,
               step: this.step,
               required: "required",
               ...(this.allowInputBeyondRange ? {} : { min: this.minValue, max: this.maxValue }),

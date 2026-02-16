@@ -495,6 +495,7 @@ export default class SkeletonParametersPanel extends Panel {
 
     // Get values: from selected points or defaults
     let left, right, total, leftMixed = false, rightMixed = false, totalMixed = false;
+    let distributionValues = [];
     let linkedStates = new Set(); // Track linked states across selection
     // Cap style states are computed on demand below
     let hasSingleSided = false; // Track if any selected point is in single-sided contour
@@ -526,6 +527,9 @@ export default class SkeletonParametersPanel extends Panel {
           leftValues.push(widths.left);
           rightValues.push(widths.right);
           totalValues.push(widths.left + widths.right);
+            const leftRounded = Math.round(widths.left);
+            const rightRounded = Math.round(widths.right);
+            distributionValues.push(this._calculateDistribution(leftRounded, rightRounded));
           linkedStates.add(this._isWidthLinked(point));
           forceHorizontalStates.add(!!point.forceHorizontal);
           forceVerticalStates.add(!!point.forceVertical);
@@ -582,6 +586,7 @@ export default class SkeletonParametersPanel extends Panel {
       left = defaultWide / 2;
       right = defaultWide / 2;
       total = defaultWide;
+      distributionValues = [this._calculateDistribution(left, right)];
     }
 
     // Determine checkbox state
@@ -706,14 +711,23 @@ export default class SkeletonParametersPanel extends Panel {
 
     // Distribution slider (always available, except single-sided)
       if (!hasSingleSided) {
-        // When values are mixed, show slider at neutral (0) position
-        const distributionMixed = leftMixed || rightMixed;
-        const distribution = distributionMixed ? 0 : this._calculateDistribution(left, right);
+        const hasDistributionValues = distributionValues.length > 0;
+        const distributionMixed =
+          hasSelection &&
+          multiSelection &&
+          hasDistributionValues &&
+          !distributionValues.every((v) => v === distributionValues[0]);
+        const distribution = distributionMixed
+          ? 0
+          : hasDistributionValues
+            ? distributionValues[0]
+            : this._calculateDistribution(left ?? 0, right ?? 0);
         formContents.push({
           type: "edit-number-slider",
           key: "pointDistribution",
           label: "Distribution",
           value: distribution,
+          displayValue: distributionMixed ? "mixed" : undefined,
           minValue: -100,
           defaultValue: 0,
           maxValue: 100,
