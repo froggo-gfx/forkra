@@ -904,8 +904,8 @@ export class RibEditBehavior {
         : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
     }
 
-    // Minimum half-width (1 unit)
-    this.minHalfWidth = 1;
+    // Minimum half-width (allow collapse to skeleton)
+    this.minHalfWidth = 0;
   }
 
   /**
@@ -986,7 +986,8 @@ export function createRibEditBehavior(skeletonData, ribHit) {
 
 /**
  * EditableRibBehavior - Handles dragging of editable rib points.
- * - Width follows normal component, nudge follows tangent component.
+ * - Width follows normal component by default.
+ * - Nudge follows tangent only when constrained (e.g. Shift).
  * - Constrain modes can lock width or nudge.
  */
 export class EditableRibBehavior {
@@ -1036,8 +1037,8 @@ export class EditableRibBehavior {
     const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
     this.originalNudge = point[nudgeKey] || 0;
 
-    // Minimum half-width (1 unit)
-    this.minHalfWidth = 1;
+    // Minimum half-width (allow collapse to skeleton)
+    this.minHalfWidth = 0;
 
     // Store original 2D handle offsets for compensation when nudge changes
     // This ensures handles stay in place when rib point moves
@@ -1139,12 +1140,8 @@ export class EditableRibBehavior {
         newHalfWidth = this.minHalfWidth;
       }
     }
-    // Free movement (no constraint)
+    // Free movement (no constraint): width only (tangent requires Shift)
     else {
-      // Project delta onto tangent → nudge change (always allowed)
-      const tangentDot = delta.x * this.tangent.x + delta.y * this.tangent.y;
-      newNudge = this.originalNudge + tangentDot;
-
       const sign = this.side === "left" ? 1 : -1;
       const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
       const normalDelta = sign * normalDot;

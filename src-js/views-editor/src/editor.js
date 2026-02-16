@@ -625,11 +625,27 @@ export class EditorController extends ViewController {
         }
       );
       registerActionInfo(
+        "action.realtime.measure-direct",
+        {
+          topic,
+          titleKey: "shortcuts.realtime.measure-direct",
+          defaultShortCuts: [{ baseKey: "q", altKey: true }],
+        }
+      );
+      registerActionInfo(
         "action.realtime.equalize",
         {
           topic,
           titleKey: "shortcuts.realtime.equalize",
           defaultShortCuts: [{ baseKey: "x" }],
+        }
+      );
+      registerActionInfo(
+        "action.realtime.rib-tangent",
+        {
+          topic,
+          titleKey: "shortcuts.realtime.rib-tangent",
+          defaultShortCuts: [{ baseKey: "z" }],
         }
       );
         registerActionInfo(

@@ -89,7 +89,9 @@ const rotationHandleSizeFactor = 1.2;
 const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
 const DEFAULT_SKELETON_WIDTH = 80;
 const REALTIME_MEASURE_ACTION = "action.realtime.measure";
+const REALTIME_MEASURE_DIRECT_ACTION = "action.realtime.measure-direct";
 const REALTIME_EQUALIZE_ACTION = "action.realtime.equalize";
+const REALTIME_RIB_TANGENT_ACTION = "action.realtime.rib-tangent";
 const REALTIME_FIXED_RIB_ACTION = "action.realtime.fixed-rib";
 const REALTIME_FIXED_RIB_COMPRESS_ACTION = "action.realtime.fixed-rib-compress";
 
@@ -198,6 +200,15 @@ function isWidthLinked(point) {
   return !hasAsymmetricWidths(point);
 }
 
+function clearEditableWhenCollapsed(point, leftHW, rightHW) {
+  if (leftHW <= 0) {
+    point.leftEditable = false;
+  }
+  if (rightHW <= 0) {
+    point.rightEditable = false;
+  }
+}
+
 function applyLinkedWidthDelta(
   point,
   basePoint,
@@ -212,27 +223,29 @@ function applyLinkedWidthDelta(
   const baseHasAsym = hasAsymmetricWidths(basePoint);
 
   if (linked) {
-    const newLeft = Math.max(1, roundFunc(baseLeft + delta));
-    const newRight = Math.max(1, roundFunc(baseRight + delta));
+    const newLeft = Math.max(0, roundFunc(baseLeft + delta));
+    const newRight = Math.max(0, roundFunc(baseRight + delta));
     if (baseHasAsym) {
       point.leftWidth = newLeft;
       point.rightWidth = newRight;
       delete point.width;
     } else {
-      point.width = Math.max(2, newLeft + newRight);
+      point.width = Math.max(0, newLeft + newRight);
       delete point.leftWidth;
       delete point.rightWidth;
     }
+    clearEditableWhenCollapsed(point, newLeft, newRight);
     return;
   }
 
   const newLeft =
-    side === "left" ? Math.max(1, roundFunc(baseLeft + delta)) : Math.max(1, roundFunc(baseLeft));
+    side === "left" ? Math.max(0, roundFunc(baseLeft + delta)) : Math.max(0, roundFunc(baseLeft));
   const newRight =
-    side === "right" ? Math.max(1, roundFunc(baseRight + delta)) : Math.max(1, roundFunc(baseRight));
+    side === "right" ? Math.max(0, roundFunc(baseRight + delta)) : Math.max(0, roundFunc(baseRight));
   point.leftWidth = newLeft;
   point.rightWidth = newRight;
   delete point.width;
+  clearEditableWhenCollapsed(point, newLeft, newRight);
 }
 
 function applyFixedRibDragToSkeletonData(
@@ -396,10 +409,16 @@ export class PointerTool extends BaseTool {
   // Measure mode (Q-key) properties
   measureMode = false;
   _boundKeyUp = null;
+  _boundMeasureAltKeyDown = null;
+  _boundMeasureAltKeyUp = null;
 
-    // Equalize handles mode (X-key) properties
+  // Equalize handles mode (X-key) properties
     equalizeMode = false;
     _boundEqualizeKeyUp = null;
+
+    // Rib tangent drag mode (Z-key) properties
+    tangentRibMode = false;
+    _boundTangentRibKeyUp = null;
 
     // Fixed rib drag mode (F-key) properties
     fixedRibMode = false;
@@ -410,13 +429,25 @@ export class PointerTool extends BaseTool {
     _boundFixedRibCompressKeyUp = null;
 
     handleKeyDown(event) {
-      if (eventMatchesActionShortCut(REALTIME_MEASURE_ACTION, event)) {
+      if (
+        eventMatchesActionShortCut(REALTIME_MEASURE_ACTION, event) ||
+        eventMatchesActionShortCut(REALTIME_MEASURE_DIRECT_ACTION, event)
+      ) {
         if (!this.measureMode) {
           this.measureMode = true;
           this.sceneModel.measureMode = true;
-          this.sceneModel.measureShowDirect = event.altKey;
+          this.sceneModel.measureShowDirect =
+            eventMatchesActionShortCut(REALTIME_MEASURE_DIRECT_ACTION, event) || event.altKey;
           this._boundKeyUp = (e) => this._handleMeasureKeyUp(e);
           window.addEventListener("keyup", this._boundKeyUp);
+          if (!this._boundMeasureAltKeyDown) {
+            this._boundMeasureAltKeyDown = (e) => this._handleMeasureAltKeyDown(e);
+            window.addEventListener("keydown", this._boundMeasureAltKeyDown);
+          }
+          if (!this._boundMeasureAltKeyUp) {
+            this._boundMeasureAltKeyUp = (e) => this._handleMeasureAltKeyUp(e);
+            window.addEventListener("keyup", this._boundMeasureAltKeyUp);
+          }
           this.canvasController.requestUpdate();
         }
         return;
@@ -426,6 +457,14 @@ export class PointerTool extends BaseTool {
           this.equalizeMode = true;
           this._boundEqualizeKeyUp = (e) => this._handleEqualizeKeyUp(e);
           window.addEventListener("keyup", this._boundEqualizeKeyUp);
+        }
+        return;
+      }
+      if (eventMatchesActionShortCut(REALTIME_RIB_TANGENT_ACTION, event)) {
+        if (!this.tangentRibMode) {
+          this.tangentRibMode = true;
+          this._boundTangentRibKeyUp = (e) => this._handleTangentRibKeyUp(e);
+          window.addEventListener("keyup", this._boundTangentRibKeyUp);
         }
         return;
       }
@@ -448,7 +487,10 @@ export class PointerTool extends BaseTool {
     }
 
     _handleMeasureKeyUp(event) {
-      if (eventMatchesActionBaseKey(REALTIME_MEASURE_ACTION, event)) {
+      if (
+        eventMatchesActionBaseKey(REALTIME_MEASURE_ACTION, event) ||
+        eventMatchesActionBaseKey(REALTIME_MEASURE_DIRECT_ACTION, event)
+      ) {
         this.measureMode = false;
         this.sceneModel.measureMode = false;
         this.sceneModel.measureHoverSegment = null;
@@ -459,8 +501,32 @@ export class PointerTool extends BaseTool {
         window.removeEventListener("keyup", this._boundKeyUp);
         this._boundKeyUp = null;
       }
+      if (this._boundMeasureAltKeyDown) {
+        window.removeEventListener("keydown", this._boundMeasureAltKeyDown);
+        this._boundMeasureAltKeyDown = null;
+      }
+      if (this._boundMeasureAltKeyUp) {
+        window.removeEventListener("keyup", this._boundMeasureAltKeyUp);
+        this._boundMeasureAltKeyUp = null;
+      }
       this.canvasController.requestUpdate();
     }
+    }
+
+    _handleMeasureAltKeyDown(event) {
+      if (!this.measureMode) return;
+      if (event.key === "Alt" || event.altKey) {
+        this.sceneModel.measureShowDirect = true;
+        this.canvasController.requestUpdate();
+      }
+    }
+
+    _handleMeasureAltKeyUp(event) {
+      if (!this.measureMode) return;
+      if (event.key === "Alt" || !event.altKey) {
+        this.sceneModel.measureShowDirect = false;
+        this.canvasController.requestUpdate();
+      }
     }
 
     _handleEqualizeKeyUp(event) {
@@ -469,6 +535,16 @@ export class PointerTool extends BaseTool {
         if (this._boundEqualizeKeyUp) {
           window.removeEventListener("keyup", this._boundEqualizeKeyUp);
           this._boundEqualizeKeyUp = null;
+        }
+      }
+    }
+
+    _handleTangentRibKeyUp(event) {
+      if (eventMatchesActionBaseKey(REALTIME_RIB_TANGENT_ACTION, event)) {
+        this.tangentRibMode = false;
+        if (this._boundTangentRibKeyUp) {
+          window.removeEventListener("keyup", this._boundTangentRibKeyUp);
+          this._boundTangentRibKeyUp = null;
         }
       }
     }
@@ -693,12 +769,6 @@ export class PointerTool extends BaseTool {
     const hasRibPoints = ribPointSelection?.size > 0;
     const hasRegularPoints = regularPointSelection?.length > 0;
 
-    // X+arrows: equalize handles for selected off-curve skeleton points
-    if (this.equalizeMode && hasSkeletonPoints) {
-      await this._equalizeSelectedSkeletonHandles(skeletonPointSelection);
-      return;
-    }
-
     // Handle skeleton point nudging (highest priority)
     if (hasSkeletonPoints) {
       // Handle skeleton point nudging (combined with regular points in one editGlyph)
@@ -711,6 +781,17 @@ export class PointerTool extends BaseTool {
         dy *= 10;
       }
       const delta = { x: dx, y: dy };
+
+      // X+arrows: nudge selected off-curve skeleton handles and equalize
+      if (this.equalizeMode) {
+        const handled = await this._handleArrowKeysForEqualizeSkeletonHandles(
+          delta,
+          skeletonPointSelection
+        );
+        if (handled) {
+          return;
+        }
+      }
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const editLayerName = sceneController.editingLayerNames?.[0];
@@ -726,20 +807,51 @@ export class PointerTool extends BaseTool {
       const originalSkeletonData = JSON.parse(JSON.stringify(skeletonData));
       const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
 
-      // Create behaviors and apply delta
-      const behaviorName = getSkeletonBehaviorName(false, event.altKey);
-      const behaviors = createSkeletonEditBehavior(
-        originalSkeletonData,
-        skeletonPointSelection,
-        behaviorName
-      );
+      const roundFunc = (value) => makeRoundFunc(event)(value, true);
+      const useFixedRib = this.fixedRibMode || this.fixedRibCompressMode;
+      let appliedFixedRib = false;
 
-      for (const behavior of behaviors) {
-        const changes = behavior.applyDelta(delta);
-        const contour = workingSkeletonData.contours[behavior.contourIndex];
-        for (const { pointIndex, x, y } of changes) {
-          contour.points[pointIndex].x = x;
-          contour.points[pointIndex].y = y;
+      if (useFixedRib) {
+        let clickedSkeletonPoint = this.sceneController.sceneModel.initialClickedSkeletonPoint;
+        if (!clickedSkeletonPoint && skeletonPointSelection?.size) {
+          const firstKey = skeletonPointSelection.values().next().value;
+          if (firstKey) {
+            const [contourIdx, pointIdx] = firstKey.split("/").map(Number);
+            if (Number.isInteger(contourIdx) && Number.isInteger(pointIdx)) {
+              clickedSkeletonPoint = { contourIdx, pointIdx };
+            }
+          }
+        }
+
+        if (clickedSkeletonPoint) {
+          appliedFixedRib = applyFixedRibDragToSkeletonData(
+            originalSkeletonData,
+            workingSkeletonData,
+            skeletonPointSelection,
+            clickedSkeletonPoint,
+            delta,
+            roundFunc,
+            { anchorToDragSide: this.fixedRibCompressMode }
+          );
+        }
+      }
+
+      if (!appliedFixedRib) {
+        // Create behaviors and apply delta
+        const behaviorName = getSkeletonBehaviorName(false, event.altKey);
+        const behaviors = createSkeletonEditBehavior(
+          originalSkeletonData,
+          skeletonPointSelection,
+          behaviorName
+        );
+
+        for (const behavior of behaviors) {
+          const changes = behavior.applyDelta(delta);
+          const contour = workingSkeletonData.contours[behavior.contourIndex];
+          for (const { pointIndex, x, y } of changes) {
+            contour.points[pointIndex].x = x;
+            contour.points[pointIndex].y = y;
+          }
         }
       }
 
@@ -871,6 +983,25 @@ export class PointerTool extends BaseTool {
     const editableHandles = this._getEditableGeneratedHandlesFromSelection(regularPointSelection);
     if (editableHandles.length > 0) {
       await this._handleArrowKeysForEditableHandles(event, editableHandles);
+      return;
+    }
+  }
+
+  if (hasRegularPoints && this.equalizeMode) {
+    let [dx, dy] = arrowKeyDeltas[event.key];
+    if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
+      dx *= 100;
+      dy *= 100;
+    } else if (event.shiftKey) {
+      dx *= 10;
+      dy *= 10;
+    }
+    const delta = { x: dx, y: dy };
+    const handled = await this._handleArrowKeysForEqualizePathHandles(
+      delta,
+      regularPointSelection
+    );
+    if (handled) {
       return;
     }
   }
@@ -1201,16 +1332,29 @@ export class PointerTool extends BaseTool {
       let targetRibSelection;
 
       if (initialEvent.shiftKey) {
-        const modeFunc = getSelectModeFunction(initialEvent);
-        sceneController.selection = modeFunc(sceneController.selection, new Set([clickedRibFullKey]));
+        const currentRibSelection =
+          parseSelection(sceneController.selection).skeletonRibPoint || new Set();
+        const clickedWasSelected = currentRibSelection.has(clickedRibShortKey);
 
         if (!(await shouldInitiateDrag(eventStream, initialEvent))) {
+          const modeFunc = getSelectModeFunction(initialEvent);
+          sceneController.selection = modeFunc(
+            sceneController.selection,
+            new Set([clickedRibFullKey])
+          );
           initialEvent.preventDefault();
           return;
         }
 
-        const updatedRibSelection =
-          parseSelection(sceneController.selection).skeletonRibPoint || new Set();
+        let updatedRibSelection = currentRibSelection;
+        if (!clickedWasSelected) {
+          updatedRibSelection = new Set(currentRibSelection);
+          updatedRibSelection.add(clickedRibShortKey);
+          sceneController.selection = new Set(
+            [...updatedRibSelection].map((key) => `skeletonRibPoint/${key}`)
+          );
+        }
+
         if (!updatedRibSelection.size || !updatedRibSelection.has(clickedRibShortKey)) {
           initialEvent.preventDefault();
           return;
@@ -2944,9 +3088,9 @@ export class PointerTool extends BaseTool {
 
         const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
 
-        // Determine constraint mode based on Shift key
-        // Shift: constrain to tangent direction (only nudge changes)
-        const constrainMode = event.shiftKey ? "tangent" : null;
+        // Determine constraint mode based on Z hold
+        // Z: constrain to tangent direction (only nudge changes)
+        const constrainMode = this.tangentRibMode ? "tangent" : null;
 
         const allChanges = [];
 
@@ -3504,9 +3648,9 @@ export class PointerTool extends BaseTool {
 
         const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
 
-        // Determine constraint mode based on Shift key
-        // Shift: constrain to tangent direction (only nudge changes)
-        const constrainMode = event.shiftKey ? "tangent" : null;
+        // Determine constraint mode based on Z hold
+        // Z: constrain to tangent direction (only nudge changes)
+        const constrainMode = this.tangentRibMode ? "tangent" : null;
 
         const allChanges = [];
 
@@ -4890,40 +5034,11 @@ export class PointerTool extends BaseTool {
     const contour = skeletonData.contours[contourIndex];
     const numPoints = contour.points.length;
 
-    // Find adjacent smooth point and opposite off-curve
-    // Off-curve can be before or after a smooth point
-    let smoothIndex = null;
-    let oppositeIndex = null;
-
-    const prevIndex = (pointIndex - 1 + numPoints) % numPoints;
-    const nextIndex = (pointIndex + 1) % numPoints;
-    const prevPoint = contour.points[prevIndex];
-    const nextPoint = contour.points[nextIndex];
-
-    // Check if prev is smooth (on-curve with smooth flag)
-    if (!prevPoint?.type && prevPoint?.smooth) {
-      // prevPoint is smooth on-curve, check if it has off-curve on the other side
-      const prevPrevIndex = (prevIndex - 1 + numPoints) % numPoints;
-      const prevPrevPoint = contour.points[prevPrevIndex];
-      if (prevPrevPoint?.type === "cubic") {
-        smoothIndex = prevIndex;
-        oppositeIndex = prevPrevIndex;
-      }
-    }
-
-    // Check if next is smooth (on-curve with smooth flag)
-    if (smoothIndex === null && !nextPoint?.type && nextPoint?.smooth) {
-      const nextNextIndex = (nextIndex + 1) % numPoints;
-      const nextNextPoint = contour.points[nextNextIndex];
-      if (nextNextPoint?.type === "cubic") {
-        smoothIndex = nextIndex;
-        oppositeIndex = nextNextIndex;
-      }
-    }
-
-    if (smoothIndex === null || oppositeIndex === null) {
+    const equalizeInfo = this._getSkeletonHandleEqualizeInfo(contour, pointIndex);
+    if (!equalizeInfo) {
       return; // No valid smooth point with opposite off-curve found
     }
+    const { smoothIndex, oppositeIndex } = equalizeInfo;
 
     // Calculate the length of the clicked handle
     const clickedPoint = contour.points[pointIndex];
@@ -5006,6 +5121,284 @@ export class PointerTool extends BaseTool {
         broadcast: true,
       };
     });
+  }
+
+  _getSkeletonHandleEqualizeInfo(contour, pointIndex) {
+    if (!contour?.points?.length) {
+      return null;
+    }
+    const numPoints = contour.points.length;
+
+    // Find adjacent smooth point and opposite off-curve
+    // Off-curve can be before or after a smooth point
+    let smoothIndex = null;
+    let oppositeIndex = null;
+
+    const prevIndex = (pointIndex - 1 + numPoints) % numPoints;
+    const nextIndex = (pointIndex + 1) % numPoints;
+    const prevPoint = contour.points[prevIndex];
+    const nextPoint = contour.points[nextIndex];
+
+    // Check if prev is smooth (on-curve with smooth flag)
+    if (!prevPoint?.type && prevPoint?.smooth) {
+      // prevPoint is smooth on-curve, check if it has off-curve on the other side
+      const prevPrevIndex = (prevIndex - 1 + numPoints) % numPoints;
+      const prevPrevPoint = contour.points[prevPrevIndex];
+      if (prevPrevPoint?.type === "cubic") {
+        smoothIndex = prevIndex;
+        oppositeIndex = prevPrevIndex;
+      }
+    }
+
+    // Check if next is smooth (on-curve with smooth flag)
+    if (smoothIndex === null && !nextPoint?.type && nextPoint?.smooth) {
+      const nextNextIndex = (nextIndex + 1) % numPoints;
+      const nextNextPoint = contour.points[nextNextIndex];
+      if (nextNextPoint?.type === "cubic") {
+        smoothIndex = nextIndex;
+        oppositeIndex = nextNextIndex;
+      }
+    }
+
+    if (smoothIndex === null || oppositeIndex === null) {
+      return null;
+    }
+
+    return { smoothIndex, oppositeIndex };
+  }
+
+  async _handleArrowKeysForEqualizeSkeletonHandles(delta, skeletonPointSelection) {
+    const sceneController = this.sceneController;
+    const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return false;
+
+    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
+    if (!skeletonData) return false;
+
+    const offCurvePoints = [];
+    for (const key of skeletonPointSelection) {
+      const [contourIdx, pointIdx] = key.split("/").map(Number);
+      const contour = skeletonData.contours[contourIdx];
+      const point = contour?.points[pointIdx];
+      if (point?.type === "cubic") {
+        offCurvePoints.push({ contourIdx, pointIdx });
+      }
+    }
+
+    if (offCurvePoints.length === 0) {
+      return false;
+    }
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const layerSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const working = JSON.parse(JSON.stringify(layerSkeletonData));
+        let changed = false;
+
+        for (const { contourIdx, pointIdx } of offCurvePoints) {
+          const contour = working.contours[contourIdx];
+          if (!contour) continue;
+          const point = contour.points[pointIdx];
+          if (!point || point.type !== "cubic") continue;
+
+          point.x = Math.round(point.x + delta.x);
+          point.y = Math.round(point.y + delta.y);
+
+          const equalizeInfo = this._getSkeletonHandleEqualizeInfo(contour, pointIdx);
+          if (!equalizeInfo) continue;
+          const { smoothIndex, oppositeIndex } = equalizeInfo;
+
+          const smoothPoint = contour.points[smoothIndex];
+          const clickedPoint = contour.points[pointIdx];
+          const oppPoint = contour.points[oppositeIndex];
+          if (!smoothPoint || !clickedPoint || !oppPoint) continue;
+
+          const clickedLength = Math.hypot(
+            clickedPoint.x - smoothPoint.x,
+            clickedPoint.y - smoothPoint.y
+          );
+          const oppDirX = oppPoint.x - smoothPoint.x;
+          const oppDirY = oppPoint.y - smoothPoint.y;
+          const oppLength = Math.hypot(oppDirX, oppDirY);
+
+          if (oppLength > 0.001) {
+            const scale = clickedLength / oppLength;
+            oppPoint.x = Math.round(smoothPoint.x + oppDirX * scale);
+            oppPoint.y = Math.round(smoothPoint.y + oppDirY * scale);
+          }
+
+          changed = true;
+        }
+
+        if (!changed) {
+          continue;
+        }
+
+        const staticGlyph = layer.glyph;
+        const generatedContours = generateContoursFromSkeleton(working);
+        const oldGeneratedIndices = working.generatedContourIndices || [];
+
+        let canUpdateInPlace = oldGeneratedIndices.length === generatedContours.length;
+        const inPlaceUpdates = [];
+        if (canUpdateInPlace) {
+          for (let i = 0; i < oldGeneratedIndices.length; i++) {
+            const contourIdx = oldGeneratedIndices[i];
+            if (contourIdx >= staticGlyph.path.numContours) {
+              canUpdateInPlace = false;
+              break;
+            }
+            const startPt = contourIdx === 0
+              ? 0
+              : staticGlyph.path.contourInfo[contourIdx - 1].endPoint + 1;
+            const endPt = staticGlyph.path.contourInfo[contourIdx].endPoint;
+            const numExistingPts = endPt - startPt + 1;
+            const packed = packContour(generatedContours[i]);
+            const numNewPts = packed.coordinates.length / 2;
+            if (numExistingPts !== numNewPts) {
+              canUpdateInPlace = false;
+              break;
+            }
+            inPlaceUpdates.push({ startPt, packed });
+          }
+        }
+
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          if (canUpdateInPlace) {
+            for (const { startPt, packed } of inPlaceUpdates) {
+              const numPts = packed.coordinates.length / 2;
+              for (let pi = 0; pi < numPts; pi++) {
+                sg.path.setPointPosition(
+                  startPt + pi,
+                  packed.coordinates[pi * 2],
+                  packed.coordinates[pi * 2 + 1]
+                );
+              }
+            }
+          } else {
+            const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+            for (const idx of sortedIndices) {
+              if (idx < sg.path.numContours) {
+                sg.path.deleteContour(idx);
+              }
+            }
+            const newGeneratedIndices = [];
+            for (const contour of generatedContours) {
+              const newIndex = sg.path.numContours;
+              sg.path.insertContour(sg.path.numContours, packContour(contour));
+              newGeneratedIndices.push(newIndex);
+            }
+            working.generatedContourIndices = newGeneratedIndices;
+          }
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = working;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Nudge skeleton handles (equalize)",
+        broadcast: true,
+      };
+    });
+
+    return true;
+  }
+
+  async _handleArrowKeysForEqualizePathHandles(delta, pointSelection) {
+    const sceneController = this.sceneController;
+    const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.glyph?.path) return false;
+
+    const basePath = positionedGlyph.glyph.path;
+    const equalizeTargets = [];
+    for (const pointIndex of pointSelection) {
+      const info = this._getEqualizeHandleInfoForPointIndex(basePath, pointIndex);
+      if (info) {
+        equalizeTargets.push(info);
+      }
+    }
+
+    if (equalizeTargets.length === 0) {
+      return false;
+    }
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.glyph?.path) continue;
+        const path = layer.glyph.path;
+        let changed = false;
+
+        const pathChange = recordChanges(layer.glyph, (lg) => {
+          for (const { pointIndex, smoothIndex, oppositeIndex } of equalizeTargets) {
+            if (
+              pointIndex >= path.numPoints ||
+              smoothIndex >= path.numPoints ||
+              oppositeIndex >= path.numPoints
+            ) {
+              continue;
+            }
+
+            const smoothPt = path.getPoint(smoothIndex);
+            const draggedPt = path.getPoint(pointIndex);
+            const oppositePt = path.getPoint(oppositeIndex);
+            if (!smoothPt || !draggedPt || !oppositePt) {
+              continue;
+            }
+
+            const newDragPos = {
+              x: Math.round(draggedPt.x + delta.x),
+              y: Math.round(draggedPt.y + delta.y),
+            };
+            const newDragVec = {
+              x: newDragPos.x - smoothPt.x,
+              y: newDragPos.y - smoothPt.y,
+            };
+            const newOppPos = {
+              x: Math.round(smoothPt.x - newDragVec.x),
+              y: Math.round(smoothPt.y - newDragVec.y),
+            };
+
+            lg.path.setPointPosition(pointIndex, newDragPos.x, newDragPos.y);
+            lg.path.setPointPosition(oppositeIndex, newOppPos.x, newOppPos.y);
+            changed = true;
+          }
+        });
+
+        if (changed) {
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+        }
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Nudge handles (equalize)",
+        broadcast: true,
+      };
+    });
+
+    return true;
   }
 
   /**
@@ -6250,42 +6643,102 @@ export class PointerTool extends BaseTool {
     const { skeletonPoint, skeletonRibPoint, point: pointSelection } =
       parseSelection(this.sceneController.selection);
 
-    // Ignore rib point selection for this mode
-    if (skeletonRibPoint?.size) return null;
-
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) return null;
 
-    if (skeletonPoint?.size === 2 && (!pointSelection || pointSelection.length === 0)) {
-      const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
-      if (!skeletonData) return null;
-      const [firstKey, secondKey] = [...skeletonPoint];
-      const [c1, p1] = firstKey.split("/").map(Number);
-      const [c2, p2] = secondKey.split("/").map(Number);
-      const pt1 = skeletonData.contours?.[c1]?.points?.[p1];
-      const pt2 = skeletonData.contours?.[c2]?.points?.[p2];
-      if (!pt1 || !pt2) return null;
-      return {
-        p1: { x: pt1.x, y: pt1.y },
-        p2: { x: pt2.x, y: pt2.y },
-        type: "skeleton",
-      };
+    const points = [];
+    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
+    const path = positionedGlyph.glyph?.path;
+
+    if (skeletonPoint?.size && skeletonData) {
+      for (const key of skeletonPoint) {
+        const [c, p] = key.split("/").map(Number);
+        const pt = skeletonData.contours?.[c]?.points?.[p];
+        if (!pt) continue;
+        points.push({
+          kind: "skeleton",
+          p: { x: pt.x, y: pt.y },
+        });
+      }
     }
 
-    if (pointSelection?.length === 2 && (!skeletonPoint || skeletonPoint.size === 0)) {
-      const path = positionedGlyph.glyph?.path;
-      if (!path) return null;
-      const pt1 = path.getPoint(pointSelection[0]);
-      const pt2 = path.getPoint(pointSelection[1]);
-      if (!pt1 || !pt2) return null;
-      return {
-        p1: { x: pt1.x, y: pt1.y },
-        p2: { x: pt2.x, y: pt2.y },
-        type: "path",
-      };
+    if (skeletonRibPoint?.size && skeletonData) {
+      for (const key of skeletonRibPoint) {
+        const [c, p, side] = key.split("/");
+        const contourIdx = Number(c);
+        const pointIdx = Number(p);
+        if (!Number.isInteger(contourIdx) || !Number.isInteger(pointIdx)) continue;
+        if (side !== "left" && side !== "right") continue;
+        const contour = skeletonData.contours?.[contourIdx];
+        const ribPoint = this._getRibPointPositionForSelection(
+          contour,
+          pointIdx,
+          side,
+          skeletonData.defaultWidth ?? DEFAULT_SKELETON_WIDTH
+        );
+        if (!ribPoint) continue;
+        points.push({
+          kind: "skeleton",
+          p: ribPoint,
+        });
+      }
     }
 
-    return null;
+    if (pointSelection?.length && path) {
+      for (const idx of pointSelection) {
+        const pt = path.getPoint(idx);
+        if (!pt) continue;
+        points.push({
+          kind: "path",
+          p: { x: pt.x, y: pt.y },
+        });
+      }
+    }
+
+    if (points.length !== 2) {
+      return null;
+    }
+
+    const type = points.every((pt) => pt.kind === "path") ? "path" : "skeleton";
+    return {
+      p1: points[0].p,
+      p2: points[1].p,
+      type,
+    };
+  }
+
+  _getRibPointPositionForSelection(contour, pointIndex, side, defaultWidth) {
+    if (!contour?.points?.length) return null;
+    const skeletonPoint = contour.points[pointIndex];
+    if (!skeletonPoint || skeletonPoint.type) return null;
+
+    const contourDefaultWidth = contour.defaultWidth ?? defaultWidth;
+    const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
+    let leftHW = getPointHalfWidth(skeletonPoint, contourDefaultWidth, "left");
+    let rightHW = getPointHalfWidth(skeletonPoint, contourDefaultWidth, "right");
+
+    const singleSided = contour.singleSided ?? false;
+    const singleSidedDirection = contour.singleSidedDirection ?? "left";
+
+    if (singleSided) {
+      const totalWidth = leftHW + rightHW;
+      if (side !== singleSidedDirection) {
+        return null;
+      }
+      const canNudge = totalWidth >= 0.5;
+      const nudge = side === "left"
+        ? ((skeletonPoint.leftEditable && canNudge) ? (skeletonPoint.leftNudge || 0) : 0)
+        : ((skeletonPoint.rightEditable && canNudge) ? (skeletonPoint.rightNudge || 0) : 0);
+      return projectRibPoint(skeletonPoint, normal, totalWidth, side, nudge);
+    }
+
+    const isLeftEditable = skeletonPoint.leftEditable === true;
+    const isRightEditable = skeletonPoint.rightEditable === true;
+    const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
+    const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+    const halfWidth = side === "left" ? leftHW : rightHW;
+    const nudge = side === "left" ? leftNudge : rightNudge;
+    return projectRibPoint(skeletonPoint, normal, halfWidth, side, nudge);
   }
 
   /**
@@ -6575,6 +7028,14 @@ export class PointerTool extends BaseTool {
       if (this._boundKeyUp) {
         window.removeEventListener("keyup", this._boundKeyUp);
         this._boundKeyUp = null;
+      }
+      if (this._boundMeasureAltKeyDown) {
+        window.removeEventListener("keydown", this._boundMeasureAltKeyDown);
+        this._boundMeasureAltKeyDown = null;
+      }
+      if (this._boundMeasureAltKeyUp) {
+        window.removeEventListener("keyup", this._boundMeasureAltKeyUp);
+        this._boundMeasureAltKeyUp = null;
       }
     }
     this.canvasController.requestUpdate();

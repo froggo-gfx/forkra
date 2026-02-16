@@ -593,7 +593,7 @@ export default class SkeletonParametersPanel extends Panel {
       label: "Total",
       value: totalMixed ? null : Math.round(totalWidth),
       placeholder: totalMixed ? "mixed" : undefined,
-      minValue: 2,
+      minValue: 0,
       allowEmptyField: totalMixed,
     });
 
@@ -603,7 +603,7 @@ export default class SkeletonParametersPanel extends Panel {
       label: "Left",
       value: leftMixed ? null : Math.round(leftDisabled ? 0 : (rightDisabled ? totalWidth : left)),
       placeholder: leftMixed ? "mixed" : undefined,
-      minValue: leftDisabled ? 0 : 1,
+      minValue: 0,
       allowEmptyField: leftMixed,
       disabled: leftDisabled,
     });
@@ -613,7 +613,7 @@ export default class SkeletonParametersPanel extends Panel {
       label: "Right",
       value: rightMixed ? null : Math.round(rightDisabled ? 0 : (leftDisabled ? totalWidth : right)),
       placeholder: rightMixed ? "mixed" : undefined,
-      minValue: rightDisabled ? 0 : 1,
+      minValue: 0,
       allowEmptyField: rightMixed,
       disabled: rightDisabled,
     });
@@ -3230,6 +3230,16 @@ export default class SkeletonParametersPanel extends Panel {
     return Math.round(((leftHW - rightHW) / total) * 100);
   }
 
+  _clearEditableWhenCollapsed(point, leftHW, rightHW) {
+    if (!point) return;
+    if (Number.isFinite(leftHW) && leftHW <= 0) {
+      point.leftEditable = false;
+    }
+    if (Number.isFinite(rightHW) && rightHW <= 0) {
+      point.rightEditable = false;
+    }
+  }
+
   /**
    * Check if a point is in asymmetric mode.
    * Returns true if the point has separate leftWidth/rightWidth properties,
@@ -5140,6 +5150,8 @@ export default class SkeletonParametersPanel extends Panel {
     if (!selectedData) return;
 
     const isLeft = key === "pointWidthLeft";
+    const rawValue = Number.isFinite(value) ? value : 0;
+    const valueClamped = Math.max(0, Math.round(rawValue));
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
@@ -5172,38 +5184,42 @@ export default class SkeletonParametersPanel extends Panel {
 
           if (isSingleSided) {
             // Single-sided mode: the value is the full width, store as symmetric
-            point.width = value;
+            point.width = valueClamped;
             delete point.leftWidth;
             delete point.rightWidth;
+            this._clearEditableWhenCollapsed(point, valueClamped / 2, valueClamped / 2);
           } else if (isLinked) {
             // Linked: update both sides by the same delta
             if (hasAsym) {
-              const delta = value - (isLeft ? leftHW : rightHW);
-              const newLeft = Math.max(1, Math.round(leftHW + delta));
-              const newRight = Math.max(1, Math.round(rightHW + delta));
+              const delta = valueClamped - (isLeft ? leftHW : rightHW);
+              const newLeft = Math.max(0, Math.round(leftHW + delta));
+              const newRight = Math.max(0, Math.round(rightHW + delta));
               point.leftWidth = newLeft;
               point.rightWidth = newRight;
               delete point.width;
+              this._clearEditableWhenCollapsed(point, newLeft, newRight);
             } else {
-              const newHalf = Math.max(1, Math.round(value));
-              point.width = Math.max(2, newHalf * 2);
+              const newHalf = Math.max(0, Math.round(valueClamped));
+              point.width = Math.max(0, newHalf * 2);
               delete point.leftWidth;
               delete point.rightWidth;
+              this._clearEditableWhenCollapsed(point, newHalf, newHalf);
             }
           } else {
             // Unlinked: update only the edited side
             if (isLeft) {
-              point.leftWidth = Math.max(1, Math.round(value));
+              point.leftWidth = Math.max(0, Math.round(valueClamped));
               if (point.rightWidth === undefined) {
                 point.rightWidth = Math.round(rightHW);
               }
             } else {
-              point.rightWidth = Math.max(1, Math.round(value));
+              point.rightWidth = Math.max(0, Math.round(valueClamped));
               if (point.leftWidth === undefined) {
                 point.leftWidth = Math.round(leftHW);
               }
             }
             delete point.width;
+            this._clearEditableWhenCollapsed(point, point.leftWidth, point.rightWidth);
           }
 
           if (point.widthLinked === undefined) {
@@ -5381,7 +5397,8 @@ export default class SkeletonParametersPanel extends Panel {
     const selectedData = this._getSelectedSkeletonPoints();
     if (!selectedData) return;
 
-    const totalValue = Math.max(2, Math.round(value));
+    const rawValue = Number.isFinite(value) ? value : 0;
+    const totalValue = Math.max(0, Math.round(rawValue));
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
@@ -5413,13 +5430,15 @@ export default class SkeletonParametersPanel extends Panel {
             point.width = totalValue;
             delete point.leftWidth;
             delete point.rightWidth;
+            this._clearEditableWhenCollapsed(point, totalValue / 2, totalValue / 2);
           } else {
             const distribution = this._calculateDistribution(leftHW, rightHW);
             const newLeftHW = totalValue * (0.5 + distribution / 200);
             const newRightHW = totalValue - newLeftHW;
-            point.leftWidth = Math.max(1, Math.round(newLeftHW));
-            point.rightWidth = Math.max(1, Math.round(newRightHW));
+            point.leftWidth = Math.max(0, Math.round(newLeftHW));
+            point.rightWidth = Math.max(0, Math.round(newRightHW));
             delete point.width;
+            this._clearEditableWhenCollapsed(point, point.leftWidth, point.rightWidth);
           }
 
           if (point.widthLinked === undefined) {
@@ -5562,39 +5581,41 @@ export default class SkeletonParametersPanel extends Panel {
           const defaultWidth = contour.defaultWidth || this._getSourceWidth(this._getDefaultWidthForGlyph().key, this._getDefaultWidthForGlyph().fallback);
           const wasLinked = this._isWidthLinked(point);
 
-        if (isMulti) {
-          const state = this._multiSelectionState.pointStates.get(key);
-          if (!state) continue;
+          if (isMulti) {
+            const state = this._multiSelectionState.pointStates.get(key);
+            if (!state) continue;
 
           const { initialLeft, initialRight } = state;
           const { maxLeft, maxRight } = this._multiSelectionState;
 
           let newLeft, newRight;
 
-          if (distribution >= 0) {
-            const delta = (distribution / 100) * maxLeft;
-            newLeft = Math.max(0, initialLeft - delta);
-            newRight = initialRight + Math.min(delta, initialLeft);
-          } else {
-            const delta = (Math.abs(distribution) / 100) * maxRight;
-            newRight = Math.max(0, initialRight - delta);
-            newLeft = initialLeft + Math.min(delta, initialRight);
-          }
+            if (distribution >= 0) {
+              const delta = (distribution / 100) * maxLeft;
+              newLeft = Math.max(0, initialLeft - delta);
+              newRight = initialRight + Math.min(delta, initialLeft);
+            } else {
+              const delta = (Math.abs(distribution) / 100) * maxRight;
+              newRight = Math.max(0, initialRight - delta);
+              newLeft = initialLeft + Math.min(delta, initialRight);
+            }
 
             point.leftWidth = Math.round(newLeft);
             point.rightWidth = Math.round(newRight);
             delete point.width;
+            this._clearEditableWhenCollapsed(point, point.leftWidth, point.rightWidth);
           } else {
-          const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
-          const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
-          const totalWidth = leftHW + rightHW;
+            const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
+            const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
+            const totalWidth = leftHW + rightHW;
 
-          const newLeftHW = totalWidth * (0.5 + distribution / 200);
-          const newRightHW = totalWidth - newLeftHW;
+            const newLeftHW = totalWidth * (0.5 + distribution / 200);
+            const newRightHW = totalWidth - newLeftHW;
 
             point.leftWidth = Math.max(0, Math.round(newLeftHW));
             point.rightWidth = Math.max(0, Math.round(newRightHW));
             delete point.width;
+            this._clearEditableWhenCollapsed(point, point.leftWidth, point.rightWidth);
           }
 
           if (point.widthLinked === undefined) {
