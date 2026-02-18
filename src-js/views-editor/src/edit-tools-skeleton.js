@@ -257,6 +257,44 @@ export class SkeletonPenTool extends BaseTool {
     point.rightWidth = right;
   }
 
+  _getEndpointOnCurveIndex(contour, useEnd) {
+    if (!contour?.points?.length) return null;
+    if (useEnd) {
+      for (let i = contour.points.length - 1; i >= 0; i--) {
+        if (!contour.points[i].type) {
+          return i;
+        }
+      }
+      return null;
+    }
+    for (let i = 0; i < contour.points.length; i++) {
+      if (!contour.points[i].type) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  _copyCapData(sourcePoint, targetPoint) {
+    if (!sourcePoint || !targetPoint) return;
+    const capKeys = [
+      "capStyle",
+      "capRadiusRatio",
+      "capTension",
+      "capAngle",
+      "capDistance",
+      "forceHorizontal",
+      "forceVertical",
+    ];
+    for (const key of capKeys) {
+      if (Object.prototype.hasOwnProperty.call(sourcePoint, key)) {
+        targetPoint[key] = sourcePoint[key];
+      } else {
+        delete targetPoint[key];
+      }
+    }
+  }
+
   _insertHandlesEqual(a, b) {
     if (!a && !b) return true;
     if (!a || !b) return false;
@@ -1219,6 +1257,13 @@ export class SkeletonPenTool extends BaseTool {
             const contour = skeletonData.contours[targetContourIndex];
             const fallbackWidth = this._getDefaultSkeletonWidth(skeletonData);
             const newPoint = { ...newOnCurve };
+            if (!contour.isClosed) {
+              const endpointIdx = this._getEndpointOnCurveIndex(contour, insertAtEnd);
+              const endpointPoint = endpointIdx !== null ? contour.points[endpointIdx] : null;
+              if (endpointPoint && !endpointPoint.type) {
+                this._copyCapData(endpointPoint, newPoint);
+              }
+            }
             this._applyDefaultDistributionToPoint(newPoint, contour, fallbackWidth);
             if (insertAtEnd) {
               contour.points.push(newPoint);

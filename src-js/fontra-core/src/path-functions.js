@@ -1240,6 +1240,45 @@ export function addOverlapToPath(path, selectedPointIndices) {
 export function deleteSkeletonPoints(skeletonData, pointSelection) {
   if (!skeletonData?.contours || !pointSelection?.size) return false;
 
+  const capKeys = [
+    "capStyle",
+    "capRadiusRatio",
+    "capTension",
+    "capAngle",
+    "capDistance",
+    "forceHorizontal",
+    "forceVertical",
+  ];
+
+  const getEndpointOnCurveIndex = (points, useEnd) => {
+    if (!points?.length) return null;
+    if (useEnd) {
+      for (let i = points.length - 1; i >= 0; i--) {
+        if (!points[i].type) {
+          return i;
+        }
+      }
+      return null;
+    }
+    for (let i = 0; i < points.length; i++) {
+      if (!points[i].type) {
+        return i;
+      }
+    }
+    return null;
+  };
+
+  const copyCapData = (sourcePoint, targetPoint) => {
+    if (!sourcePoint || !targetPoint) return;
+    for (const key of capKeys) {
+      if (Object.prototype.hasOwnProperty.call(sourcePoint, key)) {
+        targetPoint[key] = sourcePoint[key];
+      } else {
+        delete targetPoint[key];
+      }
+    }
+  };
+
   // 1. Expand selection (paired handles + adjacent handles for on-curve)
   const expandedSelection = expandSkeletonSelection(skeletonData, pointSelection);
 
@@ -1252,7 +1291,41 @@ export function deleteSkeletonPoints(skeletonData, pointSelection) {
     const contour = skeletonData.contours[contourIdx];
     if (!contour) continue;
 
+    let inheritFirstCap = null;
+    let inheritLastCap = null;
+    if (!contour.isClosed) {
+      const deleteSet = new Set(indices);
+      const firstOnCurve = getEndpointOnCurveIndex(contour.points, false);
+      const lastOnCurve = getEndpointOnCurveIndex(contour.points, true);
+      if (firstOnCurve !== null && deleteSet.has(firstOnCurve)) {
+        inheritFirstCap = contour.points[firstOnCurve];
+      }
+      if (lastOnCurve !== null && deleteSet.has(lastOnCurve)) {
+        inheritLastCap = contour.points[lastOnCurve];
+      }
+    }
+
     const newPoints = rebuildSkeletonContour(contour.points, indices, contour.isClosed);
+
+    if (!contour.isClosed && newPoints.length) {
+      const newFirstOnCurve = getEndpointOnCurveIndex(newPoints, false);
+      const newLastOnCurve = getEndpointOnCurveIndex(newPoints, true);
+      if (newFirstOnCurve !== null && newLastOnCurve !== null) {
+        if (newFirstOnCurve === newLastOnCurve) {
+          const source = inheritLastCap || inheritFirstCap;
+          if (source) {
+            copyCapData(source, newPoints[newFirstOnCurve]);
+          }
+        } else {
+          if (inheritFirstCap) {
+            copyCapData(inheritFirstCap, newPoints[newFirstOnCurve]);
+          }
+          if (inheritLastCap) {
+            copyCapData(inheritLastCap, newPoints[newLastOnCurve]);
+          }
+        }
+      }
+    }
 
     const hasOnCurve = newPoints.some((p) => !p.type);
     if (!hasOnCurve || newPoints.length === 0) {
