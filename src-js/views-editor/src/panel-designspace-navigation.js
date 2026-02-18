@@ -267,25 +267,36 @@ export default class DesignspaceNavigationPanel extends Panel {
           ]
         ),
       },
-      {
-        id: "speedpunk-accordion-item",
-        label: translate("sidebar.designspace-navigation.speedpunk"),
-        open: false,
-        content: html.div(
-          {
-            style: `
-              display: grid;
-              grid-template-columns: auto 1fr;
-              gap: 0.5em;
-              align-items: center;
-            `,
-          },
-          [
-            html.label(
-              {
-                for: "speedpunk-peak-height-input",
-                style: "white-space: nowrap;",
-              },
+        {
+          id: "speedpunk-accordion-item",
+          label: translate("sidebar.designspace-navigation.speedpunk"),
+          open: false,
+          content: html.div(
+            {
+              style: `
+                display: grid;
+                grid-template-columns: auto 1fr;
+                gap: 0.5em;
+                align-items: center;
+              `,
+            },
+            [
+              html.label(
+                {
+                  for: "speedpunk-display-toggle",
+                  style: "white-space: nowrap;",
+                },
+                ["Display"]
+              ),
+              html.input({
+                id: "speedpunk-display-toggle",
+                type: "checkbox",
+              }),
+              html.label(
+                {
+                  for: "speedpunk-peak-height-input",
+                  style: "white-space: nowrap;",
+                },
               [translate("sidebar.designspace-navigation.speedpunk.peak-height")]
             ),
             html.input({
@@ -326,11 +337,11 @@ export default class DesignspaceNavigationPanel extends Panel {
           ]
         ),
       },
-      {
-        id: "coarse-grid-accordion-item",
-        label: "Coarse Grid",
-        open: false,
-        content: html.div(
+        {
+          id: "coarse-grid-accordion-item",
+          label: "Coarse Grid",
+          open: false,
+          content: html.div(
           {
             style: `
               display: grid;
@@ -339,12 +350,23 @@ export default class DesignspaceNavigationPanel extends Panel {
               align-items: center;
             `,
           },
-          [
-            html.label(
-              {
-                for: "coarse-grid-spacing-input",
-                style: "white-space: nowrap;",
-              },
+            [
+              html.label(
+                {
+                  for: "coarse-grid-display-toggle",
+                  style: "white-space: nowrap;",
+                },
+                ["Display"]
+              ),
+              html.input({
+                id: "coarse-grid-display-toggle",
+                type: "checkbox",
+              }),
+              html.label(
+                {
+                  for: "coarse-grid-spacing-input",
+                  style: "white-space: nowrap;",
+                },
               ["Spacing"]
             ),
             html.createDomElement("range-slider", {
@@ -444,12 +466,20 @@ export default class DesignspaceNavigationPanel extends Panel {
     return this.accordion.querySelector("#speedpunk-opacity-input");
   }
 
+  get speedPunkDisplayToggle() {
+    return this.accordion.querySelector("#speedpunk-display-toggle");
+  }
+
   get coarseGridSpacingInput() {
     return this.accordion.querySelector("#coarse-grid-spacing-input");
   }
 
   get coarseGridCustomToggle() {
     return this.accordion.querySelector("#coarse-grid-custom-toggle");
+  }
+
+  get coarseGridDisplayToggle() {
+    return this.accordion.querySelector("#coarse-grid-display-toggle");
   }
 
   get coarseGridCustomFields() {
@@ -765,7 +795,9 @@ export default class DesignspaceNavigationPanel extends Panel {
     this._updateSpeedPunkPeakHeightInput();
     this._updateSpeedPunkSharpnessInput();
     this._updateSpeedPunkOpacityInput();
+    this._setupSpeedPunkDisplayToggle();
     this._setupCoarseGridControls();
+    this._setupCoarseGridDisplayToggle();
 
     this.speedPunkPeakHeightInput.addEventListener("input", (event) => {
       const parsedValue = Number(event.target.value);
@@ -1091,6 +1123,36 @@ export default class DesignspaceNavigationPanel extends Panel {
 
     this._updateAxes();
     this._updateSources();
+  }
+
+  _setupSpeedPunkDisplayToggle() {
+    const toggle = this.speedPunkDisplayToggle;
+    if (!toggle) {
+      return;
+    }
+    const visualizationSettings = this.editorController.visualizationLayersSettings;
+    toggle.checked = !!visualizationSettings.model["fontra.curvature"];
+    toggle.addEventListener("change", () => {
+      visualizationSettings.model["fontra.curvature"] = !!toggle.checked;
+    });
+    visualizationSettings.addKeyListener("fontra.curvature", (event) => {
+      toggle.checked = !!event.newValue;
+    });
+  }
+
+  _setupCoarseGridDisplayToggle() {
+    const toggle = this.coarseGridDisplayToggle;
+    if (!toggle) {
+      return;
+    }
+    const visualizationSettings = this.editorController.visualizationLayersSettings;
+    toggle.checked = !!visualizationSettings.model["fontra.coarse.grid"];
+    toggle.addEventListener("change", () => {
+      visualizationSettings.model["fontra.coarse.grid"] = !!toggle.checked;
+    });
+    visualizationSettings.addKeyListener("fontra.coarse.grid", (event) => {
+      toggle.checked = !!event.newValue;
+    });
   }
 
   getScrollAdjustBehavior(defaultBehavior) {
