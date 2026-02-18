@@ -125,6 +125,7 @@ export default class SkeletonParametersPanel extends Panel {
       distributionContext: null,
     };
 
+
     // Contour parameters state (for immediate UI updates)
     this._singleSidedState = {
       enabled: false,
@@ -3687,7 +3688,18 @@ export default class SkeletonParametersPanel extends Panel {
   _calculateDistribution(leftHW, rightHW) {
     const total = leftHW + rightHW;
     if (total === 0) return 0;
+    if (Math.abs(leftHW - rightHW) < 2) return 0;
     return Math.round(((leftHW - rightHW) / total) * 100);
+  }
+
+  _getOddWidthSide(leftHW, rightHW) {
+    if (leftHW > rightHW) {
+      return "left";
+    }
+    if (rightHW > leftHW) {
+      return "right";
+    }
+    return "left";
   }
 
   _logDistributionDebug(phase, payload) {
@@ -6016,8 +6028,25 @@ export default class SkeletonParametersPanel extends Panel {
             this._clearEditableWhenCollapsed(point, totalValue / 2, totalValue / 2);
           } else {
             const distribution = this._calculateDistribution(leftHW, rightHW);
-            const newLeftHW = totalValue * (0.5 + distribution / 200);
-            const newRightHW = totalValue - newLeftHW;
+            let newLeftHW;
+            let newRightHW;
+            if (distribution === 0) {
+              const baseHalf = Math.floor(totalValue / 2);
+              const remainder = totalValue - baseHalf * 2;
+              newLeftHW = baseHalf;
+              newRightHW = baseHalf;
+              if (remainder > 0) {
+                const side = this._getOddWidthSide(leftHW, rightHW);
+                if (side === "left") {
+                  newLeftHW += remainder;
+                } else {
+                  newRightHW += remainder;
+                }
+              }
+            } else {
+              newLeftHW = totalValue * (0.5 + distribution / 200);
+              newRightHW = totalValue - newLeftHW;
+            }
             point.leftWidth = Math.max(0, Math.round(newLeftHW));
             point.rightWidth = Math.max(0, Math.round(newRightHW));
             delete point.width;
