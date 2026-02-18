@@ -1327,11 +1327,19 @@ export class PointerTool extends BaseTool {
     }
 
     if (ribHit && (!hasSkeletonPointUnderCursor || preferRibOverSkeleton)) {
+      const { skeletonPoint: preSelectedSkeletonPoints } =
+        parseSelection(sceneController.selection);
       const clickedRibShortKey = `${ribHit.contourIndex}/${ribHit.pointIndex}/${ribHit.side}`;
       const clickedRibFullKey = `skeletonRibPoint/${clickedRibShortKey}`;
       let targetRibSelection;
 
-      if (initialEvent.shiftKey) {
+      if (preSelectedSkeletonPoints?.size) {
+        if (!(await shouldInitiateDrag(eventStream, initialEvent))) {
+          initialEvent.preventDefault();
+          return;
+        }
+        targetRibSelection = new Set([clickedRibShortKey]);
+      } else if (initialEvent.shiftKey) {
         const currentRibSelection =
           parseSelection(sceneController.selection).skeletonRibPoint || new Set();
         const clickedWasSelected = currentRibSelection.has(clickedRibShortKey);
@@ -1389,7 +1397,8 @@ export class PointerTool extends BaseTool {
           eventStream,
           initialEvent,
           ribHit,
-          targetRibSelection
+          targetRibSelection,
+          preSelectedSkeletonPoints
         );
       } finally {
         delete this.sceneController.sceneModel.initialClickedSkeletonRibPoint;
@@ -2839,7 +2848,13 @@ export class PointerTool extends BaseTool {
    * Handle dragging a rib point (width control point).
    * Constrains movement to the normal direction and updates point width.
    */
-  async _handleDragRibPoint(eventStream, initialEvent, ribHit, selectedRibSides) {
+  async _handleDragRibPoint(
+    eventStream,
+    initialEvent,
+    ribHit,
+    selectedRibSides,
+    selectedSkeletonPoints
+  ) {
     const sceneController = this.sceneController;
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
 
@@ -2901,20 +2916,41 @@ export class PointerTool extends BaseTool {
       addTargetRibPoint(contourIndex, pointIndex, side);
     }
 
+    // If skeleton points are selected, include their ribs in the drag set.
+    if (selectedSkeletonPoints?.size) {
+      for (const key of selectedSkeletonPoints) {
+        const [ci, pi] = key.split("/").map(Number);
+        if (!Number.isInteger(ci) || !Number.isInteger(pi)) continue;
+        const contour = skeletonDataForCheck.contours?.[ci];
+        const pt = contour?.points?.[pi];
+        if (!pt || pt.type) continue;
+        const isSingleSided = contour.singleSided ?? false;
+        const side = isSingleSided
+          ? contour.singleSidedDirection ?? "left"
+          : ribHit.side;
+        addTargetRibPoint(ci, pi, side);
+      }
+    }
+
     const targetPoints = [...targetPointsMap.values()];
     if (!targetPoints.length) return;
 
-    // Keep the rib-side selection explicit during drag.
-    sceneController.selection = new Set(
-      targetPoints.map((tp) => `skeletonRibPoint/${tp.ribKey}`)
-    );
+    // Keep the rib-side selection explicit during drag unless we're
+    // using a skeleton-point selection to drive rib movement.
+    const hasSkeletonSelection = selectedSkeletonPoints?.size > 0;
+    if (!hasSkeletonSelection) {
+      sceneController.selection = new Set(
+        targetPoints.map((tp) => `skeletonRibPoint/${tp.ribKey}`)
+      );
+    }
 
     const allTargetsEditable = targetPoints.every((tp) => tp.isEditable);
     const belongsToSingleSegment = this._selectedRibTargetsBelongToSingleSegment(
       targetPoints,
       skeletonDataForCheck
     );
-    const movementAllowed = allTargetsEditable || belongsToSingleSegment;
+    const movementAllowed =
+      hasSkeletonSelection || allTargetsEditable || belongsToSingleSegment;
     if (!movementAllowed) {
       return;
     }
@@ -3091,6 +3127,13 @@ export class PointerTool extends BaseTool {
         // Determine constraint mode based on Z hold
         // Z: constrain to tangent direction (only nudge changes)
         const constrainMode = this.tangentRibMode ? "tangent" : null;
+        const hasSkeletonSelection = selectedSkeletonPoints?.size > 0;
+        const useNormalDelta =
+          hasSkeletonSelection && !useInterpolation && constrainMode !== "tangent";
+        const baseNormalDelta = useNormalDelta
+          ? (ribHit.side === "left" ? 1 : -1) *
+            (delta.x * ribHit.normal.x + delta.y * ribHit.normal.y)
+          : 0;
 
         const allChanges = [];
 
@@ -3100,7 +3143,16 @@ export class PointerTool extends BaseTool {
 
           // Apply each behavior to update all target points
           for (const { behavior, target } of ribBehaviors) {
-            const change = behavior.applyDelta(delta, constrainMode, roundFunc);
+            let deltaForBehavior = delta;
+            if (useNormalDelta && behavior?.normal) {
+              const sign = (behavior.side || target.side) === "left" ? 1 : -1;
+              const normal = behavior.normal;
+              const normalLenSq = normal.x * normal.x + normal.y * normal.y;
+              const scalar =
+                normalLenSq > 0 ? baseNormalDelta / (sign * normalLenSq) : 0;
+              deltaForBehavior = { x: normal.x * scalar, y: normal.y * scalar };
+            }
+            const change = behavior.applyDelta(deltaForBehavior, constrainMode, roundFunc);
 
             const contour = working.contours[target.contourIndex];
             const point = contour.points[target.pointIndex];
