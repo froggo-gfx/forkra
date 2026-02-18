@@ -2027,8 +2027,13 @@ export class PointerTool extends BaseTool {
     let initiateDrag = false;
     let initiateRectSelect = false;
 
-    const modeFunc = getSelectModeFunction(initialEvent);
-    const newSelection = modeFunc(sceneController.selection, selection);
+      const modeFunc = getSelectModeFunction(initialEvent);
+      const isSegmentSelection = !!pathHit || clickedSegment?.size > 0;
+      const avoidSegmentToggleRemoval =
+        isSegmentSelection && initialEvent.shiftKey && !initialEvent[commandKeyProperty];
+      const newSelection = avoidSegmentToggleRemoval
+        ? union(sceneController.selection, selection)
+        : modeFunc(sceneController.selection, selection);
     const cleanSel = selection;
 
     // Check if clicking on skeleton segment (for immediate drag support)
