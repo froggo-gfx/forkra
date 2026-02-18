@@ -505,6 +505,10 @@ export class RangeSlider extends html.UnlitElement {
                   this.reset();
                 }
               },
+              ondblclick: (event) => {
+                event.preventDefault();
+                this.reset();
+              },
               onchange: (event) => {
                 if (!this.sawMouseUp) {
                   this.onChangeCallback({

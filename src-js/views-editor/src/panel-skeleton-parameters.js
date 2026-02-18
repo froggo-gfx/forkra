@@ -30,6 +30,8 @@ const SKELETON_CAP_RADIUS_RATIO_KEY = "fontra.skeleton.capRadiusRatio";
 const SKELETON_CAP_TENSION_KEY = "fontra.skeleton.capTension";
 const SKELETON_CAP_ANGLE_KEY = "fontra.skeleton.capAngle";
 const SKELETON_CAP_DISTANCE_KEY = "fontra.skeleton.capDistance";
+const SKELETON_CUSTOM_WIDTHS_UPPERCASE_KEY = "fontra.skeleton.customWidthsUppercase";
+const SKELETON_CUSTOM_WIDTHS_LOWERCASE_KEY = "fontra.skeleton.customWidthsLowercase";
 const SKELETON_CORNER_REACH_SOURCE_KEY = "fontra.skeleton.cornerReach";
 const SKELETON_ROUNDNESS_STRENGTH_SOURCE_KEY = "fontra.skeleton.roundnessStrength";
 
@@ -118,6 +120,9 @@ export default class SkeletonParametersPanel extends Panel {
       linked: true,
       widthAnchor: "center",
       scaleValue: 1.0,
+      profileSelection: "",
+      profilePrevTotalWidth: null,
+      profilePrevContext: null,
     };
 
     // Contour parameters state (for immediate UI updates)
@@ -652,29 +657,181 @@ export default class SkeletonParametersPanel extends Panel {
       );
     }
 
-    formContents.push({
-      type: "universal-row",
-      label: "Anchor",
-      field1: {
-        type: "auxiliaryElement",
-        key: "anchorSpacerLabel",
-        auxiliaryElement: html.span({}),
-      },
-      field2: {
-        type: "auxiliaryElement",
-        key: "anchorControl",
-        auxiliaryElement: anchorControl,
-      },
-      field3: {
-        type: "auxiliaryElement",
-        key: "anchorSpacerValue",
-        auxiliaryElement: html.span({}),
-      },
-    });
+      formContents.push({
+        type: "universal-row",
+        label: "Anchor",
+        field1: {
+          type: "auxiliaryElement",
+          key: "anchorSpacerLabel",
+          auxiliaryElement: html.span({}),
+        },
+        field2: {
+          type: "auxiliaryElement",
+          key: "anchorControl",
+          auxiliaryElement: anchorControl,
+        },
+        field3: {
+          type: "auxiliaryElement",
+          key: "anchorSpacerValue",
+          auxiliaryElement: html.span({}),
+        },
+      });
+
+      const totalWidth = total ?? (left ?? 0) + (right ?? 0);
+
+      const upperBaseProfile = this._getSourceWidth(
+        SKELETON_WIDTH_CAPITAL_BASE_KEY,
+        DEFAULT_WIDTH_CAPITAL_BASE
+      );
+      const upperHorizontalProfile = this._getSourceWidth(
+        SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY,
+        DEFAULT_WIDTH_CAPITAL_HORIZONTAL
+      );
+      const upperContrastProfile = this._getSourceWidth(
+        SKELETON_WIDTH_CAPITAL_CONTRAST_KEY,
+        DEFAULT_WIDTH_CAPITAL_CONTRAST
+      );
+      const lowerBaseProfile = this._getSourceWidth(
+        SKELETON_WIDTH_LOWERCASE_BASE_KEY,
+        DEFAULT_WIDTH_LOWERCASE_BASE
+      );
+      const lowerHorizontalProfile = this._getSourceWidth(
+        SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY,
+        DEFAULT_WIDTH_LOWERCASE_HORIZONTAL
+      );
+      const lowerContrastProfile = this._getSourceWidth(
+        SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY,
+        DEFAULT_WIDTH_LOWERCASE_CONTRAST
+      );
+
+      const customUpperProfiles = this._getSourceCustomWidthList(
+        SKELETON_CUSTOM_WIDTHS_UPPERCASE_KEY
+      );
+      const customLowerProfiles = this._getSourceCustomWidthList(
+        SKELETON_CUSTOM_WIDTHS_LOWERCASE_KEY
+      );
+
+      const caseKey = glyphCase === "lower" ? "lower" : "upper";
+      const caseProfiles =
+        caseKey === "upper"
+          ? [
+              { id: "upper:base", label: "Base", value: upperBaseProfile },
+              { id: "upper:horizontal", label: "Horizontal", value: upperHorizontalProfile },
+              { id: "upper:contrast", label: "Contrast", value: upperContrastProfile },
+              ...customUpperProfiles.map((item, index) => ({
+                id: `upper:custom:${index}`,
+                label: item.name || `Custom ${index + 1}`,
+                value: item.value,
+              })),
+            ]
+          : [
+              { id: "lower:base", label: "Base", value: lowerBaseProfile },
+              { id: "lower:horizontal", label: "Horizontal", value: lowerHorizontalProfile },
+              { id: "lower:contrast", label: "Contrast", value: lowerContrastProfile },
+              ...customLowerProfiles.map((item, index) => ({
+                id: `lower:custom:${index}`,
+                label: item.name || `Custom ${index + 1}`,
+                value: item.value,
+              })),
+            ];
+
+      const profiles = caseProfiles;
+
+      const profileMap = new Map(profiles.map((p) => [p.id, p]));
+      if (this.pointParameters.profilePrevContext !== selectionContext) {
+        this.pointParameters.profilePrevContext = selectionContext;
+        this.pointParameters.profilePrevTotalWidth = null;
+        this.pointParameters.profileSelection = "";
+      }
+      if (!profileMap.has(this.pointParameters.profileSelection)) {
+        this.pointParameters.profileSelection = "";
+      }
+
+      const profileOptions = [
+        html.option({ value: "", selected: !this.pointParameters.profileSelection }, "None"),
+        ...profiles.map((profile) =>
+          html.option(
+            { value: profile.id, selected: this.pointParameters.profileSelection === profile.id },
+            profile.label
+          )
+        ),
+      ];
+
+      const profileSelect = html.select(
+        {
+          style: "min-width: 12em;",
+          disabled: !hasSelection || profiles.length === 0,
+          onchange: async (e) => {
+            const selectedId = e.target.value;
+            this.pointParameters.profileSelection = selectedId;
+            if (!selectedId) {
+              this.update();
+              return;
+            }
+            const profile = profileMap.get(selectedId);
+            if (!profile) {
+              this.update();
+              return;
+            }
+            if (hasSelection && !totalMixed && this.pointParameters.profilePrevTotalWidth == null) {
+              this.pointParameters.profilePrevTotalWidth = Math.round(totalWidth);
+              this.pointParameters.profilePrevContext = selectionContext;
+            }
+            await this._setPointTotalWidth(profile.value);
+            this.update();
+          },
+        },
+        profileOptions
+      );
+
+      const canRevertProfile =
+        hasSelection &&
+        this.pointParameters.profilePrevTotalWidth != null &&
+        this.pointParameters.profilePrevContext === selectionContext;
+      const revertButton = html.createDomElement("icon-button", {
+        "src": "/tabler-icons/refresh.svg",
+        "style": "width: 1.2em; height: 1.2em;",
+        "data-tooltip": "Revert",
+        "data-tooltipposition": "left",
+        "disabled": !canRevertProfile,
+        "onclick": async () => {
+          if (!canRevertProfile) {
+            return;
+          }
+          const revertValue = this.pointParameters.profilePrevTotalWidth;
+          this.pointParameters.profilePrevTotalWidth = null;
+          this.pointParameters.profilePrevContext = selectionContext;
+          this.pointParameters.profileSelection = "";
+          await this._setPointTotalWidth(revertValue);
+          this.update();
+        },
+      });
+
+      formContents.push({
+        type: "universal-row",
+        label: "Profile",
+        field1: {
+          type: "auxiliaryElement",
+          key: "profileSpacerLabel",
+          auxiliaryElement: html.span({}),
+        },
+        field2: {
+          type: "auxiliaryElement",
+          key: "profileSelect",
+          auxiliaryElement: html.div(
+            { style: "display: flex; gap: 0.35rem; align-items: center;" },
+            [profileSelect, revertButton]
+          ),
+        },
+        field3: {
+          type: "auxiliaryElement",
+          key: "profileSpacerValue",
+          auxiliaryElement: html.span({}),
+        },
+      });
 
     // Width fields (Left / Right) - show "mixed" placeholder if values differ
     // In single-sided mode: active side shows full width, inactive side is disabled
-    const totalWidth = total ?? (left ?? 0) + (right ?? 0);
     const leftDisabled = hasSingleSided && singleSidedDirection === "right";
     const rightDisabled = hasSingleSided && singleSidedDirection === "left";
 
@@ -709,31 +866,31 @@ export default class SkeletonParametersPanel extends Panel {
       disabled: rightDisabled,
     });
 
-    // Distribution slider (always available, except single-sided)
-      if (!hasSingleSided) {
-        const hasDistributionValues = distributionValues.length > 0;
-        const distributionMixed =
-          hasSelection &&
-          multiSelection &&
-          hasDistributionValues &&
-          !distributionValues.every((v) => v === distributionValues[0]);
-        const distribution = distributionMixed
-          ? 0
-          : hasDistributionValues
-            ? distributionValues[0]
-            : this._calculateDistribution(left ?? 0, right ?? 0);
-        formContents.push({
-          type: "edit-number-slider",
-          key: "pointDistribution",
-          label: "Distribution",
-          value: distribution,
-          displayValue: distributionMixed ? "mixed" : undefined,
-          minValue: -100,
-          defaultValue: 0,
-          maxValue: 100,
-          step: 2,
-        });
-      }
+    // Distribution slider (hidden for single-sided)
+    if (!hasSingleSided) {
+      const hasDistributionValues = distributionValues.length > 0;
+      const distributionMixed =
+        hasSelection &&
+        multiSelection &&
+        hasDistributionValues &&
+        !distributionValues.every((v) => v === distributionValues[0]);
+      const distributionValue = distributionMixed
+        ? 0
+        : hasDistributionValues
+          ? distributionValues[0]
+          : this._calculateDistribution(left ?? 0, right ?? 0);
+      formContents.push({
+        type: "edit-number-slider",
+        key: "pointDistribution",
+        label: "Distribution",
+        value: distributionValue,
+        displayValue: distributionMixed ? "mixed" : undefined,
+        minValue: -100,
+        defaultValue: 0,
+        maxValue: 100,
+        step: 2,
+      });
+    }
 
       const pointMakeGlobalButton = html.button(
         {
@@ -1385,10 +1542,14 @@ export default class SkeletonParametersPanel extends Panel {
       if (sourceWidthKeyMap[fieldItem.key]) {
         await this._setDefaultSkeletonWidth(sourceWidthKeyMap[fieldItem.key], value);
         } else if (fieldItem.key === "pointWidthTotal") {
+          this.pointParameters.profileSelection = "";
+          this.pointParameters.profilePrevTotalWidth = null;
           await this._setPointTotalWidth(value);
         } else if (fieldItem.key === "pointWidthLeft" || fieldItem.key === "pointWidthRight") {
+          this.pointParameters.profileSelection = "";
+          this.pointParameters.profilePrevTotalWidth = null;
           await this._setPointWidth(fieldItem.key, value);
-      } else if (fieldItem.key === "cornerRoundnessPercent") {
+        } else if (fieldItem.key === "cornerRoundnessPercent") {
         if (valueStream) {
           this._isDraggingSlider = true;
           try {
@@ -1627,6 +1788,23 @@ export default class SkeletonParametersPanel extends Panel {
 
   _getSourceCustomDataValue(key, fallback) {
     return this._getSourceWidth(key, fallback);
+  }
+
+  _getSourceCustomWidthList(key) {
+    const list = this._getSourceCustomDataValue(key, []);
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    return list
+      .filter((item) => item && typeof item === "object")
+      .map((item) => {
+        const name = typeof item.name === "string" ? item.name : "";
+        const value = Number(item.value);
+        return {
+          name,
+          value: Number.isFinite(value) ? value : 0,
+        };
+      });
   }
 
   _getActiveSkeletonData() {
@@ -3273,6 +3451,13 @@ export default class SkeletonParametersPanel extends Panel {
         `capd:${this._getSourceCustomDataValue(SKELETON_CAP_RADIUS_RATIO_KEY, DEFAULT_CAP_RADIUS_RATIO)},${this._getSourceCustomDataValue(SKELETON_CAP_TENSION_KEY, DEFAULT_CAP_TENSION)},${this._getSourceCustomDataValue(SKELETON_CAP_ANGLE_KEY, DEFAULT_CAP_ANGLE)},${this._getSourceCustomDataValue(SKELETON_CAP_DISTANCE_KEY, DEFAULT_CAP_DISTANCE)}`
       );
       parts.push(
+        `cw:${JSON.stringify(
+          this._getSourceCustomDataValue(SKELETON_CUSTOM_WIDTHS_UPPERCASE_KEY, [])
+        )}:${JSON.stringify(
+          this._getSourceCustomDataValue(SKELETON_CUSTOM_WIDTHS_LOWERCASE_KEY, [])
+        )}`
+      );
+      parts.push(
         `cdbg:${this._getCornerTrimRatioDebug()},${this._getCornerRadiusBoostDebug()}`
       );
 
@@ -3368,6 +3553,9 @@ export default class SkeletonParametersPanel extends Panel {
         const confirmRound = this._confirmState?.round?.pending ? 1 : 0;
         parts.push(`confirm:${confirmPoint},${confirmSquare},${confirmRound}`);
         parts.push(`anchor:${this.pointParameters.widthAnchor || "center"}`);
+        parts.push(
+          `prof:${this.pointParameters.profileSelection || ""}:${this.pointParameters.profilePrevTotalWidth ?? ""}`
+        );
 
         return parts.join("|");
       }

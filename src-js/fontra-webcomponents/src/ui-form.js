@@ -15,6 +15,7 @@ export class Form extends SimpleElement {
   static styles = `
     :host {
       --label-column-width: 32%;
+      --cap-table-value-width: 4.5em;
     }
 
     .ui-form {
@@ -114,6 +115,27 @@ export class Form extends SimpleElement {
 
     .ui-form-label.universal-row {
       overflow: visible;
+    }
+
+    .ui-form-label.edit-name-number input[type="text"],
+    .ui-form-label.edit-name-number-pair input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .ui-form-value.edit-name-number {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .ui-form-value.edit-name-number-pair,
+    .ui-form-value.cap-table {
+      display: grid;
+      align-items: center;
+      justify-content: start;
+      gap: 0.35rem;
+      grid-template-columns: var(--cap-table-value-width) var(--cap-table-value-width) 1.4em;
     }
 
     .ui-form-value.slider-has-checkbox {
@@ -277,6 +299,73 @@ export class Form extends SimpleElement {
   _addEditTextDouble(valueElement, fieldItem) {
     this._addEditText(valueElement, fieldItem.field1);
     this._addEditText(valueElement, fieldItem.field2);
+  }
+
+  _addEditNameNumber(valueElement, fieldItem, labelElement) {
+    const nameField = fieldItem.fieldName;
+    const valueField = fieldItem.fieldValue;
+    if (!nameField || !valueField) {
+      return;
+    }
+
+    if (labelElement) {
+      labelElement.innerText = "";
+      this._addEditText(labelElement, nameField);
+    }
+    this._addEditNumber(valueElement, valueField, valueField.allowEmptyField);
+    if (fieldItem.deleteElement) {
+      valueElement.appendChild(fieldItem.deleteElement);
+    }
+  }
+
+  _addEditNameNumberPair(valueElement, fieldItem, labelElement) {
+    const nameField = fieldItem.fieldName;
+    const valueField1 = fieldItem.fieldValue1;
+    const valueField2 = fieldItem.fieldValue2;
+    if (!nameField || !valueField1 || !valueField2) {
+      return;
+    }
+
+    if (labelElement) {
+      labelElement.innerText = "";
+      this._addEditText(labelElement, nameField);
+    }
+    this._addEditNumber(valueElement, valueField1, valueField1.allowEmptyField);
+    this._addEditNumber(valueElement, valueField2, valueField2.allowEmptyField);
+    if (fieldItem.deleteElement) {
+      valueElement.appendChild(fieldItem.deleteElement);
+    } else {
+      valueElement.appendChild(html.span({}));
+    }
+  }
+
+  _addCapTableHeader(valueElement, fieldItem, labelElement) {
+    if (labelElement) {
+      labelElement.innerText = fieldItem.label ?? "";
+    }
+    valueElement.classList.add("cap-table");
+    valueElement.appendChild(html.span({}, [fieldItem.col1 ?? ""]));
+    valueElement.appendChild(html.span({}, [fieldItem.col2 ?? ""]));
+    valueElement.appendChild(html.span({}));
+  }
+
+  _addCapTableRow(valueElement, fieldItem, labelElement) {
+    const valueField1 = fieldItem.fieldValue1;
+    const valueField2 = fieldItem.fieldValue2;
+    if (!valueField1 || !valueField2) {
+      return;
+    }
+    if (labelElement) {
+      labelElement.innerText = fieldItem.label ?? "";
+    }
+    valueElement.classList.add("cap-table");
+    this._addEditNumber(valueElement, valueField1, valueField1.allowEmptyField);
+    this._addEditNumber(valueElement, valueField2, valueField2.allowEmptyField);
+    if (fieldItem.deleteElement) {
+      valueElement.appendChild(fieldItem.deleteElement);
+    } else {
+      valueElement.appendChild(html.span({}));
+    }
   }
 
   _addEditNumberXY(valueElement, fieldItem) {

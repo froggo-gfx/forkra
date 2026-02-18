@@ -38,6 +38,10 @@ const SKELETON_CAP_RADIUS_RATIO_KEY = "fontra.skeleton.capRadiusRatio";
 const SKELETON_CAP_TENSION_KEY = "fontra.skeleton.capTension";
 const SKELETON_CAP_ANGLE_KEY = "fontra.skeleton.capAngle";
 const SKELETON_CAP_DISTANCE_KEY = "fontra.skeleton.capDistance";
+const SKELETON_CUSTOM_WIDTHS_UPPERCASE_KEY = "fontra.skeleton.customWidthsUppercase";
+const SKELETON_CUSTOM_WIDTHS_LOWERCASE_KEY = "fontra.skeleton.customWidthsLowercase";
+const SKELETON_CUSTOM_CAP_SQUARE_KEY = "fontra.skeleton.customCapStylesSquare";
+const SKELETON_CUSTOM_CAP_ROUNDED_KEY = "fontra.skeleton.customCapStylesRounded";
 const SIDEBEARING_VARIABLES_KEY = "fontra.sidebearingVars";
 
 const DEFAULT_WIDTH_CAPITAL_BASE = 60;
@@ -68,6 +72,7 @@ export default class SelectionInfoPanel extends Panel {
     this.throttledUpdate = throttleCalls((senderID) => this.update(senderID), 100);
     this.fontController = this.editorController.fontController;
     this.sceneController = this.editorController.sceneController;
+    this._customDeleteConfirm = { key: null };
     this.letterspacerPanel = new LetterspacerPanel(editorController);
     if (this.letterspacerHost) {
       this.letterspacerHost.appendChild(this.letterspacerPanel);
@@ -193,6 +198,185 @@ export default class SelectionInfoPanel extends Panel {
         "Set skeleton defaults"
       );
     }
+  }
+
+  _getSourceCustomWidthList(key) {
+    const list = this._getSourceCustomDataValue(key, []);
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    return list
+      .filter((item) => item && typeof item === "object")
+      .map((item) => {
+        const name = typeof item.name === "string" ? item.name : "";
+        const value = Number(item.value);
+        return {
+          name,
+          value: Number.isFinite(value) ? value : 0,
+        };
+      });
+  }
+
+  async _setSourceCustomWidthList(key, list) {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return;
+
+    const sanitized = (Array.isArray(list) ? list : []).map((item) => {
+      const name = typeof item?.name === "string" ? item.name : String(item?.name ?? "");
+      const value = Number(item?.value);
+      return { name, value: Number.isFinite(value) ? value : 0 };
+    });
+
+    const root = { sources: this.fontController.sources };
+    const changes = recordChanges(root, (r) => {
+      if (!r.sources[sourceIdentifier].customData) {
+        r.sources[sourceIdentifier].customData = {};
+      }
+      r.sources[sourceIdentifier].customData[key] = sanitized;
+    });
+
+    if (changes.hasChange) {
+      await this.fontController.postChange(
+        changes.change,
+        changes.rollbackChange,
+        "Set skeleton defaults"
+      );
+    }
+  }
+
+  _getSourceCustomCapSquareList() {
+    const list = this._getSourceCustomDataValue(SKELETON_CUSTOM_CAP_SQUARE_KEY, []);
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    return list
+      .filter((item) => item && typeof item === "object")
+      .map((item) => {
+        const name = typeof item.name === "string" ? item.name : "";
+        const angleRaw =
+          Number.isFinite(Number(item.angle)) ? Number(item.angle) : Number(item.value);
+        const distanceRaw =
+          Number.isFinite(Number(item.distance)) ? Number(item.distance) : 0;
+        return {
+          name,
+          angle: Number.isFinite(angleRaw) ? angleRaw : 0,
+          distance: Number.isFinite(distanceRaw) ? distanceRaw : 0,
+        };
+      });
+  }
+
+  async _setSourceCustomCapSquareList(list) {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return;
+
+    const sanitized = (Array.isArray(list) ? list : []).map((item) => {
+      const name = typeof item?.name === "string" ? item.name : String(item?.name ?? "");
+      const angle = Number(item?.angle);
+      const distance = Number(item?.distance);
+      return {
+        name,
+        angle: Number.isFinite(angle) ? angle : 0,
+        distance: Number.isFinite(distance) ? distance : 0,
+      };
+    });
+
+    const root = { sources: this.fontController.sources };
+    const changes = recordChanges(root, (r) => {
+      if (!r.sources[sourceIdentifier].customData) {
+        r.sources[sourceIdentifier].customData = {};
+      }
+      r.sources[sourceIdentifier].customData[SKELETON_CUSTOM_CAP_SQUARE_KEY] = sanitized;
+    });
+
+    if (changes.hasChange) {
+      await this.fontController.postChange(
+        changes.change,
+        changes.rollbackChange,
+        "Set skeleton defaults"
+      );
+    }
+  }
+
+  _getSourceCustomCapRoundedList() {
+    const list = this._getSourceCustomDataValue(SKELETON_CUSTOM_CAP_ROUNDED_KEY, []);
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    return list
+      .filter((item) => item && typeof item === "object")
+      .map((item) => {
+        const name = typeof item.name === "string" ? item.name : "";
+        let radiusRaw =
+          Number.isFinite(Number(item.radius)) ? Number(item.radius) : Number(item.value);
+        if (!Number.isFinite(radiusRaw)) {
+          radiusRaw = DEFAULT_CAP_RADIUS_RATIO;
+        }
+        let tensionRaw = Number(item.tension);
+        if (!Number.isFinite(tensionRaw)) {
+          tensionRaw = DEFAULT_CAP_TENSION;
+        }
+        if (tensionRaw > 1) {
+          tensionRaw = tensionRaw / 100;
+        }
+        return {
+          name,
+          radius: Number.isFinite(radiusRaw) ? radiusRaw : DEFAULT_CAP_RADIUS_RATIO,
+          tension: Number.isFinite(tensionRaw) ? tensionRaw : DEFAULT_CAP_TENSION,
+        };
+      });
+  }
+
+  async _setSourceCustomCapRoundedList(list) {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return;
+
+    const sanitized = (Array.isArray(list) ? list : []).map((item) => {
+      const name = typeof item?.name === "string" ? item.name : String(item?.name ?? "");
+      let radius = Number(item?.radius);
+      let tension = Number(item?.tension);
+      if (!Number.isFinite(radius)) {
+        radius = DEFAULT_CAP_RADIUS_RATIO;
+      }
+      if (!Number.isFinite(tension)) {
+        tension = DEFAULT_CAP_TENSION;
+      }
+      if (tension > 1) {
+        tension = tension / 100;
+      }
+      return { name, radius, tension };
+    });
+
+    const root = { sources: this.fontController.sources };
+    const changes = recordChanges(root, (r) => {
+      if (!r.sources[sourceIdentifier].customData) {
+        r.sources[sourceIdentifier].customData = {};
+      }
+      r.sources[sourceIdentifier].customData[SKELETON_CUSTOM_CAP_ROUNDED_KEY] = sanitized;
+    });
+
+    if (changes.hasChange) {
+      await this.fontController.postChange(
+        changes.change,
+        changes.rollbackChange,
+        "Set skeleton defaults"
+      );
+    }
+  }
+
+  _makeDefaultCustomName(existingList) {
+    let maxIndex = 0;
+    for (const item of existingList || []) {
+      const name = typeof item?.name === "string" ? item.name : "";
+      const match = /^Custom\s+(\d+)$/i.exec(name);
+      if (match) {
+        const value = Number.parseInt(match[1], 10);
+        if (Number.isFinite(value)) {
+          maxIndex = Math.max(maxIndex, value);
+        }
+      }
+    }
+    const nextIndex = maxIndex > 0 ? maxIndex + 1 : (existingList?.length || 0) + 1;
+    return `Custom ${nextIndex}`;
   }
 
   _clampNumber(value, minValue, maxValue) {
@@ -785,15 +969,369 @@ export default class SelectionInfoPanel extends Panel {
         }
       }
 
-      const canEditSource = !!this.sceneController.editingLayerNames?.[0];
-      const setSourceValue = async (key, value) => {
-        await this._setSourceCustomDataValue(key, value);
-        await this.update();
-      };
+    const canEditSource = !!this.sceneController.editingLayerNames?.[0];
+    const setSourceValue = async (key, value) => {
+      await this._setSourceCustomDataValue(key, value);
+      await this.update();
+    };
+    const addCustomWidthRows = (customKey, keyPrefix) => {
+      const list = this._getSourceCustomWidthList(customKey);
+      const pendingKey = this._customDeleteConfirm?.key;
+      if (pendingKey && pendingKey.startsWith(`${customKey}:`)) {
+        const pendingIndex = Number.parseInt(pendingKey.split(":")[1], 10);
+        if (!Number.isFinite(pendingIndex) || pendingIndex >= list.length) {
+          this._customDeleteConfirm = { key: null };
+        }
+      }
+      list.forEach((item, index) => {
+        const nameKey = `${keyPrefix}-name-${index}`;
+        const valueKey = `${keyPrefix}-value-${index}`;
+        const rowId = `${customKey}:${index}`;
+        const isConfirming = this._customDeleteConfirm?.key === rowId;
+        const deleteButton = html.createDomElement("icon-button", {
+          "class": "skeleton-custom-delete",
+          "src": isConfirming ? "/tabler-icons/x.svg" : "/tabler-icons/trash.svg",
+          "style": "width: 1.1em; height: 1.1em;",
+          "data-tooltip": isConfirming ? "Confirm delete" : "Delete",
+          "data-tooltipposition": "left",
+          "disabled": !canEditSource,
+          "onclick": async () => {
+            if (!canEditSource) {
+              return;
+            }
+            if (this._customDeleteConfirm?.key !== rowId) {
+              this._customDeleteConfirm = { key: rowId };
+              await this.update();
+              return;
+            }
+            const next = this._getSourceCustomWidthList(customKey);
+            if (!next[index]) return;
+            next.splice(index, 1);
+            this._customDeleteConfirm = { key: null };
+            await this._setSourceCustomWidthList(customKey, next);
+            await this.update();
+          },
+        });
+        formContents.push({
+          type: "edit-name-number",
+          fieldName: {
+            type: "edit-text",
+            key: nameKey,
+            value: item.name ?? "",
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomWidthList(customKey);
+              if (!next[index]) return;
+              next[index] = { ...next[index], name: String(rawValue ?? "") };
+              await this._setSourceCustomWidthList(customKey, next);
+              await this.update();
+            },
+          },
+          fieldValue: {
+            type: "edit-number",
+            key: valueKey,
+            value: Number.isFinite(item.value) ? item.value : 0,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomWidthList(customKey);
+              if (!next[index]) return;
+              const numeric = Number(rawValue);
+              next[index] = {
+                ...next[index],
+                value: Number.isFinite(numeric) ? numeric : 0,
+              };
+              await this._setSourceCustomWidthList(customKey, next);
+              await this.update();
+            },
+          },
+          deleteElement: deleteButton,
+        });
+      });
 
-      formContents.push({ type: "divider" });
       formContents.push({
-        type: "header",
+        type: "single-icon",
+        element: html.div(
+          { style: "display: flex; justify-content: flex-start;" },
+          [
+            html.button(
+              {
+                type: "button",
+                style: "padding: 2px 6px; font-size: 11px;",
+                disabled: !canEditSource,
+                onclick: async () => {
+                  this._customDeleteConfirm = { key: null };
+                  const next = this._getSourceCustomWidthList(customKey);
+                  next.push({ name: this._makeDefaultCustomName(next), value: 0 });
+                  await this._setSourceCustomWidthList(customKey, next);
+                  await this.update();
+                },
+              },
+              "Add"
+            ),
+          ]
+        ),
+      });
+    };
+
+    const addCustomCapSquareRows = (keyPrefix) => {
+      const list = this._getSourceCustomCapSquareList();
+      const customKey = SKELETON_CUSTOM_CAP_SQUARE_KEY;
+      const pendingKey = this._customDeleteConfirm?.key;
+      if (pendingKey && pendingKey.startsWith(`${customKey}:`)) {
+        const pendingIndex = Number.parseInt(pendingKey.split(":")[1], 10);
+        if (!Number.isFinite(pendingIndex) || pendingIndex >= list.length) {
+          this._customDeleteConfirm = { key: null };
+        }
+      }
+      list.forEach((item, index) => {
+        const nameKey = `${keyPrefix}-name-${index}`;
+        const angleKey = `${keyPrefix}-angle-${index}`;
+        const distanceKey = `${keyPrefix}-distance-${index}`;
+        const rowId = `${customKey}:${index}`;
+        const isConfirming = this._customDeleteConfirm?.key === rowId;
+        const deleteButton = html.createDomElement("icon-button", {
+          "class": "skeleton-custom-delete",
+          "src": isConfirming ? "/tabler-icons/x.svg" : "/tabler-icons/trash.svg",
+          "style": "width: 1.1em; height: 1.1em;",
+          "data-tooltip": isConfirming ? "Confirm delete" : "Delete",
+          "data-tooltipposition": "left",
+          "disabled": !canEditSource,
+          "onclick": async () => {
+            if (!canEditSource) {
+              return;
+            }
+            if (this._customDeleteConfirm?.key !== rowId) {
+              this._customDeleteConfirm = { key: rowId };
+              await this.update();
+              return;
+            }
+            const next = this._getSourceCustomCapSquareList();
+            if (!next[index]) return;
+            next.splice(index, 1);
+            this._customDeleteConfirm = { key: null };
+            await this._setSourceCustomCapSquareList(next);
+            await this.update();
+          },
+        });
+        formContents.push({
+          type: "edit-name-number-pair",
+          fieldName: {
+            type: "edit-text",
+            key: nameKey,
+            value: item.name ?? "",
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomCapSquareList();
+              if (!next[index]) return;
+              next[index] = { ...next[index], name: String(rawValue ?? "") };
+              await this._setSourceCustomCapSquareList(next);
+              await this.update();
+            },
+          },
+          fieldValue1: {
+            type: "edit-number",
+            key: angleKey,
+            value: Number.isFinite(item.angle) ? item.angle : 0,
+            minValue: CAP_ANGLE_MIN,
+            maxValue: CAP_ANGLE_MAX,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomCapSquareList();
+              if (!next[index]) return;
+              const numeric = this._clampNumber(
+                Number(rawValue),
+                CAP_ANGLE_MIN,
+                CAP_ANGLE_MAX
+              );
+              next[index] = { ...next[index], angle: numeric };
+              await this._setSourceCustomCapSquareList(next);
+              await this.update();
+            },
+          },
+          fieldValue2: {
+            type: "edit-number",
+            key: distanceKey,
+            value: Number.isFinite(item.distance) ? item.distance : 0,
+            minValue: 0,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomCapSquareList();
+              if (!next[index]) return;
+              const numeric = this._clampNumber(Number(rawValue), 0, Number.MAX_SAFE_INTEGER);
+              next[index] = { ...next[index], distance: numeric };
+              await this._setSourceCustomCapSquareList(next);
+              await this.update();
+            },
+          },
+          deleteElement: deleteButton,
+        });
+      });
+
+      formContents.push({
+        type: "single-icon",
+        element: html.div(
+          { style: "display: flex; justify-content: flex-start;" },
+          [
+            html.button(
+              {
+                type: "button",
+                style: "padding: 2px 6px; font-size: 11px;",
+                disabled: !canEditSource,
+                onclick: async () => {
+                  this._customDeleteConfirm = { key: null };
+                  const next = this._getSourceCustomCapSquareList();
+                  next.push({
+                    name: this._makeDefaultCustomName(next),
+                    angle: DEFAULT_CAP_ANGLE,
+                    distance: DEFAULT_CAP_DISTANCE,
+                  });
+                  await this._setSourceCustomCapSquareList(next);
+                  await this.update();
+                },
+              },
+              "Add"
+            ),
+          ]
+        ),
+      });
+    };
+
+    const addCustomCapRoundedRows = (keyPrefix) => {
+      const list = this._getSourceCustomCapRoundedList();
+      const customKey = SKELETON_CUSTOM_CAP_ROUNDED_KEY;
+      const pendingKey = this._customDeleteConfirm?.key;
+      if (pendingKey && pendingKey.startsWith(`${customKey}:`)) {
+        const pendingIndex = Number.parseInt(pendingKey.split(":")[1], 10);
+        if (!Number.isFinite(pendingIndex) || pendingIndex >= list.length) {
+          this._customDeleteConfirm = { key: null };
+        }
+      }
+      list.forEach((item, index) => {
+        const nameKey = `${keyPrefix}-name-${index}`;
+        const radiusKey = `${keyPrefix}-radius-${index}`;
+        const tensionKey = `${keyPrefix}-tension-${index}`;
+        const rowId = `${customKey}:${index}`;
+        const isConfirming = this._customDeleteConfirm?.key === rowId;
+        const deleteButton = html.createDomElement("icon-button", {
+          "class": "skeleton-custom-delete",
+          "src": isConfirming ? "/tabler-icons/x.svg" : "/tabler-icons/trash.svg",
+          "style": "width: 1.1em; height: 1.1em;",
+          "data-tooltip": isConfirming ? "Confirm delete" : "Delete",
+          "data-tooltipposition": "left",
+          "disabled": !canEditSource,
+          "onclick": async () => {
+            if (!canEditSource) {
+              return;
+            }
+            if (this._customDeleteConfirm?.key !== rowId) {
+              this._customDeleteConfirm = { key: rowId };
+              await this.update();
+              return;
+            }
+            const next = this._getSourceCustomCapRoundedList();
+            if (!next[index]) return;
+            next.splice(index, 1);
+            this._customDeleteConfirm = { key: null };
+            await this._setSourceCustomCapRoundedList(next);
+            await this.update();
+          },
+        });
+        formContents.push({
+          type: "edit-name-number-pair",
+          fieldName: {
+            type: "edit-text",
+            key: nameKey,
+            value: item.name ?? "",
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomCapRoundedList();
+              if (!next[index]) return;
+              next[index] = { ...next[index], name: String(rawValue ?? "") };
+              await this._setSourceCustomCapRoundedList(next);
+              await this.update();
+            },
+          },
+          fieldValue1: {
+            type: "edit-number",
+            key: radiusKey,
+            value: Number.isFinite(item.radius) ? item.radius : DEFAULT_CAP_RADIUS_RATIO,
+            numDigits: 4,
+            minValue: CAP_RADIUS_MIN,
+            maxValue: CAP_RADIUS_MAX,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomCapRoundedList();
+              if (!next[index]) return;
+              const numeric = this._clampNumber(
+                Number(rawValue),
+                CAP_RADIUS_MIN,
+                CAP_RADIUS_MAX
+              );
+              next[index] = { ...next[index], radius: numeric };
+              await this._setSourceCustomCapRoundedList(next);
+              await this.update();
+            },
+          },
+          fieldValue2: {
+            type: "edit-number",
+            key: tensionKey,
+            value: Math.round((Number.isFinite(item.tension) ? item.tension : 0) * 100),
+            minValue: 0,
+            maxValue: 100,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomCapRoundedList();
+              if (!next[index]) return;
+              const percent = this._clampNumber(Number(rawValue), 0, 100);
+              next[index] = { ...next[index], tension: percent / 100 };
+              await this._setSourceCustomCapRoundedList(next);
+              await this.update();
+            },
+          },
+          deleteElement: deleteButton,
+        });
+      });
+
+      formContents.push({
+        type: "single-icon",
+        element: html.div(
+          { style: "display: flex; justify-content: flex-start;" },
+          [
+            html.button(
+              {
+                type: "button",
+                style: "padding: 2px 6px; font-size: 11px;",
+                disabled: !canEditSource,
+                onclick: async () => {
+                  this._customDeleteConfirm = { key: null };
+                  const next = this._getSourceCustomCapRoundedList();
+                  next.push({
+                    name: this._makeDefaultCustomName(next),
+                    radius: DEFAULT_CAP_RADIUS_RATIO,
+                    tension: DEFAULT_CAP_TENSION,
+                  });
+                  await this._setSourceCustomCapRoundedList(next);
+                  await this.update();
+                },
+              },
+              "Add"
+            ),
+          ]
+        ),
+      });
+    };
+
+    formContents.push({ type: "divider" });
+    formContents.push({
+      type: "header",
         label: "Skeleton Defaults",
       });
 
@@ -846,31 +1384,15 @@ export default class SelectionInfoPanel extends Panel {
           await setSourceValue(SKELETON_WIDTH_CAPITAL_CONTRAST_KEY, value);
         },
       });
-      formContents.push({
-        type: "edit-number",
-        key: "skeletonCapitalDistribution",
-        label: "Distribution",
-        value: this._getSourceCustomDataValue(
-          SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY,
-          DEFAULT_DISTRIBUTION
-        ),
-        minValue: DISTRIBUTION_MIN,
-        maxValue: DISTRIBUTION_MAX,
-        disabled: !canEditSource,
-        setValuePlain: async (_fieldItem, rawValue) => {
-          const value = this._clampNumber(
-            Number(rawValue),
-            DISTRIBUTION_MIN,
-            DISTRIBUTION_MAX
-          );
-          await setSourceValue(SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY, value);
-        },
-      });
+        addCustomWidthRows(
+          SKELETON_CUSTOM_WIDTHS_UPPERCASE_KEY,
+          "skeletonCustomUppercase"
+        );
 
-      formContents.push({
-        type: "header",
-        label: "Widths: Lowercase",
-      });
+        formContents.push({
+          type: "header",
+          label: "Widths: Lowercase",
+        });
       formContents.push({
         type: "edit-number",
         key: "skeletonLowercaseBase",
@@ -916,113 +1438,137 @@ export default class SelectionInfoPanel extends Panel {
           await setSourceValue(SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY, value);
         },
       });
-      formContents.push({
-        type: "edit-number",
-        key: "skeletonLowercaseDistribution",
-        label: "Distribution",
-        value: this._getSourceCustomDataValue(
-          SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY,
-          DEFAULT_DISTRIBUTION
-        ),
-        minValue: DISTRIBUTION_MIN,
-        maxValue: DISTRIBUTION_MAX,
-        disabled: !canEditSource,
-        setValuePlain: async (_fieldItem, rawValue) => {
-          const value = this._clampNumber(
-            Number(rawValue),
-            DISTRIBUTION_MIN,
-            DISTRIBUTION_MAX
-          );
-          await setSourceValue(SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY, value);
-        },
-      });
+        addCustomWidthRows(
+          SKELETON_CUSTOM_WIDTHS_LOWERCASE_KEY,
+          "skeletonCustomLowercase"
+        );
 
-      formContents.push({
-        type: "header",
-        label: "Cap Styles: Square",
-      });
-      formContents.push({
-        type: "edit-number",
-        key: "skeletonCapAngle",
-        label: "Angle",
-        value: this._getSourceCustomDataValue(
-          SKELETON_CAP_ANGLE_KEY,
-          DEFAULT_CAP_ANGLE
-        ),
-        minValue: CAP_ANGLE_MIN,
-        maxValue: CAP_ANGLE_MAX,
-        disabled: !canEditSource,
-        setValuePlain: async (_fieldItem, rawValue) => {
-          const value = this._clampNumber(Number(rawValue), CAP_ANGLE_MIN, CAP_ANGLE_MAX);
-          await setSourceValue(SKELETON_CAP_ANGLE_KEY, value);
-        },
-      });
-      formContents.push({
-        type: "edit-number",
-        key: "skeletonCapDistance",
-        label: "Distance",
-        value: this._getSourceCustomDataValue(
-          SKELETON_CAP_DISTANCE_KEY,
-          DEFAULT_CAP_DISTANCE
-        ),
-        minValue: 0,
-        disabled: !canEditSource,
-        setValuePlain: async (_fieldItem, rawValue) => {
-          const value = this._clampNumber(Number(rawValue), 0, Number.MAX_SAFE_INTEGER);
-          await setSourceValue(SKELETON_CAP_DISTANCE_KEY, value);
-        },
-      });
+        formContents.push({
+          type: "header",
+          label: "Cap Styles: Square",
+        });
+        formContents.push({
+          type: "cap-table-header",
+          label: "",
+          col1: "Angle",
+          col2: "Distance",
+        });
+        formContents.push({
+          type: "cap-table-row",
+          label: "base",
+          fieldValue1: {
+            type: "edit-number",
+            key: "skeletonCapAngle",
+            value: this._getSourceCustomDataValue(
+              SKELETON_CAP_ANGLE_KEY,
+              DEFAULT_CAP_ANGLE
+            ),
+            minValue: CAP_ANGLE_MIN,
+            maxValue: CAP_ANGLE_MAX,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              const value = this._clampNumber(
+                Number(rawValue),
+                CAP_ANGLE_MIN,
+                CAP_ANGLE_MAX
+              );
+              await setSourceValue(SKELETON_CAP_ANGLE_KEY, value);
+            },
+          },
+          fieldValue2: {
+            type: "edit-number",
+            key: "skeletonCapDistance",
+            value: this._getSourceCustomDataValue(
+              SKELETON_CAP_DISTANCE_KEY,
+              DEFAULT_CAP_DISTANCE
+            ),
+            minValue: 0,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              const value = this._clampNumber(Number(rawValue), 0, Number.MAX_SAFE_INTEGER);
+              await setSourceValue(SKELETON_CAP_DISTANCE_KEY, value);
+            },
+          },
+        });
+        addCustomCapSquareRows("skeletonCustomCapSquare");
 
-      formContents.push({
-        type: "header",
-        label: "Cap Styles: Rounded",
-      });
-      formContents.push({
-        type: "edit-number",
-        key: "skeletonCapRadiusRatio",
-        label: "Radius",
-        value: this._getSourceCustomDataValue(
-          SKELETON_CAP_RADIUS_RATIO_KEY,
-          DEFAULT_CAP_RADIUS_RATIO
-        ),
-        numDigits: 4,
-        minValue: CAP_RADIUS_MIN,
-        maxValue: CAP_RADIUS_MAX,
-        disabled: !canEditSource,
-        setValuePlain: async (_fieldItem, rawValue) => {
-          const value = this._clampNumber(
-            Number(rawValue),
-            CAP_RADIUS_MIN,
-            CAP_RADIUS_MAX
-          );
-          await setSourceValue(SKELETON_CAP_RADIUS_RATIO_KEY, value);
-        },
-      });
-      formContents.push({
-        type: "edit-number",
-        key: "skeletonCapTension",
-        label: "Tension",
-        value: Math.round(
-          this._getSourceCustomDataValue(
-            SKELETON_CAP_TENSION_KEY,
-            DEFAULT_CAP_TENSION
-          ) * 100
-        ),
-        minValue: 0,
-        maxValue: 100,
-        disabled: !canEditSource,
-        setValuePlain: async (_fieldItem, rawValue) => {
-          const percent = this._clampNumber(Number(rawValue), 0, 100);
-          await setSourceValue(SKELETON_CAP_TENSION_KEY, percent / 100);
-        },
-      });
+          formContents.push({
+            type: "header",
+            label: "Cap Styles: Rounded",
+          });
+        formContents.push({
+          type: "cap-table-header",
+          label: "",
+          col1: "Radius",
+          col2: "Tension",
+        });
+        formContents.push({
+          type: "cap-table-row",
+          label: "base",
+          fieldValue1: {
+            type: "edit-number",
+            key: "skeletonCapRadiusRatio",
+            value: this._getSourceCustomDataValue(
+              SKELETON_CAP_RADIUS_RATIO_KEY,
+              DEFAULT_CAP_RADIUS_RATIO
+            ),
+            numDigits: 4,
+            minValue: CAP_RADIUS_MIN,
+            maxValue: CAP_RADIUS_MAX,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              const value = this._clampNumber(
+                Number(rawValue),
+                CAP_RADIUS_MIN,
+                CAP_RADIUS_MAX
+              );
+              await setSourceValue(SKELETON_CAP_RADIUS_RATIO_KEY, value);
+            },
+          },
+          fieldValue2: {
+            type: "edit-number",
+            key: "skeletonCapTension",
+            value: Math.round(
+              this._getSourceCustomDataValue(
+                SKELETON_CAP_TENSION_KEY,
+                DEFAULT_CAP_TENSION
+              ) * 100
+            ),
+            minValue: 0,
+            maxValue: 100,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              const percent = this._clampNumber(Number(rawValue), 0, 100);
+              await setSourceValue(SKELETON_CAP_TENSION_KEY, percent / 100);
+            },
+          },
+        });
+        addCustomCapRoundedRows("skeletonCustomCapRounded");
 
     this._formFieldsByKey = {};
     for (const field of formContents) {
       if (field.fieldX) {
         this._formFieldsByKey[field.fieldX.key] = field.fieldX;
         this._formFieldsByKey[field.fieldY.key] = field.fieldY;
-      } else {
+        continue;
+      }
+      if (field.fieldName && field.fieldValue) {
+        this._formFieldsByKey[field.fieldName.key] = field.fieldName;
+        this._formFieldsByKey[field.fieldValue.key] = field.fieldValue;
+        continue;
+      }
+      if (field.fieldName && field.fieldValue1 && field.fieldValue2) {
+        this._formFieldsByKey[field.fieldName.key] = field.fieldName;
+        this._formFieldsByKey[field.fieldValue1.key] = field.fieldValue1;
+        this._formFieldsByKey[field.fieldValue2.key] = field.fieldValue2;
+        continue;
+      }
+      if (field.fieldValue1 && field.fieldValue2) {
+        this._formFieldsByKey[field.fieldValue1.key] = field.fieldValue1;
+        this._formFieldsByKey[field.fieldValue2.key] = field.fieldValue2;
+        continue;
+      }
+      if (field.key) {
         this._formFieldsByKey[field.key] = field;
       }
     }
