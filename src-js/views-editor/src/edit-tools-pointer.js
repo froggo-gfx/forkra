@@ -94,6 +94,7 @@ const REALTIME_EQUALIZE_ACTION = "action.realtime.equalize";
 const REALTIME_RIB_TANGENT_ACTION = "action.realtime.rib-tangent";
 const REALTIME_FIXED_RIB_ACTION = "action.realtime.fixed-rib";
 const REALTIME_FIXED_RIB_COMPRESS_ACTION = "action.realtime.fixed-rib-compress";
+const FIXED_RIB_SCALE_CONTROL_POINTS = true;
 
 function projectRibPoint(point, normal, halfWidth, side, nudge = 0) {
   const sign = side === "left" ? 1 : -1;
@@ -248,6 +249,145 @@ function applyLinkedWidthDelta(
   clearEditableWhenCollapsed(point, newLeft, newRight);
 }
 
+function enforceSmoothColinearityForSkeleton(points, isClosed, roundFunc = Math.round) {
+  if (!points || points.length < 2) return;
+  const numPoints = points.length;
+
+  for (let i = 0; i < numPoints; i++) {
+    const point = points[i];
+    if (!point || point.type || !point.smooth) continue;
+    if (point.skipColinear) continue;
+
+    if (!isClosed && (i === 0 || i === numPoints - 1)) {
+      continue;
+    }
+
+    const prevIdx = (i - 1 + numPoints) % numPoints;
+    const nextIdx = (i + 1) % numPoints;
+    const prevPoint = points[prevIdx];
+    const nextPoint = points[nextIdx];
+    if (!prevPoint || !nextPoint) continue;
+
+    const prevIsOnCurve = !prevPoint.type;
+    const nextIsOnCurve = !nextPoint.type;
+
+    if (!prevIsOnCurve && !nextIsOnCurve) {
+      const vecIn = { x: prevPoint.x - point.x, y: prevPoint.y - point.y };
+      const vecOut = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
+      const lenIn = Math.hypot(vecIn.x, vecIn.y);
+      const lenOut = Math.hypot(vecOut.x, vecOut.y);
+      if (lenIn < 1e-3 || lenOut < 1e-3) continue;
+
+      const dirIn = { x: vecIn.x / lenIn, y: vecIn.y / lenIn };
+      const dirOut = { x: vecOut.x / lenOut, y: vecOut.y / lenOut };
+      const avgDx = dirOut.x - dirIn.x;
+      const avgDy = dirOut.y - dirIn.y;
+      const avgLen = Math.hypot(avgDx, avgDy);
+      if (avgLen < 1e-3) continue;
+
+      const dirX = avgDx / avgLen;
+      const dirY = avgDy / avgLen;
+      prevPoint.x = roundFunc(point.x - dirX * lenIn);
+      prevPoint.y = roundFunc(point.y - dirY * lenIn);
+      nextPoint.x = roundFunc(point.x + dirX * lenOut);
+      nextPoint.y = roundFunc(point.y + dirY * lenOut);
+      continue;
+    }
+
+    if (prevIsOnCurve && !nextIsOnCurve) {
+      const linearVec = { x: point.x - prevPoint.x, y: point.y - prevPoint.y };
+      const lineLen = Math.hypot(linearVec.x, linearVec.y);
+      const curveVec = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
+      const curveLen = Math.hypot(curveVec.x, curveVec.y);
+      if (lineLen < 1e-3 || curveLen < 1e-3) continue;
+      const dirX = linearVec.x / lineLen;
+      const dirY = linearVec.y / lineLen;
+      nextPoint.x = roundFunc(point.x + dirX * curveLen);
+      nextPoint.y = roundFunc(point.y + dirY * curveLen);
+      continue;
+    }
+
+    if (!prevIsOnCurve && nextIsOnCurve) {
+      const linearVec = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
+      const lineLen = Math.hypot(linearVec.x, linearVec.y);
+      const curveVec = { x: prevPoint.x - point.x, y: prevPoint.y - point.y };
+      const curveLen = Math.hypot(curveVec.x, curveVec.y);
+      if (lineLen < 1e-3 || curveLen < 1e-3) continue;
+      const dirX = linearVec.x / lineLen;
+      const dirY = linearVec.y / lineLen;
+      prevPoint.x = roundFunc(point.x - dirX * curveLen);
+      prevPoint.y = roundFunc(point.y - dirY * curveLen);
+    }
+  }
+}
+
+function normalizeVectorSafe(vec, epsilon = 1e-6) {
+  const len = Math.hypot(vec.x, vec.y);
+  if (!(len > epsilon)) {
+    return null;
+  }
+  return { x: vec.x / len, y: vec.y / len };
+}
+
+function rotateVector(vec, cos, sin) {
+  return {
+    x: vec.x * cos - vec.y * sin,
+    y: vec.x * sin + vec.y * cos,
+  };
+}
+
+function calculateHandleTensionsForSegment(segment) {
+  if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
+    return null;
+  }
+  const [cp1, cp2] = segment.controlPoints;
+  const start = segment.startPoint;
+  const end = segment.endPoint;
+  const trueTunni = calculateSkeletonTrueTunniPoint(segment);
+  const tensionPoint = trueTunni || {
+    x: (cp1.x + cp2.x) / 2,
+    y: (cp1.y + cp2.y) / 2,
+  };
+  const distStart = Math.hypot(tensionPoint.x - start.x, tensionPoint.y - start.y);
+  const distEnd = Math.hypot(tensionPoint.x - end.x, tensionPoint.y - end.y);
+  const lenStart = Math.hypot(cp1.x - start.x, cp1.y - start.y);
+  const lenEnd = Math.hypot(cp2.x - end.x, cp2.y - end.y);
+  const tensionStart = distStart > 1e-6 ? lenStart / distStart : null;
+  const tensionEnd = distEnd > 1e-6 ? lenEnd / distEnd : null;
+  return { tensionStart, tensionEnd, lenStart, lenEnd };
+}
+
+function computeHandleLengthsFromTensions(
+  startPoint,
+  startDir,
+  endPoint,
+  endDir,
+  tensionStart,
+  tensionEnd
+) {
+  const line1End = { x: startPoint.x + startDir.x, y: startPoint.y + startDir.y };
+  const line2End = { x: endPoint.x + endDir.x, y: endPoint.y + endDir.y };
+  const intersection = vector.intersect(startPoint, line1End, endPoint, line2End);
+  let distStartToTunni = null;
+  let distEndToTunni = null;
+  if (intersection && Number.isFinite(intersection.t1) && Number.isFinite(intersection.t2)) {
+    distStartToTunni = Math.abs(intersection.t1);
+    distEndToTunni = Math.abs(intersection.t2);
+  } else {
+    const distTotal = vector.distance(startPoint, endPoint);
+    distStartToTunni = distTotal / 2;
+    distEndToTunni = distTotal / 2;
+  }
+
+  const startLen = Number.isFinite(tensionStart)
+    ? tensionStart * distStartToTunni
+    : null;
+  const endLen = Number.isFinite(tensionEnd)
+    ? tensionEnd * distEndToTunni
+    : null;
+  return { startLen, endLen };
+}
+
 function applyFixedRibDragToSkeletonData(
   originalSkeletonData,
   workingSkeletonData,
@@ -297,6 +437,7 @@ function applyFixedRibDragToSkeletonData(
     const singleSided = origContour.singleSided ?? false;
     const singleSidedDirection = origContour.singleSidedDirection ?? "left";
     const anchorToDragSide = !!options.anchorToDragSide;
+    const scaleControlPoints = !!options.scaleControlPoints;
     const anchorSide = singleSided
       ? singleSidedDirection
       : anchorToDragSide
@@ -355,41 +496,368 @@ function applyFixedRibDragToSkeletonData(
     }
 
     if (hasMovement) {
+      // First move on-curve points using their normals.
       for (let pi = 0; pi < points.length; pi++) {
         const origPoint = points[pi];
         const workPoint = workContour.points[pi];
-        if (!origPoint || !workPoint) continue;
-
-      let delta = null;
-      if (!origPoint.type) {
-        delta = onCurveDeltas.get(pi) || null;
-      } else {
-        const prevOn = findPrevOnCurveIndex(points, pi, isClosed);
-        const nextOn = findNextOnCurveIndex(points, pi, isClosed);
-        const hasPrevHandle =
-          prevOn !== null &&
-          (pi === prevOn + 1 ||
-            (isClosed && prevOn === points.length - 1 && pi === 0));
-        const hasNextHandle =
-          nextOn !== null &&
-          (pi === nextOn - 1 ||
-            (isClosed && nextOn === 0 && pi === points.length - 1));
-        const prevDelta = hasPrevHandle ? onCurveDeltas.get(prevOn) : null;
-        const nextDelta = hasNextHandle ? onCurveDeltas.get(nextOn) : null;
-        if (prevDelta && nextDelta) {
-          delta = {
-            dx: (prevDelta.dx + nextDelta.dx) / 2,
-            dy: (prevDelta.dy + nextDelta.dy) / 2,
-          };
-        } else {
-          delta = prevDelta || nextDelta;
-        }
-      }
-
+        if (!origPoint || !workPoint || origPoint.type) continue;
+        const delta = onCurveDeltas.get(pi) || null;
         if (delta && (delta.dx || delta.dy)) {
           workPoint.x = roundFunc(origPoint.x + delta.dx);
           workPoint.y = roundFunc(origPoint.y + delta.dy);
         }
+      }
+
+      if (scaleControlPoints) {
+        const segments = buildSegmentsFromSkeletonPoints(points, isClosed);
+        const baseHandleDirections = new Map();
+        const baseHandleLengths = new Map();
+        const handleAnchorByIndex = new Map();
+        const segmentTransforms = new Map();
+        const segmentTensions = new Map();
+        const baseSmoothTangents = new Map();
+
+        for (const segment of segments) {
+          if (!segment?.controlIndices?.length) continue;
+          const startIdx = segment.startIndex;
+          const endIdx = segment.endIndex;
+          const origStart = points[startIdx];
+          const origEnd = points[endIdx];
+          const newStart = workContour.points[startIdx];
+          const newEnd = workContour.points[endIdx];
+          if (!origStart || !origEnd || !newStart || !newEnd) continue;
+
+          const origVec = {
+            x: origEnd.x - origStart.x,
+            y: origEnd.y - origStart.y,
+          };
+          const newVec = {
+            x: newEnd.x - newStart.x,
+            y: newEnd.y - newStart.y,
+          };
+          const origLen = Math.hypot(origVec.x, origVec.y);
+          const newLen = Math.hypot(newVec.x, newVec.y);
+          const useTransform = origLen > 1e-6 && newLen > 1e-6;
+          const scale = origLen > 1e-6 ? newLen / origLen : 1;
+
+          let cos = 1;
+          let sin = 0;
+          if (useTransform) {
+            const invLen = 1 / (origLen * newLen);
+            cos = (origVec.x * newVec.x + origVec.y * newVec.y) * invLen;
+            sin = (origVec.x * newVec.y - origVec.y * newVec.x) * invLen;
+          }
+
+          segmentTransforms.set(segment.segmentIndex, {
+            cos,
+            sin,
+            scale,
+            useTransform,
+          });
+
+          if (segment.controlIndices.length === 2) {
+            const tensionInfo = calculateHandleTensionsForSegment(segment);
+            if (tensionInfo) {
+              segmentTensions.set(segment.segmentIndex, tensionInfo);
+            }
+          }
+
+          for (const cpIdx of segment.controlIndices) {
+            const origCp = points[cpIdx];
+            if (!origCp) continue;
+            const isFirst = cpIdx === segment.controlIndices[0];
+            const isLast = cpIdx === segment.controlIndices[segment.controlIndices.length - 1];
+            const anchorIdx = isFirst ? startIdx : isLast ? endIdx : null;
+            const anchorPoint = anchorIdx !== null ? points[anchorIdx] : origStart;
+            if (anchorIdx !== null) {
+              handleAnchorByIndex.set(cpIdx, anchorIdx);
+            }
+            const rel = {
+              x: origCp.x - anchorPoint.x,
+              y: origCp.y - anchorPoint.y,
+            };
+            const rotated = useTransform ? rotateVector(rel, cos, sin) : rel;
+            const dir = normalizeVectorSafe(rotated);
+            if (dir) {
+              baseHandleDirections.set(cpIdx, dir);
+            }
+            baseHandleLengths.set(cpIdx, Math.hypot(rel.x, rel.y));
+          }
+        }
+
+        const numPoints = points.length;
+        for (let i = 0; i < numPoints; i++) {
+          const point = points[i];
+          if (!point || point.type || !point.smooth) continue;
+          if (point.skipColinear) continue;
+          if (!isClosed && (i === 0 || i === numPoints - 1)) continue;
+
+          const prevIdx = (i - 1 + numPoints) % numPoints;
+          const nextIdx = (i + 1) % numPoints;
+          const prevPoint = points[prevIdx];
+          const nextPoint = points[nextIdx];
+          if (!prevPoint || !nextPoint) continue;
+
+          const prevIsOnCurve = !prevPoint.type;
+          const nextIsOnCurve = !nextPoint.type;
+          if (prevIsOnCurve || nextIsOnCurve) continue;
+
+          const vecIn = { x: prevPoint.x - point.x, y: prevPoint.y - point.y };
+          const vecOut = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
+          const lenIn = Math.hypot(vecIn.x, vecIn.y);
+          const lenOut = Math.hypot(vecOut.x, vecOut.y);
+          if (!(lenIn > 1e-6) || !(lenOut > 1e-6)) continue;
+          const dirIn = { x: vecIn.x / lenIn, y: vecIn.y / lenIn };
+          const dirOut = { x: vecOut.x / lenOut, y: vecOut.y / lenOut };
+          const weighted = {
+            x: dirOut.x * lenOut - dirIn.x * lenIn,
+            y: dirOut.y * lenOut - dirIn.y * lenIn,
+          };
+          const tangent =
+            normalizeVectorSafe(weighted) || dirOut || { x: -dirIn.x, y: -dirIn.y };
+          baseSmoothTangents.set(i, tangent);
+        }
+
+        const smoothHandleOverrides = new Map();
+        for (let i = 0; i < numPoints; i++) {
+          const point = points[i];
+          if (!point || point.type || !point.smooth) continue;
+          if (point.skipColinear) continue;
+          if (!isClosed && (i === 0 || i === numPoints - 1)) continue;
+
+          const prevIdx = (i - 1 + numPoints) % numPoints;
+          const nextIdx = (i + 1) % numPoints;
+          const prevPoint = points[prevIdx];
+          const nextPoint = points[nextIdx];
+          if (!prevPoint || !nextPoint) continue;
+
+          const prevIsOnCurve = !prevPoint.type;
+          const nextIsOnCurve = !nextPoint.type;
+          const workPoint = workContour.points[i];
+          const workPrev = workContour.points[prevIdx];
+          const workNext = workContour.points[nextIdx];
+
+          if (!prevIsOnCurve && !nextIsOnCurve) {
+            let tangent = baseSmoothTangents.get(i) || null;
+            const dirIn =
+              baseHandleDirections.get(prevIdx) ||
+              normalizeVectorSafe({
+                x: prevPoint.x - point.x,
+                y: prevPoint.y - point.y,
+              });
+            const dirOut =
+              baseHandleDirections.get(nextIdx) ||
+              normalizeVectorSafe({
+                x: nextPoint.x - point.x,
+                y: nextPoint.y - point.y,
+              });
+            const lenIn =
+              baseHandleLengths.get(prevIdx) ??
+              Math.hypot(prevPoint.x - point.x, prevPoint.y - point.y);
+            const lenOut =
+              baseHandleLengths.get(nextIdx) ??
+              Math.hypot(nextPoint.x - point.x, nextPoint.y - point.y);
+            if (!tangent) {
+              if (dirIn && dirOut) {
+                const weighted = {
+                  x: dirOut.x * lenOut - dirIn.x * lenIn,
+                  y: dirOut.y * lenOut - dirIn.y * lenIn,
+                };
+                tangent = normalizeVectorSafe(weighted) || dirOut || {
+                  x: -dirIn.x,
+                  y: -dirIn.y,
+                };
+              } else if (dirOut) {
+                tangent = dirOut;
+              } else if (dirIn) {
+                tangent = { x: -dirIn.x, y: -dirIn.y };
+              }
+            }
+            if (!tangent) continue;
+            smoothHandleOverrides.set(nextIdx, { dir: tangent, anchorIdx: i });
+            smoothHandleOverrides.set(prevIdx, {
+              dir: { x: -tangent.x, y: -tangent.y },
+              anchorIdx: i,
+            });
+            continue;
+          }
+
+          if (prevIsOnCurve && !nextIsOnCurve) {
+            if (!workPoint || !workPrev) continue;
+            const linearVec = {
+              x: workPoint.x - workPrev.x,
+              y: workPoint.y - workPrev.y,
+            };
+            const dir = normalizeVectorSafe(linearVec);
+            if (!dir) continue;
+            smoothHandleOverrides.set(nextIdx, { dir, anchorIdx: i });
+            continue;
+          }
+
+          if (!prevIsOnCurve && nextIsOnCurve) {
+            if (!workPoint || !workNext) continue;
+            const linearVec = {
+              x: workNext.x - workPoint.x,
+              y: workNext.y - workPoint.y,
+            };
+            const dir = normalizeVectorSafe(linearVec);
+            if (!dir) continue;
+            smoothHandleOverrides.set(prevIdx, {
+              dir: { x: -dir.x, y: -dir.y },
+              anchorIdx: i,
+            });
+          }
+        }
+
+        for (const segment of segments) {
+          if (!segment?.controlIndices?.length) continue;
+          const startIdx = segment.startIndex;
+          const endIdx = segment.endIndex;
+          const origStart = points[startIdx];
+          const origEnd = points[endIdx];
+          const newStart = workContour.points[startIdx];
+          const newEnd = workContour.points[endIdx];
+          if (!origStart || !origEnd || !newStart || !newEnd) continue;
+          const transform = segmentTransforms.get(segment.segmentIndex);
+          const scale = transform?.scale ?? 1;
+
+          if (segment.controlIndices.length === 2) {
+            const cpStartIdx = segment.controlIndices[0];
+            const cpEndIdx = segment.controlIndices[segment.controlIndices.length - 1];
+            const origCpStart = points[cpStartIdx];
+            const origCpEnd = points[cpEndIdx];
+            const workCpStart = workContour.points[cpStartIdx];
+            const workCpEnd = workContour.points[cpEndIdx];
+            if (!origCpStart || !origCpEnd || !workCpStart || !workCpEnd) continue;
+
+            const overrideStart = smoothHandleOverrides.get(cpStartIdx);
+            const overrideEnd = smoothHandleOverrides.get(cpEndIdx);
+            const baseStartDir =
+              baseHandleDirections.get(cpStartIdx) ||
+              normalizeVectorSafe({
+                x: origCpStart.x - origStart.x,
+                y: origCpStart.y - origStart.y,
+              });
+            const baseEndDir =
+              baseHandleDirections.get(cpEndIdx) ||
+              normalizeVectorSafe({
+                x: origCpEnd.x - origEnd.x,
+                y: origCpEnd.y - origEnd.y,
+              });
+            const fallbackStartDir =
+              normalizeVectorSafe({
+                x: newEnd.x - newStart.x,
+                y: newEnd.y - newStart.y,
+              }) || { x: 1, y: 0 };
+            const fallbackEndDir =
+              normalizeVectorSafe({
+                x: newStart.x - newEnd.x,
+                y: newStart.y - newEnd.y,
+              }) || { x: -fallbackStartDir.x, y: -fallbackStartDir.y };
+            const startDir = overrideStart?.dir || baseStartDir || fallbackStartDir;
+            const endDir = overrideEnd?.dir || baseEndDir || fallbackEndDir;
+
+            const tensionInfo = segmentTensions.get(segment.segmentIndex);
+            const { startLen, endLen } = computeHandleLengthsFromTensions(
+              newStart,
+              startDir,
+              newEnd,
+              endDir,
+              tensionInfo?.tensionStart ?? null,
+              tensionInfo?.tensionEnd ?? null
+            );
+
+            const origStartLen =
+              tensionInfo?.lenStart ??
+              Math.hypot(origCpStart.x - origStart.x, origCpStart.y - origStart.y);
+            const origEndLen =
+              tensionInfo?.lenEnd ??
+              Math.hypot(origCpEnd.x - origEnd.x, origCpEnd.y - origEnd.y);
+
+            const finalStartLen =
+              Number.isFinite(startLen) ? startLen : origStartLen * scale;
+            const finalEndLen =
+              Number.isFinite(endLen) ? endLen : origEndLen * scale;
+
+            workCpStart.x = roundFunc(newStart.x + startDir.x * finalStartLen);
+            workCpStart.y = roundFunc(newStart.y + startDir.y * finalStartLen);
+            workCpEnd.x = roundFunc(newEnd.x + endDir.x * finalEndLen);
+            workCpEnd.y = roundFunc(newEnd.y + endDir.y * finalEndLen);
+            continue;
+          }
+
+          for (const cpIdx of segment.controlIndices) {
+            const origCp = points[cpIdx];
+            const workCp = workContour.points[cpIdx];
+            if (!origCp || !workCp) continue;
+
+            const override = smoothHandleOverrides.get(cpIdx);
+            const anchorIdx =
+              override?.anchorIdx ??
+              handleAnchorByIndex.get(cpIdx) ??
+              startIdx;
+            const origAnchor = points[anchorIdx];
+            const newAnchor = workContour.points[anchorIdx];
+            if (!origAnchor || !newAnchor) continue;
+
+            const origVec = {
+              x: origCp.x - origAnchor.x,
+              y: origCp.y - origAnchor.y,
+            };
+            const origLen = Math.hypot(origVec.x, origVec.y);
+            if (!(origLen > 1e-6)) {
+              workCp.x = roundFunc(newAnchor.x);
+              workCp.y = roundFunc(newAnchor.y);
+              continue;
+            }
+            const dir =
+              override?.dir ||
+              baseHandleDirections.get(cpIdx) ||
+              { x: origVec.x / origLen, y: origVec.y / origLen };
+            const newLen = origLen * scale;
+            workCp.x = roundFunc(newAnchor.x + dir.x * newLen);
+            workCp.y = roundFunc(newAnchor.y + dir.y * newLen);
+          }
+        }
+      } else {
+        // Legacy behavior: move off-curve points by averaged on-curve deltas.
+        for (let pi = 0; pi < points.length; pi++) {
+          const origPoint = points[pi];
+          const workPoint = workContour.points[pi];
+          if (!origPoint || !workPoint || !origPoint.type) continue;
+
+          const prevOn = findPrevOnCurveIndex(points, pi, isClosed);
+          const nextOn = findNextOnCurveIndex(points, pi, isClosed);
+          const hasPrevHandle =
+            prevOn !== null &&
+            (pi === prevOn + 1 ||
+              (isClosed && prevOn === points.length - 1 && pi === 0));
+          const hasNextHandle =
+            nextOn !== null &&
+            (pi === nextOn - 1 ||
+              (isClosed && nextOn === 0 && pi === points.length - 1));
+          const prevDelta = hasPrevHandle ? onCurveDeltas.get(prevOn) : null;
+          const nextDelta = hasNextHandle ? onCurveDeltas.get(nextOn) : null;
+          let delta = null;
+          if (prevDelta && nextDelta) {
+            delta = {
+              dx: (prevDelta.dx + nextDelta.dx) / 2,
+              dy: (prevDelta.dy + nextDelta.dy) / 2,
+            };
+          } else {
+            delta = prevDelta || nextDelta;
+          }
+
+          if (delta && (delta.dx || delta.dy)) {
+            workPoint.x = roundFunc(origPoint.x + delta.dx);
+            workPoint.y = roundFunc(origPoint.y + delta.dy);
+          }
+        }
+      }
+
+      if (!scaleControlPoints) {
+        // Preserve smooth collinearity after moving points (legacy mode).
+        enforceSmoothColinearityForSkeleton(workContour.points, isClosed, roundFunc);
       }
     }
   }
@@ -831,7 +1299,10 @@ export class PointerTool extends BaseTool {
             clickedSkeletonPoint,
             delta,
             roundFunc,
-            { anchorToDragSide: this.fixedRibCompressMode }
+            {
+              anchorToDragSide: this.fixedRibCompressMode,
+              scaleControlPoints: FIXED_RIB_SCALE_CONTROL_POINTS,
+            }
           );
         }
       }
@@ -2274,7 +2745,10 @@ export class PointerTool extends BaseTool {
                   this.sceneController.sceneModel.initialClickedSkeletonPoint,
                   delta,
                   roundFunc,
-                  { anchorToDragSide: this.fixedRibCompressMode }
+                  {
+                    anchorToDragSide: this.fixedRibCompressMode,
+                    scaleControlPoints: FIXED_RIB_SCALE_CONTROL_POINTS,
+                  }
                 )
               : false;
 
@@ -2764,7 +3238,10 @@ export class PointerTool extends BaseTool {
                   initialClickedSkeletonPoint,
                   delta,
                   roundFunc,
-                  { anchorToDragSide: this.fixedRibCompressMode }
+                  {
+                    anchorToDragSide: this.fixedRibCompressMode,
+                    scaleControlPoints: FIXED_RIB_SCALE_CONTROL_POINTS,
+                  }
                 )
               : false;
 

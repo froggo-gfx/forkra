@@ -1075,7 +1075,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
       stripCornerRoundMetadata(roundedLeftSide),
       true,
       {
-      includeLinearNeighborCases: false,
+      includeLinearNeighborCases: true,
       maxHandleRotationDeg: 60,
       }
     );
@@ -1083,7 +1083,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
       stripCornerRoundMetadata(reversedRight),
       true,
       {
-      includeLinearNeighborCases: false,
+      includeLinearNeighborCases: true,
       maxHandleRotationDeg: 60,
       }
     );
@@ -1629,7 +1629,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
       stripCornerRoundMetadata(outlinePoints),
       true,
       {
-      includeLinearNeighborCases: false,
+      includeLinearNeighborCases: true,
       maxHandleRotationDeg: 60,
       }
     );
