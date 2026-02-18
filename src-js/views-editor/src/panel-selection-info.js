@@ -544,6 +544,11 @@ export default class SelectionInfoPanel extends Panel {
   }
 
   async update(senderInfo) {
+    const activeElement = document.activeElement;
+    const isEditingField =
+      activeElement &&
+      this.infoForm?.contentElement &&
+      this.infoForm.contentElement.contains(activeElement);
     if (
       senderInfo?.senderID === this &&
       ((senderInfo?.fieldKeyPath?.length !== 3 &&
@@ -552,6 +557,11 @@ export default class SelectionInfoPanel extends Panel {
         senderInfo?.fieldKeyPath?.[0] === "backgroundImage")
     ) {
       // Don't rebuild, just update the Dimensions field
+      await this.updateDimensions();
+      return;
+    }
+    if (senderInfo?.senderID === this && isEditingField) {
+      // Avoid rebuilding while the user is actively editing a field.
       await this.updateDimensions();
       return;
     }

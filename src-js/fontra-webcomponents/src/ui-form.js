@@ -180,9 +180,11 @@ export class Form extends SimpleElement {
   }
 
   setFieldDescriptions(fieldDescriptions) {
+    const activeState = this._captureActiveFieldState();
     this.contentElement.innerHTML = "";
     this._fieldGetters = {};
     this._fieldSetters = {};
+    this._fieldElements = {};
     this._lastValidFieldValues = {};
     if (!fieldDescriptions) {
       return;
@@ -248,6 +250,60 @@ export class Form extends SimpleElement {
         });
       }
     }
+
+    this._restoreActiveFieldState(activeState);
+  }
+
+  _captureActiveFieldState() {
+    const root = this.shadowRoot ?? this.contentElement?.getRootNode?.();
+    const activeElement =
+      (root && "activeElement" in root ? root.activeElement : null) ||
+      document.activeElement;
+    if (
+      !activeElement ||
+      !this.contentElement ||
+      !this.contentElement.contains(activeElement)
+    ) {
+      return null;
+    }
+    const key = activeElement.dataset?.formKey;
+    if (!key) {
+      return null;
+    }
+    const selectionStart = activeElement.selectionStart;
+    const selectionEnd = activeElement.selectionEnd;
+    return {
+      key,
+      selectionStart:
+        typeof selectionStart === "number" ? selectionStart : null,
+      selectionEnd: typeof selectionEnd === "number" ? selectionEnd : null,
+    };
+  }
+
+  _restoreActiveFieldState(state) {
+    if (!state?.key || !this._fieldElements) {
+      return;
+    }
+    const element = this._fieldElements[state.key];
+    if (!element || typeof element.focus !== "function") {
+      return;
+    }
+    element.focus();
+    if (
+      state.selectionStart !== null &&
+      state.selectionEnd !== null &&
+      typeof element.setSelectionRange === "function"
+    ) {
+      element.setSelectionRange(state.selectionStart, state.selectionEnd);
+    }
+  }
+
+  _registerFieldElement(fieldItem, element) {
+    if (!fieldItem?.key || !element) {
+      return;
+    }
+    element.dataset.formKey = fieldItem.key;
+    this._fieldElements[fieldItem.key] = element;
   }
 
   _addUniversalRow(valueElement, fieldItem, labelElement) {
@@ -293,6 +349,7 @@ export class Form extends SimpleElement {
     };
     this._fieldGetters[fieldItem.key] = () => inputElement.value;
     this._fieldSetters[fieldItem.key] = (value) => (inputElement.value = value);
+    this._registerFieldElement(fieldItem, inputElement);
     valueElement.appendChild(inputElement);
   }
 
@@ -450,6 +507,7 @@ export class Form extends SimpleElement {
     this._fieldGetters[fieldItem.key] = () => inputElement.value;
     this._fieldSetters[fieldItem.key] = (value) =>
       (inputElement.value = maybeRound(value, fieldItem.numDigits));
+    this._registerFieldElement(fieldItem, inputElement);
     valueElement.appendChild(inputElement);
   }
 
@@ -563,6 +621,7 @@ export class Form extends SimpleElement {
     this._fieldGetters[fieldItem.key] = () => inputElement.value;
     this._fieldSetters[fieldItem.key] = (value) =>
       (inputElement.value = maybeRoundToString(value, fieldItem.numDigits));
+    this._registerFieldElement(fieldItem, inputElement);
     valueElement.appendChild(inputElement);
   }
 
@@ -615,6 +674,7 @@ export class Form extends SimpleElement {
 
     this._fieldGetters[fieldItem.key] = () => inputElement.value;
     this._fieldSetters[fieldItem.key] = (value) => (inputElement.value = value);
+    this._registerFieldElement(fieldItem, inputElement);
     valueElement.appendChild(
       html.div({ style: "display: flex; gap: 0.15rem;" }, [inputElement, rotaryControl])
     );
