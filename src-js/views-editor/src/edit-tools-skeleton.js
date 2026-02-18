@@ -25,8 +25,6 @@ const SKELETON_CAP_RADIUS_RATIO_KEY = "fontra.skeleton.capRadiusRatio";
 const SKELETON_CAP_TENSION_KEY = "fontra.skeleton.capTension";
 const SKELETON_CAP_ANGLE_KEY = "fontra.skeleton.capAngle";
 const SKELETON_CAP_DISTANCE_KEY = "fontra.skeleton.capDistance";
-const SKELETON_CORNER_REACH_SOURCE_KEY = "fontra.skeleton.cornerReach";
-const SKELETON_ROUNDNESS_STRENGTH_SOURCE_KEY = "fontra.skeleton.roundnessStrength";
 const DEFAULT_WIDTH_CAPITAL_BASE = 60;
 const DEFAULT_WIDTH_LOWERCASE_BASE = 60;
 const DEFAULT_DISTRIBUTION = 0;
@@ -34,8 +32,6 @@ const DEFAULT_CAP_RADIUS_RATIO = 1 / 8;
 const DEFAULT_CAP_TENSION = 0.55;
 const DEFAULT_CAP_ANGLE = 0;
 const DEFAULT_CAP_DISTANCE = 0;
-const DEFAULT_CORNER_REACH = 0.49;
-const DEFAULT_ROUNDNESS_STRENGTH = 1.0;
 
 export class SkeletonPenTool extends BaseTool {
   iconPath = "/images/skeleton-pen.svg";
@@ -226,21 +222,6 @@ export class SkeletonPenTool extends BaseTool {
         SKELETON_CAP_DISTANCE_KEY,
         DEFAULT_CAP_DISTANCE
       ),
-    };
-  }
-
-  _getDefaultSkeletonCornerSettings() {
-    const cornerReach = this._getSourceCustomDataValue(
-      SKELETON_CORNER_REACH_SOURCE_KEY,
-      DEFAULT_CORNER_REACH
-    );
-    const roundnessStrength = this._getSourceCustomDataValue(
-      SKELETON_ROUNDNESS_STRENGTH_SOURCE_KEY,
-      DEFAULT_ROUNDNESS_STRENGTH
-    );
-    return {
-      cornerReach: Math.min(Math.max(cornerReach, 0.05), 0.99),
-      roundnessStrength: Math.min(Math.max(roundnessStrength, 0.1), 4.0),
     };
   }
 
@@ -1414,14 +1395,6 @@ export class SkeletonPenTool extends BaseTool {
   }
 
   _regenerateOutlineContours(staticGlyph, skeletonData) {
-    const defaults = this._getDefaultSkeletonCornerSettings();
-    if (!Number.isFinite(skeletonData.cornerReach)) {
-      skeletonData.cornerReach = defaults.cornerReach;
-    }
-    if (!Number.isFinite(skeletonData.roundnessStrength)) {
-      skeletonData.roundnessStrength = defaults.roundnessStrength;
-    }
-
     // Get indices of previously generated contours
     const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
 

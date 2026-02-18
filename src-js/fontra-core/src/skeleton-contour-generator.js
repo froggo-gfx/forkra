@@ -17,8 +17,6 @@ const MAX_HANDLE_TRIM_RATIO = 0.99;
 const DEFAULT_CORNER_RADIUS_BOOST = 1;
 const MIN_CORNER_RADIUS_BOOST = 0.1;
 const MAX_CORNER_RADIUS_BOOST = 4;
-const SKELETON_CORNER_REACH_DATA_KEY = "cornerReach";
-const SKELETON_ROUNDNESS_STRENGTH_DATA_KEY = "roundnessStrength";
 
 function clampCornerTrimRatio(value) {
   if (!Number.isFinite(value)) {
@@ -110,6 +108,8 @@ function buildGeneratedOnCurve(
   };
   const cornerRoundness = getCornerRoundness(skeletonPoint);
   const cornerAsymmetry = getCornerAsymmetry(skeletonPoint);
+  const cornerReach = skeletonPoint?.cornerReach;
+  const roundnessStrength = skeletonPoint?.roundnessStrength;
   const cornerRoundBase = Math.max(0, cornerRoundBaseOverride ?? halfWidth ?? 0);
   if (cornerRoundness > 0 && cornerRoundBase >= 0.5) {
     generatedPoint.cornerRoundness = cornerRoundness;
@@ -117,6 +117,12 @@ function buildGeneratedOnCurve(
   }
   if (cornerAsymmetry !== 0) {
     generatedPoint.cornerAsymmetry = cornerAsymmetry;
+  }
+  if (Number.isFinite(cornerReach)) {
+    generatedPoint.cornerReach = cornerReach;
+  }
+  if (Number.isFinite(roundnessStrength)) {
+    generatedPoint.roundnessStrength = roundnessStrength;
   }
   return generatedPoint;
 }
@@ -129,7 +135,9 @@ function stripCornerRoundMetadata(points) {
     if (
       point.cornerRoundness === undefined &&
       point.cornerRoundBase === undefined &&
-      point.cornerAsymmetry === undefined
+      point.cornerAsymmetry === undefined &&
+      point.cornerReach === undefined &&
+      point.roundnessStrength === undefined
     ) {
       return point;
     }
@@ -137,6 +145,8 @@ function stripCornerRoundMetadata(points) {
       cornerRoundness: _cornerRoundness,
       cornerRoundBase: _cornerRoundBase,
       cornerAsymmetry: _cornerAsymmetry,
+      cornerReach: _cornerReach,
+      roundnessStrength: _roundnessStrength,
       ...rest
     } = point;
     return rest;
@@ -303,6 +313,16 @@ const NEAR_ZERO_HANDLE_TARGET = 1;
 const MAX_HANDLE_TO_CHORD_RATIO = 2.0;
 const MAX_NEAR_ZERO_ROTATION_DEG = 35;
 const SKELETON_DEBUG_PREFIX = "[SKELETON GEN DEBUG]";
+const ENABLE_CORNER_DEBUG = true;
+
+function logCornerDebug(phase, payload) {
+  if (!ENABLE_CORNER_DEBUG) return;
+  try {
+    console.log(`[SKELETON CORNER DEBUG] ${phase} ${JSON.stringify(payload)}`);
+  } catch (err) {
+    console.log(`[SKELETON CORNER DEBUG] ${phase}`);
+  }
+}
 const ENABLE_EXPERIMENTAL_HANDLE_STABILIZATION = false;
 
 /**
@@ -428,6 +448,10 @@ function enforceSmoothColinearity(
       // The smooth point should act as a pivot: the off-curve handle should be collinear
       // with the linear segment, extending its direction
       const linearVec = { x: point.x - prevPoint.x, y: point.y - prevPoint.y }; // Vector from prev linear point to smooth point
+      const linearLen = Math.hypot(linearVec.x, linearVec.y);
+      if (!(linearLen > 0.001)) {
+        continue;
+      }
       const linearDir = vector.normalizeVector(linearVec);
 
       const curveVec = { x: nextPoint.x - point.x, y: nextPoint.y - point.y }; // Vector from smooth point to off-curve
@@ -454,6 +478,10 @@ function enforceSmoothColinearity(
       // Smooth point with curve before and linear segment after
       // The previous off-curve handle should be collinear with the next linear segment
       const linearVec = { x: nextPoint.x - point.x, y: nextPoint.y - point.y }; // Vector from smooth point to next linear point
+      const linearLen = Math.hypot(linearVec.x, linearVec.y);
+      if (!(linearLen > 0.001)) {
+        continue;
+      }
       const linearDir = vector.normalizeVector(linearVec);
 
       const curveVec = { x: prevPoint.x - point.x, y: prevPoint.y - point.y }; // Vector from smooth point to prev off-curve
@@ -721,16 +749,29 @@ function roundSharpCornersOnSide(
     return points;
   }
 
-  let i = 0;
-  while (i < points.length) {
+  const cornerInfos = new Map();
+  const onCurvePoints = [];
+
+  for (let i = 0; i < points.length; i++) {
     const corner = points[i];
-    if (!corner || corner.type || corner.smooth) {
-      i++;
+    if (!corner || corner.type) {
+      continue;
+    }
+    onCurvePoints.push(corner);
+    if (corner.smooth) {
       continue;
     }
 
     const baseRoundness = clampCornerRoundness(corner.cornerRoundness);
     const cornerAsymmetry = getCornerAsymmetry(corner);
+    const effectiveCornerTrimRatio = clampCornerTrimRatio(
+      Number.isFinite(corner.cornerReach) ? corner.cornerReach : cornerTrimRatio
+    );
+    const effectiveCornerRadiusBoost = clampCornerRadiusBoost(
+      Number.isFinite(corner.roundnessStrength)
+        ? corner.roundnessStrength
+        : cornerRadiusBoost
+    );
     let cornerRoundness = baseRoundness;
     if (cornerRoundness > 0 && side && cornerAsymmetry !== 0) {
       let scale = 1;
@@ -744,14 +785,12 @@ function roundSharpCornersOnSide(
     }
     const cornerRoundBase = Math.max(0, corner.cornerRoundBase ?? 0);
     if (cornerRoundness <= 0 || cornerRoundBase < 0.5) {
-      i++;
       continue;
     }
 
     const prevOnIndex = findPrevOnCurveIndex(points, i, isClosed);
     const nextOnIndex = findNextOnCurveIndex(points, i, isClosed);
     if (prevOnIndex === null || nextOnIndex === null) {
-      i++;
       continue;
     }
 
@@ -766,10 +805,11 @@ function roundSharpCornersOnSide(
         ? nextNeighborIndex
         : null;
 
-    const prevReference = prevHandleIndex !== null ? points[prevHandleIndex] : points[prevOnIndex];
-    const nextReference = nextHandleIndex !== null ? points[nextHandleIndex] : points[nextOnIndex];
+    const prevReference =
+      prevHandleIndex !== null ? points[prevHandleIndex] : points[prevOnIndex];
+    const nextReference =
+      nextHandleIndex !== null ? points[nextHandleIndex] : points[nextOnIndex];
     if (!prevReference || !nextReference) {
-      i++;
       continue;
     }
 
@@ -785,7 +825,6 @@ function roundSharpCornersOnSide(
       !Number.isFinite(dirOutAway.x) ||
       !Number.isFinite(dirOutAway.y)
     ) {
-      i++;
       continue;
     }
 
@@ -795,21 +834,19 @@ function roundSharpCornersOnSide(
     );
     const beta = Math.acos(betaCos);
     if (!(beta > 1e-4 && beta < Math.PI - 1e-4)) {
-      i++;
       continue;
     }
     const tanHalf = Math.tan(beta / 2);
     if (!(tanHalf > 1e-6)) {
-      i++;
       continue;
     }
 
     const distPrevOn = vector.distance(corner, points[prevOnIndex]);
     const distNextOn = vector.distance(corner, points[nextOnIndex]);
     const handleTrimRatio = MAX_HANDLE_TRIM_RATIO;
-    const minTrim = MIN_CORNER_TRIM;
-    let maxTrimIn = distPrevOn * cornerTrimRatio;
-    let maxTrimOut = distNextOn * cornerTrimRatio;
+    const minTrim = 0;
+    let maxTrimIn = distPrevOn * effectiveCornerTrimRatio;
+    let maxTrimOut = distNextOn * effectiveCornerTrimRatio;
 
     if (prevHandleIndex !== null) {
       maxTrimIn = Math.min(
@@ -825,53 +862,282 @@ function roundSharpCornersOnSide(
     }
 
     const maxTrim = Math.min(maxTrimIn, maxTrimOut);
-    if (!(maxTrim > minTrim)) {
-      i++;
+    if (!Number.isFinite(maxTrim) || maxTrim < minTrim) {
       continue;
     }
 
-    const wantedRadius = cornerRoundBase * cornerRoundness * cornerRadiusBoost;
+    const wantedRadius =
+      cornerRoundBase * cornerRoundness * effectiveCornerRadiusBoost;
     if (!(wantedRadius > 0.001)) {
-      i++;
       continue;
     }
 
     const wantedTrim = wantedRadius / tanHalf;
     const trim = Math.min(wantedTrim, maxTrim);
-    if (!(trim > minTrim)) {
+    if (!Number.isFinite(trim) || trim < minTrim) {
+      continue;
+    }
+
+    const radius = trim * tanHalf;
+    const kappa = (4 / 3) * Math.tan(beta / 4);
+    const arcHandleLen = Number.isFinite(radius) && Number.isFinite(kappa)
+      ? Math.max(0, radius * kappa)
+      : 0;
+    const desiredArcHandleLen =
+      Number.isFinite(wantedRadius) && Number.isFinite(kappa)
+        ? Math.max(0, wantedRadius * kappa)
+        : 0;
+
+    logCornerDebug("cornerInfo", {
+      corner: { x: corner.x, y: corner.y },
+      trim,
+      tanHalf,
+      beta,
+      radius,
+      arcHandleLen,
+      desiredArcHandleLen,
+      cornerRoundBase,
+      cornerRoundness,
+      effectiveCornerTrimRatio,
+      effectiveCornerRadiusBoost,
+      distPrevOn,
+      distNextOn,
+      maxTrimIn,
+      maxTrimOut,
+      maxTrim,
+      wantedRadius,
+      wantedTrim,
+    });
+
+    cornerInfos.set(corner, {
+      trim,
+      dirInAway,
+      dirOutAway,
+      arcHandleLen,
+      prevHandlePoint: prevHandleIndex !== null ? points[prevHandleIndex] : null,
+      nextHandlePoint: nextHandleIndex !== null ? points[nextHandleIndex] : null,
+    });
+  }
+
+  if (cornerInfos.size > 1 && onCurvePoints.length > 1) {
+    const limitSegmentTrims = (pointA, pointB) => {
+      const infoA = cornerInfos.get(pointA);
+      const infoB = cornerInfos.get(pointB);
+      if (!infoA || !infoB) {
+        return;
+      }
+      const minGap = 0;
+      const dx = pointB.x - pointA.x;
+      const dy = pointB.y - pointA.y;
+      const segLen = Math.hypot(dx, dy);
+      if (segLen < 1e-6) {
+        infoA.trim = 0;
+        infoB.trim = 0;
+        logCornerDebug("segmentClamp", {
+          cornerA: { x: pointA.x, y: pointA.y },
+          cornerB: { x: pointB.x, y: pointB.y },
+          segmentLength: segLen,
+          trimA: infoA.trim,
+          trimB: infoB.trim,
+          reason: "zero-segment",
+        });
+        return;
+      }
+
+      const ux = dx / segLen;
+      const uy = dy / segLen;
+      const kA = Math.max(0, infoA.dirOutAway.x * ux + infoA.dirOutAway.y * uy);
+      const kB = Math.max(0, -infoB.dirInAway.x * ux - infoB.dirInAway.y * uy);
+      if (!(kA > 0 || kB > 0)) {
+        return;
+      }
+
+      const budget = Math.max(segLen - minGap, 0);
+      const consA = kA * infoA.trim;
+      const consB = kB * infoB.trim;
+      if (consA + consB <= budget) {
+        return;
+      }
+
+      if (kA <= 0) {
+        infoB.trim = Math.min(infoB.trim, budget / kB);
+        logCornerDebug("segmentClamp", {
+          cornerA: { x: pointA.x, y: pointA.y },
+          cornerB: { x: pointB.x, y: pointB.y },
+          segmentLength: segLen,
+          budget,
+          trimA: infoA.trim,
+          trimB: infoB.trim,
+          kA,
+          kB,
+          reason: "kA<=0",
+        });
+        return;
+      }
+      if (kB <= 0) {
+        infoA.trim = Math.min(infoA.trim, budget / kA);
+        logCornerDebug("segmentClamp", {
+          cornerA: { x: pointA.x, y: pointA.y },
+          cornerB: { x: pointB.x, y: pointB.y },
+          segmentLength: segLen,
+          budget,
+          trimA: infoA.trim,
+          trimB: infoB.trim,
+          kA,
+          kB,
+          reason: "kB<=0",
+        });
+        return;
+      }
+
+      if (consA <= consB) {
+        if (consA >= budget) {
+          infoA.trim = budget / kA;
+          infoB.trim = 0;
+          logCornerDebug("segmentClamp", {
+            cornerA: { x: pointA.x, y: pointA.y },
+            cornerB: { x: pointB.x, y: pointB.y },
+            segmentLength: segLen,
+            budget,
+            trimA: infoA.trim,
+            trimB: infoB.trim,
+            kA,
+            kB,
+            reason: "consA>=budget",
+          });
+          return;
+        }
+        const remaining = budget - consA;
+        infoB.trim = Math.min(infoB.trim, remaining / kB);
+        logCornerDebug("segmentClamp", {
+          cornerA: { x: pointA.x, y: pointA.y },
+          cornerB: { x: pointB.x, y: pointB.y },
+          segmentLength: segLen,
+          budget,
+          trimA: infoA.trim,
+          trimB: infoB.trim,
+          kA,
+          kB,
+          reason: "reduceB",
+        });
+        return;
+      }
+
+      if (consB >= budget) {
+        infoB.trim = budget / kB;
+        infoA.trim = 0;
+        logCornerDebug("segmentClamp", {
+          cornerA: { x: pointA.x, y: pointA.y },
+          cornerB: { x: pointB.x, y: pointB.y },
+          segmentLength: segLen,
+          budget,
+          trimA: infoA.trim,
+          trimB: infoB.trim,
+          kA,
+          kB,
+          reason: "consB>=budget",
+        });
+        return;
+      }
+      const remaining = budget - consB;
+      infoA.trim = Math.min(infoA.trim, remaining / kA);
+      logCornerDebug("segmentClamp", {
+        cornerA: { x: pointA.x, y: pointA.y },
+        cornerB: { x: pointB.x, y: pointB.y },
+        segmentLength: segLen,
+        budget,
+        trimA: infoA.trim,
+        trimB: infoB.trim,
+        kA,
+        kB,
+        reason: "reduceA",
+      });
+    };
+
+    for (let i = 0; i < onCurvePoints.length - 1; i++) {
+      limitSegmentTrims(onCurvePoints[i], onCurvePoints[i + 1]);
+    }
+    if (isClosed && onCurvePoints.length > 2) {
+      limitSegmentTrims(
+        onCurvePoints[onCurvePoints.length - 1],
+        onCurvePoints[0]
+      );
+    }
+  }
+
+  let i = 0;
+  while (i < points.length) {
+    const corner = points[i];
+    const cornerInfo = cornerInfos.get(corner);
+    if (!cornerInfo) {
+      i++;
+      continue;
+    }
+
+    const trim = cornerInfo.trim;
+    if (!Number.isFinite(trim) || trim < 0) {
       i++;
       continue;
     }
 
     const startPoint = {
-      x: Math.round(corner.x + dirInAway.x * trim),
-      y: Math.round(corner.y + dirInAway.y * trim),
+      x: corner.x + cornerInfo.dirInAway.x * trim,
+      y: corner.y + cornerInfo.dirInAway.y * trim,
       smooth: true,
     };
     const endPoint = {
-      x: Math.round(corner.x + dirOutAway.x * trim),
-      y: Math.round(corner.y + dirOutAway.y * trim),
+      x: corner.x + cornerInfo.dirOutAway.x * trim,
+      y: corner.y + cornerInfo.dirOutAway.y * trim,
       smooth: true,
     };
 
-    const startTangent = { x: -dirInAway.x, y: -dirInAway.y };
-    const endTangent = { x: dirOutAway.x, y: dirOutAway.y };
-    const handleLengths = computeTunniHandleLengths(
+    const startTangent = {
+      x: -cornerInfo.dirInAway.x,
+      y: -cornerInfo.dirInAway.y,
+    };
+    const endTangent = {
+      x: cornerInfo.dirOutAway.x,
+      y: cornerInfo.dirOutAway.y,
+    };
+    let handleLengths = computeTunniHandleLengths(
       startPoint,
       startTangent,
       endPoint,
       { x: -endTangent.x, y: -endTangent.y },
       DEFAULT_CAP_TENSION
     );
+    const chord = vector.distance(startPoint, endPoint);
+    const fallbackLen = cornerInfo.desiredArcHandleLen || cornerInfo.arcHandleLen;
+    if (
+      (!(chord > 1e-3) ||
+        !(handleLengths.startLen > 1e-3) ||
+        !(handleLengths.endLen > 1e-3)) &&
+      fallbackLen > 0
+    ) {
+      handleLengths = {
+        startLen: fallbackLen,
+        endLen: fallbackLen,
+      };
+    }
+    logCornerDebug("handles", {
+      corner: { x: corner.x, y: corner.y },
+      startPoint,
+      endPoint,
+      chord,
+      trim,
+      arcHandleLen: cornerInfo.arcHandleLen,
+      desiredArcHandleLen: cornerInfo.desiredArcHandleLen,
+      handleLengths,
+    });
 
     const handleIn = {
-      x: Math.round(startPoint.x + startTangent.x * handleLengths.startLen),
-      y: Math.round(startPoint.y + startTangent.y * handleLengths.startLen),
+      x: startPoint.x + startTangent.x * handleLengths.startLen,
+      y: startPoint.y + startTangent.y * handleLengths.startLen,
       type: "cubic",
     };
     const handleOut = {
-      x: Math.round(endPoint.x - endTangent.x * handleLengths.endLen),
-      y: Math.round(endPoint.y - endTangent.y * handleLengths.endLen),
+      x: endPoint.x - endTangent.x * handleLengths.endLen,
+      y: endPoint.y - endTangent.y * handleLengths.endLen,
       type: "cubic",
     };
 
@@ -884,19 +1150,13 @@ function roundSharpCornersOnSide(
       y: endPoint.y - corner.y,
     };
 
-    if (prevHandleIndex !== null) {
-      points[prevHandleIndex] = {
-        ...points[prevHandleIndex],
-        x: Math.round(points[prevHandleIndex].x + deltaIn.x),
-        y: Math.round(points[prevHandleIndex].y + deltaIn.y),
-      };
+    if (cornerInfo.prevHandlePoint) {
+      cornerInfo.prevHandlePoint.x += deltaIn.x;
+      cornerInfo.prevHandlePoint.y += deltaIn.y;
     }
-    if (nextHandleIndex !== null) {
-      points[nextHandleIndex] = {
-        ...points[nextHandleIndex],
-        x: Math.round(points[nextHandleIndex].x + deltaOut.x),
-        y: Math.round(points[nextHandleIndex].y + deltaOut.y),
-      };
+    if (cornerInfo.nextHandlePoint) {
+      cornerInfo.nextHandlePoint.x += deltaOut.x;
+      cornerInfo.nextHandlePoint.y += deltaOut.y;
     }
 
     points.splice(i, 1, startPoint, handleIn, handleOut, endPoint);
@@ -916,12 +1176,8 @@ export function generateContoursFromSkeleton(skeletonData) {
     return [];
   }
 
-  const cornerTrimRatio = clampCornerTrimRatio(
-    skeletonData[SKELETON_CORNER_REACH_DATA_KEY]
-  );
-  const cornerRadiusBoost = clampCornerRadiusBoost(
-    skeletonData[SKELETON_ROUNDNESS_STRENGTH_DATA_KEY]
-  );
+  const cornerTrimRatio = MAX_CORNER_TRIM_RATIO;
+  const cornerRadiusBoost = DEFAULT_CORNER_RADIUS_BOOST;
 
   const generatedContours = [];
 
@@ -3335,8 +3591,6 @@ export function createEmptySkeletonData() {
     version: 1,
     contours: [],
     generatedContourIndices: [],
-    [SKELETON_CORNER_REACH_DATA_KEY]: MAX_CORNER_TRIM_RATIO,
-    [SKELETON_ROUNDNESS_STRENGTH_DATA_KEY]: DEFAULT_CORNER_RADIUS_BOOST,
   };
 }
 
