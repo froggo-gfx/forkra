@@ -12,7 +12,7 @@ const MAX_CAP_ANGLE = 85;
 const DEFAULT_CORNER_ROUNDNESS = 0;
 const DEFAULT_CORNER_ASYMMETRY = 0;
 const MIN_CORNER_TRIM = 0.5;
-const MAX_CORNER_TRIM_RATIO = 0.49;
+const MAX_CORNER_TRIM_RATIO = 0.5;
 const MAX_HANDLE_TRIM_RATIO = 0.99;
 const DEFAULT_CORNER_RADIUS_BOOST = 1;
 const MIN_CORNER_RADIUS_BOOST = 0.1;
@@ -313,16 +313,6 @@ const NEAR_ZERO_HANDLE_TARGET = 1;
 const MAX_HANDLE_TO_CHORD_RATIO = 2.0;
 const MAX_NEAR_ZERO_ROTATION_DEG = 35;
 const SKELETON_DEBUG_PREFIX = "[SKELETON GEN DEBUG]";
-const ENABLE_CORNER_DEBUG = true;
-
-function logCornerDebug(phase, payload) {
-  if (!ENABLE_CORNER_DEBUG) return;
-  try {
-    console.log(`[SKELETON CORNER DEBUG] ${phase} ${JSON.stringify(payload)}`);
-  } catch (err) {
-    console.log(`[SKELETON CORNER DEBUG] ${phase}`);
-  }
-}
 const ENABLE_EXPERIMENTAL_HANDLE_STABILIZATION = false;
 
 /**
@@ -862,55 +852,46 @@ function roundSharpCornersOnSide(
     }
 
     const maxTrim = Math.min(maxTrimIn, maxTrimOut);
-    if (!Number.isFinite(maxTrim) || maxTrim < minTrim) {
+    if (!Number.isFinite(maxTrim) || maxTrim <= minTrim) {
       continue;
     }
 
-    const wantedRadius =
-      cornerRoundBase * cornerRoundness * effectiveCornerRadiusBoost;
-    if (!(wantedRadius > 0.001)) {
+    const roundnessRatio = Math.min(
+      Math.max(cornerRoundness * effectiveCornerRadiusBoost, 0),
+      1
+    );
+    if (!(roundnessRatio > 0)) {
       continue;
     }
 
-    const wantedTrim = wantedRadius / tanHalf;
-    const trim = Math.min(wantedTrim, maxTrim);
-    if (!Number.isFinite(trim) || trim < minTrim) {
+    const trimIn = maxTrimIn * roundnessRatio;
+    const trimOut = maxTrimOut * roundnessRatio;
+    if (
+      !Number.isFinite(trimIn) ||
+      !Number.isFinite(trimOut) ||
+      trimIn <= minTrim ||
+      trimOut <= minTrim
+    ) {
       continue;
     }
 
-    const radius = trim * tanHalf;
+    const maxRadius = maxTrim * tanHalf;
+    const radiusIn = trimIn * tanHalf;
+    const radiusOut = trimOut * tanHalf;
     const kappa = (4 / 3) * Math.tan(beta / 4);
-    const arcHandleLen = Number.isFinite(radius) && Number.isFinite(kappa)
-      ? Math.max(0, radius * kappa)
-      : 0;
-    const desiredArcHandleLen =
-      Number.isFinite(wantedRadius) && Number.isFinite(kappa)
-        ? Math.max(0, wantedRadius * kappa)
+    const arcHandleLenIn =
+      Number.isFinite(radiusIn) && Number.isFinite(kappa)
+        ? Math.max(0, radiusIn * kappa)
         : 0;
-
-    logCornerDebug("cornerInfo", {
-      corner: { x: corner.x, y: corner.y },
-      trim,
-      tanHalf,
-      beta,
-      radius,
-      arcHandleLen,
-      desiredArcHandleLen,
-      cornerRoundBase,
-      cornerRoundness,
-      effectiveCornerTrimRatio,
-      effectiveCornerRadiusBoost,
-      distPrevOn,
-      distNextOn,
-      maxTrimIn,
-      maxTrimOut,
-      maxTrim,
-      wantedRadius,
-      wantedTrim,
-    });
+    const arcHandleLenOut =
+      Number.isFinite(radiusOut) && Number.isFinite(kappa)
+        ? Math.max(0, radiusOut * kappa)
+        : 0;
+    const arcHandleLen = Math.max(arcHandleLenIn, arcHandleLenOut);
 
     cornerInfos.set(corner, {
-      trim,
+      trimIn,
+      trimOut,
       dirInAway,
       dirOutAway,
       arcHandleLen,
@@ -933,19 +914,31 @@ function roundSharpCornersOnSide(
       if (segLen < 1e-6) {
         infoA.trim = 0;
         infoB.trim = 0;
-        logCornerDebug("segmentClamp", {
-          cornerA: { x: pointA.x, y: pointA.y },
-          cornerB: { x: pointB.x, y: pointB.y },
-          segmentLength: segLen,
-          trimA: infoA.trim,
-          trimB: infoB.trim,
-          reason: "zero-segment",
-        });
         return;
       }
 
       const ux = dx / segLen;
       const uy = dy / segLen;
+      const inter = vector.intersect(
+        pointA,
+        { x: pointA.x + infoA.dirOutAway.x, y: pointA.y + infoA.dirOutAway.y },
+        pointB,
+        { x: pointB.x + infoB.dirInAway.x, y: pointB.y + infoB.dirInAway.y }
+      );
+      if (
+        inter &&
+        Number.isFinite(inter.t1) &&
+        Number.isFinite(inter.t2) &&
+        inter.t1 >= 0 &&
+        inter.t2 >= 0 &&
+        inter.t1 <= infoA.trimOut + 1e-6 &&
+        inter.t2 <= infoB.trimIn + 1e-6
+      ) {
+        infoA.trimOut = inter.t1;
+        infoB.trimIn = inter.t2;
+        return;
+      }
+
       const kA = Math.max(0, infoA.dirOutAway.x * ux + infoA.dirOutAway.y * uy);
       const kB = Math.max(0, -infoB.dirInAway.x * ux - infoB.dirInAway.y * uy);
       if (!(kA > 0 || kB > 0)) {
@@ -953,105 +946,16 @@ function roundSharpCornersOnSide(
       }
 
       const budget = Math.max(segLen - minGap, 0);
-      const consA = kA * infoA.trim;
-      const consB = kB * infoB.trim;
-      if (consA + consB <= budget) {
+      const consA = kA * infoA.trimOut;
+      const consB = kB * infoB.trimIn;
+      const sum = consA + consB;
+      if (sum <= budget) {
         return;
       }
 
-      if (kA <= 0) {
-        infoB.trim = Math.min(infoB.trim, budget / kB);
-        logCornerDebug("segmentClamp", {
-          cornerA: { x: pointA.x, y: pointA.y },
-          cornerB: { x: pointB.x, y: pointB.y },
-          segmentLength: segLen,
-          budget,
-          trimA: infoA.trim,
-          trimB: infoB.trim,
-          kA,
-          kB,
-          reason: "kA<=0",
-        });
-        return;
-      }
-      if (kB <= 0) {
-        infoA.trim = Math.min(infoA.trim, budget / kA);
-        logCornerDebug("segmentClamp", {
-          cornerA: { x: pointA.x, y: pointA.y },
-          cornerB: { x: pointB.x, y: pointB.y },
-          segmentLength: segLen,
-          budget,
-          trimA: infoA.trim,
-          trimB: infoB.trim,
-          kA,
-          kB,
-          reason: "kB<=0",
-        });
-        return;
-      }
-
-      if (consA <= consB) {
-        if (consA >= budget) {
-          infoA.trim = budget / kA;
-          infoB.trim = 0;
-          logCornerDebug("segmentClamp", {
-            cornerA: { x: pointA.x, y: pointA.y },
-            cornerB: { x: pointB.x, y: pointB.y },
-            segmentLength: segLen,
-            budget,
-            trimA: infoA.trim,
-            trimB: infoB.trim,
-            kA,
-            kB,
-            reason: "consA>=budget",
-          });
-          return;
-        }
-        const remaining = budget - consA;
-        infoB.trim = Math.min(infoB.trim, remaining / kB);
-        logCornerDebug("segmentClamp", {
-          cornerA: { x: pointA.x, y: pointA.y },
-          cornerB: { x: pointB.x, y: pointB.y },
-          segmentLength: segLen,
-          budget,
-          trimA: infoA.trim,
-          trimB: infoB.trim,
-          kA,
-          kB,
-          reason: "reduceB",
-        });
-        return;
-      }
-
-      if (consB >= budget) {
-        infoB.trim = budget / kB;
-        infoA.trim = 0;
-        logCornerDebug("segmentClamp", {
-          cornerA: { x: pointA.x, y: pointA.y },
-          cornerB: { x: pointB.x, y: pointB.y },
-          segmentLength: segLen,
-          budget,
-          trimA: infoA.trim,
-          trimB: infoB.trim,
-          kA,
-          kB,
-          reason: "consB>=budget",
-        });
-        return;
-      }
-      const remaining = budget - consB;
-      infoA.trim = Math.min(infoA.trim, remaining / kA);
-      logCornerDebug("segmentClamp", {
-        cornerA: { x: pointA.x, y: pointA.y },
-        cornerB: { x: pointB.x, y: pointB.y },
-        segmentLength: segLen,
-        budget,
-        trimA: infoA.trim,
-        trimB: infoB.trim,
-        kA,
-        kB,
-        reason: "reduceA",
-      });
+      const scale = sum > 0 ? budget / sum : 0;
+      infoA.trimOut *= scale;
+      infoB.trimIn *= scale;
     };
 
     for (let i = 0; i < onCurvePoints.length - 1; i++) {
@@ -1074,20 +978,26 @@ function roundSharpCornersOnSide(
       continue;
     }
 
-    const trim = cornerInfo.trim;
-    if (!Number.isFinite(trim) || trim < 0) {
+    const trimIn = cornerInfo.trimIn;
+    const trimOut = cornerInfo.trimOut;
+    if (
+      !Number.isFinite(trimIn) ||
+      !Number.isFinite(trimOut) ||
+      trimIn < 0 ||
+      trimOut < 0
+    ) {
       i++;
       continue;
     }
 
     const startPoint = {
-      x: corner.x + cornerInfo.dirInAway.x * trim,
-      y: corner.y + cornerInfo.dirInAway.y * trim,
+      x: corner.x + cornerInfo.dirInAway.x * trimIn,
+      y: corner.y + cornerInfo.dirInAway.y * trimIn,
       smooth: true,
     };
     const endPoint = {
-      x: corner.x + cornerInfo.dirOutAway.x * trim,
-      y: corner.y + cornerInfo.dirOutAway.y * trim,
+      x: corner.x + cornerInfo.dirOutAway.x * trimOut,
+      y: corner.y + cornerInfo.dirOutAway.y * trimOut,
       smooth: true,
     };
 
@@ -1107,7 +1017,7 @@ function roundSharpCornersOnSide(
       DEFAULT_CAP_TENSION
     );
     const chord = vector.distance(startPoint, endPoint);
-    const fallbackLen = cornerInfo.desiredArcHandleLen || cornerInfo.arcHandleLen;
+    const fallbackLen = cornerInfo.arcHandleLen;
     if (
       (!(chord > 1e-3) ||
         !(handleLengths.startLen > 1e-3) ||
@@ -1119,16 +1029,6 @@ function roundSharpCornersOnSide(
         endLen: fallbackLen,
       };
     }
-    logCornerDebug("handles", {
-      corner: { x: corner.x, y: corner.y },
-      startPoint,
-      endPoint,
-      chord,
-      trim,
-      arcHandleLen: cornerInfo.arcHandleLen,
-      desiredArcHandleLen: cornerInfo.desiredArcHandleLen,
-      handleLengths,
-    });
 
     const handleIn = {
       x: startPoint.x + startTangent.x * handleLengths.startLen,
