@@ -1735,8 +1735,8 @@ function getSkeletonDebugState() {
   }
   const enabledFlag = globalThis.__fontraSkeletonDebug;
   return {
-    // Enabled by default for active geometry debugging.
-    enabled: enabledFlag === undefined ? true : !!enabledFlag,
+    // Disabled by default; enable explicitly via globalThis.__fontraSkeletonDebug.
+    enabled: enabledFlag === undefined ? false : !!enabledFlag,
     filter: globalThis.__fontraSkeletonDebugFilter || null,
   };
 }

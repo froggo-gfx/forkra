@@ -123,6 +123,8 @@ export default class SkeletonParametersPanel extends Panel {
       profileSelection: "",
       profilePrevTotalWidth: null,
       profilePrevContext: null,
+      distributionValue: null,
+      distributionContext: null,
     };
 
     // Contour parameters state (for immediate UI updates)
@@ -497,6 +499,10 @@ export default class SkeletonParametersPanel extends Panel {
     const hasSelection = selectedData && selectedData.points.length > 0;
     const multiSelection = hasSelection && selectedData.points.length > 1;
     const selectionContext = this._getSelectionContextKey();
+    if (this.pointParameters.distributionContext !== selectionContext) {
+      this.pointParameters.distributionContext = selectionContext;
+      this.pointParameters.distributionValue = null;
+    }
 
     // Get values: from selected points or defaults
     let left, right, total, leftMixed = false, rightMixed = false, totalMixed = false;
@@ -874,17 +880,41 @@ export default class SkeletonParametersPanel extends Panel {
         multiSelection &&
         hasDistributionValues &&
         !distributionValues.every((v) => v === distributionValues[0]);
-      const distributionValue = distributionMixed
-        ? 0
-        : hasDistributionValues
-          ? distributionValues[0]
-          : this._calculateDistribution(left ?? 0, right ?? 0);
+      const hasStoredDistribution =
+        multiSelection &&
+        this.pointParameters.distributionContext === selectionContext &&
+        this.pointParameters.distributionValue !== null &&
+        this.pointParameters.distributionValue !== undefined;
+      const distributionValue = hasStoredDistribution
+        ? this.pointParameters.distributionValue
+        : distributionMixed
+          ? this.pointParameters.distributionValue ?? 0
+          : hasDistributionValues
+            ? distributionValues[0]
+            : this._calculateDistribution(left ?? 0, right ?? 0);
+      if (hasSelection && (multiSelection || distributionMixed || hasStoredDistribution)) {
+        let distMin = null;
+        let distMax = null;
+        if (distributionValues.length) {
+          distMin = Math.min(...distributionValues);
+          distMax = Math.max(...distributionValues);
+        }
+        this._logDistributionDebug("ui", {
+          context: selectionContext,
+          mixed: distributionMixed,
+          value: distributionValue,
+          min: distMin,
+          max: distMax,
+          count: distributionValues.length,
+          stored: hasStoredDistribution,
+        });
+      }
       formContents.push({
         type: "edit-number-slider",
         key: "pointDistribution",
         label: "Distribution",
         value: distributionValue,
-        displayValue: distributionMixed ? "mixed" : undefined,
+        displayValue: !hasStoredDistribution && distributionMixed ? "mixed" : undefined,
         minValue: -100,
         defaultValue: 0,
         maxValue: 100,
@@ -1530,7 +1560,7 @@ export default class SkeletonParametersPanel extends Panel {
 
     this.infoForm.setFieldDescriptions(formContents);
 
-    this.infoForm.onFieldChange = async (fieldItem, value, valueStream) => {
+    this.infoForm.onFieldChange = async (fieldItem, value, valueStream, changeMeta) => {
       const sourceWidthKeyMap = {
         capitalBase: SKELETON_WIDTH_CAPITAL_BASE_KEY,
         capitalHorizontal: SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY,
@@ -1671,12 +1701,22 @@ export default class SkeletonParametersPanel extends Panel {
             this._isDraggingSlider = false;
           }
         } else {
-          // Direct input (Enter key): apply immediately
+          const source = changeMeta?.source;
           this.pointParameters.scaleValue = value;
-          await this._applyScaleToSelectedPoints();
+          if (source === "number") {
+            // Direct input (Enter key): apply immediately
+            await this._applyScaleToSelectedPoints();
+          }
         }
       } else if (fieldItem.key === "pointDistribution") {
         // For distribution slider
+        this.pointParameters.distributionValue = value;
+        this.pointParameters.distributionContext = this._getSelectionContextKey();
+        this._logDistributionDebug(valueStream ? "dragBegin" : "input", {
+          context: this.pointParameters.distributionContext,
+          value,
+          selectedCount: this._getSelectedSkeletonPoints()?.points?.length || 0,
+        });
         if (valueStream) {
           this._isDraggingSlider = true;
           // Store initial state for multi-selection
@@ -1700,6 +1740,12 @@ export default class SkeletonParametersPanel extends Panel {
             }
 
             this._multiSelectionState = { pointStates, maxLeft, maxRight };
+            this._logDistributionDebug("dragState", {
+              context: this.pointParameters.distributionContext,
+              selectedCount: selectedData.points.length,
+              maxLeft,
+              maxRight,
+            });
             } else {
               this._multiSelectionState = null;
             }
@@ -3582,6 +3628,14 @@ export default class SkeletonParametersPanel extends Panel {
     const total = leftHW + rightHW;
     if (total === 0) return 0;
     return Math.round(((leftHW - rightHW) / total) * 100);
+  }
+
+  _logDistributionDebug(phase, payload) {
+    try {
+      console.log(`[SKELETON DIST DEBUG] ${phase} ${JSON.stringify(payload)}`);
+    } catch (err) {
+      console.log(`[SKELETON DIST DEBUG] ${phase}`);
+    }
   }
 
   _clearEditableWhenCollapsed(point, leftHW, rightHW) {
@@ -5740,6 +5794,12 @@ export default class SkeletonParametersPanel extends Panel {
     if (!selectedData) return;
 
     const isMulti = this._multiSelectionState && this._multiSelectionState.pointStates.size > 0;
+    this._logDistributionDebug("direct", {
+      context: this.pointParameters.distributionContext,
+      value: distribution,
+      selectedCount: selectedData.points.length,
+      multi: isMulti,
+    });
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
         const combined = this._buildPointDistributionChanges(
@@ -5882,6 +5942,7 @@ export default class SkeletonParametersPanel extends Panel {
 
       for await (const dist of valueStream) {
         lastDist = dist;
+        this.pointParameters.distributionValue = dist;
         const now = Date.now();
         const isExtreme = dist >= 100 || dist <= -100;
         if (!isExtreme && now - lastProcessedTime < THROTTLE_MS) {
@@ -5902,6 +5963,13 @@ export default class SkeletonParametersPanel extends Panel {
       }
 
       if (lastDist === null) return;
+      this.pointParameters.distributionValue = lastDist;
+      this._logDistributionDebug("dragEnd", {
+        context: this.pointParameters.distributionContext,
+        value: lastDist,
+        selectedCount: selectedData.points.length,
+        multi: isMulti,
+      });
 
       const finalCombined = this._buildPointDistributionChanges(
         glyph,
@@ -5969,19 +6037,19 @@ export default class SkeletonParametersPanel extends Panel {
             const state = this._multiSelectionState.pointStates.get(key);
             if (!state) continue;
 
-          const { initialLeft, initialRight } = state;
-          const { maxLeft, maxRight } = this._multiSelectionState;
+            const { initialLeft, initialRight } = state;
+            const { maxLeft, maxRight } = this._multiSelectionState;
 
-          let newLeft, newRight;
+            let newLeft, newRight;
 
             if (distribution >= 0) {
-              const delta = (distribution / 100) * maxLeft;
-              newLeft = Math.max(0, initialLeft - delta);
-              newRight = initialRight + Math.min(delta, initialLeft);
-            } else {
-              const delta = (Math.abs(distribution) / 100) * maxRight;
+              const delta = (distribution / 100) * maxRight;
               newRight = Math.max(0, initialRight - delta);
               newLeft = initialLeft + Math.min(delta, initialRight);
+            } else {
+              const delta = (Math.abs(distribution) / 100) * maxLeft;
+              newLeft = Math.max(0, initialLeft - delta);
+              newRight = initialRight + Math.min(delta, initialLeft);
             }
 
             point.leftWidth = Math.round(newLeft);

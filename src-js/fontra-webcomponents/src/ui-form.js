@@ -659,9 +659,10 @@ export class Form extends SimpleElement {
 
       rangeElement.onChangeCallback = (event) => {
         const value = event.value;
+        const changeMeta = event?.source ? { source: event.source } : undefined;
         if (event.dragBegin) {
           valueStream = new QueueIterator(5, true);
-          this._fieldChanging(fieldItem, value, valueStream);
+          this._fieldChanging(fieldItem, value, valueStream, changeMeta);
         }
 
         if (valueStream) {
@@ -677,7 +678,7 @@ export class Form extends SimpleElement {
             }
           }
         } else {
-          this._fieldChanging(fieldItem, value, undefined);
+          this._fieldChanging(fieldItem, value, undefined, changeMeta);
         }
       };
     }
@@ -761,15 +762,15 @@ export class Form extends SimpleElement {
     this.contentElement.addEventListener(eventName, handler, options);
   }
 
-  _fieldChanging(fieldItem, value, valueStream) {
+  _fieldChanging(fieldItem, value, valueStream, changeMeta) {
     if (valueStream) {
-      this._dispatchEvent("beginChange", { key: fieldItem.key });
+      this._dispatchEvent("beginChange", { key: fieldItem.key, meta: changeMeta });
     } else {
-      this._dispatchEvent("doChange", { key: fieldItem.key, value: value });
+      this._dispatchEvent("doChange", { key: fieldItem.key, value: value, meta: changeMeta });
     }
     const handlerName = "onFieldChange";
     if (this[handlerName] !== undefined) {
-      this[handlerName](fieldItem, value, valueStream);
+      this[handlerName](fieldItem, value, valueStream, changeMeta);
     }
   }
 

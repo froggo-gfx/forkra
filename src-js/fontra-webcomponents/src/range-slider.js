@@ -392,7 +392,8 @@ export class RangeSlider extends html.UnlitElement {
     }
 
     if (dispatch) {
-      this.onChangeCallback({ value });
+      const source = event.target === this.numberInput ? "number" : "range";
+      this.onChangeCallback({ value, source });
     }
 
     this.value = value;
@@ -444,7 +445,7 @@ export class RangeSlider extends html.UnlitElement {
               onchange: (event) => {
                 const value = this.getValueFromEventTarget(event);
                 this.value = value;
-                const callbackEvent = { value };
+                const callbackEvent = { value, source: "number" };
                 if (this.sawMouseDown) {
                   callbackEvent.dragBegin = true;
                 }
@@ -485,6 +486,7 @@ export class RangeSlider extends html.UnlitElement {
                 if (!this.sawChangeEvent) {
                   this.onChangeCallback({
                     value: this.getValueFromEventTarget(event),
+                    source: "range",
                     dragEnd: true,
                   });
                 }
@@ -513,6 +515,7 @@ export class RangeSlider extends html.UnlitElement {
                 if (!this.sawMouseUp) {
                   this.onChangeCallback({
                     value: this.getValueFromEventTarget(event),
+                    source: "range",
                     dragEnd: true,
                   });
                 }
@@ -522,7 +525,7 @@ export class RangeSlider extends html.UnlitElement {
               oninput: (event) => {
                 const value = this.getValueFromEventTarget(event);
                 this.value = value;
-                const callbackEvent = { value, isDragging: true };
+                const callbackEvent = { value, isDragging: true, source: "range" };
                 if (this.sawMouseDown) {
                   callbackEvent.dragBegin = true;
                 }
@@ -547,7 +550,7 @@ export class RangeSlider extends html.UnlitElement {
 
   reset() {
     this.value = this.defaultValue;
-    this.onChangeCallback({ value: this.value });
+    this.onChangeCallback({ value: this.value, source: "reset" });
   }
 }
 
