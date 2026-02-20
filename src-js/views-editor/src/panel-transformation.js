@@ -15,6 +15,8 @@ import {
 import { rectCenter, rectSize, unionRect } from "@fontra/core/rectangle.js";
 import {
   generateContoursFromSkeleton,
+  getSkeletonData,
+  setSkeletonData,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { Transform } from "@fontra/core/transform.js";
 import {
@@ -1083,7 +1085,7 @@ export default class TransformationPanel extends Panel {
         // Add skeleton points bounds if present
         if (hasSkeletonPoints) {
           const layer = glyph.layers[layerName];
-          const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+          const skeletonData = getSkeletonData(layer);
           if (skeletonData?.contours) {
             let skeletonBounds = null;
             for (const selKey of skeletonPointSelection) {
@@ -1142,7 +1144,7 @@ export default class TransformationPanel extends Panel {
         // Transform skeleton points
         if (hasSkeletonPoints) {
           const layer = glyph.layers[layerName];
-          const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+          const skeletonData = getSkeletonData(layer);
           if (skeletonData?.contours) {
             const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
 
@@ -1188,7 +1190,7 @@ export default class TransformationPanel extends Panel {
 
             // Record custom data change
             const customDataChange = recordChanges(layer, (l) => {
-              l.customData[SKELETON_CUSTOM_DATA_KEY] = newSkeletonData;
+              setSkeletonData(l, newSkeletonData);
             });
 
             editChanges.push(consolidateChanges(pathChange.change, changePath));
@@ -1359,7 +1361,7 @@ export default class TransformationPanel extends Panel {
       editLayerName && positionedGlyph?.varGlyph?.glyph?.layers
         ? positionedGlyph.varGlyph.glyph.layers[editLayerName]
         : null;
-    const skeletonData = skeletonLayer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(skeletonLayer);
 
     if (skeletonData?.contours && skeletonPoints?.size) {
       for (const selKey of skeletonPoints) {
@@ -1473,7 +1475,7 @@ export default class TransformationPanel extends Panel {
           skeletonPointMoves.length > 0 ||
           skeletonRibHandleMoves.length > 0
         ) {
-          const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+          const skeletonData = getSkeletonData(layer);
           if (skeletonData) {
             // Deep clone skeleton data once
             const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
@@ -1524,7 +1526,7 @@ export default class TransformationPanel extends Panel {
 
             // Record custom data change
             const customDataChange = recordChanges(layer, (l) => {
-              l.customData[SKELETON_CUSTOM_DATA_KEY] = newSkeletonData;
+              setSkeletonData(l, newSkeletonData);
             });
 
             // Add combined skeleton changes
@@ -1608,8 +1610,6 @@ class MovableObject {
   }
 }
 
-const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
-
 class SkeletonMovableObject {
   constructor(contourIdx, pointIdx, point) {
     this.contourIdx = contourIdx;
@@ -1629,7 +1629,7 @@ class SkeletonMovableObject {
 
   makeChangesForDelta(delta, layer, sceneController, layerName) {
     // layer is the full layer object with glyph and customData
-    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData) {
       return [{}, {}];
     }
@@ -1692,7 +1692,7 @@ class SkeletonMovableObject {
 
     // Record custom data change on layer
     const customDataChange = recordChanges(layer, (l) => {
-      l.customData[SKELETON_CUSTOM_DATA_KEY] = newSkeletonData;
+      setSkeletonData(l, newSkeletonData);
     });
 
     // Combine changes with proper prefixes
