@@ -32,7 +32,12 @@ import {
   lenientIsEqualSet,
   union,
 } from "@fontra/core/set-ops.js";
-import { generateContoursFromSkeleton } from "@fontra/core/skeleton-contour-generator.js";
+import {
+  clearSkeletonData,
+  generateContoursFromSkeleton,
+  getSkeletonData,
+  setSkeletonData,
+} from "@fontra/core/skeleton-contour-generator.js";
 import {
   arrowKeyDeltas,
   assert,
@@ -384,8 +389,6 @@ export class SceneController {
    * the contours are created and persisted.
    */
   async _initializeSkeletonContours() {
-    const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
-
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph?.varGlyph?.glyph?.layers) {
       return;
@@ -395,7 +398,7 @@ export class SceneController {
 
     // Check all layers for skeleton data that needs initialization
     for (const [layerName, layer] of Object.entries(varGlyph.glyph.layers)) {
-      const skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      const skeletonData = getSkeletonData(layer);
       if (!skeletonData?.contours?.length) {
         continue;
       }
@@ -431,7 +434,7 @@ export class SceneController {
         const editLayer = glyph.layers[layerName];
         if (!editLayer) return;
 
-        let skelData = editLayer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+        let skelData = getSkeletonData(editLayer);
         if (!skelData?.contours?.length) return;
 
         // Deep clone
@@ -493,7 +496,7 @@ export class SceneController {
 
         // Record custom data change
         const customDataChange = recordChanges(editLayer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skelData;
+          setSkeletonData(l, skelData);
         });
         changes.push(customDataChange.prefixed(["layers", layerName]));
 
@@ -1571,7 +1574,7 @@ export class SceneController {
     let sourceCustomData = null;
     for (const existingLayerName of Object.keys(varGlyph.glyph.layers)) {
       const existingLayer = varGlyph.glyph.layers[existingLayerName];
-      if (existingLayer?.customData?.["fontra.skeleton"]) {
+      if (getSkeletonData(existingLayer)) {
         // Deep clone the customData to avoid sharing references
         sourceCustomData = JSON.parse(JSON.stringify(existingLayer.customData));
         break;
@@ -1764,7 +1767,7 @@ export class SceneController {
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     const editLayerName = this.editingLayerNames?.[0];
     const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
-    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours) {
       return false;
     }
@@ -1787,7 +1790,7 @@ export class SceneController {
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     const editLayerName = this.editingLayerNames?.[0];
     const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
-    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours) {
       return false;
     }
@@ -1814,7 +1817,7 @@ export class SceneController {
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     const editLayerName = this.editingLayerNames?.[0];
     const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
-    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours) {
       return null;
     }
@@ -1872,7 +1875,7 @@ export class SceneController {
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     const editLayerName = this.editingLayerNames?.[0];
     const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
-    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours) {
       return null;
     }
@@ -1931,7 +1934,7 @@ export class SceneController {
   _hasSkeletonDataInGlyph() {
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[this.editingLayerNames?.[0]];
-    return !!layer?.customData?.["fontra.skeleton"];
+    return !!getSkeletonData(layer);
   }
 
   async doBreakSkeletonContour() {
@@ -1943,7 +1946,7 @@ export class SceneController {
     await this.editGlyph(async (sendIncrementalChange, glyph) => {
       const editLayerName = this.editingLayerNames?.[0];
       const layer = glyph.layers[editLayerName];
-      let skeletonData = layer?.customData?.["fontra.skeleton"];
+      let skeletonData = getSkeletonData(layer);
       if (!skeletonData?.contours) {
         return;
       }
@@ -2064,7 +2067,7 @@ export class SceneController {
 
       // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
       const customDataChange = recordChanges(layer, (l) => {
-        l.customData["fontra.skeleton"] = skeletonData;
+        setSkeletonData(l, skeletonData);
       });
       changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
@@ -2089,7 +2092,7 @@ export class SceneController {
     await this.editGlyph(async (sendIncrementalChange, glyph) => {
       const editLayerName = this.editingLayerNames?.[0];
       const layer = glyph.layers[editLayerName];
-      let skeletonData = layer?.customData?.["fontra.skeleton"];
+      let skeletonData = getSkeletonData(layer);
       if (!skeletonData?.contours) {
         return;
       }
@@ -2168,7 +2171,7 @@ export class SceneController {
       changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
       const customDataChange = recordChanges(layer, (l) => {
-        l.customData["fontra.skeleton"] = skeletonData;
+        setSkeletonData(l, skeletonData);
       });
       changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
@@ -2193,7 +2196,7 @@ export class SceneController {
     await this.editGlyph(async (sendIncrementalChange, glyph) => {
       const editLayerName = this.editingLayerNames?.[0];
       const layer = glyph.layers[editLayerName];
-      let skeletonData = layer?.customData?.["fontra.skeleton"];
+      let skeletonData = getSkeletonData(layer);
       if (!skeletonData?.contours) {
         return;
       }
@@ -2239,7 +2242,7 @@ export class SceneController {
       changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
       const customDataChange = recordChanges(layer, (l) => {
-        l.customData["fontra.skeleton"] = skeletonData;
+        setSkeletonData(l, skeletonData);
       });
       changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
@@ -2265,7 +2268,7 @@ export class SceneController {
     await this.editGlyph(async (sendIncrementalChange, glyph) => {
       const editLayerName = this.editingLayerNames?.[0];
       const layer = glyph.layers[editLayerName];
-      let skeletonData = layer?.customData?.["fontra.skeleton"];
+      let skeletonData = getSkeletonData(layer);
       if (!skeletonData?.contours) {
         return;
       }
@@ -2330,7 +2333,7 @@ export class SceneController {
       changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
       const customDataChange = recordChanges(layer, (l) => {
-        l.customData["fontra.skeleton"] = skeletonData;
+        setSkeletonData(l, skeletonData);
       });
       changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
@@ -2501,7 +2504,7 @@ export class SceneController {
 
       for (const editLayerName of this.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        let skeletonData = layer?.customData?.["fontra.skeleton"];
+        let skeletonData = getSkeletonData(layer);
         if (!skeletonData?.contours) continue;
 
         // Deep clone for manipulation
@@ -2555,9 +2558,9 @@ export class SceneController {
         // Update or remove skeleton data (no path changes needed!)
         const customDataChange = recordChanges(layer, (l) => {
           if (skeletonData.contours.length === 0) {
-            delete l.customData["fontra.skeleton"];
+            clearSkeletonData(l);
           } else {
-            l.customData["fontra.skeleton"] = skeletonData;
+            setSkeletonData(l, skeletonData);
           }
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));

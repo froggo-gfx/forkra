@@ -3,6 +3,7 @@
 
 // Import necessary functions from vector.js for the new functions
 import { intersect, distance, addVectors, subVectors, normalizeVector } from "./vector.js";
+import { getSkeletonData } from "./skeleton-contour-generator.js";
 
 // Color constants for distance-angle visualization
 export const DISTANCE_ANGLE_COLOR = "rgba(0, 153, 255, 0.75)"; // Similar to Glyphs plugin color
@@ -1122,7 +1123,7 @@ function drawRoundRect(context, x, y, width, height, radii) {
 function getSkeletonGeneratedContourIndexSet(positionedGlyph, model) {
   const layerName = model?.sceneSettings?.editLayerName || positionedGlyph?.glyph?.layerName;
   const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[layerName];
-  const indices = layer?.customData?.["fontra.skeleton"]?.generatedContourIndices || [];
+  const indices = getSkeletonData(layer)?.generatedContourIndices || [];
   return new Set(indices);
 }
 

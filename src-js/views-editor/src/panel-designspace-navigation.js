@@ -50,6 +50,7 @@ import { Accordion } from "@fontra/web-components/ui-accordion.js";
 import "@fontra/web-components/range-slider.js";
 
 import { NumberFormatter } from "@fontra/core/formatters.js";
+import { getSkeletonData } from "@fontra/core/skeleton-contour-generator.js";
 import Panel from "./panel.js";
 
 const FONTRA_STATUS_KEY = "fontra.development.status";
@@ -2106,7 +2107,7 @@ export default class DesignspaceNavigationPanel extends Panel {
         // Copy skeleton customData from an existing layer if present
         for (const existingLayerName of Object.keys(glyph.layers)) {
           const existingLayer = glyph.layers[existingLayerName];
-          if (existingLayer?.customData?.["fontra.skeleton"]) {
+          if (getSkeletonData(existingLayer)) {
             newLayer.customData = JSON.parse(JSON.stringify(existingLayer.customData));
             break;
           }

@@ -8,6 +8,8 @@ import { translate } from "@fontra/core/localization.js";
 import { connectContours, toggleSmooth } from "@fontra/core/path-functions.js";
 import {
   generateContoursFromSkeleton,
+  getSkeletonData,
+  setSkeletonData,
   calculateNormalAtSkeletonPoint,
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
@@ -86,7 +88,6 @@ import {
 const transformHandleMargin = 6;
 const transformHandleSize = 8;
 const rotationHandleSizeFactor = 1.2;
-const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
 const DEFAULT_SKELETON_WIDTH = 80;
 const REALTIME_MEASURE_ACTION = "action.realtime.measure";
 const REALTIME_MEASURE_DIRECT_ACTION = "action.realtime.measure-direct";
@@ -1268,7 +1269,7 @@ export class PointerTool extends BaseTool {
       }
 
       const layer = glyph.layers[editLayerName];
-      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      let skeletonData = getSkeletonData(layer);
       if (!skeletonData) return;
 
       // Deep clone for manipulation
@@ -1420,7 +1421,7 @@ export class PointerTool extends BaseTool {
 
       // 3. Save skeletonData to customData
       const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = workingSkeletonData;
+        setSkeletonData(l, workingSkeletonData);
       });
       allChanges.push(customDataChange.prefixed(["layers", editLayerName]).change);
 
@@ -2194,11 +2195,11 @@ export class PointerTool extends BaseTool {
       const layersData = {};
       for (const editLayerName of sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         layersData[editLayerName] = {
           layer,
-          skeletonData: JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])),
+          skeletonData: JSON.parse(JSON.stringify(getSkeletonData(layer))),
         };
       }
 
@@ -2389,7 +2390,7 @@ export class PointerTool extends BaseTool {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -2423,7 +2424,7 @@ export class PointerTool extends BaseTool {
     const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[
       sceneController.editingLayerNames?.[0]
     ];
-    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
 
     if (!skeletonData?.contours?.[contourIdx]) return;
 
@@ -2611,7 +2612,7 @@ export class PointerTool extends BaseTool {
       if (hasSkeletonSelection) {
         const editLayerName = sceneController.editingLayerNames?.[0];
         const layer = editLayerName ? glyph.layers[editLayerName] : null;
-        const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+        const skeletonData = getSkeletonData(layer);
 
         if (skeletonData) {
           skeletonEditState = {
@@ -2835,9 +2836,7 @@ export class PointerTool extends BaseTool {
 
           // Update customData
           const customDataChange = recordChanges(layer, (l) => {
-            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
-              JSON.stringify(workingSkeletonData)
-            );
+            setSkeletonData(l, JSON.parse(JSON.stringify(workingSkeletonData)));
           });
           const prefixedCustomDataChange = customDataChange.prefixed(["layers", editLayerName]);
           deepEditChanges.push(prefixedCustomDataChange.change);
@@ -2943,7 +2942,7 @@ export class PointerTool extends BaseTool {
     }
 
     const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours?.length) {
       return result;
     }
@@ -3007,7 +3006,7 @@ export class PointerTool extends BaseTool {
     }
 
     const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours?.length) {
       return result;
     }
@@ -3101,9 +3100,9 @@ export class PointerTool extends BaseTool {
       const layersData = {};
       for (const editLayerName of sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const skeletonData = getSkeletonData(layer);
         layersData[editLayerName] = {
           layer,
           original: JSON.parse(JSON.stringify(skeletonData)),
@@ -3303,7 +3302,7 @@ export class PointerTool extends BaseTool {
 
           // 2. THEN: Save skeletonData to customData
           const customDataChange = recordChanges(layer, (l) => {
-            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
           });
           allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
         }
@@ -3354,7 +3353,7 @@ export class PointerTool extends BaseTool {
     // Use first layer for structural checks
     const editLayerNameForCheck = sceneController.editingLayerNames?.[0];
     const layerForCheck = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerNameForCheck];
-    const skeletonDataForCheck = layerForCheck?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonDataForCheck = getSkeletonData(layerForCheck);
     if (!skeletonDataForCheck?.contours?.length) return;
 
     const defaultRibKey = `${ribHit.contourIndex}/${ribHit.pointIndex}/${ribHit.side}`;
@@ -3446,9 +3445,9 @@ export class PointerTool extends BaseTool {
       const layersData = {};
       for (const editLayerName of sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const skeletonData = getSkeletonData(layer);
         layersData[editLayerName] = {
           layer,
           original: JSON.parse(JSON.stringify(skeletonData)),
@@ -3745,7 +3744,7 @@ export class PointerTool extends BaseTool {
           allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
           const customDataChange = recordChanges(layer, (l) => {
-            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
           });
           allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
         }
@@ -4100,9 +4099,9 @@ export class PointerTool extends BaseTool {
 
       for (const editLayerName of sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const skeletonData = getSkeletonData(layer);
         layersData[editLayerName] = {
           layer,
           original: JSON.parse(JSON.stringify(skeletonData)),
@@ -4249,7 +4248,7 @@ export class PointerTool extends BaseTool {
           allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
           const customDataChange = recordChanges(layer, (l) => {
-            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
           });
           allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
         }
@@ -4297,9 +4296,9 @@ export class PointerTool extends BaseTool {
 
       for (const editLayerName of sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const skeletonData = getSkeletonData(layer);
         layersData[editLayerName] = {
           layer,
           original: JSON.parse(JSON.stringify(skeletonData)),
@@ -4486,7 +4485,7 @@ export class PointerTool extends BaseTool {
           allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
           const customDataChange = recordChanges(layer, (l) => {
-            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
           });
           allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
         }
@@ -4535,9 +4534,9 @@ export class PointerTool extends BaseTool {
 
       for (const editLayerName of sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const skeletonData = getSkeletonData(layer);
         layersData[editLayerName] = {
           layer,
           original: JSON.parse(JSON.stringify(skeletonData)),
@@ -4634,7 +4633,7 @@ export class PointerTool extends BaseTool {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = working;
+          setSkeletonData(l, working);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -4669,7 +4668,7 @@ export class PointerTool extends BaseTool {
     if (!varGlyph?.glyph?.layers?.[editLayerName]) return result;
 
     const layer = varGlyph.glyph.layers[editLayerName];
-    const skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours?.length) return result;
 
     for (const key of ribPointSelection) {
@@ -4759,10 +4758,8 @@ export class PointerTool extends BaseTool {
 
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     const editLayerName = sceneController.editingLayerNames?.[0];
-    const skeletonData =
-      positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName]?.customData?.[
-        SKELETON_CUSTOM_DATA_KEY
-      ];
+    const layerForRibs = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
+    const skeletonData = getSkeletonData(layerForRibs);
     if (!skeletonData?.contours?.length) return;
 
     const allTargetsEditable = ribPointsInfo.every((ribInfo) => ribInfo.isEditable);
@@ -4791,9 +4788,9 @@ export class PointerTool extends BaseTool {
       // Process each editing layer
       for (const editLayerName of sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const originalSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const originalSkeletonData = getSkeletonData(layer);
         const workingSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
 
         // Apply changes to each selected rib point
@@ -4915,7 +4912,7 @@ export class PointerTool extends BaseTool {
 
         // Record skeleton data changes (after path, so indices are correct)
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = workingSkeletonData;
+          setSkeletonData(l, workingSkeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -5117,9 +5114,9 @@ export class PointerTool extends BaseTool {
 
       for (const editLayerName of sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const skeletonData = getSkeletonData(layer);
         const original = JSON.parse(JSON.stringify(skeletonData));
         const contour = original.contours[editableHandle.skeletonContourIndex];
         const point = contour?.points?.[editableHandle.skeletonPointIndex];
@@ -5253,7 +5250,7 @@ export class PointerTool extends BaseTool {
           allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
           const customDataChange = recordChanges(layer, (l) => {
-            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
           });
           allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
         }
@@ -5318,9 +5315,9 @@ export class PointerTool extends BaseTool {
       const layersData = {};
       for (const editLayerName of sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const skeletonData = getSkeletonData(layer);
         layersData[editLayerName] = {
           layer,
           original: JSON.parse(JSON.stringify(skeletonData)),
@@ -5446,7 +5443,7 @@ export class PointerTool extends BaseTool {
 
           // 2. THEN: Save skeletonData to customData
           const customDataChange = recordChanges(layer, (l) => {
-            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
           });
           allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
         }
@@ -5488,9 +5485,9 @@ export class PointerTool extends BaseTool {
       // Apply changes to ALL editable layers
       for (const editLayerName of sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const skeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const skeletonData = getSkeletonData(layer);
         const working = JSON.parse(JSON.stringify(skeletonData));
         const contour = working.contours[contourIndex];
 
@@ -5540,7 +5537,7 @@ export class PointerTool extends BaseTool {
 
         // Update customData
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = working;
+          setSkeletonData(l, working);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -5588,9 +5585,9 @@ export class PointerTool extends BaseTool {
       // Apply changes to ALL editable layers
       for (const editLayerName of sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const layerSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const layerSkeletonData = getSkeletonData(layer);
         const working = JSON.parse(JSON.stringify(layerSkeletonData));
         const workingContour = working.contours[contourIndex];
 
@@ -5641,7 +5638,7 @@ export class PointerTool extends BaseTool {
 
         // Update customData
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = working;
+          setSkeletonData(l, working);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -5728,9 +5725,9 @@ export class PointerTool extends BaseTool {
 
       for (const editLayerName of sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const layerSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const layerSkeletonData = getSkeletonData(layer);
         const working = JSON.parse(JSON.stringify(layerSkeletonData));
         let changed = false;
 
@@ -5832,7 +5829,7 @@ export class PointerTool extends BaseTool {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = working;
+          setSkeletonData(l, working);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -5989,9 +5986,9 @@ export class PointerTool extends BaseTool {
       const layersData = {};
       for (const editLayerName of sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const layerSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const layerSkeletonData = getSkeletonData(layer);
         layersData[editLayerName] = {
           layer,
           original: JSON.parse(JSON.stringify(layerSkeletonData)),
@@ -6083,7 +6080,7 @@ export class PointerTool extends BaseTool {
           allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
           const customDataChange = recordChanges(layer, (l) => {
-            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(working));
+            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
           });
           allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
         }
@@ -6339,7 +6336,7 @@ export class PointerTool extends BaseTool {
       if (!editLayerName || !glyph.layers[editLayerName]) return;
 
       const layer = glyph.layers[editLayerName];
-      const originalSkeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      const originalSkeletonData = getSkeletonData(layer);
       if (!originalSkeletonData) return;
 
       const layerGlyph = layer.glyph;
@@ -6442,7 +6439,7 @@ export class PointerTool extends BaseTool {
         changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = workingSkeletonData;
+          setSkeletonData(l, workingSkeletonData);
         });
         changes.push(customDataChange.prefixed(["layers", editLayerName]));
 
@@ -6673,7 +6670,7 @@ export class PointerTool extends BaseTool {
     const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[
       this.sceneController.editingLayerNames?.[0]
     ];
-    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
 
     const bounds = getTransformSelectionBounds(
       glyph,
@@ -6744,7 +6741,7 @@ export class PointerTool extends BaseTool {
       return null;
     }
 
-    const skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours?.length) {
       return null;
     }
@@ -6873,7 +6870,7 @@ export class PointerTool extends BaseTool {
     if (!editLayerName) return null;
 
     const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours?.length) return null;
 
     const defaultWidth = skeletonData.defaultWidth ?? 100;
@@ -7379,7 +7376,7 @@ export class PointerTool extends BaseTool {
     if (!editLayerName) return null;
 
     const layer = varGlyph.glyph.layers[editLayerName];
-    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours?.length) return null;
 
     for (const contour of skeletonData.contours) {

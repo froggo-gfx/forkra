@@ -1,4 +1,5 @@
 import { intersect, distance, addVectors, subVectors, normalizeVector } from "./vector.js";
+import { getSkeletonData } from "./skeleton-contour-generator.js";
 
 /* Distance and Angle imports
 import {
@@ -34,7 +35,7 @@ function drawRoundRect(context, x, y, width, height, radii) {
 function getSkeletonGeneratedContourIndexSet(positionedGlyph, editLayerName) {
   const layerName = editLayerName || positionedGlyph?.glyph?.layerName;
   const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[layerName];
-  const indices = layer?.customData?.["fontra.skeleton"]?.generatedContourIndices || [];
+  const indices = getSkeletonData(layer)?.generatedContourIndices || [];
   return new Set(indices);
 }
 

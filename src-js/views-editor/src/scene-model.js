@@ -4,6 +4,7 @@ import {
 } from "@fontra/core/convex-hull.js";
 import {
   calculateNormalAtSkeletonPoint,
+  getSkeletonData,
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
@@ -749,7 +750,7 @@ export class SceneModel {
     }
 
     const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.generatedContourIndices?.length) {
       return false;
     }
@@ -793,7 +794,7 @@ export class SceneModel {
     }
 
     const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours?.length) {
       return null;
     }
@@ -897,7 +898,7 @@ export class SceneModel {
     }
 
     const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours?.length) {
       return null;
     }
@@ -1031,7 +1032,7 @@ export class SceneModel {
     }
 
     const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours?.length) {
       return new Set();
     }
@@ -1086,7 +1087,7 @@ export class SceneModel {
     }
 
     const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours?.length) {
       return new Set();
     }
@@ -1556,7 +1557,7 @@ export class SceneModel {
       this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
     if (editLayerName && positionedGlyph.varGlyph?.glyph?.layers) {
       const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-      const skeletonData = layer?.customData?.["fontra.skeleton"];
+      const skeletonData = getSkeletonData(layer);
       if (skeletonData?.contours?.length) {
         for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
           const contour = skeletonData.contours[contourIdx];

@@ -21,7 +21,11 @@ import { showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialog } from "@fontra/web-components/modal-dialog.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import { clearRepresentationCache } from "@fontra/core/representation-cache.js";
-import { moveSkeletonData } from "@fontra/core/skeleton-contour-generator.js";
+import {
+  getSkeletonData,
+  moveSkeletonData,
+  setSkeletonData,
+} from "@fontra/core/skeleton-contour-generator.js";
 import LetterspacerPanel from "./panel-letterspacer.js";
 import Panel from "./panel.js";
 
@@ -397,11 +401,11 @@ export default class SelectionInfoPanel extends Panel {
     for (const compo of layerGlyph.components) {
       compo.transformation.translateX += translationX;
     }
-    const skeletonData = layer?.customData?.["fontra.skeleton"];
+    const skeletonData = getSkeletonData(layer);
     if (skeletonData) {
       const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
       moveSkeletonData(newSkeletonData, translationX, 0);
-      layer.customData["fontra.skeleton"] = newSkeletonData;
+      setSkeletonData(layer, newSkeletonData);
     }
     layerGlyph.xAdvance += translationX;
   }

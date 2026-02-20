@@ -79,6 +79,7 @@ import { SkeletonPenTool } from "./edit-tools-skeleton.js";
 import {
   generateContoursFromSkeleton,
   getSkeletonData,
+  setSkeletonData,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { SceneController } from "./scene-controller.js";
 import { MIN_SIDEBAR_WIDTH, Sidebar } from "./sidebar.js";
@@ -1784,7 +1785,7 @@ export class EditorController extends ViewController {
       if (hasSkeletonSelection) {
         // Get skeleton data from the full layer object, not the glyph
         const fullLayer = varGlyph.layers[layerName];
-        const skeletonData = fullLayer?.customData?.["fontra.skeleton"];
+        const skeletonData = getSkeletonData(fullLayer);
         if (skeletonData?.contours?.length) {
           // Copy only selected contours
           const copiedContours = [];
@@ -2261,8 +2262,7 @@ export class EditorController extends ViewController {
         if (defaultSkeletonData?.contours?.length) {
           // Get the first editing layer name and access skeleton data directly from glyph.layers
           const firstEditLayerName = Object.keys(editLayerGlyphs)[0];
-          const existingSkeletonData =
-            glyph.layers[firstEditLayerName]?.customData?.["fontra.skeleton"];
+          const existingSkeletonData = getSkeletonData(glyph.layers[firstEditLayerName]);
           const startContourIndex = existingSkeletonData?.contours?.length || 0;
 
           for (let ci = 0; ci < defaultSkeletonData.contours.length; ci++) {
@@ -2305,7 +2305,7 @@ export class EditorController extends ViewController {
                 if (!layer.customData) {
                   layer.customData = {};
                 }
-                const existingSkeleton = layer.customData["fontra.skeleton"];
+                const existingSkeleton = getSkeletonData(layer);
                 if (existingSkeleton?.contours?.length) {
                   // Append to existing skeleton
                   existingSkeleton.contours.push(
@@ -2321,7 +2321,7 @@ export class EditorController extends ViewController {
                     ),
                     generatedContourIndices: [],
                   };
-                  layer.customData["fontra.skeleton"] = newSkeletonData;
+                  setSkeletonData(layer, newSkeletonData);
                   // Generate outline
                   this._regenerateSkeletonOutline(layer, newSkeletonData, layerGlyph);
                 }
@@ -2419,12 +2419,14 @@ export class EditorController extends ViewController {
       guideline: guidelineSelection,
       backgroundImage: backgroundImageSelection,
       skeletonPoint: skeletonPointSelection,
+      skeletonSegment: skeletonSegmentSelection,
       //fontGuideline: fontGuidelineSelection,
     } = parseSelection(this.sceneController.selection);
 
     const hasRegularSelection = pointSelection?.length || componentSelection?.length ||
       anchorSelection?.length || guidelineSelection?.length || backgroundImageSelection;
-    const hasSkeletonSelection = skeletonPointSelection?.size > 0;
+    const hasSkeletonSelection =
+      skeletonPointSelection?.size > 0 || skeletonSegmentSelection?.size > 0;
 
     if (!hasRegularSelection && !hasSkeletonSelection) {
       return;
@@ -2480,14 +2482,37 @@ export class EditorController extends ViewController {
 
       // 2. Delete skeleton points AFTER regular (skeleton regen shifts path indices)
       if (hasSkeletonSelection) {
-        const SKELETON_KEY = "fontra.skeleton";
         const editLayerName = this.sceneController.editingLayerNames?.[0];
         const layer = editLayerName ? glyph.layers[editLayerName] : null;
-        let skeletonData = layer?.customData?.[SKELETON_KEY];
+        let skeletonData = getSkeletonData(layer);
 
         if (skeletonData) {
           skeletonData = JSON.parse(JSON.stringify(skeletonData));
-          const modified = deleteSkeletonPoints(skeletonData, skeletonPointSelection);
+          const effectiveSkeletonPointSelection = new Set(skeletonPointSelection || []);
+
+          // Support deleting full skeleton contours via selected skeleton segments.
+          if (skeletonSegmentSelection?.size) {
+            const contourIndices = new Set();
+            for (const selKey of skeletonSegmentSelection) {
+              const [contourIdx] = selKey.split("/").map(Number);
+              if (Number.isInteger(contourIdx)) {
+                contourIndices.add(contourIdx);
+              }
+            }
+            for (const contourIdx of contourIndices) {
+              const contour = skeletonData.contours?.[contourIdx];
+              if (!contour?.points?.length) {
+                continue;
+              }
+              for (let pointIdx = 0; pointIdx < contour.points.length; pointIdx++) {
+                if (!contour.points[pointIdx].type) {
+                  effectiveSkeletonPointSelection.add(`${contourIdx}/${pointIdx}`);
+                }
+              }
+            }
+          }
+
+          const modified = deleteSkeletonPoints(skeletonData, effectiveSkeletonPointSelection);
 
           if (modified) {
             const staticGlyph = layer.glyph;
@@ -2514,7 +2539,7 @@ export class EditorController extends ViewController {
 
             // Save updated skeletonData
             const customDataChange = recordChanges(layer, (l) => {
-              l.customData[SKELETON_KEY] = skeletonData;
+              setSkeletonData(l, skeletonData);
             });
             allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
           }
@@ -2540,8 +2565,6 @@ export class EditorController extends ViewController {
    * Delete selected skeleton points.
    */
   async _deleteSkeletonPoints(skeletonPointSelection) {
-    const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
-
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const editLayerName = this.sceneController.editingLayerNames?.[0];
       if (!editLayerName || !glyph.layers[editLayerName]) {
@@ -2549,7 +2572,7 @@ export class EditorController extends ViewController {
       }
 
       const layer = glyph.layers[editLayerName];
-      let skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      let skeletonData = getSkeletonData(layer);
       if (!skeletonData) return;
 
       // Deep clone for manipulation
@@ -2591,7 +2614,7 @@ export class EditorController extends ViewController {
 
       // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
       const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        setSkeletonData(l, skeletonData);
       });
       changes.push(customDataChange.prefixed(["layers", editLayerName]));
 

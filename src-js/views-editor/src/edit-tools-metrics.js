@@ -21,9 +21,11 @@ import {
   registerVisualizationLayerDefinition,
   strokeLine,
 } from "./visualization-layer-definitions.js";
-import { moveSkeletonData } from "@fontra/core/skeleton-contour-generator.js";
-
-const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
+import {
+  getSkeletonData,
+  moveSkeletonData,
+  setSkeletonData,
+} from "@fontra/core/skeleton-contour-generator.js";
 
 export class MetricsTool {
   identifier = "metrics-tool";
@@ -700,13 +702,12 @@ export class SidebearingEditContext {
       font.glyphs[glyphName] = varGlyph;
       const layer = varGlyph.layers[layerName];
       const layerGlyph = layer.glyph;
+      const layerSkeletonData = getSkeletonData(layer);
       initialValues[glyphName] = {
         xAdvance: layerGlyph.xAdvance,
         reference: layerGlyph.getMoveReference(),
         // Clone skeleton for restoration during continuous editing
-        skeletonData: layer?.customData?.["fontra.skeleton"]
-          ? JSON.parse(JSON.stringify(layer.customData["fontra.skeleton"]))
-          : null,
+        skeletonData: layerSkeletonData ? JSON.parse(JSON.stringify(layerSkeletonData)) : null,
       };
     }
 
@@ -745,7 +746,7 @@ export class SidebearingEditContext {
                   JSON.stringify(initialValues[glyphName].skeletonData)
                 );
                 moveSkeletonData(newSkeletonData, -clampedDeltaX, 0);
-                layer.customData["fontra.skeleton"] = newSkeletonData;
+                setSkeletonData(layer, newSkeletonData);
               }
               break;
             }
@@ -781,7 +782,7 @@ export class SidebearingEditContext {
                   JSON.stringify(initialValues[glyphName].skeletonData)
                 );
                 moveSkeletonData(newSkeletonData, clampedDeltaX / 2, 0);
-                layer.customData["fontra.skeleton"] = newSkeletonData;
+                setSkeletonData(layer, newSkeletonData);
               }
               break;
             }

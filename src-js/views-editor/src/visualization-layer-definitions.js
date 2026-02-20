@@ -3,6 +3,7 @@ import { translate } from "@fontra/core/localization.js";
 import { rectToPoints } from "@fontra/core/rectangle.js";
 import {
   calculateNormalAtSkeletonPoint,
+  getSkeletonData,
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { difference, isSuperset, union } from "@fontra/core/set-ops.js";
@@ -826,7 +827,7 @@ registerVisualizationLayerDefinition({
       const editLayerName =
         model.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
       const layer = positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName];
-      const skeletonData = layer?.customData?.["fontra.skeleton"];
+      const skeletonData = getSkeletonData(layer);
       const point = skeletonData?.contours?.[skeletonPoint.contourIdx]?.points?.[skeletonPoint.pointIdx];
       if (point) {
         ({ x, y } = point);
@@ -869,7 +870,7 @@ function getCurrentSkeletonRibPointPosition(positionedGlyph, model, ribPointRef)
   const editLayerName =
     model.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
   const layer = positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName];
-  const skeletonData = layer?.customData?.["fontra.skeleton"];
+  const skeletonData = getSkeletonData(layer);
   const contour = skeletonData?.contours?.[contourIdx];
   const point = contour?.points?.[pointIdx];
   if (!contour || !point || point.type) {
@@ -2728,7 +2729,7 @@ function getTextVerticalCenter(context, text) {
 function getSkeletonGeneratedContourIndexSet(positionedGlyph, model) {
   const layerName = model?.sceneSettings?.editLayerName || positionedGlyph?.glyph?.layerName;
   const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[layerName];
-  const indices = layer?.customData?.["fontra.skeleton"]?.generatedContourIndices || [];
+  const indices = getSkeletonData(layer)?.generatedContourIndices || [];
   return new Set(indices);
 }
 

@@ -12,11 +12,11 @@ import {
   createSkeletonContour,
   calculateNormalAtSkeletonPoint,
   getPointHalfWidth,
+  setSkeletonData,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { getGlyphInfoFromGlyphName } from "@fontra/core/glyph-data.js";
 import { BaseTool } from "./edit-tools-base.js";
 
-const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
 const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
 const SKELETON_WIDTH_LOWERCASE_BASE_KEY = "fontra.skeleton.lowercaseBase";
 const SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY = "fontra.skeleton.capitalDistribution";
@@ -149,7 +149,7 @@ export class SkeletonPenTool extends BaseTool {
     const layer = varGlyph.glyph.layers[editLayerName];
     if (!layer) return null;
 
-    return layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    return getSkeletonData(layer);
   }
 
   /**
@@ -304,8 +304,8 @@ export class SkeletonPenTool extends BaseTool {
    * @returns {Object} The skeleton data (deep cloned)
    */
   _ensureSkeletonDataForLayer(layer, primarySkeletonData) {
-    if (layer.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
-      return JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+    if (getSkeletonData(layer)) {
+      return JSON.parse(JSON.stringify(getSkeletonData(layer)));
     }
     // Copy skeleton structure from primary source
     return JSON.parse(JSON.stringify(primarySkeletonData));
@@ -488,7 +488,7 @@ export class SkeletonPenTool extends BaseTool {
       return null;
     }
 
-    const skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours?.length) {
       return null;
     }
@@ -537,7 +537,7 @@ export class SkeletonPenTool extends BaseTool {
       return null;
     }
 
-    const skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours?.length) {
       return null;
     }
@@ -650,7 +650,7 @@ export class SkeletonPenTool extends BaseTool {
       return null;
     }
 
-    const skeletonData = layer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData?.contours?.length) {
       return null;
     }
@@ -863,8 +863,8 @@ export class SkeletonPenTool extends BaseTool {
       let primarySkeletonData = null;
       for (const layerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[layerName];
-        if (layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
-          primarySkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        if (getSkeletonData(layer)) {
+          primarySkeletonData = getSkeletonData(layer);
           break;
         }
       }
@@ -938,7 +938,7 @@ export class SkeletonPenTool extends BaseTool {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -976,8 +976,8 @@ export class SkeletonPenTool extends BaseTool {
       let primarySkeletonData = null;
       for (const layerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[layerName];
-        if (layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
-          primarySkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        if (getSkeletonData(layer)) {
+          primarySkeletonData = getSkeletonData(layer);
           break;
         }
       }
@@ -1144,7 +1144,7 @@ export class SkeletonPenTool extends BaseTool {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -1186,7 +1186,7 @@ export class SkeletonPenTool extends BaseTool {
       }
 
       const firstLayer = glyph.layers[firstLayerName];
-      const firstSkeletonData = firstLayer.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      const firstSkeletonData = getSkeletonData(firstLayer);
 
       // Determine which contour to add to based on selection
       const { skeletonPoint: selectedSkeletonPoints } = parseSelection(
@@ -1224,8 +1224,8 @@ export class SkeletonPenTool extends BaseTool {
         if (!layer) continue;
 
         let skeletonData;
-        if (layer.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
-          skeletonData = JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+        if (getSkeletonData(layer)) {
+          skeletonData = JSON.parse(JSON.stringify(getSkeletonData(layer)));
         } else if (firstSkeletonData) {
           // Copy skeleton structure from primary layer for multi-source editing
           skeletonData = JSON.parse(JSON.stringify(firstSkeletonData));
@@ -1290,10 +1290,7 @@ export class SkeletonPenTool extends BaseTool {
 
           // 2. Record customData change (save skeletonData)
           const customDataChange = recordChanges(layer, (l) => {
-            if (!l.customData) {
-              l.customData = {};
-            }
-            l.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(JSON.stringify(skeletonData));
+            setSkeletonData(l, JSON.parse(JSON.stringify(skeletonData)));
           });
           allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
         }
@@ -1339,8 +1336,8 @@ export class SkeletonPenTool extends BaseTool {
       let primarySkeletonData = null;
       for (const layerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[layerName];
-        if (layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) {
-          primarySkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        if (getSkeletonData(layer)) {
+          primarySkeletonData = getSkeletonData(layer);
           break;
         }
       }
@@ -1369,7 +1366,7 @@ export class SkeletonPenTool extends BaseTool {
 
         // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }

@@ -2,6 +2,12 @@ import { Bezier } from "bezier-js";
 import * as vector from "./vector.js";
 import { VarPackedPath } from "./var-path.js";
 import { fitCubic, chordLengthParameterize, computeMaxError } from "./fit-cubic.js";
+import {
+  deleteFontraInternalSection,
+  getFontraInternalSection,
+  setFontraInternalSection,
+} from "./fontra-internal-data.js";
+import { FONTRA_INTERNAL_KEY, FONTRA_INTERNAL_SECTIONS } from "./fontra-internal-schema.js";
 
 const DEFAULT_WIDTH = 80;
 const DEFAULT_CAP_RADIUS_RATIO = 1 / 8;
@@ -3460,8 +3466,39 @@ export function outlineContourToPackedPath(outlineContour) {
  * Get skeleton data from layer customData.
  */
 export function getSkeletonData(layerOrCustomData) {
+  if (layerOrCustomData?.customData) {
+    const internalSkeleton = getFontraInternalSection(
+      layerOrCustomData,
+      FONTRA_INTERNAL_SECTIONS.SKELETON
+    );
+    if (internalSkeleton) {
+      return internalSkeleton;
+    }
+  }
   const customData = layerOrCustomData?.customData ?? layerOrCustomData;
-  return customData?.["fontra.skeleton"] ?? null;
+  const internalSkeleton =
+    customData?.[FONTRA_INTERNAL_KEY]?.[FONTRA_INTERNAL_SECTIONS.SKELETON];
+  if (internalSkeleton) {
+    return internalSkeleton;
+  }
+  return null;
+}
+
+/**
+ * Store skeleton data in the internal customData section.
+ */
+export function setSkeletonData(layer, skeletonData) {
+  if (!layer) {
+    return;
+  }
+  setFontraInternalSection(layer, FONTRA_INTERNAL_SECTIONS.SKELETON, skeletonData);
+}
+
+export function clearSkeletonData(layer) {
+  if (!layer) {
+    return;
+  }
+  deleteFontraInternalSection(layer, FONTRA_INTERNAL_SECTIONS.SKELETON);
 }
 
 function isPlainObject(value) {

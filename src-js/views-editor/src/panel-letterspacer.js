@@ -1,7 +1,11 @@
 import { PathHitTester } from "@fontra/core/path-hit-tester.js";
 import { getGlyphInfoFromGlyphName } from "@fontra/core/glyph-data.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
-import { moveSkeletonData } from "@fontra/core/skeleton-contour-generator.js";
+import {
+  getSkeletonData,
+  moveSkeletonData,
+  setSkeletonData,
+} from "@fontra/core/skeleton-contour-generator.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import { Form } from "@fontra/web-components/ui-form.js";
@@ -638,11 +642,11 @@ export default class LetterspacerPanel extends Panel {
             const deltaLSB = roundedLSB - currentLSB;
             this.shiftPath(layerGlyph.path, deltaLSB);
             const layer = glyph.layers?.[layerName];
-            const skeletonData = layer?.customData?.["fontra.skeleton"];
+            const skeletonData = getSkeletonData(layer);
             if (skeletonData && deltaLSB) {
               const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
               moveSkeletonData(newSkeletonData, deltaLSB, 0);
-              layer.customData["fontra.skeleton"] = newSkeletonData;
+              setSkeletonData(layer, newSkeletonData);
             }
           }
 
