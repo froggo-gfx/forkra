@@ -51,6 +51,11 @@ import "@fontra/web-components/range-slider.js";
 
 import { NumberFormatter } from "@fontra/core/formatters.js";
 import {
+  getFontraInternalSection,
+  setFontraInternalSection,
+} from "@fontra/core/fontra-internal-data.js";
+import { FONTRA_INTERNAL_SECTIONS } from "@fontra/core/fontra-internal-schema.js";
+import {
   getSkeletonData,
   setSkeletonData,
 } from "@fontra/core/skeleton-contour-generator.js";
@@ -80,11 +85,15 @@ const SPEEDPUNK_SHARPNESS_MAX = 4;
 const SPEEDPUNK_OPACITY_DEFAULT = 0.5;
 const SPEEDPUNK_OPACITY_MIN = 0;
 const SPEEDPUNK_OPACITY_MAX = 1;
-const COARSE_GRID_FONT_CUSTOM_DATA_KEY = "fontra.coarseGrid.settings";
 const COARSE_GRID_DEFAULT_BASE = 5;
 const COARSE_GRID_DEFAULT_INCREMENT = 5;
 const COARSE_GRID_DEFAULT_STEP_COUNT = 8;
 const COARSE_GRID_DEFAULT_SPACING = 10;
+const COARSE_GRID_DEFAULT_VALUES = [...range(
+  COARSE_GRID_DEFAULT_BASE,
+  COARSE_GRID_DEFAULT_BASE + COARSE_GRID_DEFAULT_INCREMENT * COARSE_GRID_DEFAULT_STEP_COUNT,
+  COARSE_GRID_DEFAULT_INCREMENT
+)];
 
 export default class DesignspaceNavigationPanel extends Panel {
   identifier = "designspace-navigation";
@@ -498,6 +507,62 @@ export default class DesignspaceNavigationPanel extends Panel {
     return this.accordion.querySelector("#coarse-grid-increment-input");
   }
 
+  _isRecord(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+  }
+
+  _getEditorViewSettingsFromEntity(entity = this.fontController) {
+    const editorView = getFontraInternalSection(entity, FONTRA_INTERNAL_SECTIONS.EDITOR_VIEW);
+    return this._isRecord(editorView) ? editorView : {};
+  }
+
+  _setEditorViewSettingsOnEntity(entity, sectionValues) {
+    const nextEditorView = {
+      ...this._getEditorViewSettingsFromEntity(entity),
+      ...sectionValues,
+    };
+    setFontraInternalSection(entity, FONTRA_INTERNAL_SECTIONS.EDITOR_VIEW, nextEditorView);
+  }
+
+  _getFontSpeedPunkSettingsFromEntity(entity = this.fontController) {
+    return this._getEditorViewSettingsFromEntity(entity)?.speedpunk;
+  }
+
+  _getFontCoarseGridSettingsFromEntity(entity = this.fontController) {
+    return this._getEditorViewSettingsFromEntity(entity)?.coarseGrid;
+  }
+
+  _normalizeStoredCoarseGridValues(values) {
+    const normalized = Array.isArray(values)
+      ? values
+          .map((value) => Math.round(Number(value)))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      : [];
+    if (normalized.length !== COARSE_GRID_DEFAULT_STEP_COUNT) {
+      return [...COARSE_GRID_DEFAULT_VALUES];
+    }
+    const increment = normalized[1] - normalized[0];
+    if (!Number.isFinite(increment) || increment < 1) {
+      return [...COARSE_GRID_DEFAULT_VALUES];
+    }
+    for (let i = 2; i < normalized.length; i++) {
+      if (normalized[i] !== normalized[i - 1] + increment) {
+        return [...COARSE_GRID_DEFAULT_VALUES];
+      }
+    }
+    return normalized;
+  }
+
+  _deriveCoarseGridPreset(values) {
+    const normalizedValues = this._normalizeStoredCoarseGridValues(values);
+    const base = this._normalizeCoarseGridBase(normalizedValues[0]);
+    const increment = this._normalizeCoarseGridIncrement(
+      normalizedValues[1] - normalizedValues[0]
+    );
+    const custom = !objectsEqual(normalizedValues, COARSE_GRID_DEFAULT_VALUES);
+    return { values: normalizedValues, base, increment, custom };
+  }
+
   _normalizeCoarseGridBase(value) {
     if (!Number.isFinite(value)) {
       return COARSE_GRID_DEFAULT_BASE;
@@ -514,12 +579,7 @@ export default class DesignspaceNavigationPanel extends Panel {
 
   _buildCoarseGridValues(settings = this._coarseGridSettings) {
     if (!settings.custom) {
-      return [...range(
-        COARSE_GRID_DEFAULT_BASE,
-        COARSE_GRID_DEFAULT_BASE +
-          COARSE_GRID_DEFAULT_INCREMENT * COARSE_GRID_DEFAULT_STEP_COUNT,
-        COARSE_GRID_DEFAULT_INCREMENT
-      )];
+      return [...COARSE_GRID_DEFAULT_VALUES];
     }
 
     const values = [];
@@ -549,20 +609,17 @@ export default class DesignspaceNavigationPanel extends Panel {
     return closest;
   }
 
-  _normalizeCoarseGridSettings(rawSettings = this.fontController?.customData?.[
-    COARSE_GRID_FONT_CUSTOM_DATA_KEY
-  ]) {
-    const custom = !!rawSettings?.custom;
-    const base = this._normalizeCoarseGridBase(Number(rawSettings?.base));
-    const increment = this._normalizeCoarseGridIncrement(Number(rawSettings?.increment));
+  _normalizeCoarseGridSettings(rawSettings = this._getFontCoarseGridSettingsFromEntity()) {
+    const { values, custom, base, increment } = this._deriveCoarseGridPreset(
+      rawSettings?.values
+    );
     const settings = {
       custom,
       base,
       increment,
       spacing: COARSE_GRID_DEFAULT_SPACING,
     };
-    const values = this._buildCoarseGridValues(settings);
-    settings.spacing = this._snapCoarseGridSpacing(rawSettings?.spacing, values);
+    settings.spacing = this._snapCoarseGridSpacing(rawSettings?.defaultSpacing, values);
     return settings;
   }
 
@@ -622,13 +679,17 @@ export default class DesignspaceNavigationPanel extends Panel {
     if (this.fontController.readOnly) {
       return;
     }
-    const nextSettings = {
+    const normalizedPreset = {
       custom: !!this._coarseGridSettings.custom,
       base: this._normalizeCoarseGridBase(this._coarseGridSettings.base),
       increment: this._normalizeCoarseGridIncrement(this._coarseGridSettings.increment),
-      spacing: this._coarseGridSettings.spacing,
     };
-    const currentSettings = this.fontController.customData?.[COARSE_GRID_FONT_CUSTOM_DATA_KEY];
+    const values = this._buildCoarseGridValues(normalizedPreset);
+    const nextSettings = {
+      values,
+      defaultSpacing: this._snapCoarseGridSpacing(this._coarseGridSettings.spacing, values),
+    };
+    const currentSettings = this._getFontCoarseGridSettingsFromEntity();
     if (objectsEqual(currentSettings, nextSettings)) {
       return;
     }
@@ -636,10 +697,7 @@ export default class DesignspaceNavigationPanel extends Panel {
       "edit coarse grid settings",
       "customData",
       (root) => {
-        if (!root.customData) {
-          root.customData = {};
-        }
-        root.customData[COARSE_GRID_FONT_CUSTOM_DATA_KEY] = { ...nextSettings };
+        this._setEditorViewSettingsOnEntity(root, { coarseGrid: nextSettings });
       },
       this
     );
@@ -793,9 +851,56 @@ export default class DesignspaceNavigationPanel extends Panel {
     input.value = String(normalized);
   }
 
+  _getNormalizedSpeedPunkSettings(rawSettings = this._getFontSpeedPunkSettingsFromEntity()) {
+    return {
+      peakHeightUpm: this._normalizeSpeedPunkPeakHeightUpm(rawSettings?.peakHeightUpm),
+      sharpness: this._normalizeSpeedPunkSharpness(rawSettings?.sharpness),
+      opacity: this._normalizeSpeedPunkOpacity(rawSettings?.opacity),
+    };
+  }
+
+  _applySpeedPunkSettingsFromFont() {
+    const settings = this._getNormalizedSpeedPunkSettings();
+    this.sceneSettingsController.setItem("speedPunkPeakHeightUpm", settings.peakHeightUpm, {
+      senderID: this,
+    });
+    this.sceneSettingsController.setItem("speedPunkSharpness", settings.sharpness, {
+      senderID: this,
+    });
+    this.sceneSettingsController.setItem("speedPunkOpacity", settings.opacity, {
+      senderID: this,
+    });
+  }
+
+  async _persistSpeedPunkSettings() {
+    if (this.fontController.readOnly) {
+      return;
+    }
+    const nextSettings = {
+      peakHeightUpm: this._normalizeSpeedPunkPeakHeightUpm(
+        this.sceneSettings.speedPunkPeakHeightUpm
+      ),
+      sharpness: this._normalizeSpeedPunkSharpness(this.sceneSettings.speedPunkSharpness),
+      opacity: this._normalizeSpeedPunkOpacity(this.sceneSettings.speedPunkOpacity),
+    };
+    const currentSettings = this._getFontSpeedPunkSettingsFromEntity();
+    if (objectsEqual(currentSettings, nextSettings)) {
+      return;
+    }
+    await this.fontController.performEdit(
+      "edit speedpunk settings",
+      "customData",
+      (root) => {
+        this._setEditorViewSettingsOnEntity(root, { speedpunk: nextSettings });
+      },
+      this
+    );
+  }
+
   setup() {
     this._setFontLocationValues();
     this.glyphAxesElement.values = this.sceneSettings.glyphLocation;
+    this._applySpeedPunkSettingsFromFont();
     this._updateSpeedPunkPeakHeightInput();
     this._updateSpeedPunkSharpnessInput();
     this._updateSpeedPunkOpacityInput();
@@ -821,6 +926,7 @@ export default class DesignspaceNavigationPanel extends Panel {
         senderID: this,
       });
       this._updateSpeedPunkPeakHeightInput(normalizedValue);
+      void this._persistSpeedPunkSettings();
     });
 
     this.sceneSettingsController.addKeyListener("speedPunkPeakHeightUpm", (event) => {
@@ -845,6 +951,7 @@ export default class DesignspaceNavigationPanel extends Panel {
         senderID: this,
       });
       this._updateSpeedPunkSharpnessInput(normalizedValue);
+      void this._persistSpeedPunkSettings();
     });
 
     this.sceneSettingsController.addKeyListener("speedPunkSharpness", (event) => {
@@ -869,6 +976,7 @@ export default class DesignspaceNavigationPanel extends Panel {
         senderID: this,
       });
       this._updateSpeedPunkOpacityInput(normalizedValue);
+      void this._persistSpeedPunkSettings();
     });
 
     this.sceneSettingsController.addKeyListener("speedPunkOpacity", (event) => {
@@ -1120,6 +1228,10 @@ export default class DesignspaceNavigationPanel extends Panel {
         // the statusFieldDefinitions may have changed, better update the col defs, too
         this.sourcesList.columnDescriptions = this._setupSourceListColumnDescriptions();
         this._updateSources();
+        this._applySpeedPunkSettingsFromFont();
+        this._updateSpeedPunkPeakHeightInput();
+        this._updateSpeedPunkSharpnessInput();
+        this._updateSpeedPunkOpacityInput();
         this._coarseGridSettings = this._normalizeCoarseGridSettings();
         this._syncCoarseGridControls();
       }

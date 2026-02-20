@@ -344,8 +344,6 @@ setFontraInternalSection(glyph, "letterspacer", { referenceGlyphName: "H" });
 ---
 
 
-## ОСТАЛОСЬ СДЕЛАТЬ
-
 ## Шаг 10. Перенести Speedpunk и coarse grid в `font.internal.editorView`
 **Проблема (общее):** настройки размазаны между `window.*`, scene и persistent storage.  
 **Аспект:** единая каноника редакторных настроек на уровне файла.
@@ -372,6 +370,9 @@ setFontraInternalSection(fontInfo, "editorView", {
 2. Пустой массив `coarseGrid.values`.
 
 ---
+
+
+## ОСТАЛОСЬ СДЕЛАТЬ
 
 ## Шаг 11. Разделить UI: OpenType vs Fontra Internal
 **Проблема (общее):** internal-поля ошибочно выглядят как OpenType settings.  
@@ -485,5 +486,6 @@ for (const file of fontraFiles) {
 2. Автоматизированные тесты.
 3. Изменение базовой модели контуров/точек Fontra.
 4. Любая миграция данных, не относящаяся к 4 подсистемам форка.
+
 
 

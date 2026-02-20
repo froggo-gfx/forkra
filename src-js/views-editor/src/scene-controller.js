@@ -75,18 +75,6 @@ export class SceneController {
     this.setupSceneSettings();
     //// grid
     this.sceneSettingsController.setItem("coarseGridSpacing", 10);
-    this.sceneSettingsController.setItem(
-      "speedPunkPeakHeightUpm",
-      this.applicationSettings.speedPunkPeakHeightUpm ?? 24
-    );
-    this.sceneSettingsController.setItem(
-      "speedPunkSharpness",
-      this.applicationSettings.speedPunkSharpness ?? 1
-    );
-    this.sceneSettingsController.setItem(
-      "speedPunkOpacity",
-      this.applicationSettings.speedPunkOpacity ?? 0.5
-    );
     this.sceneSettings = this.sceneSettingsController.model;
     this.visualizationLayersSettings = visualizationLayersSettings;
 
@@ -547,44 +535,14 @@ export class SceneController {
 
     this.sceneSettingsController.addKeyListener("speedPunkPeakHeightUpm", (event) => {
       this.canvasController.requestUpdate();
-      if (this.applicationSettings.speedPunkPeakHeightUpm !== event.newValue) {
-        this.applicationSettings.speedPunkPeakHeightUpm = event.newValue;
-      }
     });
-
-    this.applicationSettingsController.addKeyListener(
-      "speedPunkPeakHeightUpm",
-      (event) => {
-        this.sceneSettingsController.setItem("speedPunkPeakHeightUpm", event.newValue, {
-          senderID: this,
-        });
-      }
-    );
 
     this.sceneSettingsController.addKeyListener("speedPunkSharpness", (event) => {
       this.canvasController.requestUpdate();
-      if (this.applicationSettings.speedPunkSharpness !== event.newValue) {
-        this.applicationSettings.speedPunkSharpness = event.newValue;
-      }
-    });
-
-    this.applicationSettingsController.addKeyListener("speedPunkSharpness", (event) => {
-      this.sceneSettingsController.setItem("speedPunkSharpness", event.newValue, {
-        senderID: this,
-      });
     });
 
     this.sceneSettingsController.addKeyListener("speedPunkOpacity", (event) => {
       this.canvasController.requestUpdate();
-      if (this.applicationSettings.speedPunkOpacity !== event.newValue) {
-        this.applicationSettings.speedPunkOpacity = event.newValue;
-      }
-    });
-
-    this.applicationSettingsController.addKeyListener("speedPunkOpacity", (event) => {
-      this.sceneSettingsController.setItem("speedPunkOpacity", event.newValue, {
-        senderID: this,
-      });
     });
 
     this.sceneSettingsController.addKeyListener("selectedGlyph", (event) => {
