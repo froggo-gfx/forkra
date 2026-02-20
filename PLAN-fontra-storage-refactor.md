@@ -258,8 +258,6 @@ export function regenerateSkeletonContours(staticGlyph, skeletonCanonical) {
 ---
 
 
-## ОСТАЛОСЬ СДЕЛАТЬ
-
 ## Шаг 07. Убрать копирование всего `layer.customData` при создании source/layer
 **Проблема (общее):** перетаскивается мусорная метадата.  
 **Аспект:** переносим только нужную канонику.
@@ -285,6 +283,9 @@ if (srcSkeleton) {
 2. Частично заполненный `fontra.internal`.
 
 ---
+
+
+## ОСТАЛОСЬ СДЕЛАТЬ
 
 ## Шаг 08. Перенести source-level width/cap defaults и profiles
 **Проблема (общее):** параметры распылены по множеству legacy-ключей.  

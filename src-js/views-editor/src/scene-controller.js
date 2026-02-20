@@ -1562,13 +1562,13 @@ export class SceneController {
 
     const layerName = sourceIdentifier;
 
-    // Find skeleton customData from an existing source layer to copy
-    let sourceCustomData = null;
+    // Find skeleton data from an existing source layer to copy.
+    let sourceSkeletonData = null;
     for (const existingLayerName of Object.keys(varGlyph.glyph.layers)) {
       const existingLayer = varGlyph.glyph.layers[existingLayerName];
-      if (getSkeletonData(existingLayer)) {
-        // Deep clone the customData to avoid sharing references
-        sourceCustomData = JSON.parse(JSON.stringify(existingLayer.customData));
+      const existingSkeletonData = getSkeletonData(existingLayer);
+      if (existingSkeletonData) {
+        sourceSkeletonData = existingSkeletonData;
         break;
       }
     }
@@ -1583,9 +1583,9 @@ export class SceneController {
         })
       );
       const newLayer = Layer.fromObject({ glyph: instance });
-      // Copy skeleton customData if found
-      if (sourceCustomData) {
-        newLayer.customData = sourceCustomData;
+      // Copy only skeleton data for new layers; avoid dragging unrelated layer metadata.
+      if (sourceSkeletonData) {
+        setSkeletonData(newLayer, sourceSkeletonData);
       }
       glyph.layers[layerName] = newLayer;
     });
