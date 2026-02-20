@@ -3695,7 +3695,16 @@ function _sanitizeGeneratedIndices(indices) {
   if (!Array.isArray(indices)) {
     return [];
   }
-  return indices.filter((index) => Number.isInteger(index) && index >= 0);
+  const seen = new Set();
+  const sanitized = [];
+  for (const index of indices) {
+    if (!Number.isInteger(index) || index < 0 || seen.has(index)) {
+      continue;
+    }
+    seen.add(index);
+    sanitized.push(index);
+  }
+  return sanitized;
 }
 
 function _canUpdateGeneratedContoursInPlace(path, generatedContours, oldGeneratedIndices) {
@@ -3769,6 +3778,23 @@ export function regenerateSkeletonContours(
     }
   }
 
+  const canReplaceAtExistingIndices =
+    oldGeneratedIndices.length === generatedContours.length &&
+    oldGeneratedIndices.every((index) => index < path.numContours);
+  if (canReplaceAtExistingIndices) {
+    for (let i = 0; i < oldGeneratedIndices.length; i++) {
+      const contourIndex = oldGeneratedIndices[i];
+      path.deleteContour(contourIndex);
+      path.insertContour(contourIndex, packContour(generatedContours[i]));
+    }
+    skeletonData.generatedContourIndices = [...oldGeneratedIndices];
+    return {
+      generatedContours,
+      generatedContourIndices: [...oldGeneratedIndices],
+      didUpdateInPlace: false,
+    };
+  }
+
   const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
   for (const contourIndex of sortedIndices) {
     if (contourIndex < path.numContours) {
@@ -3776,10 +3802,13 @@ export function regenerateSkeletonContours(
     }
   }
 
+  const minOldIndex = oldGeneratedIndices.length ? Math.min(...oldGeneratedIndices) : null;
+  let insertionIndex = minOldIndex === null ? path.numContours : minOldIndex;
+  insertionIndex = Math.max(0, Math.min(insertionIndex, path.numContours));
   const newGeneratedIndices = [];
-  for (const contour of generatedContours) {
-    const newIndex = path.numContours;
-    path.insertContour(newIndex, packContour(contour));
+  for (let i = 0; i < generatedContours.length; i++) {
+    const newIndex = insertionIndex + i;
+    path.insertContour(newIndex, packContour(generatedContours[i]));
     newGeneratedIndices.push(newIndex);
   }
   skeletonData.generatedContourIndices = newGeneratedIndices;
