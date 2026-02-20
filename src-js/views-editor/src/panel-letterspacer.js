@@ -64,6 +64,74 @@ function computeParamAreaFromTargetArea(targetArea, fontMetrics, amplitudeY, fac
   return (targetArea * fontMetrics.xHeight) / (amplitudeY * 100 * upmScale * factor);
 }
 
+function triangle(angle, y) {
+  const radians = (angle * Math.PI) / 180;
+  return y * Math.tan(radians);
+}
+
+function deslantMargins(margins, xHeight, angle) {
+  if (!angle) return margins;
+  const radians = (angle * Math.PI) / 180;
+  const tanAngle = Math.tan(radians);
+  const mline = xHeight * 0.5;
+  return margins.map(point => ({
+    x: point.x - (point.y - mline) * tanAngle,
+    y: point.y
+  }));
+}
+
+function filterMarginsByY(margins, minY, maxY) {
+  if (!margins?.length) return [];
+  return margins.filter(point => point.y >= minY && point.y <= maxY);
+}
+
+function getExtremes(leftMargins, rightMargins, bounds) {
+  let leftExtreme = Infinity;
+  let rightExtreme = -Infinity;
+  for (const point of leftMargins) {
+    leftExtreme = Math.min(leftExtreme, point.x);
+  }
+  for (const point of rightMargins) {
+    rightExtreme = Math.max(rightExtreme, point.x);
+  }
+  if (leftExtreme === Infinity) leftExtreme = bounds?.xMin ?? 0;
+  if (rightExtreme === -Infinity) rightExtreme = bounds?.xMax ?? 0;
+  return { leftExtreme, rightExtreme };
+}
+
+function extendMarginsToReference(
+  leftMargins,
+  rightMargins,
+  leftDepthLimit,
+  rightDepthLimit,
+  minY,
+  maxY,
+  step
+) {
+  if (!leftMargins.length || !rightMargins.length) {
+    return { leftMargins, rightMargins };
+  }
+
+  const extendedLeft = [...leftMargins];
+  const extendedRight = [...rightMargins];
+
+  let y = extendedLeft[0].y - step;
+  while (y >= minY) {
+    extendedLeft.unshift({ x: leftDepthLimit, y });
+    extendedRight.unshift({ x: rightDepthLimit, y });
+    y -= step;
+  }
+
+  y = extendedLeft[extendedLeft.length - 1].y + step;
+  while (y <= maxY) {
+    extendedLeft.push({ x: leftDepthLimit, y });
+    extendedRight.push({ x: rightDepthLimit, y });
+    y += step;
+  }
+
+  return { leftMargins: extendedLeft, rightMargins: extendedRight };
+}
+
 const LETTERSPACER_CUSTOM_DATA_KEYS = {
   area: "fontra.letterspacer.area",
   depth: "fontra.letterspacer.depth",
@@ -146,16 +214,24 @@ class LetterspacerEngine {
     this.rightMargins = [];
     this.leftMarginsProcessed = [];
     this.rightMarginsProcessed = [];
+    this.leftMarginsProcessedAlgo = [];
+    this.rightMarginsProcessedAlgo = [];
     this.leftExtreme = null;
     this.rightExtreme = null;
     this.leftExtremeDepthLimited = null;
     this.rightExtremeDepthLimited = null;
     this.leftDepthLimit = null;
     this.rightDepthLimit = null;
+    this.leftDepthLimitAlgo = null;
+    this.rightDepthLimitAlgo = null;
+    this.leftAlgoPolygon = [];
+    this.rightAlgoPolygon = [];
   }
 
   computeSpacing(path, bounds, refMinY, refMaxY, factor = 1) {
     const freq = 5;
+    const minY = bounds.yMin;
+    const maxY = bounds.yMax;
     const amplitudeY = refMaxY - refMinY;
 
     this.scanLines = [];
@@ -165,70 +241,152 @@ class LetterspacerEngine {
     this.rightSBPolygon = [];
     this.leftMarginsProcessed = [];
     this.rightMarginsProcessed = [];
+    this.leftMarginsProcessedAlgo = [];
+    this.rightMarginsProcessedAlgo = [];
+    this.leftAlgoPolygon = [];
+    this.rightAlgoPolygon = [];
+    this.leftDepthLimitAlgo = null;
+    this.rightDepthLimitAlgo = null;
 
     const areaUPM = this.params.area * factor * Math.pow(this.upm / 1000, 2);
     const targetArea = (amplitudeY * areaUPM * 100) / this.xHeight;
 
     const maxDepth = this.xHeight * this.params.depth / 100;
 
-    const margins = this.collectMargins(path, bounds, refMinY, refMaxY, freq);
-    this.leftMargins = margins.leftMargins;
-    this.rightMargins = margins.rightMargins;
-    this.leftExtreme = margins.leftExtreme;
-    this.rightExtreme = margins.rightExtreme;
-
+    const margins = this.collectMargins(path, bounds, minY, maxY, refMinY, refMaxY, freq);
     if (!margins.hasRefIntersections) {
       return { lsb: null, rsb: null, noRefIntersections: true };
     }
 
-    if (this.leftMargins.length < 2 || this.rightMargins.length < 2) {
+    const zoneLeftMargins = filterMarginsByY(margins.leftMargins, refMinY, refMaxY);
+    const zoneRightMargins = filterMarginsByY(margins.rightMargins, refMinY, refMaxY);
+
+    if (zoneLeftMargins.length < 2 || zoneRightMargins.length < 2) {
       return { lsb: null, rsb: null };
     }
 
-    // Apply depth limit to margins
-    let processedLeft = setDepth(this.leftMargins, this.leftExtreme, maxDepth, true);
-    let processedRight = setDepth(this.rightMargins, this.rightExtreme, maxDepth, false);
+    const displayExtremes = getExtremes(zoneLeftMargins, zoneRightMargins, bounds);
+    this.leftMargins = zoneLeftMargins;
+    this.rightMargins = zoneRightMargins;
+    this.leftExtreme = displayExtremes.leftExtreme;
+    this.rightExtreme = displayExtremes.rightExtreme;
+
+    let fullLeftMargins = margins.leftMargins;
+    let fullRightMargins = margins.rightMargins;
+    let algoZoneLeftMargins = zoneLeftMargins;
+    let algoZoneRightMargins = zoneRightMargins;
+
+    if (this.angle) {
+      fullLeftMargins = deslantMargins(fullLeftMargins, this.xHeight, this.angle);
+      fullRightMargins = deslantMargins(fullRightMargins, this.xHeight, this.angle);
+      algoZoneLeftMargins = deslantMargins(algoZoneLeftMargins, this.xHeight, this.angle);
+      algoZoneRightMargins = deslantMargins(algoZoneRightMargins, this.xHeight, this.angle);
+    }
+
+    const fullExtremes = getExtremes(fullLeftMargins, fullRightMargins, bounds);
+    const zoneExtremes = getExtremes(algoZoneLeftMargins, algoZoneRightMargins, bounds);
+    const distanceL = zoneExtremes.leftExtreme - fullExtremes.leftExtreme;
+    const distanceR = fullExtremes.rightExtreme - zoneExtremes.rightExtreme;
+
+    const leftDepthLimitAlgo = zoneExtremes.leftExtreme + maxDepth;
+    const rightDepthLimitAlgo = zoneExtremes.rightExtreme - maxDepth;
+
+    // Apply depth limit to margins (algorithm space)
+    let processedLeft = setDepth(algoZoneLeftMargins, zoneExtremes.leftExtreme, maxDepth, true);
+    let processedRight = setDepth(algoZoneRightMargins, zoneExtremes.rightExtreme, maxDepth, false);
+    ({ leftMargins: processedLeft, rightMargins: processedRight } = extendMarginsToReference(
+      processedLeft,
+      processedRight,
+      leftDepthLimitAlgo,
+      rightDepthLimitAlgo,
+      refMinY,
+      refMaxY,
+      freq
+    ));
+
+    const algoLeftPolygon = closePolygon(
+      processedLeft,
+      zoneExtremes.leftExtreme,
+      refMinY,
+      refMaxY
+    );
+    const algoRightPolygon = closePolygon(
+      processedRight,
+      zoneExtremes.rightExtreme,
+      refMinY,
+      refMaxY
+    );
+
+    this.leftMarginsProcessedAlgo = [...processedLeft];
+    this.rightMarginsProcessedAlgo = [...processedRight];
+    this.leftAlgoPolygon = [...algoLeftPolygon];
+    this.rightAlgoPolygon = [...algoRightPolygon];
+    this.leftDepthLimitAlgo = leftDepthLimitAlgo;
+    this.rightDepthLimitAlgo = rightDepthLimitAlgo;
+
+    this.lsb = calculateSidebearing(algoLeftPolygon, targetArea, amplitudeY) - distanceL;
+    this.rsb = calculateSidebearing(algoRightPolygon, targetArea, amplitudeY) - distanceR;
+
+    const leftDepthLimitDisplay = this.leftExtreme + maxDepth;
+    const rightDepthLimitDisplay = this.rightExtreme - maxDepth;
+
+    // Apply depth limit to margins (display space)
+    let displayProcessedLeft = setDepth(zoneLeftMargins, this.leftExtreme, maxDepth, true);
+    let displayProcessedRight = setDepth(zoneRightMargins, this.rightExtreme, maxDepth, false);
+    ({ leftMargins: displayProcessedLeft, rightMargins: displayProcessedRight } =
+      extendMarginsToReference(
+        displayProcessedLeft,
+        displayProcessedRight,
+        leftDepthLimitDisplay,
+        rightDepthLimitDisplay,
+        refMinY,
+        refMaxY,
+        freq
+      ));
 
     // Store processed margins for visualization
-    this.leftMarginsProcessed = [...processedLeft];
-    this.rightMarginsProcessed = [...processedRight];
+    this.leftMarginsProcessed = [...displayProcessedLeft];
+    this.rightMarginsProcessed = [...displayProcessedRight];
 
     // Calculate depth limits (how far inward from glyph edge)
-    this.leftDepthLimit = this.leftExtreme + maxDepth;  // Inward from left extreme (rightward)
-    this.rightDepthLimit = this.rightExtreme - maxDepth;  // Inward from right extreme (leftward)
-    
-    this.leftExtremeDepthLimited = Math.min(...processedLeft.map(p => p.x));
-    this.rightExtremeDepthLimited = Math.max(...processedRight.map(p => p.x));
+    this.leftDepthLimit = leftDepthLimitDisplay;  // Inward from left extreme (rightward)
+    this.rightDepthLimit = rightDepthLimitDisplay;  // Inward from right extreme (leftward)
+
+    this.leftExtremeDepthLimited = Math.min(...displayProcessedLeft.map(p => p.x));
+    this.rightExtremeDepthLimited = Math.max(...displayProcessedRight.map(p => p.x));
 
     // Close polygons at the ORIGINAL extremes (not the depth limits)
     // The depth limit only affects how far inward the margins can extend,
     // but the polygon area is bounded by the original glyph edge
-    this.leftPolygon = closePolygon(processedLeft, this.leftExtreme, refMinY, refMaxY);
-    this.rightPolygon = closePolygon(processedRight, this.rightExtreme, refMinY, refMaxY);
+    this.leftPolygon = closePolygon(displayProcessedLeft, this.leftExtreme, refMinY, refMaxY);
+    this.rightPolygon = closePolygon(displayProcessedRight, this.rightExtreme, refMinY, refMaxY);
 
-    this.lsb = calculateSidebearing(this.leftPolygon, targetArea, amplitudeY);
-    this.rsb = calculateSidebearing(this.rightPolygon, targetArea, amplitudeY);
+    // For visualization: show polygon in display space
+    // The polygon goes from extreme -> clipped margins -> extreme
+    this.leftSBPolygon = [...this.leftPolygon];
+    this.rightSBPolygon = [...this.rightPolygon];
 
     // Calculate sidebearing line positions from depth-limited extremes
     this.leftSBLine = this.leftExtremeDepthLimited - this.lsb;
     this.rightSBLine = this.rightExtremeDepthLimited + this.rsb;
 
-    // For visualization: show the actual polygon used by algorithm
-    // The algorithm polygon goes from extreme -> clipped margins -> extreme
-    // This is the actual shape used for area calculation
-    this.leftSBPolygon = [...this.leftPolygon];
-    this.rightSBPolygon = [...this.rightPolygon];
-
     return { lsb: this.lsb, rsb: this.rsb, noRefIntersections: false };
   }
 
-  collectMargins(path, bounds, minY, maxY, freq) {
+  collectMargins(path, bounds, minY, maxY, refMinY, refMaxY, freq) {
     const hitTester = new PathHitTester(path, bounds);
     const leftMargins = [];
     const rightMargins = [];
     let leftExtreme = Infinity;  // Will be set from actual margins
     let rightExtreme = -Infinity;  // Will be set from actual margins
     let hasRefIntersections = false;
+    const angle = this.angle || 0;
+    const origin = bounds.xMin;
+    const endpointx = bounds.xMax;
+    const endpointy = bounds.yMax;
+    const xpos = triangle(angle, endpointy) + origin;
+    const slantWidth = endpointx - xpos;
+    const dfltDepth = slantWidth;
 
     // Clear previous scan lines
     this.scanLines = [];
@@ -247,25 +405,36 @@ class LetterspacerEngine {
         y: y
       });
 
+      let left = null;
+      let right = null;
+
       if (intersections.length >= 2) {
-        hasRefIntersections = true;
-        // Сортируем по x
+        // Sort by x
         const sorted = intersections
           .map(i => i.x !== undefined ? i : { x: i.point?.x })
           .filter(i => i.x !== undefined)
           .sort((a, b) => a.x - b.x);
 
         if (sorted.length >= 2) {
-          const left = sorted[0].x;
-          const right = sorted[sorted.length - 1].x;
-
-          leftMargins.push({ x: left, y });
-          rightMargins.push({ x: right, y });
-
-          leftExtreme = Math.min(leftExtreme, left);
-          rightExtreme = Math.max(rightExtreme, right);
+          left = sorted[0].x;
+          right = sorted[sorted.length - 1].x;
+          if (y >= refMinY && y <= refMaxY) {
+            hasRefIntersections = true;
+          }
         }
       }
+
+      if (left === null || right === null) {
+        const slantOffset = triangle(angle, y);
+        left = origin + slantOffset + dfltDepth;
+        right = origin + slantOffset;
+      }
+
+      leftMargins.push({ x: left, y });
+      rightMargins.push({ x: right, y });
+
+      leftExtreme = Math.min(leftExtreme, left);
+      rightExtreme = Math.max(rightExtreme, right);
     }
 
     // Fallback to bounds if no intersections found
@@ -554,8 +723,8 @@ export default class LetterspacerPanel extends Panel {
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) return false;
 
-    const path = positionedGlyph.glyph.path;
-    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    const glyphController = positionedGlyph.glyph;
+    const bounds = glyphController.bounds;
     if (!bounds) return false;
 
     this.currentLSB = Math.round(bounds.xMin);
@@ -565,134 +734,102 @@ export default class LetterspacerPanel extends Panel {
 
 
   async applySpacing() {
-    if (!this.algorithmEnabled) {
-      return;
-    }
-    if (!(await this.hasCurrentMasterForGlyph())) {
-      return;
-    }
-    this.visualizationOpacity = 1;
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) return;
 
+    // Font metrics
     const fontMetrics = await this.getFontMetrics();
+
+    // Engine
+    const engine = new LetterspacerEngine(this.params, fontMetrics);
+
+    const spacingByLayer = {};
+    const layerGlyphs = this.sceneController.getEditingLayerFromGlyphLayers(
+      positionedGlyph.varGlyph?.glyph?.layers || {}
+    );
     const glyphName = this.getSelectedGlyphName() || positionedGlyph.glyphName;
     const { referenceGlyph, factor } = this.getReferenceSettings(glyphName);
     const referenceGlyphController = referenceGlyph
       ? await this.fontController.getGlyph(referenceGlyph)
       : null;
-    const engine = new LetterspacerEngine(this.params, fontMetrics);
 
-    
-    // Store calculated values from the edit operation
-    let calculatedLSB = null;
-    let calculatedRSB = null;
-    let warnedNoRefZone = false;
+    for (const layerName of Object.keys(layerGlyphs)) {
+      const glyphController = await this.sceneController.sceneModel.getGlyphInstance(
+        glyphName,
+        layerName
+      );
+      if (!glyphController) {
+        continue;
+      }
+      const path = glyphController.flattenedPath;
+      const bounds = glyphController.bounds;
+      if (!bounds) {
+        continue;
+      }
+
+      const refBounds = await this.getReferenceBoundsForLayer(
+        referenceGlyph,
+        referenceGlyphController,
+        layerName,
+        glyphController,
+        fontMetrics,
+        glyphName
+      );
+
+      const { lsb, rsb } = engine.computeSpacing(
+        path,
+        bounds,
+        refBounds.minY,
+        refBounds.maxY,
+        factor
+      );
+
+      if (lsb === null || rsb === null) {
+        continue;
+      }
+
+      const roundedLSB = Math.round(lsb);
+      const roundedRSB = Math.round(rsb);
+      const currentLSB = bounds.xMin;
+      const deltaLSB = roundedLSB - currentLSB;
+      const newXAdvanceWithRSB = Math.round(bounds.xMax + deltaLSB + roundedRSB);
+      const newXAdvanceKeepRSB = Math.round(glyphController.xAdvance + deltaLSB);
+
+      spacingByLayer[layerName] = {
+        deltaLSB,
+        newXAdvanceWithRSB,
+        newXAdvanceKeepRSB
+      };
+    }
 
     await this.sceneController.editGlyphAndRecordChanges((glyph) => {
       const layerGlyphs = this.sceneController.getEditingLayerFromGlyphLayers(glyph.layers);
 
       for (const [layerName, layerGlyph] of Object.entries(layerGlyphs)) {
-        const path = layerGlyph.path;
-        const bounds = path.getBounds?.() || path.getControlBounds?.();
-        if (!bounds) continue;
-
-        const refBounds = this.getReferenceBoundsForLayer(
-          referenceGlyph,
-          referenceGlyphController,
-          layerName,
-          layerGlyph,
-          fontMetrics,
-          glyphName
-        );
-
-        // Calculate fresh values for this layer
-        const result = engine.computeSpacing(
-          path,
-          bounds,
-          refBounds.minY,
-          refBounds.maxY,
-          factor
-        );
-
-        if (result.noRefIntersections) {
-          if (!warnedNoRefZone) {
-            warnedNoRefZone = true;
-          }
+        const spacing = spacingByLayer[layerName];
+        if (!spacing) {
           continue;
         }
 
-        const { lsb, rsb } = result;
-
-        if (lsb === null || rsb === null) continue;
-        
-        // Store calculated values (rounded to avoid fractional sidebearings)
-        const roundedLSB = Math.round(lsb);
-        const roundedRSB = Math.round(rsb);
-        calculatedLSB = roundedLSB;
-        calculatedRSB = roundedRSB;
-
-        const currentLSB = bounds.xMin;
-
-          if (this.params.applyLSB) {
-            const deltaLSB = roundedLSB - currentLSB;
-            this.shiftPath(layerGlyph.path, deltaLSB);
-            const layer = glyph.layers?.[layerName];
-            const skeletonData = layer?.customData?.["fontra.skeleton"];
-            if (skeletonData && deltaLSB) {
-              const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
-              moveSkeletonData(newSkeletonData, deltaLSB, 0);
-              layer.customData["fontra.skeleton"] = newSkeletonData;
-            }
+        if (this.params.applyLSB) {
+          const reference = layerGlyph.getMoveReference();
+          layerGlyph.moveWithReference(reference, spacing.deltaLSB, 0);
+          const layer = glyph.layers?.[layerName];
+          const skeletonData = layer?.customData?.["fontra.skeleton"];
+          if (skeletonData) {
+            moveSkeletonData(skeletonData, spacing.deltaLSB, 0);
           }
+        }
 
-        if (this.params.applyRSB || this.params.applyLSB) {
-          const newBounds = layerGlyph.path.getBounds?.() || layerGlyph.path.getControlBounds?.();
-          if (this.params.applyRSB) {
-            layerGlyph.xAdvance = Math.round(newBounds.xMax + roundedRSB);
-          } else {
-            layerGlyph.xAdvance = Math.round(newBounds.xMax + (layerGlyph.xAdvance - bounds.xMax));
-          }
+        if (this.params.applyRSB) {
+          layerGlyph.xAdvance = spacing.newXAdvanceWithRSB;
+        } else if (this.params.applyLSB) {
+          layerGlyph.xAdvance = spacing.newXAdvanceKeepRSB;
         }
       }
 
       return "letterspacer";
     }, undefined, true);
-
-    // Update the stored calculated values
-    this.calculatedLSB = calculatedLSB;
-    this.calculatedRSB = calculatedRSB;
-    
-    // Update current values from the modified glyph
-    const path = positionedGlyph.glyph.path;
-    const bounds = path.getBounds?.() || path.getControlBounds?.();
-    if (bounds) {
-      this.currentLSB = Math.round(bounds.xMin);
-      this.currentRSB = Math.round(positionedGlyph.glyph.xAdvance - bounds.xMax);
-    }
-    
-    // Update value display without rebuilding the form
-    this.updateValueDisplay();
-
-    if (this.editorController.sceneModel) {
-      this.editorController.sceneModel.letterspacerVisualizationData = await this.getVisualizationData();
-      if (this.editorController.canvasController) {
-        this.editorController.canvasController.requestUpdate();
-      }
-    }
-
-    // Force interpolation status to refresh after edits
-    const mappedLocation = this.sceneController.sceneSettings.fontLocationSourceMapped;
-    if (mappedLocation) {
-      this.sceneSettingsController.setItem(
-        "fontLocationSourceMapped",
-        { ...mappedLocation },
-        { senderID: this }
-      );
-    }
-
-    await this.refreshDesignspacePanel();
-    await this.update();
   }
 
   async loadPersistedParams() {
@@ -1045,8 +1182,9 @@ export default class LetterspacerPanel extends Panel {
     const fontMetrics = await this.getFontMetrics();
     const glyphName = this.getSelectedGlyphName() || positionedGlyph.glyphName;
     const { factor } = this.getReferenceSettings(glyphName);
-    const path = positionedGlyph.glyph.path;
-    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    const glyphController = positionedGlyph.glyph;
+    const path = glyphController.flattenedPath;
+    const bounds = glyphController.bounds;
     if (!bounds) return;
 
     const currentLSB = bounds.xMin;
@@ -1060,23 +1198,35 @@ export default class LetterspacerPanel extends Panel {
     if (amplitudeY === 0) return;
 
     const margins = this.collectMarginsForReverse(
-      hitTester, path, bounds, minY, maxY, freq
+      hitTester,
+      bounds,
+      minY,
+      maxY,
+      freq,
+      fontMetrics.italicAngle || 0
     );
 
-    if (!margins.leftMargins || !margins.rightMargins) {
+    if (!margins.leftMargins || !margins.rightMargins || !margins.hasIntersections) {
       return;
     }
 
     const maxDepth = fontMetrics.xHeight * this.params.depth / 100;
-    const processedLeft = setDepth(margins.leftMargins, margins.leftExtreme, maxDepth, true);
-    const processedRight = setDepth(margins.rightMargins, margins.rightExtreme, maxDepth, false);
+    let leftMargins = margins.leftMargins;
+    let rightMargins = margins.rightMargins;
+    if (fontMetrics.italicAngle) {
+      leftMargins = deslantMargins(leftMargins, fontMetrics.xHeight, fontMetrics.italicAngle);
+      rightMargins = deslantMargins(rightMargins, fontMetrics.xHeight, fontMetrics.italicAngle);
+    }
+    const reverseExtremes = getExtremes(leftMargins, rightMargins, bounds);
+    const processedLeft = setDepth(leftMargins, reverseExtremes.leftExtreme, maxDepth, true);
+    const processedRight = setDepth(rightMargins, reverseExtremes.rightExtreme, maxDepth, false);
 
     if (processedLeft.length < 2 || processedRight.length < 2) {
       return;
     }
 
-    const leftPolygon = closePolygon(processedLeft, margins.leftExtreme, minY, maxY);
-    const rightPolygon = closePolygon(processedRight, margins.rightExtreme, minY, maxY);
+    const leftPolygon = closePolygon(processedLeft, reverseExtremes.leftExtreme, minY, maxY);
+    const rightPolygon = closePolygon(processedRight, reverseExtremes.rightExtreme, minY, maxY);
 
     const areaLeft = polygonArea(leftPolygon);
     const areaRight = polygonArea(rightPolygon);
@@ -1119,11 +1269,18 @@ export default class LetterspacerPanel extends Panel {
     }
   }
 
-  collectMarginsForReverse(hitTester, path, bounds, minY, maxY, freq) {
+  collectMarginsForReverse(hitTester, bounds, minY, maxY, freq, angle) {
     const leftMargins = [];
     const rightMargins = [];
     let leftExtreme = Infinity;
     let rightExtreme = -Infinity;
+    let hasIntersections = false;
+    const origin = bounds.xMin;
+    const endpointx = bounds.xMax;
+    const endpointy = bounds.yMax;
+    const xpos = triangle(angle || 0, endpointy) + origin;
+    const slantWidth = endpointx - xpos;
+    const dfltDepth = slantWidth;
 
     for (let y = minY; y <= maxY; y += freq) {
       const lineStart = { x: bounds.xMin - 100, y };
@@ -1131,6 +1288,8 @@ export default class LetterspacerPanel extends Panel {
 
       const intersections = hitTester.lineIntersections(lineStart, lineEnd);
 
+      let left = null;
+      let right = null;
       if (intersections.length >= 2) {
         const sorted = intersections
           .map(i => i.x !== undefined ? i : { x: i.point?.x })
@@ -1138,22 +1297,29 @@ export default class LetterspacerPanel extends Panel {
           .sort((a, b) => a.x - b.x);
 
         if (sorted.length >= 2) {
-          const left = sorted[0].x;
-          const right = sorted[sorted.length - 1].x;
-
-          leftMargins.push({ x: left, y });
-          rightMargins.push({ x: right, y });
-
-          leftExtreme = Math.min(leftExtreme, left);
-          rightExtreme = Math.max(rightExtreme, right);
+          left = sorted[0].x;
+          right = sorted[sorted.length - 1].x;
+          hasIntersections = true;
         }
       }
+
+      if (left === null || right === null) {
+        const slantOffset = triangle(angle || 0, y);
+        left = origin + slantOffset + dfltDepth;
+        right = origin + slantOffset;
+      }
+
+      leftMargins.push({ x: left, y });
+      rightMargins.push({ x: right, y });
+
+      leftExtreme = Math.min(leftExtreme, left);
+      rightExtreme = Math.max(rightExtreme, right);
     }
 
     if (leftExtreme === Infinity) leftExtreme = bounds.xMin;
     if (rightExtreme === -Infinity) rightExtreme = bounds.xMax;
 
-    return { leftMargins, rightMargins, leftExtreme, rightExtreme };
+    return { leftMargins, rightMargins, leftExtreme, rightExtreme, hasIntersections };
   }
 
   shiftPath(path, deltaX) {
@@ -1264,11 +1430,17 @@ export default class LetterspacerPanel extends Panel {
     if (!layerGlyph) {
       return null;
     }
+    if (layerGlyph.bounds) {
+      return layerGlyph.bounds;
+    }
+    if (layerGlyph.controlBounds) {
+      return layerGlyph.controlBounds;
+    }
     const path = layerGlyph.path;
     return path?.getBounds?.() || path?.getControlBounds?.() || null;
   }
 
-  getReferenceBoundsForLayer(
+  async getReferenceBoundsForLayer(
     referenceGlyphName,
     referenceGlyphController,
     sourceId,
@@ -1279,21 +1451,33 @@ export default class LetterspacerPanel extends Panel {
     const overshoot = fontMetrics.xHeight * this.params.overshoot / 100;
     const fallbackBounds = this.getLayerBounds(layerGlyph);
 
+    if (referenceGlyphName) {
+      const refInstance =
+        sourceId &&
+        this.sceneController.sceneModel?.getGlyphInstance &&
+        (await this.sceneController.sceneModel.getGlyphInstance(referenceGlyphName, sourceId));
+      const refBounds = this.getLayerBounds(refInstance);
+      if (refBounds) {
+        return {
+          minY: refBounds.yMin - overshoot,
+          maxY: refBounds.yMax + overshoot,
+          referenceGlyph: referenceGlyphName,
+        };
+      }
+    }
+
     if (referenceGlyphName && referenceGlyphController?.layers) {
       const refLayer =
         referenceGlyphController.layers[sourceId] ||
         Object.values(referenceGlyphController.layers)[0];
-        const refBounds = this.getLayerBounds(refLayer?.glyph);
-        if (refBounds) {
-          return {
-            minY: refBounds.yMin - overshoot,
-            maxY: refBounds.yMax + overshoot,
-            referenceGlyph: referenceGlyphName,
-          };
-        }
-    }
-
-    if (referenceGlyphName) {
+      const refBounds = this.getLayerBounds(refLayer?.glyph);
+      if (refBounds) {
+        return {
+          minY: refBounds.yMin - overshoot,
+          maxY: refBounds.yMax + overshoot,
+          referenceGlyph: referenceGlyphName,
+        };
+      }
     }
 
     if (fallbackBounds) {
@@ -1369,8 +1553,9 @@ export default class LetterspacerPanel extends Panel {
     if (!this.algorithmEnabled) return;
 
     // Calculate new values using letterspacer
-    const path = positionedGlyph.glyph.path;
-    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    const glyphController = positionedGlyph.glyph;
+    const path = glyphController.flattenedPath;
+    const bounds = glyphController.bounds;
     if (!bounds) return;
 
     const fontMetrics = await this.getFontMetrics();
@@ -1380,7 +1565,7 @@ export default class LetterspacerPanel extends Panel {
       ? await this.fontController.getGlyph(referenceGlyph)
       : null;
     const sourceId = this.getCurrentSourceIdentifier();
-    const refBounds = this.getReferenceBoundsForLayer(
+    const refBounds = await this.getReferenceBoundsForLayer(
       referenceGlyph,
       referenceGlyphController,
       sourceId,
@@ -1453,7 +1638,7 @@ export default class LetterspacerPanel extends Panel {
       ? await this.fontController.getGlyph(referenceGlyph)
       : null;
     const sourceId = this.getCurrentSourceIdentifier();
-    const refBounds = this.getReferenceBoundsForLayer(
+    const refBounds = await this.getReferenceBoundsForLayer(
       referenceGlyph,
       referenceGlyphController,
       sourceId,
@@ -1463,8 +1648,9 @@ export default class LetterspacerPanel extends Panel {
     );
     const engine = new LetterspacerEngine(this.params, fontMetrics);
 
-    const path = positionedGlyph.glyph.path;
-    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    const glyphController = positionedGlyph.glyph;
+    const path = glyphController.flattenedPath;
+    const bounds = glyphController.bounds;
     if (!bounds) {
       return null;
     }
@@ -1487,6 +1673,8 @@ export default class LetterspacerPanel extends Panel {
       rightPolygon: engine.rightPolygon,
       leftSBPolygon: engine.leftSBPolygon,
       rightSBPolygon: engine.rightSBPolygon,
+      leftAlgoPolygon: engine.leftAlgoPolygon,
+      rightAlgoPolygon: engine.rightAlgoPolygon,
       leftSBLine: engine.leftSBLine,
       rightSBLine: engine.rightSBLine,
       lsb: engine.lsb,
@@ -1495,14 +1683,20 @@ export default class LetterspacerPanel extends Panel {
       rightExtreme: engine.rightExtreme,
       leftDepthLimit: engine.leftDepthLimit,
       rightDepthLimit: engine.rightDepthLimit,
+      leftDepthLimitAlgo: engine.leftDepthLimitAlgo,
+      rightDepthLimitAlgo: engine.rightDepthLimitAlgo,
       leftExtremeDepthLimited: engine.leftExtremeDepthLimited,
       rightExtremeDepthLimited: engine.rightExtremeDepthLimited,
       leftMargins: engine.leftMargins,
       rightMargins: engine.rightMargins,
       leftMarginsProcessed: engine.leftMarginsProcessed,
       rightMarginsProcessed: engine.rightMarginsProcessed,
+      leftMarginsProcessedAlgo: engine.leftMarginsProcessedAlgo,
+      rightMarginsProcessedAlgo: engine.rightMarginsProcessedAlgo,
       params: this.params,
-      referenceBounds: { minY: refBounds.minY, maxY: refBounds.maxY }
+      referenceBounds: { minY: refBounds.minY, maxY: refBounds.maxY },
+      italicAngle: fontMetrics.italicAngle || 0,
+      xHeight: fontMetrics.xHeight
     };
 
     return result;
