@@ -9,10 +9,11 @@ import {
   calculateNormalAtSkeletonPoint,
   getSkeletonData,
   getPointHalfWidth,
+  regenerateSkeletonContours,
   setSkeletonData,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { parseSelection } from "@fontra/core/utils.js";
-import { packContour, VarPackedPath } from "@fontra/core/var-path.js";
+import { VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
 
@@ -4198,23 +4199,7 @@ export default class SkeletonParametersPanel extends Panel {
    * Helper to regenerate outline contours from skeleton data.
    */
   _regenerateOutlineContours(staticGlyph, skeletonData) {
-
-    const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
-    const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-    for (const idx of sortedIndices) {
-      if (idx < staticGlyph.path.numContours) {
-        staticGlyph.path.deleteContour(idx);
-      }
-    }
-
-    const generatedContours = generateContoursFromSkeleton(skeletonData);
-    const newGeneratedIndices = [];
-    for (const contour of generatedContours) {
-      const newIndex = staticGlyph.path.numContours;
-      staticGlyph.path.insertContour(staticGlyph.path.numContours, packContour(contour));
-      newGeneratedIndices.push(newIndex);
-    }
-    skeletonData.generatedContourIndices = newGeneratedIndices;
+    regenerateSkeletonContours(staticGlyph, skeletonData);
   }
 
   /**

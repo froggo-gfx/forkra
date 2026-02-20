@@ -3,15 +3,14 @@ import { recordChanges } from "@fontra/core/change-recorder.js";
 import { ChangeCollector, consolidateChanges, applyChange } from "@fontra/core/changes.js";
 import { translate } from "@fontra/core/localization.js";
 import { parseSelection } from "@fontra/core/utils.js";
-import { packContour } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
 import {
-  generateContoursFromSkeleton,
   getSkeletonData,
   createEmptySkeletonData,
   createSkeletonContour,
   calculateNormalAtSkeletonPoint,
   getPointHalfWidth,
+  regenerateSkeletonContours,
   setSkeletonData,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { getGlyphInfoFromGlyphName } from "@fontra/core/glyph-data.js";
@@ -1392,31 +1391,7 @@ export class SkeletonPenTool extends BaseTool {
   }
 
   _regenerateOutlineContours(staticGlyph, skeletonData) {
-    // Get indices of previously generated contours
-    const oldGeneratedIndices = skeletonData.generatedContourIndices || [];
-
-    // Remove old generated contours (in reverse order to maintain indices)
-    const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-    for (const idx of sortedIndices) {
-      if (idx < staticGlyph.path.numContours) {
-        staticGlyph.path.deleteContour(idx);
-      }
-    }
-
-    // Generate new contours from skeleton
-    const generatedContours = generateContoursFromSkeleton(skeletonData);
-
-    // Add new contours and track their indices
-    // Use insertContour with packContour to ensure changes are recorded properly
-    const newGeneratedIndices = [];
-    for (const contour of generatedContours) {
-      const newIndex = staticGlyph.path.numContours;
-      staticGlyph.path.insertContour(newIndex, packContour(contour));
-      newGeneratedIndices.push(newIndex);
-    }
-
-    // Update generated contour indices
-    skeletonData.generatedContourIndices = newGeneratedIndices;
+    regenerateSkeletonContours(staticGlyph, skeletonData);
   }
 
   /**

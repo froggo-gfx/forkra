@@ -14,8 +14,8 @@ import {
 } from "@fontra/core/path-functions.js";
 import { rectCenter, rectSize, unionRect } from "@fontra/core/rectangle.js";
 import {
-  generateContoursFromSkeleton,
   getSkeletonData,
+  regenerateSkeletonContours,
   setSkeletonData,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { Transform } from "@fontra/core/transform.js";
@@ -28,7 +28,7 @@ import {
   zip,
 } from "@fontra/core/utils.js";
 import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
-import { packContour, VarPackedPath } from "@fontra/core/var-path.js";
+import { VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import Panel from "./panel.js";
@@ -1170,22 +1170,7 @@ export default class TransformationPanel extends Panel {
             // Regenerate contours
             const staticGlyph = layer.glyph;
             const pathChange = recordChanges(staticGlyph, (sg) => {
-              const oldGeneratedIndices = newSkeletonData.generatedContourIndices || [];
-              const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-              for (const idx of sortedIndices) {
-                if (idx < sg.path.numContours) {
-                  sg.path.deleteContour(idx);
-                }
-              }
-
-              const generatedContours = generateContoursFromSkeleton(newSkeletonData);
-              const newGeneratedIndices = [];
-              for (const contour of generatedContours) {
-                const newIndex = sg.path.numContours;
-                sg.path.insertContour(newIndex, packContour(contour));
-                newGeneratedIndices.push(newIndex);
-              }
-              newSkeletonData.generatedContourIndices = newGeneratedIndices;
+              regenerateSkeletonContours(sg, newSkeletonData);
             });
 
             // Record custom data change
@@ -1506,22 +1491,7 @@ export default class TransformationPanel extends Panel {
             // Regenerate contours ONCE for all skeleton changes
             const staticGlyph = layer.glyph;
             const pathChange = recordChanges(staticGlyph, (sg) => {
-              const oldGeneratedIndices = newSkeletonData.generatedContourIndices || [];
-              const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-              for (const idx of sortedIndices) {
-                if (idx < sg.path.numContours) {
-                  sg.path.deleteContour(idx);
-                }
-              }
-
-              const generatedContours = generateContoursFromSkeleton(newSkeletonData);
-              const newGeneratedIndices = [];
-              for (const contour of generatedContours) {
-                const newIndex = sg.path.numContours;
-                sg.path.insertContour(newIndex, packContour(contour));
-                newGeneratedIndices.push(newIndex);
-              }
-              newSkeletonData.generatedContourIndices = newGeneratedIndices;
+              regenerateSkeletonContours(sg, newSkeletonData);
             });
 
             // Record custom data change
@@ -1663,31 +1633,10 @@ class SkeletonMovableObject {
       skelContour.points[pointIndex].y = y;
     }
 
-    // Get old generated indices before modification
-    const oldGeneratedIndices = newSkeletonData.generatedContourIndices || [];
-
-    // Generate new contours from skeleton
-    const generatedContours = generateContoursFromSkeleton(newSkeletonData);
-
     // Record path changes on staticGlyph
     const staticGlyph = layer.glyph;
     const pathChange = recordChanges(staticGlyph, (sg) => {
-      // Remove old generated contours (in reverse order to maintain indices)
-      const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-      for (const idx of sortedIndices) {
-        if (idx < sg.path.numContours) {
-          sg.path.deleteContour(idx);
-        }
-      }
-
-      // Add new contours
-      const newGeneratedIndices = [];
-      for (const contour of generatedContours) {
-        const newIndex = sg.path.numContours;
-        sg.path.insertContour(newIndex, packContour(contour));
-        newGeneratedIndices.push(newIndex);
-      }
-      newSkeletonData.generatedContourIndices = newGeneratedIndices;
+      regenerateSkeletonContours(sg, newSkeletonData);
     });
 
     // Record custom data change on layer

@@ -230,8 +230,6 @@ export function setLayerSkeleton(layer, skeleton) {
 ---
 
 
-## ОСТАЛОСЬ СДЕЛАТЬ
-
 ## Шаг 06. Централизовать regeneration контуров скелета
 **Проблема (общее):** логика генерации контуров дублируется в нескольких местах.  
 **Аспект:** один источник правды для regenerate.
@@ -258,6 +256,9 @@ export function regenerateSkeletonContours(staticGlyph, skeletonCanonical) {
 2. Контуры на границе удаления/вставки.
 
 ---
+
+
+## ОСТАЛОСЬ СДЕЛАТЬ
 
 ## Шаг 07. Убрать копирование всего `layer.customData` при создании source/layer
 **Проблема (общее):** перетаскивается мусорная метадата.  

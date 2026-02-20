@@ -1,6 +1,6 @@
 import { Bezier } from "bezier-js";
 import * as vector from "./vector.js";
-import { VarPackedPath } from "./var-path.js";
+import { packContour, VarPackedPath } from "./var-path.js";
 import { fitCubic, chordLengthParameterize, computeMaxError } from "./fit-cubic.js";
 import {
   deleteFontraInternalSection,
@@ -3688,6 +3688,106 @@ export function createEmptySkeletonData() {
     version: 1,
     contours: [],
     generatedContourIndices: [],
+  };
+}
+
+function _sanitizeGeneratedIndices(indices) {
+  if (!Array.isArray(indices)) {
+    return [];
+  }
+  return indices.filter((index) => Number.isInteger(index) && index >= 0);
+}
+
+function _canUpdateGeneratedContoursInPlace(path, generatedContours, oldGeneratedIndices) {
+  if (!path || oldGeneratedIndices.length !== generatedContours.length) {
+    return null;
+  }
+  const updates = [];
+  for (let i = 0; i < oldGeneratedIndices.length; i++) {
+    const contourIndex = oldGeneratedIndices[i];
+    if (contourIndex >= path.numContours) {
+      return null;
+    }
+    const startPoint =
+      contourIndex === 0 ? 0 : path.contourInfo[contourIndex - 1].endPoint + 1;
+    const endPoint = path.contourInfo[contourIndex].endPoint;
+    const numExistingPoints = endPoint - startPoint + 1;
+    const packedContour = packContour(generatedContours[i]);
+    const numNewPoints = packedContour.coordinates.length / 2;
+    if (numExistingPoints !== numNewPoints) {
+      return null;
+    }
+    updates.push({ startPoint, packedContour });
+  }
+  return updates;
+}
+
+/**
+ * Regenerate outline contours for a skeleton and update generated contour indices.
+ * Mutates both `staticGlyph.path` and `skeletonData.generatedContourIndices`.
+ */
+export function regenerateSkeletonContours(
+  staticGlyph,
+  skeletonData,
+  { preferInPlace = false } = {}
+) {
+  if (!staticGlyph?.path || !skeletonData) {
+    return {
+      generatedContours: [],
+      generatedContourIndices: [],
+      didUpdateInPlace: false,
+    };
+  }
+
+  const path = staticGlyph.path;
+  const generatedContours = generateContoursFromSkeleton(skeletonData);
+  const oldGeneratedIndices = _sanitizeGeneratedIndices(skeletonData.generatedContourIndices);
+
+  if (preferInPlace) {
+    const updates = _canUpdateGeneratedContoursInPlace(
+      path,
+      generatedContours,
+      oldGeneratedIndices
+    );
+    if (updates) {
+      for (const { startPoint, packedContour } of updates) {
+        const numPoints = packedContour.coordinates.length / 2;
+        for (let pointIndex = 0; pointIndex < numPoints; pointIndex++) {
+          path.setPointPosition(
+            startPoint + pointIndex,
+            packedContour.coordinates[pointIndex * 2],
+            packedContour.coordinates[pointIndex * 2 + 1]
+          );
+        }
+      }
+      skeletonData.generatedContourIndices = [...oldGeneratedIndices];
+      return {
+        generatedContours,
+        generatedContourIndices: [...oldGeneratedIndices],
+        didUpdateInPlace: true,
+      };
+    }
+  }
+
+  const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
+  for (const contourIndex of sortedIndices) {
+    if (contourIndex < path.numContours) {
+      path.deleteContour(contourIndex);
+    }
+  }
+
+  const newGeneratedIndices = [];
+  for (const contour of generatedContours) {
+    const newIndex = path.numContours;
+    path.insertContour(newIndex, packContour(contour));
+    newGeneratedIndices.push(newIndex);
+  }
+  skeletonData.generatedContourIndices = newGeneratedIndices;
+
+  return {
+    generatedContours,
+    generatedContourIndices: newGeneratedIndices,
+    didUpdateInPlace: false,
   };
 }
 

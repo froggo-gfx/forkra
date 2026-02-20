@@ -34,8 +34,8 @@ import {
 } from "@fontra/core/set-ops.js";
 import {
   clearSkeletonData,
-  generateContoursFromSkeleton,
   getSkeletonData,
+  regenerateSkeletonContours,
   setSkeletonData,
 } from "@fontra/core/skeleton-contour-generator.js";
 import {
@@ -443,9 +443,6 @@ export class SceneController {
         // Get old generated indices before modification
         const oldGeneratedIndices = skelData.generatedContourIndices || [];
 
-        // Generate new contours from skeleton
-        const generatedContours = generateContoursFromSkeleton(skelData);
-
         // Record all changes properly
         const changes = [];
 
@@ -483,14 +480,9 @@ export class SceneController {
             }
           }
 
-          // Add new contours
-          const newGeneratedIndices = [];
-          for (const contour of generatedContours) {
-            const newIndex = sg.path.numContours;
-            sg.path.insertContour(newIndex, packContour(contour));
-            newGeneratedIndices.push(newIndex);
-          }
-          skelData.generatedContourIndices = newGeneratedIndices;
+          // Regenerate using adjusted old generated indices.
+          skelData.generatedContourIndices = adjustedOldIndices;
+          regenerateSkeletonContours(sg, skelData);
         });
         changes.push(pathChange.prefixed(["layers", layerName, "glyph"]));
 
@@ -2035,33 +2027,13 @@ export class SceneController {
         return;
       }
 
-      // Helper function to regenerate outline contours
-      const regenerateOutline = (staticGlyph, skelData) => {
-        const oldGeneratedIndices = skelData.generatedContourIndices || [];
-        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-        for (const idx of sortedIndices) {
-          if (idx < staticGlyph.path.numContours) {
-            staticGlyph.path.deleteContour(idx);
-          }
-        }
-
-        const generatedContours = generateContoursFromSkeleton(skelData);
-        const newGeneratedIndices = [];
-        for (const contour of generatedContours) {
-          const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.insertContour(newIndex, packContour(contour));
-          newGeneratedIndices.push(newIndex);
-        }
-        skelData.generatedContourIndices = newGeneratedIndices;
-      };
-
       // Record changes using recordChanges pattern
       const changes = [];
 
       // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
       const staticGlyph = layer.glyph;
       const pathChange = recordChanges(staticGlyph, (sg) => {
-        regenerateOutline(sg, skeletonData);
+        regenerateSkeletonContours(sg, skeletonData);
       });
       changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
@@ -2141,32 +2113,12 @@ export class SceneController {
       // Remove contour2
       skeletonData.contours.splice(second.contourIdx, 1);
 
-      // Helper function to regenerate outline contours
-      const regenerateOutline = (staticGlyph, skelData) => {
-        const oldGeneratedIndices = skelData.generatedContourIndices || [];
-        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-        for (const idx of sortedIndices) {
-          if (idx < staticGlyph.path.numContours) {
-            staticGlyph.path.deleteContour(idx);
-          }
-        }
-
-        const generatedContours = generateContoursFromSkeleton(skelData);
-        const newGeneratedIndices = [];
-        for (const contour of generatedContours) {
-          const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.insertContour(newIndex, packContour(contour));
-          newGeneratedIndices.push(newIndex);
-        }
-        skelData.generatedContourIndices = newGeneratedIndices;
-      };
-
       // Record changes
       const changes = [];
 
       const staticGlyph = layer.glyph;
       const pathChange = recordChanges(staticGlyph, (sg) => {
-        regenerateOutline(sg, skeletonData);
+        regenerateSkeletonContours(sg, skeletonData);
       });
       changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
@@ -2212,32 +2164,12 @@ export class SceneController {
       // Close the contour
       contour.isClosed = true;
 
-      // Helper function to regenerate outline contours
-      const regenerateOutline = (staticGlyph, skelData) => {
-        const oldGeneratedIndices = skelData.generatedContourIndices || [];
-        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-        for (const idx of sortedIndices) {
-          if (idx < staticGlyph.path.numContours) {
-            staticGlyph.path.deleteContour(idx);
-          }
-        }
-
-        const generatedContours = generateContoursFromSkeleton(skelData);
-        const newGeneratedIndices = [];
-        for (const contour of generatedContours) {
-          const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.insertContour(newIndex, packContour(contour));
-          newGeneratedIndices.push(newIndex);
-        }
-        skelData.generatedContourIndices = newGeneratedIndices;
-      };
-
       // Record changes
       const changes = [];
 
       const staticGlyph = layer.glyph;
       const pathChange = recordChanges(staticGlyph, (sg) => {
-        regenerateOutline(sg, skeletonData);
+        regenerateSkeletonContours(sg, skeletonData);
       });
       changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
@@ -2303,32 +2235,12 @@ export class SceneController {
         }
       }
 
-      // Helper function to regenerate outline contours
-      const regenerateOutline = (staticGlyph, skelData) => {
-        const oldGeneratedIndices = skelData.generatedContourIndices || [];
-        const sortedIndices = [...oldGeneratedIndices].sort((a, b) => b - a);
-        for (const idx of sortedIndices) {
-          if (idx < staticGlyph.path.numContours) {
-            staticGlyph.path.deleteContour(idx);
-          }
-        }
-
-        const generatedContours = generateContoursFromSkeleton(skelData);
-        const newGeneratedIndices = [];
-        for (const contour of generatedContours) {
-          const newIndex = staticGlyph.path.numContours;
-          staticGlyph.path.insertContour(newIndex, packContour(contour));
-          newGeneratedIndices.push(newIndex);
-        }
-        skelData.generatedContourIndices = newGeneratedIndices;
-      };
-
       // Record changes
       const changes = [];
 
       const staticGlyph = layer.glyph;
       const pathChange = recordChanges(staticGlyph, (sg) => {
-        regenerateOutline(sg, skeletonData);
+        regenerateSkeletonContours(sg, skeletonData);
       });
       changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
