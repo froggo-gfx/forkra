@@ -2,6 +2,11 @@ import { PathHitTester } from "@fontra/core/path-hit-tester.js";
 import { getGlyphInfoFromGlyphName } from "@fontra/core/glyph-data.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import {
+  getFontraInternalSection,
+  setFontraInternalSection,
+} from "@fontra/core/fontra-internal-data.js";
+import { FONTRA_INTERNAL_SECTIONS } from "@fontra/core/fontra-internal-schema.js";
+import {
   getSkeletonData,
   moveSkeletonData,
   setSkeletonData,
@@ -68,16 +73,19 @@ function computeParamAreaFromTargetArea(targetArea, fontMetrics, amplitudeY, fac
   return (targetArea * fontMetrics.xHeight) / (amplitudeY * 100 * upmScale * factor);
 }
 
-const LETTERSPACER_CUSTOM_DATA_KEYS = {
-  area: "fontra.letterspacer.area",
-  depth: "fontra.letterspacer.depth",
-  overshoot: "fontra.letterspacer.overshoot",
-  reference: "fontra.letterspacer.reference",
-};
+const LETTERSPACER_SOURCE_FIELDS = Object.freeze({
+  area: "area",
+  depth: "depth",
+  overshoot: "overshoot",
+});
 
-const LETTERSPACER_FONT_CUSTOM_DATA_KEYS = {
-  enabled: "fontra.letterspacer.enabled",
-};
+const LETTERSPACER_FONT_FIELDS = Object.freeze({
+  enabled: "enabled",
+});
+
+const LETTERSPACER_GLYPH_FIELDS = Object.freeze({
+  referenceGlyphName: "referenceGlyphName",
+});
 
 const LETTERSPACER_DEFAULTS = {
   area: 400,
@@ -129,6 +137,82 @@ function matchesRuleField(ruleValue, glyphValue) {
 function coerceNumber(value, fallback) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
+}
+
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function getLetterspacerSection(entity) {
+  const section = getFontraInternalSection(entity, FONTRA_INTERNAL_SECTIONS.LETTERSPACER);
+  return isRecord(section) ? section : null;
+}
+
+function getSourceLetterspacerValues(source) {
+  const section = getLetterspacerSection(source);
+  return {
+    area: coerceNumber(section?.[LETTERSPACER_SOURCE_FIELDS.area], LETTERSPACER_DEFAULTS.area),
+    depth: coerceNumber(section?.[LETTERSPACER_SOURCE_FIELDS.depth], LETTERSPACER_DEFAULTS.depth),
+    overshoot: coerceNumber(
+      section?.[LETTERSPACER_SOURCE_FIELDS.overshoot],
+      LETTERSPACER_DEFAULTS.overshoot
+    ),
+  };
+}
+
+function hasCompleteSourceLetterspacerValues(source) {
+  const section = getLetterspacerSection(source);
+  if (!section) {
+    return false;
+  }
+  return (
+    Number.isFinite(Number(section[LETTERSPACER_SOURCE_FIELDS.area])) &&
+    Number.isFinite(Number(section[LETTERSPACER_SOURCE_FIELDS.depth])) &&
+    Number.isFinite(Number(section[LETTERSPACER_SOURCE_FIELDS.overshoot]))
+  );
+}
+
+function setSourceLetterspacerValues(source, values) {
+  const section = {
+    ...(getLetterspacerSection(source) || {}),
+  };
+
+  if (values.area !== undefined) {
+    section[LETTERSPACER_SOURCE_FIELDS.area] = coerceNumber(
+      values.area,
+      LETTERSPACER_DEFAULTS.area
+    );
+  }
+  if (values.depth !== undefined) {
+    section[LETTERSPACER_SOURCE_FIELDS.depth] = coerceNumber(
+      values.depth,
+      LETTERSPACER_DEFAULTS.depth
+    );
+  }
+  if (values.overshoot !== undefined) {
+    section[LETTERSPACER_SOURCE_FIELDS.overshoot] = coerceNumber(
+      values.overshoot,
+      LETTERSPACER_DEFAULTS.overshoot
+    );
+  }
+
+  setFontraInternalSection(source, FONTRA_INTERNAL_SECTIONS.LETTERSPACER, section);
+}
+
+function setFontLetterspacerEnabled(entity, enabled) {
+  const section = {
+    ...(getLetterspacerSection(entity) || {}),
+    [LETTERSPACER_FONT_FIELDS.enabled]: !!enabled,
+  };
+  setFontraInternalSection(entity, FONTRA_INTERNAL_SECTIONS.LETTERSPACER, section);
+}
+
+function setGlyphLetterspacerReference(glyph, value) {
+  const section = {
+    ...(getLetterspacerSection(glyph) || {}),
+    [LETTERSPACER_GLYPH_FIELDS.referenceGlyphName]: String(value ?? ""),
+  };
+  setFontraInternalSection(glyph, FONTRA_INTERNAL_SECTIONS.LETTERSPACER, section);
 }
 
 class LetterspacerEngine {
@@ -708,17 +792,19 @@ export default class LetterspacerPanel extends Panel {
       activeSourceIds
     );
     if (effectiveSourceId && this.fontController.sources[effectiveSourceId]) {
-      const sourceCustomData = this.fontController.sources[effectiveSourceId].customData || {};
+      const values = getSourceLetterspacerValues(
+        this.fontController.sources[effectiveSourceId]
+      );
       this.params.area = coerceNumber(
-        sourceCustomData[LETTERSPACER_CUSTOM_DATA_KEYS.area],
+        values.area,
         this.params.area ?? LETTERSPACER_DEFAULTS.area
       );
       this.params.depth = coerceNumber(
-        sourceCustomData[LETTERSPACER_CUSTOM_DATA_KEYS.depth],
+        values.depth,
         this.params.depth ?? LETTERSPACER_DEFAULTS.depth
       );
       this.params.overshoot = coerceNumber(
-        sourceCustomData[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot],
+        values.overshoot,
         this.params.overshoot ?? LETTERSPACER_DEFAULTS.overshoot
       );
     } else {
@@ -733,8 +819,9 @@ export default class LetterspacerPanel extends Panel {
   }
 
   async loadAlgorithmEnabled() {
-    const value =
-      this.fontController?.customData?.[LETTERSPACER_FONT_CUSTOM_DATA_KEYS.enabled];
+    const value = getLetterspacerSection(this.fontController)?.[
+      LETTERSPACER_FONT_FIELDS.enabled
+    ];
     if (value === undefined || value === null) {
       return;
     }
@@ -748,10 +835,7 @@ export default class LetterspacerPanel extends Panel {
     const nextValue = !!enabled;
     const root = { customData: this.fontController.customData || {} };
     const changes = recordChanges(root, (root) => {
-      if (!root.customData) {
-        root.customData = {};
-      }
-      root.customData[LETTERSPACER_FONT_CUSTOM_DATA_KEYS.enabled] = nextValue;
+      setFontLetterspacerEnabled(root, nextValue);
     });
     if (changes.hasChange) {
       await this.fontController.postChange(
@@ -812,15 +896,7 @@ export default class LetterspacerPanel extends Panel {
 
   getLetterspacerValuesForSource(sourceId) {
     const source = this.fontController.sources[sourceId];
-    const customData = source?.customData || {};
-    return {
-      area: coerceNumber(customData[LETTERSPACER_CUSTOM_DATA_KEYS.area], LETTERSPACER_DEFAULTS.area),
-      depth: coerceNumber(customData[LETTERSPACER_CUSTOM_DATA_KEYS.depth], LETTERSPACER_DEFAULTS.depth),
-      overshoot: coerceNumber(
-        customData[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot],
-        LETTERSPACER_DEFAULTS.overshoot
-      ),
-    };
+    return getSourceLetterspacerValues(source);
   }
 
   getNearestSourceIdentifier(targetId, candidateIds) {
@@ -858,11 +934,7 @@ export default class LetterspacerPanel extends Panel {
       Array.isArray(sourceIds) && sourceIds.length
         ? sourceIds.filter((id) => sources[id])
         : Object.keys(sources);
-    const hasKeys = (source) =>
-      source?.customData &&
-      LETTERSPACER_CUSTOM_DATA_KEYS.area in source.customData &&
-      LETTERSPACER_CUSTOM_DATA_KEYS.depth in source.customData &&
-      LETTERSPACER_CUSTOM_DATA_KEYS.overshoot in source.customData;
+    const hasKeys = (source) => hasCompleteSourceLetterspacerValues(source);
     const candidateIds = idsToCheck.filter((id) => hasKeys(sources[id]));
     const missing = {};
     for (const id of idsToCheck) {
@@ -898,20 +970,16 @@ export default class LetterspacerPanel extends Panel {
       const changes = recordChanges(root, (root) => {
         for (const id of missingIds) {
           const source = root.sources[id];
-        const existing = source.customData || {};
-        const next = { ...existing };
-        if (!(LETTERSPACER_CUSTOM_DATA_KEYS.area in next)) {
-          next[LETTERSPACER_CUSTOM_DATA_KEYS.area] = missing[id].area;
+          if (!source) {
+            continue;
+          }
+          setSourceLetterspacerValues(source, {
+            area: missing[id].area,
+            depth: missing[id].depth,
+            overshoot: missing[id].overshoot,
+          });
         }
-        if (!(LETTERSPACER_CUSTOM_DATA_KEYS.depth in next)) {
-          next[LETTERSPACER_CUSTOM_DATA_KEYS.depth] = missing[id].depth;
-        }
-        if (!(LETTERSPACER_CUSTOM_DATA_KEYS.overshoot in next)) {
-          next[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot] = missing[id].overshoot;
-        }
-        source.customData = next;
-      }
-    });
+      });
       if (changes.hasChange) {
         await this.fontController.postChange(
           changes.change,
@@ -941,12 +1009,6 @@ export default class LetterspacerPanel extends Panel {
         return;
       }
       const targetSourceIds = activeSourceIds.length ? activeSourceIds : [effectiveSourceId];
-      const customKeyMap = {
-        area: LETTERSPACER_CUSTOM_DATA_KEYS.area,
-        depth: LETTERSPACER_CUSTOM_DATA_KEYS.depth,
-        overshoot: LETTERSPACER_CUSTOM_DATA_KEYS.overshoot,
-      };
-      const customKey = customKeyMap[key];
       const valueToStore = coerceNumber(value, 0);
 
       const missing = this.getMissingLetterspacerValues(targetSourceIds);
@@ -957,25 +1019,16 @@ export default class LetterspacerPanel extends Panel {
           if (!source) {
             continue;
           }
-          const existing = source.customData || {};
-          const next = { ...existing };
-          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.area in next)) {
-            next[LETTERSPACER_CUSTOM_DATA_KEYS.area] =
-              missing[id]?.area ?? LETTERSPACER_DEFAULTS.area;
+          const nextValues = {
+            area: missing[id]?.area ?? LETTERSPACER_DEFAULTS.area,
+            depth: missing[id]?.depth ?? LETTERSPACER_DEFAULTS.depth,
+            overshoot: missing[id]?.overshoot ?? LETTERSPACER_DEFAULTS.overshoot,
+          };
+          if (id === effectiveSourceId) {
+            nextValues[key] = valueToStore;
           }
-          if (!(LETTERSPACER_CUSTOM_DATA_KEYS.depth in next)) {
-            next[LETTERSPACER_CUSTOM_DATA_KEYS.depth] =
-              missing[id]?.depth ?? LETTERSPACER_DEFAULTS.depth;
-          }
-        if (!(LETTERSPACER_CUSTOM_DATA_KEYS.overshoot in next)) {
-          next[LETTERSPACER_CUSTOM_DATA_KEYS.overshoot] =
-            missing[id]?.overshoot ?? LETTERSPACER_DEFAULTS.overshoot;
+          setSourceLetterspacerValues(source, nextValues);
         }
-        if (id === effectiveSourceId) {
-          next[customKey] = valueToStore;
-        }
-        source.customData = next;
-      }
       });
       if (changes.hasChange) {
         await this.fontController.postChange(
@@ -990,7 +1043,9 @@ export default class LetterspacerPanel extends Panel {
 
   async getGlyphReferenceValue() {
     const varGlyph = await this.getSelectedVarGlyph();
-    return varGlyph?.glyph?.customData?.[LETTERSPACER_CUSTOM_DATA_KEYS.reference];
+    return getLetterspacerSection(varGlyph?.glyph)?.[
+      LETTERSPACER_GLYPH_FIELDS.referenceGlyphName
+    ];
   }
 
   async persistGlyphReference(value) {
@@ -1002,14 +1057,13 @@ export default class LetterspacerPanel extends Panel {
     }
     const nextValue = String(value ?? "");
     await this.sceneController.editNamedGlyphAndRecordChanges(glyphName, (glyph) => {
-      const existing = glyph.customData?.[LETTERSPACER_CUSTOM_DATA_KEYS.reference];
+      const existing = getLetterspacerSection(glyph)?.[
+        LETTERSPACER_GLYPH_FIELDS.referenceGlyphName
+      ];
       if (existing === nextValue) {
         return "edit letterspacer reference";
       }
-      if (!glyph.customData) {
-        glyph.customData = {};
-      }
-      glyph.customData[LETTERSPACER_CUSTOM_DATA_KEYS.reference] = nextValue;
+      setGlyphLetterspacerReference(glyph, nextValue);
       return "edit letterspacer reference";
     });
   }

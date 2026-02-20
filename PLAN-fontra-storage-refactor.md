@@ -316,8 +316,6 @@ setFontraInternalSection(source, "skeletonDefaults", {
 ---
 
 
-## ОСТАЛОСЬ СДЕЛАТЬ
-
 ## Шаг 09. Перенести Letterspacer в internal-секции
 **Проблема (общее):** letterspacer-хранилище разбросано и слабо типизировано.  
 **Аспект:** прозрачная модель данных letterspacer.
@@ -344,6 +342,9 @@ setFontraInternalSection(glyph, "letterspacer", { referenceGlyphName: "H" });
 2. Глиф с компонентами.
 
 ---
+
+
+## ОСТАЛОСЬ СДЕЛАТЬ
 
 ## Шаг 10. Перенести Speedpunk и coarse grid в `font.internal.editorView`
 **Проблема (общее):** настройки размазаны между `window.*`, scene и persistent storage.  
@@ -484,4 +485,5 @@ for (const file of fontraFiles) {
 2. Автоматизированные тесты.
 3. Изменение базовой модели контуров/точек Fontra.
 4. Любая миграция данных, не относящаяся к 4 подсистемам форка.
+
 
