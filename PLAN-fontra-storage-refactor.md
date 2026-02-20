@@ -103,8 +103,6 @@ export const FONTRA_INTERNAL_SCHEMA_VERSION = 1;
 
 ---
 
-## ОСТАЛОСЬ СДЕЛАТЬ
-
 ## Шаг 02. Добавить общий read/write API для internal-данных
 **Проблема (общее):** прямой доступ к `customData` размазан по коду.  
 **Аспект:** единая точка чтения/записи без дублирования.
@@ -138,6 +136,8 @@ export function setFontraInternalSection(entity, section, value) {
 2. Запись в объект без `customData`.
 
 ---
+
+## ОСТАЛОСЬ СДЕЛАТЬ
 
 ## Шаг 03. Вынести нормализацию skeleton-каноники
 **Проблема (общее):** скелет хранит смесь каноники и derived-полей.  
