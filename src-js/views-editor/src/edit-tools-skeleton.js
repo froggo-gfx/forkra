@@ -15,16 +15,21 @@ import {
 } from "@fontra/core/skeleton-contour-generator.js";
 import { getGlyphInfoFromGlyphName } from "@fontra/core/glyph-data.js";
 import { BaseTool } from "./edit-tools-base.js";
-import { getSourceSkeletonDefaultsValue } from "./skeleton-source-defaults.js";
+import {
+  SKELETON_SOURCE_DEFAULT_KEYS,
+  getSourceSkeletonDefaultsValue,
+} from "./skeleton-source-defaults.js";
 
-const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
-const SKELETON_WIDTH_LOWERCASE_BASE_KEY = "fontra.skeleton.lowercaseBase";
-const SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY = "fontra.skeleton.capitalDistribution";
-const SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY = "fontra.skeleton.lowercaseDistribution";
-const SKELETON_CAP_RADIUS_RATIO_KEY = "fontra.skeleton.capRadiusRatio";
-const SKELETON_CAP_TENSION_KEY = "fontra.skeleton.capTension";
-const SKELETON_CAP_ANGLE_KEY = "fontra.skeleton.capAngle";
-const SKELETON_CAP_DISTANCE_KEY = "fontra.skeleton.capDistance";
+const SKELETON_WIDTH_CAPITAL_BASE_KEY = SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_CAPITAL_BASE;
+const SKELETON_WIDTH_LOWERCASE_BASE_KEY = SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_LOWERCASE_BASE;
+const SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY =
+  SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_CAPITAL_DISTRIBUTION;
+const SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY =
+  SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_LOWERCASE_DISTRIBUTION;
+const SKELETON_CAP_RADIUS_RATIO_KEY = SKELETON_SOURCE_DEFAULT_KEYS.CAP_RADIUS_RATIO;
+const SKELETON_CAP_TENSION_KEY = SKELETON_SOURCE_DEFAULT_KEYS.CAP_TENSION;
+const SKELETON_CAP_ANGLE_KEY = SKELETON_SOURCE_DEFAULT_KEYS.CAP_ANGLE;
+const SKELETON_CAP_DISTANCE_KEY = SKELETON_SOURCE_DEFAULT_KEYS.CAP_DISTANCE;
 const DEFAULT_WIDTH_CAPITAL_BASE = 60;
 const DEFAULT_WIDTH_LOWERCASE_BASE = 60;
 const DEFAULT_DISTRIBUTION = 0;

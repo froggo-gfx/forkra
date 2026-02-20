@@ -1,23 +1,60 @@
 import { getFontraInternalSection, setFontraInternalSection } from "@fontra/core/fontra-internal-data.js";
 import { FONTRA_INTERNAL_SECTIONS } from "@fontra/core/fontra-internal-schema.js";
 
+export const SKELETON_SOURCE_DEFAULT_KEYS = Object.freeze({
+  WIDTH_CAPITAL_BASE: "widthCapitalBase",
+  WIDTH_CAPITAL_HORIZONTAL: "widthCapitalHorizontal",
+  WIDTH_CAPITAL_CONTRAST: "widthCapitalContrast",
+  WIDTH_CAPITAL_DISTRIBUTION: "widthCapitalDistribution",
+  WIDTH_LOWERCASE_BASE: "widthLowercaseBase",
+  WIDTH_LOWERCASE_HORIZONTAL: "widthLowercaseHorizontal",
+  WIDTH_LOWERCASE_CONTRAST: "widthLowercaseContrast",
+  WIDTH_LOWERCASE_DISTRIBUTION: "widthLowercaseDistribution",
+  CAP_RADIUS_RATIO: "capRadiusRatio",
+  CAP_TENSION: "capTension",
+  CAP_ANGLE: "capAngle",
+  CAP_DISTANCE: "capDistance",
+  CUSTOM_WIDTHS_UPPERCASE: "customWidthsUppercase",
+  CUSTOM_WIDTHS_LOWERCASE: "customWidthsLowercase",
+  CUSTOM_CAP_SQUARE: "customCapSquare",
+  CUSTOM_CAP_ROUNDED: "customCapRounded",
+});
+
 const KEY_PATHS = new Map([
-  ["fontra.skeleton.capitalBase", ["widthDefaults", "uppercase", "base"]],
-  ["fontra.skeleton.capitalHorizontal", ["widthDefaults", "uppercase", "horizontal"]],
-  ["fontra.skeleton.capitalContrast", ["widthDefaults", "uppercase", "contrast"]],
-  ["fontra.skeleton.capitalDistribution", ["widthDefaults", "uppercase", "distribution"]],
-  ["fontra.skeleton.lowercaseBase", ["widthDefaults", "lowercase", "base"]],
-  ["fontra.skeleton.lowercaseHorizontal", ["widthDefaults", "lowercase", "horizontal"]],
-  ["fontra.skeleton.lowercaseContrast", ["widthDefaults", "lowercase", "contrast"]],
-  ["fontra.skeleton.lowercaseDistribution", ["widthDefaults", "lowercase", "distribution"]],
-  ["fontra.skeleton.capRadiusRatio", ["capDefaults", "round", "radiusRatio"]],
-  ["fontra.skeleton.capTension", ["capDefaults", "round", "tension"]],
-  ["fontra.skeleton.capAngle", ["capDefaults", "square", "angle"]],
-  ["fontra.skeleton.capDistance", ["capDefaults", "square", "distance"]],
-  ["fontra.skeleton.customWidthsUppercase", ["widthProfiles", "uppercase"]],
-  ["fontra.skeleton.customWidthsLowercase", ["widthProfiles", "lowercase"]],
-  ["fontra.skeleton.customCapStylesSquare", ["capProfiles", "square"]],
-  ["fontra.skeleton.customCapStylesRounded", ["capProfiles", "round"]],
+  [SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_CAPITAL_BASE, ["widthDefaults", "uppercase", "base"]],
+  [
+    SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_CAPITAL_HORIZONTAL,
+    ["widthDefaults", "uppercase", "horizontal"],
+  ],
+  [
+    SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_CAPITAL_CONTRAST,
+    ["widthDefaults", "uppercase", "contrast"],
+  ],
+  [
+    SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_CAPITAL_DISTRIBUTION,
+    ["widthDefaults", "uppercase", "distribution"],
+  ],
+  [SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_LOWERCASE_BASE, ["widthDefaults", "lowercase", "base"]],
+  [
+    SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_LOWERCASE_HORIZONTAL,
+    ["widthDefaults", "lowercase", "horizontal"],
+  ],
+  [
+    SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_LOWERCASE_CONTRAST,
+    ["widthDefaults", "lowercase", "contrast"],
+  ],
+  [
+    SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_LOWERCASE_DISTRIBUTION,
+    ["widthDefaults", "lowercase", "distribution"],
+  ],
+  [SKELETON_SOURCE_DEFAULT_KEYS.CAP_RADIUS_RATIO, ["capDefaults", "round", "radiusRatio"]],
+  [SKELETON_SOURCE_DEFAULT_KEYS.CAP_TENSION, ["capDefaults", "round", "tension"]],
+  [SKELETON_SOURCE_DEFAULT_KEYS.CAP_ANGLE, ["capDefaults", "square", "angle"]],
+  [SKELETON_SOURCE_DEFAULT_KEYS.CAP_DISTANCE, ["capDefaults", "square", "distance"]],
+  [SKELETON_SOURCE_DEFAULT_KEYS.CUSTOM_WIDTHS_UPPERCASE, ["widthProfiles", "uppercase"]],
+  [SKELETON_SOURCE_DEFAULT_KEYS.CUSTOM_WIDTHS_LOWERCASE, ["widthProfiles", "lowercase"]],
+  [SKELETON_SOURCE_DEFAULT_KEYS.CUSTOM_CAP_SQUARE, ["capProfiles", "square"]],
+  [SKELETON_SOURCE_DEFAULT_KEYS.CUSTOM_CAP_ROUNDED, ["capProfiles", "round"]],
 ]);
 
 function cloneValue(value) {
