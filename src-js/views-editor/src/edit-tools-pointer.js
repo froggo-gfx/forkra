@@ -1755,10 +1755,12 @@ export class PointerTool extends BaseTool {
 
       if (preSelectedSkeletonPoints?.size) {
         if (!(await shouldInitiateDrag(eventStream, initialEvent))) {
+          sceneController.selection = new Set([clickedRibFullKey]);
           initialEvent.preventDefault();
           return;
         }
         targetRibSelection = new Set([clickedRibShortKey]);
+        sceneController.selection = new Set([clickedRibFullKey]);
       } else if (initialEvent.shiftKey) {
         const currentRibSelection =
           parseSelection(sceneController.selection).skeletonRibPoint || new Set();
