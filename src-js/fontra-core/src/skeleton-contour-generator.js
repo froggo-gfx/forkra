@@ -3464,6 +3464,155 @@ export function getSkeletonData(layerOrCustomData) {
   return customData?.["fontra.skeleton"] ?? null;
 }
 
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function asFiniteNumber(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function asNonNegativeNumber(value, fallback) {
+  return Math.max(0, asFiniteNumber(value, fallback));
+}
+
+function asBoolean(value, fallback = false) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function clampCapRadiusRatio(value, fallback = DEFAULT_CAP_RADIUS_RATIO) {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(Math.max(value, 0), MAX_CAP_RADIUS_RATIO);
+}
+
+function clampCapAngle(value, fallback = DEFAULT_CAP_ANGLE) {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(Math.max(value, -MAX_CAP_ANGLE), MAX_CAP_ANGLE);
+}
+
+function normalizeSkeletonPoint(point) {
+  if (!isPlainObject(point)) {
+    return null;
+  }
+
+  const normalized = { ...point };
+  normalized.x = asFiniteNumber(point.x, 0);
+  normalized.y = asFiniteNumber(point.y, 0);
+
+  if (point.width !== undefined) {
+    normalized.width = asNonNegativeNumber(point.width, 0);
+  }
+  if (point.leftWidth !== undefined) {
+    normalized.leftWidth = asNonNegativeNumber(point.leftWidth, 0);
+  }
+  if (point.rightWidth !== undefined) {
+    normalized.rightWidth = asNonNegativeNumber(point.rightWidth, 0);
+  }
+
+  if (point.capStyle !== undefined) {
+    normalized.capStyle = normalizeCapStyle(point.capStyle);
+  }
+  if (point.capRadiusRatio !== undefined) {
+    normalized.capRadiusRatio = clampCapRadiusRatio(point.capRadiusRatio);
+  }
+  if (point.capTension !== undefined) {
+    normalized.capTension = asFiniteNumber(point.capTension, DEFAULT_CAP_TENSION);
+  }
+  if (point.capAngle !== undefined) {
+    normalized.capAngle = clampCapAngle(point.capAngle);
+  }
+  if (point.capDistance !== undefined) {
+    normalized.capDistance = asFiniteNumber(point.capDistance, 0);
+  }
+
+  if (point.leftEditable !== undefined) {
+    normalized.leftEditable = asBoolean(point.leftEditable);
+  }
+  if (point.rightEditable !== undefined) {
+    normalized.rightEditable = asBoolean(point.rightEditable);
+  }
+  if (point.smooth !== undefined) {
+    normalized.smooth = asBoolean(point.smooth);
+  }
+
+  return normalized;
+}
+
+function normalizeSkeletonContour(contour) {
+  if (!isPlainObject(contour)) {
+    return createSkeletonContour();
+  }
+
+  const normalized = { ...contour };
+  normalized.isClosed = asBoolean(contour.isClosed);
+  normalized.points = Array.isArray(contour.points)
+    ? contour.points.map(normalizeSkeletonPoint).filter((point) => !!point)
+    : [];
+  normalized.defaultWidth = asNonNegativeNumber(contour.defaultWidth, DEFAULT_WIDTH);
+  normalized.capStyle = normalizeCapStyle(contour.capStyle ?? "butt");
+  normalized.capRadiusRatio = clampCapRadiusRatio(
+    contour.capRadiusRatio,
+    DEFAULT_CAP_RADIUS_RATIO
+  );
+  normalized.capTension = asFiniteNumber(contour.capTension, DEFAULT_CAP_TENSION);
+  normalized.capAngle = clampCapAngle(contour.capAngle, DEFAULT_CAP_ANGLE);
+  normalized.capDistance = asFiniteNumber(contour.capDistance, 0);
+  normalized.defaultDistribution = asFiniteNumber(contour.defaultDistribution, 0);
+
+  return normalized;
+}
+
+/**
+ * Remove derived (rebuildable) fields from skeleton data.
+ * By default this strips generated contour index tracking.
+ */
+export function stripDerivedSkeletonFields(
+  skeletonData,
+  { keepGeneratedContourIndices = false } = {}
+) {
+  if (!isPlainObject(skeletonData)) {
+    return {};
+  }
+  const stripped = JSON.parse(JSON.stringify(skeletonData));
+  if (!keepGeneratedContourIndices) {
+    delete stripped.generatedContourIndices;
+  }
+  return stripped;
+}
+
+/**
+ * Normalize skeleton data to a consistent shape.
+ * This keeps unknown custom fields, but sanitizes known core fields.
+ */
+export function normalizeSkeletonData(
+  skeletonData,
+  { keepGeneratedContourIndices = false } = {}
+) {
+  const stripped = stripDerivedSkeletonFields(skeletonData, {
+    keepGeneratedContourIndices,
+  });
+
+  const normalized = isPlainObject(stripped) ? { ...stripped } : {};
+  normalized.version = asFiniteNumber(stripped.version, 1);
+  normalized.contours = Array.isArray(stripped.contours)
+    ? stripped.contours.map(normalizeSkeletonContour)
+    : [];
+
+  if (keepGeneratedContourIndices) {
+    normalized.generatedContourIndices = Array.isArray(stripped.generatedContourIndices)
+      ? stripped.generatedContourIndices.filter((index) => Number.isInteger(index) && index >= 0)
+      : [];
+  } else {
+    delete normalized.generatedContourIndices;
+  }
+
+  return normalized;
+}
+
 /**
  * Move all skeleton points by dx, dy.
  * Modifies the skeletonData object in place.

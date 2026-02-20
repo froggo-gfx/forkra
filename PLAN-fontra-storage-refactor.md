@@ -137,8 +137,6 @@ export function setFontraInternalSection(entity, section, value) {
 
 ---
 
-## ОСТАЛОСЬ СДЕЛАТЬ
-
 ## Шаг 03. Вынести нормализацию skeleton-каноники
 **Проблема (общее):** скелет хранит смесь каноники и derived-полей.  
 **Аспект:** формально очищаем skeleton перед записью.
@@ -174,6 +172,8 @@ export function normalizeSkeletonData(skeleton) {
 2. Поломанный скелет (`contours: null`).
 
 ---
+
+## ОСТАЛОСЬ СДЕЛАТЬ
 
 ## Шаг 04. Перевести чтение skeleton на `fontra.internal`
 **Проблема (общее):** чтение идёт из legacy-ключа `fontra.skeleton`.  
