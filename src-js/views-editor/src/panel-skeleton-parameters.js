@@ -7,14 +7,14 @@ import { translate } from "@fontra/core/localization.js";
 import {
   generateContoursFromSkeleton,
   calculateNormalAtSkeletonPoint,
+  getSkeletonData,
   getPointHalfWidth,
+  setSkeletonData,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { parseSelection } from "@fontra/core/utils.js";
 import { packContour, VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
-
-const SKELETON_CUSTOM_DATA_KEY = "fontra.skeleton";
 
 // Source width keys stored in source customData
 const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
@@ -2129,7 +2129,7 @@ export default class SkeletonParametersPanel extends Panel {
     const editLayerName = this.sceneController.editingLayerNames?.[0];
     if (!editLayerName) return null;
     const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-    return layer?.customData?.[SKELETON_CUSTOM_DATA_KEY] ?? null;
+    return getSkeletonData(layer) ?? null;
   }
 
   _getAdjacentHandleIndices(contour, pointIdx) {
@@ -2596,10 +2596,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
         let changed = false;
 
@@ -2648,7 +2648,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -2681,10 +2681,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
         const baseSkeletonData = JSON.parse(JSON.stringify(skeletonData));
 
@@ -2783,7 +2783,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -2812,10 +2812,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
         let changed = false;
 
@@ -2872,7 +2872,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -2972,10 +2972,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
 
         for (const { contourIdx, pointIdx } of selectedData.points) {
@@ -3011,7 +3011,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -3065,10 +3065,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
         let changed = false;
 
@@ -3097,7 +3097,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -3212,10 +3212,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
 
         // Update single-sided mode for each selected contour
@@ -3238,7 +3238,7 @@ export default class SkeletonParametersPanel extends Panel {
 
         // Update skeleton data
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -3272,10 +3272,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
 
         // Update direction for each selected contour
@@ -3295,7 +3295,7 @@ export default class SkeletonParametersPanel extends Panel {
 
         // Update skeleton data
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -3372,7 +3372,7 @@ export default class SkeletonParametersPanel extends Panel {
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     const editLayerName = this.sceneController.editingLayerNames?.[0];
     const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
-    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData) return null;
 
     const pointKeys = new Set();
@@ -3971,7 +3971,7 @@ export default class SkeletonParametersPanel extends Panel {
     const snapshot = {};
     for (const editLayerName of this.sceneController.editingLayerNames) {
       const layer = glyph.layers[editLayerName];
-      const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      const skeletonData = getSkeletonData(layer);
       if (!skeletonData) continue;
 
       const layerSnapshot = {};
@@ -4012,7 +4012,7 @@ export default class SkeletonParametersPanel extends Panel {
     const snapshot = {};
     for (const editLayerName of this.sceneController.editingLayerNames) {
       const layer = glyph.layers[editLayerName];
-      const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      const skeletonData = getSkeletonData(layer);
       if (!skeletonData) continue;
 
       const layerSnapshot = {};
@@ -4238,10 +4238,10 @@ export default class SkeletonParametersPanel extends Panel {
       // Apply changes to ALL editable layers (multi-source editing support)
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
 
         for (const { contourIdx, pointIdx } of selectedData.points) {
@@ -4261,7 +4261,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -4341,10 +4341,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
         let changed = false;
 
@@ -4376,7 +4376,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -4404,13 +4404,13 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const layerSnapshot = snapshot[editLayerName];
         if (!layerSnapshot) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
         let changed = false;
 
@@ -4445,7 +4445,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -4476,10 +4476,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
         let changed = false;
 
@@ -4534,7 +4534,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -4591,12 +4591,12 @@ export default class SkeletonParametersPanel extends Panel {
       const layerInfo = [];
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
         layerInfo.push({
           editLayerName,
           layer,
           originalSkeletonData: JSON.parse(
-            JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+            JSON.stringify(getSkeletonData(layer))
           ),
         });
       }
@@ -4688,7 +4688,7 @@ export default class SkeletonParametersPanel extends Panel {
     const allChanges = [];
     const layers = layerInfo || this.sceneController.editingLayerNames.map((editLayerName) => {
       const layer = glyph.layers[editLayerName];
-      if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) return null;
+      if (!getSkeletonData(layer)) return null;
       return {
         editLayerName,
         layer,
@@ -4706,13 +4706,13 @@ export default class SkeletonParametersPanel extends Panel {
       const { editLayerName, layer } = info;
       const baseSkeletonData = info.originalSkeletonData
         ? JSON.parse(JSON.stringify(info.originalSkeletonData))
-        : JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+        : JSON.parse(JSON.stringify(getSkeletonData(layer)));
 
       if (resetBaseline && info.originalSkeletonData) {
-        layer.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+        setSkeletonData(layer, JSON.parse(
           JSON.stringify(info.originalSkeletonData)
-        );
-        this._regenerateOutlineContours(layer.glyph, layer.customData[SKELETON_CUSTOM_DATA_KEY]);
+        ));
+        this._regenerateOutlineContours(layer.glyph, getSkeletonData(layer));
       }
 
       const skeletonData = JSON.parse(JSON.stringify(baseSkeletonData));
@@ -4742,7 +4742,7 @@ export default class SkeletonParametersPanel extends Panel {
       allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
       const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        setSkeletonData(l, skeletonData);
       });
       allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
     }
@@ -4761,7 +4761,7 @@ export default class SkeletonParametersPanel extends Panel {
     const allChanges = [];
     const layers = layerInfo || this.sceneController.editingLayerNames.map((editLayerName) => {
       const layer = glyph.layers[editLayerName];
-      if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) return null;
+      if (!getSkeletonData(layer)) return null;
       return {
         editLayerName,
         layer,
@@ -4779,13 +4779,13 @@ export default class SkeletonParametersPanel extends Panel {
       const { editLayerName, layer } = info;
       const baseSkeletonData = info.originalSkeletonData
         ? JSON.parse(JSON.stringify(info.originalSkeletonData))
-        : JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+        : JSON.parse(JSON.stringify(getSkeletonData(layer)));
 
       if (resetBaseline && info.originalSkeletonData) {
-        layer.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+        setSkeletonData(layer, JSON.parse(
           JSON.stringify(info.originalSkeletonData)
-        );
-        this._regenerateOutlineContours(layer.glyph, layer.customData[SKELETON_CUSTOM_DATA_KEY]);
+        ));
+        this._regenerateOutlineContours(layer.glyph, getSkeletonData(layer));
       }
 
       const skeletonData = JSON.parse(JSON.stringify(baseSkeletonData));
@@ -4815,7 +4815,7 @@ export default class SkeletonParametersPanel extends Panel {
       allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
       const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        setSkeletonData(l, skeletonData);
       });
       allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
     }
@@ -4861,12 +4861,12 @@ export default class SkeletonParametersPanel extends Panel {
       const layerInfo = [];
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
         layerInfo.push({
           editLayerName,
           layer,
           originalSkeletonData: JSON.parse(
-            JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+            JSON.stringify(getSkeletonData(layer))
           ),
         });
       }
@@ -4944,12 +4944,12 @@ export default class SkeletonParametersPanel extends Panel {
       const layerInfo = [];
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
         layerInfo.push({
           editLayerName,
           layer,
           originalSkeletonData: JSON.parse(
-            JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+            JSON.stringify(getSkeletonData(layer))
           ),
         });
       }
@@ -5000,7 +5000,7 @@ export default class SkeletonParametersPanel extends Panel {
     const allChanges = [];
     const layers = layerInfo || this.sceneController.editingLayerNames.map((editLayerName) => {
       const layer = glyph.layers[editLayerName];
-      if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) return null;
+      if (!getSkeletonData(layer)) return null;
       return {
         editLayerName,
         layer,
@@ -5012,13 +5012,13 @@ export default class SkeletonParametersPanel extends Panel {
       const { editLayerName, layer } = info;
       const baseSkeletonData = info.originalSkeletonData
         ? JSON.parse(JSON.stringify(info.originalSkeletonData))
-        : JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+        : JSON.parse(JSON.stringify(getSkeletonData(layer)));
 
       if (resetBaseline && info.originalSkeletonData) {
-        layer.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+        setSkeletonData(layer, JSON.parse(
           JSON.stringify(info.originalSkeletonData)
-        );
-        this._regenerateOutlineContours(layer.glyph, layer.customData[SKELETON_CUSTOM_DATA_KEY]);
+        ));
+        this._regenerateOutlineContours(layer.glyph, getSkeletonData(layer));
       }
 
       const skeletonData = JSON.parse(JSON.stringify(baseSkeletonData));
@@ -5047,7 +5047,7 @@ export default class SkeletonParametersPanel extends Panel {
       allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
       const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        setSkeletonData(l, skeletonData);
       });
       allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
     }
@@ -5066,7 +5066,7 @@ export default class SkeletonParametersPanel extends Panel {
     const allChanges = [];
     const layers = layerInfo || this.sceneController.editingLayerNames.map((editLayerName) => {
       const layer = glyph.layers[editLayerName];
-      if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) return null;
+      if (!getSkeletonData(layer)) return null;
       return {
         editLayerName,
         layer,
@@ -5081,13 +5081,13 @@ export default class SkeletonParametersPanel extends Panel {
       const { editLayerName, layer } = info;
       const baseSkeletonData = info.originalSkeletonData
         ? JSON.parse(JSON.stringify(info.originalSkeletonData))
-        : JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+        : JSON.parse(JSON.stringify(getSkeletonData(layer)));
 
       if (resetBaseline && info.originalSkeletonData) {
-        layer.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+        setSkeletonData(layer, JSON.parse(
           JSON.stringify(info.originalSkeletonData)
-        );
-        this._regenerateOutlineContours(layer.glyph, layer.customData[SKELETON_CUSTOM_DATA_KEY]);
+        ));
+        this._regenerateOutlineContours(layer.glyph, getSkeletonData(layer));
       }
 
       const skeletonData = JSON.parse(JSON.stringify(baseSkeletonData));
@@ -5116,7 +5116,7 @@ export default class SkeletonParametersPanel extends Panel {
       allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
       const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        setSkeletonData(l, skeletonData);
       });
       allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
     }
@@ -5189,12 +5189,12 @@ export default class SkeletonParametersPanel extends Panel {
       const layerInfo = [];
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
         layerInfo.push({
           editLayerName,
           layer,
           originalSkeletonData: JSON.parse(
-            JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+            JSON.stringify(getSkeletonData(layer))
           ),
         });
       }
@@ -5245,12 +5245,12 @@ export default class SkeletonParametersPanel extends Panel {
       const layerInfo = [];
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
         layerInfo.push({
           editLayerName,
           layer,
           originalSkeletonData: JSON.parse(
-            JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+            JSON.stringify(getSkeletonData(layer))
           ),
         });
       }
@@ -5330,7 +5330,7 @@ export default class SkeletonParametersPanel extends Panel {
     const allChanges = [];
     const layers = layerInfo || this.sceneController.editingLayerNames.map((editLayerName) => {
       const layer = glyph.layers[editLayerName];
-      if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) return null;
+      if (!getSkeletonData(layer)) return null;
       return {
         editLayerName,
         layer,
@@ -5342,13 +5342,13 @@ export default class SkeletonParametersPanel extends Panel {
       const { editLayerName, layer } = info;
       const baseSkeletonData = info.originalSkeletonData
         ? JSON.parse(JSON.stringify(info.originalSkeletonData))
-        : JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+        : JSON.parse(JSON.stringify(getSkeletonData(layer)));
 
       if (resetBaseline && info.originalSkeletonData) {
-        layer.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+        setSkeletonData(layer, JSON.parse(
           JSON.stringify(info.originalSkeletonData)
-        );
-        this._regenerateOutlineContours(layer.glyph, layer.customData[SKELETON_CUSTOM_DATA_KEY]);
+        ));
+        this._regenerateOutlineContours(layer.glyph, getSkeletonData(layer));
       }
 
       const skeletonData = JSON.parse(JSON.stringify(baseSkeletonData));
@@ -5377,7 +5377,7 @@ export default class SkeletonParametersPanel extends Panel {
       allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
       const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        setSkeletonData(l, skeletonData);
       });
       allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
     }
@@ -5413,10 +5413,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
 
         for (const { contourIdx, pointIdx } of selectedData.points) {
@@ -5440,7 +5440,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -5476,10 +5476,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
 
         for (const { contourIdx, pointIdx } of selectedData.points) {
@@ -5503,7 +5503,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -5553,10 +5553,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
 
         for (const [pointKey, sides] of pointSidesMap) {
@@ -5625,7 +5625,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -5675,10 +5675,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
 
         // Get the current generated path to find handle positions
@@ -5826,7 +5826,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -5919,7 +5919,7 @@ export default class SkeletonParametersPanel extends Panel {
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     const editLayerName = this.sceneController.editingLayerNames?.[0];
     const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
-    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData) return false;
 
     for (const key of selectedRibSides) {
@@ -5952,7 +5952,7 @@ export default class SkeletonParametersPanel extends Panel {
     const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
     const editLayerName = this.sceneController.editingLayerNames?.[0];
     const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
-    const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+    const skeletonData = getSkeletonData(layer);
     if (!skeletonData) return false;
 
     for (const key of selectedRibSides) {
@@ -6014,10 +6014,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
 
         for (const [pointKey, sides] of pointSidesMap) {
@@ -6063,7 +6063,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -6110,10 +6110,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
 
         for (const [pointKey, sides] of pointSidesMap) {
@@ -6141,7 +6141,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -6203,10 +6203,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
 
         for (const { contourIdx, pointIdx } of selectedData.points) {
@@ -6231,7 +6231,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -6265,10 +6265,10 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
 
         for (const { contourIdx, pointIdx } of selectedData.points) {
@@ -6299,7 +6299,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -6336,9 +6336,9 @@ export default class SkeletonParametersPanel extends Panel {
       // Apply changes to ALL editable layers (multi-source editing support)
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const originalSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const originalSkeletonData = getSkeletonData(layer);
         const skeletonData = JSON.parse(
           JSON.stringify(originalSkeletonData)
         );
@@ -6427,7 +6427,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -6480,7 +6480,7 @@ export default class SkeletonParametersPanel extends Panel {
       // Apply changes to ALL editable layers (multi-source editing support)
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        const originalSkeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+        const originalSkeletonData = getSkeletonData(layer);
         if (!originalSkeletonData) continue;
 
         // Clone skeleton data for modification
@@ -6531,7 +6531,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = newSkeletonData;
+          setSkeletonData(l, newSkeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -6604,9 +6604,9 @@ export default class SkeletonParametersPanel extends Panel {
       // Apply changes to ALL editable layers (multi-source editing support)
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
-        const originalSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const originalSkeletonData = getSkeletonData(layer);
         const skeletonData = JSON.parse(
           JSON.stringify(originalSkeletonData)
         );
@@ -6684,7 +6684,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -6711,14 +6711,14 @@ export default class SkeletonParametersPanel extends Panel {
 
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
 
         const layerSnapshot = snapshot[editLayerName];
         if (!layerSnapshot) continue;
 
-        const originalSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const originalSkeletonData = getSkeletonData(layer);
         const skeletonData = JSON.parse(
-          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+          JSON.stringify(getSkeletonData(layer))
         );
         let changed = false;
 
@@ -6764,7 +6764,7 @@ export default class SkeletonParametersPanel extends Panel {
         allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
         const customDataChange = recordChanges(layer, (l) => {
-          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+          setSkeletonData(l, skeletonData);
         });
         allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
       }
@@ -6792,12 +6792,12 @@ export default class SkeletonParametersPanel extends Panel {
       const layerInfo = [];
       for (const editLayerName of this.sceneController.editingLayerNames) {
         const layer = glyph.layers[editLayerName];
-        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+        if (!getSkeletonData(layer)) continue;
         layerInfo.push({
           editLayerName,
           layer,
           originalSkeletonData: JSON.parse(
-            JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+            JSON.stringify(getSkeletonData(layer))
           ),
         });
       }
@@ -6866,7 +6866,7 @@ export default class SkeletonParametersPanel extends Panel {
     const allChanges = [];
     const layers = layerInfo || this.sceneController.editingLayerNames.map((editLayerName) => {
       const layer = glyph.layers[editLayerName];
-      if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) return null;
+      if (!getSkeletonData(layer)) return null;
       return {
         editLayerName,
         layer,
@@ -6878,13 +6878,13 @@ export default class SkeletonParametersPanel extends Panel {
       const { editLayerName, layer } = info;
       const baseSkeletonData = info.originalSkeletonData
         ? JSON.parse(JSON.stringify(info.originalSkeletonData))
-        : JSON.parse(JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY]));
+        : JSON.parse(JSON.stringify(getSkeletonData(layer)));
 
       if (resetBaseline && info.originalSkeletonData) {
-        layer.customData[SKELETON_CUSTOM_DATA_KEY] = JSON.parse(
+        setSkeletonData(layer, JSON.parse(
           JSON.stringify(info.originalSkeletonData)
-        );
-        this._regenerateOutlineContours(layer.glyph, layer.customData[SKELETON_CUSTOM_DATA_KEY]);
+        ));
+        this._regenerateOutlineContours(layer.glyph, getSkeletonData(layer));
       }
 
       const skeletonData = JSON.parse(JSON.stringify(baseSkeletonData));
@@ -6948,7 +6948,7 @@ export default class SkeletonParametersPanel extends Panel {
       allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
       const customDataChange = recordChanges(layer, (l) => {
-        l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        setSkeletonData(l, skeletonData);
       });
       allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
     }

@@ -1074,7 +1074,7 @@ function roundSharpCornersOnSide(
 
 /**
  * Generates outline contours from skeleton data.
- * @param {Object} skeletonData - The skeleton data from customData["fontra.skeleton"]
+ * @param {Object} skeletonData - The skeleton data from customData["fontra.internal"].skeleton
  * @returns {Array} Array of unpacked contours ready to add to path
  */
 export function generateContoursFromSkeleton(skeletonData) {
@@ -3487,11 +3487,22 @@ export function getSkeletonData(layerOrCustomData) {
 /**
  * Store skeleton data in the internal customData section.
  */
-export function setSkeletonData(layer, skeletonData) {
+export function setSkeletonData(
+  layer,
+  skeletonData,
+  { keepGeneratedContourIndices = true } = {}
+) {
   if (!layer) {
     return;
   }
-  setFontraInternalSection(layer, FONTRA_INTERNAL_SECTIONS.SKELETON, skeletonData);
+  if (skeletonData === null || skeletonData === undefined) {
+    deleteFontraInternalSection(layer, FONTRA_INTERNAL_SECTIONS.SKELETON);
+    return;
+  }
+  const normalized = normalizeSkeletonData(skeletonData, {
+    keepGeneratedContourIndices,
+  });
+  setFontraInternalSection(layer, FONTRA_INTERNAL_SECTIONS.SKELETON, normalized);
 }
 
 export function clearSkeletonData(layer) {
