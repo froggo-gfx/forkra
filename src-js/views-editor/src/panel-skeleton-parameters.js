@@ -32,6 +32,8 @@ const SKELETON_CAP_ANGLE_KEY = "fontra.skeleton.capAngle";
 const SKELETON_CAP_DISTANCE_KEY = "fontra.skeleton.capDistance";
 const SKELETON_CUSTOM_WIDTHS_UPPERCASE_KEY = "fontra.skeleton.customWidthsUppercase";
 const SKELETON_CUSTOM_WIDTHS_LOWERCASE_KEY = "fontra.skeleton.customWidthsLowercase";
+const SKELETON_CUSTOM_CAP_SQUARE_KEY = "fontra.skeleton.customCapStylesSquare";
+const SKELETON_CUSTOM_CAP_ROUNDED_KEY = "fontra.skeleton.customCapStylesRounded";
 
 const DEFAULT_WIDTH_CAPITAL_BASE = 60;
 const DEFAULT_WIDTH_CAPITAL_HORIZONTAL = 50;
@@ -121,6 +123,11 @@ export default class SkeletonParametersPanel extends Panel {
       profileSelection: "",
       profilePrevTotalWidth: null,
       profilePrevContext: null,
+      profilePrevPointWidths: null,
+      capProfileSelection: "",
+      capProfilePrevContext: null,
+      capProfilePrevValues: null,
+      capProfilePrevPoints: null,
       distributionValue: null,
       distributionContext: null,
     };
@@ -498,6 +505,7 @@ export default class SkeletonParametersPanel extends Panel {
     const hasSelection = selectedData && selectedData.points.length > 0;
     const multiSelection = hasSelection && selectedData.points.length > 1;
     const selectionContext = this._getSelectionContextKey();
+    const capStyleState = this._getSelectedEndpointCapStyleState(selectedData);
     if (this.pointParameters.distributionContext !== selectionContext) {
       this.pointParameters.distributionContext = selectionContext;
       this.pointParameters.distributionValue = null;
@@ -743,11 +751,12 @@ export default class SkeletonParametersPanel extends Panel {
       const profiles = caseProfiles;
 
       const profileMap = new Map(profiles.map((p) => [p.id, p]));
-      if (this.pointParameters.profilePrevContext !== selectionContext) {
-        this.pointParameters.profilePrevContext = selectionContext;
-        this.pointParameters.profilePrevTotalWidth = null;
-        this.pointParameters.profileSelection = "";
-      }
+        if (this.pointParameters.profilePrevContext !== selectionContext) {
+          this.pointParameters.profilePrevContext = selectionContext;
+          this.pointParameters.profilePrevTotalWidth = null;
+          this.pointParameters.profilePrevPointWidths = null;
+          this.pointParameters.profileSelection = "";
+        }
       if (!profileMap.has(this.pointParameters.profileSelection)) {
         this.pointParameters.profileSelection = "";
       }
@@ -778,45 +787,57 @@ export default class SkeletonParametersPanel extends Panel {
               this.update();
               return;
             }
-            if (hasSelection && !totalMixed && this.pointParameters.profilePrevTotalWidth == null) {
-              this.pointParameters.profilePrevTotalWidth = Math.round(totalWidth);
-              this.pointParameters.profilePrevContext = selectionContext;
-            }
-            await this._setPointTotalWidth(profile.value);
-            this.update();
+              if (hasSelection && this.pointParameters.profilePrevPointWidths == null) {
+                this.pointParameters.profilePrevPointWidths =
+                  this._capturePointWidthSnapshot(selectedData);
+                this.pointParameters.profilePrevContext = selectionContext;
+              }
+              if (hasSelection && !totalMixed && this.pointParameters.profilePrevTotalWidth == null) {
+                this.pointParameters.profilePrevTotalWidth = Math.round(totalWidth);
+                this.pointParameters.profilePrevContext = selectionContext;
+              }
+              await this._setPointTotalWidth(profile.value);
+              this.update();
+            },
           },
-        },
-        profileOptions
+          profileOptions
       );
 
-      const canRevertProfile =
-        hasSelection &&
-        this.pointParameters.profilePrevTotalWidth != null &&
-        this.pointParameters.profilePrevContext === selectionContext;
-      const revertButton = html.createDomElement("icon-button", {
-        "src": "/tabler-icons/refresh.svg",
-        "style": "width: 1.2em; height: 1.2em;",
-        "data-tooltip": "Revert",
-        "data-tooltipposition": "left",
-        "disabled": !canRevertProfile,
-        "onclick": async () => {
-          if (!canRevertProfile) {
-            return;
-          }
-          const revertValue = this.pointParameters.profilePrevTotalWidth;
-          this.pointParameters.profilePrevTotalWidth = null;
-          this.pointParameters.profilePrevContext = selectionContext;
-          this.pointParameters.profileSelection = "";
-          await this._setPointTotalWidth(revertValue);
-          this.update();
-        },
-      });
+        const canRevertProfile =
+          hasSelection &&
+          this.pointParameters.profilePrevContext === selectionContext &&
+          (this.pointParameters.profilePrevTotalWidth != null ||
+            this.pointParameters.profilePrevPointWidths != null);
+        const revertButton = html.createDomElement("icon-button", {
+          "src": "/tabler-icons/refresh.svg",
+          "style": "width: 1.2em; height: 1.2em;",
+          "data-tooltip": "Revert",
+          "data-tooltipposition": "left",
+          "disabled": !canRevertProfile,
+          "onclick": async () => {
+            if (!canRevertProfile) {
+              return;
+            }
+            const revertSnapshot = this.pointParameters.profilePrevPointWidths;
+            const revertValue = this.pointParameters.profilePrevTotalWidth;
+            this.pointParameters.profilePrevTotalWidth = null;
+            this.pointParameters.profilePrevPointWidths = null;
+            this.pointParameters.profilePrevContext = selectionContext;
+            this.pointParameters.profileSelection = "";
+            if (revertSnapshot) {
+              await this._restorePointWidthSnapshot(revertSnapshot);
+            } else {
+              await this._setPointTotalWidth(revertValue);
+            }
+            this.update();
+          },
+        });
 
-      formContents.push({
-        type: "universal-row",
-        label: "Profile",
-        field1: {
-          type: "auxiliaryElement",
+        formContents.push({
+          type: "universal-row",
+          label: "Profile",
+          field1: {
+            type: "auxiliaryElement",
           key: "profileSpacerLabel",
           auxiliaryElement: html.span({}),
         },
@@ -832,13 +853,13 @@ export default class SkeletonParametersPanel extends Panel {
           type: "auxiliaryElement",
           key: "profileSpacerValue",
           auxiliaryElement: html.span({}),
-        },
-      });
+          },
+        });
 
-    // Width fields (Left / Right) - show "mixed" placeholder if values differ
-    // In single-sided mode: active side shows full width, inactive side is disabled
-    const leftDisabled = hasSingleSided && singleSidedDirection === "right";
-    const rightDisabled = hasSingleSided && singleSidedDirection === "left";
+      // Width fields (Left / Right) - show "mixed" placeholder if values differ
+      // In single-sided mode: active side shows full width, inactive side is disabled
+      const leftDisabled = hasSingleSided && singleSidedDirection === "right";
+      const rightDisabled = hasSingleSided && singleSidedDirection === "left";
 
     formContents.push({
       type: "edit-number",
@@ -884,42 +905,43 @@ export default class SkeletonParametersPanel extends Panel {
         this.pointParameters.distributionContext === selectionContext &&
         this.pointParameters.distributionValue !== null &&
         this.pointParameters.distributionValue !== undefined;
-      const distributionValue = hasStoredDistribution
-        ? this.pointParameters.distributionValue
-        : distributionMixed
-          ? this.pointParameters.distributionValue ?? 0
-          : hasDistributionValues
-            ? distributionValues[0]
-            : this._calculateDistribution(left ?? 0, right ?? 0);
-      if (hasSelection && (multiSelection || distributionMixed || hasStoredDistribution)) {
-        let distMin = null;
-        let distMax = null;
-        if (distributionValues.length) {
-          distMin = Math.min(...distributionValues);
-          distMax = Math.max(...distributionValues);
+        const distributionValue = hasStoredDistribution
+          ? this.pointParameters.distributionValue
+          : distributionMixed
+            ? this.pointParameters.distributionValue ?? 0
+            : hasDistributionValues
+              ? distributionValues[0]
+              : this._calculateDistribution(left ?? 0, right ?? 0);
+        const distributionUiValue = distributionValue / 100;
+        if (hasSelection && (multiSelection || distributionMixed || hasStoredDistribution)) {
+          let distMin = null;
+          let distMax = null;
+          if (distributionValues.length) {
+            distMin = Math.min(...distributionValues) / 100;
+            distMax = Math.max(...distributionValues) / 100;
+          }
+          this._logDistributionDebug("ui", {
+            context: selectionContext,
+            mixed: distributionMixed,
+            value: distributionUiValue,
+            min: distMin,
+            max: distMax,
+            count: distributionValues.length,
+            stored: hasStoredDistribution,
+          });
         }
-        this._logDistributionDebug("ui", {
-          context: selectionContext,
-          mixed: distributionMixed,
-          value: distributionValue,
-          min: distMin,
-          max: distMax,
-          count: distributionValues.length,
-          stored: hasStoredDistribution,
+        formContents.push({
+          type: "edit-number-slider",
+          key: "pointDistribution",
+          label: "Distribution",
+          value: distributionUiValue,
+          displayValue: !hasStoredDistribution && distributionMixed ? "mixed" : undefined,
+          minValue: -1,
+          defaultValue: 0,
+          maxValue: 1,
+          step: 0.1,
         });
       }
-      formContents.push({
-        type: "edit-number-slider",
-        key: "pointDistribution",
-        label: "Distribution",
-        value: distributionValue,
-        displayValue: !hasStoredDistribution && distributionMixed ? "mixed" : undefined,
-        minValue: -100,
-        defaultValue: 0,
-        maxValue: 100,
-        step: 2,
-      });
-    }
 
       const pointMakeGlobalButton = html.button(
         {
@@ -1277,9 +1299,8 @@ export default class SkeletonParametersPanel extends Panel {
       disabled: !cornerStrengthState.canEdit,
     });
 
-    const capStyleState = this._getSelectedEndpointCapStyleState(selectedData);
-    const capValue = capStyleState.value || "flat";
-    const capOptions = [];
+      const capValue = capStyleState.value || "flat";
+      const capOptions = [];
     if (capStyleState.mixed) {
       capOptions.push(
         html.option({ value: "", selected: true, disabled: true }, "mixed")
@@ -1304,11 +1325,11 @@ export default class SkeletonParametersPanel extends Panel {
       capOptions
     );
 
-    formContents.push({
-      type: "header",
-      label: "Cap Styles",
-      auxiliaryElement: capStyleSelect,
-    });
+      formContents.push({
+        type: "header",
+        label: "Cap Styles",
+        auxiliaryElement: capStyleSelect,
+      });
 
       const capRadiusState = this._getSelectedEndpointCapParamState(
         selectedData,
@@ -1331,10 +1352,187 @@ export default class SkeletonParametersPanel extends Panel {
         DEFAULT_CAP_DISTANCE
       );
 
-      const capRadiusValue = capRadiusState.value ?? DEFAULT_CAP_RADIUS_RATIO;
-      const capRadiusIndex = this._capRadiusIndexFromRatio(capRadiusValue);
-      const capRadiusPosition = capRadiusIndex + 1;
-      const defaultCapRadiusIndex = this._capRadiusIndexFromRatio(DEFAULT_CAP_RADIUS_RATIO);
+      const showCapProfile =
+        capStyleState.canEdit &&
+        !capStyleState.mixed &&
+        (capValue === "square" || capValue === "round");
+      if (showCapProfile) {
+        const capProfiles =
+          capValue === "square"
+            ? [
+                {
+                  id: "square:base",
+                  label: "Base",
+                  style: "square",
+                  angle: capAngle,
+                  distance: capDistance,
+                },
+                ...this._getSourceCustomCapSquareList().map((item, index) => ({
+                  id: `square:custom:${index}`,
+                  label: item.name || `Custom ${index + 1}`,
+                  style: "square",
+                  angle: item.angle,
+                  distance: item.distance,
+                })),
+              ]
+            : [
+                {
+                  id: "round:base",
+                  label: "Base",
+                  style: "round",
+                  radius: capRadiusRatio,
+                  tension: capTension,
+                },
+                ...this._getSourceCustomCapRoundedList().map((item, index) => ({
+                  id: `round:custom:${index}`,
+                  label: item.name || `Custom ${index + 1}`,
+                  style: "round",
+                  radius: item.radius,
+                  tension: item.tension,
+                })),
+              ];
+
+        const capProfileMap = new Map(capProfiles.map((p) => [p.id, p]));
+        if (this.pointParameters.capProfilePrevContext !== selectionContext) {
+          this.pointParameters.capProfilePrevContext = selectionContext;
+          this.pointParameters.capProfileSelection = "";
+          this.pointParameters.capProfilePrevValues = null;
+          this.pointParameters.capProfilePrevPoints = null;
+        }
+        if (!capProfileMap.has(this.pointParameters.capProfileSelection)) {
+          this.pointParameters.capProfileSelection = "";
+        }
+
+        const capProfileOptions = [
+          html.option(
+            { value: "", selected: !this.pointParameters.capProfileSelection },
+            "None"
+          ),
+          ...capProfiles.map((profile) =>
+            html.option(
+              {
+                value: profile.id,
+                selected: this.pointParameters.capProfileSelection === profile.id,
+              },
+              profile.label
+            )
+          ),
+        ];
+
+        const capProfileSelect = html.select(
+          {
+            style: "min-width: 12em;",
+            disabled: !capStyleState.canEdit || capProfiles.length === 0,
+            onchange: async (e) => {
+              const selectedId = e.target.value;
+              this.pointParameters.capProfileSelection = selectedId;
+              if (!selectedId) {
+                this.update();
+                return;
+              }
+              const profile = capProfileMap.get(selectedId);
+              if (!profile) {
+                this.update();
+                return;
+              }
+              if (this.pointParameters.capProfilePrevPoints == null && hasSelection) {
+                this.pointParameters.capProfilePrevPoints =
+                  this._capturePointCapSnapshot(selectedData);
+                this.pointParameters.capProfilePrevContext = selectionContext;
+              }
+              if (this.pointParameters.capProfilePrevValues == null && hasSelection) {
+                let prevValues = null;
+                if (!capStyleState.mixed) {
+                  if (capValue === "square") {
+                    if (!capAngleState.mixed && !capDistanceState.mixed) {
+                      prevValues = {
+                        style: "square",
+                        angle: capAngleState.value ?? DEFAULT_CAP_ANGLE,
+                        distance: capDistanceState.value ?? DEFAULT_CAP_DISTANCE,
+                      };
+                    }
+                  } else if (capValue === "round") {
+                    if (!capRadiusState.mixed && !capTensionState.mixed) {
+                      prevValues = {
+                        style: "round",
+                        radius: capRadiusState.value ?? DEFAULT_CAP_RADIUS_RATIO,
+                        tension: capTensionState.value ?? DEFAULT_CAP_TENSION,
+                      };
+                    }
+                  } else if (capValue === "flat") {
+                    prevValues = { style: "flat" };
+                  }
+                }
+                if (prevValues) {
+                  this.pointParameters.capProfilePrevValues = prevValues;
+                  this.pointParameters.capProfilePrevContext = selectionContext;
+                }
+              }
+              await this._applyCapProfileToSelection(profile);
+              this.update();
+            },
+          },
+          capProfileOptions
+        );
+
+        const canRevertCapProfile =
+          hasSelection &&
+          this.pointParameters.capProfilePrevContext === selectionContext &&
+          (this.pointParameters.capProfilePrevValues != null ||
+            this.pointParameters.capProfilePrevPoints != null);
+        const capRevertButton = html.createDomElement("icon-button", {
+          "src": "/tabler-icons/refresh.svg",
+          "style": "width: 1.2em; height: 1.2em;",
+          "data-tooltip": "Revert",
+          "data-tooltipposition": "left",
+          "disabled": !canRevertCapProfile || !capStyleState.canEdit,
+          "onclick": async () => {
+            if (!canRevertCapProfile) {
+              return;
+            }
+            const prevValues = this.pointParameters.capProfilePrevValues;
+            const prevPoints = this.pointParameters.capProfilePrevPoints;
+            this.pointParameters.capProfilePrevValues = null;
+            this.pointParameters.capProfilePrevPoints = null;
+            this.pointParameters.capProfilePrevContext = selectionContext;
+            this.pointParameters.capProfileSelection = "";
+            if (prevPoints) {
+              await this._restoreCapProfileSnapshot(prevPoints);
+            } else if (prevValues) {
+              await this._applyCapProfileToSelection(prevValues);
+            }
+            this.update();
+          },
+        });
+
+        formContents.push({
+          type: "universal-row",
+          label: "Cap Profile",
+          field1: {
+            type: "auxiliaryElement",
+            key: "capProfileSpacerLabel",
+            auxiliaryElement: html.span({}),
+          },
+          field2: {
+            type: "auxiliaryElement",
+            key: "capProfileSelect",
+            auxiliaryElement: html.div(
+              { style: "display: flex; gap: 0.35rem; align-items: center;" },
+              [capProfileSelect, capRevertButton]
+            ),
+          },
+          field3: {
+            type: "auxiliaryElement",
+            key: "capProfileSpacerValue",
+            auxiliaryElement: html.span({}),
+          },
+        });
+      }
+
+        const capRadiusValue = capRadiusState.value ?? DEFAULT_CAP_RADIUS_RATIO;
+        const capRadiusIndex = this._capRadiusIndexFromRatio(capRadiusValue);
+        const capRadiusPosition = capRadiusIndex + 1;
+        const defaultCapRadiusIndex = this._capRadiusIndexFromRatio(DEFAULT_CAP_RADIUS_RATIO);
       const capTensionPercent = Math.round(
         (capTensionState.value ?? DEFAULT_CAP_TENSION) * 100
       );
@@ -1580,10 +1778,12 @@ export default class SkeletonParametersPanel extends Panel {
         } else if (fieldItem.key === "pointWidthTotal") {
           this.pointParameters.profileSelection = "";
           this.pointParameters.profilePrevTotalWidth = null;
+          this.pointParameters.profilePrevPointWidths = null;
           await this._setPointTotalWidth(value);
         } else if (fieldItem.key === "pointWidthLeft" || fieldItem.key === "pointWidthRight") {
           this.pointParameters.profileSelection = "";
           this.pointParameters.profilePrevTotalWidth = null;
+          this.pointParameters.profilePrevPointWidths = null;
           await this._setPointWidth(fieldItem.key, value);
         } else if (fieldItem.key === "cornerRoundnessPercent") {
         if (valueStream) {
@@ -1644,12 +1844,15 @@ export default class SkeletonParametersPanel extends Panel {
           await this._setCornerRadiusBoostDebug(value / 100);
           this.update();
         }
-      } else if (fieldItem.key === "capRadiusIndex") {
-        if (valueStream) {
-          this._isDraggingSlider = true;
-          try {
-            const mappedStream = this._mapValueStream(valueStream, (v) => {
-              const index = Math.round(v) - 1;
+        } else if (fieldItem.key === "capRadiusIndex") {
+          this.pointParameters.capProfileSelection = "";
+          this.pointParameters.capProfilePrevValues = null;
+          this.pointParameters.capProfilePrevPoints = null;
+          if (valueStream) {
+            this._isDraggingSlider = true;
+            try {
+              const mappedStream = this._mapValueStream(valueStream, (v) => {
+                const index = Math.round(v) - 1;
               return this._capRadiusRatioFromIndex(index);
             });
             await this._setCapParameterForSelectionStream("capRadiusRatio", mappedStream);
@@ -1662,13 +1865,16 @@ export default class SkeletonParametersPanel extends Panel {
           const index = Math.round(value) - 1;
           const ratio = this._capRadiusRatioFromIndex(index);
           await this._onCapRadiusChange(ratio);
-        }
-      } else if (fieldItem.key === "capTension") {
-        if (valueStream) {
-          this._isDraggingSlider = true;
-          try {
-            const mappedStream = this._mapValueStream(valueStream, (v) => v / 100);
-            await this._setCapParameterForSelectionStream("capTension", mappedStream);
+          }
+        } else if (fieldItem.key === "capTension") {
+          this.pointParameters.capProfileSelection = "";
+          this.pointParameters.capProfilePrevValues = null;
+          this.pointParameters.capProfilePrevPoints = null;
+          if (valueStream) {
+            this._isDraggingSlider = true;
+            try {
+              const mappedStream = this._mapValueStream(valueStream, (v) => v / 100);
+              await this._setCapParameterForSelectionStream("capTension", mappedStream);
           } finally {
             this._isDraggingSlider = false;
             this._blurActiveFormElement();
@@ -1676,13 +1882,16 @@ export default class SkeletonParametersPanel extends Panel {
           this.update();
         } else {
           await this._onCapTensionChange(value);
-        }
-      } else if (fieldItem.key === "capAngle") {
-        if (valueStream) {
-          this._isDraggingSlider = true;
-          try {
-            await this._setCapParameterForSelectionStream("capAngle", valueStream);
-          } finally {
+          }
+        } else if (fieldItem.key === "capAngle") {
+          this.pointParameters.capProfileSelection = "";
+          this.pointParameters.capProfilePrevValues = null;
+          this.pointParameters.capProfilePrevPoints = null;
+          if (valueStream) {
+            this._isDraggingSlider = true;
+            try {
+              await this._setCapParameterForSelectionStream("capAngle", valueStream);
+            } finally {
             this._isDraggingSlider = false;
             this._blurActiveFormElement();
           }
@@ -1690,11 +1899,14 @@ export default class SkeletonParametersPanel extends Panel {
         } else {
           await this._setCapParameterForSelection("capAngle", value);
           this.update();
-        }
-      } else if (fieldItem.key === "capDistance") {
-        await this._setCapParameterForSelection("capDistance", value);
-        this.update();
-      } else if (fieldItem.key === "pointWidthScale") {
+          }
+        } else if (fieldItem.key === "capDistance") {
+          this.pointParameters.capProfileSelection = "";
+          this.pointParameters.capProfilePrevValues = null;
+          this.pointParameters.capProfilePrevPoints = null;
+          await this._setCapParameterForSelection("capDistance", value);
+          this.update();
+        } else if (fieldItem.key === "pointWidthScale") {
         // Protect scale slider from form rebuilds during drag
         if (valueStream) {
           // Slider drag: just update value, wait for "Apply Scale" button
@@ -1714,19 +1926,20 @@ export default class SkeletonParametersPanel extends Panel {
             await this._applyScaleToSelectedPoints();
           }
         }
-      } else if (fieldItem.key === "pointDistribution") {
-        // For distribution slider
-        this.pointParameters.distributionValue = value;
-        this.pointParameters.distributionContext = this._getSelectionContextKey();
-        this._logDistributionDebug(valueStream ? "dragBegin" : "input", {
-          context: this.pointParameters.distributionContext,
-          value,
-          selectedCount: this._getSelectedSkeletonPoints()?.points?.length || 0,
-        });
-        if (valueStream) {
-          this._isDraggingSlider = true;
-          // Store initial state for multi-selection
-          const selectedData = this._getSelectedSkeletonPoints();
+        } else if (fieldItem.key === "pointDistribution") {
+          // For distribution slider
+          const scaledValue = value * 100;
+          this.pointParameters.distributionValue = scaledValue;
+          this.pointParameters.distributionContext = this._getSelectionContextKey();
+          this._logDistributionDebug(valueStream ? "dragBegin" : "input", {
+            context: this.pointParameters.distributionContext,
+            value,
+            selectedCount: this._getSelectedSkeletonPoints()?.points?.length || 0,
+          });
+          if (valueStream) {
+            this._isDraggingSlider = true;
+            // Store initial state for multi-selection
+            const selectedData = this._getSelectedSkeletonPoints();
 
           if (selectedData && selectedData.points.length > 1) {
             const pointStates = new Map();
@@ -1755,20 +1968,21 @@ export default class SkeletonParametersPanel extends Panel {
             } else {
               this._multiSelectionState = null;
             }
-            try {
-              await this._setPointDistributionStream(valueStream);
-            } finally {
-              this._isDraggingSlider = false;
-              this._multiSelectionState = null;
-              this._blurActiveFormElement();
-              this.update();
-            }
+              try {
+                const mappedStream = this._mapValueStream(valueStream, (v) => v * 100);
+                await this._setPointDistributionStream(mappedStream);
+              } finally {
+                this._isDraggingSlider = false;
+                this._multiSelectionState = null;
+                this._blurActiveFormElement();
+                this.update();
+              }
+          } else {
+            await this._setPointDistributionDirect(scaledValue);
+          }
         } else {
-          await this._setPointDistributionDirect(value);
+          this.parameters[fieldItem.key] = value;
         }
-      } else {
-        this.parameters[fieldItem.key] = value;
-      }
       };
     }
 
@@ -1855,6 +2069,56 @@ export default class SkeletonParametersPanel extends Panel {
         return {
           name,
           value: Number.isFinite(value) ? value : 0,
+      };
+    });
+  }
+
+  _getSourceCustomCapSquareList() {
+    const list = this._getSourceCustomDataValue(SKELETON_CUSTOM_CAP_SQUARE_KEY, []);
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    return list
+      .filter((item) => item && typeof item === "object")
+      .map((item) => {
+        const name = typeof item.name === "string" ? item.name : "";
+        const angleRaw =
+          Number.isFinite(Number(item.angle)) ? Number(item.angle) : Number(item.value);
+        const distanceRaw =
+          Number.isFinite(Number(item.distance)) ? Number(item.distance) : 0;
+        return {
+          name,
+          angle: Number.isFinite(angleRaw) ? angleRaw : 0,
+          distance: Number.isFinite(distanceRaw) ? distanceRaw : 0,
+        };
+      });
+  }
+
+  _getSourceCustomCapRoundedList() {
+    const list = this._getSourceCustomDataValue(SKELETON_CUSTOM_CAP_ROUNDED_KEY, []);
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    return list
+      .filter((item) => item && typeof item === "object")
+      .map((item) => {
+        const name = typeof item.name === "string" ? item.name : "";
+        let radiusRaw =
+          Number.isFinite(Number(item.radius)) ? Number(item.radius) : Number(item.value);
+        if (!Number.isFinite(radiusRaw)) {
+          radiusRaw = DEFAULT_CAP_RADIUS_RATIO;
+        }
+        let tensionRaw = Number(item.tension);
+        if (!Number.isFinite(tensionRaw)) {
+          tensionRaw = DEFAULT_CAP_TENSION;
+        }
+        if (tensionRaw > 1) {
+          tensionRaw = tensionRaw / 100;
+        }
+        return {
+          name,
+          radius: Number.isFinite(radiusRaw) ? radiusRaw : DEFAULT_CAP_RADIUS_RATIO,
+          tension: Number.isFinite(tensionRaw) ? tensionRaw : DEFAULT_CAP_TENSION,
         };
       });
   }
@@ -3560,6 +3824,29 @@ export default class SkeletonParametersPanel extends Panel {
           this._getSourceCustomDataValue(SKELETON_CUSTOM_WIDTHS_LOWERCASE_KEY, [])
         )}`
       );
+      parts.push(
+        `cc:${JSON.stringify(
+          this._getSourceCustomDataValue(SKELETON_CUSTOM_CAP_SQUARE_KEY, [])
+        )}:${JSON.stringify(
+          this._getSourceCustomDataValue(SKELETON_CUSTOM_CAP_ROUNDED_KEY, [])
+        )}`
+      );
+      parts.push(
+        `prof:${this.pointParameters.profileSelection || ""}:${
+          this.pointParameters.profilePrevTotalWidth ?? ""
+        }:${this.pointParameters.profilePrevPointWidths ? 1 : 0}`
+      );
+      const capPrev = this.pointParameters.capProfilePrevValues;
+      const capPrevSig = capPrev
+        ? `${capPrev.style || ""}:${capPrev.angle ?? ""},${capPrev.distance ?? ""},${capPrev.radius ?? ""},${
+            capPrev.tension ?? ""
+          }`
+        : "";
+      parts.push(
+        `capprof:${this.pointParameters.capProfileSelection || ""}:${capPrevSig}:${
+          this.pointParameters.capProfilePrevPoints ? 1 : 0
+        }`
+      );
 
     // Single-sided state
     parts.push(`ss:${this._getCurrentSingleSided()},${this._getCurrentSingleSidedDirection()}`);
@@ -3660,10 +3947,6 @@ export default class SkeletonParametersPanel extends Panel {
         const confirmRound = this._confirmState?.round?.pending ? 1 : 0;
         parts.push(`confirm:${confirmPoint},${confirmSquare},${confirmRound}`);
         parts.push(`anchor:${this.pointParameters.widthAnchor || "center"}`);
-        parts.push(
-          `prof:${this.pointParameters.profileSelection || ""}:${this.pointParameters.profilePrevTotalWidth ?? ""}`
-        );
-
         return parts.join("|");
       }
 
@@ -3677,6 +3960,170 @@ export default class SkeletonParametersPanel extends Panel {
     const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
     const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
     return { left: leftHW, right: rightHW };
+  }
+
+  _capturePointWidthSnapshot(selectedData) {
+    if (!selectedData?.points?.length) return null;
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    const glyph = positionedGlyph?.varGlyph?.glyph;
+    if (!glyph?.layers) return null;
+
+    const snapshot = {};
+    for (const editLayerName of this.sceneController.editingLayerNames) {
+      const layer = glyph.layers[editLayerName];
+      const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      if (!skeletonData) continue;
+
+      const layerSnapshot = {};
+      for (const { contourIdx, pointIdx } of selectedData.points) {
+        const point = skeletonData.contours?.[contourIdx]?.points?.[pointIdx];
+        if (!point || point.type) continue;
+        layerSnapshot[`${contourIdx}/${pointIdx}`] = this._snapshotPointWidth(point);
+      }
+      snapshot[editLayerName] = layerSnapshot;
+    }
+
+    return Object.keys(snapshot).length ? snapshot : null;
+  }
+
+  _snapshotPointWidth(point) {
+    const hasWidth = Object.prototype.hasOwnProperty.call(point, "width");
+    const hasLeftWidth = Object.prototype.hasOwnProperty.call(point, "leftWidth");
+    const hasRightWidth = Object.prototype.hasOwnProperty.call(point, "rightWidth");
+    const hasWidthLinked = Object.prototype.hasOwnProperty.call(point, "widthLinked");
+    return {
+      hasWidth,
+      width: point.width,
+      hasLeftWidth,
+      leftWidth: point.leftWidth,
+      hasRightWidth,
+      rightWidth: point.rightWidth,
+      hasWidthLinked,
+      widthLinked: point.widthLinked,
+    };
+  }
+
+  _capturePointCapSnapshot(selectedData) {
+    if (!selectedData?.points?.length) return null;
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    const glyph = positionedGlyph?.varGlyph?.glyph;
+    if (!glyph?.layers) return null;
+
+    const snapshot = {};
+    for (const editLayerName of this.sceneController.editingLayerNames) {
+      const layer = glyph.layers[editLayerName];
+      const skeletonData = layer?.customData?.[SKELETON_CUSTOM_DATA_KEY];
+      if (!skeletonData) continue;
+
+      const layerSnapshot = {};
+      for (const { contourIdx, pointIdx } of selectedData.points) {
+        const contour = skeletonData.contours?.[contourIdx];
+        if (!contour || contour.isClosed) continue;
+        const endpoints = this._getContourEndpointIndices(contour);
+        if (!endpoints) continue;
+        if (pointIdx !== endpoints.firstOnCurve && pointIdx !== endpoints.lastOnCurve) {
+          continue;
+        }
+        const point = contour.points?.[pointIdx];
+        if (!point || point.type) continue;
+        layerSnapshot[`${contourIdx}/${pointIdx}`] = this._snapshotPointCap(point);
+      }
+      snapshot[editLayerName] = layerSnapshot;
+    }
+
+    return Object.keys(snapshot).length ? snapshot : null;
+  }
+
+  _snapshotPointCap(point) {
+    const hasCapStyle = Object.prototype.hasOwnProperty.call(point, "capStyle");
+    const hasCapRadiusRatio = Object.prototype.hasOwnProperty.call(point, "capRadiusRatio");
+    const hasCapTension = Object.prototype.hasOwnProperty.call(point, "capTension");
+    const hasCapAngle = Object.prototype.hasOwnProperty.call(point, "capAngle");
+    const hasCapDistance = Object.prototype.hasOwnProperty.call(point, "capDistance");
+    return {
+      hasCapStyle,
+      capStyle: point.capStyle,
+      hasCapRadiusRatio,
+      capRadiusRatio: point.capRadiusRatio,
+      hasCapTension,
+      capTension: point.capTension,
+      hasCapAngle,
+      capAngle: point.capAngle,
+      hasCapDistance,
+      capDistance: point.capDistance,
+    };
+  }
+
+  _applyPointCapSnapshot(point, snapshot) {
+    if (!point || !snapshot) return;
+    if (snapshot.hasCapStyle) {
+      point.capStyle = snapshot.capStyle;
+    } else {
+      delete point.capStyle;
+    }
+    if (snapshot.hasCapRadiusRatio) {
+      point.capRadiusRatio = snapshot.capRadiusRatio;
+    } else {
+      delete point.capRadiusRatio;
+    }
+    if (snapshot.hasCapTension) {
+      point.capTension = snapshot.capTension;
+    } else {
+      delete point.capTension;
+    }
+    if (snapshot.hasCapAngle) {
+      point.capAngle = snapshot.capAngle;
+    } else {
+      delete point.capAngle;
+    }
+    if (snapshot.hasCapDistance) {
+      point.capDistance = snapshot.capDistance;
+    } else {
+      delete point.capDistance;
+    }
+  }
+
+  _applyPointWidthSnapshot(point, snapshot) {
+    if (!point || !snapshot) return;
+    if (snapshot.hasWidth) {
+      point.width = snapshot.width;
+    } else {
+      delete point.width;
+    }
+    if (snapshot.hasLeftWidth) {
+      point.leftWidth = snapshot.leftWidth;
+    } else {
+      delete point.leftWidth;
+    }
+    if (snapshot.hasRightWidth) {
+      point.rightWidth = snapshot.rightWidth;
+    } else {
+      delete point.rightWidth;
+    }
+    if (snapshot.hasWidthLinked) {
+      point.widthLinked = snapshot.widthLinked;
+    } else {
+      delete point.widthLinked;
+    }
+  }
+
+  _getPointWidthsFromSnapshot(snapshot, defaultWidth) {
+    if (!snapshot) {
+      return { left: defaultWidth / 2, right: defaultWidth / 2 };
+    }
+    if (snapshot.hasLeftWidth || snapshot.hasRightWidth) {
+      const fallbackHalf = snapshot.hasWidth
+        ? (snapshot.width ?? defaultWidth) / 2
+        : defaultWidth / 2;
+      const left = snapshot.hasLeftWidth ? snapshot.leftWidth : fallbackHalf;
+      const right = snapshot.hasRightWidth ? snapshot.rightWidth : fallbackHalf;
+      return { left, right };
+    }
+    if (snapshot.hasWidth) {
+      const half = (snapshot.width ?? defaultWidth) / 2;
+      return { left: half, right: half };
+    }
+    return { left: defaultWidth / 2, right: defaultWidth / 2 };
   }
 
   /**
@@ -3883,6 +4330,10 @@ export default class SkeletonParametersPanel extends Panel {
       return;
     }
 
+    this.pointParameters.capProfileSelection = "";
+    this.pointParameters.capProfilePrevValues = null;
+    this.pointParameters.capProfilePrevPoints = null;
+
     const capStyle = value === "flat" ? "butt" : value;
 
     await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
@@ -3943,6 +4394,162 @@ export default class SkeletonParametersPanel extends Panel {
     });
 
     this.update();
+  }
+
+  async _restoreCapProfileSnapshot(snapshot) {
+    if (!snapshot) return;
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const layerSnapshot = snapshot[editLayerName];
+        if (!layerSnapshot) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+        let changed = false;
+
+        for (const [key, pointSnapshot] of Object.entries(layerSnapshot)) {
+          const [contourIdx, pointIdx] = key.split("/").map(Number);
+          const contour = skeletonData.contours?.[contourIdx];
+          if (!contour || contour.isClosed) continue;
+          const endpoints = this._getContourEndpointIndices(contour);
+          if (!endpoints) continue;
+          if (pointIdx !== endpoints.firstOnCurve && pointIdx !== endpoints.lastOnCurve) {
+            continue;
+          }
+          const point = contour.points?.[pointIdx];
+          if (!point || point.type) continue;
+
+          this._applyPointCapSnapshot(point, pointSnapshot);
+
+          if (point.capStyle === "round") {
+            this._disableEditableSide(point, "left");
+            this._disableEditableSide(point, "right");
+          }
+
+          changed = true;
+        }
+
+        if (!changed) continue;
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Revert cap profile",
+        broadcast: true,
+      };
+    });
+  }
+
+  async _applyCapProfileToSelection(profile) {
+    const selectedData = this._getSelectedSkeletonPoints();
+    if (!selectedData) {
+      return;
+    }
+
+    const capStyle = profile.style === "flat" ? "butt" : profile.style;
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+        let changed = false;
+
+        for (const { contourIdx, pointIdx } of selectedData.points) {
+          const contour = skeletonData.contours[contourIdx];
+          if (!contour || contour.isClosed) continue;
+          const endpoints = this._getContourEndpointIndices(contour);
+          if (!endpoints) continue;
+          if (pointIdx !== endpoints.firstOnCurve && pointIdx !== endpoints.lastOnCurve) {
+            continue;
+          }
+          const point = contour.points[pointIdx];
+          if (!point || point.type) continue;
+
+          point.capStyle = capStyle;
+
+          if (capStyle === "round") {
+            const radius = this._clampCapParam(
+              "capRadiusRatio",
+              profile.radius ?? DEFAULT_CAP_RADIUS_RATIO
+            );
+            const tension = this._clampCapParam(
+              "capTension",
+              profile.tension ?? DEFAULT_CAP_TENSION
+            );
+            point.capRadiusRatio = radius;
+            point.capTension = tension;
+            this._disableEditableSide(point, "left");
+            this._disableEditableSide(point, "right");
+          } else if (capStyle === "square") {
+            const angle = this._clampCapParam(
+              "capAngle",
+              profile.angle ?? DEFAULT_CAP_ANGLE
+            );
+            const distance = this._clampCapParam(
+              "capDistance",
+              profile.distance ?? DEFAULT_CAP_DISTANCE
+            );
+            point.capAngle = angle;
+            point.capDistance = distance;
+          }
+
+          changed = true;
+        }
+
+        if (!changed) continue;
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Apply cap profile",
+        broadcast: true,
+      };
+    });
   }
 
   async _setCapParameterForSelection(paramKey, value) {
@@ -6090,6 +6697,86 @@ export default class SkeletonParametersPanel extends Panel {
       return {
         changes: combined,
         undoLabel: "Set point total width",
+        broadcast: true,
+      };
+    });
+  }
+
+  async _restorePointWidthSnapshot(snapshot) {
+    if (!snapshot) return;
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+      const { key: widthKey, fallback: widthFallback } = this._getDefaultWidthForGlyph();
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer?.customData?.[SKELETON_CUSTOM_DATA_KEY]) continue;
+
+        const layerSnapshot = snapshot[editLayerName];
+        if (!layerSnapshot) continue;
+
+        const originalSkeletonData = layer.customData[SKELETON_CUSTOM_DATA_KEY];
+        const skeletonData = JSON.parse(
+          JSON.stringify(layer.customData[SKELETON_CUSTOM_DATA_KEY])
+        );
+        let changed = false;
+
+        for (const [key, pointSnapshot] of Object.entries(layerSnapshot)) {
+          const [contourIdx, pointIdx] = key.split("/").map(Number);
+          const contour = skeletonData.contours?.[contourIdx];
+          const originalContour = originalSkeletonData.contours?.[contourIdx];
+          if (!contour || !originalContour) continue;
+          const point = contour.points?.[pointIdx];
+          const originalPoint = originalContour.points?.[pointIdx];
+          if (!point || !originalPoint || point.type) continue;
+
+          const defaultWidth =
+            originalContour.defaultWidth ||
+            this._getSourceWidth(widthKey, widthFallback);
+          const oldWidths = this._getPointWidths(originalPoint, defaultWidth);
+          const newWidths = this._getPointWidthsFromSnapshot(
+            pointSnapshot,
+            defaultWidth
+          );
+
+          this._applyPointWidthSnapshot(point, pointSnapshot);
+          this._clearEditableWhenCollapsed(point, newWidths.left, newWidths.right);
+          this._applyWidthAnchorTranslation(
+            contour,
+            originalContour,
+            pointIdx,
+            oldWidths.left,
+            oldWidths.right,
+            newWidths.left,
+            newWidths.right
+          );
+
+          changed = true;
+        }
+
+        if (!changed) continue;
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          l.customData[SKELETON_CUSTOM_DATA_KEY] = skeletonData;
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Revert point widths",
         broadcast: true,
       };
     });
