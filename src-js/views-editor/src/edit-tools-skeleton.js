@@ -15,6 +15,7 @@ import {
 } from "@fontra/core/skeleton-contour-generator.js";
 import { getGlyphInfoFromGlyphName } from "@fontra/core/glyph-data.js";
 import { BaseTool } from "./edit-tools-base.js";
+import { getSourceSkeletonDefaultsValue } from "./skeleton-source-defaults.js";
 
 const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
 const SKELETON_WIDTH_LOWERCASE_BASE_KEY = "fontra.skeleton.lowercaseBase";
@@ -186,7 +187,7 @@ export class SkeletonPenTool extends BaseTool {
     if (!sourceIdentifier) return fallback;
     const fontController = this.sceneController.sceneModel.fontController;
     const source = fontController.sources[sourceIdentifier];
-    return source?.customData?.[key] ?? fallback;
+    return getSourceSkeletonDefaultsValue(source, key, fallback);
   }
 
   _getDefaultSkeletonDistribution() {

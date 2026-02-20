@@ -16,6 +16,10 @@ import { parseSelection } from "@fontra/core/utils.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
+import {
+  getSourceSkeletonDefaultsValue,
+  setSourceSkeletonDefaultsValues,
+} from "./skeleton-source-defaults.js";
 
 // Source width keys stored in source customData
 const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
@@ -2050,7 +2054,7 @@ export default class SkeletonParametersPanel extends Panel {
     if (!sourceIdentifier) return fallback;
 
     const source = this.fontController.sources[sourceIdentifier];
-    return source?.customData?.[key] ?? fallback;
+    return getSourceSkeletonDefaultsValue(source, key, fallback);
   }
 
   _getSourceCustomDataValue(key, fallback) {
@@ -2896,12 +2900,7 @@ export default class SkeletonParametersPanel extends Panel {
 
     const root = { sources: this.fontController.sources };
     const changes = recordChanges(root, (r) => {
-      if (!r.sources[sourceIdentifier].customData) {
-        r.sources[sourceIdentifier].customData = {};
-      }
-      for (const [key, value] of Object.entries(values)) {
-        r.sources[sourceIdentifier].customData[key] = value;
-      }
+      setSourceSkeletonDefaultsValues(r.sources[sourceIdentifier], values);
     });
 
     if (changes.hasChange) {
@@ -3325,10 +3324,7 @@ export default class SkeletonParametersPanel extends Panel {
 
     const root = { sources: this.fontController.sources };
     const changes = recordChanges(root, (r) => {
-      if (!r.sources[sourceIdentifier].customData) {
-        r.sources[sourceIdentifier].customData = {};
-      }
-      r.sources[sourceIdentifier].customData[key] = value;
+      setSourceSkeletonDefaultsValues(r.sources[sourceIdentifier], { [key]: value });
     });
 
     if (changes.hasChange) {

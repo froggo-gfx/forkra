@@ -28,6 +28,10 @@ import {
 } from "@fontra/core/skeleton-contour-generator.js";
 import LetterspacerPanel from "./panel-letterspacer.js";
 import Panel from "./panel.js";
+import {
+  getSourceSkeletonDefaultsValue,
+  setSourceSkeletonDefaultsValues,
+} from "./skeleton-source-defaults.js";
 
 const SKELETON_WIDTH_CAPITAL_BASE_KEY = "fontra.skeleton.capitalBase";
 const SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY = "fontra.skeleton.capitalHorizontal";
@@ -180,7 +184,7 @@ export default class SelectionInfoPanel extends Panel {
     const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
     if (!sourceIdentifier) return fallback;
     const source = this.fontController.sources[sourceIdentifier];
-    return source?.customData?.[key] ?? fallback;
+    return getSourceSkeletonDefaultsValue(source, key, fallback);
   }
 
   async _setSourceCustomDataValue(key, value) {
@@ -189,10 +193,7 @@ export default class SelectionInfoPanel extends Panel {
 
     const root = { sources: this.fontController.sources };
     const changes = recordChanges(root, (r) => {
-      if (!r.sources[sourceIdentifier].customData) {
-        r.sources[sourceIdentifier].customData = {};
-      }
-      r.sources[sourceIdentifier].customData[key] = value;
+      setSourceSkeletonDefaultsValues(r.sources[sourceIdentifier], { [key]: value });
     });
 
     if (changes.hasChange) {
@@ -233,10 +234,7 @@ export default class SelectionInfoPanel extends Panel {
 
     const root = { sources: this.fontController.sources };
     const changes = recordChanges(root, (r) => {
-      if (!r.sources[sourceIdentifier].customData) {
-        r.sources[sourceIdentifier].customData = {};
-      }
-      r.sources[sourceIdentifier].customData[key] = sanitized;
+      setSourceSkeletonDefaultsValues(r.sources[sourceIdentifier], { [key]: sanitized });
     });
 
     if (changes.hasChange) {
@@ -286,10 +284,9 @@ export default class SelectionInfoPanel extends Panel {
 
     const root = { sources: this.fontController.sources };
     const changes = recordChanges(root, (r) => {
-      if (!r.sources[sourceIdentifier].customData) {
-        r.sources[sourceIdentifier].customData = {};
-      }
-      r.sources[sourceIdentifier].customData[SKELETON_CUSTOM_CAP_SQUARE_KEY] = sanitized;
+      setSourceSkeletonDefaultsValues(r.sources[sourceIdentifier], {
+        [SKELETON_CUSTOM_CAP_SQUARE_KEY]: sanitized,
+      });
     });
 
     if (changes.hasChange) {
@@ -352,10 +349,9 @@ export default class SelectionInfoPanel extends Panel {
 
     const root = { sources: this.fontController.sources };
     const changes = recordChanges(root, (r) => {
-      if (!r.sources[sourceIdentifier].customData) {
-        r.sources[sourceIdentifier].customData = {};
-      }
-      r.sources[sourceIdentifier].customData[SKELETON_CUSTOM_CAP_ROUNDED_KEY] = sanitized;
+      setSourceSkeletonDefaultsValues(r.sources[sourceIdentifier], {
+        [SKELETON_CUSTOM_CAP_ROUNDED_KEY]: sanitized,
+      });
     });
 
     if (changes.hasChange) {
