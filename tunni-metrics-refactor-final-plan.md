@@ -1,10 +1,14 @@
 # Полный план рефакторинга Tunni + Metrics/Q-режима
 
 ## Статус документа
-- **Версия:** 2.0 (полная, все шаги включены)
-- **Дата:** 21 февраля 2026
+- **Версия:** 4.0 (консолидация Tunni файлов, Pointer модули)
+- **Дата:** 23 февраля 2026
 - **Статус:** Готов к выполнению
-- **Основан на:** `PLAN-tunni-metrics-refactor.md` + `docs/refactor/tunni-metrics-refactor-critical-fixes.md`
+- **Основан на:** `PLAN-tunni-metrics-refactor.md` + аудит codebase от 23.02.2026
+- **Критические изменения:** 
+  - Шаг 19 удалён (уже выполнен)
+  - Tunni: 2 файла вместо 4 (tunni-core.js + tunni-target.js в Pointer)
+  - Адаптеры regular/skeleton в том же файле что и математика
 
 ---
 
@@ -25,27 +29,28 @@
 |-----|----------|--------|-------------|
 | **00** | Математические инварианты (опционально) | ⬜ Новый | — |
 | **01** | Зафиксировать baseline сценариев | ⬜ Оригинал | — |
-| **02** | Ввести ядро регулярной Tunni-геометрии | ⬜ Оригинал | — |
-| **03** | Перевести `tunni-calculations.js` на новое ядро | ⬜ Оригинал | Шаг 02 |
-| **04** | Вычистить Tunni-дубли из `distance-angle.js` | ⬜ Оригинал | Шаг 02 |
+| **02** | Ввести tunni-core.js (математика + адаптеры) | ⬜ Оригинал++ | — |
+| **03** | Вычистить дубли из `distance-angle.js` | ⬜ Оригинал | Шаг 02 |
+| **04** | Вынести Tunni interactions в Pointer targets | ⬜ Оригинал+ | Шаг 02, 22 |
 | **05** | Разнести регистрации visualization layers по доменам | ⬜ Оригинал | — |
-| **06** | Вынести регулярные Tunni interactions из core в views | ⬜ Оригинал | Шаг 02 |
-| **07** | Ввести единый helper фильтра generated contours | ⬜ Оригинал+ | — |
-| **08** | Ввести pointer context-контракт | ⬜ Оригинал | — |
-| **09** | Вынести Q-measure key lifecycle из pointer | ⬜ Оригинал | Шаг 08 |
-| **10** | Ввести единый Measure state API в `SceneModel` | ⬜ Оригинал+ | Шаг 08 |
-| **11** | Вынести Q-measure hover hit-testing в отдельный модуль | ⬜ Оригинал | Шаг 10 |
-| **12** | Вынести regular Tunni pointer-flow из pointer | ⬜ Оригинал | Шаг 08 |
-| **13** | Вынести skeleton Tunni pointer-flow из pointer | ⬜ Оригинал | Шаг 08 |
-| **14** | Вынести equalize-механику regular/skeleton | ⬜ Оригинал | Шаг 08 |
-| **15** | Свести `edit-tools-pointer.js` к thin orchestrator | ⬜ Оригинал+ | Шаги 09-14 |
-| **16** | Починить binding чекбоксов Tunni | ⬜ Оригинал+ | — |
-| **17** | Вычистить `edit-tools-metrics.js` от no-op мусора | ⬜ Оригинал | — |
-| **18** | Локализация, naming, hotkey-consistency | ⬜ Оригинал+ | — |
-| **19** | Политика Ctrl-modified mousedown в MouseTracker | ⬜ Оригинал+ | — |
-| **20** | Финальная зачистка deprecated путей | ⬜ Оригинал | Все предыдущие |
-| **21** | Удалить debug-код и временные имена | ⬜ Новый | — |
-| **22** | Объектно-ориентированный Pointer Tool | ⬜ Новый | — |
+| **06** | Helper фильтрации generated contours | ⬜ Оригинал+ | — |
+| **07** | Ввести pointer context-контракт | ⬜ Оригинал | — |
+| **08** | Вынести Q-measure key lifecycle из pointer | ⬜ Оригинал | Шаг 07 |
+| **09** | Ввести единый Measure state API в `SceneModel` | ⬜ Оригинал+ | Шаг 07 |
+| **10** | Вынести Q-measure hover hit-testing в отдельный модуль | ⬜ Оригинал | Шаг 09 |
+| **11** | Починить binding чекбоксов Tunni | ⬜ Оригинал+ | — |
+| **12** | Вычистить `edit-tools-metrics.js` от no-op мусора | ⬜ Оригинал | — |
+| **13** | Локализация, naming, hotkey-consistency | ⬜ Оригинал+ | — |
+| **14** | Удалить debug-код и временные имена | ⬜ Новый | — |
+| **15** | Финальная зачистка deprecated путей | ⬜ Оригинал | Все предыдущие |
+| **22** | Объектно-ориентированный Pointer Tool | ⬜ Новый | Шаг 02, 07 |
+
+**Изменения в версии 4.0:**
+- **Шаг 19 удалён** — проверка `ctrlKey` уже удалена в `mouse-tracker.js:44` (закомментирована)
+- **Шаг 02 обновлён** — создаётся `tunni-core.js` (математика + адаптеры regular/skeleton вместе)
+- **Шаг 04 обновлён** — Tunni interactions не выносятся отдельно, а становятся частью Pointer (tunni-target.js)
+- **Q-measure шаги (08-10) сохранены** — это отдельная функциональность, не связанная с Tunni
+- **Итого:** 17 шагов вместо 23 (удалён 19, объединены 02+02.5, 12-15→04)
 
 ---
 
@@ -66,19 +71,26 @@
                           ↓
 ┌─────────────────────────────────────────────────────────┐
 │  Шаг 02: Ввести ядро Tunni-геометрии                    │
-│  (создать tunni-geometry.js)                            │
+│  (создать tunni-geometry.js — универсальная математика) │
 └─────────────────────────────────────────────────────────┘
                           ↓
                     ┌───────────┴───────────┐
                     ↓                       ↓
         ┌───────────────────┐    ┌───────────────────┐
-        │ Шаг 03:           │    │ Шаг 04:           │
-        │ tunni-calculations│    │ distance-angle.js │
+        │ Шаг 02.5:         │    │ Шаг 04:           │
+        │ Tunni adapters    │    │ distance-angle.js │
+        │ (regular/skeleton)│    │ (импорт из ядра)  │
         └───────────────────┘    └───────────────────┘
-                    ↓                       ↓
+                    ↓
+        ┌───────────────────┐
+        │ Шаг 03:           │
+        │ tunni-calculations│
+        │ (regular API)     │
+        └───────────────────┘
+                    ↓
                     └───────────┬───────────┘
                                 ↓
-Фаза 2: Визуализация (Дни 3-4)
+Фаза 2: Визуализация (Дни 4-5)
 ┌─────────────────────────────────────────────────────────┐
 │  Шаг 05: Разнести регистрации visualization layers      │
 └─────────────────────────────────────────────────────────┘
@@ -91,22 +103,23 @@
 │  Шаг 07: Helper фильтрации generated contours           │
 └─────────────────────────────────────────────────────────┘
                           ↓
-Фаза 3: Pointer рефакторинг (Дни 5-8)
+Фаза 3: Pointer рефакторинг (Дни 6-10)
 ┌─────────────────────────────────────────────────────────┐
 │  Шаг 22: Объектно-ориентированный Pointer Tool          │
 │  (архитектурное изменение — заменяет шаги 08-15)        │
+│  ⚠️ 4 дня минимум, +2 дня буфер                         │
 └─────────────────────────────────────────────────────────┘
                           ↓
-Фаза 4: Сопутствующие изменения (Дни 9-10)
+Фаза 4: Сопутствующие изменения (Дни 11-12)
 ┌─────────────────────────────────────────────────────────┐
 │  Шаг 16: Чекбоксы Tunni                                 │
 │  Шаг 17: Очистка edit-tools-metrics.js                  │
 │  Шаг 18: Локализация                                    │
-│  Шаг 19: Ctrl-modified логика                           │
 │  Шаг 21: Debug clean                                    │
+│  (Шаг 19 исключён — уже выполнен)                       │
 └─────────────────────────────────────────────────────────┘
                           ↓
-Фаза 5: Финализация (День 11)
+Фаза 5: Финализация (День 13-14)
 ┌─────────────────────────────────────────────────────────┐
 │  Шаг 20: Финальная зачистка + baseline sweep            │
 └─────────────────────────────────────────────────────────┘
@@ -203,85 +216,137 @@ it("расстояние всегда положительное", () => {
 
 ---
 
-### Шаг 02. Ввести ядро регулярной Tunni-геометрии
+### Шаг 02. Ввести tunni-core.js (математика + адаптеры)
 
-**Статус:** ⬜ Оригинал
+**Статус:** ⬜ Оригинал++ (консолидировано)
 
-**Проблема:** Дубли формул в `distance-angle.js` и `tunni-calculations.js`.
+**Проблема:** Дубли формул в `distance-angle.js`, `tunni-calculations.js` и `skeleton-tunni-calculations.js`.
 
-**Решение:** Создать `tunni-geometry.js` с чистыми функциями.
+**Решение:** Создать **один** файл `tunni-core.js` с универсальной математикой и адаптерами для regular/skeleton.
 
 **Файлы:**
-- `src-js/fontra-core/src/tunni-geometry.js` — создать
+- `src-js/fontra-core/src/tunni-core.js` — создать (~500 строк)
 
-**Функции для переноса:**
-- `calculateMidpointTunni(segmentPoints)`
-- `calculateTrueTunniPoint(segmentPoints)`
-- `calculateControlPointsFromTunni(tunniPoint, segmentPoints, options)`
-- `calculateEqualizedControlPoints(segmentPoints)`
-- `areDistancesEqualized(segmentPoints, tolerance)`
-- `calculateControlHandleDistance(segmentPoints)`
+**Структура файла:**
+
+```js
+// tunni-core.js
+
+// ============================================================================
+// УНИВЕРСАЛЬНАЯ МАТЕМАТИКА (не зависит от regular/skeleton)
+// ============================================================================
+
+export function calculateMidpoint(point1, point2) {
+  return { x: (point1.x + point2.x) / 2, y: (point1.y + point2.y) / 2 };
+}
+
+export function calculateTrueTunniIntersection(p1, ray1End, p2, ray2End) {
+  return intersect(p1, ray1End, p2, ray2End);
+}
+
+export function calculateControlPointsAlongRays(...) {
+  // ...
+}
+
+// ============================================================================
+// АДАПТЕР ДЛЯ REGULAR CONTOURS
+// ============================================================================
+
+export function calculateTrueTunniPoint(segmentPoints) {
+  const [p1, p2, p3, p4] = segmentPoints;
+  // Regular: p1→p2 direction, p4→p3 direction
+  return calculateTrueTunniIntersection(p1, p2, p4, p3);
+}
+
+export function calculateTunniPoint(segmentPoints) {
+  const [p1, p2, p3, p4] = segmentPoints;
+  return calculateMidpoint(p2, p3);
+}
+
+export function calculateControlPointsFromTunni(...) {
+  // ...
+}
+
+// ============================================================================
+// АДАПТЕР ДЛЯ SKELETON CONTOURS
+// ============================================================================
+
+export function calculateSkeletonTrueTunniPoint(segment) {
+  const { startPoint, endPoint, controlPoints } = segment;
+  const [cp1, cp2] = controlPoints;
+  // Skeleton: startPoint→cp1 direction, endPoint→cp2 direction
+  return calculateTrueTunniIntersection(startPoint, cp1, endPoint, cp2);
+}
+
+export function calculateSkeletonTunniPoint(segment) {
+  const { controlPoints } = segment;
+  const [cp1, cp2] = controlPoints;
+  return calculateMidpoint(cp1, cp2);
+}
+
+export function calculateSkeletonControlPointsFromTunniDelta(...) {
+  // ...
+}
+```
 
 **Критерии приемки:**
-- [ ] Все функции перенесены
-- [ ] Нет зависимостей от canvas/scene/hit-test
+- [ ] Все функции **чистые**, без зависимостей от canvas/scene/hit-test
+- [ ] Универсальная математика отделена комментариями от адаптеров
+- [ ] Адаптеры regular/skeleton в одном файле — легко сравнить
 - [ ] Тесты из Шага 00 проходят
 
 ---
 
-### Шаг 03. Перевести `tunni-calculations.js` на новое ядро
-
-**Статус:** ⬜ Оригинал
-
-**Проблема:** `tunni-calculations.js` содержит и математику, и интеракцию.
-
-**Решение:** Импортировать из `tunni-geometry.js`, удалить дубли.
-
-**Файлы:**
-- `src-js/fontra-core/src/tunni-calculations.js` — изменить
-
-**Мокап кода:**
-```js
-// tunni-calculations.js
-import {
-  calculateTrueTunniPoint,
-  calculateEqualizedControlPoints,
-  calculateControlHandleDistance,
-  areDistancesEqualized,
-} from "./tunni-geometry.js";
-
-// Thin wrappers для обратной совместимости
-export function calculateTrueTunniPoint(points) { return calculateTrueTunniPoint(points); }
-export function calculateEqualizedControlPoints(points) { return calculateEqualizedControlPoints(points); }
-```
-
-**Критерии приемки:**
-- [ ] Дубли математики удалены
-- [ ] Экспорты работают (обратная совместимость)
-- [ ] Drag/ctrl+shift сценарии работают как раньше
-
----
-
-### Шаг 04. Вычистить Tunni-дубли из `distance-angle.js`
+### Шаг 03. Вычистить дубли из `distance-angle.js`
 
 **Статус:** ⬜ Оригинал
 
 **Проблема:** `distance-angle.js` дублирует Tunni-математику.
 
-**Решение:** Удалить дубли, импортировать из `tunni-geometry.js`.
+**Решение:** Удалить дубли, импортировать из `tunni-core.js`.
 
 **Файлы:**
 - `src-js/fontra-core/src/distance-angle.js` — изменить
 
 **Функции к удалению/замене:**
-- `calculateTrueTunniPoint` → импорт из `tunni-geometry.js`
-- `calculateEqualizedControlPoints` → импорт из `tunni-geometry.js`
+- `calculateTrueTunniPoint` → импорт из `tunni-core.js`
+- `calculateEqualizedControlPoints` → импорт из `tunni-core.js`
 - `calculateTunniPointz` → удалить (временное имя)
 
 **Критерии приемки:**
 - [ ] Дубли удалены
 - [ ] Визуализации Distance/Manhattan/Tunni работают как раньше
 - [ ] `calculateTunniPointz` больше не используется
+
+---
+
+### Шаг 04. Вынести Tunni interactions в Pointer targets
+
+**Статус:** ⬜ Оригинал+ (обновлено)
+
+**Проблема:** `tunni-calculations.js` содержит interaction-логику (hit-test, mouse down/drag/up), которая должна быть в views-editor.
+
+**Решение:** Переместить Tunni interaction-логику в `pointer/targets/tunni-target.js` как часть Шага 22 (Pointer рефактор).
+
+**Файлы:**
+- `src-js/views-editor/src/pointer/targets/tunni-target.js` — создать (в рамках Шага 22)
+- `src-js/fontra-core/src/tunni-calculations.js` — удалить interaction-функции, оставить только thin wrapper для совместимости (опционально)
+
+**Что переезжает в tunni-target.js:**
+- `tunniLayerHitTest(...)` → `TunniTarget.hitTest()`
+- `handleTunniPointMouseDown(...)` → `TunniTarget.handleDrag()`
+- `handleTunniPointMouseDrag(...)` → `TunniTarget.handleDrag()`
+- `handleTunniPointMouseUp(...)` → `TunniTarget.handleDrag()`
+- `equalizeThenQuantizeSegmentControlPoints(...)` → `TunniTarget` + `EqualizeModifier`
+- `handleTrueTunniPoint*` → `TunniTarget`
+
+**Важно:** Tunni interaction **не выносится в отдельный файл** — это часть Pointer-рефактора (Шаг 22).
+
+**Критерии приемки:**
+- [ ] Regular Tunni drag работает через `TunniTarget`
+- [ ] Skeleton Tunni drag работает через `TunniTarget`
+- [ ] Ctrl+Shift-click equalize/quantize работает
+- [ ] Undo/redo работают
 
 ---
 
@@ -384,27 +449,211 @@ export function getGeneratedContourIndexSet(positionedGlyph, editLayerName) {
 
 **Решение:** Композиция + стратегия: 5 target-классов + 4 modifier-класса.
 
+**Важное разделение:**
+
+| Тип | Назначение | Примеры |
+|-----|------------|---------|
+| **Targets** | Объекты для hit-test, реагируют на drag | point, skeleton-point, rib-point, tunni, measure |
+| **Modifiers** | Состояния, меняющие поведение drag | equalize, quantize, snap, fixed-rib |
+
+**Архитектура:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    PointerTool                          │
+│  targets: [PointTarget, SkeletonPointTarget, ...]       │
+│  modifiers: []  (добавляются dynamically при keydown)   │
+│                                                         │
+│  handleDrag(eventStream, initialEvent):                 │
+│    target = targets.find(t => t.hitTest(event))         │
+│    if target:                                           │
+│      modifiers.forEach(m => m.beforeDrag(target))       │
+│      await target.handleDrag(eventStream, event)        │
+│      modifiers.forEach(m => m.afterDrag(target))        │
+└─────────────────────────────────────────────────────────┘
+                          │
+          ┌───────────────┴───────────────┐
+          ↓                               ↓
+┌─────────────────────┐         ┌─────────────────────┐
+│   InteractionTarget │         │  Modifier           │
+│   (базовый класс)   │         │  (базовный класс)   │
+├─────────────────────┤         ├─────────────────────┤
+│ + hitTest()         │         │ + beforeDrag()      │
+│ + handleDrag()      │         │ + afterDrag()       │
+│ + handleHover()     │         │ + isActive()        │
+│ + getCursor()       │         │ + getCursorMod()    │
+└─────────────────────┘         └─────────────────────┘
+          │                               │
+    ┌─────┴─────┐                   ┌─────┴─────┐
+    ↓           ↓                   ↓           ↓
+ PointTarget  ...              EqualizeMod  ...
+```
+
 **Файлы:**
-- `src-js/views-editor/src/pointer/interaction-target.js` — создать
-- `src-js/views-editor/src/pointer/pointer-tool.js` — создать (~400 строк)
+
+**Базовые классы:**
+- `src-js/views-editor/src/pointer/interaction-target.js` — создать (базовый класс `InteractionTarget`)
+- `src-js/views-editor/src/pointer/modifier-base.js` — создать (базовый класс `Modifier`)
+
+**Targets (5 классов):**
 - `src-js/views-editor/src/pointer/targets/point-target.js` — создать
 - `src-js/views-editor/src/pointer/targets/skeleton-point-target.js` — создать
 - `src-js/views-editor/src/pointer/targets/rib-point-target.js` — создать
-- `src-js/views-editor/src/pointer/targets/tunni-target.js` — создать
+- `src-js/views-editor/src/pointer/targets/tunni-target.js` — создать (regular + skeleton Tunni; импортирует математику из `@fontra/core/tunni-core.js`)
 - `src-js/views-editor/src/pointer/targets/measure-target.js` — создать
+
+**Modifiers (4 класса):**
 - `src-js/views-editor/src/pointer/modifiers/equalize-modifier.js` — создать
 - `src-js/views-editor/src/pointer/modifiers/quantize-modifier.js` — создать
 - `src-js/views-editor/src/pointer/modifiers/snap-modifier.js` — создать
 - `src-js/views-editor/src/pointer/modifiers/fixed-rib-modifier.js` — создать
+
+**Оркестратор:**
+- `src-js/views-editor/src/pointer/pointer-tool.js` — создать (~400-500 строк)
 - `src-js/views-editor/src/edit-tools-pointer.js` — удалить (7497 строк)
+
+**Мокап базового интерфейса:**
+
+```js
+// src-js/views-editor/src/pointer/interaction-target.js
+export class InteractionTarget {
+  constructor(context) {
+    this.context = context; // { sceneController, sceneModel, editor }
+  }
+
+  /**
+   * Проверить, попадает ли событие в этот target
+   * @param {Event} event — событие мыши
+   * @returns {boolean} — true если hit
+   */
+  hitTest(event) {
+    return false;
+  }
+
+  /**
+   * Обработать drag сессию
+   * @param {QueueIterator} eventStream — поток событий
+   * @param {Event} initialEvent — начальное событие
+   */
+  async handleDrag(eventStream, initialEvent) {
+    // Реализация в подклассах
+  }
+
+  /**
+   * Обработать hover
+   * @param {Event} event — событие мыши
+   */
+  handleHover(event) {
+    // Опционально
+  }
+
+  /**
+   * Получить курсор для этого target
+   * @returns {string} — имя курсора
+   */
+  getCursor() {
+    return "default";
+  }
+}
+
+// src-js/views-editor/src/pointer/modifier-base.js
+export class Modifier {
+  constructor(context) {
+    this.context = context;
+  }
+
+  isActive() {
+    return false;
+  }
+
+  beforeDrag(target) {
+    // Вызывается перед drag
+  }
+
+  afterDrag(target) {
+    // Вызывается после drag
+  }
+
+  getCursorMod() {
+    return null; // или имя курсора-модификатора
+  }
+}
+
+// src-js/views-editor/src/pointer/pointer-tool.js
+import { InteractionTarget } from "./interaction-target.js";
+import { PointTarget } from "./targets/point-target.js";
+// ... импорты всех targets
+import { EqualizeModifier } from "./modifiers/equalize-modifier.js";
+// ... импорты всех modifiers
+
+export class PointerTool extends BaseTool {
+  constructor(editor) {
+    super(editor);
+    const context = {
+      sceneController: this.sceneController,
+      sceneModel: this.sceneModel,
+      editor: this.editor,
+    };
+
+    this.targets = [
+      new PointTarget(context),
+      new SkeletonPointTarget(context),
+      new RibPointTarget(context),
+      new TunniTarget(context),
+      new MeasureTarget(context),
+    ];
+
+    this.modifiers = [];
+    this._setupKeyListeners();
+  }
+
+  async handleDrag(eventStream, initialEvent) {
+    const target = this.targets.find(t => t.hitTest(initialEvent));
+    if (!target) return;
+
+    // Применить модификаторы
+    for (const mod of this.modifiers) {
+      if (mod.isActive()) mod.beforeDrag(target);
+    }
+
+    await target.handleDrag(eventStream, initialEvent);
+
+    for (const mod of this.modifiers) {
+      if (mod.isActive()) mod.afterDrag(target);
+    }
+  }
+
+  handleKeyDown(event) {
+    // Добавить модификатор при нажатии клавиши
+    if (eventMatchesActionShortCut(REALTIME_EQUALIZE_ACTION, event)) {
+      if (!this.modifiers.some(m => m instanceof EqualizeModifier)) {
+        this.modifiers.push(new EqualizeModifier(this.context));
+      }
+    }
+  }
+
+  handleKeyUp(event) {
+    // Удалить модификатор при отпускании клавиши
+    if (eventMatchesActionBaseKey(REALTIME_EQUALIZE_ACTION, event)) {
+      this.modifiers = this.modifiers.filter(m => !(m instanceof EqualizeModifier));
+    }
+  }
+
+  _setupKeyListeners() {
+    // Подписка на keydown/keyup для модификаторов
+  }
+}
+```
 
 **Критерии приемки:**
 - [ ] `edit-tools-pointer.js` разделён на модули
-- [ ] Базовый класс `InteractionTarget` определён
+- [ ] Базовый класс `InteractionTarget` определён с методами `hitTest`, `handleDrag`, `handleHover`, `getCursor`
+- [ ] Базовый класс `Modifier` определён с методами `beforeDrag`, `afterDrag`, `isActive`
 - [ ] 5 классов target реализованы
 - [ ] 4 класса modifier реализованы
-- [ ] Модификаторы добавляются/удаляются динамически
+- [ ] Модификаторы добавляются/удаляются динамически (при keydown/keyup)
 - [ ] Размер `pointer-tool.js` ≤ 500 строк
+- [ ] `PointerTool` делегирует target'ам через `hitTest` → `handleDrag`
 
 ---
 
@@ -480,20 +729,21 @@ export function getGeneratedContourIndexSet(positionedGlyph, editLayerName) {
 
 ### Шаг 19. Политика Ctrl-modified mousedown в MouseTracker
 
-**Статус:** ⬜ Оригинал+ (исправлено)
+**Статус:** ❌ **УДАЛЁН** — уже выполнен в codebase
 
-**Проблема:** Глобальное удаление `ctrlKey` guard может давать побочные эффекты.
+**Причина удаления:** Аудит codebase от 23.02.2026 показал, что этот шаг уже выполнен:
 
-**Решение:** `MouseTracker` не проверяет ctrlKey, `SceneController` фильтрует.
+```js
+// src-js/fontra-core/src/mouse-tracker.js:44
+handleMouseDown(event) {
+  if (event.button === 2 /* || event.ctrlKey */) {  // ← ctrlKey check ЗАКОММЕНТИРОВАН
+    return;
+  }
+  // ...
+}
+```
 
-**Файлы:**
-- `src-js/fontra-core/src/mouse-tracker.js` — удалить проверку
-- `src-js/views-editor/src/scene-controller.js` — добавить фильтрацию
-
-**Критерии приемки:**
-- [ ] `MouseTracker` не проверяет `event.ctrlKey`
-- [ ] Ctrl+Shift+click на Tunni работает в pointer tool
-- [ ] Обычный Ctrl+click не начинает drag в других инструментах
+**Примечание:** Проверка `ctrlKey` уже удалена из `MouseTracker`, что позволяет `Ctrl+Shift+click` для Tunni equalize. Дополнительная фильтрация в `SceneController` не требуется.
 
 ---
 
@@ -553,15 +803,21 @@ rg -n "setTimeout\(\) => .*allCheckboxes\[0\]" src-js
 ### После Шага 01 (baseline)
 - [ ] Все сценарии описаны и проверены
 
-### После Шага 04 (ядро геометрии)
+### После Шага 02 (tunni-core.js)
 - [ ] Прогнать ручные сценарии на 3 типах сегментов
-- [ ] Поведение в UI не изменилось до следующего шага
+- [ ] Regular Tunni работает на обычных контурах
+- [ ] Skeleton Tunni работает на скелетных контурах
+- [ ] Поведение в UI не изменилось
 
-### После Шага 06 (visualization layers)
+### После Шага 03 (distance-angle clean)
+- [ ] Визуализации Distance/Manhattan работают как раньше
+- [ ] `calculateTunniPointz` больше не используется
+
+### После Шага 05 (visualization layers)
 - [ ] Toggles всех слоев работают
 - [ ] Порядок z-index не изменился
 
-### После Шага 07 (helper фильтрации)
+### После Шага 06 (helper фильтрации)
 - [ ] Regular Tunni/measure не работают по generated contours
 - [ ] На обычных контурах всё работает как раньше
 
@@ -572,21 +828,17 @@ rg -n "setTimeout\(\) => .*allCheckboxes\[0\]" src-js
 - [ ] X+arrows skeleton handles работает
 - [ ] Модификаторы включаются/выключаются в процессе drag
 
-### После Шага 16 (чекбоксы)
+### После Шага 11 (чекбоксы)
 - [ ] Переключение чекбоксов стабильно работает
 
-### После Шага 17 (metrics clean)
+### После Шага 12 (metrics clean)
 - [ ] Изменение sidebearings работает
 - [ ] Нет console noise
 
-### После Шага 18 (i18n)
+### После Шага 13 (i18n)
 - [ ] Shortcuts UI показывает корректные названия
 
-### После Шага 19 (ctrl-modified)
-- [ ] Ctrl+Shift+click на Tunni работает в pointer tool
-- [ ] Ctrl+click не начинает drag в pen tool
-
-### После Шага 20 (baseline sweep)
+### После Шага 15 (baseline sweep)
 - [ ] Полный regression test по матрице из Шага 01
 - [ ] Стресс-кейс: skeleton + regular contours в одном глифе
 
@@ -596,19 +848,25 @@ rg -n "setTimeout\(\) => .*allCheckboxes\[0\]" src-js
 
 - [ ] Шаг 00: Математические инварианты (ОПЦИОНАЛЬНО — если пишешь тесты)
 - [ ] Шаг 01: Baseline зафиксирован
-- [ ] Шаг 02: Tunni-геометрия создана
-- [ ] Шаг 03: tunni-calculations переведён на новое ядро
-- [ ] Шаг 04: distance-angle вычищен от дублей
+- [ ] Шаг 02: tunni-core.js создан (математика + адаптеры)
+- [ ] Шаг 03: distance-angle вычищен от дублей
+- [ ] Шаг 04: Tunni interactions переехали в Pointer targets
 - [ ] Шаг 05: Visualization layers разнесены
-- [ ] Шаг 06: Tunni interactions вынесены из core
-- [ ] Шаг 07: Helper фильтрации создан
-- [ ] Шаг 22: Pointer tool рефакторирован
-- [ ] Шаг 16: Чекбоксы привязаны к sceneSettings
-- [ ] Шаг 17: edit-tools-metrics вычищен
-- [ ] Шаг 18: i18n аудит завершён
-- [ ] Шаг 19: Ctrl-modified логика перемещена
-- [ ] Шаг 21: Debug-код удалён
-- [ ] Шаг 20: Финальная зачистка пройдена
+- [ ] Шаг 06: Helper фильтрации создан
+- [ ] Шаг 07: Pointer context введён
+- [ ] Шаг 08: Q-measure key lifecycle вынесен
+- [ ] Шаг 09: Measure state API в SceneModel
+- [ ] Шаг 10: Q-measure hit-testing вынесен
+- [ ] Шаг 11: Чекбоксы привязаны к sceneSettings
+- [ ] Шаг 12: edit-tools-metrics вычищен
+- [ ] Шаг 13: i18n аудит завершён
+- [ ] Шаг 14: Debug-код удалён
+- [ ] Шаг 15: Финальная зачистка пройдена
+- [ ] Шаг 22: Pointer tool рефакторирован (Targets + Modifiers)
+
+**Исключено:**
+- ~~Шаг 19: Ctrl-modified логика~~ — уже выполнена в codebase
+- ~~Шаг 02.5: Tunni-адаптеры~~ — объединены с Шаг 02 (tunni-core.js)
 
 **Если Шаг 00 пропущен:**
 - [ ] Шаг 01 усилен — детальная ручная матрица проверки
@@ -620,11 +878,13 @@ rg -n "setTimeout\(\) => .*allCheckboxes\[0\]" src-js
 
 | Метрика | До | После |
 |---------|-----|-------|
-| **Размер pointer файла** | 7497 строк | ~400 строк (pointer-tool.js) |
-| **Количество классов** | 0 (монолит) | 5 target + 4 modifier = 9 |
-| **Unit-тесты математики** | 0 | ~20 тестов |
-| **Дублирование функций** | 3+ места | 1 место |
+| **Размер pointer файла** | 7497 строк | ~400-500 строк (pointer-tool.js) |
+| **Количество классов** | 0 (монолит) | 2 базовых + 5 target + 4 modifier = 11 |
+| **Unit-тесты математики** | 0 | ~20 тестов (опционально) |
+| **Дублирование функций** | 3+ места (tunni-calculations, distance-angle, skeleton-tunni) | 1 файл (tunni-core.js) |
 | **Модификаторы** | if/else везде | Динамическая композиция |
+| **Tunni файлы** | 3 файла с дублями | 1 файл (tunni-core.js) + 1 target в Pointer |
+| **Tunni interaction** | В core (tunni-calculations.js) | В views (tunni-target.js) |
 
 ---
 
@@ -632,11 +892,18 @@ rg -n "setTimeout\(\) => .*allCheckboxes\[0\]" src-js
 
 **Порядок выполнения:**
 1. Дни 1-2: Шаг 00 (опционально — тесты на инварианты), Шаг 01 (baseline)
-2. Дни 3-4: Шаги 02, 03, 04 (ядро геометрии)
-3. Дни 5-6: Шаги 05, 06, 07 (визуализация)
-4. Дни 7-10: Шаг 22 (Pointer рефактор)
-5. Дни 11-12: Шаги 16, 17, 18, 19, 21 (параллельно)
-6. День 13: Шаг 20 (финализация + baseline sweep)
+2. Дни 3-4: Шаги 02, 03 (tunni-core.js + clean distance-angle)
+3. Дни 5-6: Шаги 05, 06 (визуализация + helper фильтрации)
+4. Дни 7-8: Шаги 07-10 (Pointer context + Q-measure вынос)
+5. Дни 9-13: Шаг 22 (Pointer рефактор) — **5 дней минимум**
+6. Дни 14-15: Шаги 11-15 (параллельно: чекбоксы, metrics clean, i18n, debug clean, финализация)
+
+**Итого: 15 дней**
+
+**Важно про Tunni-рефактор (Шаги 02-04):**
+- tunni-core.js — математика + адаптеры в одном файле (~500 строк)
+- Адаптеры regular/skeleton разделены комментариями внутри файла
+- Tunni interaction переезжает в pointer/targets/tunni-target.js (часть Шага 22)
 
 **Важно про Шаг 00:**
 - Если пишешь тесты → только на **математические инварианты**, не на реализацию
@@ -647,3 +914,9 @@ rg -n "setTimeout\(\) => .*allCheckboxes\[0\]" src-js
 - Автор знает правильное поведение → ручная проверка надёжнее тестов
 - Визуальная проверка ловит UX-регрессии, которые тесты пропустят
 - Проверяй после каждого шага по baseline-матрице (Шаг 01)
+
+**Важно про Шаг 22:**
+- Это самый большой и рискованный шаг
+- Начни с прототипа `InteractionTarget` и одного target-класса
+- Убедись, что архитектура работает, прежде чем рефакторить всё остальное
+- +2 дня буфера обязательно
