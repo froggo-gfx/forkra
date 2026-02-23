@@ -1,14 +1,16 @@
 # Полный план рефакторинга Tunni + Metrics/Q-режима
 
 ## Статус документа
-- **Версия:** 4.0 (консолидация Tunni файлов, Pointer модули)
+- **Версия:** 5.0 (консолидация Tunni + Measure, Pointer модули)
 - **Дата:** 23 февраля 2026
 - **Статус:** Готов к выполнению
 - **Основан на:** `PLAN-tunni-metrics-refactor.md` + аудит codebase от 23.02.2026
-- **Критические изменения:** 
+- **Критические изменения:**
   - Шаг 19 удалён (уже выполнен)
   - Tunni: 2 файла вместо 4 (tunni-core.js + tunni-target.js в Pointer)
+  - Measure: 2 файла вместо 3 (measure-math.js + measure-target.js в Pointer)
   - Адаптеры regular/skeleton в том же файле что и математика
+  - edit-tools-metrics.js ИСКЛЮЧЁН из рефактора (это MetricsTool)
 
 ---
 
@@ -30,27 +32,26 @@
 | **00** | Математические инварианты (опционально) | ⬜ Новый | — |
 | **01** | Зафиксировать baseline сценариев | ⬜ Оригинал | — |
 | **02** | Ввести tunni-core.js (математика + адаптеры) | ⬜ Оригинал++ | — |
-| **03** | Вычистить дубли из `distance-angle.js` | ⬜ Оригинал | Шаг 02 |
+| **03** | Консолидировать Measure/Distance математику | ⬜ Новый | Шаг 02 |
 | **04** | Вынести Tunni interactions в Pointer targets | ⬜ Оригинал+ | Шаг 02, 22 |
 | **05** | Разнести регистрации visualization layers по доменам | ⬜ Оригинал | — |
 | **06** | Helper фильтрации generated contours | ⬜ Оригинал+ | — |
 | **07** | Ввести pointer context-контракт | ⬜ Оригинал | — |
-| **08** | Вынести Q-measure key lifecycle из pointer | ⬜ Оригинал | Шаг 07 |
-| **09** | Ввести единый Measure state API в `SceneModel` | ⬜ Оригинал+ | Шаг 07 |
-| **10** | Вынести Q-measure hover hit-testing в отдельный модуль | ⬜ Оригинал | Шаг 09 |
-| **11** | Починить binding чекбоксов Tunni | ⬜ Оригинал+ | — |
-| **12** | Вычистить `edit-tools-metrics.js` от no-op мусора | ⬜ Оригинал | — |
-| **13** | Локализация, naming, hotkey-consistency | ⬜ Оригинал+ | — |
-| **14** | Удалить debug-код и временные имена | ⬜ Новый | — |
-| **15** | Финальная зачистка deprecated путей | ⬜ Оригинал | Все предыдущие |
+| **08** | Консолидировать Measure state (Q-mode + Distance) | ⬜ Новый | Шаг 07 |
+| **09** | Починить binding чекбоксов Tunni | ⬜ Оригинал+ | — |
+| **10** | Локализация, naming, hotkey-consistency | ⬜ Оригинал+ | — |
+| **11** | Удалить debug-код и временные имена | ⬜ Новый | — |
+| **12** | Финальная зачистка deprecated путей | ⬜ Оригинал | Все предыдущие |
 | **22** | Объектно-ориентированный Pointer Tool | ⬜ Новый | Шаг 02, 07 |
 
-**Изменения в версии 4.0:**
-- **Шаг 19 удалён** — проверка `ctrlKey` уже удалена в `mouse-tracker.js:44` (закомментирована)
-- **Шаг 02 обновлён** — создаётся `tunni-core.js` (математика + адаптеры regular/skeleton вместе)
-- **Шаг 04 обновлён** — Tunni interactions не выносятся отдельно, а становятся частью Pointer (tunni-target.js)
-- **Q-measure шаги (08-10) сохранены** — это отдельная функциональность, не связанная с Tunni
-- **Итого:** 17 шагов вместо 23 (удалён 19, объединены 02+02.5, 12-15→04)
+**Изменения в версии 5.0:**
+- **Шаг 19 удалён** — проверка `ctrlKey` уже удалена в `mouse-tracker.js:44`
+- **Шаг 02** — tunni-core.js (математика + адаптеры regular/skeleton)
+- **Шаг 03 новый** — консолидация Measure/Distance математики в ОДИН файл
+- **Шаг 04** — Tunni interactions в Pointer targets (часть Шага 22)
+- **Шаг 08** — Measure state консолидируется (Q-mode + Distance один домен)
+- **edit-tools-metrics.js ИСКЛЮЧЁН** — это MetricsTool (sidebearings/kerning), не относится к рефактору
+- **Итого:** 14 шагов вместо 23
 
 ---
 
@@ -297,26 +298,52 @@ export function calculateSkeletonControlPointsFromTunniDelta(...) {
 
 ---
 
-### Шаг 03. Вычистить дубли из `distance-angle.js`
+### Шаг 03. Консолидировать Measure/Distance математику
 
-**Статус:** ⬜ Оригинал
+**Статус:** ⬜ Новый
 
-**Проблема:** `distance-angle.js` дублирует Tunni-математику.
+**Проблема:** Q-measure и Distance-Angle используют одну и ту же математику (дистанция, угол, tension), но:
+- Математика размазана по `distance-angle.js` (1423 строки!)
+- Дублирование формул для distance/angle/tension
+- Разные entry points для одного и того же
 
-**Решение:** Удалить дубли, импортировать из `tunni-core.js`.
+**Решение:** Создать **один** файл `measure-math.js` с универсальной математикой измерений.
 
 **Файлы:**
-- `src-js/fontra-core/src/distance-angle.js` — изменить
+- `src-js/fontra-core/src/measure-math.js` — создать (~400-500 строк)
+- `src-js/fontra-core/src/distance-angle.js` — удалить математику, оставить только legacy совместимость (опционально)
 
-**Функции к удалению/замене:**
-- `calculateTrueTunniPoint` → импорт из `tunni-core.js`
-- `calculateEqualizedControlPoints` → импорт из `tunni-core.js`
-- `calculateTunniPointz` → удалить (временное имя)
+**Структура файла:**
+
+```js
+// measure-math.js
+
+// ============================================================================
+// УНИВЕРСАЛЬНАЯ МАТЕМАТИКА ИЗМЕРЕНИЙ
+// ============================================================================
+
+export function calculateDistance(point1, point2) { ... }
+export function calculateAngle(point1, point2) { ... }
+export function calculateDistanceAndAngle(point1, point2) { ... }
+export function calculateManhattanDistance(point1, point2) { ... }
+
+// Tension calculation (использует Tunni)
+import { calculateTrueTunniPoint } from "./tunni-core.js";
+
+export function calculateHandleTension(cp1, cp2, tunniPoint) { ... }
+export function calculateTunniTension(segmentPoints) { ... }
+
+// Helper для Q-measure и Distance-Angle
+export function formatDistance(dist) { ... }
+export function formatAngle(angle) { ... }
+export function formatTension(tension) { ... }
+```
 
 **Критерии приемки:**
-- [ ] Дубли удалены
-- [ ] Визуализации Distance/Manhattan/Tunni работают как раньше
-- [ ] `calculateTunniPointz` больше не используется
+- [ ] Вся математика измерений в одном файле
+- [ ] Q-measure импортирует из `measure-math.js`
+- [ ] Distance-Angle импортирует из `measure-math.js`
+- [ ] Нет дублирования формул
 
 ---
 
@@ -395,7 +422,7 @@ export function calculateSkeletonControlPointsFromTunniDelta(...) {
 
 ---
 
-### Шаг 07. Ввести единый helper фильтра generated contours
+### Шаг 07. Helper фильтрации generated contours
 
 **Статус:** ⬜ Оригинал+ (исправлено)
 
@@ -424,7 +451,47 @@ export function getGeneratedContourIndexSet(positionedGlyph, editLayerName) {
 
 ---
 
-### Шаг 08-15: ЗАМЕНЕНО на Шаг 22
+### Шаг 08. Консолидировать Measure state (Q-mode + Distance)
+
+**Статус:** ⬜ Новый
+
+**Проблема:** Measure state дублируется между:
+- `PointerTool.measureMode` (в `edit-tools-pointer.js`)
+- `SceneModel.measureMode`, `measureHoverSegment`, `measureHoverRibPoint`, etc. (в `scene-model.js`)
+- Дублирование keydown/keyup логики для Q/Alt+Q
+
+**Решение:** Консолидировать Measure state в `SceneModel`, Pointer импортирует состояние оттуда.
+
+**Файлы:**
+- `src-js/views-editor/src/scene-model.js` — добавить единый Measure state API
+- `src-js/views-editor/src/edit-tools-pointer.js` — удалить дубли state, импортировать из `scene-model.js`
+
+**Структура Measure state:**
+
+```js
+// scene-model.js
+this.measure = {
+  active: false,           // Q-key hold
+  showDirect: false,       // Alt+Q toggle
+  hoverSegment: null,      // { p1, p2, type }
+  hoverRibPoint: null,     // { x, y, width, leftWidth, rightWidth }
+  hoverHandle: null,       // { p1, p2, type, tensionContext }
+  hoverPoints: null,       // { p1, p2, type } (selected points)
+};
+
+setMeasureState(patch) { Object.assign(this.measure, patch); }
+resetMeasureState() { /* сброс всех полей */ }
+```
+
+**Критерии приемки:**
+- [ ] Единый источник истины для Measure state в `SceneModel`
+- [ ] Pointer не дублирует state, только вызывает `setMeasureState()`
+- [ ] Q-key lifecycle (keydown/keyup) управляет state через `setMeasureState()`
+- [ ] При любом завершении interaction (mouseup, escape, смена tool) state сбрасывается
+
+---
+
+### Шаг 09. Ввести pointer context-контракт
 
 **Примечание:** Шаги 08-15 оригинального плана заменены на **Шаг 22** (объектно-ориентированный Pointer Tool), который реализует ту же функциональность, но с лучшей архитектурой.
 
@@ -500,7 +567,7 @@ export function getGeneratedContourIndexSet(positionedGlyph, editLayerName) {
 - `src-js/views-editor/src/pointer/targets/skeleton-point-target.js` — создать
 - `src-js/views-editor/src/pointer/targets/rib-point-target.js` — создать
 - `src-js/views-editor/src/pointer/targets/tunni-target.js` — создать (regular + skeleton Tunni; импортирует математику из `@fontra/core/tunni-core.js`)
-- `src-js/views-editor/src/pointer/targets/measure-target.js` — создать
+- `src-js/views-editor/src/pointer/targets/measure-target.js` — создать (Q-mode + Distance; импортирует математику из `@fontra/core/measure-math.js`)
 
 **Modifiers (4 класса):**
 - `src-js/views-editor/src/pointer/modifiers/equalize-modifier.js` — создать
@@ -512,7 +579,9 @@ export function getGeneratedContourIndexSet(positionedGlyph, editLayerName) {
 - `src-js/views-editor/src/pointer/pointer-tool.js` — создать (~400-500 строк)
 - `src-js/views-editor/src/edit-tools-pointer.js` — удалить (7497 строк)
 
-**Мокап базового интерфейса:**
+**Важно:** Интеракция Q-measure **не выносится в отдельный файл** — это часть `measure-target.js` в составе Pointer-рефактора.
+
+**Мокап базового интерфейса:****
 
 ```js
 // src-js/views-editor/src/pointer/interaction-target.js
@@ -809,9 +878,10 @@ rg -n "setTimeout\(\) => .*allCheckboxes\[0\]" src-js
 - [ ] Skeleton Tunni работает на скелетных контурах
 - [ ] Поведение в UI не изменилось
 
-### После Шага 03 (distance-angle clean)
-- [ ] Визуализации Distance/Manhattan работают как раньше
-- [ ] `calculateTunniPointz` больше не используется
+### После Шага 03 (measure-math.js)
+- [ ] Distance-Angle визуализация работает как раньше
+- [ ] Q-measure (Q-key hold) работает как раньше
+- [ ] Математика измерений в одном файле
 
 ### После Шага 05 (visualization layers)
 - [ ] Toggles всех слоев работают
@@ -821,6 +891,11 @@ rg -n "setTimeout\(\) => .*allCheckboxes\[0\]" src-js
 - [ ] Regular Tunni/measure не работают по generated contours
 - [ ] На обычных контурах всё работает как раньше
 
+### После Шага 08 (Measure state)
+- [ ] Q-key lifecycle работает (keydown/keyup)
+- [ ] Alt+Q toggle работает (direct/projected)
+- [ ] Measure state сбрасывается при escape/tool switch
+
 ### После Шага 22 (Pointer рефактор)
 - [ ] Pointer drag не мешает Tunni drag
 - [ ] Selection работает после Tunni interaction
@@ -828,17 +903,13 @@ rg -n "setTimeout\(\) => .*allCheckboxes\[0\]" src-js
 - [ ] X+arrows skeleton handles работает
 - [ ] Модификаторы включаются/выключаются в процессе drag
 
-### После Шага 11 (чекбоксы)
+### После Шага 09 (чекбоксы)
 - [ ] Переключение чекбоксов стабильно работает
 
-### После Шага 12 (metrics clean)
-- [ ] Изменение sidebearings работает
-- [ ] Нет console noise
-
-### После Шага 13 (i18n)
+### После Шага 10 (i18n)
 - [ ] Shortcuts UI показывает корректные названия
 
-### После Шага 15 (baseline sweep)
+### После Шага 12 (baseline sweep)
 - [ ] Полный regression test по матрице из Шага 01
 - [ ] Стресс-кейс: skeleton + regular contours в одном глифе
 
@@ -849,24 +920,21 @@ rg -n "setTimeout\(\) => .*allCheckboxes\[0\]" src-js
 - [ ] Шаг 00: Математические инварианты (ОПЦИОНАЛЬНО — если пишешь тесты)
 - [ ] Шаг 01: Baseline зафиксирован
 - [ ] Шаг 02: tunni-core.js создан (математика + адаптеры)
-- [ ] Шаг 03: distance-angle вычищен от дублей
+- [ ] Шаг 03: measure-math.js создан (консолидация Measure/Distance)
 - [ ] Шаг 04: Tunni interactions переехали в Pointer targets
 - [ ] Шаг 05: Visualization layers разнесены
 - [ ] Шаг 06: Helper фильтрации создан
 - [ ] Шаг 07: Pointer context введён
-- [ ] Шаг 08: Q-measure key lifecycle вынесен
-- [ ] Шаг 09: Measure state API в SceneModel
-- [ ] Шаг 10: Q-measure hit-testing вынесен
-- [ ] Шаг 11: Чекбоксы привязаны к sceneSettings
-- [ ] Шаг 12: edit-tools-metrics вычищен
-- [ ] Шаг 13: i18n аудит завершён
-- [ ] Шаг 14: Debug-код удалён
-- [ ] Шаг 15: Финальная зачистка пройдена
+- [ ] Шаг 08: Measure state консолидирован в SceneModel
+- [ ] Шаг 09: Чекбоксы Tunni привязаны
+- [ ] Шаг 10: i18n аудит завершён
+- [ ] Шаг 11: Debug-код удалён
+- [ ] Шаг 12: Финальная зачистка пройдена
 - [ ] Шаг 22: Pointer tool рефакторирован (Targets + Modifiers)
 
 **Исключено:**
 - ~~Шаг 19: Ctrl-modified логика~~ — уже выполнена в codebase
-- ~~Шаг 02.5: Tunni-адаптеры~~ — объединены с Шаг 02 (tunni-core.js)
+- ~~edit-tools-metrics.js~~ — это MetricsTool (sidebearings/kerning), не относится к рефактору
 
 **Если Шаг 00 пропущен:**
 - [ ] Шаг 01 усилен — детальная ручная матрица проверки
@@ -881,10 +949,12 @@ rg -n "setTimeout\(\) => .*allCheckboxes\[0\]" src-js
 | **Размер pointer файла** | 7497 строк | ~400-500 строк (pointer-tool.js) |
 | **Количество классов** | 0 (монолит) | 2 базовых + 5 target + 4 modifier = 11 |
 | **Unit-тесты математики** | 0 | ~20 тестов (опционально) |
-| **Дублирование функций** | 3+ места (tunni-calculations, distance-angle, skeleton-tunni) | 1 файл (tunni-core.js) |
+| **Дублирование функций** | 3+ места (tunni-calculations, distance-angle, skeleton-tunni) | 1 файл (tunni-core.js) + 1 файл (measure-math.js) |
 | **Модификаторы** | if/else везде | Динамическая композиция |
 | **Tunni файлы** | 3 файла с дублями | 1 файл (tunni-core.js) + 1 target в Pointer |
 | **Tunni interaction** | В core (tunni-calculations.js) | В views (tunni-target.js) |
+| **Measure файлы** | Математика в distance-angle.js (1423 строки) | 1 файл (measure-math.js) + 1 target в Pointer |
+| **Measure state** | Дублируется (Pointer + SceneModel) | Единый state в SceneModel |
 
 ---
 
@@ -892,11 +962,11 @@ rg -n "setTimeout\(\) => .*allCheckboxes\[0\]" src-js
 
 **Порядок выполнения:**
 1. Дни 1-2: Шаг 00 (опционально — тесты на инварианты), Шаг 01 (baseline)
-2. Дни 3-4: Шаги 02, 03 (tunni-core.js + clean distance-angle)
+2. Дни 3-4: Шаги 02, 03 (tunni-core.js + measure-math.js)
 3. Дни 5-6: Шаги 05, 06 (визуализация + helper фильтрации)
-4. Дни 7-8: Шаги 07-10 (Pointer context + Q-measure вынос)
+4. Дни 7-8: Шаг 08 (Measure state консолидация)
 5. Дни 9-13: Шаг 22 (Pointer рефактор) — **5 дней минимум**
-6. Дни 14-15: Шаги 11-15 (параллельно: чекбоксы, metrics clean, i18n, debug clean, финализация)
+6. Дни 14-15: Шаги 09-12 (параллельно: чекбоксы, i18n, debug clean, финализация)
 
 **Итого: 15 дней**
 
@@ -904,6 +974,12 @@ rg -n "setTimeout\(\) => .*allCheckboxes\[0\]" src-js
 - tunni-core.js — математика + адаптеры в одном файле (~500 строк)
 - Адаптеры regular/skeleton разделены комментариями внутри файла
 - Tunni interaction переезжает в pointer/targets/tunni-target.js (часть Шага 22)
+
+**Важно про Measure-рефактор (Шаги 03, 08):**
+- measure-math.js — математика измерений (distance, angle, tension) в одном файле
+- Measure state консолидирован в SceneModel (единый источник истины)
+- Q-measure interaction — часть measure-target.js (Шаг 22)
+- **edit-tools-metrics.js НЕ трогать** — это MetricsTool (sidebearings/kerning)
 
 **Важно про Шаг 00:**
 - Если пишешь тесты → только на **математические инварианты**, не на реализацию
