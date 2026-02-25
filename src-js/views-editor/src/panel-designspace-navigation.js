@@ -2219,12 +2219,16 @@ export default class DesignspaceNavigationPanel extends Panel {
       );
       if (doAddLayer) {
         const newLayer = Layer.fromObject({ glyph: instance });
-        // Copy only skeleton data from an existing layer if present.
+        // Copy skeleton data together with generatedContourIndices.
+        // The new layer glyph is created from the same interpolated geometry, so
+        // indices remain valid and avoid first-edit duplicate outlines.
         for (const existingLayerName of Object.keys(glyph.layers)) {
           const existingLayer = glyph.layers[existingLayerName];
           const skeletonData = getSkeletonData(existingLayer);
           if (skeletonData) {
-            setSkeletonData(newLayer, skeletonData);
+            setSkeletonData(newLayer, skeletonData, {
+              keepGeneratedContourIndices: true,
+            });
             break;
           }
         }

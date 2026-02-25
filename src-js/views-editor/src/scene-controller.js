@@ -1541,9 +1541,13 @@ export class SceneController {
         })
       );
       const newLayer = Layer.fromObject({ glyph: instance });
-      // Copy only skeleton data for new layers; avoid dragging unrelated layer metadata.
+      // Copy skeleton data together with generatedContourIndices.
+      // Here the new layer path is cloned from the same source geometry, so indices
+      // remain valid and prevent first-edit duplicate generated contours.
       if (sourceSkeletonData) {
-        setSkeletonData(newLayer, sourceSkeletonData);
+        setSkeletonData(newLayer, sourceSkeletonData, {
+          keepGeneratedContourIndices: true,
+        });
       }
       glyph.layers[layerName] = newLayer;
     });
