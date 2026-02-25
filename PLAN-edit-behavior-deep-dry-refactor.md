@@ -206,7 +206,7 @@ Status: Completed
 - Public rib classes delegate to runner for apply semantics.
 
 ## Step 5.5 - Intent parity architecture
-Status: Completed
+Status: In progress
 
 ### Mandatory objective
 Make intent and plan central, and make pointer call sites purely executors.
@@ -222,6 +222,13 @@ Make intent and plan central, and make pointer call sites purely executors.
 - drag and nudge for each object kind consume plan output.
 - pointer does not define semantic meaning via local modifier branches.
 
+4. Modifier classification matrix:
+- for every `object kind x modality`, each relevant modifier flag is classified exactly once as:
+  - semantic,
+  - passive (UI/step-size only),
+  - or unsupported.
+- classification is validated in code (coverage gate), not by review memory.
+
 ### Non-negotiable done criteria
 Step 5.5 is complete only if all are true:
 
@@ -230,6 +237,7 @@ Step 5.5 is complete only if all are true:
 3. Changing mapping for a modifier/object kind requires editing one central mapping location.
 4. Unsupported combinations are explicit in central mapping (never silent no-op by omission).
 5. Code review can list removed local semantic branches in pointer.
+6. Coverage gate passes: no missing/duplicate modifier classification entries for any `object kind x modality`.
 
 ## Step 6 - Rollback payload builders
 Status: Completed

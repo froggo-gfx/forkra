@@ -1406,99 +1406,247 @@ export const BEHAVIOR_TABLES = {
   },
 };
 
+const MODIFIER_FLAG_KEYS = Object.freeze(["shift", "alt", "z", "x"]);
+const OBJECT_KINDS = Object.freeze(["regular", "skeleton", "rib"]);
+const MODALITIES = Object.freeze(["drag", "nudge"]);
+
+const INTENT_PRIORITY_BY_KIND = Object.freeze({
+  regular: Object.freeze([
+    Object.freeze({ intent: "alternate-constrain", requireAll: Object.freeze(["alt", "shift"]) }),
+    Object.freeze({ intent: "alternate", requireAll: Object.freeze(["alt"]) }),
+    Object.freeze({ intent: "constrain", requireAll: Object.freeze(["shift"]) }),
+    Object.freeze({ intent: "default", requireAll: Object.freeze([]) }),
+  ]),
+  skeleton: Object.freeze([
+    Object.freeze({ intent: "alternate-constrain", requireAll: Object.freeze(["alt", "shift"]) }),
+    Object.freeze({ intent: "alternate", requireAll: Object.freeze(["alt"]) }),
+    Object.freeze({ intent: "constrain", requireAll: Object.freeze(["shift"]) }),
+    Object.freeze({ intent: "default", requireAll: Object.freeze([]) }),
+  ]),
+  rib: Object.freeze([
+    Object.freeze({ intent: "equalize", requireAll: Object.freeze(["x"]) }),
+    Object.freeze({ intent: "interpolate", requireAll: Object.freeze(["alt"]) }),
+    Object.freeze({ intent: "tangent", requireAll: Object.freeze(["z"]) }),
+    Object.freeze({ intent: "default", requireAll: Object.freeze([]) }),
+  ]),
+});
+
+const MODIFIER_SPEC = Object.freeze({
+  regular: Object.freeze({
+    drag: Object.freeze({
+      semanticFlags: Object.freeze(["shift", "alt"]),
+      passiveFlags: Object.freeze(["z", "x"]),
+      unsupportedFlags: Object.freeze([]),
+      presetByIntent: Object.freeze({
+        default: "default",
+        constrain: "constrain",
+        alternate: "alternate",
+        "alternate-constrain": "alternate-constrain",
+      }),
+    }),
+    nudge: Object.freeze({
+      semanticFlags: Object.freeze(["alt"]),
+      // Shift affects step magnitude in pointer, not behavior semantics.
+      passiveFlags: Object.freeze(["shift", "z", "x"]),
+      unsupportedFlags: Object.freeze([]),
+      presetByIntent: Object.freeze({
+        default: "default",
+        constrain: "default",
+        alternate: "alternate",
+        "alternate-constrain": "alternate",
+      }),
+    }),
+  }),
+  skeleton: Object.freeze({
+    drag: Object.freeze({
+      semanticFlags: Object.freeze(["shift", "alt"]),
+      passiveFlags: Object.freeze(["z", "x"]),
+      unsupportedFlags: Object.freeze([]),
+      presetByIntent: Object.freeze({
+        default: "default",
+        constrain: "constrain",
+        alternate: "alternate",
+        "alternate-constrain": "alternate-constrain",
+      }),
+    }),
+    nudge: Object.freeze({
+      semanticFlags: Object.freeze(["alt"]),
+      passiveFlags: Object.freeze(["shift", "z", "x"]),
+      unsupportedFlags: Object.freeze([]),
+      presetByIntent: Object.freeze({
+        default: "default",
+        constrain: "default",
+        alternate: "alternate",
+        "alternate-constrain": "alternate",
+      }),
+    }),
+  }),
+  rib: Object.freeze({
+    drag: Object.freeze({
+      semanticFlags: Object.freeze(["alt", "z", "x"]),
+      passiveFlags: Object.freeze(["shift"]),
+      unsupportedFlags: Object.freeze([]),
+      planByIntent: Object.freeze({
+        default: Object.freeze({ useInterpolationBehavior: false }),
+        tangent: Object.freeze({ useInterpolationBehavior: false }),
+        interpolate: Object.freeze({ useInterpolationBehavior: true }),
+        // Equalize currently follows interpolation motion policy for rib points.
+        // The distinction is carried in intent so execution can diverge later without pointer rewiring.
+        equalize: Object.freeze({ useInterpolationBehavior: true }),
+      }),
+    }),
+    nudge: Object.freeze({
+      semanticFlags: Object.freeze(["alt", "z", "x"]),
+      passiveFlags: Object.freeze(["shift"]),
+      unsupportedFlags: Object.freeze([]),
+      planByIntent: Object.freeze({
+        default: Object.freeze({ useInterpolationBehavior: false, constrainMode: null }),
+        tangent: Object.freeze({ useInterpolationBehavior: false, constrainMode: "tangent" }),
+        interpolate: Object.freeze({
+          useInterpolationBehavior: true,
+          constrainMode: null,
+          fallbackConstrainWithoutInterpolationAxis: "tangent",
+        }),
+        equalize: Object.freeze({
+          useInterpolationBehavior: true,
+          constrainMode: null,
+          fallbackConstrainWithoutInterpolationAxis: null,
+        }),
+      }),
+    }),
+  }),
+});
+
+function normalizeModifierFlags(flags = {}) {
+  return {
+    shift: !!(flags.shift || flags.shiftKey || flags.constrain),
+    alt: !!(flags.alt || flags.altKey || flags.alternate || flags.interpolate),
+    z: !!(flags.z || flags.zKey || flags.tangent),
+    x: !!(flags.x || flags.xKey || flags.equalize),
+  };
+}
+
+function getModifierSpec(objectKind = "regular", modality = "drag") {
+  const kindSpec = MODIFIER_SPEC[objectKind] || MODIFIER_SPEC.regular;
+  return kindSpec[modality] || kindSpec.drag;
+}
+
+function getIntentRules(objectKind = "regular") {
+  return INTENT_PRIORITY_BY_KIND[objectKind] || INTENT_PRIORITY_BY_KIND.regular;
+}
+
+function getActiveFlagList(normalizedFlags = {}, flagList = []) {
+  if (!normalizedFlags) {
+    return [];
+  }
+  return flagList.filter((flagName) => !!normalizedFlags[flagName]);
+}
+
+function resolveModifierIntentFromNormalized(objectKind, normalizedFlags) {
+  const rules = getIntentRules(objectKind);
+  for (const rule of rules) {
+    const matches = rule.requireAll.every((flagName) => !!normalizedFlags[flagName]);
+    if (matches) {
+      return rule.intent;
+    }
+  }
+  return "default";
+}
+
+function validateModifierArchitectureCoverage() {
+  for (const objectKind of OBJECT_KINDS) {
+    const rules = getIntentRules(objectKind);
+    if (!rules?.length) {
+      throw new Error(`Missing intent rules for object kind "${objectKind}"`);
+    }
+    for (const modality of MODALITIES) {
+      const spec = getModifierSpec(objectKind, modality);
+      if (!spec) {
+        throw new Error(`Missing modifier spec for ${objectKind}/${modality}`);
+      }
+      for (const flagName of MODIFIER_FLAG_KEYS) {
+        const membershipCount =
+          Number(spec.semanticFlags.includes(flagName)) +
+          Number(spec.passiveFlags.includes(flagName)) +
+          Number(spec.unsupportedFlags.includes(flagName));
+        if (membershipCount !== 1) {
+          throw new Error(
+            `Modifier "${flagName}" must be classified exactly once for ${objectKind}/${modality}`
+          );
+        }
+      }
+      if (objectKind === "rib") {
+        const planByIntent = spec.planByIntent || {};
+        for (const rule of rules) {
+          if (!planByIntent[rule.intent]) {
+            throw new Error(
+              `Missing rib plan mapping for intent "${rule.intent}" in ${objectKind}/${modality}`
+            );
+          }
+        }
+      } else {
+        const presetByIntent = spec.presetByIntent || {};
+        for (const rule of rules) {
+          if (!presetByIntent[rule.intent]) {
+            throw new Error(
+              `Missing preset mapping for intent "${rule.intent}" in ${objectKind}/${modality}`
+            );
+          }
+        }
+      }
+    }
+  }
+}
+
+validateModifierArchitectureCoverage();
+
 export function resolveBehaviorPresetName(flagsOrName) {
   if (typeof flagsOrName === "string" && flagsOrName) {
     return flagsOrName;
   }
-  const flags = flagsOrName || {};
-  const shiftActive = !!(flags.shift || flags.shiftKey || flags.constrain);
-  const altActive = !!(flags.alt || flags.altKey || flags.alternate);
-  if (altActive && shiftActive) {
-    return "alternate-constrain";
-  }
-  if (altActive) {
-    return "alternate";
-  }
-  if (shiftActive) {
-    return "constrain";
-  }
-  return "default";
+  const normalizedFlags = normalizeModifierFlags(flagsOrName || {});
+  return resolveModifierIntentFromNormalized("regular", normalizedFlags);
 }
 
 export function resolveModifierIntent(objectKind = "regular", flagsOrName = {}) {
   if (typeof flagsOrName === "string" && flagsOrName) {
     return flagsOrName;
   }
-  const flags = flagsOrName || {};
-  if (objectKind === "rib") {
-    const altActive = !!(flags.alt || flags.altKey || flags.alternate || flags.interpolate);
-    const zActive = !!(flags.z || flags.zKey || flags.tangent);
-    // Rib precedence is explicit and shared across drag/nudge paths.
-    if (altActive) {
-      return "interpolate";
-    }
-    if (zActive) {
-      return "tangent";
-    }
-    return "default";
-  }
-  // Regular/skeleton intents map to the same public preset names.
-  return resolveBehaviorPresetName(flags);
+  const normalizedFlags = normalizeModifierFlags(flagsOrName || {});
+  return resolveModifierIntentFromNormalized(objectKind, normalizedFlags);
 }
 
-const RIB_INTENT = Object.freeze({
-  DEFAULT: "default",
-  TANGENT: "tangent",
-  INTERPOLATE: "interpolate",
-});
-
-const REGULAR_LIKE_PRESET_MAP = Object.freeze({
-  // Drag keeps full preset surface for regular/skeleton points.
-  drag: Object.freeze({
-    default: "default",
-    constrain: "constrain",
-    alternate: "alternate",
-    "alternate-constrain": "alternate-constrain",
-  }),
-  // Nudge keeps legacy semantics: Shift only changes step size in pointer,
-  // so "constrain" intents are explicitly collapsed to non-constrain presets.
-  nudge: Object.freeze({
-    default: "default",
-    constrain: "default",
-    alternate: "alternate",
-    "alternate-constrain": "alternate",
-  }),
-});
-
-function resolveRegularLikeModifierPlan(objectKind, modality, intent) {
-  const modalityMap = REGULAR_LIKE_PRESET_MAP[modality] || REGULAR_LIKE_PRESET_MAP.drag;
-  const explicitPresetName = modalityMap[intent];
-  const presetName = explicitPresetName || modalityMap.default;
+function resolveRegularLikeModifierPlan(objectKind, modality, intent, normalizedFlags) {
+  const spec = getModifierSpec(objectKind, modality);
+  const presetName = spec.presetByIntent[intent] || spec.presetByIntent.default;
+  const unsupportedModifiers = getActiveFlagList(normalizedFlags, spec.unsupportedFlags);
+  const ignoredActiveModifiers = getActiveFlagList(normalizedFlags, spec.passiveFlags);
   return {
     objectKind,
     modality,
     intent,
     presetName,
-    isExplicitIntent: explicitPresetName !== undefined,
+    unsupportedModifiers,
+    ignoredActiveModifiers,
   };
 }
 
-function resolveRibModifierPlan(modality, intent, context = {}) {
+function resolveRibModifierPlan(modality, intent, normalizedFlags, context = {}) {
+  const spec = getModifierSpec("rib", modality);
+  const basePlan = spec.planByIntent[intent] || spec.planByIntent.default;
   const zActive = !!context.zActive;
   const hasInterpolationBehavior = context.hasInterpolationBehavior !== false;
-  const useInterpolationBehavior = intent === RIB_INTENT.INTERPOLATE;
+  const useInterpolationBehavior = !!basePlan.useInterpolationBehavior;
+  const fallbackConstrainWithoutInterpolationAxis =
+    basePlan.fallbackConstrainWithoutInterpolationAxis || null;
 
-  let constrainMode = null;
+  let constrainMode = basePlan.constrainMode || null;
   if (modality === "drag") {
-    // Drag keeps legacy contract: Z can constrain movement live during drag.
+    // Drag keeps the live-toggle contract for tangent constrain.
     constrainMode = zActive ? "tangent" : null;
-  } else if (
-    modality === "nudge" &&
-    (intent === RIB_INTENT.TANGENT ||
-      (intent === RIB_INTENT.INTERPOLATE && !hasInterpolationBehavior))
-  ) {
-    // Arrow fallback contract: interpolation without a valid axis becomes tangent nudge.
-    constrainMode = "tangent";
+  } else if (modality === "nudge" && useInterpolationBehavior && !hasInterpolationBehavior) {
+    // Nudge fallback is intent-specific and comes from central plan mapping.
+    constrainMode = fallbackConstrainWithoutInterpolationAxis;
   }
 
   return {
@@ -1507,6 +1655,8 @@ function resolveRibModifierPlan(modality, intent, context = {}) {
     intent,
     useInterpolationBehavior,
     constrainMode,
+    unsupportedModifiers: getActiveFlagList(normalizedFlags, spec.unsupportedFlags),
+    ignoredActiveModifiers: getActiveFlagList(normalizedFlags, spec.passiveFlags),
     // For mixed rib+skeleton drag, only default intent projects to base normal.
     shouldProjectToBaseNormal:
       modality === "drag" &&
@@ -1522,17 +1672,19 @@ export function resolveModifierPlan(
   flagsOrIntent = {},
   context = {}
 ) {
+  const normalizedFlags =
+    typeof flagsOrIntent === "string" ? null : normalizeModifierFlags(flagsOrIntent || {});
   const intent =
     typeof flagsOrIntent === "string"
       ? flagsOrIntent
-      : resolveModifierIntent(objectKind, flagsOrIntent);
+      : resolveModifierIntentFromNormalized(objectKind, normalizedFlags);
 
   if (objectKind === "rib") {
-    return resolveRibModifierPlan(modality, intent, context);
+    return resolveRibModifierPlan(modality, intent, normalizedFlags, context);
   }
 
   if (objectKind === "regular" || objectKind === "skeleton") {
-    return resolveRegularLikeModifierPlan(objectKind, modality, intent);
+    return resolveRegularLikeModifierPlan(objectKind, modality, intent, normalizedFlags);
   }
 
   return {

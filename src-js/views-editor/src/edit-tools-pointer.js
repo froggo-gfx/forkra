@@ -3314,6 +3314,14 @@ export class PointerTool extends BaseTool {
 
     const targetPoints = [...targetPointsMap.values()];
     if (!targetPoints.length) return;
+    const preferredLinkedWidthSideByPoint = new Map([
+      [`${ribHit.contourIndex}/${ribHit.pointIndex}`, ribHit.side],
+    ]);
+    const linkedWidthDriverByPoint = this._buildLinkedWidthDriverByPoint(
+      targetPoints,
+      preferredLinkedWidthSideByPoint
+    );
+    const hasMirroredLinkedTargets = linkedWidthDriverByPoint.size > 0;
 
     // Keep the rib-side selection explicit during drag unless we're
     // using a skeleton-point selection to drive rib movement.
@@ -3330,7 +3338,10 @@ export class PointerTool extends BaseTool {
       skeletonDataForCheck
     );
     const movementAllowed =
-      hasSkeletonSelection || allTargetsEditable || belongsToSingleSegment;
+      hasSkeletonSelection ||
+      allTargetsEditable ||
+      belongsToSingleSegment ||
+      hasMirroredLinkedTargets;
     if (!movementAllowed) {
       return;
     }
@@ -3388,7 +3399,9 @@ export class PointerTool extends BaseTool {
               // Or InterpolatingRibBehavior if Alt is pressed
               let behavior;
               if (useInterpolation) {
-                // Find adjacent handles in the generated path
+                // Architecture rule: resolver decides interpolation semantics.
+                // Axis availability is geometric detail, not a semantic switch.
+                // createInterpolatingRibBehavior handles null axis via internal tangent fallback.
                 const interpolationAxis = this._findHandlesForRibPointFromSkeleton(
                   data.layer.glyph.path,
                   skeletonPoint,
@@ -3396,16 +3409,11 @@ export class PointerTool extends BaseTool {
                   contour,
                   tp.side
                 );
-                if (interpolationAxis) {
-                  behavior = createInterpolatingRibBehavior(
-                    data.original,
-                    ribHitForPoint,
-                    interpolationAxis
-                  );
-                } else {
-                  // Fallback to normal behavior if handles not found
-                  behavior = createEditableRibBehavior(data.original, ribHitForPoint);
-                }
+                behavior = createInterpolatingRibBehavior(
+                  data.original,
+                  ribHitForPoint,
+                  interpolationAxis
+                );
               } else {
                 behavior = createEditableRibBehavior(data.original, ribHitForPoint);
               }
@@ -3438,7 +3446,7 @@ export class PointerTool extends BaseTool {
             // Or InterpolatingRibBehavior if Alt is pressed
             let behavior;
             if (useInterpolation) {
-              // Find adjacent handles in the generated path
+              // Keep drag semantics centralized: do not reinterpret intent at call site.
               const interpolationAxis = this._findHandlesForRibPointFromSkeleton(
                 data.layer.glyph.path,
                 skeletonPoint,
@@ -3446,16 +3454,11 @@ export class PointerTool extends BaseTool {
                 contour,
                 tp.side
               );
-              if (interpolationAxis) {
-                behavior = createInterpolatingRibBehavior(
-                  data.original,
-                  ribHitForPoint,
-                  interpolationAxis
-                );
-              } else {
-                // Fallback to normal behavior if handles not found
-                behavior = createEditableRibBehavior(data.original, ribHitForPoint);
-              }
+              behavior = createInterpolatingRibBehavior(
+                data.original,
+                ribHitForPoint,
+                interpolationAxis
+              );
             } else {
               behavior = createEditableRibBehavior(data.original, ribHitForPoint);
             }
@@ -3519,6 +3522,10 @@ export class PointerTool extends BaseTool {
             const contour = working.contours[target.contourIndex];
             const point = contour.points[target.pointIndex];
             const side = target.side;
+            const pointKey = `${target.contourIndex}/${target.pointIndex}`;
+            const linkedWidthDriverSide = linkedWidthDriverByPoint.get(pointKey);
+            const shouldApplyLinkedWidth =
+              !target.isLinked || !linkedWidthDriverSide || linkedWidthDriverSide === side;
 
             // Check if this side is editable
             const sideIsEditable = target.isEditable;
@@ -3540,7 +3547,7 @@ export class PointerTool extends BaseTool {
             } else if (sideIsEditable) {
               const baseContour = data.original.contours[target.contourIndex];
               const basePoint = baseContour?.points[target.pointIndex];
-              if (basePoint) {
+              if (basePoint && shouldApplyLinkedWidth) {
                 const defaultWidth = baseContour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
                 const delta = change.halfWidth - behavior.originalHalfWidth;
                 applyLinkedWidthDelta(
@@ -3563,7 +3570,7 @@ export class PointerTool extends BaseTool {
             } else {
               const baseContour = data.original.contours[target.contourIndex];
               const basePoint = baseContour?.points[target.pointIndex];
-              if (basePoint) {
+              if (basePoint && shouldApplyLinkedWidth) {
                 const defaultWidth = baseContour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
                 const delta = change.halfWidth - behavior.originalHalfWidth;
                 applyLinkedWidthDelta(
@@ -3976,9 +3983,10 @@ export class PointerTool extends BaseTool {
             onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
           };
 
-          // Use interpolating behavior if Alt is pressed and axis data is found
+          // Use interpolation behavior whenever central plan requests it.
+          // Axis may be null; behavior has deterministic tangent fallback.
           let behavior;
-          if (useInterpolation && ep.interpolationAxis) {
+          if (useInterpolation) {
             behavior = createInterpolatingRibBehavior(
               data.original,
               ribHit,
@@ -4334,6 +4342,7 @@ export class PointerTool extends BaseTool {
 
       // Create behaviors for each editable handle
       for (const data of Object.values(layersData)) {
+        const layerPath = data.layer?.glyph?.path;
         for (const eh of editableHandles) {
           const contour = data.original.contours[eh.skeletonContourIndex];
           if (!contour) continue;
@@ -4344,10 +4353,55 @@ export class PointerTool extends BaseTool {
 
           if (!skeletonHandleDir) continue;
 
+          const equalizeInfo = layerPath
+            ? this._getEqualizeHandleInfoForPointIndex(layerPath, eh.pointIndex)
+            : null;
+          let equalizeState = null;
+          if (equalizeInfo) {
+            const anchorPos = layerPath.getPoint(equalizeInfo.smoothIndex);
+            const draggedPos = layerPath.getPoint(equalizeInfo.pointIndex);
+            const oppositePos = layerPath.getPoint(equalizeInfo.oppositeIndex);
+            const oppositeHandleType = eh.handleType === "in" ? "out" : "in";
+            const oppositeHandleDir = this._getSkeletonHandleDirForPoint(
+              contour,
+              eh.skeletonPointIndex,
+              oppositeHandleType
+            );
+            if (anchorPos && draggedPos && oppositePos && oppositeHandleDir) {
+              const point = contour.points[eh.skeletonPointIndex];
+              const detachedKey = getHandleDetachedKey(eh.side);
+              const detachedMode = !!point[detachedKey];
+              const draggedState = this._readEditableHandleEqualizeState(
+                point,
+                eh.side,
+                eh.handleType,
+                anchorPos,
+                draggedPos,
+                skeletonHandleDir,
+                detachedMode
+              );
+              const oppositeState = this._readEditableHandleEqualizeState(
+                point,
+                eh.side,
+                oppositeHandleType,
+                anchorPos,
+                oppositePos,
+                oppositeHandleDir,
+                detachedMode
+              );
+              equalizeState = {
+                anchorPos,
+                draggedState,
+                oppositeState,
+              };
+            }
+          }
+
           data.behaviors.push({
             behavior: createEditableHandleBehavior(data.original, eh, skeletonHandleDir),
             editableHandle: eh,
             skeletonHandleDir,
+            equalizeState,
           });
         }
       }
@@ -4357,7 +4411,36 @@ export class PointerTool extends BaseTool {
       for (const [editLayerName, data] of Object.entries(layersData)) {
         const { layer, working, behaviors } = data;
 
-        for (const { behavior, editableHandle, skeletonHandleDir } of behaviors) {
+        for (const { behavior, editableHandle, skeletonHandleDir, equalizeState } of behaviors) {
+          if (this.equalizeMode && equalizeState) {
+            const point =
+              working.contours[editableHandle.skeletonContourIndex].points[
+                editableHandle.skeletonPointIndex
+              ];
+            const projectedDelta =
+              delta.x * equalizeState.draggedState.direction.x +
+              delta.y * equalizeState.draggedState.direction.y;
+            const targetLength = Math.max(
+              0,
+              equalizeState.draggedState.originalLength + projectedDelta
+            );
+            this._applyEditableHandleEqualizedLength(
+              point,
+              equalizeState.draggedState,
+              targetLength,
+              equalizeState.anchorPos,
+              Math.round
+            );
+            this._applyEditableHandleEqualizedLength(
+              point,
+              equalizeState.oppositeState,
+              targetLength,
+              equalizeState.anchorPos,
+              Math.round
+            );
+            continue;
+          }
+
           const change = behavior.applyDelta(delta);
           const point = working.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
 
@@ -4510,6 +4593,178 @@ export class PointerTool extends BaseTool {
     return false;
   }
 
+  _buildLinkedWidthDriverByPoint(targets, preferredSideByPoint = null) {
+    // Linked width is shared by both rib sides of the same skeleton point.
+    // If both sides are selected, width must be written once per point
+    // to avoid last-write-wins conflicts.
+    const grouped = new Map();
+    for (const target of targets || []) {
+      if (!target?.isLinked || target?.isSingleSided) {
+        continue;
+      }
+      const pointKey = `${target.contourIndex}/${target.pointIndex}`;
+      if (!grouped.has(pointKey)) {
+        grouped.set(pointKey, new Set());
+      }
+      grouped.get(pointKey).add(target.side);
+    }
+
+    const driverByPoint = new Map();
+    for (const [pointKey, sides] of grouped.entries()) {
+      if (!(sides.has("left") && sides.has("right"))) {
+        continue;
+      }
+      const preferredSide = preferredSideByPoint?.get(pointKey);
+      driverByPoint.set(pointKey, preferredSide || "left");
+    }
+    return driverByPoint;
+  }
+
+  async _handleArrowKeysForEqualizeRibHandles(delta, ribPointsInfo) {
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph || !ribPointsInfo?.length) {
+      return false;
+    }
+
+    let handled = false;
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!getSkeletonData(layer)) continue;
+
+        const originalSkeletonData = getSkeletonData(layer);
+        const workingSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
+        let changed = false;
+
+        for (const ribInfo of ribPointsInfo) {
+          const { contourIndex, pointIndex, side, isEditable } = ribInfo;
+          if (!isEditable) {
+            continue;
+          }
+
+          const baseContour = originalSkeletonData.contours?.[contourIndex];
+          const basePoint = baseContour?.points?.[pointIndex];
+          const workPoint = workingSkeletonData.contours?.[contourIndex]?.points?.[pointIndex];
+          if (!baseContour || !basePoint || !workPoint || basePoint.type) {
+            continue;
+          }
+
+          const normal = calculateNormalAtSkeletonPoint(baseContour, pointIndex);
+          const anchorPos = this._offsetSkeletonOnCurve(basePoint, baseContour, pointIndex, side);
+          const interpolationAxis = this._findHandlesForRibPointFromSkeleton(
+            layer.glyph.path,
+            basePoint,
+            normal,
+            baseContour,
+            side
+          );
+          if (!interpolationAxis) {
+            continue;
+          }
+
+          const detachedMode = !!basePoint[getHandleDetachedKey(side)];
+          const incomingDir = this._getSkeletonHandleDirForPoint(baseContour, pointIndex, "in");
+          const outgoingDir = this._getSkeletonHandleDirForPoint(baseContour, pointIndex, "out");
+
+          const inState =
+            interpolationAxis.prevHandle && incomingDir
+              ? this._readEditableHandleEqualizeState(
+                  basePoint,
+                  side,
+                  "in",
+                  anchorPos,
+                  interpolationAxis.prevHandle,
+                  incomingDir,
+                  detachedMode
+                )
+              : null;
+
+          const outState =
+            interpolationAxis.nextHandle && outgoingDir
+              ? this._readEditableHandleEqualizeState(
+                  basePoint,
+                  side,
+                  "out",
+                  anchorPos,
+                  interpolationAxis.nextHandle,
+                  outgoingDir,
+                  detachedMode
+                )
+              : null;
+
+          const primaryState = outState || inState;
+          if (!primaryState) {
+            continue;
+          }
+
+          const projectedDelta =
+            delta.x * primaryState.direction.x + delta.y * primaryState.direction.y;
+          const baseLength =
+            inState && outState
+              ? (inState.originalLength + outState.originalLength) / 2
+              : primaryState.originalLength;
+          const targetLength = Math.max(0, baseLength + projectedDelta);
+
+          // X-equalize for rib points changes only distances to rib control points.
+          // It does not modify width or rib-point nudge.
+          if (inState) {
+            this._applyEditableHandleEqualizedLength(
+              workPoint,
+              inState,
+              targetLength,
+              anchorPos,
+              Math.round
+            );
+          }
+          if (outState) {
+            this._applyEditableHandleEqualizedLength(
+              workPoint,
+              outState,
+              targetLength,
+              anchorPos,
+              Math.round
+            );
+          }
+          changed = true;
+        }
+
+        if (!changed) {
+          continue;
+        }
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          regenerateSkeletonContours(sg, workingSkeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          setSkeletonData(l, workingSkeletonData);
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) {
+        return false;
+      }
+
+      handled = true;
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+      return {
+        changes: combined,
+        undoLabel: "Nudge rib handles (equalize)",
+        broadcast: true,
+      };
+    });
+
+    return handled;
+  }
+
   /**
    * Handle arrow key movement for rib points.
    * For non-editable ribs: changes width only.
@@ -4528,15 +4783,6 @@ export class PointerTool extends BaseTool {
     const skeletonData = getSkeletonData(layerForRibs);
     if (!skeletonData?.contours?.length) return;
 
-    const allTargetsEditable = ribPointsInfo.every((ribInfo) => ribInfo.isEditable);
-    const belongsToSingleSegment = this._selectedRibTargetsBelongToSingleSegment(
-      ribPointsInfo,
-      skeletonData
-    );
-    if (!allTargetsEditable && !belongsToSingleSegment) {
-      return;
-    }
-
     // Calculate arrow key delta
     let [dx, dy] = arrowKeyDeltas[event.key];
     if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
@@ -4552,6 +4798,24 @@ export class PointerTool extends BaseTool {
       z: this.tangentRibMode,
       x: this.equalizeMode,
     });
+
+    if (ribArrowPlan.intent === "equalize") {
+      await this._handleArrowKeysForEqualizeRibHandles(delta, ribPointsInfo);
+      // Equalize intent never falls back to width/nudge semantics.
+      // If no equalizable rib handles are found, this is a deliberate no-op.
+      return;
+    }
+
+    const allTargetsEditable = ribPointsInfo.every((ribInfo) => ribInfo.isEditable);
+    const linkedWidthDriverByPoint = this._buildLinkedWidthDriverByPoint(ribPointsInfo);
+    const hasMirroredLinkedTargets = linkedWidthDriverByPoint.size > 0;
+    const belongsToSingleSegment = this._selectedRibTargetsBelongToSingleSegment(
+      ribPointsInfo,
+      skeletonData
+    );
+    if (!allTargetsEditable && !belongsToSingleSegment && !hasMirroredLinkedTargets) {
+      return;
+    }
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
@@ -4585,7 +4849,7 @@ export class PointerTool extends BaseTool {
 
             if (isEditable) {
               // Editable ribs:
-              // - Alt => interpolation mode (same behavior family as Alt-drag)
+              // - Alt/X => interpolation-family motion (intent resolved centrally)
               // - Z => tangent-only nudge
               // - default => width edit (+ nudge where applicable)
               const ribHit = {
@@ -4601,24 +4865,25 @@ export class PointerTool extends BaseTool {
               const basePoint = baseContour?.points[pointIndex];
               let hasInterpolationBehavior = false;
 
-              if (ribArrowPlan.useInterpolationBehavior && baseContour && basePoint) {
-                const interpolationAxis = this._findHandlesForRibPointFromSkeleton(
-                  layer.glyph.path,
-                  basePoint,
-                  normal,
-                  baseContour,
-                  side
+              if (ribArrowPlan.useInterpolationBehavior) {
+                // Nudge must not redefine semantics when geometry context is partial.
+                // Axis discovery is best-effort; interpolation behavior remains authoritative.
+                const interpolationAxis =
+                  baseContour && basePoint
+                    ? this._findHandlesForRibPointFromSkeleton(
+                        layer.glyph.path,
+                        basePoint,
+                        normal,
+                        baseContour,
+                        side
+                      )
+                    : null;
+                behavior = createInterpolatingRibBehavior(
+                  originalSkeletonData,
+                  ribHit,
+                  interpolationAxis
                 );
-                if (interpolationAxis) {
-                  behavior = createInterpolatingRibBehavior(
-                    originalSkeletonData,
-                    ribHit,
-                    interpolationAxis
-                  );
-                  hasInterpolationBehavior = true;
-                } else {
-                  behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
-                }
+                hasInterpolationBehavior = true;
               } else {
                 behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
               }
@@ -4646,12 +4911,21 @@ export class PointerTool extends BaseTool {
               );
               const constrainMode = ribNudgeApplyPlan.constrainMode;
               const change = behavior.applyDelta(delta, constrainMode);
+              const pointKey = `${contourIndex}/${pointIndex}`;
+              const linkedWidthDriverSide = linkedWidthDriverByPoint.get(pointKey);
+              const shouldApplyLinkedWidth =
+                !isLinked || !linkedWidthDriverSide || linkedWidthDriverSide === side;
 
               if (isSingleSided) {
                 point.width = change.halfWidth;
                 delete point.leftWidth;
                 delete point.rightWidth;
-              } else if (basePoint && constrainMode !== "tangent" && !change.isInterpolation) {
+              } else if (
+                basePoint &&
+                constrainMode !== "tangent" &&
+                !change.isInterpolation &&
+                shouldApplyLinkedWidth
+              ) {
                 const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
                 applyLinkedWidthDelta(
                   point,
@@ -4688,6 +4962,13 @@ export class PointerTool extends BaseTool {
               const baseContour = originalSkeletonData.contours[contourIndex];
               const basePoint = baseContour?.points[pointIndex];
               if (basePoint) {
+                const pointKey = `${contourIndex}/${pointIndex}`;
+                const linkedWidthDriverSide = linkedWidthDriverByPoint.get(pointKey);
+                const shouldApplyLinkedWidth =
+                  !isLinked || !linkedWidthDriverSide || linkedWidthDriverSide === side;
+                if (!shouldApplyLinkedWidth) {
+                  continue;
+                }
                 const linked = isWidthLinked(basePoint);
                 const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
                 applyLinkedWidthDelta(
