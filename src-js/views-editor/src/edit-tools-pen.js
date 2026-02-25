@@ -7,7 +7,7 @@ import {
 import { translate } from "@fontra/core/localization.js";
 import { insertHandles, insertPoint, scalePoint } from "@fontra/core/path-functions.js";
 import { isEqualSet } from "@fontra/core/set-ops.js";
-import { getSkeletonData } from "@fontra/core/skeleton-contour-generator.js";
+import { getGeneratedContourIndexSetForLayer } from "@fontra/core/skeleton-contour-generator.js";
 import { modulo, parseSelection } from "@fontra/core/utils.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
@@ -163,8 +163,7 @@ export class PenToolCubic extends BaseTool {
     const editLayerName =
       this.sceneModel.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
     const layer = positionedGlyph.varGlyph.glyph.layers?.[editLayerName];
-    const indices = getSkeletonData(layer)?.generatedContourIndices || [];
-    return new Set(indices);
+    return getGeneratedContourIndexSetForLayer(layer);
   }
 
   _isPointInGeneratedContour(path, pointIndex, generatedContourIndices) {
@@ -855,8 +854,7 @@ function getGeneratedContourIndexSet(sceneController) {
   const editLayerName =
     sceneModel?.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
   const layer = positionedGlyph.varGlyph.glyph.layers?.[editLayerName];
-  const indices = getSkeletonData(layer)?.generatedContourIndices || [];
-  return new Set(indices);
+  return getGeneratedContourIndexSetForLayer(layer);
 }
 
 function emptyContour() {

@@ -3,6 +3,7 @@ import { translate } from "@fontra/core/localization.js";
 import { rectToPoints } from "@fontra/core/rectangle.js";
 import {
   calculateNormalAtSkeletonPoint,
+  getGeneratedContourIndexSetForLayer,
   getSkeletonData,
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
@@ -2709,8 +2710,7 @@ function getTextVerticalCenter(context, text) {
 function getSkeletonGeneratedContourIndexSet(positionedGlyph, model) {
   const layerName = model?.sceneSettings?.editLayerName || positionedGlyph?.glyph?.layerName;
   const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[layerName];
-  const indices = getSkeletonData(layer)?.generatedContourIndices || [];
-  return new Set(indices);
+  return getGeneratedContourIndexSetForLayer(layer);
 }
 
 registerVisualizationLayerDefinition({

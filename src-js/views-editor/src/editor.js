@@ -77,6 +77,7 @@ import { PowerRulerTool } from "./edit-tools-power-ruler.js";
 import { ShapeTool } from "./edit-tools-shape.js";
 import { SkeletonPenTool } from "./edit-tools-skeleton.js";
 import {
+  getGeneratedContourIndexSetForLayer,
   getSkeletonData,
   regenerateSkeletonContours,
   setSkeletonData,
@@ -3136,7 +3137,7 @@ export class EditorController extends ViewController {
       ? positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName]
       : null;
     const skeletonData = layer ? getSkeletonData(layer) : null;
-    const generatedContourIndices = new Set(skeletonData?.generatedContourIndices || []);
+    const generatedContourIndices = getGeneratedContourIndexSetForLayer(layer);
 
     // Collect skeleton on-curve points
     const skeletonOnCurvePoints = [];

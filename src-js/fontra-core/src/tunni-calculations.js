@@ -1,5 +1,5 @@
 import { distance, subVectors, normalizeVector } from "./vector.js";
-import { getSkeletonData } from "./skeleton-contour-generator.js";
+import { getGeneratedContourIndexSetForLayer } from "./skeleton-contour-generator.js";
 // Regular cubic Tunni math is centralized in tunni-core.js.
 // This module keeps interaction/hit-test/drawing and preserves legacy exports as wrappers.
 import {
@@ -38,8 +38,7 @@ function logTunniWrapperCall(name) {
 function getSkeletonGeneratedContourIndexSet(positionedGlyph, editLayerName) {
   const layerName = editLayerName || positionedGlyph?.glyph?.layerName;
   const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[layerName];
-  const indices = getSkeletonData(layer)?.generatedContourIndices || [];
-  return new Set(indices);
+  return getGeneratedContourIndexSetForLayer(layer);
 }
 
 // Grid Snap Utility Function

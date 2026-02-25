@@ -3485,6 +3485,16 @@ export function getSkeletonData(layerOrCustomData) {
 }
 
 /**
+ * Return skeleton-generated contour indices for a layer/customData object as a Set.
+ * All callers should use this helper instead of re-reading customData directly so
+ * hit-test and visualization logic stay consistent across the app.
+ */
+export function getGeneratedContourIndexSetForLayer(layerOrCustomData) {
+  const skeletonData = getSkeletonData(layerOrCustomData);
+  return new Set(_sanitizeGeneratedIndices(skeletonData?.generatedContourIndices));
+}
+
+/**
  * Store skeleton data in the internal customData section.
  */
 export function setSkeletonData(

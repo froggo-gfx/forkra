@@ -4,6 +4,7 @@ import {
 } from "@fontra/core/convex-hull.js";
 import {
   calculateNormalAtSkeletonPoint,
+  getGeneratedContourIndexSetForLayer,
   getSkeletonData,
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
@@ -750,8 +751,8 @@ export class SceneModel {
     }
 
     const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
-    const skeletonData = getSkeletonData(layer);
-    if (!skeletonData?.generatedContourIndices?.length) {
+    const generatedContourIndices = getGeneratedContourIndexSetForLayer(layer);
+    if (!generatedContourIndices.size) {
       return false;
     }
 
@@ -767,7 +768,7 @@ export class SceneModel {
     }
 
     // Check if this contour is in the skeleton-generated list
-    return skeletonData.generatedContourIndices.includes(contourIndex);
+    return generatedContourIndices.has(contourIndex);
   }
 
   /**
