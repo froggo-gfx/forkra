@@ -1997,6 +1997,10 @@ function readNormalizedHandleOffsets(point, side, dirs, tangent) {
     inY,
     outX,
     outY,
+    // Presence flags are based on contour topology, not on stored offset keys.
+    // This allows compensation to work even when offset values were not explicitly serialized.
+    hasIncomingHandle: !!dirs.hasIncomingHandle,
+    hasOutgoingHandle: !!dirs.hasOutgoingHandle,
     hasAny: has2DIn || has2DOut || has1DIn || has1DOut,
   };
 }
@@ -2260,15 +2264,9 @@ export class EditableRibBehavior {
     this.skeletonHandleInDir = dirs.skeletonHandleInDir;
     this.skeletonHandleOutDir = dirs.skeletonHandleOutDir;
 
-    const offsets = readNormalizedHandleOffsets(
-      point,
-      side,
-      {
-        skeletonHandleInDir: this.skeletonHandleInDir,
-        skeletonHandleOutDir: this.skeletonHandleOutDir,
-      },
-      this.tangent
-    );
+    const offsets = readNormalizedHandleOffsets(point, side, dirs, this.tangent);
+    this.hasIncomingHandle = offsets.hasIncomingHandle;
+    this.hasOutgoingHandle = offsets.hasOutgoingHandle;
     this.hasHandleOffsets = offsets.hasAny;
     this.originalHandleInOffsetX = offsets.inX;
     this.originalHandleInOffsetY = offsets.inY;
@@ -2405,27 +2403,19 @@ export class InterpolatingRibBehavior {
     const isClosed = !!contour.isClosed;
     const defaultWidth = getContourDefaultWidth(contour);
 
-    // Compute skeleton handle directions for 1D->2D conversion
-    // and detect available handle sides.
+    // Compute skeleton handle directions for 1D->2D conversion.
+    // Handle-side presence is resolved by readNormalizedHandleOffsets.
     const dirs = getSkeletonHandleDirections(points, pointIndex, isClosed);
     this.skeletonHandleInDir = dirs.skeletonHandleInDir;
     this.skeletonHandleOutDir = dirs.skeletonHandleOutDir;
-    this.hasIncomingHandle = dirs.hasIncomingHandle;
-    this.hasOutgoingHandle = dirs.hasOutgoingHandle;
 
     this.originalHalfWidth = getOriginalHalfWidth(point, defaultWidth, side);
     this.originalNudge = getOriginalNudge(point, side);
 
     // Store normalized original handle offsets (2D), including 1D->2D conversion.
-    const offsets = readNormalizedHandleOffsets(
-      point,
-      side,
-      {
-        skeletonHandleInDir: this.skeletonHandleInDir,
-        skeletonHandleOutDir: this.skeletonHandleOutDir,
-      },
-      this.tangent
-    );
+    const offsets = readNormalizedHandleOffsets(point, side, dirs, this.tangent);
+    this.hasIncomingHandle = offsets.hasIncomingHandle;
+    this.hasOutgoingHandle = offsets.hasOutgoingHandle;
     this.originalHandleInOffsetX = offsets.inX;
     this.originalHandleInOffsetY = offsets.inY;
     this.originalHandleOutOffsetX = offsets.outX;
