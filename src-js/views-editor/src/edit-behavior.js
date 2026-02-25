@@ -1446,6 +1446,68 @@ export function resolveModifierIntent(objectKind = "regular", flagsOrName = {}) 
   return resolveBehaviorPresetName(flags);
 }
 
+const RIB_INTENT = Object.freeze({
+  DEFAULT: "default",
+  TANGENT: "tangent",
+  INTERPOLATE: "interpolate",
+});
+
+function resolveRibModifierPlan(modality, intent, context = {}) {
+  const zActive = !!context.zActive;
+  const hasInterpolationBehavior = context.hasInterpolationBehavior !== false;
+  const useInterpolationBehavior = intent === RIB_INTENT.INTERPOLATE;
+
+  let constrainMode = null;
+  if (modality === "drag") {
+    // Drag keeps legacy contract: Z can constrain movement live during drag.
+    constrainMode = zActive ? "tangent" : null;
+  } else if (
+    modality === "nudge" &&
+    (intent === RIB_INTENT.TANGENT ||
+      (intent === RIB_INTENT.INTERPOLATE && !hasInterpolationBehavior))
+  ) {
+    // Arrow fallback contract: interpolation without a valid axis becomes tangent nudge.
+    constrainMode = "tangent";
+  }
+
+  return {
+    objectKind: "rib",
+    modality,
+    intent,
+    useInterpolationBehavior,
+    constrainMode,
+    // For mixed rib+skeleton drag, only default intent projects to base normal.
+    shouldProjectToBaseNormal:
+      modality === "drag" &&
+      !!context.hasSkeletonSelection &&
+      !useInterpolationBehavior &&
+      constrainMode !== "tangent",
+  };
+}
+
+export function resolveModifierPlan(
+  objectKind = "regular",
+  modality = "drag",
+  flagsOrIntent = {},
+  context = {}
+) {
+  const intent =
+    typeof flagsOrIntent === "string"
+      ? flagsOrIntent
+      : resolveModifierIntent(objectKind, flagsOrIntent);
+
+  if (objectKind === "rib") {
+    return resolveRibModifierPlan(modality, intent, context);
+  }
+
+  return {
+    objectKind,
+    modality,
+    intent,
+    presetName: intent,
+  };
+}
+
 export function getBehaviorPreset(objectKind = "regular", flagsOrName = "default") {
   const table = BEHAVIOR_TABLES[objectKind] || BEHAVIOR_TABLES.regular;
   const presetName = resolveBehaviorPresetName(flagsOrName);

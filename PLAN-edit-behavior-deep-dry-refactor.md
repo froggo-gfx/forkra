@@ -109,125 +109,174 @@ Behavior execution choices must be represented centrally (table/resolver), inclu
 Behavior classes/runners apply plan data; pointer handlers should not encode business meaning.
 
 ## 7) Step Plan (Detailed)
+### 7.0 Step Completion Gate (applies to every step)
+A step is not complete unless all of the following are true:
+
+1. It has an explicit link to architecture intent:
+- Which part of `resolve intent -> resolve plan -> execute` this step improves.
+
+2. It reduces or enables reduction of semantic drift:
+- either removes local semantic branches now,
+- or introduces shared primitives that are consumed by at least two independent execution paths.
+
+3. It provides evidence in code review notes:
+- exact files/lines touched,
+- which semantic branches were removed or which central model was introduced,
+- manual parity checks run.
+
+4. It does not introduce new modality-specific semantic meaning in pointer call sites.
+
+If any of these fail, the step status must remain `In progress`.
 
 ## Step 1 - Internal rib context helpers
 Status: Completed
 
-### Delivered
+### Primary output
 - `getContourPoint(...)`
 - `getContourDefaultWidth(...)`
 - `getOriginalHalfWidth(...)`
 - `getOriginalNudge(...)`
 - `buildTangentFromNormal(...)`
 
-### Acceptance
-- No behavior deltas for rib/skeleton/regular drag baseline
+### Architecture intent linkage
+- Establishes shared execution primitives used by multiple rib paths.
+- Prevents per-class re-derivation of identical base state.
+
+### Completion evidence required
+- Helpers used by `RibEditBehavior`, `EditableRibBehavior`, `InterpolatingRibBehavior`.
 
 ## Step 2 - Offset key resolver centralization
 Status: Completed
 
-### Delivered
+### Primary output
 - `getHandleOffsetKeys(...)`
 - `getRibHandleOffsetKeys(...)`
 - `getRibNudgeKey(...)`
 
-### Acceptance
-- No key drift
-- No undefined-key runtime errors in editable handle flows
+### Architecture intent linkage
+- Moves key semantics to a single location.
+- Prevents call-site key composition drift.
+
+### Completion evidence required
+- No direct side/type string concatenation remains in consumers.
 
 ## Step 3 - Shared projection math
 Status: Completed
 
-### Delivered
+### Primary output
 - `projectDelta(...)`
 - `projectToNormalSigned(...)`
 - `projectToTangent(...)`
 - `clampHalfWidth(...)`
 
-### Acceptance
-- Width sign/parity preserved
-- Clamp behavior unchanged
+### Architecture intent linkage
+- Centralizes geometric behavior semantics used by drag/nudge execution.
+- Prevents sign/clamp divergence across modalities.
+
+### Completion evidence required
+- Rib width/nudge math paths use shared helpers rather than local formulas.
 
 ## Step 4 - Handle offset adapter (1D/2D bridge)
 Status: Completed
 
-### Delivered
+### Primary output
 - `readNormalizedHandleOffsets(...)`
 - `buildCompensatedOffsets(...)`
-- Presence flags sourced from adapter path
 
-### Acceptance
-- Alt interpolation keeps handles visually stable
-- Rollback parity preserved
+### Architecture intent linkage
+- Unifies offset representation before execution.
+- Removes representation-specific semantic decisions from behavior classes.
+
+### Completion evidence required
+- Presence and normalization logic sourced from adapter, not duplicated in consumers.
 
 ## Step 5 - Rib strategy runtime
 Status: Completed
 
-### Delivered
+### Primary output
 - `createRibRuntimeContext(...)`
 - `runRibStrategy(...)`
-- Strategy constants for basic/editable/interpolate
+- strategy keys for basic/editable/interpolate
 
-### Acceptance
-- Rib drag matrix parity (basic/editable/interpolate/tangent)
+### Architecture intent linkage
+- Centralizes how rib execution is applied after intent/plan selection.
+- Replaces class-local execution drift with strategy runner.
 
-## Step 5.5 - Intent parity architecture (re-opened until fully done)
-Status: In progress (partial wiring done, architectural completion pending)
+### Completion evidence required
+- Public rib classes delegate to runner for apply semantics.
 
-### Required end-state
-- Shared intent resolver is not enough by itself.
-- Shared execution plan resolution must also be centralized.
-- Pointer drag/nudge must not contain semantic re-interpretation branches.
+## Step 5.5 - Intent parity architecture
+Status: In progress
 
-### Required tasks
-1. Keep `resolveModifierIntent(objectKind, flags)` as the only intent gateway.
-2. Add/complete centralized intent-to-plan mapping for object kinds and modalities.
-3. Replace remaining local modality branches that define semantics.
-4. Keep selection/routing ownership unchanged in pointer.
-5. Document explicit support matrix per object kind (including unsupported combos).
+### Mandatory objective
+Make intent and plan central, and make pointer call sites purely executors.
 
-### Definition of done
-Step 5.5 is done only when:
-- same modifiers on same object kind resolve to the same intent in drag and nudge
-- pointer call sites do not redefine semantic meaning
-- changing a modifier mapping requires editing one central mapping location
+### Required outputs
+1. Single intent gateway:
+- `resolveModifierIntent(objectKind, flags)`
+
+2. Single plan gateway:
+- `resolveModifierPlan(objectKind, modality, intentOrFlags, context)`
+
+3. Pointer parity:
+- drag and nudge for each object kind consume plan output.
+- pointer does not define semantic meaning via local modifier branches.
+
+### Non-negotiable done criteria
+Step 5.5 is complete only if all are true:
+
+1. Same modifiers + same object kind => same intent in drag and nudge.
+2. Any modality-specific behavior differences are defined in central plan mapping, not pointer branches.
+3. Changing mapping for a modifier/object kind requires editing one central mapping location.
+4. Unsupported combinations are explicit in central mapping (never silent no-op by omission).
+5. Code review can list removed local semantic branches in pointer.
 
 ## Step 6 - Rollback payload builders
 Status: Completed
 
-### Delivered
+### Primary output
 - `buildRibRollbackPayload(...)`
 - `buildHandleRollbackPayload(...)`
-- Rib/editable/interpolation/handle `getRollback()` routing through builders
 
-### Acceptance
-- Undo/redo parity for rib/editable/interpolate/handle flows
+### Architecture intent linkage
+- Centralizes rollback semantics after execution.
+- Prevents class-level payload drift.
+
+### Completion evidence required
+- Rib/editable/interpolation/handle `getRollback()` routed through builders.
 
 ## Step 7 - Skeleton DRY pass
 Status: Completed
 
-### Delivered
+### Primary output
 - `buildMatchedEditEntry(...)`
 - `partitionTransformVsConstrain(...)`
 - `collectParticipatingIndices(...)`
 
-### Acceptance
-- No rule semantic change
-- Mixed selection parity retained
+### Architecture intent linkage
+- Reduces duplicate internal skeleton execution assembly.
+- Prepares skeleton path for plan-driven execution parity.
+
+### Completion evidence required
+- No rule semantic changes (`actionFactories` semantics preserved).
 
 ## Step 8 - Final consolidation and net reduction
 Status: Pending
 
-### Required tasks
-1. Remove dead helpers and transitional wrappers.
-2. Collapse remaining duplicated pointer-side semantic branches into centralized mapping.
-3. Ensure net complexity reduction (fewer semantic branch points in pointer).
-4. Keep comments only for non-obvious logic.
+### Mandatory objective
+Finish migration from distributed semantic branching to central intent/plan execution with net simplification.
 
-### Acceptance
-- No stale references
-- Stable bundle/runtime
-- Reduced semantic duplication hotspots
+### Required tasks
+1. Remove dead/transitional helpers no longer needed.
+2. Eliminate remaining pointer-local semantic branches for behavior meaning.
+3. Reduce number of semantic branch points in pointer (net decrease from baseline).
+4. Keep comments only where logic is non-obvious.
+
+### Done criteria
+1. No stale references.
+2. Stable bundle/runtime.
+3. Demonstrable reduction of semantic duplication hotspots.
+4. Plan-to-execution mapping readable from one central area.
 
 ## 8) Behavior Support Matrix Policy
 Support must be explicit, centrally documented, and code-backed:

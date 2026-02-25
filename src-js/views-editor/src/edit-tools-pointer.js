@@ -52,7 +52,7 @@ import {
   constrainHorVerDiag,
   getSkeletonBehaviorName,
   makeRoundFunc,
-  resolveModifierIntent,
+  resolveModifierPlan,
 } from "./edit-behavior.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import {
@@ -3203,12 +3203,13 @@ export class PointerTool extends BaseTool {
     if (!positionedGlyph) return;
 
     // Keep drag behavior stable: interpolation mode is chosen on drag start.
-    const ribDragIntent = resolveModifierIntent("rib", {
+    const ribDragStartPlan = resolveModifierPlan("rib", "drag", {
       alt: initialEvent.altKey,
       z: this.tangentRibMode,
       x: this.equalizeMode,
     });
-    const useInterpolation = ribDragIntent === "interpolate";
+    const ribDragIntent = ribDragStartPlan.intent;
+    const useInterpolation = ribDragStartPlan.useInterpolationBehavior;
 
     // Get initial point in glyph coordinates
     const localPoint = sceneController.localPoint(initialEvent);
@@ -3453,14 +3454,13 @@ export class PointerTool extends BaseTool {
 
         const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
 
-        // Z-constrain is still live during drag; resolve through shared rib intent mapping.
-        const constrainMode =
-          resolveModifierIntent("rib", { z: this.tangentRibMode }) === "tangent"
-            ? "tangent"
-            : null;
         const hasSkeletonSelection = selectedSkeletonPoints?.size > 0;
-        const useNormalDelta =
-          hasSkeletonSelection && !useInterpolation && constrainMode !== "tangent";
+        const ribDragPlan = resolveModifierPlan("rib", "drag", ribDragIntent, {
+          zActive: this.tangentRibMode,
+          hasSkeletonSelection,
+        });
+        const constrainMode = ribDragPlan.constrainMode;
+        const useNormalDelta = ribDragPlan.shouldProjectToBaseNormal;
         const baseNormalDelta = useNormalDelta
           ? (ribHit.side === "left" ? 1 : -1) *
             (delta.x * ribHit.normal.x + delta.y * ribHit.normal.y)
@@ -3919,12 +3919,13 @@ export class PointerTool extends BaseTool {
     if (!positionedGlyph || editablePoints.length === 0) return;
 
     // Keep drag behavior stable: interpolation mode is chosen on drag start.
-    const ribDragIntent = resolveModifierIntent("rib", {
+    const ribDragStartPlan = resolveModifierPlan("rib", "drag", {
       alt: initialEvent.altKey,
       z: this.tangentRibMode,
       x: this.equalizeMode,
     });
-    const useInterpolation = ribDragIntent === "interpolate";
+    const ribDragIntent = ribDragStartPlan.intent;
+    const useInterpolation = ribDragStartPlan.useInterpolationBehavior;
 
     const localPoint = sceneController.localPoint(initialEvent);
     const startGlyphPoint = {
@@ -4018,11 +4019,10 @@ export class PointerTool extends BaseTool {
 
         const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
 
-        // Z-constrain is still live during drag; resolve through shared rib intent mapping.
-        const constrainMode =
-          resolveModifierIntent("rib", { z: this.tangentRibMode }) === "tangent"
-            ? "tangent"
-            : null;
+        const ribDragPlan = resolveModifierPlan("rib", "drag", ribDragIntent, {
+          zActive: this.tangentRibMode,
+        });
+        const constrainMode = ribDragPlan.constrainMode;
 
         const allChanges = [];
 
@@ -4587,7 +4587,7 @@ export class PointerTool extends BaseTool {
       dy *= 10;
     }
     const delta = { x: dx, y: dy };
-    const ribArrowMode = resolveModifierIntent("rib", {
+    const ribArrowPlan = resolveModifierPlan("rib", "nudge", {
       alt: event.altKey,
       z: this.tangentRibMode,
       x: this.equalizeMode,
@@ -4641,7 +4641,7 @@ export class PointerTool extends BaseTool {
               const basePoint = baseContour?.points[pointIndex];
               let hasInterpolationBehavior = false;
 
-              if (ribArrowMode === "interpolate" && baseContour && basePoint) {
+              if (ribArrowPlan.useInterpolationBehavior && baseContour && basePoint) {
                 const interpolationAxis = this._findHandlesForRibPointFromSkeleton(
                   layer.glyph.path,
                   basePoint,
@@ -4675,11 +4675,16 @@ export class PointerTool extends BaseTool {
                 behavior.minHalfWidth = 2;
               }
 
-              const constrainMode =
-                ribArrowMode === "tangent" ||
-                (ribArrowMode === "interpolate" && !hasInterpolationBehavior)
-                  ? "tangent"
-                  : null;
+              const ribNudgeApplyPlan = resolveModifierPlan(
+                "rib",
+                "nudge",
+                ribArrowPlan.intent,
+                {
+                  zActive: this.tangentRibMode,
+                  hasInterpolationBehavior,
+                }
+              );
+              const constrainMode = ribNudgeApplyPlan.constrainMode;
               const change = behavior.applyDelta(delta, constrainMode);
 
               if (isSingleSided) {
@@ -7283,7 +7288,10 @@ function pointInCircleHandle(point, handle, handleSize) {
 }
 
 function getBehaviorName(event) {
-  return resolveModifierIntent("regular", { shift: event.shiftKey, alt: event.altKey });
+  return resolveModifierPlan("regular", "drag", {
+    shift: event.shiftKey,
+    alt: event.altKey,
+  }).presetName;
 }
 
 function replace(setA, setB) {
