@@ -98,8 +98,6 @@ export function calculateSkeletonTrueTunniPoint(segment) {}
 
 ---
 
-## ОСТАЛОСЬ ВЫПОЛНИТЬ
-
 ## Шаг 03. Ввести `measure-core.js` (чистая measure-математика)
 **Общая проблема:** measure-формулы смешаны с визуализацией.  
 **Аспект шага:** отделение вычислений от рендера/hover.  
@@ -118,6 +116,8 @@ export function handleTension(segmentPoints, truePoint) {}
 - UI не меняется, нет циклических импортов.
 
 ---
+
+## ОСТАЛОСЬ ВЫПОЛНИТЬ
 
 ## Шаг 04. Перевести `tunni-calculations.js` на `tunni-core.js`
 **Общая проблема:** старый файл держит дубли формул.  

@@ -51,7 +51,9 @@ Purpose: lock down real behavior before refactor so each step can be validated a
 3. `Alt+drag` (editable rib) switches to interpolation behavior (`InterpolatingRibBehavior`)
 4. `Z+drag` constrains to tangent mode (nudge-only path)
 5. `Z+Shift+drag` must still keep tangent constraint semantics; shift must not silently switch mode
-6. movement gating exists: allowed only for all-editable targets OR same-segment pairing OR skeleton-driven drag context
+6. `detached` rib-handle mode is per side (`leftHandleDetached`/`rightHandleDetached`): handle 2D offsets are interpreted in rib-point space, so handle placement is independent from skeleton-handle length changes.
+7. non-detached mode stores offsets relative to generated control positions, so handle placement follows skeleton-handle geometry changes.
+8. movement gating exists: allowed only for all-editable targets OR same-segment pairing OR skeleton-driven drag context
 
 ### Generated contours
 - Regular Tunni hit-test excludes generated contour indices (`src-js/fontra-core/src/tunni-calculations.js`).
@@ -118,6 +120,8 @@ Purpose: lock down real behavior before refactor so each step can be validated a
 5. drag editable rib point with `Z+Shift`
 6. select multi-rib targets that are not same-segment and not all editable, attempt drag
 7. nudge selected rib points with arrows and modifier variants
+8. toggle detached ON for one side (via Skeleton Parameters), then change width/nudge and move adjacent skeleton handles
+9. toggle detached OFF, repeat width/nudge/handle moves
 - Expected:
 1. non-editable path stays width-only
 2. editable path follows editable rib semantics
@@ -125,6 +129,9 @@ Purpose: lock down real behavior before refactor so each step can be validated a
 4. `Z` and `Z+Shift` keep tangent-constrained semantics (no silent mode switch)
 5. movement gating blocks disallowed multi-target drags
 6. arrow nudge respects rib restrictions and does not behave like unrestricted skeleton drag
+7. detached ON: handle positions stay anchored in rib-point space (not re-scaled by skeleton-handle distance changes)
+8. detached OFF: offsets are back in control-point space, so handles follow skeleton-handle geometry again
+9. detached ON/OFF toggle preserves visual continuity (no jump on mode switch)
 
 ## Scenario 5: Editable generated handles (from rib side)
 - Setup: contour with editable generated handles available on both sides.
@@ -132,10 +139,13 @@ Purpose: lock down real behavior before refactor so each step can be validated a
 1. drag editable generated handle
 2. drag with `X` where equalize pair exists
 3. nudge editable generated handle with arrows
+4. repeat 1-3 with detached OFF and detached ON
 - Expected:
 1. movement constrained along corresponding skeleton-handle direction
 2. `X` equalize works only with valid in/out pairing
-3. offset representation remains stable (no random switch corruption between 1D/2D semantics)
+3. detached OFF: drag/arrows update 1D offset (2D cleared unless equalize path writes 2D)
+4. detached ON: drag/arrows update 2D offsets and keep detached semantics
+5. offset representation remains stable (no random switch corruption between 1D/2D semantics)
 
 ## Scenario 6: Generated contour interactions in measure/tunni
 - Setup: mixed glyph containing regular contours and skeleton-generated contours.
@@ -180,4 +190,3 @@ Tester:
 Notes:
 - ...
 ```
-
