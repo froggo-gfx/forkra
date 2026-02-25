@@ -1535,6 +1535,14 @@ function getIntentRules(objectKind = "regular") {
   return INTENT_PRIORITY_BY_KIND[objectKind] || INTENT_PRIORITY_BY_KIND.regular;
 }
 
+function getModifierSpecStrict(objectKind = "regular", modality = "drag") {
+  return MODIFIER_SPEC[objectKind]?.[modality] || null;
+}
+
+function getIntentRulesStrict(objectKind = "regular") {
+  return INTENT_PRIORITY_BY_KIND[objectKind] || null;
+}
+
 function getActiveFlagList(normalizedFlags = {}, flagList = []) {
   if (!normalizedFlags) {
     return [];
@@ -1616,24 +1624,109 @@ export function resolveModifierIntent(objectKind = "regular", flagsOrName = {}) 
   return resolveModifierIntentFromNormalized(objectKind, normalizedFlags);
 }
 
-function resolveRegularLikeModifierPlan(objectKind, modality, intent, normalizedFlags) {
-  const spec = getModifierSpec(objectKind, modality);
-  const presetName = spec.presetByIntent[intent] || spec.presetByIntent.default;
-  const unsupportedModifiers = getActiveFlagList(normalizedFlags, spec.unsupportedFlags);
-  const ignoredActiveModifiers = getActiveFlagList(normalizedFlags, spec.passiveFlags);
+function resolveModifierIntentResultFromNormalized(
+  objectKind,
+  modality,
+  normalizedFlags,
+  explicitIntent = null
+) {
+  // R2 contract: intent resolution always reports support status and reason,
+  // so callers never need to infer unsupported states from missing fields.
+  const intentRules = getIntentRulesStrict(objectKind);
+  const modifierSpec = getModifierSpecStrict(objectKind, modality);
+  const intent =
+    explicitIntent ||
+    (intentRules
+      ? resolveModifierIntentFromNormalized(objectKind, normalizedFlags || {})
+      : "default");
+  const hasKnownIntent = !!intentRules?.some((rule) => rule.intent === intent);
+
+  if (!intentRules) {
+    return {
+      objectKind,
+      modality,
+      intent,
+      status: "unsupported",
+      supported: false,
+      unsupportedReason: "unknown-object-kind",
+      unsupportedModifiers: [],
+      ignoredActiveModifiers: [],
+    };
+  }
+
+  if (!modifierSpec) {
+    return {
+      objectKind,
+      modality,
+      intent,
+      status: "unsupported",
+      supported: false,
+      unsupportedReason: "unknown-modality",
+      unsupportedModifiers: [],
+      ignoredActiveModifiers: [],
+    };
+  }
+
+  if (!hasKnownIntent) {
+    return {
+      objectKind,
+      modality,
+      intent,
+      status: "unsupported",
+      supported: false,
+      unsupportedReason: "unknown-intent",
+      unsupportedModifiers: [],
+      ignoredActiveModifiers: [],
+    };
+  }
+
+  const unsupportedModifiers = getActiveFlagList(normalizedFlags, modifierSpec.unsupportedFlags);
+  const ignoredActiveModifiers = getActiveFlagList(normalizedFlags, modifierSpec.passiveFlags);
+  const supported = unsupportedModifiers.length === 0;
+
   return {
     objectKind,
     modality,
     intent,
-    presetName,
+    status: supported ? "supported" : "unsupported",
+    supported,
+    unsupportedReason: supported ? null : "unsupported-modifiers",
     unsupportedModifiers,
     ignoredActiveModifiers,
   };
 }
 
-function resolveRibModifierPlan(modality, intent, normalizedFlags, context = {}) {
-  const spec = getModifierSpec("rib", modality);
-  const basePlan = spec.planByIntent[intent] || spec.planByIntent.default;
+export function resolveModifierIntentResult(
+  objectKind = "regular",
+  modality = "drag",
+  flagsOrName = {}
+) {
+  const normalizedFlags =
+    typeof flagsOrName === "string" ? null : normalizeModifierFlags(flagsOrName || {});
+  return resolveModifierIntentResultFromNormalized(
+    objectKind,
+    modality,
+    normalizedFlags,
+    typeof flagsOrName === "string" ? flagsOrName : null
+  );
+}
+
+function resolveRegularLikeModifierPlan(objectKind, modality, intentResolution) {
+  const spec = getModifierSpecStrict(objectKind, modality);
+  const presetName = spec?.presetByIntent?.[intentResolution.intent] || spec?.presetByIntent?.default;
+  return {
+    ...intentResolution,
+    presetName,
+    executorFamily: objectKind === "skeleton" ? "skeleton-point" : "regular-point",
+    fallbackPolicy: {
+      kind: "none",
+    },
+  };
+}
+
+function resolveRibModifierPlan(modality, intentResolution, context = {}) {
+  const spec = getModifierSpecStrict("rib", modality);
+  const basePlan = spec?.planByIntent?.[intentResolution.intent] || spec?.planByIntent?.default || {};
   const zActive = !!context.zActive;
   const hasInterpolationBehavior = context.hasInterpolationBehavior !== false;
   const useInterpolationBehavior = !!basePlan.useInterpolationBehavior;
@@ -1650,13 +1743,24 @@ function resolveRibModifierPlan(modality, intent, normalizedFlags, context = {})
   }
 
   return {
-    objectKind: "rib",
-    modality,
-    intent,
+    ...intentResolution,
     useInterpolationBehavior,
     constrainMode,
-    unsupportedModifiers: getActiveFlagList(normalizedFlags, spec.unsupportedFlags),
-    ignoredActiveModifiers: getActiveFlagList(normalizedFlags, spec.passiveFlags),
+    executorFamily:
+      intentResolution.intent === "equalize" && modality === "nudge"
+        ? "rib-handle-equalize"
+        : useInterpolationBehavior
+          ? "rib-point-interpolating"
+          : "rib-point",
+    fallbackPolicy:
+      modality === "nudge" && useInterpolationBehavior
+        ? {
+            kind: "missing-interpolation-axis",
+            constrainModeWhenMissingAxis: fallbackConstrainWithoutInterpolationAxis,
+          }
+        : {
+            kind: "none",
+          },
     // For mixed rib+skeleton drag, only default intent projects to base normal.
     shouldProjectToBaseNormal:
       modality === "drag" &&
@@ -1672,26 +1776,31 @@ export function resolveModifierPlan(
   flagsOrIntent = {},
   context = {}
 ) {
-  const normalizedFlags =
-    typeof flagsOrIntent === "string" ? null : normalizeModifierFlags(flagsOrIntent || {});
-  const intent =
-    typeof flagsOrIntent === "string"
-      ? flagsOrIntent
-      : resolveModifierIntentFromNormalized(objectKind, normalizedFlags);
+  // R2 contract: plan always returns support status + executor routing metadata.
+  const normalizedFlags = typeof flagsOrIntent === "string"
+    ? null
+    : normalizeModifierFlags(flagsOrIntent || {});
+  const intentResolution = resolveModifierIntentResult(
+    objectKind,
+    modality,
+    typeof flagsOrIntent === "string" ? flagsOrIntent : normalizedFlags
+  );
 
   if (objectKind === "rib") {
-    return resolveRibModifierPlan(modality, intent, normalizedFlags, context);
+    return resolveRibModifierPlan(modality, intentResolution, context);
   }
 
   if (objectKind === "regular" || objectKind === "skeleton") {
-    return resolveRegularLikeModifierPlan(objectKind, modality, intent, normalizedFlags);
+    return resolveRegularLikeModifierPlan(objectKind, modality, intentResolution);
   }
 
   return {
-    objectKind,
-    modality,
-    intent,
-    presetName: intent,
+    ...intentResolution,
+    presetName: null,
+    executorFamily: null,
+    fallbackPolicy: {
+      kind: "unsupported",
+    },
   };
 }
 

@@ -3239,6 +3239,9 @@ export class PointerTool extends BaseTool {
       z: this.tangentRibMode,
       x: this.equalizeMode,
     });
+    if (!ribDragStartPlan.supported) {
+      return;
+    }
     const ribDragIntent = ribDragStartPlan.intent;
     const useInterpolation = ribDragStartPlan.useInterpolationBehavior;
 
@@ -3493,6 +3496,9 @@ export class PointerTool extends BaseTool {
           zActive: this.tangentRibMode,
           hasSkeletonSelection,
         });
+        if (!ribDragPlan.supported) {
+          continue;
+        }
         const constrainMode = ribDragPlan.constrainMode;
         const useNormalDelta = ribDragPlan.shouldProjectToBaseNormal;
         const baseNormalDelta = useNormalDelta
@@ -3922,6 +3928,9 @@ export class PointerTool extends BaseTool {
       z: this.tangentRibMode,
       x: this.equalizeMode,
     });
+    if (!ribDragStartPlan.supported) {
+      return;
+    }
     const ribDragIntent = ribDragStartPlan.intent;
     const useInterpolation = ribDragStartPlan.useInterpolationBehavior;
 
@@ -4021,6 +4030,9 @@ export class PointerTool extends BaseTool {
         const ribDragPlan = resolveModifierPlan("rib", "drag", ribDragIntent, {
           zActive: this.tangentRibMode,
         });
+        if (!ribDragPlan.supported) {
+          continue;
+        }
         const constrainMode = ribDragPlan.constrainMode;
 
         const allChanges = [];
@@ -4798,6 +4810,9 @@ export class PointerTool extends BaseTool {
       z: this.tangentRibMode,
       x: this.equalizeMode,
     });
+    if (!ribArrowPlan.supported) {
+      return;
+    }
 
     if (ribArrowPlan.intent === "equalize") {
       await this._handleArrowKeysForEqualizeRibHandles(delta, ribPointsInfo);
@@ -4909,6 +4924,9 @@ export class PointerTool extends BaseTool {
                   hasInterpolationBehavior,
                 }
               );
+              if (!ribNudgeApplyPlan.supported) {
+                continue;
+              }
               const constrainMode = ribNudgeApplyPlan.constrainMode;
               const change = behavior.applyDelta(delta, constrainMode);
               const pointKey = `${contourIndex}/${pointIndex}`;
@@ -7510,10 +7528,13 @@ function pointInCircleHandle(point, handle, handleSize) {
 }
 
 function getBehaviorPresetNameFromEvent(objectKind, modality, event) {
-  return resolveModifierPlan(objectKind, modality, {
+  const plan = resolveModifierPlan(objectKind, modality, {
     shift: event.shiftKey,
     alt: event.altKey,
-  }).presetName;
+  });
+  // Pointer stays transport-only: unsupported combinations are resolved centrally.
+  // Call-sites use the default preset as a safe routing fallback.
+  return plan.supported && plan.presetName ? plan.presetName : "default";
 }
 
 function replace(setA, setB) {

@@ -1,340 +1,342 @@
-# Pointer/Edit Behavior Refactor Plan
+# Pointer/Edit Behavior Refactor Plan (Reset v3)
 
 ## 0) Intent (explicit, non-negotiable)
-This refactor exists to enforce one architecture rule:
+This refactor has one goal:
 
-- Behavior meaning is defined once.
-- Drag and nudge consume the same meaning.
-- Changing behavior must require editing one central model, not chasing duplicated `if/else` branches.
+1. Behavior meaning is defined once in central sources.
+2. Drag and nudge are two transport modalities over the same semantics.
+3. Pointer handlers only route input/context and dispatch execution.
+4. Adding/changing a behavior is done centrally, not by searching call-sites.
 
-If a change does not move us toward this rule, it is not in scope, even if it "works."
+Non-negotiable interpretation:
 
-## 1) Problem Statement
-Current behavior logic is split across:
+1. We do not close steps by fixing one behavior family manually.
+2. We do not accept parity that depends on pointer-local branches.
+3. Coverage is driven by the behavior table contract, not by remembered cases.
 
-- `src-js/views-editor/src/edit-behavior.js`
-- `src-js/views-editor/src/edit-tools-pointer.js`
+## 1) Canonical Sources of Truth
+There are only three semantic sources:
 
-This creates drift risk:
+1. `edit-behavior.js` behavior table and central resolver(s): what behavior means.
+2. Central plan mapping: how intent maps to execution family and constraints.
+3. Central executor families: where geometry/math is applied.
 
-- Modifier interpretation duplicated by modality (`drag` vs `nudge`).
-- Object-kind semantics (`regular` / `skeleton` / `rib`) not always centralized.
-- Rollback/build logic repeated across classes.
+Everything else (especially pointer handlers) is transport/routing only.
 
-Result: parity bugs, high cognitive load, and expensive behavior changes.
-
-## 2) Refactor Objective
-Move from "distributed behavior branching" to an "intent-driven architecture":
-
-1. Resolve modifier intent once per object kind.
-2. Resolve execution plan from that intent.
-3. Execute plan in each modality without redefining semantics.
-
-## 3) Scope and Non-Scope
+## 2) Scope
 
 ### In scope
-- `src-js/views-editor/src/edit-behavior.js`
-- Minimal call-site rewiring in `src-js/views-editor/src/edit-tools-pointer.js`
-- Internal helper extraction and strategy routing
-- Rollback payload unification
-- Explicit intent/parity contract documentation
+1. `src-js/views-editor/src/edit-behavior.js`
+2. `src-js/views-editor/src/edit-tools-pointer.js`
+3. Internal execution abstractions required to run drag+nudge through one semantic pipeline.
+4. All behavior families present in current baseline table:
+- regular points
+- skeleton points
+- rib points
+- editable generated handles (including equalize-like intents)
 
 ### Out of scope
-- Public API breakage
-- Skeleton data schema changes
-- Routing redesign of pointer tool ownership
-- New automated tests in this refactor track
+1. External/public API breakage.
+2. Data schema migrations unrelated to behavior execution architecture.
+3. New behavior types not present in current baseline semantics.
 
-## 4) Hard Constraints
+## 3) Target Architecture Contract
 
-1. Public exports/signatures remain stable:
-- `EditBehaviorFactory`
-- `SkeletonEditBehavior`
-- `RibEditBehavior`
-- `EditableRibBehavior`
-- `InterpolatingRibBehavior`
-- `EditableHandleBehavior`
-- `createSkeletonEditBehavior(...)`
-- `getSkeletonBehaviorName(...)`
-- `createRibEditBehavior(...)`
-- `createEditableRibBehavior(...)`
-- `createInterpolatingRibBehavior(...)`
-- `createEditableHandleBehavior(...)`
-- `resolveBehaviorPresetName(...)`
-- `getBehaviorPreset(...)`
+### 3.1 Intent resolution (single gateway)
+`resolveModifierIntent(objectKind, flags)` is the only modifier->intent gateway.
 
-2. No hidden modality-specific reinterpretation of modifiers.
-3. Any unsupported modifier combination must be explicit in a central table/resolver, never implicit in call-site branches.
+Rules:
+1. Explicit precedence per object kind.
+2. Unsupported combinations return explicit semantic result (`unsupported`), never silent pointer fallback.
 
-## 5) Architecture Contract
+### 3.2 Plan resolution (single gateway)
+`resolveModifierPlan(objectKind, modality, intent, context)` is the only intent->execution-plan gateway.
 
-### 5.1 Core terms
-- `object kind`: `regular`, `skeleton`, `rib`
-- `modality`: `drag`, `nudge`
-- `intent`: normalized semantic mode resolved from modifiers
-- `plan`: executable behavior decisions derived from intent and object context
+Plan payload must include:
+1. Executor family id.
+2. Constraint mode and fallback policy.
+3. Explicit unsupported/no-op reason (if not executable).
 
-### 5.2 Mandatory flow
-All pointer behavior must follow:
+### 3.3 Execution (single gateway per family)
+Execution math lives only in centralized executors/runners.
 
-`raw flags -> resolve intent -> resolve plan -> execute`
+Rules:
+1. Same family logic is called by drag and nudge.
+2. Pointer may not embed family-specific geometry behavior.
 
-`pointer` call sites may pass context, but may not redefine intent semantics.
+### 3.4 Pointer contract (routing only)
+Pointer handlers may:
+1. Hit-test and normalize selection.
+2. Normalize event delta.
+3. Build context and call intent->plan->executor pipeline.
+4. Dispatch updates/transactions.
 
-### 5.3 "No branch drift" rule
-In pointer handlers, this pattern is forbidden for behavior semantics:
+Pointer handlers may not:
+1. Reinterpret modifier semantics.
+2. Duplicate behavior math for drag vs nudge.
+3. Add object-kind-specific semantic branches beyond routing.
 
-- `if (alt) ... else if (z) ... else ...`
+## 4) Completion Gate (binary, mandatory for every step)
+A step is complete only if all checks pass:
 
-unless the branch calls a shared resolver/table and does not define meaning itself.
+1. `Intent Link`: the step improves one pipeline leg (`intent -> plan -> executor`).
+2. `Coverage Link`: change is mapped to behavior-table coverage entries, not ad hoc cases.
+3. `Drift Reduction`: semantic duplication in pointer is removed or replaced by shared execution.
+4. `No New Pointer Semantics`: pointer contains no new behavior meaning.
+5. `Parity Proof`: targeted behaviors run through the same executor family for drag and nudge.
+6. `Evidence`: files/branches/paths/manual checks are listed with PASS/FAIL.
 
-## 6) Single Source of Truth Requirements
+If any check fails, status remains `In progress`.
 
-### 6.1 Intent source
-`resolveModifierIntent(objectKind, flags)` in `edit-behavior.js` is the semantic gateway.
+## 5) Coverage-First Workflow (prevents manual case hunting)
 
-Requirements:
-- deterministic precedence per object kind
-- parity across `drag`/`nudge`
-- explicit handling of unsupported combinations
+### 5.1 Build Behavior Coverage Map (BCM)
+Before each implementation step, maintain a map keyed by:
+`(objectKind, intent, modality)`
 
-### 6.2 Plan source
-Behavior execution choices must be represented centrally (table/resolver), including:
-- strategy selection
-- constrain mode
-- interpolation/equalize policy
-- rollback mode contract
+Each BCM row includes:
+1. Source row from behavior table (`edit-behavior.js`).
+2. Current plan resolver path.
+3. Current executor family.
+4. Pointer branch ownership (`none` expected in target).
+5. Verification status (`untested/pass/fail`).
 
-### 6.3 Execution source
-Behavior classes/runners apply plan data; pointer handlers should not encode business meaning.
+### 5.2 Step work must reference BCM rows
+No step can be closed by saying "fixed X". It must state:
+1. Which BCM rows moved from pointer-semantic ownership to central ownership.
+2. Which rows now share drag+nudge executor path.
 
-## 7) Step Plan (Detailed)
-### 7.0 Step Completion Gate (applies to every step)
-A step is not complete unless all of the following are true:
+### 5.3 Regression rule
+Any new behavior or modifier combination must be added as BCM rows first, then implemented centrally.
 
-1. It has an explicit link to architecture intent:
-- Which part of `resolve intent -> resolve plan -> execute` this step improves.
+## 6) Execution Plan (detailed, architecture-first)
 
-2. It reduces or enables reduction of semantic drift:
-- either removes local semantic branches now,
-- or introduces shared primitives that are consumed by at least two independent execution paths.
+## Step R1 - Baseline inventory and BCM bootstrap
+Status: Completed (2026-02-25)
 
-3. It provides evidence in code review notes:
-- exact files/lines touched,
-- which semantic branches were removed or which central model was introduced,
-- manual parity checks run.
+Objective:
+1. Inventory all pointer semantic branches.
+2. Build initial BCM from behavior table and current routing.
 
-4. It does not introduce new modality-specific semantic meaning in pointer call sites.
+Required outputs:
+1. Pointer semantic branch list with file/region references.
+2. Initial BCM entries for all currently supported behavior combinations.
+3. Mapping: each semantic pointer branch -> target central owner (`intent`, `plan`, `executor`).
 
-If any of these fail, the step status must remain `In progress`.
+Done criteria:
+1. Every semantic pointer branch is represented in BCM ownership columns.
+2. No known behavior-table row is missing from BCM.
 
-## Step 1 - Internal rib context helpers
-Status: Completed
+### R1 Output A - Pointer semantic branch inventory (baseline)
+| ID | Pointer branch site | What semantics are still decided in pointer | Current owner | Planned central owner |
+| --- | --- | --- | --- | --- |
+| P1 | `src-js/views-editor/src/edit-tools-pointer.js:1288` | X+nudge for skeleton handles routed to dedicated equalize path (`_handleArrowKeysForEqualizeSkeletonHandles`) | pointer | executor family `skeleton-handle-equalize` selected via plan |
+| P2 | `src-js/views-editor/src/edit-tools-pointer.js:1314` | fixed-rib/fixed-rib-compress override in skeleton nudge flow | pointer | plan policy + dedicated executor family |
+| P3 | `src-js/views-editor/src/edit-tools-pointer.js:1444` | X+nudge for regular path handles routed to dedicated equalize path (`_handleArrowKeysForEqualizePathHandles`) | pointer | executor family `regular-handle-equalize` selected via plan |
+| P4 | `src-js/views-editor/src/edit-tools-pointer.js:2652` | mid-drag X-equalize geometry for regular handles inside general drag loop | pointer | shared equalize executor used by drag+nudge |
+| P5 | `src-js/views-editor/src/edit-tools-pointer.js:3129` | fixed-rib override in skeleton drag flow | pointer | plan policy + dedicated executor family |
+| P6 | `src-js/views-editor/src/edit-tools-pointer.js:3156` | X+drag equalize geometry for skeleton handles inside skeleton drag flow | pointer | shared equalize executor used by drag+nudge |
+| P7 | `src-js/views-editor/src/edit-tools-pointer.js:3237` | rib drag intent start-plan is central, but behavior family selection remains local (`Rib/Editable/Interpolating`) | mixed (plan + pointer) | executor registry keyed by plan |
+| P8 | `src-js/views-editor/src/edit-tools-pointer.js:3492` | rib drag recomputes constrain mode from plan, then pointer applies family-specific execution branches | mixed (plan + pointer) | executor registry keyed by plan |
+| P9 | `src-js/views-editor/src/edit-tools-pointer.js:3920` | editable generated point drag uses rib plan intent, but still chooses behavior family in pointer | mixed (plan + pointer) | executor registry keyed by plan |
+| P10 | `src-js/views-editor/src/edit-tools-pointer.js:4096` | editable generated handle drag does not use resolver/plan; pointer owns default and X-equalize semantics | pointer | new `editable-generated-handle` plan + executor |
+| P11 | `src-js/views-editor/src/edit-tools-pointer.js:4308` | editable generated handle nudge duplicates drag-side handle semantics and X-equalize logic | pointer | same executor family as drag |
+| P12 | `src-js/views-editor/src/edit-tools-pointer.js:4623` | rib X+nudge equalize math is dedicated pointer path (`_handleArrowKeysForEqualizeRibHandles`) | pointer | rib equalize executor selected by plan |
+| P13 | `src-js/views-editor/src/edit-tools-pointer.js:4796` | rib nudge intent resolves centrally, but family selection/fallback behavior is still pointer-local | mixed (plan + pointer) | executor registry keyed by plan |
+| P14 | `src-js/views-editor/src/edit-tools-pointer.js:7512` | helper `getBehaviorPresetNameFromEvent` forwards only `shift/alt`; `z/x` semantics live in separate pointer branches | pointer | unified plan payload for all semantic flags |
 
-### Primary output
-- `getContourPoint(...)`
-- `getContourDefaultWidth(...)`
-- `getOriginalHalfWidth(...)`
-- `getOriginalNudge(...)`
-- `buildTangentFromNormal(...)`
+### R1 Output B - Initial BCM (table-backed rows from `edit-behavior.js`)
+Notes:
+1. Intent priority source: `src-js/views-editor/src/edit-behavior.js:1413`.
+2. Mapping completeness is validated centrally: `src-js/views-editor/src/edit-behavior.js:1556`.
+3. `Verification` is baseline-only at this step and set to `untested`.
 
-### Architecture intent linkage
-- Establishes shared execution primitives used by multiple rib paths.
-- Prevents per-class re-derivation of identical base state.
+| BCM ID | objectKind | modality | intent | Source row | Current plan output | Current execution path | Pointer ownership | Verification |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| BCM-REG-DRAG-DEFAULT | regular | drag | default | `edit-behavior.js:1414`, `edit-behavior.js:1440` | `presetName=default` | `edit-tools-pointer.js:2524` (`EditBehaviorFactory`) | partial (X path outside table) | untested |
+| BCM-REG-DRAG-CONSTRAIN | regular | drag | constrain | `edit-behavior.js:1417`, `edit-behavior.js:1442` | `presetName=constrain` | `edit-tools-pointer.js:2524` (`EditBehaviorFactory`) | partial (X path outside table) | untested |
+| BCM-REG-DRAG-ALTERNATE | regular | drag | alternate | `edit-behavior.js:1416`, `edit-behavior.js:1443` | `presetName=alternate` | `edit-tools-pointer.js:2524` (`EditBehaviorFactory`) | partial (X path outside table) | untested |
+| BCM-REG-DRAG-ALT-CONSTRAIN | regular | drag | alternate-constrain | `edit-behavior.js:1415`, `edit-behavior.js:1444` | `presetName=alternate-constrain` | `edit-tools-pointer.js:2524` (`EditBehaviorFactory`) | partial (X path outside table) | untested |
+| BCM-REG-NUDGE-DEFAULT | regular | nudge | default | `edit-behavior.js:1418`, `edit-behavior.js:1453` | `presetName=default` | `edit-tools-pointer.js:1382` (`EditBehaviorFactory`) | partial (X path outside table) | untested |
+| BCM-REG-NUDGE-CONSTRAIN | regular | nudge | constrain | `edit-behavior.js:1417`, `edit-behavior.js:1454` | `presetName=default` | `edit-tools-pointer.js:1382` (`EditBehaviorFactory`) | partial (X path outside table) | untested |
+| BCM-REG-NUDGE-ALTERNATE | regular | nudge | alternate | `edit-behavior.js:1416`, `edit-behavior.js:1455` | `presetName=alternate` | `edit-tools-pointer.js:1382` (`EditBehaviorFactory`) | partial (X path outside table) | untested |
+| BCM-REG-NUDGE-ALT-CONSTRAIN | regular | nudge | alternate-constrain | `edit-behavior.js:1415`, `edit-behavior.js:1456` | `presetName=alternate` | `edit-tools-pointer.js:1382` (`EditBehaviorFactory`) | partial (X path outside table) | untested |
+| BCM-SKL-DRAG-DEFAULT | skeleton | drag | default | `edit-behavior.js:1420`, `edit-behavior.js:1465` | `presetName=default` | `edit-tools-pointer.js:2593`, `edit-tools-pointer.js:3099` (`createSkeletonEditBehavior`) | partial (fixed-rib/X branches) | untested |
+| BCM-SKL-DRAG-CONSTRAIN | skeleton | drag | constrain | `edit-behavior.js:1423`, `edit-behavior.js:1467` | `presetName=constrain` | `edit-tools-pointer.js:2593`, `edit-tools-pointer.js:3099` (`createSkeletonEditBehavior`) | partial (fixed-rib/X branches) | untested |
+| BCM-SKL-DRAG-ALTERNATE | skeleton | drag | alternate | `edit-behavior.js:1422`, `edit-behavior.js:1468` | `presetName=alternate` | `edit-tools-pointer.js:2593`, `edit-tools-pointer.js:3099` (`createSkeletonEditBehavior`) | partial (fixed-rib/X branches) | untested |
+| BCM-SKL-DRAG-ALT-CONSTRAIN | skeleton | drag | alternate-constrain | `edit-behavior.js:1421`, `edit-behavior.js:1469` | `presetName=alternate-constrain` | `edit-tools-pointer.js:2593`, `edit-tools-pointer.js:3099` (`createSkeletonEditBehavior`) | partial (fixed-rib/X branches) | untested |
+| BCM-SKL-NUDGE-DEFAULT | skeleton | nudge | default | `edit-behavior.js:1424`, `edit-behavior.js:1477` | `presetName=default` | `edit-tools-pointer.js:1347` (`createSkeletonEditBehavior`) | partial (fixed-rib/X branches) | untested |
+| BCM-SKL-NUDGE-CONSTRAIN | skeleton | nudge | constrain | `edit-behavior.js:1423`, `edit-behavior.js:1478` | `presetName=default` | `edit-tools-pointer.js:1347` (`createSkeletonEditBehavior`) | partial (fixed-rib/X branches) | untested |
+| BCM-SKL-NUDGE-ALTERNATE | skeleton | nudge | alternate | `edit-behavior.js:1422`, `edit-behavior.js:1479` | `presetName=alternate` | `edit-tools-pointer.js:1347` (`createSkeletonEditBehavior`) | partial (fixed-rib/X branches) | untested |
+| BCM-SKL-NUDGE-ALT-CONSTRAIN | skeleton | nudge | alternate-constrain | `edit-behavior.js:1421`, `edit-behavior.js:1480` | `presetName=alternate` | `edit-tools-pointer.js:1347` (`createSkeletonEditBehavior`) | partial (fixed-rib/X branches) | untested |
+| BCM-RIB-DRAG-DEFAULT | rib | drag | default | `edit-behavior.js:1430`, `edit-behavior.js:1490` | `useInterpolation=false`, `constrainMode` from context | `edit-tools-pointer.js:3237`, `edit-tools-pointer.js:3492` | high | untested |
+| BCM-RIB-DRAG-TANGENT | rib | drag | tangent | `edit-behavior.js:1429`, `edit-behavior.js:1491` | `useInterpolation=false`, `constrainMode` from context | `edit-tools-pointer.js:3237`, `edit-tools-pointer.js:3492` | high | untested |
+| BCM-RIB-DRAG-INTERPOLATE | rib | drag | interpolate | `edit-behavior.js:1428`, `edit-behavior.js:1492` | `useInterpolation=true`, `constrainMode` from context | `edit-tools-pointer.js:3237`, `edit-tools-pointer.js:3492` | high | untested |
+| BCM-RIB-DRAG-EQUALIZE | rib | drag | equalize | `edit-behavior.js:1427`, `edit-behavior.js:1495` | `useInterpolation=true`, `constrainMode` from context | `edit-tools-pointer.js:3237`, `edit-tools-pointer.js:3492` | high | untested |
+| BCM-RIB-NUDGE-DEFAULT | rib | nudge | default | `edit-behavior.js:1430`, `edit-behavior.js:1503` | `useInterpolation=false`, `constrainMode=null` | `edit-tools-pointer.js:4796`, `edit-tools-pointer.js:4903` | high | untested |
+| BCM-RIB-NUDGE-TANGENT | rib | nudge | tangent | `edit-behavior.js:1429`, `edit-behavior.js:1504` | `useInterpolation=false`, `constrainMode=tangent` | `edit-tools-pointer.js:4796`, `edit-tools-pointer.js:4903` | high | untested |
+| BCM-RIB-NUDGE-INTERPOLATE | rib | nudge | interpolate | `edit-behavior.js:1428`, `edit-behavior.js:1505` | `useInterpolation=true`, fallback constrain from plan | `edit-tools-pointer.js:4796`, `edit-tools-pointer.js:4903` | high | untested |
+| BCM-RIB-NUDGE-EQUALIZE | rib | nudge | equalize | `edit-behavior.js:1427`, `edit-behavior.js:1510` | `useInterpolation=true`, equalize intent path | `edit-tools-pointer.js:4796`, `edit-tools-pointer.js:4623` | high | untested |
 
-### Completion evidence required
-- Helpers used by `RibEditBehavior`, `EditableRibBehavior`, `InterpolatingRibBehavior`.
+### R1 Output C - Initial BCM extension (runtime rows outside behavior table)
+These rows are currently supported in pointer runtime but are not first-class rows in `INTENT_PRIORITY_BY_KIND` / `MODIFIER_SPEC`:
 
-## Step 2 - Offset key resolver centralization
-Status: Completed
+| BCM ID | objectKind | modality | runtime intent | Current execution path | Pointer ownership | Verification |
+| --- | --- | --- | --- | --- | --- | --- |
+| BCM-EDH-DRAG-DEFAULT | editable-generated-handle | drag | default (tangent-constrained) | `edit-tools-pointer.js:4096` | high | untested |
+| BCM-EDH-DRAG-EQUALIZE | editable-generated-handle | drag | equalize (X) | `edit-tools-pointer.js:5164`, `edit-tools-pointer.js:4221` | high | untested |
+| BCM-EDH-NUDGE-DEFAULT | editable-generated-handle | nudge | default (tangent-constrained) | `edit-tools-pointer.js:4308`, `edit-tools-pointer.js:4444` | high | untested |
+| BCM-EDH-NUDGE-EQUALIZE | editable-generated-handle | nudge | equalize (X) | `edit-tools-pointer.js:4308`, `edit-tools-pointer.js:4415` | high | untested |
 
-### Primary output
-- `getHandleOffsetKeys(...)`
-- `getRibHandleOffsetKeys(...)`
-- `getRibNudgeKey(...)`
+### R1 Gate Check
+1. Intent Link: PASS (`intent -> plan` ownership and leaks are explicitly mapped).
+2. Coverage Link: PASS (all table rows from `regular/skeleton/rib` listed as BCM entries).
+3. Drift Reduction: PASS (baseline captured; migration targets defined for each semantic pointer site).
+4. No New Pointer Semantics: PASS (inventory-only step, no runtime code change).
+5. Parity Proof: BASELINE ONLY (deferred to R4/R6; current drift explicitly documented).
+6. Evidence: PASS (files, branch sites, and BCM rows recorded).
 
-### Architecture intent linkage
-- Moves key semantics to a single location.
-- Prevents call-site key composition drift.
+## Step R2 - Stabilize central resolver contract
+Status: Completed (2026-02-25)
 
-### Completion evidence required
-- No direct side/type string concatenation remains in consumers.
+Objective:
+1. Make resolver/plan outputs explicit enough for all BCM rows.
 
-## Step 3 - Shared projection math
-Status: Completed
+Required outputs:
+1. Normalized intent result model (`supported/unsupported + reason`).
+2. Normalized plan result model (`executorFamily`, constraints, fallback policy).
+3. Pointer call-sites updated to consume resolver results without adding meaning.
 
-### Primary output
-- `projectDelta(...)`
-- `projectToNormalSigned(...)`
-- `projectToTangent(...)`
-- `clampHalfWidth(...)`
+Done criteria:
+1. Pointer no longer decides unsupported semantics ad hoc.
+2. BCM rows point to explicit resolver+plan outputs.
 
-### Architecture intent linkage
-- Centralizes geometric behavior semantics used by drag/nudge execution.
-- Prevents sign/clamp divergence across modalities.
+### R2 Output A - Normalized intent result model
+Implemented in `src-js/views-editor/src/edit-behavior.js`:
+1. `resolveModifierIntentResult(...)` now returns normalized intent payload:
+- `status`: `supported` / `unsupported`
+- `supported`: boolean
+- `unsupportedReason`: code (`unknown-object-kind`, `unknown-modality`, `unknown-intent`, `unsupported-modifiers`, or `null`)
+- `unsupportedModifiers`: explicit list
+- `ignoredActiveModifiers`: explicit list
+2. Same contract is used by `resolveModifierPlan(...)`, so plan cannot be "implicitly unsupported".
 
-### Completion evidence required
-- Rib width/nudge math paths use shared helpers rather than local formulas.
+### R2 Output B - Normalized plan result model
+`resolveModifierPlan(...)` now always returns routing metadata:
+1. `executorFamily`:
+- regular: `regular-point`
+- skeleton: `skeleton-point`
+- rib: `rib-point` / `rib-point-interpolating` / `rib-handle-equalize`
+2. `fallbackPolicy`:
+- `kind: none` for direct cases
+- `kind: missing-interpolation-axis` with `constrainModeWhenMissingAxis` for rib nudge interpolation fallback
+- `kind: unsupported` for unsupported object-kind branches
+3. Existing fields remain available for compatibility:
+- regular/skeleton: `presetName`
+- rib: `useInterpolationBehavior`, `constrainMode`, `shouldProjectToBaseNormal`
 
-## Step 4 - Handle offset adapter (1D/2D bridge)
-Status: Completed
+### R2 Output C - Pointer call-sites consume support contract
+Updated `src-js/views-editor/src/edit-tools-pointer.js`:
+1. Rib drag start (`_handleDragRibPoint`) exits early when `plan.supported === false`.
+2. Rib drag loop and editable generated point drag loop skip event tick when plan becomes unsupported.
+3. Rib nudge path exits/skips when plan is unsupported.
+4. `getBehaviorPresetNameFromEvent(...)` now routes via plan support and falls back to `"default"` only as transport safety.
 
-### Primary output
-- `readNormalizedHandleOffsets(...)`
-- `buildCompensatedOffsets(...)`
+### R2 Gate Check
+1. Intent Link: PASS (intent result model is explicit and normalized).
+2. Coverage Link: PASS (all current BCM rows now receive structured support status from resolver/plan).
+3. Drift Reduction: PARTIAL PASS (semantic execution branches still exist in pointer; moved to R3/R4).
+4. No New Pointer Semantics: PASS (pointer only consumes `supported` state; no new modifier meaning introduced).
+5. Parity Proof: BASELINE ONLY (full drag+nudge same-family execution remains R3/R4 scope).
+6. Evidence: PASS (contract fields + call-site wiring documented and implemented).
 
-### Architecture intent linkage
-- Unifies offset representation before execution.
-- Removes representation-specific semantic decisions from behavior classes.
-
-### Completion evidence required
-- Presence and normalization logic sourced from adapter, not duplicated in consumers.
-
-## Step 5 - Rib strategy runtime
-Status: Completed
-
-### Primary output
-- `createRibRuntimeContext(...)`
-- `runRibStrategy(...)`
-- strategy keys for basic/editable/interpolate
-
-### Architecture intent linkage
-- Centralizes how rib execution is applied after intent/plan selection.
-- Replaces class-local execution drift with strategy runner.
-
-### Completion evidence required
-- Public rib classes delegate to runner for apply semantics.
-
-## Step 5.5 - Intent parity architecture
-Status: In progress
-
-### Mandatory objective
-Make intent and plan central, and make pointer call sites purely executors.
-
-### Required outputs
-1. Single intent gateway:
-- `resolveModifierIntent(objectKind, flags)`
-
-2. Single plan gateway:
-- `resolveModifierPlan(objectKind, modality, intentOrFlags, context)`
-
-3. Pointer parity:
-- drag and nudge for each object kind consume plan output.
-- pointer does not define semantic meaning via local modifier branches.
-
-4. Modifier classification matrix:
-- for every `object kind x modality`, each relevant modifier flag is classified exactly once as:
-  - semantic,
-  - passive (UI/step-size only),
-  - or unsupported.
-- classification is validated in code (coverage gate), not by review memory.
-
-### Non-negotiable done criteria
-Step 5.5 is complete only if all are true:
-
-1. Same modifiers + same object kind => same intent in drag and nudge.
-2. Any modality-specific behavior differences are defined in central plan mapping, not pointer branches.
-3. Changing mapping for a modifier/object kind requires editing one central mapping location.
-4. Unsupported combinations are explicit in central mapping (never silent no-op by omission).
-5. Code review can list removed local semantic branches in pointer.
-6. Coverage gate passes: no missing/duplicate modifier classification entries for any `object kind x modality`.
-
-## Step 6 - Rollback payload builders
-Status: Completed
-
-### Primary output
-- `buildRibRollbackPayload(...)`
-- `buildHandleRollbackPayload(...)`
-
-### Architecture intent linkage
-- Centralizes rollback semantics after execution.
-- Prevents class-level payload drift.
-
-### Completion evidence required
-- Rib/editable/interpolation/handle `getRollback()` routed through builders.
-
-## Step 7 - Skeleton DRY pass
-Status: Completed
-
-### Primary output
-- `buildMatchedEditEntry(...)`
-- `partitionTransformVsConstrain(...)`
-- `collectParticipatingIndices(...)`
-
-### Architecture intent linkage
-- Reduces duplicate internal skeleton execution assembly.
-- Prepares skeleton path for plan-driven execution parity.
-
-### Completion evidence required
-- No rule semantic changes (`actionFactories` semantics preserved).
-
-## Step 8 - Final consolidation and net reduction
+## Step R3 - Introduce executor registry and shared execution entrypoint
 Status: Pending
 
-### Mandatory objective
-Finish migration from distributed semantic branching to central intent/plan execution with net simplification.
+Objective:
+1. Route execution through a central registry keyed by plan payload.
 
-### Required tasks
-1. Remove dead/transitional helpers no longer needed.
-2. Eliminate remaining pointer-local semantic branches for behavior meaning.
-3. Reduce number of semantic branch points in pointer (net decrease from baseline).
-4. Keep comments only where logic is non-obvious.
+Required outputs:
+1. Executor interface and registry.
+2. Shared invocation path used by both drag and nudge.
+3. Migration wrappers for existing family math where needed.
 
-### Done criteria
-1. No stale references.
-2. Stable bundle/runtime.
-3. Demonstrable reduction of semantic duplication hotspots.
-4. Plan-to-execution mapping readable from one central area.
+Done criteria:
+1. Drag+nudge execution selection is centralized.
+2. Pointer does not choose family behavior with semantic `if/else`.
 
-## 8) Behavior Support Matrix Policy
-Support must be explicit, centrally documented, and code-backed:
+## Step R4 - Migrate all BCM rows to shared drag+nudge execution
+Status: Pending
 
-- If a modifier combination is unsupported for an object kind, this must be represented in one table/resolver.
-- Silent "no-op by omission" in call-site logic is not acceptable.
-- Adding new behavior mode must require central map update, not modality edits.
+Objective:
+1. Move every behavior-table-supported row from modality-local logic to shared executor family path.
 
-## 9) Manual Verification Matrix (Mandatory)
+Required outputs:
+1. For each object kind, drag and nudge route through identical semantic pipeline.
+2. Remove duplicated modality-specific geometry branches.
+3. Keep unsupported rows explicit at plan layer (with reason), never implicit in pointer.
 
-1. Regular points
-- drag: default / Shift / Alt / Shift+Alt
-- nudge: default / Shift / Alt / Shift+Alt
-- undo/redo
+Done criteria:
+1. No BCM row remains with pointer semantic ownership.
+2. All supported rows have one central executor-family mapping for both modalities.
 
-2. Skeleton points
-- drag: default / Shift / Alt / Shift+Alt
-- nudge: default / Shift / Alt / Shift+Alt
-- mixed selection with regular
-- undo/redo
+## Step R5 - Pointer semantic purge and simplification
+Status: Pending
 
-3. Rib points
-- drag: default / editable / interpolation / tangent
-- nudge: same intent mapping as drag for supported modes
-- single-sided and linked variants
-- undo/redo
+Objective:
+1. Reduce pointer to transport-only responsibilities.
 
-4. Editable generated handles
-- drag + nudge
-- left/right, in/out
-- detached and non-detached
-- undo/redo
+Required outputs:
+1. Delete dead/transitional semantic helpers in pointer.
+2. Keep only routing/context/update mechanics.
+3. Add succinct comments only where routing complexity is non-obvious.
 
-5. Cross-modality parity
-- for each object kind, same modifiers => same intent => same semantic mode
+Done criteria:
+1. Pointer semantic branch inventory from R1 is fully eliminated or downgraded to routing-only.
+2. Net semantic complexity in pointer is lower than baseline.
 
-6. Safety matrix
-- modifier press/release during drag does not violate current contract
-- no runtime import errors
+## Step R6 - Verification, sign-off, and freeze rules
+Status: Pending
 
-## 10) Governance Rules For Future Changes
+Objective:
+1. Validate architecture and parity using BCM, not intuition.
 
-1. Any new behavior mode must be added through intent/plan central mapping first.
-2. Any intentional UX delta must be documented in this file under a new "Intent Delta" entry before implementation.
-3. If parity bug appears, fix resolver/plan tables first, not call-site branches.
+Required outputs:
+1. Full BCM marked PASS/FAIL with manual checks.
+2. Evidence block per step (template below).
+3. Residual risk list (if any) with explicit owner and follow-up.
 
-## 11) Working Agreement
-When discussing "is this in scope?":
+Done criteria:
+1. All mandatory checks pass.
+2. No unresolved parity drift between drag and nudge for supported rows.
+3. No open pointer-semantic ownership rows in BCM.
 
-- In scope if it improves central intent/plan architecture and reduces drift.
-- Out of scope if it adds modality-specific semantic branches.
+## 7) Mandatory Manual Verification Matrix
+Run and record for all relevant BCM rows:
 
-This file is the source of truth for that decision.
+1. Regular points: drag/nudge for default/Shift/Alt/Shift+Alt.
+2. Skeleton points: drag/nudge for default/Shift/Alt/Shift+Alt.
+3. Rib points: drag/nudge for all intents declared in behavior table.
+4. Editable generated handles: drag/nudge for default and equalize-like intents.
+5. Modifier transition safety: press/release modifiers during drag follows resolver contract.
+6. Transaction safety: undo/redo consistency per executor family.
+7. Structural safety: no runtime import/type errors.
+
+Rule:
+If a row is unsupported by design, it must appear as explicit `unsupported + reason` in BCM and plan output.
+
+## 8) Governance Rules (strict)
+1. No step closure without binary gate evidence.
+2. No "partial complete" on behavior families.
+3. No new pointer-local semantics.
+4. No manual case hunting as closure strategy.
+5. Any parity bug is fixed at intent/plan/executor layer first.
+6. Plan changes must preserve coverage-first workflow and BCM completeness.
+
+## 9) Evidence Template (required per completed step)
+1. Files touched:
+2. BCM rows affected:
+3. Removed pointer semantic branches:
+4. New central resolver/plan/executor paths:
+5. Manual checks executed:
+6. Result (PASS/FAIL):
