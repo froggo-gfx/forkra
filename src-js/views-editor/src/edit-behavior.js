@@ -1881,12 +1881,32 @@ function getOriginalHalfWidth(point, contourDefaultWidth, side) {
 }
 
 function getOriginalNudge(point, side) {
-  const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-  return point[nudgeKey] || 0;
+  return point[getRibNudgeKey(side)] || 0;
 }
 
 function buildTangentFromNormal(normal) {
   return { x: -normal.y, y: normal.x };
+}
+
+function getRibNudgeKey(side) {
+  return side === "left" ? "leftNudge" : "rightNudge";
+}
+
+function getHandleOffsetKeys(side, handleType) {
+  const prefix = side === "left" ? "left" : "right";
+  const stem = handleType === "in" ? "HandleInOffset" : "HandleOutOffset";
+  return {
+    oneD: `${prefix}${stem}`,
+    x: `${prefix}${stem}X`,
+    y: `${prefix}${stem}Y`,
+  };
+}
+
+function getRibHandleOffsetKeys(side) {
+  return {
+    in: getHandleOffsetKeys(side, "in"),
+    out: getHandleOffsetKeys(side, "out"),
+  };
 }
 
 /**
@@ -2079,39 +2099,33 @@ export class EditableRibBehavior {
     }
 
     // Read existing 2D offsets or convert from 1D
-    const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
-    const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
-    const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
-    const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
-    const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
-    const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
-
-    const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
-    const has2DOut = point[handleOutXKey] !== undefined || point[handleOutYKey] !== undefined;
+    const handleKeys = getRibHandleOffsetKeys(side);
+    const has2DIn = point[handleKeys.in.x] !== undefined || point[handleKeys.in.y] !== undefined;
+    const has2DOut = point[handleKeys.out.x] !== undefined || point[handleKeys.out.y] !== undefined;
 
     // Check if any handle offsets exist (2D or 1D)
     this.hasHandleOffsets = has2DIn || has2DOut ||
-      point[handleIn1DKey] !== undefined || point[handleOut1DKey] !== undefined;
+      point[handleKeys.in.oneD] !== undefined || point[handleKeys.out.oneD] !== undefined;
 
     if (has2DIn) {
-      this.originalHandleInOffsetX = point[handleInXKey] || 0;
-      this.originalHandleInOffsetY = point[handleInYKey] || 0;
-    } else if (point[handleIn1DKey]) {
+      this.originalHandleInOffsetX = point[handleKeys.in.x] || 0;
+      this.originalHandleInOffsetY = point[handleKeys.in.y] || 0;
+    } else if (point[handleKeys.in.oneD]) {
       const dir = this.skeletonHandleInDir || this.tangent;
-      this.originalHandleInOffsetX = dir.x * point[handleIn1DKey];
-      this.originalHandleInOffsetY = dir.y * point[handleIn1DKey];
+      this.originalHandleInOffsetX = dir.x * point[handleKeys.in.oneD];
+      this.originalHandleInOffsetY = dir.y * point[handleKeys.in.oneD];
     } else {
       this.originalHandleInOffsetX = 0;
       this.originalHandleInOffsetY = 0;
     }
 
     if (has2DOut) {
-      this.originalHandleOutOffsetX = point[handleOutXKey] || 0;
-      this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
-    } else if (point[handleOut1DKey]) {
+      this.originalHandleOutOffsetX = point[handleKeys.out.x] || 0;
+      this.originalHandleOutOffsetY = point[handleKeys.out.y] || 0;
+    } else if (point[handleKeys.out.oneD]) {
       const dir = this.skeletonHandleOutDir || this.tangent;
-      this.originalHandleOutOffsetX = dir.x * point[handleOut1DKey];
-      this.originalHandleOutOffsetY = dir.y * point[handleOut1DKey];
+      this.originalHandleOutOffsetX = dir.x * point[handleKeys.out.oneD];
+      this.originalHandleOutOffsetY = dir.y * point[handleKeys.out.oneD];
     } else {
       this.originalHandleOutOffsetX = 0;
       this.originalHandleOutOffsetY = 0;
@@ -2303,40 +2317,35 @@ export class InterpolatingRibBehavior {
 
     // Store original 2D handle offsets (new format)
     // If only 1D offsets exist, convert them to 2D using skeleton handle direction
-    const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
-    const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
-    const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
-    const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
-    const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
-    const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+    const handleKeys = getRibHandleOffsetKeys(side);
 
     // Check if 2D offsets exist
-    const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
-    const has2DOut = point[handleOutXKey] !== undefined || point[handleOutYKey] !== undefined;
+    const has2DIn = point[handleKeys.in.x] !== undefined || point[handleKeys.in.y] !== undefined;
+    const has2DOut = point[handleKeys.out.x] !== undefined || point[handleKeys.out.y] !== undefined;
 
     if (has2DIn) {
-      this.originalHandleInOffsetX = point[handleInXKey] || 0;
-      this.originalHandleInOffsetY = point[handleInYKey] || 0;
-    } else if (point[handleIn1DKey]) {
+      this.originalHandleInOffsetX = point[handleKeys.in.x] || 0;
+      this.originalHandleInOffsetY = point[handleKeys.in.y] || 0;
+    } else if (point[handleKeys.in.oneD]) {
       // Convert 1D to 2D using the actual skeleton handle direction
       // The 1D offset was applied along skeletonHandleInDir, so use that for conversion
       const dir = this.skeletonHandleInDir || this.tangent;
-      this.originalHandleInOffsetX = dir.x * point[handleIn1DKey];
-      this.originalHandleInOffsetY = dir.y * point[handleIn1DKey];
+      this.originalHandleInOffsetX = dir.x * point[handleKeys.in.oneD];
+      this.originalHandleInOffsetY = dir.y * point[handleKeys.in.oneD];
     } else {
       this.originalHandleInOffsetX = 0;
       this.originalHandleInOffsetY = 0;
     }
 
     if (has2DOut) {
-      this.originalHandleOutOffsetX = point[handleOutXKey] || 0;
-      this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
-    } else if (point[handleOut1DKey]) {
+      this.originalHandleOutOffsetX = point[handleKeys.out.x] || 0;
+      this.originalHandleOutOffsetY = point[handleKeys.out.y] || 0;
+    } else if (point[handleKeys.out.oneD]) {
       // Convert 1D to 2D using the actual skeleton handle direction
       // The 1D offset was applied along skeletonHandleOutDir, so use that for conversion
       const dir = this.skeletonHandleOutDir || this.tangent;
-      this.originalHandleOutOffsetX = dir.x * point[handleOut1DKey];
-      this.originalHandleOutOffsetY = dir.y * point[handleOut1DKey];
+      this.originalHandleOutOffsetX = dir.x * point[handleKeys.out.oneD];
+      this.originalHandleOutOffsetY = dir.y * point[handleKeys.out.oneD];
     } else {
       this.originalHandleOutOffsetX = 0;
       this.originalHandleOutOffsetY = 0;
@@ -2527,25 +2536,16 @@ export class EditableHandleBehavior {
     const point = contour.points[pointIndex];
 
     // Get the appropriate offset key based on side and handle type
-    this.offsetKey = side === "left"
-      ? (handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
-      : (handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
-
-    // 2D offset keys (created by interpolation)
-    const offsetXKey = side === "left"
-      ? (handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
-      : (handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
-    const offsetYKey = side === "left"
-      ? (handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
-      : (handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+    const handleKeys = getHandleOffsetKeys(side, handleType);
+    this.offsetKey = handleKeys.oneD;
 
     // Check if 2D offsets exist (from interpolation)
-    const has2D = point[offsetXKey] !== undefined || point[offsetYKey] !== undefined;
+    const has2D = point[handleKeys.x] !== undefined || point[handleKeys.y] !== undefined;
 
     if (has2D) {
       // Convert 2D offset to 1D by projecting onto skeletonHandleDir
-      const offset2DX = point[offsetXKey] || 0;
-      const offset2DY = point[offsetYKey] || 0;
+      const offset2DX = point[handleKeys.x] || 0;
+      const offset2DY = point[handleKeys.y] || 0;
       this.originalOffset = offset2DX * skeletonHandleDir.x + offset2DY * skeletonHandleDir.y;
     } else {
       // Use 1D offset directly
