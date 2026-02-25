@@ -1855,6 +1855,40 @@ export function getSkeletonBehaviorName(shiftKey, altKey) {
   return resolveBehaviorPresetName({ shift: shiftKey, alt: altKey });
 }
 
+function getContourPoint(skeletonData, contourIndex, pointIndex) {
+  const contour = skeletonData.contours[contourIndex];
+  const point = contour.points[pointIndex];
+  return { contour, point };
+}
+
+function getContourDefaultWidth(contour) {
+  return contour.defaultWidth || 20;
+}
+
+function getOriginalHalfWidth(point, contourDefaultWidth, side) {
+  if (side === "left") {
+    return point.leftWidth !== undefined
+      ? point.leftWidth
+      : point.width !== undefined
+      ? point.width / 2
+      : contourDefaultWidth / 2;
+  }
+  return point.rightWidth !== undefined
+    ? point.rightWidth
+    : point.width !== undefined
+    ? point.width / 2
+    : contourDefaultWidth / 2;
+}
+
+function getOriginalNudge(point, side) {
+  const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+  return point[nudgeKey] || 0;
+}
+
+function buildTangentFromNormal(normal) {
+  return { x: -normal.y, y: normal.x };
+}
+
 /**
  * RibEditBehavior - Handles dragging of rib points (width control points).
  * Constrains movement to the normal direction and updates point width.
@@ -1885,20 +1919,9 @@ export class RibEditBehavior {
     this.onCurvePoint = onCurvePoint;
     this.roundFunc = roundFunc;
 
-    const contour = skeletonData.contours[contourIndex];
-    const point = contour.points[pointIndex];
-    const defaultWidth = contour.defaultWidth || 20;
-
-    // Store original half-widths
-    if (side === "left") {
-      this.originalHalfWidth = point.leftWidth !== undefined
-        ? point.leftWidth
-        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
-    } else {
-      this.originalHalfWidth = point.rightWidth !== undefined
-        ? point.rightWidth
-        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
-    }
+    const { contour, point } = getContourPoint(skeletonData, contourIndex, pointIndex);
+    const defaultWidth = getContourDefaultWidth(contour);
+    this.originalHalfWidth = getOriginalHalfWidth(point, defaultWidth, side);
 
     // Minimum half-width (allow collapse to skeleton)
     this.minHalfWidth = 0;
@@ -2009,29 +2032,15 @@ export class EditableRibBehavior {
     this.pointIndex = pointIndex;
     this.side = side;
     this.normal = normal;
-    this.tangent = { x: -normal.y, y: normal.x }; // Perpendicular to normal
+    this.tangent = buildTangentFromNormal(normal); // Perpendicular to normal
     this.onCurvePoint = onCurvePoint;
     this.roundFunc = roundFunc;
 
-    const contour = skeletonData.contours[contourIndex];
-    const point = contour.points[pointIndex];
+    const { contour, point } = getContourPoint(skeletonData, contourIndex, pointIndex);
     const points = contour.points;
-    const defaultWidth = contour.defaultWidth || 20;
-
-    // Store original half-width
-    if (side === "left") {
-      this.originalHalfWidth = point.leftWidth !== undefined
-        ? point.leftWidth
-        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
-    } else {
-      this.originalHalfWidth = point.rightWidth !== undefined
-        ? point.rightWidth
-        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
-    }
-
-    // Store original nudge
-    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-    this.originalNudge = point[nudgeKey] || 0;
+    const defaultWidth = getContourDefaultWidth(contour);
+    this.originalHalfWidth = getOriginalHalfWidth(point, defaultWidth, side);
+    this.originalNudge = getOriginalNudge(point, side);
 
     // Minimum half-width (allow collapse to skeleton)
     this.minHalfWidth = 0;
@@ -2248,16 +2257,15 @@ export class InterpolatingRibBehavior {
     this.pointIndex = pointIndex;
     this.side = side;
     this.normal = normal;
-    this.tangent = { x: -normal.y, y: normal.x };
+    this.tangent = buildTangentFromNormal(normal);
     this.onCurvePoint = onCurvePoint;
     this.interpolationAxis = interpolationAxis || null;
     this.roundFunc = roundFunc;
 
-    const contour = skeletonData.contours[contourIndex];
-    const point = contour.points[pointIndex];
+    const { contour, point } = getContourPoint(skeletonData, contourIndex, pointIndex);
     const points = contour.points;
     const isClosed = !!contour.isClosed;
-    const defaultWidth = contour.defaultWidth || 20;
+    const defaultWidth = getContourDefaultWidth(contour);
 
     // Compute skeleton handle directions for 1D to 2D conversion
     // These are needed to correctly interpret existing 1D offsets
@@ -2290,20 +2298,8 @@ export class InterpolatingRibBehavior {
       }
     }
 
-    // Store original half-width
-    if (side === "left") {
-      this.originalHalfWidth = point.leftWidth !== undefined
-        ? point.leftWidth
-        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
-    } else {
-      this.originalHalfWidth = point.rightWidth !== undefined
-        ? point.rightWidth
-        : (point.width !== undefined ? point.width / 2 : defaultWidth / 2);
-    }
-
-    // Store original nudge
-    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-    this.originalNudge = point[nudgeKey] || 0;
+    this.originalHalfWidth = getOriginalHalfWidth(point, defaultWidth, side);
+    this.originalNudge = getOriginalNudge(point, side);
 
     // Store original 2D handle offsets (new format)
     // If only 1D offsets exist, convert them to 2D using skeleton handle direction
