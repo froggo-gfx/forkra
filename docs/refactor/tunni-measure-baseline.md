@@ -6,7 +6,7 @@ Purpose: lock down real behavior before refactor so each step can be validated a
 ## Source of truth used for this baseline
 - `src-js/views-editor/src/edit-tools-pointer.js`
 - `src-js/views-editor/src/skeleton-edit-behavior.js`
-- `src-js/views-editor/src/skeleton-tunni-calculations.js`
+- `src-js/fontra-core/src/tunni-core.js`
 - `src-js/fontra-core/src/tunni-calculations.js`
 - `src-js/views-editor/src/visualization-layer-definitions.js`
 - `src-js/fontra-core/src/distance-angle.js`
@@ -31,7 +31,7 @@ Purpose: lock down real behavior before refactor so each step can be validated a
 
 ### Tunni (regular vs skeleton)
 - Regular Tunni uses `tunniLayerHitTest` from `src-js/fontra-core/src/tunni-calculations.js`.
-- Skeleton Tunni uses `skeletonTunniHitTest` from `src-js/views-editor/src/skeleton-tunni-calculations.js`.
+- Skeleton Tunni uses `skeletonTunniHitTest` from `src-js/fontra-core/src/tunni-core.js`.
 - Common interaction semantics:
 1. midpoint drag edits control-point tension behavior
 2. true-point drag edits on-curve behavior

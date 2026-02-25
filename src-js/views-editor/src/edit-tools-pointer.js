@@ -62,7 +62,7 @@ import {
   areSkeletonTensionsEqualized,
   calculateSkeletonTunniPoint,
   calculateSkeletonTrueTunniPoint,
-} from "./skeleton-tunni-calculations.js";
+} from "@fontra/core/tunni-core.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
 import { getPinPoint } from "./panel-transformation.js";
 import { equalGlyphSelection } from "./scene-controller.js";

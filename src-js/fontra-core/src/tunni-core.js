@@ -239,7 +239,130 @@ export function calculateOnCurvePointsFromTunni(
   return [newStartPoint, controlPoint1, controlPoint2, newEndPoint];
 }
 
+/**
+ * Build skeleton segments from contour points.
+ * Segment shape matches editor consumers:
+ * { startPoint, endPoint, controlPoints, startIndex, endIndex, controlIndices, segmentIndex }
+ */
+export function buildSegmentsFromSkeletonPoints(points, isClosed) {
+  logTunniCoreCall("buildSegmentsFromSkeletonPoints");
+  const segments = [];
+  const pointCount = points.length;
+  if (pointCount < 2) {
+    return segments;
+  }
+
+  const onCurveIndices = [];
+  for (let i = 0; i < pointCount; i++) {
+    if (!points[i].type) {
+      onCurveIndices.push(i);
+    }
+  }
+  if (onCurveIndices.length < 2) {
+    return segments;
+  }
+
+  for (let i = 0; i < onCurveIndices.length; i++) {
+    const startIndex = onCurveIndices[i];
+    const isLast = i === onCurveIndices.length - 1;
+    if (!isClosed && isLast) {
+      continue;
+    }
+    const endIndex = isLast ? onCurveIndices[0] : onCurveIndices[i + 1];
+    const startPoint = points[startIndex];
+    const endPoint = points[endIndex];
+
+    const controlPoints = [];
+    const controlIndices = [];
+
+    if (isLast) {
+      for (let j = startIndex + 1; j < pointCount; j++) {
+        if (points[j].type) {
+          controlPoints.push(points[j]);
+          controlIndices.push(j);
+        }
+      }
+      for (let j = 0; j < endIndex; j++) {
+        if (points[j].type) {
+          controlPoints.push(points[j]);
+          controlIndices.push(j);
+        }
+      }
+    } else {
+      for (let j = startIndex + 1; j < endIndex; j++) {
+        if (points[j].type) {
+          controlPoints.push(points[j]);
+          controlIndices.push(j);
+        }
+      }
+    }
+
+    segments.push({
+      startPoint,
+      endPoint,
+      controlPoints,
+      startIndex,
+      endIndex,
+      controlIndices,
+      segmentIndex: i,
+    });
+  }
+
+  return segments;
+}
+
+/**
+ * Hit-test skeleton midpoint/true Tunni points.
+ * Returns editor-friendly hit payload or null.
+ */
+export function skeletonTunniHitTest(point, size, skeletonData, options = {}) {
+  logTunniCoreCall("skeletonTunniHitTest");
+  if (!skeletonData?.contours) {
+    return null;
+  }
+
+  const { midpointOnly = false } = options;
+  for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
+    const contour = skeletonData.contours[contourIndex];
+    const segments = buildSegmentsFromSkeletonPoints(contour.points, contour.isClosed);
+
+    for (const segment of segments) {
+      if (segment.controlPoints.length !== 2) {
+        continue;
+      }
+
+      if (!midpointOnly) {
+        const trueTunniPoint = calculateSkeletonTrueTunniPoint(segment);
+        if (trueTunniPoint && distance(point, trueTunniPoint) <= size) {
+          return {
+            type: "true-tunni",
+            contourIndex,
+            segmentIndex: segment.segmentIndex,
+            segment,
+            tunniPoint: trueTunniPoint,
+          };
+        }
+      }
+
+      const midpointTunniPoint = calculateSkeletonTunniPoint(segment);
+      if (midpointTunniPoint && distance(point, midpointTunniPoint) <= size) {
+        return {
+          type: "tunni",
+          contourIndex,
+          segmentIndex: segment.segmentIndex,
+          segment,
+          tunniPoint: midpointTunniPoint,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
 export function calculateSkeletonTunniPoint(segment) {
+  logTunniCoreCall("calculateSkeletonTunniPoint");
+  // Intentionally mirrors regular midpoint semantics for skeleton cubic segments.
   if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
     return null;
   }
@@ -249,6 +372,8 @@ export function calculateSkeletonTunniPoint(segment) {
 }
 
 export function calculateSkeletonTrueTunniPoint(segment) {
+  logTunniCoreCall("calculateSkeletonTrueTunniPoint");
+  // True Tunni point for skeleton segments is the intersection of start->cp1 and end->cp2.
   if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
     return null;
   }
@@ -256,4 +381,186 @@ export function calculateSkeletonTrueTunniPoint(segment) {
   const { startPoint, endPoint, controlPoints } = segment;
   const [controlPoint1, controlPoint2] = controlPoints;
   return trueIntersection(startPoint, controlPoint1, endPoint, controlPoint2);
+}
+
+/**
+ * Skeleton midpoint drag math:
+ * 1) project pointer delta to the averaged handle direction,
+ * 2) move both controls along their own rays,
+ * 3) optionally preserve equalized tension by proportional motion.
+ */
+export function calculateSkeletonControlPointsFromTunniDelta(
+  delta,
+  segment,
+  preserveTensions = true
+) {
+  logTunniCoreCall("calculateSkeletonControlPointsFromTunniDelta");
+  if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
+    return null;
+  }
+
+  const { startPoint, endPoint, controlPoints } = segment;
+  const [controlPoint1, controlPoint2] = controlPoints;
+
+  const direction1 = normalizeVector(subVectors(controlPoint1, startPoint));
+  const direction2 = normalizeVector(subVectors(controlPoint2, endPoint));
+  const averagedDirection = normalizeVector(addVectors(direction1, direction2));
+  const projectedDelta = delta.x * averagedDirection.x + delta.y * averagedDirection.y;
+
+  if (preserveTensions) {
+    const truePoint = calculateSkeletonTrueTunniPoint(segment);
+    if (truePoint) {
+      const startToTrue = distance(startPoint, truePoint);
+      const endToTrue = distance(endPoint, truePoint);
+      if (startToTrue > 0 && endToTrue > 0) {
+        const distanceSum = startToTrue + endToTrue;
+        const proportionalScale = (2 * projectedDelta) / distanceSum;
+        const move1 = proportionalScale * startToTrue;
+        const move2 = proportionalScale * endToTrue;
+        return [
+          {
+            x: controlPoint1.x + direction1.x * move1,
+            y: controlPoint1.y + direction1.y * move1,
+          },
+          {
+            x: controlPoint2.x + direction2.x * move2,
+            y: controlPoint2.y + direction2.y * move2,
+          },
+        ];
+      }
+    }
+
+    // Fallback for parallel rays: keep proportional mode but use identical scalar movement.
+    return [
+      {
+        x: controlPoint1.x + direction1.x * projectedDelta,
+        y: controlPoint1.y + direction1.y * projectedDelta,
+      },
+      {
+        x: controlPoint2.x + direction2.x * projectedDelta,
+        y: controlPoint2.y + direction2.y * projectedDelta,
+      },
+    ];
+  }
+
+  // Non-proportional mode: each control tracks its own projection.
+  const projection1 = delta.x * direction1.x + delta.y * direction1.y;
+  const projection2 = delta.x * direction2.x + delta.y * direction2.y;
+  return [
+    {
+      x: controlPoint1.x + direction1.x * projection1,
+      y: controlPoint1.y + direction1.y * projection1,
+    },
+    {
+      x: controlPoint2.x + direction2.x * projection2,
+      y: controlPoint2.y + direction2.y * projection2,
+    },
+  ];
+}
+
+/**
+ * Skeleton true-point drag math:
+ * move the two on-curve anchors along fixed start/end handle directions.
+ */
+export function calculateSkeletonOnCurveFromTunni(
+  newTrueTunniPoint,
+  segment,
+  equalizeDistances = true
+) {
+  logTunniCoreCall("calculateSkeletonOnCurveFromTunni");
+  if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
+    return null;
+  }
+
+  const { startPoint, endPoint, controlPoints } = segment;
+  const [controlPoint1, controlPoint2] = controlPoints;
+  const originalTruePoint = trueIntersection(startPoint, controlPoint1, endPoint, controlPoint2);
+  if (!originalTruePoint) {
+    return null;
+  }
+
+  const direction1 = normalizeVector(subVectors(controlPoint1, startPoint));
+  const direction2 = normalizeVector(subVectors(controlPoint2, endPoint));
+  const delta = subVectors(newTrueTunniPoint, originalTruePoint);
+  const projection1 = delta.x * direction1.x + delta.y * direction1.y;
+  const projection2 = delta.x * direction2.x + delta.y * direction2.y;
+
+  const resolvedProjection1 = equalizeDistances ? (projection1 + projection2) / 2 : projection1;
+  const resolvedProjection2 = equalizeDistances ? (projection1 + projection2) / 2 : projection2;
+
+  return {
+    newStartPoint: {
+      x: startPoint.x + direction1.x * resolvedProjection1,
+      y: startPoint.y + direction1.y * resolvedProjection1,
+    },
+    newEndPoint: {
+      x: endPoint.x + direction2.x * resolvedProjection2,
+      y: endPoint.y + direction2.y * resolvedProjection2,
+    },
+  };
+}
+
+/**
+ * Skeleton tension equalization:
+ * keep handle directions, make scalar tension equal by averaging.
+ */
+export function calculateSkeletonEqualizedControlPoints(segment) {
+  logTunniCoreCall("calculateSkeletonEqualizedControlPoints");
+  if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
+    return null;
+  }
+
+  const { startPoint, endPoint, controlPoints } = segment;
+  const [controlPoint1, controlPoint2] = controlPoints;
+  const truePoint = calculateSkeletonTrueTunniPoint(segment);
+  if (!truePoint) {
+    return [controlPoint1, controlPoint2];
+  }
+
+  const startToTrue = distance(startPoint, truePoint);
+  const endToTrue = distance(endPoint, truePoint);
+  if (startToTrue <= 0 || endToTrue <= 0) {
+    return [controlPoint1, controlPoint2];
+  }
+
+  const tension1 = distance(startPoint, controlPoint1) / startToTrue;
+  const tension2 = distance(endPoint, controlPoint2) / endToTrue;
+  const targetTension = (tension1 + tension2) / 2;
+  const direction1 = normalizeVector(subVectors(controlPoint1, startPoint));
+  const direction2 = normalizeVector(subVectors(controlPoint2, endPoint));
+
+  return [
+    {
+      x: startPoint.x + direction1.x * targetTension * startToTrue,
+      y: startPoint.y + direction1.y * targetTension * startToTrue,
+    },
+    {
+      x: endPoint.x + direction2.x * targetTension * endToTrue,
+      y: endPoint.y + direction2.y * targetTension * endToTrue,
+    },
+  ];
+}
+
+export function areSkeletonTensionsEqualized(segment, tolerance = 0.01) {
+  logTunniCoreCall("areSkeletonTensionsEqualized");
+  if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
+    return true;
+  }
+
+  const { startPoint, endPoint, controlPoints } = segment;
+  const [controlPoint1, controlPoint2] = controlPoints;
+  const truePoint = calculateSkeletonTrueTunniPoint(segment);
+  if (!truePoint) {
+    return true;
+  }
+
+  const startToTrue = distance(startPoint, truePoint);
+  const endToTrue = distance(endPoint, truePoint);
+  if (startToTrue <= 0 || endToTrue <= 0) {
+    return true;
+  }
+
+  const tension1 = distance(startPoint, controlPoint1) / startToTrue;
+  const tension2 = distance(endPoint, controlPoint2) / endToTrue;
+  return Math.abs(tension1 - tension2) < tolerance;
 }

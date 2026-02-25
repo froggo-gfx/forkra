@@ -135,8 +135,6 @@ export function calculateTunniPoint(points) {
 
 ---
 
-## ОСТАЛОСЬ ВЫПОЛНИТЬ
-
 ## Шаг 05. Перевести `src-js/views-editor/src/skeleton-tunni-calculations.js` на `tunni-core.js`
 **Общая проблема:** skeleton Tunni математика дублируется отдельно.  
 **Аспект шага:** skeleton путь тоже на общем core.  
@@ -154,6 +152,8 @@ import {
 - Skeleton midpoint/true-point drag как baseline.
 
 ---
+
+## ОСТАЛОСЬ ВЫПОЛНИТЬ
 
 ## Шаг 06. Перевести `distance-angle.js` на `measure-core.js`
 **Общая проблема:** файл одновременно считает и рисует, плюс Tunni-дубли.  
