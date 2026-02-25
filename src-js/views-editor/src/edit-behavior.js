@@ -1881,6 +1881,85 @@ export function resolveHandleEqualizePlan(
   };
 }
 
+function computeMirroredHandlePositions(smoothPoint, dragVector, roundFunc = Math.round) {
+  if (!smoothPoint || !dragVector) {
+    return null;
+  }
+  const dragLength = Math.hypot(dragVector.x, dragVector.y);
+  if (dragLength < 1) {
+    return null;
+  }
+  return {
+    dragged: {
+      x: roundFunc(smoothPoint.x + dragVector.x),
+      y: roundFunc(smoothPoint.y + dragVector.y),
+    },
+    opposite: {
+      x: roundFunc(smoothPoint.x - dragVector.x),
+      y: roundFunc(smoothPoint.y - dragVector.y),
+    },
+  };
+}
+
+function createMirrorEqualizeHandleExecutor() {
+  return Object.freeze({
+    applyNudge({ smoothPoint, draggedPoint, delta, roundFunc = Math.round }) {
+      if (!smoothPoint || !draggedPoint || !delta) {
+        return null;
+      }
+      const dragVector = {
+        x: draggedPoint.x + delta.x - smoothPoint.x,
+        y: draggedPoint.y + delta.y - smoothPoint.y,
+      };
+      return computeMirroredHandlePositions(smoothPoint, dragVector, roundFunc);
+    },
+    applyDrag({
+      smoothPoint,
+      cursorPoint,
+      constrainDiagonal = false,
+      roundFunc = Math.round,
+    }) {
+      if (!smoothPoint || !cursorPoint) {
+        return null;
+      }
+      const dragVector = {
+        x: cursorPoint.x - smoothPoint.x,
+        y: cursorPoint.y - smoothPoint.y,
+      };
+      const constrainedVector = constrainDiagonal
+        ? constrainHorVerDiag(dragVector)
+        : dragVector;
+      return computeMirroredHandlePositions(smoothPoint, constrainedVector, roundFunc);
+    },
+  });
+}
+
+const HANDLE_EQUALIZE_EXECUTOR_REGISTRY = Object.freeze({
+  [HANDLE_EXECUTOR_FAMILIES.REGULAR_EQUALIZE]: () => createMirrorEqualizeHandleExecutor(),
+  [HANDLE_EXECUTOR_FAMILIES.SKELETON_EQUALIZE]: () => createMirrorEqualizeHandleExecutor(),
+});
+
+export function createHandleEqualizeExecutor(plan = {}) {
+  // Handle equalize execution contract mirrors rib execution contract:
+  // plan selects family, registry owns implementation details.
+  if (plan.supported === false) {
+    return {
+      executor: null,
+      requestedFamily: plan.executorFamily || null,
+      resolvedFamily: null,
+    };
+  }
+  const requestedFamily = plan.executorFamily || null;
+  const executorFactory = requestedFamily
+    ? HANDLE_EQUALIZE_EXECUTOR_REGISTRY[requestedFamily]
+    : null;
+  return {
+    executor: executorFactory ? executorFactory(plan) : null,
+    requestedFamily,
+    resolvedFamily: executorFactory ? requestedFamily : null,
+  };
+}
+
 export function getBehaviorPreset(objectKind = "regular", flagsOrName = "default") {
   const table = BEHAVIOR_TABLES[objectKind] || BEHAVIOR_TABLES.regular;
   const presetName = resolveBehaviorPresetName(flagsOrName);

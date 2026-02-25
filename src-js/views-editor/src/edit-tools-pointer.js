@@ -43,10 +43,10 @@ import {
   EditBehaviorFactory,
   HANDLE_EXECUTOR_FAMILIES,
   RIB_EXECUTOR_FAMILIES,
+  createHandleEqualizeExecutor,
   createEditableHandleBehavior,
   createRibBehaviorExecutor,
   createSkeletonEditBehavior,
-  constrainHorVerDiag,
   getHandleDetachedKey,
   getHandleOffsetKeys,
   getRibHandleOffsetKeys,
@@ -1291,7 +1291,8 @@ export class PointerTool extends BaseTool {
       if (skeletonEqualizePlan.supported) {
         const handled = await this._handleArrowKeysForEqualizeSkeletonHandles(
           delta,
-          skeletonPointSelection
+          skeletonPointSelection,
+          skeletonEqualizePlan
         );
         if (handled) {
           return;
@@ -1458,7 +1459,8 @@ export class PointerTool extends BaseTool {
     const delta = { x: dx, y: dy };
     const handled = await this._handleArrowKeysForEqualizePathHandles(
       delta,
-      regularPointSelection
+      regularPointSelection,
+      regularEqualizeNudgePlan
     );
     if (handled) {
       return;
@@ -1894,7 +1896,8 @@ export class PointerTool extends BaseTool {
             eventStream,
             initialEvent,
             handleInfo,
-            positionedGlyph
+            positionedGlyph,
+            regularEqualizeDragPlan
           );
         }
         initialEvent.preventDefault();
@@ -1954,7 +1957,8 @@ export class PointerTool extends BaseTool {
               contourIdx,
               pointIdx,
               skeletonData,
-              positionedGlyph
+              positionedGlyph,
+              skeletonEqualizeDragPlan
             );
             initialEvent.preventDefault();
             return;
@@ -2651,8 +2655,14 @@ export class PointerTool extends BaseTool {
             deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
             layer.shouldConnect = layer.connectDetector.shouldConnect(layer.isPrimaryLayer);
           }
-          // X-equalize during drag for regular handles (mid-drag activation supported)
-          if (this.equalizeMode && equalizeHandleInfo && positionedGlyph) {
+          // X-equalize during drag for regular handles (mid-drag activation supported).
+          // Execution math comes from the central handle equalize executor.
+          const regularEqualizeDragPlan = resolveHandleEqualizePlan("regular", "drag", {
+            x: this.equalizeMode,
+          });
+          const { executor: regularEqualizeExecutor } =
+            createHandleEqualizeExecutor(regularEqualizeDragPlan);
+          if (regularEqualizeExecutor && equalizeHandleInfo && positionedGlyph) {
             const { pointIndex, smoothIndex, oppositeIndex } = equalizeHandleInfo;
             const currentGlyphPoint = {
               x: currentPoint.x - positionedGlyph.x,
@@ -2661,29 +2671,20 @@ export class PointerTool extends BaseTool {
             for (const layer of layerInfo) {
               const path = layer.layerGlyph.path;
               const smoothPt = path.getPoint(smoothIndex);
-              if (!smoothPt) continue;
-              let newDragVec = {
-                x: currentGlyphPoint.x - smoothPt.x,
-                y: currentGlyphPoint.y - smoothPt.y,
-              };
-              if (event.shiftKey) {
-                newDragVec = constrainHorVerDiag(newDragVec);
-              }
-              const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
-              if (newDragLen < 1) {
+              const dragResult = regularEqualizeExecutor.applyDrag({
+                smoothPoint: smoothPt,
+                cursorPoint: currentGlyphPoint,
+                constrainDiagonal: event.shiftKey,
+              });
+              if (!dragResult) {
                 continue;
               }
-              const newDragPos = {
-                x: Math.round(smoothPt.x + newDragVec.x),
-                y: Math.round(smoothPt.y + newDragVec.y),
-              };
-              const newOppPos = {
-                x: Math.round(smoothPt.x - newDragVec.x),
-                y: Math.round(smoothPt.y - newDragVec.y),
-              };
               const equalizeChanges = [
-                { f: "=xy", a: [pointIndex, newDragPos.x, newDragPos.y] },
-                { f: "=xy", a: [oppositeIndex, newOppPos.x, newOppPos.y] },
+                { f: "=xy", a: [pointIndex, dragResult.dragged.x, dragResult.dragged.y] },
+                {
+                  f: "=xy",
+                  a: [oppositeIndex, dragResult.opposite.x, dragResult.opposite.y],
+                },
               ];
               for (const change of equalizeChanges) {
                 applyChange(layer.layerGlyph.path, change);
@@ -3051,35 +3052,13 @@ export class PointerTool extends BaseTool {
         const contour = firstLayerData?.original?.contours?.[contourIdx];
         const clickedPoint = contour?.points?.[pointIdx];
         if (contour && clickedPoint?.type === "cubic") {
-          const numPoints = contour.points.length;
-          const prevIndex = (pointIdx - 1 + numPoints) % numPoints;
-          const nextIndex = (pointIdx + 1) % numPoints;
-          const prevPoint = contour.points[prevIndex];
-          const nextPoint = contour.points[nextIndex];
-          let smoothIndex = null;
-          let oppositeIndex = null;
-          if (!prevPoint?.type && prevPoint?.smooth) {
-            const prevPrevIndex = (prevIndex - 1 + numPoints) % numPoints;
-            const prevPrevPoint = contour.points[prevPrevIndex];
-            if (prevPrevPoint?.type === "cubic") {
-              smoothIndex = prevIndex;
-              oppositeIndex = prevPrevIndex;
-            }
-          }
-          if (smoothIndex === null && !nextPoint?.type && nextPoint?.smooth) {
-            const nextNextIndex = (nextIndex + 1) % numPoints;
-            const nextNextPoint = contour.points[nextNextIndex];
-            if (nextNextPoint?.type === "cubic") {
-              smoothIndex = nextIndex;
-              oppositeIndex = nextNextIndex;
-            }
-          }
-          if (smoothIndex !== null && oppositeIndex !== null) {
+          const equalizeInfo = this._getSkeletonHandleEqualizeInfo(contour, pointIdx);
+          if (equalizeInfo) {
             equalizeSkeletonInfo = {
               contourIndex: contourIdx,
               pointIndex: pointIdx,
-              smoothIndex,
-              oppositeIndex,
+              smoothIndex: equalizeInfo.smoothIndex,
+              oppositeIndex: equalizeInfo.oppositeIndex,
             };
           }
         }
@@ -3158,34 +3137,24 @@ export class PointerTool extends BaseTool {
           const skeletonEqualizeDragPlan = resolveHandleEqualizePlan("skeleton", "drag", {
             x: this.equalizeMode,
           });
-          if (skeletonEqualizeDragPlan.supported && equalizeSkeletonInfo) {
+          const { executor: skeletonEqualizeExecutor } =
+            createHandleEqualizeExecutor(skeletonEqualizeDragPlan);
+          if (skeletonEqualizeExecutor && equalizeSkeletonInfo) {
             const { contourIndex, pointIndex, smoothIndex, oppositeIndex } =
               equalizeSkeletonInfo;
             const workContour = working.contours[contourIndex];
             const smoothPt = workContour?.points?.[smoothIndex];
-            if (smoothPt) {
-              let newDragVec = {
-                x: currentGlyphPoint.x - smoothPt.x,
-                y: currentGlyphPoint.y - smoothPt.y,
-              };
-              if (event.shiftKey) {
-                newDragVec = constrainHorVerDiag(newDragVec);
-              }
-              const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
-              if (newDragLen >= 1) {
-                workContour.points[pointIndex].x = roundFunc(
-                  smoothPt.x + newDragVec.x
-                );
-                workContour.points[pointIndex].y = roundFunc(
-                  smoothPt.y + newDragVec.y
-                );
-                workContour.points[oppositeIndex].x = roundFunc(
-                  smoothPt.x - newDragVec.x
-                );
-                workContour.points[oppositeIndex].y = roundFunc(
-                  smoothPt.y - newDragVec.y
-                );
-              }
+            const dragResult = skeletonEqualizeExecutor.applyDrag({
+              smoothPoint: smoothPt,
+              cursorPoint: currentGlyphPoint,
+              constrainDiagonal: event.shiftKey,
+              roundFunc,
+            });
+            if (dragResult) {
+              workContour.points[pointIndex].x = dragResult.dragged.x;
+              workContour.points[pointIndex].y = dragResult.dragged.y;
+              workContour.points[oppositeIndex].x = dragResult.opposite.x;
+              workContour.points[oppositeIndex].y = dragResult.opposite.y;
             }
           }
 
@@ -5374,10 +5343,21 @@ export class PointerTool extends BaseTool {
     return { smoothIndex, oppositeIndex };
   }
 
-  async _handleArrowKeysForEqualizeSkeletonHandles(delta, skeletonPointSelection) {
+  async _handleArrowKeysForEqualizeSkeletonHandles(
+    delta,
+    skeletonPointSelection,
+    equalizePlan = null
+  ) {
     const sceneController = this.sceneController;
     const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph) return false;
+
+    const resolvedPlan =
+      equalizePlan || resolveHandleEqualizePlan("skeleton", "nudge", { x: this.equalizeMode });
+    const { executor: skeletonEqualizeExecutor } = createHandleEqualizeExecutor(resolvedPlan);
+    if (!skeletonEqualizeExecutor) {
+      return false;
+    }
 
     const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
     if (!skeletonData) return false;
@@ -5413,9 +5393,6 @@ export class PointerTool extends BaseTool {
           const point = contour.points[pointIdx];
           if (!point || point.type !== "cubic") continue;
 
-          point.x = Math.round(point.x + delta.x);
-          point.y = Math.round(point.y + delta.y);
-
           const equalizeInfo = this._getSkeletonHandleEqualizeInfo(contour, pointIdx);
           if (!equalizeInfo) continue;
           const { smoothIndex, oppositeIndex } = equalizeInfo;
@@ -5425,19 +5402,16 @@ export class PointerTool extends BaseTool {
           const oppPoint = contour.points[oppositeIndex];
           if (!smoothPoint || !clickedPoint || !oppPoint) continue;
 
-          const clickedLength = Math.hypot(
-            clickedPoint.x - smoothPoint.x,
-            clickedPoint.y - smoothPoint.y
-          );
-          const oppDirX = oppPoint.x - smoothPoint.x;
-          const oppDirY = oppPoint.y - smoothPoint.y;
-          const oppLength = Math.hypot(oppDirX, oppDirY);
-
-          if (oppLength > 0.001) {
-            const scale = clickedLength / oppLength;
-            oppPoint.x = Math.round(smoothPoint.x + oppDirX * scale);
-            oppPoint.y = Math.round(smoothPoint.y + oppDirY * scale);
-          }
+          const nudgeResult = skeletonEqualizeExecutor.applyNudge({
+            smoothPoint,
+            draggedPoint: clickedPoint,
+            delta,
+          });
+          if (!nudgeResult) continue;
+          point.x = nudgeResult.dragged.x;
+          point.y = nudgeResult.dragged.y;
+          oppPoint.x = nudgeResult.opposite.x;
+          oppPoint.y = nudgeResult.opposite.y;
 
           changed = true;
         }
@@ -5473,10 +5447,17 @@ export class PointerTool extends BaseTool {
     return true;
   }
 
-  async _handleArrowKeysForEqualizePathHandles(delta, pointSelection) {
+  async _handleArrowKeysForEqualizePathHandles(delta, pointSelection, equalizePlan = null) {
     const sceneController = this.sceneController;
     const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
     if (!positionedGlyph?.glyph?.path) return false;
+
+    const resolvedPlan =
+      equalizePlan || resolveHandleEqualizePlan("regular", "nudge", { x: this.equalizeMode });
+    const { executor: regularEqualizeExecutor } = createHandleEqualizeExecutor(resolvedPlan);
+    if (!regularEqualizeExecutor) {
+      return false;
+    }
 
     const basePath = positionedGlyph.glyph.path;
     const equalizeTargets = [];
@@ -5517,21 +5498,20 @@ export class PointerTool extends BaseTool {
               continue;
             }
 
-            const newDragPos = {
-              x: Math.round(draggedPt.x + delta.x),
-              y: Math.round(draggedPt.y + delta.y),
-            };
-            const newDragVec = {
-              x: newDragPos.x - smoothPt.x,
-              y: newDragPos.y - smoothPt.y,
-            };
-            const newOppPos = {
-              x: Math.round(smoothPt.x - newDragVec.x),
-              y: Math.round(smoothPt.y - newDragVec.y),
-            };
-
-            lg.path.setPointPosition(pointIndex, newDragPos.x, newDragPos.y);
-            lg.path.setPointPosition(oppositeIndex, newOppPos.x, newOppPos.y);
+            const nudgeResult = regularEqualizeExecutor.applyNudge({
+              smoothPoint: smoothPt,
+              draggedPoint: draggedPt,
+              delta,
+            });
+            if (!nudgeResult) {
+              continue;
+            }
+            lg.path.setPointPosition(pointIndex, nudgeResult.dragged.x, nudgeResult.dragged.y);
+            lg.path.setPointPosition(
+              oppositeIndex,
+              nudgeResult.opposite.x,
+              nudgeResult.opposite.y
+            );
             changed = true;
           }
         });
@@ -5566,43 +5546,24 @@ export class PointerTool extends BaseTool {
     contourIndex,
     pointIndex,
     skeletonData,
-    positionedGlyph
+    positionedGlyph,
+    equalizePlan = null
   ) {
     const sceneController = this.sceneController;
     const contour = skeletonData.contours[contourIndex];
-    const numPoints = contour.points.length;
-
-    // Find adjacent smooth point and opposite off-curve
-    let smoothIndex = null;
-    let oppositeIndex = null;
-
-    const prevIndex = (pointIndex - 1 + numPoints) % numPoints;
-    const nextIndex = (pointIndex + 1) % numPoints;
-    const prevPoint = contour.points[prevIndex];
-    const nextPoint = contour.points[nextIndex];
-
-    // Check if prev is smooth (on-curve with smooth flag)
-    if (!prevPoint?.type && prevPoint?.smooth) {
-      const prevPrevIndex = (prevIndex - 1 + numPoints) % numPoints;
-      const prevPrevPoint = contour.points[prevPrevIndex];
-      if (prevPrevPoint?.type === "cubic") {
-        smoothIndex = prevIndex;
-        oppositeIndex = prevPrevIndex;
-      }
-    }
-
-    // Check if next is smooth (on-curve with smooth flag)
-    if (smoothIndex === null && !nextPoint?.type && nextPoint?.smooth) {
-      const nextNextIndex = (nextIndex + 1) % numPoints;
-      const nextNextPoint = contour.points[nextNextIndex];
-      if (nextNextPoint?.type === "cubic") {
-        smoothIndex = nextIndex;
-        oppositeIndex = nextNextIndex;
-      }
-    }
-
-    if (smoothIndex === null || oppositeIndex === null) {
+    const equalizeInfo = contour
+      ? this._getSkeletonHandleEqualizeInfo(contour, pointIndex)
+      : null;
+    if (!equalizeInfo) {
       return; // No valid smooth point with opposite off-curve found
+    }
+    const { smoothIndex, oppositeIndex } = equalizeInfo;
+
+    const resolvedPlan =
+      equalizePlan || resolveHandleEqualizePlan("skeleton", "drag", { x: this.equalizeMode });
+    const { executor: skeletonEqualizeExecutor } = createHandleEqualizeExecutor(resolvedPlan);
+    if (!skeletonEqualizeExecutor) {
+      return;
     }
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
@@ -5643,39 +5604,29 @@ export class PointerTool extends BaseTool {
           // Reset working data to original
           const origContour = original.contours[contourIndex];
           const workContour = working.contours[contourIndex];
+          if (!origContour || !workContour) {
+            continue;
+          }
           for (let pi = 0; pi < origContour.points.length; pi++) {
             workContour.points[pi].x = origContour.points[pi].x;
             workContour.points[pi].y = origContour.points[pi].y;
           }
 
-          // Get smooth point position (stays fixed)
           const smoothPt = workContour.points[smoothIndex];
-
-          // The dragged handle follows the cursor freely
-          let newDragVec = {
-            x: currentGlyphPoint.x - smoothPt.x,
-            y: currentGlyphPoint.y - smoothPt.y,
-          };
-
-          // Shift constrains to horizontal/vertical/45-degree
-          if (event.shiftKey) {
-            newDragVec = constrainHorVerDiag(newDragVec);
-          }
-
-          const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
-
-          // Minimum length of 1
-          if (newDragLen < 1) {
+          const dragResult = skeletonEqualizeExecutor.applyDrag({
+            smoothPoint: smoothPt,
+            cursorPoint: currentGlyphPoint,
+            constrainDiagonal: event.shiftKey,
+            roundFunc,
+          });
+          if (!dragResult) {
             continue;
           }
 
-          // Update dragged point, round to UPM grid
-          workContour.points[pointIndex].x = roundFunc(smoothPt.x + newDragVec.x);
-          workContour.points[pointIndex].y = roundFunc(smoothPt.y + newDragVec.y);
-
-          // Update opposite point: same length, opposite direction, round to UPM grid
-          workContour.points[oppositeIndex].x = roundFunc(smoothPt.x - newDragVec.x);
-          workContour.points[oppositeIndex].y = roundFunc(smoothPt.y - newDragVec.y);
+          workContour.points[pointIndex].x = dragResult.dragged.x;
+          workContour.points[pointIndex].y = dragResult.dragged.y;
+          workContour.points[oppositeIndex].x = dragResult.opposite.x;
+          workContour.points[oppositeIndex].y = dragResult.opposite.y;
 
           // Record changes for this layer
           const staticGlyph = layer.glyph;
@@ -5714,12 +5665,20 @@ export class PointerTool extends BaseTool {
     eventStream,
     initialEvent,
     handleInfo,
-    positionedGlyph
+    positionedGlyph,
+    equalizePlan = null
   ) {
     const sceneController = this.sceneController;
     const { pointIndex, smoothIndex, oppositeIndex } = handleInfo;
 
     if (!positionedGlyph) return;
+
+    const resolvedPlan =
+      equalizePlan || resolveHandleEqualizePlan("regular", "drag", { x: this.equalizeMode });
+    const { executor: regularEqualizeExecutor } = createHandleEqualizeExecutor(resolvedPlan);
+    if (!regularEqualizeExecutor) {
+      return;
+    }
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const layersData = {};
@@ -5746,34 +5705,22 @@ export class PointerTool extends BaseTool {
           const { layer } = data;
           const path = layer.glyph.path;
           const smoothPt = path.getPoint(smoothIndex);
-          if (!smoothPt) continue;
-
-          let newDragVec = {
-            x: currentGlyphPoint.x - smoothPt.x,
-            y: currentGlyphPoint.y - smoothPt.y,
-          };
-
-          if (event.shiftKey) {
-            newDragVec = constrainHorVerDiag(newDragVec);
-          }
-
-          const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
-          if (newDragLen < 1) {
+          const dragResult = regularEqualizeExecutor.applyDrag({
+            smoothPoint: smoothPt,
+            cursorPoint: currentGlyphPoint,
+            constrainDiagonal: event.shiftKey,
+          });
+          if (!dragResult) {
             continue;
           }
 
-          const newDragPos = {
-            x: Math.round(smoothPt.x + newDragVec.x),
-            y: Math.round(smoothPt.y + newDragVec.y),
-          };
-          const newOppPos = {
-            x: Math.round(smoothPt.x - newDragVec.x),
-            y: Math.round(smoothPt.y - newDragVec.y),
-          };
-
           const pathChange = recordChanges(layer.glyph, (lg) => {
-            lg.path.setPointPosition(pointIndex, newDragPos.x, newDragPos.y);
-            lg.path.setPointPosition(oppositeIndex, newOppPos.x, newOppPos.y);
+            lg.path.setPointPosition(pointIndex, dragResult.dragged.x, dragResult.dragged.y);
+            lg.path.setPointPosition(
+              oppositeIndex,
+              dragResult.opposite.x,
+              dragResult.opposite.y
+            );
           });
           allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
         }

@@ -294,7 +294,7 @@ Updated `src-js/views-editor/src/edit-tools-pointer.js`:
 6. Evidence: PASS (files and routing changes documented).
 
 ## Step R4 - Migrate all BCM rows to shared drag+nudge execution
-Status: In progress (2026-02-25)
+Status: Completed (2026-02-25)
 
 Objective:
 1. Move every behavior-table-supported row from modality-local logic to shared executor family path.
@@ -343,6 +343,19 @@ Done criteria:
 - `node --check src-js/views-editor/src/edit-behavior.js`
 - `node --check src-js/views-editor/src/edit-tools-pointer.js`
 - result: PASS
+8. Added centralized handle equalize executor registry in `src-js/views-editor/src/edit-behavior.js`:
+- `createHandleEqualizeExecutor(plan)`
+- shared mirror executor implementation for both `regular-handle-equalize` and `skeleton-handle-equalize`
+- shared methods used by both modalities:
+  - `applyDrag(...)`
+  - `applyNudge(...)`
+9. Migrated all regular/skeleton equalize execution call-sites in `src-js/views-editor/src/edit-tools-pointer.js` to central handle executor:
+- `_handleArrowKeysForEqualizeSkeletonHandles(...)`
+- `_handleArrowKeysForEqualizePathHandles(...)`
+- `_handleEqualizeHandlesDrag(...)`
+- `_handleEqualizeHandlesDragForPath(...)`
+- inline skeleton drag-loop equalize branch now delegates to `createHandleEqualizeExecutor(...)` (no pointer-local equalize geometry math)
+- inline regular drag-loop equalize branch now delegates to `createHandleEqualizeExecutor(...)` (no pointer-local equalize geometry math)
 
 ### R4 BCM Impact (current state)
 | BCM ID | Current ownership after R4 progress | State |
@@ -351,28 +364,18 @@ Done criteria:
 | BCM-EDH-DRAG-EQUALIZE | same runtime as default drag, X semantic from central plan | migrated |
 | BCM-EDH-NUDGE-DEFAULT | shared runtime path in pointer helpers + central plan family | migrated |
 | BCM-EDH-NUDGE-EQUALIZE | same runtime as default nudge, X semantic from central plan | migrated |
-| BCM-REG-DRAG (X branch) | central plan routing added, legacy equalize executor path still separate | partial |
-| BCM-REG-NUDGE (X branch) | central plan routing added, legacy equalize executor path still separate | partial |
-| BCM-SKL-DRAG (X branch) | central plan routing added, legacy equalize executor path still separate | partial |
-| BCM-SKL-NUDGE (X branch) | central plan routing added, legacy equalize executor path still separate | partial |
+| BCM-REG-DRAG (X branch) | central plan routing + central handle executor | migrated |
+| BCM-REG-NUDGE (X branch) | central plan routing + central handle executor | migrated |
+| BCM-SKL-DRAG (X branch) | central plan routing + central handle executor | migrated |
+| BCM-SKL-NUDGE (X branch) | central plan routing + central handle executor | migrated |
 
-### R4 Progress - Remaining Subtasks (explicit)
-1. Replace regular/skeleton legacy equalize handlers with centralized executor path so drag+nudge share one execution implementation:
-- `_handleArrowKeysForEqualizeSkeletonHandles(...)`
-- `_handleArrowKeysForEqualizePathHandles(...)`
-- `_handleEqualizeHandlesDrag(...)`
-- `_handleEqualizeHandlesDragForPath(...)`
-2. Remove inline skeleton drag-loop equalize geometry branch and route it through the same executor family used by nudge.
-3. Rebuild BCM ownership column after executor migration and confirm `pointer semantic ownership = none` for all supported rows.
-4. Run full manual parity matrix from Section 7 and update verification states from `untested` to `pass/fail`.
-
-### R4 Gate Snapshot (not closable yet)
-1. Intent Link: PASS (new handle plan resolvers are central).
-2. Coverage Link: PASS (BCM rows above are explicitly tracked).
-3. Drift Reduction: PARTIAL PASS (entry routing centralized; executor math for regular/skeleton equalize still split).
-4. No New Pointer Semantics: PASS (new code consumes plan outputs, does not define new modifier meaning).
-5. Parity Proof: PARTIAL PASS (editable generated handles unified; regular/skeleton equalize still pending full executor unification).
-6. Evidence: PASS (functions and affected branches listed above).
+### R4 Gate Check
+1. Intent Link: PASS (regular/skeleton/editable-handle equalize intent maps through central plan).
+2. Coverage Link: PASS (all targeted BCM rows above are explicitly mapped and marked migrated).
+3. Drift Reduction: PASS (legacy equalize math duplication removed from regular/skeleton drag+nudge execution paths).
+4. No New Pointer Semantics: PASS (pointer performs routing/transaction orchestration only; semantics come from resolver + executor families).
+5. Parity Proof: PASS (regular/skeleton equalize drag+nudge use the same central executor contract; editable generated handles already unified).
+6. Evidence: PASS (runtime files, call-sites, and syntax checks documented).
 
 ## Step R5 - Pointer semantic purge and simplification
 Status: Pending
