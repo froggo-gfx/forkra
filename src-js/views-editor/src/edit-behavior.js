@@ -1425,6 +1425,27 @@ export function resolveBehaviorPresetName(flagsOrName) {
   return "default";
 }
 
+export function resolveModifierIntent(objectKind = "regular", flagsOrName = {}) {
+  if (typeof flagsOrName === "string" && flagsOrName) {
+    return flagsOrName;
+  }
+  const flags = flagsOrName || {};
+  if (objectKind === "rib") {
+    const altActive = !!(flags.alt || flags.altKey || flags.alternate || flags.interpolate);
+    const zActive = !!(flags.z || flags.zKey || flags.tangent);
+    // Rib precedence is explicit and shared across drag/nudge paths.
+    if (altActive) {
+      return "interpolate";
+    }
+    if (zActive) {
+      return "tangent";
+    }
+    return "default";
+  }
+  // Regular/skeleton intents map to the same public preset names.
+  return resolveBehaviorPresetName(flags);
+}
+
 export function getBehaviorPreset(objectKind = "regular", flagsOrName = "default") {
   const table = BEHAVIOR_TABLES[objectKind] || BEHAVIOR_TABLES.regular;
   const presetName = resolveBehaviorPresetName(flagsOrName);
@@ -1852,7 +1873,7 @@ export function createSkeletonEditBehavior(
  * Same logic as getBehaviorName in edit-tools-pointer.js
  */
 export function getSkeletonBehaviorName(shiftKey, altKey) {
-  return resolveBehaviorPresetName({ shift: shiftKey, alt: altKey });
+  return resolveModifierIntent("skeleton", { shift: shiftKey, alt: altKey });
 }
 
 function getContourPoint(skeletonData, contourIndex, pointIndex) {
