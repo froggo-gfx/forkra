@@ -30,12 +30,12 @@ import {
 import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
-import { EditBehaviorFactory } from "./edit-behavior.js";
-import Panel from "./panel.js";
 import {
-  createEditableHandleBehavior,
+  EditBehaviorFactory,
   SkeletonEditBehavior,
-} from "./skeleton-edit-behavior.js";
+  createEditableHandleBehavior,
+} from "./edit-behavior.js";
+import Panel from "./panel.js";
 
 export default class TransformationPanel extends Panel {
   identifier = "selection-transformation";

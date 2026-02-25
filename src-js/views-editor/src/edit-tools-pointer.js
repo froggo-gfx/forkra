@@ -41,21 +41,19 @@ import { VarPackedPath } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
 import {
   EditBehaviorFactory,
+  EditableHandleBehavior,
+  EditableRibBehavior,
+  RibEditBehavior,
+  createEditableHandleBehavior,
+  createEditableRibBehavior,
+  createInterpolatingRibBehavior,
+  createRibEditBehavior,
+  createSkeletonEditBehavior,
   constrainHorVerDiag,
+  getSkeletonBehaviorName,
   makeRoundFunc,
   resolveBehaviorPresetName,
 } from "./edit-behavior.js";
-import {
-  createSkeletonEditBehavior,
-  getSkeletonBehaviorName,
-  createRibEditBehavior,
-  RibEditBehavior,
-  createEditableRibBehavior,
-  EditableRibBehavior,
-  createInterpolatingRibBehavior,
-  createEditableHandleBehavior,
-  EditableHandleBehavior,
-} from "./skeleton-edit-behavior.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import {
   skeletonTunniHitTest,
