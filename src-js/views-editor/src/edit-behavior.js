@@ -1409,6 +1409,17 @@ export const BEHAVIOR_TABLES = {
 const MODIFIER_FLAG_KEYS = Object.freeze(["shift", "alt", "z", "x"]);
 const OBJECT_KINDS = Object.freeze(["regular", "skeleton", "rib"]);
 const MODALITIES = Object.freeze(["drag", "nudge"]);
+export const RIB_EXECUTOR_FAMILIES = Object.freeze({
+  POINT: "rib-point",
+  POINT_INTERPOLATING: "rib-point-interpolating",
+  HANDLE_EQUALIZE: "rib-handle-equalize",
+});
+export const HANDLE_EXECUTOR_FAMILIES = Object.freeze({
+  EDITABLE_GENERATED: "editable-generated-handle",
+  EDITABLE_GENERATED_EQUALIZE: "editable-generated-handle-equalize",
+  REGULAR_EQUALIZE: "regular-handle-equalize",
+  SKELETON_EQUALIZE: "skeleton-handle-equalize",
+});
 
 const INTENT_PRIORITY_BY_KIND = Object.freeze({
   regular: Object.freeze([
@@ -1748,10 +1759,10 @@ function resolveRibModifierPlan(modality, intentResolution, context = {}) {
     constrainMode,
     executorFamily:
       intentResolution.intent === "equalize" && modality === "nudge"
-        ? "rib-handle-equalize"
+        ? RIB_EXECUTOR_FAMILIES.HANDLE_EQUALIZE
         : useInterpolationBehavior
-          ? "rib-point-interpolating"
-          : "rib-point",
+          ? RIB_EXECUTOR_FAMILIES.POINT_INTERPOLATING
+          : RIB_EXECUTOR_FAMILIES.POINT,
     fallbackPolicy:
       modality === "nudge" && useInterpolationBehavior
         ? {
@@ -1800,6 +1811,72 @@ export function resolveModifierPlan(
     executorFamily: null,
     fallbackPolicy: {
       kind: "unsupported",
+    },
+  };
+}
+
+export function resolveEditableGeneratedHandlePlan(modality = "drag", flagsOrIntent = {}) {
+  const normalizedFlags =
+    typeof flagsOrIntent === "string" ? null : normalizeModifierFlags(flagsOrIntent || {});
+  const intent =
+    typeof flagsOrIntent === "string"
+      ? flagsOrIntent
+      : normalizedFlags?.x
+        ? "equalize"
+        : "default";
+
+  return {
+    objectKind: "editable-generated-handle",
+    modality,
+    intent,
+    status: "supported",
+    supported: true,
+    unsupportedReason: null,
+    unsupportedModifiers: [],
+    ignoredActiveModifiers: getActiveFlagList(normalizedFlags, ["shift", "alt", "z"]),
+    executorFamily:
+      intent === "equalize"
+        ? HANDLE_EXECUTOR_FAMILIES.EDITABLE_GENERATED_EQUALIZE
+        : HANDLE_EXECUTOR_FAMILIES.EDITABLE_GENERATED,
+    fallbackPolicy: {
+      kind: "none",
+    },
+  };
+}
+
+export function resolveHandleEqualizePlan(
+  objectKind = "regular",
+  modality = "drag",
+  flagsOrIntent = {}
+) {
+  const normalizedFlags =
+    typeof flagsOrIntent === "string" ? null : normalizeModifierFlags(flagsOrIntent || {});
+  const intent =
+    typeof flagsOrIntent === "string"
+      ? flagsOrIntent
+      : normalizedFlags?.x
+        ? "equalize"
+        : "default";
+
+  const familyByKind = {
+    regular: HANDLE_EXECUTOR_FAMILIES.REGULAR_EQUALIZE,
+    skeleton: HANDLE_EXECUTOR_FAMILIES.SKELETON_EQUALIZE,
+  };
+  const executorFamily = familyByKind[objectKind] || null;
+  const supported = intent === "equalize" && !!executorFamily;
+
+  return {
+    objectKind,
+    modality,
+    intent,
+    status: supported ? "supported" : "unsupported",
+    supported,
+    unsupportedReason: supported ? null : "intent-not-equalize",
+    unsupportedModifiers: [],
+    ignoredActiveModifiers: getActiveFlagList(normalizedFlags, ["shift", "alt", "z"]),
+    executorFamily,
+    fallbackPolicy: {
+      kind: supported ? "none" : "unsupported",
     },
   };
 }
@@ -2998,6 +3075,54 @@ export function createInterpolatingRibBehavior(skeletonData, ribHit, interpolati
     interpolationAxis,
     ribHit.roundFunc || Math.round
   );
+}
+
+const RIB_BEHAVIOR_EXECUTOR_REGISTRY = Object.freeze({
+  [RIB_EXECUTOR_FAMILIES.POINT]: (context) =>
+    context.isEditable
+      ? createEditableRibBehavior(context.skeletonData, context.ribHit)
+      : createRibEditBehavior(context.skeletonData, context.ribHit),
+  [RIB_EXECUTOR_FAMILIES.POINT_INTERPOLATING]: (context) =>
+    context.isEditable
+      ? createInterpolatingRibBehavior(
+          context.skeletonData,
+          context.ribHit,
+          context.interpolationAxis || null
+        )
+      : createRibEditBehavior(context.skeletonData, context.ribHit),
+  [RIB_EXECUTOR_FAMILIES.HANDLE_EQUALIZE]: (context) =>
+    context.isEditable
+      ? createInterpolatingRibBehavior(
+          context.skeletonData,
+          context.ribHit,
+          context.interpolationAxis || null
+        )
+      : null,
+});
+
+export function createRibBehaviorExecutor(plan = {}, context = {}) {
+  // R3 contract: pointer asks for one executor family; registry owns class selection/fallbacks.
+  if (plan.supported === false) {
+    return {
+      behavior: null,
+      requestedFamily: plan.executorFamily || RIB_EXECUTOR_FAMILIES.POINT,
+      resolvedFamily: null,
+    };
+  }
+  const requestedFamily = plan.executorFamily || RIB_EXECUTOR_FAMILIES.POINT;
+  const defaultFactory = RIB_BEHAVIOR_EXECUTOR_REGISTRY[RIB_EXECUTOR_FAMILIES.POINT];
+  const requestedFactory = RIB_BEHAVIOR_EXECUTOR_REGISTRY[requestedFamily];
+  let resolvedFamily = requestedFactory ? requestedFamily : RIB_EXECUTOR_FAMILIES.POINT;
+  let behavior = (requestedFactory || defaultFactory)({ ...context, plan });
+  if (!behavior && resolvedFamily !== RIB_EXECUTOR_FAMILIES.POINT) {
+    behavior = defaultFactory({ ...context, plan });
+    resolvedFamily = behavior ? RIB_EXECUTOR_FAMILIES.POINT : null;
+  }
+  return {
+    behavior,
+    requestedFamily,
+    resolvedFamily,
+  };
 }
 
 /**

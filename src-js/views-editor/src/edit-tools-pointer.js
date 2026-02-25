@@ -41,13 +41,10 @@ import { VarPackedPath } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
 import {
   EditBehaviorFactory,
-  EditableHandleBehavior,
-  EditableRibBehavior,
-  RibEditBehavior,
+  HANDLE_EXECUTOR_FAMILIES,
+  RIB_EXECUTOR_FAMILIES,
   createEditableHandleBehavior,
-  createEditableRibBehavior,
-  createInterpolatingRibBehavior,
-  createRibEditBehavior,
+  createRibBehaviorExecutor,
   createSkeletonEditBehavior,
   constrainHorVerDiag,
   getHandleDetachedKey,
@@ -55,6 +52,8 @@ import {
   getRibHandleOffsetKeys,
   getRibNudgeKey,
   makeRoundFunc,
+  resolveEditableGeneratedHandlePlan,
+  resolveHandleEqualizePlan,
   resolveModifierPlan,
 } from "./edit-behavior.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
@@ -1285,8 +1284,11 @@ export class PointerTool extends BaseTool {
       }
       const delta = { x: dx, y: dy };
 
-      // X+arrows: nudge selected off-curve skeleton handles and equalize
-      if (this.equalizeMode) {
+      // X+arrows equalize routing comes from central plan.
+      const skeletonEqualizePlan = resolveHandleEqualizePlan("skeleton", "nudge", {
+        x: this.equalizeMode,
+      });
+      if (skeletonEqualizePlan.supported) {
         const handled = await this._handleArrowKeysForEqualizeSkeletonHandles(
           delta,
           skeletonPointSelection
@@ -1441,7 +1443,10 @@ export class PointerTool extends BaseTool {
     }
   }
 
-  if (hasRegularPoints && this.equalizeMode) {
+  const regularEqualizeNudgePlan = resolveHandleEqualizePlan("regular", "nudge", {
+    x: this.equalizeMode,
+  });
+  if (hasRegularPoints && regularEqualizeNudgePlan.supported) {
     let [dx, dy] = arrowKeyDeltas[event.key];
     if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
       dx *= 100;
@@ -1863,8 +1868,11 @@ export class PointerTool extends BaseTool {
       return;
     }
 
-    // X+drag: equalize regular handles (non-skeleton)
-    if (this.equalizeMode && !hasSkeletonPointUnderCursor) {
+    // X+drag equalize routing comes from central plan.
+    const regularEqualizeDragPlan = resolveHandleEqualizePlan("regular", "drag", {
+      x: this.equalizeMode,
+    });
+    if (regularEqualizeDragPlan.supported && !hasSkeletonPointUnderCursor) {
       const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
       const handleInfo = this._findEqualizeHandleForPath(point, size);
       if (handleInfo && positionedGlyph) {
@@ -1874,22 +1882,13 @@ export class PointerTool extends BaseTool {
         );
 
         if (editableHandleInfo) {
-          const handled = await this._handleEqualizeEditableHandleDrag(
+          // X+drag for editable generated handles uses the same runtime path as default drag.
+          // Equalize semantics are resolved inside that shared executor path.
+          await this._handleDragEditableGeneratedHandles(
             eventStream,
             initialEvent,
-            editableHandleInfo,
-            handleInfo,
-            positionedGlyph
+            [editableHandleInfo]
           );
-          if (!handled) {
-            // Fallback: no valid in/out pair for equalize -> keep editable-handle drag,
-            // but do not fall back to legacy path equalize logic.
-            await this._handleDragEditableGeneratedHandles(
-              eventStream,
-              initialEvent,
-              [editableHandleInfo]
-            );
-          }
         } else {
           await this._handleEqualizeHandlesDragForPath(
             eventStream,
@@ -1932,8 +1931,11 @@ export class PointerTool extends BaseTool {
       }
     }
 
-    // X+drag: equalize skeleton handles in real-time while dragging
-    if (this.equalizeMode && hasSkeletonPointUnderCursor) {
+    // X+drag for skeleton handles is routed via central equalize plan.
+    const skeletonEqualizeDragPlan = resolveHandleEqualizePlan("skeleton", "drag", {
+      x: this.equalizeMode,
+    });
+    if (skeletonEqualizeDragPlan.supported && hasSkeletonPointUnderCursor) {
       const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
       if (positionedGlyph) {
         const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
@@ -3153,7 +3155,10 @@ export class PointerTool extends BaseTool {
               }
             }
 
-          if (this.equalizeMode && equalizeSkeletonInfo) {
+          const skeletonEqualizeDragPlan = resolveHandleEqualizePlan("skeleton", "drag", {
+            x: this.equalizeMode,
+          });
+          if (skeletonEqualizeDragPlan.supported && equalizeSkeletonInfo) {
             const { contourIndex, pointIndex, smoothIndex, oppositeIndex } =
               equalizeSkeletonInfo;
             const workContour = working.contours[contourIndex];
@@ -3243,7 +3248,6 @@ export class PointerTool extends BaseTool {
       return;
     }
     const ribDragIntent = ribDragStartPlan.intent;
-    const useInterpolation = ribDragStartPlan.useInterpolationBehavior;
 
     // Get initial point in glyph coordinates
     const localPoint = sceneController.localPoint(initialEvent);
@@ -3389,90 +3393,40 @@ export class PointerTool extends BaseTool {
 
           // Check if this side is editable
           const sideIsEditable = tp.isEditable;
-
-          if (tp.isSingleSided) {
-            // For single-sided, create behavior with totalWidth as the effective width
-            const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
-            const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
-            const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
-            const totalWidth = leftHW + rightHW;
-
-            if (sideIsEditable) {
-              // Editable single-sided: use EditableRibBehavior for nudge support
-              // Or InterpolatingRibBehavior if Alt is pressed
-              let behavior;
-              if (useInterpolation) {
-                // Architecture rule: resolver decides interpolation semantics.
-                // Axis availability is geometric detail, not a semantic switch.
-                // createInterpolatingRibBehavior handles null axis via internal tangent fallback.
-                const interpolationAxis = this._findHandlesForRibPointFromSkeleton(
+          const interpolationAxis =
+            sideIsEditable && ribDragStartPlan.useInterpolationBehavior
+              ? this._findHandlesForRibPointFromSkeleton(
                   data.layer.glyph.path,
                   skeletonPoint,
                   normal,
                   contour,
                   tp.side
-                );
-                behavior = createInterpolatingRibBehavior(
-                  data.original,
-                  ribHitForPoint,
-                  interpolationAxis
-                );
-              } else {
-                behavior = createEditableRibBehavior(data.original, ribHitForPoint);
-              }
-              // Override to track totalWidth for width changes
-              // Use setOriginalHalfWidth for InterpolatingRibBehavior to recalculate ribPos
-                if (behavior.setOriginalHalfWidth) {
-                  behavior.setOriginalHalfWidth(totalWidth);
-                } else {
-                  behavior.originalHalfWidth = totalWidth;
-                }
-                behavior.minHalfWidth = 2;
-                data.ribBehaviors.push({ behavior, target: tp });
-            } else {
-              // Non-editable single-sided: constrained to normal direction
-              const behavior = new RibEditBehavior(
-                data.original,
-                tp.contourIndex,
-                tp.pointIndex,
-                tp.side,
-                normal,
-                { x: skeletonPoint.x, y: skeletonPoint.y }
-              );
-              // Override to track totalWidth; min 2 UPM since it's the full width
-              behavior.originalHalfWidth = totalWidth;
-              behavior.minHalfWidth = 2;
-              data.ribBehaviors.push({ behavior, target: tp });
-            }
-          } else if (sideIsEditable) {
-            // Editable mode: use EditableRibBehavior for free movement
-            // Or InterpolatingRibBehavior if Alt is pressed
-            let behavior;
-            if (useInterpolation) {
-              // Keep drag semantics centralized: do not reinterpret intent at call site.
-              const interpolationAxis = this._findHandlesForRibPointFromSkeleton(
-                data.layer.glyph.path,
-                skeletonPoint,
-                normal,
-                contour,
-                tp.side
-              );
-              behavior = createInterpolatingRibBehavior(
-                data.original,
-                ribHitForPoint,
-                interpolationAxis
-              );
-            } else {
-              behavior = createEditableRibBehavior(data.original, ribHitForPoint);
-            }
-            data.ribBehaviors.push({ behavior, target: tp });
-          } else {
-            // Normal mode: constrained to normal direction
-            data.ribBehaviors.push({
-              behavior: createRibEditBehavior(data.original, ribHitForPoint),
-              target: tp,
-            });
+                )
+              : null;
+          const { behavior } = createRibBehaviorExecutor(ribDragStartPlan, {
+            skeletonData: data.original,
+            ribHit: ribHitForPoint,
+            isEditable: sideIsEditable,
+            interpolationAxis,
+          });
+          if (!behavior) {
+            continue;
           }
+
+          if (tp.isSingleSided) {
+            // Single-sided tracks total width in the same half-width channel.
+            const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+            const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+            const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+            const totalWidth = leftHW + rightHW;
+            if (behavior.setOriginalHalfWidth) {
+              behavior.setOriginalHalfWidth(totalWidth);
+            } else {
+              behavior.originalHalfWidth = totalWidth;
+            }
+            behavior.minHalfWidth = 2;
+          }
+          data.ribBehaviors.push({ behavior, target: tp });
         }
       }
       
@@ -3992,17 +3946,14 @@ export class PointerTool extends BaseTool {
             onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
           };
 
-          // Use interpolation behavior whenever central plan requests it.
-          // Axis may be null; behavior has deterministic tangent fallback.
-          let behavior;
-          if (useInterpolation) {
-            behavior = createInterpolatingRibBehavior(
-              data.original,
-              ribHit,
-              ep.interpolationAxis
-            );
-          } else {
-            behavior = createEditableRibBehavior(data.original, ribHit);
+          const { behavior } = createRibBehaviorExecutor(ribDragStartPlan, {
+            skeletonData: data.original,
+            ribHit,
+            isEditable: true,
+            interpolationAxis: ep.interpolationAxis,
+          });
+          if (!behavior) {
+            continue;
           }
 
           data.behaviors.push({
@@ -4101,6 +4052,191 @@ export class PointerTool extends BaseTool {
     }
   }
 
+  _buildEditableHandleEqualizeState(layerPath, contour, editableHandle, skeletonHandleDir) {
+    if (!layerPath) {
+      return null;
+    }
+    const equalizeInfo = this._getEqualizeHandleInfoForPointIndex(layerPath, editableHandle.pointIndex);
+    if (!equalizeInfo) {
+      return null;
+    }
+
+    const anchorPos = layerPath.getPoint(equalizeInfo.smoothIndex);
+    const draggedPos = layerPath.getPoint(equalizeInfo.pointIndex);
+    const oppositePos = layerPath.getPoint(equalizeInfo.oppositeIndex);
+    const oppositeHandleType = editableHandle.handleType === "in" ? "out" : "in";
+    const oppositeHandleDir = this._getSkeletonHandleDirForPoint(
+      contour,
+      editableHandle.skeletonPointIndex,
+      oppositeHandleType
+    );
+    if (!anchorPos || !draggedPos || !oppositePos || !oppositeHandleDir) {
+      return null;
+    }
+
+    const point = contour.points[editableHandle.skeletonPointIndex];
+    const detachedKey = getHandleDetachedKey(editableHandle.side);
+    const detachedMode = !!point[detachedKey];
+    const draggedState = this._readEditableHandleEqualizeState(
+      point,
+      editableHandle.side,
+      editableHandle.handleType,
+      anchorPos,
+      draggedPos,
+      skeletonHandleDir,
+      detachedMode
+    );
+    const oppositeState = this._readEditableHandleEqualizeState(
+      point,
+      editableHandle.side,
+      oppositeHandleType,
+      anchorPos,
+      oppositePos,
+      oppositeHandleDir,
+      detachedMode
+    );
+    return {
+      anchorPos,
+      draggedState,
+      oppositeState,
+    };
+  }
+
+  _buildEditableHandleLayersData(glyph, editableHandles) {
+    const layersData = {};
+    for (const editLayerName of this.sceneController.editingLayerNames) {
+      const layer = glyph.layers[editLayerName];
+      if (!getSkeletonData(layer)) {
+        continue;
+      }
+      const skeletonData = getSkeletonData(layer);
+      layersData[editLayerName] = {
+        layer,
+        original: JSON.parse(JSON.stringify(skeletonData)),
+        working: JSON.parse(JSON.stringify(skeletonData)),
+        behaviors: [],
+      };
+    }
+    if (Object.keys(layersData).length === 0) {
+      return layersData;
+    }
+
+    for (const data of Object.values(layersData)) {
+      const layerPath = data.layer?.glyph?.path;
+      for (const editableHandle of editableHandles) {
+        const contour = data.original.contours[editableHandle.skeletonContourIndex];
+        if (!contour) {
+          continue;
+        }
+        const skeletonHandleDir = this._getSkeletonHandleDirForPoint(
+          contour,
+          editableHandle.skeletonPointIndex,
+          editableHandle.handleType
+        );
+        if (!skeletonHandleDir) {
+          continue;
+        }
+
+        const equalizeState = this._buildEditableHandleEqualizeState(
+          layerPath,
+          contour,
+          editableHandle,
+          skeletonHandleDir
+        );
+
+        data.behaviors.push({
+          behavior: createEditableHandleBehavior(data.original, editableHandle, skeletonHandleDir),
+          editableHandle,
+          skeletonHandleDir,
+          equalizeState,
+        });
+      }
+    }
+    return layersData;
+  }
+
+  _applyEditableHandleBehaviorEntry(
+    layerData,
+    behaviorEntry,
+    delta,
+    roundFunc,
+    useOriginalForDetached,
+    equalizeEnabled
+  ) {
+    const { behavior, editableHandle, skeletonHandleDir, equalizeState } = behaviorEntry;
+    const point =
+      layerData.working.contours[editableHandle.skeletonContourIndex].points[
+        editableHandle.skeletonPointIndex
+      ];
+
+    if (equalizeEnabled && equalizeState) {
+      const projectedDelta =
+        delta.x * equalizeState.draggedState.direction.x +
+        delta.y * equalizeState.draggedState.direction.y;
+      const targetLength = Math.max(
+        0,
+        equalizeState.draggedState.originalLength + projectedDelta
+      );
+      this._applyEditableHandleEqualizedLength(
+        point,
+        equalizeState.draggedState,
+        targetLength,
+        equalizeState.anchorPos,
+        roundFunc
+      );
+      this._applyEditableHandleEqualizedLength(
+        point,
+        equalizeState.oppositeState,
+        targetLength,
+        equalizeState.anchorPos,
+        roundFunc
+      );
+      return;
+    }
+
+    const change = behavior.applyDelta(delta, roundFunc);
+    const editableHandleKeys = getEditableHandleKeys(
+      editableHandle.side,
+      editableHandle.handleType
+    );
+    const isDetached = point[editableHandleKeys.detachedKey];
+    if (isDetached) {
+      const basePoint = useOriginalForDetached
+        ? layerData.original.contours[editableHandle.skeletonContourIndex].points[
+            editableHandle.skeletonPointIndex
+          ]
+        : point;
+      const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
+      point[editableHandleKeys.offsetXKey] =
+        (basePoint[editableHandleKeys.offsetXKey] || 0) +
+        roundFunc(skeletonHandleDir.x * projectedDelta);
+      point[editableHandleKeys.offsetYKey] =
+        (basePoint[editableHandleKeys.offsetYKey] || 0) +
+        roundFunc(skeletonHandleDir.y * projectedDelta);
+      return;
+    }
+
+    delete point[editableHandleKeys.offsetXKey];
+    delete point[editableHandleKeys.offsetYKey];
+    point[editableHandleKeys.offset1DKey] = change.offset;
+  }
+
+  _collectEditableHandleLayerChanges(editLayerName, layerData, allChanges, cloneWorkingForCustomData) {
+    const { layer, working } = layerData;
+    const pathChange = recordChanges(layer.glyph, (sg) => {
+      regenerateSkeletonContours(sg, working);
+    });
+    allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+    const customDataChange = recordChanges(layer, (l) => {
+      setSkeletonData(
+        l,
+        cloneWorkingForCustomData ? JSON.parse(JSON.stringify(working)) : working
+      );
+    });
+    allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+  }
+
   /**
    * Handle dragging editable generated handles (from skeleton contours).
    * Updates skeleton data (handle offsets) based on handle movement.
@@ -4122,91 +4258,9 @@ export class PointerTool extends BaseTool {
 
     try {
       await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const layersData = {};
-
-      for (const editLayerName of sceneController.editingLayerNames) {
-        const layer = glyph.layers[editLayerName];
-        if (!getSkeletonData(layer)) continue;
-
-        const skeletonData = getSkeletonData(layer);
-        layersData[editLayerName] = {
-          layer,
-          original: JSON.parse(JSON.stringify(skeletonData)),
-          working: JSON.parse(JSON.stringify(skeletonData)),
-          behaviors: [],
-        };
-      }
+      const layersData = this._buildEditableHandleLayersData(glyph, editableHandles);
 
       if (Object.keys(layersData).length === 0) return;
-
-      // Create behaviors for each editable handle in each layer
-      for (const data of Object.values(layersData)) {
-        const layerPath = data.layer?.glyph?.path;
-        for (const eh of editableHandles) {
-          const contour = data.original.contours[eh.skeletonContourIndex];
-          if (!contour) continue;
-
-          // Calculate skeleton handle direction
-          const skeletonHandleDir = this._getSkeletonHandleDirForPoint(
-            contour, eh.skeletonPointIndex, eh.handleType
-          );
-
-          if (!skeletonHandleDir) {
-            continue;
-          }
-
-          const equalizeInfo = layerPath
-            ? this._getEqualizeHandleInfoForPointIndex(layerPath, eh.pointIndex)
-            : null;
-          let equalizeState = null;
-          if (equalizeInfo) {
-            const anchorPos = layerPath.getPoint(equalizeInfo.smoothIndex);
-            const draggedPos = layerPath.getPoint(equalizeInfo.pointIndex);
-            const oppositePos = layerPath.getPoint(equalizeInfo.oppositeIndex);
-            const oppositeHandleType = eh.handleType === "in" ? "out" : "in";
-            const oppositeHandleDir = this._getSkeletonHandleDirForPoint(
-              contour,
-              eh.skeletonPointIndex,
-              oppositeHandleType
-            );
-            if (anchorPos && draggedPos && oppositePos && oppositeHandleDir) {
-              const point = contour.points[eh.skeletonPointIndex];
-              const detachedKey = getHandleDetachedKey(eh.side);
-              const detachedMode = !!point[detachedKey];
-              const draggedState = this._readEditableHandleEqualizeState(
-                point,
-                eh.side,
-                eh.handleType,
-                anchorPos,
-                draggedPos,
-                skeletonHandleDir,
-                detachedMode
-              );
-              const oppositeState = this._readEditableHandleEqualizeState(
-                point,
-                eh.side,
-                oppositeHandleType,
-                anchorPos,
-                oppositePos,
-                oppositeHandleDir,
-                detachedMode
-              );
-              equalizeState = {
-                anchorPos,
-                draggedState,
-                oppositeState,
-              };
-            }
-          }
-
-          data.behaviors.push({
-            behavior: createEditableHandleBehavior(data.original, eh, skeletonHandleDir),
-            editableHandle: eh,
-            skeletonHandleDir,
-            equalizeState,
-          });
-        }
-      }
       
 
       let accumulatedChanges = new ChangeCollector();
@@ -4221,78 +4275,27 @@ export class PointerTool extends BaseTool {
         };
 
         const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+        const editableHandlePlan = resolveEditableGeneratedHandlePlan("drag", {
+          x: this.equalizeMode,
+        });
+        const equalizeEnabled =
+          editableHandlePlan.executorFamily ===
+          HANDLE_EXECUTOR_FAMILIES.EDITABLE_GENERATED_EQUALIZE;
 
         const allChanges = [];
 
         for (const [editLayerName, data] of Object.entries(layersData)) {
-          const { layer, working, behaviors } = data;
-
-          for (const { behavior, editableHandle, skeletonHandleDir, equalizeState } of behaviors) {
-            const point = working.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
-
-            if (this.equalizeMode && equalizeState) {
-              const projectedDelta =
-                delta.x * equalizeState.draggedState.direction.x +
-                delta.y * equalizeState.draggedState.direction.y;
-              const targetLength = Math.max(
-                0,
-                equalizeState.draggedState.originalLength + projectedDelta
-              );
-              this._applyEditableHandleEqualizedLength(
-                point,
-                equalizeState.draggedState,
-                targetLength,
-                equalizeState.anchorPos,
-                roundFunc
-              );
-              this._applyEditableHandleEqualizedLength(
-                point,
-                equalizeState.oppositeState,
-                targetLength,
-                equalizeState.anchorPos,
-                roundFunc
-              );
-              continue;
-            }
-
-            const change = behavior.applyDelta(delta, roundFunc);
-
-            // Check if handle is in detached mode
-            const editableHandleKeys = getEditableHandleKeys(
-              editableHandle.side,
-              editableHandle.handleType
+          for (const behaviorEntry of data.behaviors) {
+            this._applyEditableHandleBehaviorEntry(
+              data,
+              behaviorEntry,
+              delta,
+              roundFunc,
+              true,
+              equalizeEnabled
             );
-            const isDetached = point[editableHandleKeys.detachedKey];
-
-            if (isDetached) {
-              // Detached mode: update 2D offsets, preserve detached state
-              // Use original values since delta is cumulative from drag start
-              const originalPoint = data.original.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
-              const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
-              point[editableHandleKeys.offsetXKey] =
-                (originalPoint[editableHandleKeys.offsetXKey] || 0) +
-                roundFunc(skeletonHandleDir.x * projectedDelta);
-              point[editableHandleKeys.offsetYKey] =
-                (originalPoint[editableHandleKeys.offsetYKey] || 0) +
-                roundFunc(skeletonHandleDir.y * projectedDelta);
-            } else {
-              // Normal mode: clear 2D offsets (they have priority), set 1D offset
-              delete point[editableHandleKeys.offsetXKey];
-              delete point[editableHandleKeys.offsetYKey];
-              point[editableHandleKeys.offset1DKey] = change.offset;
-            }
           }
-
-          const staticGlyph = layer.glyph;
-          const pathChange = recordChanges(staticGlyph, (sg) => {
-            regenerateSkeletonContours(sg, working);
-          });
-          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-          const customDataChange = recordChanges(layer, (l) => {
-            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
-          });
-          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+          this._collectEditableHandleLayerChanges(editLayerName, data, allChanges, true);
         }
 
         const combinedChange = new ChangeCollector().concat(...allChanges);
@@ -4333,166 +4336,36 @@ export class PointerTool extends BaseTool {
       dy *= 10;
     }
     const delta = { x: dx, y: dy };
+    const editableHandlePlan = resolveEditableGeneratedHandlePlan("nudge", {
+      x: this.equalizeMode,
+    });
+    if (!editableHandlePlan.supported) {
+      return;
+    }
+    const equalizeEnabled =
+      editableHandlePlan.executorFamily ===
+      HANDLE_EXECUTOR_FAMILIES.EDITABLE_GENERATED_EQUALIZE;
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const layersData = {};
-
-      for (const editLayerName of sceneController.editingLayerNames) {
-        const layer = glyph.layers[editLayerName];
-        if (!getSkeletonData(layer)) continue;
-
-        const skeletonData = getSkeletonData(layer);
-        layersData[editLayerName] = {
-          layer,
-          original: JSON.parse(JSON.stringify(skeletonData)),
-          working: JSON.parse(JSON.stringify(skeletonData)),
-          behaviors: [],
-        };
-      }
+      const layersData = this._buildEditableHandleLayersData(glyph, editableHandles);
 
       if (Object.keys(layersData).length === 0) return;
 
-      // Create behaviors for each editable handle
-      for (const data of Object.values(layersData)) {
-        const layerPath = data.layer?.glyph?.path;
-        for (const eh of editableHandles) {
-          const contour = data.original.contours[eh.skeletonContourIndex];
-          if (!contour) continue;
-
-          const skeletonHandleDir = this._getSkeletonHandleDirForPoint(
-            contour, eh.skeletonPointIndex, eh.handleType
-          );
-
-          if (!skeletonHandleDir) continue;
-
-          const equalizeInfo = layerPath
-            ? this._getEqualizeHandleInfoForPointIndex(layerPath, eh.pointIndex)
-            : null;
-          let equalizeState = null;
-          if (equalizeInfo) {
-            const anchorPos = layerPath.getPoint(equalizeInfo.smoothIndex);
-            const draggedPos = layerPath.getPoint(equalizeInfo.pointIndex);
-            const oppositePos = layerPath.getPoint(equalizeInfo.oppositeIndex);
-            const oppositeHandleType = eh.handleType === "in" ? "out" : "in";
-            const oppositeHandleDir = this._getSkeletonHandleDirForPoint(
-              contour,
-              eh.skeletonPointIndex,
-              oppositeHandleType
-            );
-            if (anchorPos && draggedPos && oppositePos && oppositeHandleDir) {
-              const point = contour.points[eh.skeletonPointIndex];
-              const detachedKey = getHandleDetachedKey(eh.side);
-              const detachedMode = !!point[detachedKey];
-              const draggedState = this._readEditableHandleEqualizeState(
-                point,
-                eh.side,
-                eh.handleType,
-                anchorPos,
-                draggedPos,
-                skeletonHandleDir,
-                detachedMode
-              );
-              const oppositeState = this._readEditableHandleEqualizeState(
-                point,
-                eh.side,
-                oppositeHandleType,
-                anchorPos,
-                oppositePos,
-                oppositeHandleDir,
-                detachedMode
-              );
-              equalizeState = {
-                anchorPos,
-                draggedState,
-                oppositeState,
-              };
-            }
-          }
-
-          data.behaviors.push({
-            behavior: createEditableHandleBehavior(data.original, eh, skeletonHandleDir),
-            editableHandle: eh,
-            skeletonHandleDir,
-            equalizeState,
-          });
-        }
-      }
-
       const allChanges = [];
+      const roundFunc = Math.round;
 
       for (const [editLayerName, data] of Object.entries(layersData)) {
-        const { layer, working, behaviors } = data;
-
-        for (const { behavior, editableHandle, skeletonHandleDir, equalizeState } of behaviors) {
-          if (this.equalizeMode && equalizeState) {
-            const point =
-              working.contours[editableHandle.skeletonContourIndex].points[
-                editableHandle.skeletonPointIndex
-              ];
-            const projectedDelta =
-              delta.x * equalizeState.draggedState.direction.x +
-              delta.y * equalizeState.draggedState.direction.y;
-            const targetLength = Math.max(
-              0,
-              equalizeState.draggedState.originalLength + projectedDelta
-            );
-            this._applyEditableHandleEqualizedLength(
-              point,
-              equalizeState.draggedState,
-              targetLength,
-              equalizeState.anchorPos,
-              Math.round
-            );
-            this._applyEditableHandleEqualizedLength(
-              point,
-              equalizeState.oppositeState,
-              targetLength,
-              equalizeState.anchorPos,
-              Math.round
-            );
-            continue;
-          }
-
-          const change = behavior.applyDelta(delta);
-          const point = working.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
-
-          // Check if handle is in detached mode
-          const editableHandleKeys = getEditableHandleKeys(
-            editableHandle.side,
-            editableHandle.handleType
+        for (const behaviorEntry of data.behaviors) {
+          this._applyEditableHandleBehaviorEntry(
+            data,
+            behaviorEntry,
+            delta,
+            roundFunc,
+            false,
+            equalizeEnabled
           );
-          const isDetached = point[editableHandleKeys.detachedKey];
-
-          if (isDetached) {
-            // Detached mode: update 2D offsets, preserve detached state
-            // Project delta onto skeleton handle direction
-            const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
-            point[editableHandleKeys.offsetXKey] =
-              (point[editableHandleKeys.offsetXKey] || 0) +
-              Math.round(skeletonHandleDir.x * projectedDelta);
-            point[editableHandleKeys.offsetYKey] =
-              (point[editableHandleKeys.offsetYKey] || 0) +
-              Math.round(skeletonHandleDir.y * projectedDelta);
-            // Don't touch 1D offset - let 2D offsets take priority
-          } else {
-            // Normal mode: clear 2D offsets (they have priority), set 1D offset
-            delete point[editableHandleKeys.offsetXKey];
-            delete point[editableHandleKeys.offsetYKey];
-            point[editableHandleKeys.offset1DKey] = change.offset;
-          }
         }
-
-        // Regenerate outline contours
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          regenerateSkeletonContours(sg, working);
-        });
-        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-        const customDataChange = recordChanges(layer, (l) => {
-          setSkeletonData(l, working);
-        });
-        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+        this._collectEditableHandleLayerChanges(editLayerName, data, allChanges, false);
       }
 
       if (allChanges.length === 0) return;
@@ -4862,144 +4735,95 @@ export class PointerTool extends BaseTool {
           const point = contour.points[pointIndex];
           if (point.type) continue;
 
-            if (isEditable) {
-              // Editable ribs:
-              // - Alt/X => interpolation-family motion (intent resolved centrally)
-              // - Z => tangent-only nudge
-              // - default => width edit (+ nudge where applicable)
-              const ribHit = {
-                contourIndex,
-                pointIndex,
-                side,
-                normal,
-                onCurvePoint: point,
-              };
-
-              let behavior;
-              const baseContour = originalSkeletonData.contours[contourIndex];
-              const basePoint = baseContour?.points[pointIndex];
-              let hasInterpolationBehavior = false;
-
-              if (ribArrowPlan.useInterpolationBehavior) {
-                // Nudge must not redefine semantics when geometry context is partial.
-                // Axis discovery is best-effort; interpolation behavior remains authoritative.
-                const interpolationAxis =
-                  baseContour && basePoint
-                    ? this._findHandlesForRibPointFromSkeleton(
-                        layer.glyph.path,
-                        basePoint,
-                        normal,
-                        baseContour,
-                        side
-                      )
-                    : null;
-                behavior = createInterpolatingRibBehavior(
-                  originalSkeletonData,
-                  ribHit,
-                  interpolationAxis
-                );
-                hasInterpolationBehavior = true;
-              } else {
-                behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
-              }
-
-              if (isSingleSided && baseContour && basePoint) {
-                const leftHW = getPointHalfWidth(basePoint, defaultWidth, "left");
-                const rightHW = getPointHalfWidth(basePoint, defaultWidth, "right");
-                const totalWidth = leftHW + rightHW;
-                if (behavior.setOriginalHalfWidth) {
-                  behavior.setOriginalHalfWidth(totalWidth);
-                } else {
-                  behavior.originalHalfWidth = totalWidth;
-                }
-                behavior.minHalfWidth = 2;
-              }
-
-              const ribNudgeApplyPlan = resolveModifierPlan(
-                "rib",
-                "nudge",
-                ribArrowPlan.intent,
-                {
-                  zActive: this.tangentRibMode,
-                  hasInterpolationBehavior,
-                }
-              );
-              if (!ribNudgeApplyPlan.supported) {
-                continue;
-              }
-              const constrainMode = ribNudgeApplyPlan.constrainMode;
-              const change = behavior.applyDelta(delta, constrainMode);
-              const pointKey = `${contourIndex}/${pointIndex}`;
-              const linkedWidthDriverSide = linkedWidthDriverByPoint.get(pointKey);
-              const shouldApplyLinkedWidth =
-                !isLinked || !linkedWidthDriverSide || linkedWidthDriverSide === side;
-
-              if (isSingleSided) {
-                point.width = change.halfWidth;
-                delete point.leftWidth;
-                delete point.rightWidth;
-              } else if (
-                basePoint &&
-                constrainMode !== "tangent" &&
-                !change.isInterpolation &&
-                shouldApplyLinkedWidth
-              ) {
-                const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
-                applyLinkedWidthDelta(
-                  point,
+          const ribHit = {
+            contourIndex,
+            pointIndex,
+            side,
+            normal,
+            onCurvePoint: point,
+          };
+          const baseContour = originalSkeletonData.contours[contourIndex];
+          const basePoint = baseContour?.points[pointIndex];
+          const interpolationAxis =
+            isEditable && ribArrowPlan.useInterpolationBehavior && baseContour && basePoint
+              ? this._findHandlesForRibPointFromSkeleton(
+                  layer.glyph.path,
                   basePoint,
-                  defaultWidth,
-                  side,
-                  deltaWidth,
-                  isLinked,
-                  Math.round
-                );
-              }
+                  normal,
+                  baseContour,
+                  side
+                )
+              : null;
 
-              // Apply nudge changes
-              if (change.nudge !== undefined) {
-                setRibNudgeValue(point, side, change.nudge);
-              }
+          const { behavior, resolvedFamily } = createRibBehaviorExecutor(ribArrowPlan, {
+            skeletonData: originalSkeletonData,
+            ribHit,
+            isEditable,
+            interpolationAxis,
+          });
+          if (!behavior) {
+            continue;
+          }
 
-            // Apply 2D handle offset compensation for interpolation/editable flows.
-            if (change.isInterpolation || change.hasHandleOffsets) {
-              applyRibHandleOffsetCompensation(point, side, change);
+          if (isSingleSided && baseContour && basePoint) {
+            const leftHW = getPointHalfWidth(basePoint, defaultWidth, "left");
+            const rightHW = getPointHalfWidth(basePoint, defaultWidth, "right");
+            const totalWidth = leftHW + rightHW;
+            if (behavior.setOriginalHalfWidth) {
+              behavior.setOriginalHalfWidth(totalWidth);
+            } else {
+              behavior.originalHalfWidth = totalWidth;
             }
-          } else {
-            // Use RibEditBehavior for non-editable ribs (width only)
-            const ribHit = {
-              contourIndex,
-              pointIndex,
+            behavior.minHalfWidth = 2;
+          }
+
+          const hasInterpolationBehavior =
+            resolvedFamily === RIB_EXECUTOR_FAMILIES.POINT_INTERPOLATING;
+          const ribNudgeApplyPlan = resolveModifierPlan("rib", "nudge", ribArrowPlan.intent, {
+            zActive: this.tangentRibMode,
+            hasInterpolationBehavior,
+          });
+          if (!ribNudgeApplyPlan.supported) {
+            continue;
+          }
+          const constrainMode = ribNudgeApplyPlan.constrainMode;
+          const change = behavior.applyDelta(delta, constrainMode);
+          const pointKey = `${contourIndex}/${pointIndex}`;
+          const linkedWidthDriverSide = linkedWidthDriverByPoint.get(pointKey);
+          const shouldApplyLinkedWidth =
+            !isLinked || !linkedWidthDriverSide || linkedWidthDriverSide === side;
+
+          if (isSingleSided) {
+            point.width = change.halfWidth;
+            delete point.leftWidth;
+            delete point.rightWidth;
+          } else if (
+            basePoint &&
+            (!isEditable || constrainMode !== "tangent") &&
+            !change.isInterpolation &&
+            shouldApplyLinkedWidth
+          ) {
+            const linked = isWidthLinked(basePoint);
+            const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
+            applyLinkedWidthDelta(
+              point,
+              basePoint,
+              defaultWidth,
               side,
-              normal,
-              onCurvePoint: point,
-            };
-              const behavior = createRibEditBehavior(originalSkeletonData, ribHit);
-              const change = behavior.applyDelta(delta);
+              deltaWidth,
+              linked,
+              Math.round
+            );
+          }
 
-              const baseContour = originalSkeletonData.contours[contourIndex];
-              const basePoint = baseContour?.points[pointIndex];
-              if (basePoint) {
-                const pointKey = `${contourIndex}/${pointIndex}`;
-                const linkedWidthDriverSide = linkedWidthDriverByPoint.get(pointKey);
-                const shouldApplyLinkedWidth =
-                  !isLinked || !linkedWidthDriverSide || linkedWidthDriverSide === side;
-                if (!shouldApplyLinkedWidth) {
-                  continue;
-                }
-                const linked = isWidthLinked(basePoint);
-                const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
-                applyLinkedWidthDelta(
-                  point,
-                  basePoint,
-                  defaultWidth,
-                  side,
-                  deltaWidth,
-                  linked,
-                  Math.round
-                );
-              }
-            }
+          if (change.nudge !== undefined) {
+            setRibNudgeValue(point, side, change.nudge);
+          }
+
+          // Interpolation/editable executors may provide 2D compensation payloads.
+          if (change.isInterpolation || change.hasHandleOffsets) {
+            applyRibHandleOffsetCompensation(point, side, change);
+          }
         }
 
         // CRITICAL: Regenerate contours INSIDE recordChanges so changes are tracked for undo
@@ -5171,179 +4995,6 @@ export class PointerTool extends BaseTool {
     point[state.keys.offsetXKey] = roundFunc(relX);
     point[state.keys.offsetYKey] = roundFunc(relY);
     point[state.keys.offset1DKey] = roundFunc(relX * state.skeletonDir.x + relY * state.skeletonDir.y);
-  }
-
-  /**
-   * Handle X+drag for editable generated handles.
-   * Equalizes in/out handle magnitudes for the same skeleton rib side while preserving
-   * each handle's direction (angle).
-   * Returns true if handled, false if equalize cannot be applied.
-   */
-  async _handleEqualizeEditableHandleDrag(
-    eventStream,
-    initialEvent,
-    editableHandle,
-    pathHandleInfo,
-    positionedGlyph
-  ) {
-    const sceneController = this.sceneController;
-    const oppositeHandleType = editableHandle.handleType === "in" ? "out" : "in";
-
-    if (!positionedGlyph) return false;
-
-    const localPoint = sceneController.localPoint(initialEvent);
-    const startGlyphPoint = {
-      x: localPoint.x - positionedGlyph.x,
-      y: localPoint.y - positionedGlyph.y,
-    };
-
-    let handled = false;
-
-    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const layersData = {};
-
-      for (const editLayerName of sceneController.editingLayerNames) {
-        const layer = glyph.layers[editLayerName];
-        if (!getSkeletonData(layer)) continue;
-
-        const skeletonData = getSkeletonData(layer);
-        const original = JSON.parse(JSON.stringify(skeletonData));
-        const contour = original.contours[editableHandle.skeletonContourIndex];
-        const point = contour?.points?.[editableHandle.skeletonPointIndex];
-        if (!contour || !point) continue;
-
-        const path = layer.glyph?.path;
-        const anchorPos = path?.getPoint(pathHandleInfo.smoothIndex);
-        const draggedPos = path?.getPoint(pathHandleInfo.pointIndex);
-        const oppositePos = path?.getPoint(pathHandleInfo.oppositeIndex);
-        if (!anchorPos || !draggedPos || !oppositePos) continue;
-
-        const draggedDir = this._getSkeletonHandleDirForPoint(
-          contour,
-          editableHandle.skeletonPointIndex,
-          editableHandle.handleType
-        );
-        const oppositeDir = this._getSkeletonHandleDirForPoint(
-          contour,
-          editableHandle.skeletonPointIndex,
-          oppositeHandleType
-        );
-        if (!draggedDir || !oppositeDir) continue;
-
-        const detachedKey = getHandleDetachedKey(editableHandle.side);
-        const detachedMode = !!point[detachedKey];
-
-        const draggedState = this._readEditableHandleEqualizeState(
-          point,
-          editableHandle.side,
-          editableHandle.handleType,
-          anchorPos,
-          draggedPos,
-          draggedDir,
-          detachedMode
-        );
-        const oppositeState = this._readEditableHandleEqualizeState(
-          point,
-          editableHandle.side,
-          oppositeHandleType,
-          anchorPos,
-          oppositePos,
-          oppositeDir,
-          detachedMode
-        );
-
-        layersData[editLayerName] = {
-          layer,
-          original,
-          working: JSON.parse(JSON.stringify(skeletonData)),
-          anchorPos,
-          draggedState,
-          oppositeState,
-        };
-      }
-
-      if (Object.keys(layersData).length === 0) {
-        return false;
-      }
-      handled = true;
-
-      const regenerateOutline = (staticGlyph, skelData) => {
-        regenerateSkeletonContours(staticGlyph, skelData);
-      };
-
-      let accumulatedChanges = new ChangeCollector();
-
-      for await (const event of eventStream) {
-        const roundFunc = makeRoundFunc(event);
-        const currentLocalPoint = sceneController.localPoint(event);
-        const currentGlyphPoint = {
-          x: currentLocalPoint.x - positionedGlyph.x,
-          y: currentLocalPoint.y - positionedGlyph.y,
-        };
-        const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
-
-        const allChanges = [];
-
-        for (const [editLayerName, data] of Object.entries(layersData)) {
-          const {
-            layer,
-            working,
-            anchorPos,
-            draggedState,
-            oppositeState,
-          } = data;
-
-          const projectedDelta = delta.x * draggedState.direction.x + delta.y * draggedState.direction.y;
-          const targetLength = Math.max(0, draggedState.originalLength + projectedDelta);
-
-          const point =
-            working.contours[editableHandle.skeletonContourIndex].points[
-              editableHandle.skeletonPointIndex
-            ];
-
-          // Keep each handle angle fixed; equalize by final length from the same anchor.
-          this._applyEditableHandleEqualizedLength(
-            point,
-            draggedState,
-            targetLength,
-            anchorPos,
-            roundFunc
-          );
-          this._applyEditableHandleEqualizedLength(
-            point,
-            oppositeState,
-            targetLength,
-            anchorPos,
-            roundFunc
-          );
-
-          const staticGlyph = layer.glyph;
-          const pathChange = recordChanges(staticGlyph, (sg) => {
-            regenerateSkeletonContours(sg, working);
-          });
-          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-          const customDataChange = recordChanges(layer, (l) => {
-            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
-          });
-          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-        }
-
-        const combinedChange = new ChangeCollector().concat(...allChanges);
-        accumulatedChanges = accumulatedChanges.concat(combinedChange);
-        await sendIncrementalChange(combinedChange.change, true);
-      }
-
-      await sendIncrementalChange(accumulatedChanges.change);
-
-      return {
-        changes: accumulatedChanges,
-        undoLabel: "Equalize editable rib handles",
-        broadcast: true,
-      };
-    });
-
-    return handled;
   }
 
   /**

@@ -251,7 +251,7 @@ Updated `src-js/views-editor/src/edit-tools-pointer.js`:
 6. Evidence: PASS (contract fields + call-site wiring documented and implemented).
 
 ## Step R3 - Introduce executor registry and shared execution entrypoint
-Status: Pending
+Status: Completed (2026-02-25)
 
 Objective:
 1. Route execution through a central registry keyed by plan payload.
@@ -265,8 +265,36 @@ Done criteria:
 1. Drag+nudge execution selection is centralized.
 2. Pointer does not choose family behavior with semantic `if/else`.
 
+### R3 Output A - Executor registry and contract
+Implemented in `src-js/views-editor/src/edit-behavior.js`:
+1. Added central rib executor families constant: `RIB_EXECUTOR_FAMILIES`.
+2. Added `RIB_BEHAVIOR_EXECUTOR_REGISTRY` mapping family -> behavior factory.
+3. Added `createRibBehaviorExecutor(plan, context)` as single execution entrypoint:
+- consumes `plan.executorFamily`
+- applies runtime fallback to point-family when needed
+- returns `{ behavior, requestedFamily, resolvedFamily }`
+
+### R3 Output B - Shared invocation path in drag and nudge
+Updated `src-js/views-editor/src/edit-tools-pointer.js`:
+1. `_handleDragRibPoint(...)` now creates rib behaviors only through `createRibBehaviorExecutor(...)`.
+2. `_handleDragEditableGeneratedPoints(...)` now uses the same entrypoint.
+3. `_handleArrowKeysForRibPoints(...)` now uses the same entrypoint and derives interpolation availability from `resolvedFamily`.
+
+### R3 Output C - Pointer semantic reduction
+1. Removed pointer-local class selection branches (`createRibEditBehavior` vs `createEditableRibBehavior` vs `createInterpolatingRibBehavior`) from drag/nudge call-sites.
+2. Pointer now passes routing context (`isEditable`, `interpolationAxis`) and applies returned behavior uniformly.
+3. Executor family string usage in pointer is bound to central constant (`RIB_EXECUTOR_FAMILIES.POINT_INTERPOLATING`).
+
+### R3 Gate Check
+1. Intent Link: PASS (`resolveModifierPlan.executorFamily` now drives runtime behavior selection through registry).
+2. Coverage Link: PASS (affected BCM rows for rib drag/nudge and editable-generated-point drag are routed through registry).
+3. Drift Reduction: PASS (duplicated family-selection branches removed from three major call-sites).
+4. No New Pointer Semantics: PASS (pointer passes context only; family meaning moved to registry).
+5. Parity Proof: PARTIAL PASS (drag+nudge family selection unified for rib flows; equalize/path-handle families remain for R4).
+6. Evidence: PASS (files and routing changes documented).
+
 ## Step R4 - Migrate all BCM rows to shared drag+nudge execution
-Status: Pending
+Status: In progress (2026-02-25)
 
 Objective:
 1. Move every behavior-table-supported row from modality-local logic to shared executor family path.
@@ -279,6 +307,72 @@ Required outputs:
 Done criteria:
 1. No BCM row remains with pointer semantic ownership.
 2. All supported rows have one central executor-family mapping for both modalities.
+
+### R4 Progress - Completed Subtasks (detailed, code-level)
+1. Added centralized handle-family plan IDs in `src-js/views-editor/src/edit-behavior.js`:
+- `HANDLE_EXECUTOR_FAMILIES.EDITABLE_GENERATED`
+- `HANDLE_EXECUTOR_FAMILIES.EDITABLE_GENERATED_EQUALIZE`
+- `HANDLE_EXECUTOR_FAMILIES.REGULAR_EQUALIZE`
+- `HANDLE_EXECUTOR_FAMILIES.SKELETON_EQUALIZE`
+2. Added central resolver for editable generated handles in `src-js/views-editor/src/edit-behavior.js`:
+- `resolveEditableGeneratedHandlePlan(modality, flagsOrIntent)`
+- normalizes `x` into semantic intent (`default` / `equalize`)
+- returns explicit routing payload (`supported`, `intent`, `executorFamily`, `fallbackPolicy`)
+3. Added central resolver for regular/skeleton X-equalize routing in `src-js/views-editor/src/edit-behavior.js`:
+- `resolveHandleEqualizePlan(objectKind, modality, flagsOrIntent)`
+- exposes explicit support state instead of pointer-local boolean checks
+- maps family by kind (`regular` -> `regular-handle-equalize`, `skeleton` -> `skeleton-handle-equalize`)
+4. Migrated pointer X-entry routing to central plan checks in `src-js/views-editor/src/edit-tools-pointer.js`:
+- skeleton nudge X branch now gated by `resolveHandleEqualizePlan("skeleton", "nudge", ...)`
+- regular nudge X branch now gated by `resolveHandleEqualizePlan("regular", "nudge", ...)`
+- regular drag X branch now gated by `resolveHandleEqualizePlan("regular", "drag", ...)`
+- skeleton drag X branch now gated by `resolveHandleEqualizePlan("skeleton", "drag", ...)`
+- skeleton drag-loop equalize application now also re-checks central plan
+5. Unified editable generated handle runtime path in `src-js/views-editor/src/edit-tools-pointer.js`:
+- removed dedicated X-only drag path by routing X+drag through `_handleDragEditableGeneratedHandles(...)`
+- both drag and nudge now use shared helpers:
+  - `_buildEditableHandleLayersData(...)`
+  - `_buildEditableHandleEqualizeState(...)`
+  - `_applyEditableHandleBehaviorEntry(...)`
+  - `_collectEditableHandleLayerChanges(...)`
+- both modalities compute `equalizeEnabled` from `resolveEditableGeneratedHandlePlan(...)` and apply the same per-entry runtime
+6. Kept rib family execution on shared registry path (from R3) while integrating R4 handle routing:
+- rib drag/nudge execution still uses `createRibBehaviorExecutor(...)`
+- pointer no longer performs direct rib class selection in migrated call-sites
+7. Syntax safety check executed for touched runtime files:
+- `node --check src-js/views-editor/src/edit-behavior.js`
+- `node --check src-js/views-editor/src/edit-tools-pointer.js`
+- result: PASS
+
+### R4 BCM Impact (current state)
+| BCM ID | Current ownership after R4 progress | State |
+| --- | --- | --- |
+| BCM-EDH-DRAG-DEFAULT | shared runtime path in pointer helpers + central plan family | migrated |
+| BCM-EDH-DRAG-EQUALIZE | same runtime as default drag, X semantic from central plan | migrated |
+| BCM-EDH-NUDGE-DEFAULT | shared runtime path in pointer helpers + central plan family | migrated |
+| BCM-EDH-NUDGE-EQUALIZE | same runtime as default nudge, X semantic from central plan | migrated |
+| BCM-REG-DRAG (X branch) | central plan routing added, legacy equalize executor path still separate | partial |
+| BCM-REG-NUDGE (X branch) | central plan routing added, legacy equalize executor path still separate | partial |
+| BCM-SKL-DRAG (X branch) | central plan routing added, legacy equalize executor path still separate | partial |
+| BCM-SKL-NUDGE (X branch) | central plan routing added, legacy equalize executor path still separate | partial |
+
+### R4 Progress - Remaining Subtasks (explicit)
+1. Replace regular/skeleton legacy equalize handlers with centralized executor path so drag+nudge share one execution implementation:
+- `_handleArrowKeysForEqualizeSkeletonHandles(...)`
+- `_handleArrowKeysForEqualizePathHandles(...)`
+- `_handleEqualizeHandlesDrag(...)`
+- `_handleEqualizeHandlesDragForPath(...)`
+2. Remove inline skeleton drag-loop equalize geometry branch and route it through the same executor family used by nudge.
+3. Rebuild BCM ownership column after executor migration and confirm `pointer semantic ownership = none` for all supported rows.
+4. Run full manual parity matrix from Section 7 and update verification states from `untested` to `pass/fail`.
+
+### R4 Gate Snapshot (not closable yet)
+1. Intent Link: PASS (new handle plan resolvers are central).
+2. Coverage Link: PASS (BCM rows above are explicitly tracked).
+3. Drift Reduction: PARTIAL PASS (entry routing centralized; executor math for regular/skeleton equalize still split).
+4. No New Pointer Semantics: PASS (new code consumes plan outputs, does not define new modifier meaning).
+5. Parity Proof: PARTIAL PASS (editable generated handles unified; regular/skeleton equalize still pending full executor unification).
+6. Evidence: PASS (functions and affected branches listed above).
 
 ## Step R5 - Pointer semantic purge and simplification
 Status: Pending
