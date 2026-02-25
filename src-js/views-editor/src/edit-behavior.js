@@ -2106,6 +2106,78 @@ function runRibStrategy(context, delta, strategy, options = {}) {
   throw new Error(`Unknown rib strategy: ${strategy}`);
 }
 
+const RIB_ROLLBACK_MODE = Object.freeze({
+  BASIC: "basic",
+  EDITABLE: "editable",
+  INTERPOLATE: "interpolate",
+});
+
+function getRibRollbackHandleOffsets(context) {
+  // Interpolation runtime stores normalized offsets as an object,
+  // while editable rib behavior keeps legacy scalar fields.
+  if (context.originalHandleOffsets) {
+    return context.originalHandleOffsets;
+  }
+  return {
+    inX: context.originalHandleInOffsetX,
+    inY: context.originalHandleInOffsetY,
+    outX: context.originalHandleOutOffsetX,
+    outY: context.originalHandleOutOffsetY,
+  };
+}
+
+function buildRibRollbackPayload(context, mode, extras = {}) {
+  const payload = {
+    contourIndex: context.contourIndex,
+    pointIndex: context.pointIndex,
+    side: context.side,
+    halfWidth: Math.round(context.originalHalfWidth),
+  };
+
+  if (mode === RIB_ROLLBACK_MODE.BASIC) {
+    return { ...payload, ...extras };
+  }
+
+  payload.nudge = Math.round(context.originalNudge);
+
+  if (mode === RIB_ROLLBACK_MODE.EDITABLE) {
+    // Keep payload parity: include 2D handle offsets only when they were present before drag.
+    if (context.hasHandleOffsets) {
+      const offsets = getRibRollbackHandleOffsets(context);
+      payload.handleInOffsetX = Math.round(offsets.inX);
+      payload.handleInOffsetY = Math.round(offsets.inY);
+      payload.handleOutOffsetX = Math.round(offsets.outX);
+      payload.handleOutOffsetY = Math.round(offsets.outY);
+      payload.hasHandleOffsets = true;
+    }
+    return { ...payload, ...extras };
+  }
+
+  if (mode === RIB_ROLLBACK_MODE.INTERPOLATE) {
+    // Interpolation rollback always restores full 2D handle offset state.
+    const offsets = getRibRollbackHandleOffsets(context);
+    payload.handleInOffsetX = Math.round(offsets.inX);
+    payload.handleInOffsetY = Math.round(offsets.inY);
+    payload.handleOutOffsetX = Math.round(offsets.outX);
+    payload.handleOutOffsetY = Math.round(offsets.outY);
+    payload.isInterpolation = true;
+    return { ...payload, ...extras };
+  }
+
+  throw new Error(`Unknown rib rollback mode: ${mode}`);
+}
+
+function buildHandleRollbackPayload(context, extras = {}) {
+  return {
+    contourIndex: context.contourIndex,
+    pointIndex: context.pointIndex,
+    side: context.side,
+    handleType: context.handleType,
+    offset: Math.round(context.originalOffset),
+    ...extras,
+  };
+}
+
 /**
  * RibEditBehavior - Handles dragging of rib points (width control points).
  * Constrains movement to the normal direction and updates point width.
@@ -2181,12 +2253,7 @@ export class RibEditBehavior {
    * Get rollback data to restore original width.
    */
   getRollback() {
-    return {
-      contourIndex: this.contourIndex,
-      pointIndex: this.pointIndex,
-      side: this.side,
-      halfWidth: Math.round(this.originalHalfWidth),
-    };
+    return buildRibRollbackPayload(this, RIB_ROLLBACK_MODE.BASIC);
   }
 }
 
@@ -2312,23 +2379,7 @@ export class EditableRibBehavior {
    * Get rollback data to restore original width, nudge, and handle offsets.
    */
   getRollback() {
-    const result = {
-      contourIndex: this.contourIndex,
-      pointIndex: this.pointIndex,
-      side: this.side,
-      halfWidth: Math.round(this.originalHalfWidth),
-      nudge: Math.round(this.originalNudge),
-    };
-
-    if (this.hasHandleOffsets) {
-      result.handleInOffsetX = Math.round(this.originalHandleInOffsetX);
-      result.handleInOffsetY = Math.round(this.originalHandleInOffsetY);
-      result.handleOutOffsetX = Math.round(this.originalHandleOutOffsetX);
-      result.handleOutOffsetY = Math.round(this.originalHandleOutOffsetY);
-      result.hasHandleOffsets = true;
-    }
-
-    return result;
+    return buildRibRollbackPayload(this, RIB_ROLLBACK_MODE.EDITABLE);
   }
 
   /**
@@ -2524,18 +2575,7 @@ export class InterpolatingRibBehavior {
    * Get rollback data to restore original nudge and 2D handle offsets.
    */
   getRollback() {
-    return {
-      contourIndex: this.contourIndex,
-      pointIndex: this.pointIndex,
-      side: this.side,
-      halfWidth: Math.round(this.originalHalfWidth),
-      nudge: Math.round(this.originalNudge),
-      handleInOffsetX: Math.round(this.originalHandleInOffsetX),
-      handleInOffsetY: Math.round(this.originalHandleInOffsetY),
-      handleOutOffsetX: Math.round(this.originalHandleOutOffsetX),
-      handleOutOffsetY: Math.round(this.originalHandleOutOffsetY),
-      isInterpolation: true,
-    };
+    return buildRibRollbackPayload(this, RIB_ROLLBACK_MODE.INTERPOLATE);
   }
 }
 
@@ -2635,13 +2675,7 @@ export class EditableHandleBehavior {
    * Get rollback data to restore original offset.
    */
   getRollback() {
-    return {
-      contourIndex: this.contourIndex,
-      pointIndex: this.pointIndex,
-      side: this.side,
-      handleType: this.handleType,
-      offset: Math.round(this.originalOffset),
-    };
+    return buildHandleRollbackPayload(this);
   }
 }
 
