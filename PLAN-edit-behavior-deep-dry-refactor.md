@@ -1,35 +1,53 @@
-# Deep DRY Refactor for `edit-behavior.js` (No UX Change)
+# Pointer/Edit Behavior Refactor Plan
 
-## Summary
-Goal: reduce duplicated code in the merged `edit-behavior.js` (regular + skeleton/rib) while preserving current UX and public contracts.
+## 0) Intent (explicit, non-negotiable)
+This refactor exists to enforce one architecture rule:
 
-Approach: small incremental steps, each manually verifiable and safe to roll back.
+- Behavior meaning is defined once.
+- Drag and nudge consume the same meaning.
+- Changing behavior must require editing one central model, not chasing duplicated `if/else` branches.
 
-## Scope and Non-Scope
+If a change does not move us toward this rule, it is not in scope, even if it "works."
 
-### In Scope
+## 1) Problem Statement
+Current behavior logic is split across:
+
 - `src-js/views-editor/src/edit-behavior.js`
-- Minimal import updates in consumers only if required by internal moves
-- Minimal call-site wiring in `src-js/views-editor/src/edit-tools-pointer.js` only to reuse shared modifier-intent resolution (no routing redesign)
-- Internal refactor only:
-  - rib/skeleton helpers
-  - offset key resolvers
-  - shared projection math
-  - strategy-based rib delta handling
-  - unified rollback builders
+- `src-js/views-editor/src/edit-tools-pointer.js`
 
-### Out of Scope
-- Any UX or behavior changes in drag/arrow/modifier flows
+This creates drift risk:
+
+- Modifier interpretation duplicated by modality (`drag` vs `nudge`).
+- Object-kind semantics (`regular` / `skeleton` / `rib`) not always centralized.
+- Rollback/build logic repeated across classes.
+
+Result: parity bugs, high cognitive load, and expensive behavior changes.
+
+## 2) Refactor Objective
+Move from "distributed behavior branching" to an "intent-driven architecture":
+
+1. Resolve modifier intent once per object kind.
+2. Resolve execution plan from that intent.
+3. Execute plan in each modality without redefining semantics.
+
+## 3) Scope and Non-Scope
+
+### In scope
+- `src-js/views-editor/src/edit-behavior.js`
+- Minimal call-site rewiring in `src-js/views-editor/src/edit-tools-pointer.js`
+- Internal helper extraction and strategy routing
+- Rollback payload unification
+- Explicit intent/parity contract documentation
+
+### Out of scope
+- Public API breakage
 - Skeleton data schema changes
-- Pointer routing redesign
-- New automated tests
+- Routing redesign of pointer tool ownership
+- New automated tests in this refactor track
 
-## Architectural Invariant (Added)
-- For a given `object kind`, modifier semantics are resolved once and reused across input modalities (`drag`, `nudge`).
-- Input modality must not redefine modifier meaning.
-- Differences between `regular`, `skeleton`, and `rib` are allowed, but they must live in shared behavior tables/resolvers, not duplicated per-handler condition trees.
+## 4) Hard Constraints
 
-## Public APIs / Interfaces (Must Stay Stable)
+1. Public exports/signatures remain stable:
 - `EditBehaviorFactory`
 - `SkeletonEditBehavior`
 - `RibEditBehavior`
@@ -45,335 +63,221 @@ Approach: small incremental steps, each manually verifiable and safe to roll bac
 - `resolveBehaviorPresetName(...)`
 - `getBehaviorPreset(...)`
 
-## Step 1 — Introduce internal rib context helpers
-### Problem
-`RibEditBehavior`, `EditableRibBehavior`, and `InterpolatingRibBehavior` duplicate the same context extraction.
+2. No hidden modality-specific reinterpretation of modifiers.
+3. Any unsupported modifier combination must be explicit in a central table/resolver, never implicit in call-site branches.
 
-### Step focus
-Create shared non-behavioral helpers for contour/point base access.
+## 5) Architecture Contract
 
-### Solution
-Add private helpers:
-- `getContourPoint(skeletonData, contourIndex, pointIndex)`
-- `getContourDefaultWidth(contour)`
-- `getOriginalHalfWidth(point, contourDefaultWidth, side)`
-- `getOriginalNudge(point, side)`
-- `buildTangentFromNormal(normal)`
+### 5.1 Core terms
+- `object kind`: `regular`, `skeleton`, `rib`
+- `modality`: `drag`, `nudge`
+- `intent`: normalized semantic mode resolved from modifiers
+- `plan`: executable behavior decisions derived from intent and object context
 
-### Mock code
-```js
-function getOriginalHalfWidth(point, contourDefaultWidth, side) {
-  if (side === "left") {
-    return point.leftWidth ?? (point.width !== undefined ? point.width / 2 : contourDefaultWidth / 2);
-  }
-  return point.rightWidth ?? (point.width !== undefined ? point.width / 2 : contourDefaultWidth / 2);
-}
-```
+### 5.2 Mandatory flow
+All pointer behavior must follow:
 
-### Manual testing
-- No functional change expected.
-- Quick smoke: rib drag, skeleton drag, regular drag behave unchanged.
+`raw flags -> resolve intent -> resolve plan -> execute`
 
-### Corner cases
-- `point.width` exists, `leftWidth/rightWidth` absent
-- `contour.defaultWidth` absent
+`pointer` call sites may pass context, but may not redefine intent semantics.
 
-## Step 2 — Centralize offset key resolution
-### Problem
-String key composition (`left/right + in/out + X/Y + 1D`) is duplicated and error-prone.
+### 5.3 "No branch drift" rule
+In pointer handlers, this pattern is forbidden for behavior semantics:
 
-### Step focus
-Avoid key drift by using one resolver layer.
+- `if (alt) ... else if (z) ... else ...`
 
-### Solution
-Add:
-- `getHandleOffsetKeys(side, handleType)` for `EditableHandleBehavior`
-- `getRibHandleOffsetKeys(side)` for in/out groups
-- `getRibNudgeKey(side)`
+unless the branch calls a shared resolver/table and does not define meaning itself.
 
-### Mock code
-```js
-function getHandleOffsetKeys(side, handleType) {
-  const prefix = side === "left" ? "left" : "right";
-  const stem = handleType === "in" ? "HandleInOffset" : "HandleOutOffset";
-  return {
-    oneD: `${prefix}${stem}`,
-    x: `${prefix}${stem}X`,
-    y: `${prefix}${stem}Y`,
-  };
-}
-```
+## 6) Single Source of Truth Requirements
 
-### Manual testing
-- Editable handle drag (`in/out`, `left/right`) unchanged.
-- No `undefined` key access errors.
+### 6.1 Intent source
+`resolveModifierIntent(objectKind, flags)` in `edit-behavior.js` is the semantic gateway.
 
-### Corner cases
-- Mixed 1D-only and 2D-only points
+Requirements:
+- deterministic precedence per object kind
+- parity across `drag`/`nudge`
+- explicit handling of unsupported combinations
 
-## Step 3 — Unify delta projection math
-### Problem
-Normal/tangent projections and half-width clamp logic are repeated.
+### 6.2 Plan source
+Behavior execution choices must be represented centrally (table/resolver), including:
+- strategy selection
+- constrain mode
+- interpolation/equalize policy
+- rollback mode contract
 
-### Step focus
-Use one internal math helper set.
+### 6.3 Execution source
+Behavior classes/runners apply plan data; pointer handlers should not encode business meaning.
 
-### Solution
-Add:
-- `projectDelta(delta, axis)`
-- `projectToNormalSigned(delta, normal, side)`
-- `projectToTangent(delta, tangent)`
-- `clampHalfWidth(value, min = 0)`
+## 7) Step Plan (Detailed)
 
-### Mock code
-```js
-function projectToNormalSigned(delta, normal, side) {
-  const sign = side === "left" ? 1 : -1;
-  return sign * (delta.x * normal.x + delta.y * normal.y);
-}
-```
+## Step 1 - Internal rib context helpers
+Status: Completed
 
-### Manual testing
-- Rib width drag remains identical (left/right sign sanity).
-- Shift/non-Shift in editable rib unchanged.
+### Delivered
+- `getContourPoint(...)`
+- `getContourDefaultWidth(...)`
+- `getOriginalHalfWidth(...)`
+- `getOriginalNudge(...)`
+- `buildTangentFromNormal(...)`
 
-### Corner cases
-- near-zero normal/tangent
-- collapse to zero width
+### Acceptance
+- No behavior deltas for rib/skeleton/regular drag baseline
 
-## Step 4 — Extract handle offset adapter (1D/2D bridge)
-### Problem
-1D↔2D conversion and handle-offset presence logic are duplicated and scattered.
+## Step 2 - Offset key resolver centralization
+Status: Completed
 
-### Step focus
-One adapter for normalized offset runtime state.
+### Delivered
+- `getHandleOffsetKeys(...)`
+- `getRibHandleOffsetKeys(...)`
+- `getRibNudgeKey(...)`
 
-### Solution
-Add:
-- `readNormalizedHandleOffsets(point, side, dirs, tangent)`
-- `buildCompensatedOffsets(baseOffsets, tangent, deltaNudge, hasIncoming, hasOutgoing)`
+### Acceptance
+- No key drift
+- No undefined-key runtime errors in editable handle flows
 
-### Mock code
-```js
-function readNormalizedHandleOffsets(point, side, dirs, tangent) {
-  // 2D if present; else convert 1D via direction; else zero
-  return { inX, inY, outX, outY, hasAny, hasIncoming, hasOutgoing };
-}
-```
+## Step 3 - Shared projection math
+Status: Completed
 
-### Manual testing
-- Alt interpolation rib drag keeps handles visually stationary.
-- Rollback payload equals pre-refactor behavior.
+### Delivered
+- `projectDelta(...)`
+- `projectToNormalSigned(...)`
+- `projectToTangent(...)`
+- `clampHalfWidth(...)`
 
-### Corner cases
-- only incoming handle
-- only outgoing handle
-- no handles
+### Acceptance
+- Width sign/parity preserved
+- Clamp behavior unchanged
 
-## Step 5 — Introduce internal rib strategy runner
-### Problem
-`RibEditBehavior`, `EditableRibBehavior`, and `InterpolatingRibBehavior` duplicate state plumbing; only delta strategy differs.
+## Step 4 - Handle offset adapter (1D/2D bridge)
+Status: Completed
 
-### Step focus
-Create one strategy-driven internal runtime.
+### Delivered
+- `readNormalizedHandleOffsets(...)`
+- `buildCompensatedOffsets(...)`
+- Presence flags sourced from adapter path
 
-### Solution
-Introduce:
+### Acceptance
+- Alt interpolation keeps handles visually stable
+- Rollback parity preserved
+
+## Step 5 - Rib strategy runtime
+Status: Completed
+
+### Delivered
 - `createRibRuntimeContext(...)`
-- `runRibStrategy(context, delta, strategy, options)`
-- Strategies:
-  - `RIB_STRATEGY_BASIC_WIDTH`
-  - `RIB_STRATEGY_EDITABLE_WIDTH_NUDGE`
-  - `RIB_STRATEGY_INTERPOLATE`
+- `runRibStrategy(...)`
+- Strategy constants for basic/editable/interpolate
 
-Keep public classes and signatures unchanged; delegate internals to runner.
+### Acceptance
+- Rib drag matrix parity (basic/editable/interpolate/tangent)
 
-### Mock code
-```js
-class EditableRibBehavior {
-  applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
-    return runRibStrategy(this._ctx, delta, RIB_STRATEGY_EDITABLE_WIDTH_NUDGE, {
-      constrainMode,
-      roundFunc,
-    });
-  }
-}
-```
+## Step 5.5 - Intent parity architecture (re-opened until fully done)
+Status: In progress (partial wiring done, architectural completion pending)
 
-### Manual testing
-- Rib matrix:
-  - basic rib drag
-  - editable rib drag
-  - Alt interpolation drag
-  - Z tangent mode
-  - arrow nudge
-- Undo/redo in each mode.
+### Required end-state
+- Shared intent resolver is not enough by itself.
+- Shared execution plan resolution must also be centralized.
+- Pointer drag/nudge must not contain semantic re-interpretation branches.
 
-### Corner cases
-- fast modifier switching during drag
-- single-sided behavior
+### Required tasks
+1. Keep `resolveModifierIntent(objectKind, flags)` as the only intent gateway.
+2. Add/complete centralized intent-to-plan mapping for object kinds and modalities.
+3. Replace remaining local modality branches that define semantics.
+4. Keep selection/routing ownership unchanged in pointer.
+5. Document explicit support matrix per object kind (including unsupported combos).
 
-## Step 5.5 — Add shared modifier-intent resolver and reuse it in drag+nudge call sites
-### Problem
-Modifier meaning for non-regular objects drifts when drag and arrow paths resolve modes independently.
+### Definition of done
+Step 5.5 is done only when:
+- same modifiers on same object kind resolve to the same intent in drag and nudge
+- pointer call sites do not redefine semantic meaning
+- changing a modifier mapping requires editing one central mapping location
 
-### Step focus
-Keep current UX, but force one source of truth for modifier intent per object kind.
+## Step 6 - Rollback payload builders
+Status: Completed
 
-### Solution
-Add shared intent resolver API (in `edit-behavior.js`) and route existing call sites through it.
-- Add `resolveModifierIntent(objectKind, flags)` with explicit precedence rules.
-- Keep output compatible with existing preset/mode names (`default`, `constrain`, `alternate`, `alternate-constrain`, rib-specific runtime intents).
-- Update existing drag+nudge call sites in pointer to call the resolver instead of local `if/else` trees.
-- Do not change routing order or selection ownership in pointer.
+### Delivered
+- `buildRibRollbackPayload(...)`
+- `buildHandleRollbackPayload(...)`
+- Rib/editable/interpolation/handle `getRollback()` routing through builders
 
-### Mock code
-```js
-// edit-behavior.js
-export function resolveModifierIntent(objectKind, flags) {
-  if (objectKind === "rib") {
-    if (flags.alt) return "interpolate";
-    if (flags.z) return "tangent";
-    return "default";
-  }
-  return resolveBehaviorPresetName(flags);
-}
-```
+### Acceptance
+- Undo/redo parity for rib/editable/interpolate/handle flows
 
-```js
-// edit-tools-pointer.js
-const ribIntent = resolveModifierIntent("rib", {
-  alt: event.altKey,
-  z: this.tangentRibMode,
-  x: this.equalizeMode,
-});
-```
+## Step 7 - Skeleton DRY pass
+Status: Completed
 
-### Manual testing
-- For each object kind (`regular`, `skeleton`, `rib`), compare drag vs arrow with the same modifier state.
-- Verify no behavior delta from baseline for regular points.
-- Verify rib/skeleton no longer depend on duplicated local mode branches.
-
-### Corner cases
-- `Alt+Z` precedence is deterministic and documented.
-- `X` remains no-op for object kinds where it is intentionally unsupported.
-- Modifier press/release mid-drag keeps current behavior contracts.
-
-## Step 6 — Unify rollback builders
-### Problem
-Rollback payloads are manually repeated across classes.
-
-### Step focus
-Central rollback payload builders.
-
-### Solution
-Add:
-- `buildRibRollbackPayload(context, mode, extras?)`
-- Optional `buildHandleRollbackPayload(...)` for editable handles
-
-Replace manual `getRollback()` assembly with builders.
-
-### Mock code
-```js
-function buildRibRollbackPayload(ctx, mode) {
-  // mode controls nudge / 2D offsets / interpolation flag inclusion
-}
-```
-
-### Manual testing
-- Undo/redo parity for every rib/editable/interpolation path.
-- 2D offset rollback correctness.
-
-### Corner cases
-- `hasHandleOffsets = false`
-- interpolation rollback includes `isInterpolation: true`
-
-## Step 7 — Skeleton behavior DRY pass
-### Problem
-`SkeletonEditBehavior` still has internal repetition that can be reduced without changing rule semantics.
-
-### Step focus
-Refactor internals of edit-entry build and partitioning only.
-
-### Solution
-Extract helpers:
+### Delivered
 - `buildMatchedEditEntry(...)`
 - `partitionTransformVsConstrain(...)`
 - `collectParticipatingIndices(...)`
 
-Do not modify `actionFactories` or rule semantics.
+### Acceptance
+- No rule semantic change
+- Mixed selection parity retained
 
-### Mock code
-```js
-function buildMatchedEditEntry(points, match, neighborIndices, actionFactories) {
-  return normalizedEntry;
-}
-```
+## Step 8 - Final consolidation and net reduction
+Status: Pending
 
-### Manual testing
-- Skeleton drag with `Shift`, `Alt`, mixed selection
-- X-equalize and Z-related flows unchanged
+### Required tasks
+1. Remove dead helpers and transitional wrappers.
+2. Collapse remaining duplicated pointer-side semantic branches into centralized mapping.
+3. Ensure net complexity reduction (fewer semantic branch points in pointer).
+4. Keep comments only for non-obvious logic.
 
-### Corner cases
-- open contour endpoints
-- closed contour neighbor wrap
+### Acceptance
+- No stale references
+- Stable bundle/runtime
+- Reduced semantic duplication hotspots
 
-## Step 8 — Final cleanup and parity pass
-### Problem
-After DRY refactor, dead helpers/noise may remain.
+## 8) Behavior Support Matrix Policy
+Support must be explicit, centrally documented, and code-backed:
 
-### Step focus
-Cleanup only, no functional change.
+- If a modifier combination is unsupported for an object kind, this must be represented in one table/resolver.
+- Silent "no-op by omission" in call-site logic is not acceptable.
+- Adding new behavior mode must require central map update, not modality edits.
 
-### Solution
-- Remove unused helpers/vars
-- Keep concise comments only where logic is non-obvious
-- Ensure no stale references to removed structures
+## 9) Manual Verification Matrix (Mandatory)
 
-### Manual testing
-- Full regression smoke (matrix below)
-
-## Regression test matrix (manual, mandatory)
 1. Regular points
-- drag default / Shift / Alt / Shift+Alt
-- arrows default / Shift / Alt / Shift+Alt
+- drag: default / Shift / Alt / Shift+Alt
+- nudge: default / Shift / Alt / Shift+Alt
 - undo/redo
 
 2. Skeleton points
-- drag default / Shift / Alt / Shift+Alt
-- arrows default / Shift / Alt / Shift+Alt
+- drag: default / Shift / Alt / Shift+Alt
+- nudge: default / Shift / Alt / Shift+Alt
 - mixed selection with regular
 - undo/redo
 
 3. Rib points
-- normal rib drag
-- editable rib drag (`linked/editable` variants)
-- arrow movement (same intent mapping as drag for supported modifiers)
-- `Z` tangent mode
-
-4. Interpolation
-- Alt-drag rib interpolation
-- handle visual stability
-- rollback integrity
-
-5. Editable generated handles
-- drag + arrows
-- `left/right`, `in/out`
+- drag: default / editable / interpolation / tangent
+- nudge: same intent mapping as drag for supported modes
+- single-sided and linked variants
 - undo/redo
 
-6. Tunni / Q
-- no regression in hover/drag/key lifecycle
-- Q/Alt+Q on mixed glyph remains baseline
+4. Editable generated handles
+- drag + nudge
+- left/right, in/out
+- detached and non-detached
+- undo/redo
 
-7. Panel transformations
-- skeleton-related transform flows remain stable
+5. Cross-modality parity
+- for each object kind, same modifiers => same intent => same semantic mode
+
+6. Safety matrix
+- modifier press/release during drag does not violate current contract
 - no runtime import errors
 
-8. Cross-modality intent parity
-- For each object kind, modifier intent is resolved once and used consistently in drag and nudge paths.
+## 10) Governance Rules For Future Changes
 
-## Assumptions and defaults
-- No UX/behavior changes.
-- Public exports and signatures remain stable.
-- Work is delivered in small commits with manual test after each step.
-- No automated tests added in this refactor.
+1. Any new behavior mode must be added through intent/plan central mapping first.
+2. Any intentional UX delta must be documented in this file under a new "Intent Delta" entry before implementation.
+3. If parity bug appears, fix resolver/plan tables first, not call-site branches.
+
+## 11) Working Agreement
+When discussing "is this in scope?":
+
+- In scope if it improves central intent/plan architecture and reduces drift.
+- Out of scope if it adds modality-specific semantic branches.
+
+This file is the source of truth for that decision.

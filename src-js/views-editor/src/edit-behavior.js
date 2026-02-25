@@ -1452,6 +1452,50 @@ export function getBehaviorPreset(objectKind = "regular", flagsOrName = "default
   return table[presetName] || table.default || BEHAVIOR_TABLES.regular.default;
 }
 
+function buildMatchedEditEntry(points, match, neighborIndices) {
+  // Direction controls neighbor ordering for the same logical rule.
+  const [prevPrevPrev, prevPrev, prev, thePoint, next, nextNext] =
+    match.direction > 0 ? neighborIndices : reversed(neighborIndices);
+
+  const actionFactory = actionFactories[match.action];
+  if (!actionFactory) {
+    console.warn(`Unknown action: ${match.action}`);
+    return null;
+  }
+
+  const actionFunc = actionFactory(
+    points[prevPrevPrev],
+    points[prevPrev],
+    points[prev],
+    points[thePoint],
+    points[next],
+    points[nextNext]
+  );
+
+  return {
+    pointIndex: thePoint,
+    neighborIndices: { prevPrevPrev, prevPrev, prev, thePoint, next, nextNext },
+    constrain: match.constrain,
+    actionFunc,
+  };
+}
+
+function partitionTransformVsConstrain(editEntry, transformEntries, constrainEntries) {
+  if (!editEntry.constrain) {
+    transformEntries.push(editEntry);
+  } else {
+    constrainEntries.push(editEntry);
+  }
+}
+
+function collectParticipatingIndices(participatingPointIndices, indices) {
+  if (Array.isArray(indices)) {
+    participatingPointIndices.push(...indices);
+    return;
+  }
+  participatingPointIndices.push(indices);
+}
+
 
 /**
  * Skeleton and rib behavior adapters.
@@ -1515,40 +1559,13 @@ export class SkeletonEditBehavior {
 
       if (!match) continue;
 
-      // Use direction to get correct neighbor order (same as edit-behavior.js)
-      const [prevPrevPrev, prevPrev, prev, thePoint, next, nextNext, nextNextNext] =
-        match.direction > 0 ? neighborIndices : reversed(neighborIndices);
-
-      const actionFactory = actionFactories[match.action];
-      if (!actionFactory) {
-        console.warn(`Unknown action: ${match.action}`);
+      const editEntry = buildMatchedEditEntry(this.points, match, neighborIndices);
+      if (!editEntry) {
         continue;
       }
 
-      participatingPointIndices.push(thePoint);
-
-      // Create action function with original points
-      const actionFunc = actionFactory(
-        this.points[prevPrevPrev],
-        this.points[prevPrev],
-        this.points[prev],
-        this.points[thePoint],
-        this.points[next],
-        this.points[nextNext]
-      );
-
-      const editEntry = {
-        pointIndex: thePoint,
-        neighborIndices: { prevPrevPrev, prevPrev, prev, thePoint, next, nextNext },
-        constrain: match.constrain,
-        actionFunc,
-      };
-
-      if (!match.constrain) {
-        editFuncsTransform.push(editEntry);
-      } else {
-        editFuncsConstrain.push(editEntry);
-      }
+      collectParticipatingIndices(participatingPointIndices, editEntry.pointIndex);
+      partitionTransformVsConstrain(editEntry, editFuncsTransform, editFuncsConstrain);
     }
 
     // Add segment-based additional edit funcs (for interpolation)
@@ -1587,7 +1604,7 @@ export class SkeletonEditBehavior {
       if (!conditionFunc(segment)) continue;
       const [editFuncs, indices] = segmentFunc(segment);
       additionalFuncs.push(...editFuncs);
-      participatingPointIndices.push(...indices);
+      collectParticipatingIndices(participatingPointIndices, indices);
     }
 
     return additionalFuncs;
