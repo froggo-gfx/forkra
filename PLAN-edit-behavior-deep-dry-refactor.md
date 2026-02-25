@@ -206,7 +206,7 @@ Status: Completed
 - Public rib classes delegate to runner for apply semantics.
 
 ## Step 5.5 - Intent parity architecture
-Status: In progress
+Status: Completed
 
 ### Mandatory objective
 Make intent and plan central, and make pointer call sites purely executors.

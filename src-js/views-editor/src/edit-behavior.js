@@ -1452,6 +1452,37 @@ const RIB_INTENT = Object.freeze({
   INTERPOLATE: "interpolate",
 });
 
+const REGULAR_LIKE_PRESET_MAP = Object.freeze({
+  // Drag keeps full preset surface for regular/skeleton points.
+  drag: Object.freeze({
+    default: "default",
+    constrain: "constrain",
+    alternate: "alternate",
+    "alternate-constrain": "alternate-constrain",
+  }),
+  // Nudge keeps legacy semantics: Shift only changes step size in pointer,
+  // so "constrain" intents are explicitly collapsed to non-constrain presets.
+  nudge: Object.freeze({
+    default: "default",
+    constrain: "default",
+    alternate: "alternate",
+    "alternate-constrain": "alternate",
+  }),
+});
+
+function resolveRegularLikeModifierPlan(objectKind, modality, intent) {
+  const modalityMap = REGULAR_LIKE_PRESET_MAP[modality] || REGULAR_LIKE_PRESET_MAP.drag;
+  const explicitPresetName = modalityMap[intent];
+  const presetName = explicitPresetName || modalityMap.default;
+  return {
+    objectKind,
+    modality,
+    intent,
+    presetName,
+    isExplicitIntent: explicitPresetName !== undefined,
+  };
+}
+
 function resolveRibModifierPlan(modality, intent, context = {}) {
   const zActive = !!context.zActive;
   const hasInterpolationBehavior = context.hasInterpolationBehavior !== false;
@@ -1498,6 +1529,10 @@ export function resolveModifierPlan(
 
   if (objectKind === "rib") {
     return resolveRibModifierPlan(modality, intent, context);
+  }
+
+  if (objectKind === "regular" || objectKind === "skeleton") {
+    return resolveRegularLikeModifierPlan(objectKind, modality, intent);
   }
 
   return {
