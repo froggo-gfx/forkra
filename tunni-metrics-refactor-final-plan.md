@@ -155,19 +155,26 @@ import {
 
 ## ОСТАЛОСЬ ВЫПОЛНИТЬ
 
-## Шаг 06. Перевести `distance-angle.js` на `measure-core.js`
-**Общая проблема:** файл одновременно считает и рисует, плюс Tunni-дубли.  
-**Аспект шага:** оставить в файле только visualization/format слой.  
-**Решение:** формулы импортировать из `measure-core.js`, удалить временные дубли (`calculateTunniPointz` и т.п.).
+## Шаг 06. Убрать `distance-angle.js`: математика в `measure-core`, рендер в `visualization-layer-definitions.js`
+**Общая проблема:** сейчас `distance-angle.js` смешивает вычисления и отрисовку; это тот же анти-паттерн, который мы уже убираем в Tunni.  
+**Аспект шага:** объединить `Q-measure` и distance/manhattan callouts на общей математике, а визуализацию держать только в визуализационном слое editor-а.  
+**Решение:** перенести draw-часть из `@fontra/core/distance-angle.js` в `src-js/views-editor/src/visualization-layer-definitions.js` (или его локальный measure-блок), оставить в core только pure math (`measure-core.js` + `tunni-core.js`), удалить прямые зависимости от `distance-angle.js`.
 
 **Мокап кода:**
 ```js
-import { distance, angleDeg, manhattan, handleTension } from "./measure-core.js";
-import { calculateRegularTrueTunniPoint } from "./tunni-core.js";
+// src-js/views-editor/src/visualization-layer-definitions.js
+import { distance, angleDeg, manhattan, handleTension } from "@fontra/core/measure-core.js";
+import { calculateRegularTrueTunniPoint } from "@fontra/core/tunni-core.js";
+
+function drawMeasureLabels(...) { /* Q-measure + segment callouts */ }
+function drawTunniLabels(...) { /* uses tunni-core + measure-core */ }
 ```
 
 **Что тестировать вручную:**
-- Q/Alt+Q значения и Tunni labels как baseline.
+- Q/Alt+Q для rib/handle/segment/selection как baseline.
+- Distance/Manhattan overlays отображаются и считают как baseline.
+- Tunni labels (distance/tension/angle toggles) совпадают с baseline.
+- В коде нет runtime-импортов из `@fontra/core/distance-angle.js`.
 
 ---
 

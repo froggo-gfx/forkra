@@ -21,6 +21,7 @@ import {
 } from "@fontra/core/utils.js";
 import { subVectors } from "@fontra/core/vector.js";
 import { calculateTunniPoint, calculateTrueTunniPoint } from "@fontra/core/tunni-calculations.js";
+import { angleDeg, distance, offCurveAngleDeg } from "@fontra/core/measure-core.js";
 import {
   calculateCurvatureForSegment,
   calculateCurvatureForQuadraticSegment,
@@ -30,38 +31,17 @@ import {
   solveQuadraticBezier
 } from "@fontra/core/curvature.js"; 
 import { VarPackedPath } from "@fontra/core/var-path.js";
-import {
-  unitVectorFromTo,
-  calculateDistanceAndAngle,
-  calculateBadgeDimensions,
-  calculateBadgePosition,
-  formatDistanceAndAngle,
-  calculateDistancesFromPoint,
-  drawDistanceAngleVisualization,
-  drawManhattanDistanceVisualization,
-  drawOffCurveDistanceVisualization,
-  calculateTension,
-  calculateOffCurveAngle,
-  formatDistanceTensionAngle,
-  calculateTunniPointz,
-  calculateControlHandleDistance,
-  drawTunniLabels,
-  DISTANCE_ANGLE_COLOR,
-  DISTANCE_ANGLE_BADGE_COLOR,
-  DISTANCE_ANGLE_TEXT_COLOR,
-  DISTANCE_ANGLE_BADGE_PADDING,
-  DISTANCE_ANGLE_BADGE_RADIUS,
-  DISTANCE_ANGLE_FONT_SIZE,
-  OFFCURVE_DISTANCE_COLOR,
-  OFFCURVE_DISTANCE_BADGE_COLOR,
-  OFFCURVE_DISTANCE_TEXT_COLOR,
-  OFFCURVE_DISTANCE_BADGE_PADDING,
-  OFFCURVE_DISTANCE_BADGE_RADIUS,
-  OFFCURVE_DISTANCE_FONT_SIZE
-} from "@fontra/core/distance-angle.js";
 
 export const visualizationLayerDefinitions = [];
 const DEFAULT_SKELETON_WIDTH = 80;
+
+// Distance/angle and Tunni label visualization styling.
+const DISTANCE_ANGLE_BADGE_COLOR = "rgba(0, 153, 255, 0.75)";
+const DISTANCE_ANGLE_TEXT_COLOR = "white";
+const DISTANCE_ANGLE_BADGE_PADDING = 4;
+const DISTANCE_ANGLE_BADGE_RADIUS = 5;
+const DISTANCE_ANGLE_FONT_SIZE = 7;
+const OFFCURVE_DISTANCE_FONT_SIZE = 7;
 
 export function registerVisualizationLayerDefinition(newLayerDef) {
   let index = 0;
@@ -2936,6 +2916,630 @@ function drawActualTunniPoints(context, positionedGlyph, parameters, model, cont
   }
   
   context.setLineDash([]);
+}
+
+function unitVectorFromTo(pointB, pointA) {
+  const dx = pointA.x - pointB.x;
+  const dy = pointA.y - pointB.y;
+  const length = Math.hypot(dx, dy);
+  if (length === 0) {
+    return { x: 0, y: 0 };
+  }
+  return { x: dx / length, y: dy / length };
+}
+
+function calculateBadgeDimensions(text, fontSize) {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  context.font = `${fontSize}px sans-serif`;
+
+  const lines = text.split("\n");
+  let maxWidth = 0;
+  for (const line of lines) {
+    const metrics = context.measureText(line);
+    maxWidth = Math.max(maxWidth, metrics.width);
+  }
+
+  const width = maxWidth + DISTANCE_ANGLE_BADGE_PADDING * 2;
+  const height = lines.length * fontSize + DISTANCE_ANGLE_BADGE_PADDING * 2;
+  return { width, height, radius: DISTANCE_ANGLE_BADGE_RADIUS };
+}
+
+function calculateBadgePosition(midPoint, _unitVector, badgeWidth, badgeHeight) {
+  // Keep badge centered on the measurement line.
+  return {
+    x: midPoint.x - badgeWidth / 2,
+    y: midPoint.y - badgeHeight / 2,
+  };
+}
+
+function formatDistanceAndAngle(distanceValue, angleValue) {
+  return `${distanceValue.toFixed(1)}\n${angleValue.toFixed(1)}\u00B0`;
+}
+
+function formatManhattanDistance(distanceValue) {
+  return `${distanceValue.toFixed(1)}`;
+}
+
+function formatDistanceAngle(distanceValue, angleValue) {
+  return `${distanceValue.toFixed(1)} / ${angleValue.toFixed(1)}\u00B0`;
+}
+
+function calculateTunniPointMidpoint(segmentPoints) {
+  if (!Array.isArray(segmentPoints) || segmentPoints.length !== 4) {
+    throw new Error("Segment must have exactly 4 points");
+  }
+  const [, controlPoint1, controlPoint2] = segmentPoints;
+  return {
+    x: (controlPoint1.x + controlPoint2.x) / 2,
+    y: (controlPoint1.y + controlPoint2.y) / 2,
+  };
+}
+
+function drawLine(context, point1, point2, strokeWidth, color) {
+  context.strokeStyle = color;
+  context.lineWidth = strokeWidth;
+  strokeLine(context, point1.x, point1.y, point2.x, point2.y);
+}
+
+function drawBadge(context, x, y, width, height, radius, color) {
+  context.fillStyle = color;
+  drawRoundRect(context, x, y, width, height, radius);
+}
+
+function drawText(context, text, x, y, color, fontSize) {
+  context.save();
+  context.fillStyle = color;
+  context.font = `${fontSize}px sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.scale(1, -1);
+
+  const lines = text.split("\n");
+  const lineHeight = fontSize;
+  const totalHeight = lines.length * lineHeight;
+  for (let i = 0; i < lines.length; i++) {
+    const lineY = -y - totalHeight / 2 + (i + 0.5) * lineHeight;
+    context.fillText(lines[i], x, lineY);
+  }
+  context.restore();
+}
+
+function drawDistanceAngleVisualization(context, positionedGlyph, parameters, model) {
+  const { point: selectedPointIndices } = parseSelection(model.selection);
+  if (!selectedPointIndices || selectedPointIndices.length !== 2) {
+    return;
+  }
+
+  const path = positionedGlyph.glyph.path;
+  const point1 = path.getPoint(selectedPointIndices[0]);
+  const point2 = path.getPoint(selectedPointIndices[1]);
+  if (!point1 || !point2) {
+    return;
+  }
+
+  drawLine(context, point1, point2, parameters.strokeWidth, parameters.strokeColor);
+
+  const dist = distance(point1, point2);
+  const angle = angleDeg(point1, point2);
+  const text = formatDistanceAndAngle(dist, angle);
+
+  const midPoint = {
+    x: (point1.x + point2.x) / 2,
+    y: (point1.y + point2.y) / 2,
+  };
+
+  const badgeDimensions = calculateBadgeDimensions(text, DISTANCE_ANGLE_FONT_SIZE);
+  const unitVector = unitVectorFromTo(point1, point2);
+  const badgePosition = calculateBadgePosition(
+    midPoint,
+    { x: -unitVector.y, y: unitVector.x },
+    badgeDimensions.width,
+    badgeDimensions.height
+  );
+
+  drawBadge(
+    context,
+    badgePosition.x,
+    badgePosition.y,
+    badgeDimensions.width,
+    badgeDimensions.height,
+    DISTANCE_ANGLE_BADGE_RADIUS,
+    DISTANCE_ANGLE_BADGE_COLOR
+  );
+  drawText(
+    context,
+    text,
+    badgePosition.x + badgeDimensions.width / 2,
+    badgePosition.y + badgeDimensions.height / 2,
+    DISTANCE_ANGLE_TEXT_COLOR,
+    DISTANCE_ANGLE_FONT_SIZE
+  );
+}
+
+function drawManhattanDistanceVisualization(context, positionedGlyph, parameters, model) {
+  const { point: selectedPointIndices } = parseSelection(model.selection);
+  if (!selectedPointIndices || selectedPointIndices.length !== 2) {
+    return;
+  }
+
+  const path = positionedGlyph.glyph.path;
+  const point1 = path.getPoint(selectedPointIndices[0]);
+  const point2 = path.getPoint(selectedPointIndices[1]);
+  if (!point1 || !point2) {
+    return;
+  }
+
+  const dx = Math.abs(point2.x - point1.x);
+  const dy = Math.abs(point2.y - point1.y);
+
+  if (dx === 0 || dy === 0) {
+    const dist = distance(point1, point2);
+    drawLine(context, point1, point2, parameters.strokeWidth, parameters.strokeColor);
+
+    const text = formatManhattanDistance(dist);
+    const midPoint = {
+      x: (point1.x + point2.x) / 2,
+      y: (point1.y + point2.y) / 2,
+    };
+    const badgeDimensions = calculateBadgeDimensions(text, DISTANCE_ANGLE_FONT_SIZE);
+    const unitVector = unitVectorFromTo(point1, point2);
+    const badgePosition = calculateBadgePosition(
+      midPoint,
+      { x: -unitVector.y, y: unitVector.x },
+      badgeDimensions.width,
+      badgeDimensions.height
+    );
+
+    drawBadge(
+      context,
+      badgePosition.x,
+      badgePosition.y,
+      badgeDimensions.width,
+      badgeDimensions.height,
+      DISTANCE_ANGLE_BADGE_RADIUS,
+      DISTANCE_ANGLE_BADGE_COLOR
+    );
+    drawText(
+      context,
+      text,
+      badgePosition.x + badgeDimensions.width / 2,
+      badgePosition.y + badgeDimensions.height / 2,
+      DISTANCE_ANGLE_TEXT_COLOR,
+      DISTANCE_ANGLE_FONT_SIZE
+    );
+    return;
+  }
+
+  const cornerPoint = { x: point2.x, y: point1.y };
+  drawLine(context, point1, cornerPoint, parameters.strokeWidth, parameters.strokeColor);
+  drawLine(context, cornerPoint, point2, parameters.strokeWidth, parameters.strokeColor);
+
+  const dxText = dx.toFixed(1);
+  const dyText = dy.toFixed(1);
+
+  const hMidPoint = {
+    x: (point1.x + cornerPoint.x) / 2,
+    y: (point1.y + cornerPoint.y) / 2,
+  };
+  const vMidPoint = {
+    x: (cornerPoint.x + point2.x) / 2,
+    y: (cornerPoint.y + point2.y) / 2,
+  };
+
+  const dxBadgeDimensions = calculateBadgeDimensions(dxText, DISTANCE_ANGLE_FONT_SIZE);
+  const dyBadgeDimensions = calculateBadgeDimensions(dyText, DISTANCE_ANGLE_FONT_SIZE);
+
+  const dxBadgePosition = calculateBadgePosition(
+    hMidPoint,
+    { x: 0, y: 1 },
+    dxBadgeDimensions.width,
+    dxBadgeDimensions.height
+  );
+  const dyBadgePosition = calculateBadgePosition(
+    vMidPoint,
+    { x: 1, y: 0 },
+    dyBadgeDimensions.width,
+    dyBadgeDimensions.height
+  );
+
+  drawBadge(
+    context,
+    dxBadgePosition.x,
+    dxBadgePosition.y,
+    dxBadgeDimensions.width,
+    dxBadgeDimensions.height,
+    DISTANCE_ANGLE_BADGE_RADIUS,
+    DISTANCE_ANGLE_BADGE_COLOR
+  );
+  drawBadge(
+    context,
+    dyBadgePosition.x,
+    dyBadgePosition.y,
+    dyBadgeDimensions.width,
+    dyBadgeDimensions.height,
+    DISTANCE_ANGLE_BADGE_RADIUS,
+    DISTANCE_ANGLE_BADGE_COLOR
+  );
+
+  drawText(
+    context,
+    dxText,
+    dxBadgePosition.x + dxBadgeDimensions.width / 2,
+    dxBadgePosition.y + dxBadgeDimensions.height / 2,
+    DISTANCE_ANGLE_TEXT_COLOR,
+    DISTANCE_ANGLE_FONT_SIZE
+  );
+  drawText(
+    context,
+    dyText,
+    dyBadgePosition.x + dyBadgeDimensions.width / 2,
+    dyBadgePosition.y + dyBadgeDimensions.height / 2,
+    DISTANCE_ANGLE_TEXT_COLOR,
+    DISTANCE_ANGLE_FONT_SIZE
+  );
+}
+
+function drawOffCurveDistanceVisualization(context, positionedGlyph, parameters, model) {
+  const { point: selectedPointIndices } = parseSelection(model.selection);
+  if (!selectedPointIndices || selectedPointIndices.length === 0) {
+    return;
+  }
+
+  const path = positionedGlyph.glyph.path;
+  const offCurveGroups = new Map();
+
+  for (const pointIndex of selectedPointIndices) {
+    const pointType = path.pointTypes[pointIndex] & 0x07;
+    if (pointType === 0) {
+      continue;
+    }
+
+    const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
+    const contourInfo = path.contourInfo[contourIndex];
+    const startPoint = contourIndex === 0 ? 0 : path.contourInfo[contourIndex - 1].endPoint + 1;
+    const endPoint = contourInfo.endPoint;
+    const numPoints = endPoint - startPoint + 1;
+
+    let prevPointIndex;
+    let nextPointIndex;
+    if (contourInfo.isClosed) {
+      prevPointIndex = startPoint + ((contourPointIndex - 1 + numPoints) % numPoints);
+      nextPointIndex = startPoint + ((contourPointIndex + 1) % numPoints);
+    } else {
+      prevPointIndex = contourPointIndex > 0 ? pointIndex - 1 : null;
+      nextPointIndex = contourPointIndex < numPoints - 1 ? pointIndex + 1 : null;
+    }
+
+    let onCurvePointIndex = null;
+    if (prevPointIndex !== null) {
+      const prevPointType = path.pointTypes[prevPointIndex] & 0x07;
+      if (prevPointType === 0) {
+        onCurvePointIndex = prevPointIndex;
+      }
+    }
+    if (onCurvePointIndex === null && nextPointIndex !== null) {
+      const nextPointType = path.pointTypes[nextPointIndex] & 0x07;
+      if (nextPointType === 0) {
+        onCurvePointIndex = nextPointIndex;
+      }
+    }
+
+    if (onCurvePointIndex !== null) {
+      if (!offCurveGroups.has(onCurvePointIndex)) {
+        offCurveGroups.set(onCurvePointIndex, []);
+      }
+      offCurveGroups.get(onCurvePointIndex).push({
+        index: pointIndex,
+        point: path.getPoint(pointIndex),
+      });
+    }
+  }
+
+  for (const [onCurvePointIndex, offCurvePoints] of offCurveGroups.entries()) {
+    const onCurvePoint = path.getPoint(onCurvePointIndex);
+
+    let nextPoint = null;
+    let nextPointIndex = null;
+    const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(onCurvePointIndex);
+    const contourInfo = path.contourInfo[contourIndex];
+    const startPoint = contourIndex === 0 ? 0 : path.contourInfo[contourIndex - 1].endPoint + 1;
+    const endPoint = contourInfo.endPoint;
+    const numPoints = endPoint - startPoint + 1;
+
+    if (contourInfo.isClosed) {
+      let searchIndex = (contourPointIndex + 1) % numPoints;
+      while (searchIndex !== contourPointIndex) {
+        const actualPointIndex = startPoint + searchIndex;
+        const pointType = path.pointTypes[actualPointIndex] & 0x07;
+        if (pointType === 0) {
+          nextPointIndex = actualPointIndex;
+          break;
+        }
+        searchIndex = (searchIndex + 1) % numPoints;
+      }
+    } else {
+      for (let i = contourPointIndex + 1; i < numPoints; i++) {
+        const actualPointIndex = startPoint + i;
+        const pointType = path.pointTypes[actualPointIndex] & 0x07;
+        if (pointType === 0) {
+          nextPointIndex = actualPointIndex;
+          break;
+        }
+      }
+    }
+    nextPoint = nextPointIndex !== null ? path.getPoint(nextPointIndex) : null;
+
+    for (const offCurvePointData of offCurvePoints) {
+      const offCurvePoint = offCurvePointData.point;
+
+      const dist = distance(onCurvePoint, offCurvePoint);
+      const angle = nextPoint && nextPointIndex !== null
+        ? offCurveAngleDeg(offCurvePoint, onCurvePoint)
+        : 0;
+
+      drawLine(context, onCurvePoint, offCurvePoint, parameters.strokeWidth, parameters.strokeColor);
+
+      const text = formatDistanceAngle(dist, angle);
+      const midPoint = {
+        x: (onCurvePoint.x + offCurvePoint.x) / 2,
+        y: (onCurvePoint.y + offCurvePoint.y) / 2,
+      };
+
+      const unitVector = unitVectorFromTo(onCurvePoint, offCurvePoint);
+      const perpVector = { x: -unitVector.y, y: unitVector.x };
+      const textOffset = 8;
+      const consistentPerpVector =
+        perpVector.y >= 0 ? perpVector : { x: -perpVector.x, y: -perpVector.y };
+      const textPosition = {
+        x: midPoint.x + consistentPerpVector.x * textOffset,
+        y: midPoint.y + consistentPerpVector.y * textOffset,
+      };
+
+      context.save();
+      context.fillStyle = "rgba(26, 82, 26, 1)";
+      context.font = `${OFFCURVE_DISTANCE_FONT_SIZE}px sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "alphabetic";
+      context.scale(1, -1);
+      if (context.letterSpacing !== undefined) {
+        context.letterSpacing = "-0.11px";
+      }
+      context.fillText(text, textPosition.x, -textPosition.y);
+      context.restore();
+    }
+  }
+}
+
+function drawTunniLabels(context, positionedGlyph, parameters, model) {
+  const path = positionedGlyph.glyph.path;
+  const generatedContourIndices = getSkeletonGeneratedContourIndexSet(positionedGlyph, model);
+
+  const showDistance = model.sceneSettings?.showTunniDistance ?? true;
+  const showTension = model.sceneSettings?.showTunniTension ?? true;
+  const showAngle = model.sceneSettings?.showTunniAngle ?? true;
+
+  context.save();
+
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
+    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
+      if (segment.points.length !== 4) {
+        continue;
+      }
+      const pointTypes = segment.parentPointIndices.map(
+        index => path.pointTypes[index]
+      );
+      if (pointTypes[1] !== 2 || pointTypes[2] !== 2) {
+        continue;
+      }
+
+      try {
+        const [p1, p2, p3, p4] = segment.points;
+        const visualPt = calculateTunniPointMidpoint(segment.points);
+        const truePt = calculateTrueTunniPoint(segment.points);
+        const tensionPt = truePt || visualPt;
+
+        const tension1 = distance(p1, p2) / distance(p1, tensionPt);
+        const tension2 = distance(p4, p3) / distance(p4, tensionPt);
+
+        const dist1 = distance(p1, p2);
+        const dist2 = distance(p4, p3);
+
+        const angle1 = offCurveAngleDeg(p2, p1);
+        const angle2 = offCurveAngleDeg(p3, p4);
+
+        const visibleComponents = [];
+        if (showDistance) visibleComponents.push(dist1.toFixed(1));
+        if (showTension) visibleComponents.push(tension1.toFixed(2));
+        if (showAngle) visibleComponents.push(`${angle1.toFixed(1)}\u00B0`);
+        const text1 = visibleComponents.join("\n");
+
+        const visibleComponents2 = [];
+        if (showDistance) visibleComponents2.push(dist2.toFixed(1));
+        if (showTension) visibleComponents2.push(tension2.toFixed(2));
+        if (showAngle) visibleComponents2.push(`${angle2.toFixed(1)}\u00B0`);
+        const text2 = visibleComponents2.join("\n");
+
+        const badgeDimensions1 = calculateBadgeDimensions(text1, 6);
+        const badgeDimensions2 = calculateBadgeDimensions(text2, 6);
+
+        const unitVector1 = unitVectorFromTo(p1, p2);
+        const unitVector2 = unitVectorFromTo(p4, p3);
+
+        const badgePosition1 = calculateBadgePosition(
+          { x: p2.x + 14, y: p2.y },
+          { x: -unitVector1.y, y: unitVector1.x },
+          badgeDimensions1.width,
+          badgeDimensions1.height
+        );
+        const badgePosition2 = calculateBadgePosition(
+          { x: p3.x + 14, y: p3.y },
+          { x: -unitVector2.y, y: unitVector2.x },
+          badgeDimensions2.width,
+          badgeDimensions2.height
+        );
+
+        context.save();
+        context.fillStyle = "rgba(4, 28, 44, 1)";
+        context.font = `6px fontra-ui-regular, sans-serif`;
+        context.textAlign = "left";
+        context.textBaseline = "middle";
+        context.scale(1, -1);
+
+        const lines1 = text1.split("\n");
+        const lineHeight = 6;
+        const totalHeight = lines1.length * lineHeight;
+        const startY =
+          -(badgePosition1.y + badgeDimensions1.height / 2) -
+          totalHeight / 2 +
+          lineHeight / 2;
+        for (let i = 0; i < lines1.length; i++) {
+          context.fillText(lines1[i], badgePosition1.x, startY + i * lineHeight);
+        }
+        context.restore();
+
+        context.save();
+        context.fillStyle = "rgba(44, 28, 44, 1)";
+        context.font = `6px fontra-ui-regular, sans-serif`;
+        context.textAlign = "left";
+        context.textBaseline = "middle";
+        context.scale(1, -1);
+
+        const lines2 = text2.split("\n");
+        const totalHeight2 = lines2.length * lineHeight;
+        const startY2 =
+          -(badgePosition2.y + badgeDimensions2.height / 2) -
+          totalHeight2 / 2 +
+          lineHeight / 2;
+        for (let i = 0; i < lines2.length; i++) {
+          context.fillText(lines2[i], badgePosition2.x, startY2 + i * lineHeight);
+        }
+        context.restore();
+      } catch (error) {
+        // Skip segments where tension calculation fails.
+      }
+    }
+  }
+
+  for (let pointIndex = 0; pointIndex < path.numPoints; pointIndex++) {
+    const pointType = path.pointTypes[pointIndex];
+    if (pointType === 0) {
+      continue;
+    }
+
+    const offCurvePoint = path.getPoint(pointIndex);
+    const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
+
+    let isPartOfCubicSegment = false;
+    for (let segmentContourIndex = 0; segmentContourIndex < path.numContours; segmentContourIndex++) {
+      if (generatedContourIndices.has(segmentContourIndex)) {
+        continue;
+      }
+      for (const segment of path.iterContourDecomposedSegments(segmentContourIndex)) {
+        if (segment.points.length !== 4) {
+          continue;
+        }
+        const pointTypes = segment.parentPointIndices.map(
+          index => path.pointTypes[index]
+        );
+        if (pointTypes[1] === 2 && pointTypes[2] === 2) {
+          if (
+            segment.parentPointIndices[1] === pointIndex ||
+            segment.parentPointIndices[2] === pointIndex
+          ) {
+            isPartOfCubicSegment = true;
+            break;
+          }
+        }
+      }
+      if (isPartOfCubicSegment) {
+        break;
+      }
+    }
+    if (isPartOfCubicSegment) {
+      continue;
+    }
+
+    const contourInfo = path.contourInfo[contourIndex];
+    const startPoint = contourIndex === 0 ? 0 : path.contourInfo[contourIndex - 1].endPoint + 1;
+    const endPoint = contourInfo.endPoint;
+    const numPoints = endPoint - startPoint + 1;
+
+    let prevPointIndex;
+    let nextPointIndex;
+    if (contourInfo.isClosed) {
+      prevPointIndex = startPoint + ((contourPointIndex - 1 + numPoints) % numPoints);
+      nextPointIndex = startPoint + ((contourPointIndex + 1) % numPoints);
+    } else {
+      prevPointIndex = contourPointIndex > 0 ? pointIndex - 1 : -1;
+      nextPointIndex = contourPointIndex < numPoints - 1 ? pointIndex + 1 : -1;
+    }
+
+    const prevPoint = prevPointIndex >= 0 ? path.getPoint(prevPointIndex) : null;
+    const nextPoint = nextPointIndex >= 0 ? path.getPoint(nextPointIndex) : null;
+
+    const prevPointType = prevPointIndex >= 0 ? path.pointTypes[prevPointIndex] : -1;
+    const nextPointType = nextPointIndex >= 0 ? path.pointTypes[nextPointIndex] : -1;
+
+    let onCurvePoint = null;
+    let onCurveIndex = -1;
+    if (prevPoint && prevPointType === 0) {
+      onCurvePoint = prevPoint;
+      onCurveIndex = prevPointIndex;
+    } else if (nextPoint && nextPointType === 0) {
+      onCurvePoint = nextPoint;
+      onCurveIndex = nextPointIndex;
+    }
+
+    if (onCurvePoint && onCurveIndex >= 0) {
+      try {
+        const dist = distance(onCurvePoint, offCurvePoint);
+        const angle = offCurveAngleDeg(offCurvePoint, onCurvePoint);
+
+        const visibleComponentsOff = [];
+        if (showDistance) visibleComponentsOff.push(dist.toFixed(1));
+        if (showAngle) visibleComponentsOff.push(`${angle.toFixed(1)}\u00B0`);
+        const text = visibleComponentsOff.join("\n");
+
+        const badgeDimensionsOff = calculateBadgeDimensions(text, 6);
+        const badgePositionOff = calculateBadgePosition(
+          { x: offCurvePoint.x + 14, y: offCurvePoint.y },
+          { x: 0, y: 1 },
+          badgeDimensionsOff.width,
+          badgeDimensionsOff.height
+        );
+
+        context.save();
+        context.fillStyle = "rgba(26, 82, 26, 1)";
+        context.font = `6px fontra-ui-regular, sans-serif`;
+        context.textAlign = "left";
+        context.textBaseline = "middle";
+        context.scale(1, -1);
+
+        const linesOff = text.split("\n");
+        const lineHeightOff = 6;
+        const totalHeightOff = linesOff.length * lineHeightOff;
+        const startYOff =
+          -(badgePositionOff.y + badgeDimensionsOff.height / 2) -
+          totalHeightOff / 2 +
+          lineHeightOff / 2;
+        for (let i = 0; i < linesOff.length; i++) {
+          context.fillText(linesOff[i], badgePositionOff.x, startYOff + i * lineHeightOff);
+        }
+        context.restore();
+      } catch (error) {
+        // Skip points where angle calculation fails.
+      }
+    }
+  }
+
+  context.restore();
 }
 
 registerVisualizationLayerDefinition({

@@ -2338,7 +2338,11 @@ export class EditorController extends ViewController {
   }
 
   _regenerateSkeletonOutline(layer, skeletonData, layerGlyph) {
+    // Regeneration mutates generatedContourIndices in the working skeleton object.
+    // Persist it back to layer customData so the first post-paste edit can replace
+    // old generated contours instead of appending duplicates.
     regenerateSkeletonContours(layerGlyph, skeletonData);
+    setSkeletonData(layer, skeletonData);
   }
 
   getDeleteLabel() {

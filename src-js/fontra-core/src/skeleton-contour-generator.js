@@ -3707,6 +3707,50 @@ function _sanitizeGeneratedIndices(indices) {
   return sanitized;
 }
 
+function _packedContoursEqual(contourA, contourB) {
+  if (!contourA || !contourB) {
+    return false;
+  }
+  if (!!contourA.isClosed !== !!contourB.isClosed) {
+    return false;
+  }
+  if (
+    contourA.pointTypes.length !== contourB.pointTypes.length ||
+    contourA.coordinates.length !== contourB.coordinates.length
+  ) {
+    return false;
+  }
+  for (let i = 0; i < contourA.pointTypes.length; i++) {
+    if (contourA.pointTypes[i] !== contourB.pointTypes[i]) {
+      return false;
+    }
+  }
+  for (let i = 0; i < contourA.coordinates.length; i++) {
+    if (contourA.coordinates[i] !== contourB.coordinates[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function _recoverGeneratedIndices(path, generatedContours) {
+  if (!path || !generatedContours.length) {
+    return [];
+  }
+  const packedGeneratedContours = generatedContours.map((contour) => packContour(contour));
+  const recoveredIndices = [];
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    const existingContour = path.getContour(contourIndex);
+    for (const packedGeneratedContour of packedGeneratedContours) {
+      if (_packedContoursEqual(existingContour, packedGeneratedContour)) {
+        recoveredIndices.push(contourIndex);
+        break;
+      }
+    }
+  }
+  return recoveredIndices;
+}
+
 function _canUpdateGeneratedContoursInPlace(path, generatedContours, oldGeneratedIndices) {
   if (!path || oldGeneratedIndices.length !== generatedContours.length) {
     return null;
@@ -3750,7 +3794,17 @@ export function regenerateSkeletonContours(
 
   const path = staticGlyph.path;
   const generatedContours = generateContoursFromSkeleton(skeletonData);
-  const oldGeneratedIndices = _sanitizeGeneratedIndices(skeletonData.generatedContourIndices);
+  let oldGeneratedIndices = _sanitizeGeneratedIndices(skeletonData.generatedContourIndices);
+
+  // Recovery path: if indices were not stored, infer them from contours that already
+  // match the generated skeleton geometry. This prevents one-time duplicates and
+  // cleans previously duplicated generated contours as well.
+  if (!oldGeneratedIndices.length && generatedContours.length) {
+    const recoveredIndices = _recoverGeneratedIndices(path, generatedContours);
+    if (recoveredIndices.length >= generatedContours.length) {
+      oldGeneratedIndices = _sanitizeGeneratedIndices(recoveredIndices);
+    }
+  }
 
   if (preferInPlace) {
     const updates = _canUpdateGeneratedContoursInPlace(
