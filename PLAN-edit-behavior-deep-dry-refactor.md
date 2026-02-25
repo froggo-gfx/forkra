@@ -10,6 +10,7 @@ Approach: small incremental steps, each manually verifiable and safe to roll bac
 ### In Scope
 - `src-js/views-editor/src/edit-behavior.js`
 - Minimal import updates in consumers only if required by internal moves
+- Minimal call-site wiring in `src-js/views-editor/src/edit-tools-pointer.js` only to reuse shared modifier-intent resolution (no routing redesign)
 - Internal refactor only:
   - rib/skeleton helpers
   - offset key resolvers
@@ -22,6 +23,11 @@ Approach: small incremental steps, each manually verifiable and safe to roll bac
 - Skeleton data schema changes
 - Pointer routing redesign
 - New automated tests
+
+## Architectural Invariant (Added)
+- For a given `object kind`, modifier semantics are resolved once and reused across input modalities (`drag`, `nudge`).
+- Input modality must not redefine modifier meaning.
+- Differences between `regular`, `skeleton`, and `rib` are allowed, but they must live in shared behavior tables/resolvers, not duplicated per-handler condition trees.
 
 ## Public APIs / Interfaces (Must Stay Stable)
 - `EditBehaviorFactory`
@@ -207,6 +213,52 @@ class EditableRibBehavior {
 - fast modifier switching during drag
 - single-sided behavior
 
+## Step 5.5 — Add shared modifier-intent resolver and reuse it in drag+nudge call sites
+### Problem
+Modifier meaning for non-regular objects drifts when drag and arrow paths resolve modes independently.
+
+### Step focus
+Keep current UX, but force one source of truth for modifier intent per object kind.
+
+### Solution
+Add shared intent resolver API (in `edit-behavior.js`) and route existing call sites through it.
+- Add `resolveModifierIntent(objectKind, flags)` with explicit precedence rules.
+- Keep output compatible with existing preset/mode names (`default`, `constrain`, `alternate`, `alternate-constrain`, rib-specific runtime intents).
+- Update existing drag+nudge call sites in pointer to call the resolver instead of local `if/else` trees.
+- Do not change routing order or selection ownership in pointer.
+
+### Mock code
+```js
+// edit-behavior.js
+export function resolveModifierIntent(objectKind, flags) {
+  if (objectKind === "rib") {
+    if (flags.alt) return "interpolate";
+    if (flags.z) return "tangent";
+    return "default";
+  }
+  return resolveBehaviorPresetName(flags);
+}
+```
+
+```js
+// edit-tools-pointer.js
+const ribIntent = resolveModifierIntent("rib", {
+  alt: event.altKey,
+  z: this.tangentRibMode,
+  x: this.equalizeMode,
+});
+```
+
+### Manual testing
+- For each object kind (`regular`, `skeleton`, `rib`), compare drag vs arrow with the same modifier state.
+- Verify no behavior delta from baseline for regular points.
+- Verify rib/skeleton no longer depend on duplicated local mode branches.
+
+### Corner cases
+- `Alt+Z` precedence is deterministic and documented.
+- `X` remains no-op for object kinds where it is intentionally unsupported.
+- Modifier press/release mid-drag keeps current behavior contracts.
+
 ## Step 6 — Unify rollback builders
 ### Problem
 Rollback payloads are manually repeated across classes.
@@ -284,17 +336,19 @@ Cleanup only, no functional change.
 ## Regression test matrix (manual, mandatory)
 1. Regular points
 - drag default / Shift / Alt / Shift+Alt
+- arrows default / Shift / Alt / Shift+Alt
 - undo/redo
 
 2. Skeleton points
 - drag default / Shift / Alt / Shift+Alt
+- arrows default / Shift / Alt / Shift+Alt
 - mixed selection with regular
 - undo/redo
 
 3. Rib points
 - normal rib drag
 - editable rib drag (`linked/editable` variants)
-- arrow movement
+- arrow movement (same intent mapping as drag for supported modifiers)
 - `Z` tangent mode
 
 4. Interpolation
@@ -315,9 +369,11 @@ Cleanup only, no functional change.
 - skeleton-related transform flows remain stable
 - no runtime import errors
 
+8. Cross-modality intent parity
+- For each object kind, modifier intent is resolved once and used consistently in drag and nudge paths.
+
 ## Assumptions and defaults
 - No UX/behavior changes.
 - Public exports and signatures remain stable.
 - Work is delivered in small commits with manual test after each step.
 - No automated tests added in this refactor.
-

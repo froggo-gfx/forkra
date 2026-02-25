@@ -4474,6 +4474,8 @@ export class PointerTool extends BaseTool {
       const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
       const editableKey = side === "left" ? "leftEditable" : "rightEditable";
       const isEditable = point[editableKey] === true;
+      const isSingleSided = contour.singleSided ?? false;
+      const isLinked = isWidthLinked(point);
 
       // Calculate normal at this point
       const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
@@ -4485,6 +4487,8 @@ export class PointerTool extends BaseTool {
         point,
         normal,
         isEditable,
+        isSingleSided,
+        isLinked,
         defaultWidth,
       });
     }
@@ -4567,6 +4571,13 @@ export class PointerTool extends BaseTool {
       dy *= 10;
     }
     const delta = { x: dx, y: dy };
+    // Keep arrow-key modes aligned with drag behavior:
+    // Alt => interpolation slide, Z => tangent-only nudge, else default.
+    const ribArrowMode = event.altKey
+      ? "interpolate"
+      : this.tangentRibMode
+      ? "tangent"
+      : "default";
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
@@ -4581,7 +4592,16 @@ export class PointerTool extends BaseTool {
 
         // Apply changes to each selected rib point
         for (const ribInfo of ribPointsInfo) {
-          const { contourIndex, pointIndex, side, normal, isEditable, defaultWidth } = ribInfo;
+          const {
+            contourIndex,
+            pointIndex,
+            side,
+            normal,
+            isEditable,
+            isSingleSided,
+            isLinked,
+            defaultWidth,
+          } = ribInfo;
 
           const contour = workingSkeletonData.contours[contourIndex];
           if (!contour || pointIndex >= contour.points.length) continue;
@@ -4590,7 +4610,10 @@ export class PointerTool extends BaseTool {
           if (point.type) continue;
 
             if (isEditable) {
-              // Use EditableRibBehavior for editable ribs
+              // Editable ribs:
+              // - Alt => interpolation mode (same behavior family as Alt-drag)
+              // - Z => tangent-only nudge
+              // - default => width edit (+ nudge where applicable)
               const ribHit = {
                 contourIndex,
                 pointIndex,
@@ -4598,13 +4621,58 @@ export class PointerTool extends BaseTool {
                 normal,
                 onCurvePoint: point,
               };
-              const behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
-              const change = behavior.applyDelta(delta, null);
 
+              let behavior;
               const baseContour = originalSkeletonData.contours[contourIndex];
               const basePoint = baseContour?.points[pointIndex];
-              if (basePoint) {
-                const linked = isWidthLinked(basePoint);
+              let hasInterpolationBehavior = false;
+
+              if (ribArrowMode === "interpolate" && baseContour && basePoint) {
+                const interpolationAxis = this._findHandlesForRibPointFromSkeleton(
+                  layer.glyph.path,
+                  basePoint,
+                  normal,
+                  baseContour,
+                  side
+                );
+                if (interpolationAxis) {
+                  behavior = createInterpolatingRibBehavior(
+                    originalSkeletonData,
+                    ribHit,
+                    interpolationAxis
+                  );
+                  hasInterpolationBehavior = true;
+                } else {
+                  behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
+                }
+              } else {
+                behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
+              }
+
+              if (isSingleSided && baseContour && basePoint) {
+                const leftHW = getPointHalfWidth(basePoint, defaultWidth, "left");
+                const rightHW = getPointHalfWidth(basePoint, defaultWidth, "right");
+                const totalWidth = leftHW + rightHW;
+                if (behavior.setOriginalHalfWidth) {
+                  behavior.setOriginalHalfWidth(totalWidth);
+                } else {
+                  behavior.originalHalfWidth = totalWidth;
+                }
+                behavior.minHalfWidth = 2;
+              }
+
+              const constrainMode =
+                ribArrowMode === "tangent" ||
+                (ribArrowMode === "interpolate" && !hasInterpolationBehavior)
+                  ? "tangent"
+                  : null;
+              const change = behavior.applyDelta(delta, constrainMode);
+
+              if (isSingleSided) {
+                point.width = change.halfWidth;
+                delete point.leftWidth;
+                delete point.rightWidth;
+              } else if (basePoint && constrainMode !== "tangent" && !change.isInterpolation) {
                 const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
                 applyLinkedWidthDelta(
                   point,
@@ -4612,7 +4680,7 @@ export class PointerTool extends BaseTool {
                   defaultWidth,
                   side,
                   deltaWidth,
-                  linked,
+                  isLinked,
                   Math.round
                 );
               }
@@ -4623,22 +4691,23 @@ export class PointerTool extends BaseTool {
                 point[nudgeKey] = change.nudge;
             }
 
-            // Apply handle offset compensations if present
-            if (change.handleInOffsetX !== undefined) {
-              const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
-              point[handleInXKey] = change.handleInOffsetX;
-            }
-            if (change.handleInOffsetY !== undefined) {
-              const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
-              point[handleInYKey] = change.handleInOffsetY;
-            }
-            if (change.handleOutOffsetX !== undefined) {
-              const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
-              point[handleOutXKey] = change.handleOutOffsetX;
-            }
-            if (change.handleOutOffsetY !== undefined) {
-              const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
-              point[handleOutYKey] = change.handleOutOffsetY;
+            // Apply 2D handle offset compensation for interpolation/editable flows.
+            if (change.isInterpolation || change.hasHandleOffsets) {
+              if (side === "left") {
+                point.leftHandleInOffsetX = change.handleInOffsetX;
+                point.leftHandleInOffsetY = change.handleInOffsetY;
+                point.leftHandleOutOffsetX = change.handleOutOffsetX;
+                point.leftHandleOutOffsetY = change.handleOutOffsetY;
+                delete point.leftHandleInOffset;
+                delete point.leftHandleOutOffset;
+              } else {
+                point.rightHandleInOffsetX = change.handleInOffsetX;
+                point.rightHandleInOffsetY = change.handleInOffsetY;
+                point.rightHandleOutOffsetX = change.handleOutOffsetX;
+                point.rightHandleOutOffsetY = change.handleOutOffsetY;
+                delete point.rightHandleInOffset;
+                delete point.rightHandleOutOffset;
+              }
             }
           } else {
             // Use RibEditBehavior for non-editable ribs (width only)

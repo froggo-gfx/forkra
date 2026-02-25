@@ -1926,6 +1926,182 @@ function getRibHandleOffsetKeys(side) {
   };
 }
 
+function getSkeletonHandleDirections(points, pointIndex, isClosed = true) {
+  let skeletonHandleInDir = null;
+  let skeletonHandleOutDir = null;
+  let hasIncomingHandle = false;
+  let hasOutgoingHandle = false;
+
+  const prevIdx = isClosed || pointIndex > 0 ? (pointIndex - 1 + points.length) % points.length : null;
+  if (prevIdx !== null && points[prevIdx]?.type) {
+    hasIncomingHandle = true;
+    const dx = points[prevIdx].x - points[pointIndex].x;
+    const dy = points[prevIdx].y - points[pointIndex].y;
+    const len = Math.hypot(dx, dy);
+    if (len > 0.001) {
+      skeletonHandleInDir = { x: dx / len, y: dy / len };
+    }
+  }
+
+  const nextIdx = isClosed || pointIndex < points.length - 1 ? (pointIndex + 1) % points.length : null;
+  if (nextIdx !== null && points[nextIdx]?.type) {
+    hasOutgoingHandle = true;
+    const dx = points[nextIdx].x - points[pointIndex].x;
+    const dy = points[nextIdx].y - points[pointIndex].y;
+    const len = Math.hypot(dx, dy);
+    if (len > 0.001) {
+      skeletonHandleOutDir = { x: dx / len, y: dy / len };
+    }
+  }
+
+  return {
+    skeletonHandleInDir,
+    skeletonHandleOutDir,
+    hasIncomingHandle,
+    hasOutgoingHandle,
+  };
+}
+
+function readNormalizedHandleOffsets(point, side, dirs, tangent) {
+  const handleKeys = getRibHandleOffsetKeys(side);
+  const has2DIn = point[handleKeys.in.x] !== undefined || point[handleKeys.in.y] !== undefined;
+  const has2DOut = point[handleKeys.out.x] !== undefined || point[handleKeys.out.y] !== undefined;
+  const has1DIn = point[handleKeys.in.oneD] !== undefined;
+  const has1DOut = point[handleKeys.out.oneD] !== undefined;
+
+  let inX = 0;
+  let inY = 0;
+  let outX = 0;
+  let outY = 0;
+
+  if (has2DIn) {
+    inX = point[handleKeys.in.x] || 0;
+    inY = point[handleKeys.in.y] || 0;
+  } else if (has1DIn) {
+    const dir = dirs.skeletonHandleInDir || tangent;
+    inX = dir.x * (point[handleKeys.in.oneD] || 0);
+    inY = dir.y * (point[handleKeys.in.oneD] || 0);
+  }
+
+  if (has2DOut) {
+    outX = point[handleKeys.out.x] || 0;
+    outY = point[handleKeys.out.y] || 0;
+  } else if (has1DOut) {
+    const dir = dirs.skeletonHandleOutDir || tangent;
+    outX = dir.x * (point[handleKeys.out.oneD] || 0);
+    outY = dir.y * (point[handleKeys.out.oneD] || 0);
+  }
+
+  return {
+    inX,
+    inY,
+    outX,
+    outY,
+    hasAny: has2DIn || has2DOut || has1DIn || has1DOut,
+  };
+}
+
+function buildCompensatedOffsets(baseOffsets, tangent, deltaNudge, hasIncomingHandle, hasOutgoingHandle) {
+  const handleOffsetDeltaX = -tangent.x * deltaNudge;
+  const handleOffsetDeltaY = -tangent.y * deltaNudge;
+  return {
+    inX: baseOffsets.inX + (hasIncomingHandle ? handleOffsetDeltaX : 0),
+    inY: baseOffsets.inY + (hasIncomingHandle ? handleOffsetDeltaY : 0),
+    outX: baseOffsets.outX + (hasOutgoingHandle ? handleOffsetDeltaX : 0),
+    outY: baseOffsets.outY + (hasOutgoingHandle ? handleOffsetDeltaY : 0),
+  };
+}
+
+const RIB_STRATEGY_BASIC_WIDTH = "basic-width";
+const RIB_STRATEGY_EDITABLE_WIDTH_NUDGE = "editable-width-nudge";
+const RIB_STRATEGY_INTERPOLATE = "interpolate";
+
+function createRibRuntimeContext(context) {
+  return {
+    tangent: buildTangentFromNormal(context.normal),
+    originalNudge: 0,
+    minHalfWidth: 0,
+    hasIncomingHandle: false,
+    hasOutgoingHandle: false,
+    originalHandleOffsets: { inX: 0, inY: 0, outX: 0, outY: 0 },
+    ...context,
+  };
+}
+
+function withRibIdentity(context, payload) {
+  return {
+    contourIndex: context.contourIndex,
+    pointIndex: context.pointIndex,
+    side: context.side,
+    ...payload,
+  };
+}
+
+function runRibStrategy(context, delta, strategy, options = {}) {
+  const roundFunc = options.roundFunc || Math.round;
+  const constrainMode = options.constrainMode || null;
+
+  if (strategy === RIB_STRATEGY_BASIC_WIDTH) {
+    const projectedDelta = projectToNormalSigned(delta, context.normal, context.side);
+    const newHalfWidth = clampHalfWidth(
+      context.originalHalfWidth + projectedDelta,
+      context.minHalfWidth
+    );
+    return withRibIdentity(context, {
+      halfWidth: roundFunc(newHalfWidth),
+    });
+  }
+
+  if (strategy === RIB_STRATEGY_EDITABLE_WIDTH_NUDGE) {
+    let newNudge = context.originalNudge;
+    let newHalfWidth = context.originalHalfWidth;
+
+    if (constrainMode === "tangent") {
+      const tangentDelta = projectToTangent(delta, context.tangent);
+      newNudge = context.originalNudge + tangentDelta;
+    } else {
+      const normalDelta = projectToNormalSigned(delta, context.normal, context.side);
+      newHalfWidth = clampHalfWidth(
+        context.originalHalfWidth + normalDelta,
+        context.minHalfWidth
+      );
+    }
+
+    return withRibIdentity(context, {
+      halfWidth: roundFunc(newHalfWidth),
+      nudge: roundFunc(newNudge),
+    });
+  }
+
+  if (strategy === RIB_STRATEGY_INTERPOLATE) {
+    const lineDir = context.lineDir || context.tangent;
+    const deltaAlongLine = projectDelta(delta, lineDir);
+    const lineDirDotTangent = projectDelta(lineDir, context.tangent);
+    const deltaNudge = lineDirDotTangent * deltaAlongLine;
+    const newNudge = context.originalNudge + deltaNudge;
+
+    const compensatedOffsets = buildCompensatedOffsets(
+      context.originalHandleOffsets,
+      context.tangent,
+      deltaNudge,
+      context.hasIncomingHandle,
+      context.hasOutgoingHandle
+    );
+
+    return withRibIdentity(context, {
+      halfWidth: roundFunc(context.originalHalfWidth),
+      nudge: roundFunc(newNudge),
+      handleInOffsetX: roundFunc(compensatedOffsets.inX),
+      handleInOffsetY: roundFunc(compensatedOffsets.inY),
+      handleOutOffsetX: roundFunc(compensatedOffsets.outX),
+      handleOutOffsetY: roundFunc(compensatedOffsets.outY),
+      isInterpolation: true,
+    });
+  }
+
+  throw new Error(`Unknown rib strategy: ${strategy}`);
+}
+
 /**
  * RibEditBehavior - Handles dragging of rib points (width control points).
  * Constrains movement to the normal direction and updates point width.
@@ -1986,22 +2162,15 @@ export class RibEditBehavior {
    * @returns {Object} { halfWidth, widthChange } - New half-width and width change object
    */
   applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
-    // Project delta onto normal
-    const projectedDelta = projectToNormalSigned(delta, this.normal, this.side);
-
-    // Calculate new half-width
-    let newHalfWidth = this.originalHalfWidth + projectedDelta;
-
-    // Clamp to minimum
-    newHalfWidth = clampHalfWidth(newHalfWidth, this.minHalfWidth);
-
-    // Return the width change object
-    return {
+    const context = createRibRuntimeContext({
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
       side: this.side,
-      halfWidth: roundFunc(newHalfWidth),
-    };
+      normal: this.normal,
+      originalHalfWidth: this.originalHalfWidth,
+      minHalfWidth: this.minHalfWidth,
+    });
+    return runRibStrategy(context, delta, RIB_STRATEGY_BASIC_WIDTH, { roundFunc });
   }
 
   /**
@@ -2087,62 +2256,24 @@ export class EditableRibBehavior {
    * Initialize handle offset tracking for nudge compensation.
    */
   _initHandleOffsets(point, points, pointIndex, side) {
-    // Compute skeleton handle directions
-    this.skeletonHandleInDir = null;
-    this.skeletonHandleOutDir = null;
+    const dirs = getSkeletonHandleDirections(points, pointIndex, true);
+    this.skeletonHandleInDir = dirs.skeletonHandleInDir;
+    this.skeletonHandleOutDir = dirs.skeletonHandleOutDir;
 
-    const prevIdx = (pointIndex - 1 + points.length) % points.length;
-    if (points[prevIdx]?.type) {
-      const dx = points[prevIdx].x - point.x;
-      const dy = points[prevIdx].y - point.y;
-      const len = Math.hypot(dx, dy);
-      if (len > 0.001) {
-        this.skeletonHandleInDir = { x: dx / len, y: dy / len };
-      }
-    }
-
-    const nextIdx = (pointIndex + 1) % points.length;
-    if (points[nextIdx]?.type) {
-      const dx = points[nextIdx].x - point.x;
-      const dy = points[nextIdx].y - point.y;
-      const len = Math.hypot(dx, dy);
-      if (len > 0.001) {
-        this.skeletonHandleOutDir = { x: dx / len, y: dy / len };
-      }
-    }
-
-    // Read existing 2D offsets or convert from 1D
-    const handleKeys = getRibHandleOffsetKeys(side);
-    const has2DIn = point[handleKeys.in.x] !== undefined || point[handleKeys.in.y] !== undefined;
-    const has2DOut = point[handleKeys.out.x] !== undefined || point[handleKeys.out.y] !== undefined;
-
-    // Check if any handle offsets exist (2D or 1D)
-    this.hasHandleOffsets = has2DIn || has2DOut ||
-      point[handleKeys.in.oneD] !== undefined || point[handleKeys.out.oneD] !== undefined;
-
-    if (has2DIn) {
-      this.originalHandleInOffsetX = point[handleKeys.in.x] || 0;
-      this.originalHandleInOffsetY = point[handleKeys.in.y] || 0;
-    } else if (point[handleKeys.in.oneD]) {
-      const dir = this.skeletonHandleInDir || this.tangent;
-      this.originalHandleInOffsetX = dir.x * point[handleKeys.in.oneD];
-      this.originalHandleInOffsetY = dir.y * point[handleKeys.in.oneD];
-    } else {
-      this.originalHandleInOffsetX = 0;
-      this.originalHandleInOffsetY = 0;
-    }
-
-    if (has2DOut) {
-      this.originalHandleOutOffsetX = point[handleKeys.out.x] || 0;
-      this.originalHandleOutOffsetY = point[handleKeys.out.y] || 0;
-    } else if (point[handleKeys.out.oneD]) {
-      const dir = this.skeletonHandleOutDir || this.tangent;
-      this.originalHandleOutOffsetX = dir.x * point[handleKeys.out.oneD];
-      this.originalHandleOutOffsetY = dir.y * point[handleKeys.out.oneD];
-    } else {
-      this.originalHandleOutOffsetX = 0;
-      this.originalHandleOutOffsetY = 0;
-    }
+    const offsets = readNormalizedHandleOffsets(
+      point,
+      side,
+      {
+        skeletonHandleInDir: this.skeletonHandleInDir,
+        skeletonHandleOutDir: this.skeletonHandleOutDir,
+      },
+      this.tangent
+    );
+    this.hasHandleOffsets = offsets.hasAny;
+    this.originalHandleInOffsetX = offsets.inX;
+    this.originalHandleInOffsetY = offsets.inY;
+    this.originalHandleOutOffsetX = offsets.outX;
+    this.originalHandleOutOffsetY = offsets.outY;
   }
 
   /**
@@ -2154,34 +2285,22 @@ export class EditableRibBehavior {
    * @returns {Object} { halfWidth, nudge, handleInOffsetX/Y, handleOutOffsetX/Y }
    */
   applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
-    let newNudge = this.originalNudge;
-    let newHalfWidth = this.originalHalfWidth;
-
-    // Constrain to tangent: only nudge changes
-    if (constrainMode === "tangent") {
-      const tangentDelta = projectToTangent(delta, this.tangent);
-      newNudge = this.originalNudge + tangentDelta;
-    }
-    // Constrain to normal: only width changes
-    else if (constrainMode === "normal") {
-      const normalDelta = projectToNormalSigned(delta, this.normal, this.side);
-      newHalfWidth = this.originalHalfWidth + normalDelta;
-      newHalfWidth = clampHalfWidth(newHalfWidth, this.minHalfWidth);
-    }
-    // Free movement (no constraint): width only (tangent requires Shift)
-    else {
-      const normalDelta = projectToNormalSigned(delta, this.normal, this.side);
-      newHalfWidth = this.originalHalfWidth + normalDelta;
-      newHalfWidth = clampHalfWidth(newHalfWidth, this.minHalfWidth);
-    }
-
-    const result = {
+    const context = createRibRuntimeContext({
       contourIndex: this.contourIndex,
       pointIndex: this.pointIndex,
       side: this.side,
-      halfWidth: roundFunc(newHalfWidth),
-      nudge: roundFunc(newNudge),
-    };
+      normal: this.normal,
+      tangent: this.tangent,
+      originalHalfWidth: this.originalHalfWidth,
+      originalNudge: this.originalNudge,
+      minHalfWidth: this.minHalfWidth,
+    });
+    const result = runRibStrategy(
+      context,
+      delta,
+      RIB_STRATEGY_EDITABLE_WIDTH_NUDGE,
+      { constrainMode, roundFunc }
+    );
 
     // Note: we don't compensate handle offsets here.
     // Handles should move WITH the rib point in normal drag mode.
@@ -2286,75 +2405,31 @@ export class InterpolatingRibBehavior {
     const isClosed = !!contour.isClosed;
     const defaultWidth = getContourDefaultWidth(contour);
 
-    // Compute skeleton handle directions for 1D to 2D conversion
-    // These are needed to correctly interpret existing 1D offsets
-    this.skeletonHandleInDir = null;
-    this.skeletonHandleOutDir = null;
-    this.hasIncomingHandle = false;
-    this.hasOutgoingHandle = false;
-
-    // Incoming handle (previous point if it's off-curve). Respect open contour endpoints.
-    const prevIdx = isClosed || pointIndex > 0 ? (pointIndex - 1 + points.length) % points.length : null;
-    if (prevIdx !== null && points[prevIdx]?.type) {
-      this.hasIncomingHandle = true;
-      const dx = points[prevIdx].x - point.x;
-      const dy = points[prevIdx].y - point.y;
-      const len = Math.hypot(dx, dy);
-      if (len > 0.001) {
-        this.skeletonHandleInDir = { x: dx / len, y: dy / len };
-      }
-    }
-
-    // Outgoing handle (next point if it's off-curve). Respect open contour endpoints.
-    const nextIdx = isClosed || pointIndex < points.length - 1 ? (pointIndex + 1) % points.length : null;
-    if (nextIdx !== null && points[nextIdx]?.type) {
-      this.hasOutgoingHandle = true;
-      const dx = points[nextIdx].x - point.x;
-      const dy = points[nextIdx].y - point.y;
-      const len = Math.hypot(dx, dy);
-      if (len > 0.001) {
-        this.skeletonHandleOutDir = { x: dx / len, y: dy / len };
-      }
-    }
+    // Compute skeleton handle directions for 1D->2D conversion
+    // and detect available handle sides.
+    const dirs = getSkeletonHandleDirections(points, pointIndex, isClosed);
+    this.skeletonHandleInDir = dirs.skeletonHandleInDir;
+    this.skeletonHandleOutDir = dirs.skeletonHandleOutDir;
+    this.hasIncomingHandle = dirs.hasIncomingHandle;
+    this.hasOutgoingHandle = dirs.hasOutgoingHandle;
 
     this.originalHalfWidth = getOriginalHalfWidth(point, defaultWidth, side);
     this.originalNudge = getOriginalNudge(point, side);
 
-    // Store original 2D handle offsets (new format)
-    // If only 1D offsets exist, convert them to 2D using skeleton handle direction
-    const handleKeys = getRibHandleOffsetKeys(side);
-
-    // Check if 2D offsets exist
-    const has2DIn = point[handleKeys.in.x] !== undefined || point[handleKeys.in.y] !== undefined;
-    const has2DOut = point[handleKeys.out.x] !== undefined || point[handleKeys.out.y] !== undefined;
-
-    if (has2DIn) {
-      this.originalHandleInOffsetX = point[handleKeys.in.x] || 0;
-      this.originalHandleInOffsetY = point[handleKeys.in.y] || 0;
-    } else if (point[handleKeys.in.oneD]) {
-      // Convert 1D to 2D using the actual skeleton handle direction
-      // The 1D offset was applied along skeletonHandleInDir, so use that for conversion
-      const dir = this.skeletonHandleInDir || this.tangent;
-      this.originalHandleInOffsetX = dir.x * point[handleKeys.in.oneD];
-      this.originalHandleInOffsetY = dir.y * point[handleKeys.in.oneD];
-    } else {
-      this.originalHandleInOffsetX = 0;
-      this.originalHandleInOffsetY = 0;
-    }
-
-    if (has2DOut) {
-      this.originalHandleOutOffsetX = point[handleKeys.out.x] || 0;
-      this.originalHandleOutOffsetY = point[handleKeys.out.y] || 0;
-    } else if (point[handleKeys.out.oneD]) {
-      // Convert 1D to 2D using the actual skeleton handle direction
-      // The 1D offset was applied along skeletonHandleOutDir, so use that for conversion
-      const dir = this.skeletonHandleOutDir || this.tangent;
-      this.originalHandleOutOffsetX = dir.x * point[handleKeys.out.oneD];
-      this.originalHandleOutOffsetY = dir.y * point[handleKeys.out.oneD];
-    } else {
-      this.originalHandleOutOffsetX = 0;
-      this.originalHandleOutOffsetY = 0;
-    }
+    // Store normalized original handle offsets (2D), including 1D->2D conversion.
+    const offsets = readNormalizedHandleOffsets(
+      point,
+      side,
+      {
+        skeletonHandleInDir: this.skeletonHandleInDir,
+        skeletonHandleOutDir: this.skeletonHandleOutDir,
+      },
+      this.tangent
+    );
+    this.originalHandleInOffsetX = offsets.inX;
+    this.originalHandleInOffsetY = offsets.inY;
+    this.originalHandleOutOffsetX = offsets.outX;
+    this.originalHandleOutOffsetY = offsets.outY;
 
     // Calculate current rib point position
     this._recalculateRibPos();
@@ -2434,37 +2509,25 @@ export class InterpolatingRibBehavior {
    * @returns {Object} { nudge, handleInOffsetX/Y, handleOutOffsetX/Y, isInterpolation }
    */
   applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
-    // Project drag delta onto the handle-handle line direction
-    const deltaAlongLine = delta.x * this.lineDir.x + delta.y * this.lineDir.y;
-
-    // Decompose line movement into tangent component (nudge)
-    const lineDirDotTangent = this.lineDir.x * this.tangent.x + this.lineDir.y * this.tangent.y;
-    const deltaNudge = lineDirDotTangent * deltaAlongLine;
-    const newNudge = this.originalNudge + deltaNudge;
-
-    // 2D compensation: handles must stay fixed in place
-    // When rib point moves by tangent * deltaNudge, we need to add
-    // an opposite offset to keep handles stationary
-    const handleOffsetDeltaX = -this.tangent.x * deltaNudge;
-    const handleOffsetDeltaY = -this.tangent.y * deltaNudge;
-
-    const newHandleInOffsetX = this.originalHandleInOffsetX + (this.hasIncomingHandle ? handleOffsetDeltaX : 0);
-    const newHandleInOffsetY = this.originalHandleInOffsetY + (this.hasIncomingHandle ? handleOffsetDeltaY : 0);
-    const newHandleOutOffsetX = this.originalHandleOutOffsetX + (this.hasOutgoingHandle ? handleOffsetDeltaX : 0);
-    const newHandleOutOffsetY = this.originalHandleOutOffsetY + (this.hasOutgoingHandle ? handleOffsetDeltaY : 0);
-
-      return {
-        contourIndex: this.contourIndex,
-        pointIndex: this.pointIndex,
-        side: this.side,
-        halfWidth: roundFunc(this.originalHalfWidth),  // Keep width unchanged
-        nudge: roundFunc(newNudge),
-        handleInOffsetX: roundFunc(newHandleInOffsetX),
-        handleInOffsetY: roundFunc(newHandleInOffsetY),
-        handleOutOffsetX: roundFunc(newHandleOutOffsetX),
-        handleOutOffsetY: roundFunc(newHandleOutOffsetY),
-        isInterpolation: true,
-      };
+    const context = createRibRuntimeContext({
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      normal: this.normal,
+      tangent: this.tangent,
+      lineDir: this.lineDir,
+      originalHalfWidth: this.originalHalfWidth,
+      originalNudge: this.originalNudge,
+      hasIncomingHandle: this.hasIncomingHandle,
+      hasOutgoingHandle: this.hasOutgoingHandle,
+      originalHandleOffsets: {
+        inX: this.originalHandleInOffsetX,
+        inY: this.originalHandleInOffsetY,
+        outX: this.originalHandleOutOffsetX,
+        outY: this.originalHandleOutOffsetY,
+      },
+    });
+    return runRibStrategy(context, delta, RIB_STRATEGY_INTERPOLATE, { roundFunc });
   }
 
   /**
