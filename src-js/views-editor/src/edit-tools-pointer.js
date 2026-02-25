@@ -50,7 +50,11 @@ import {
   createRibEditBehavior,
   createSkeletonEditBehavior,
   constrainHorVerDiag,
+  getHandleDetachedKey,
+  getHandleOffsetKeys,
+  getRibHandleOffsetKeys,
   getSkeletonBehaviorName,
+  getRibNudgeKey,
   makeRoundFunc,
   resolveModifierPlan,
 } from "./edit-behavior.js";
@@ -107,6 +111,35 @@ function projectRibPoint(point, normal, halfWidth, side, nudge = 0) {
   return {
     x: Math.round(baseX + tangent.x * nudge),
     y: Math.round(baseY + tangent.y * nudge),
+  };
+}
+
+function getRibNudgeValue(point, side) {
+  return point[getRibNudgeKey(side)] || 0;
+}
+
+function setRibNudgeValue(point, side, nudge) {
+  point[getRibNudgeKey(side)] = nudge;
+}
+
+function applyRibHandleOffsetCompensation(point, side, change) {
+  const handleKeys = getRibHandleOffsetKeys(side);
+  // When 2D compensation is present, clear legacy 1D offsets so the schema has one source.
+  point[handleKeys.in.x] = change.handleInOffsetX;
+  point[handleKeys.in.y] = change.handleInOffsetY;
+  point[handleKeys.out.x] = change.handleOutOffsetX;
+  point[handleKeys.out.y] = change.handleOutOffsetY;
+  delete point[handleKeys.in.oneD];
+  delete point[handleKeys.out.oneD];
+}
+
+function getEditableHandleKeys(side, handleType) {
+  const offsetKeys = getHandleOffsetKeys(side, handleType);
+  return {
+    offset1DKey: offsetKeys.oneD,
+    offsetXKey: offsetKeys.x,
+    offsetYKey: offsetKeys.y,
+    detachedKey: getHandleDetachedKey(side),
   };
 }
 
@@ -3500,29 +3533,11 @@ export class PointerTool extends BaseTool {
               delete point.rightWidth;
               // Also apply nudge if editable
               if (sideIsEditable && change.nudge !== undefined) {
-                if (side === "left") {
-                  point.leftNudge = change.nudge;
-                } else {
-                  point.rightNudge = change.nudge;
-                }
+                setRibNudgeValue(point, side, change.nudge);
               }
               // Apply 2D handle offset compensation for interpolation or editable drag (single-sided)
               if (sideIsEditable && (change.isInterpolation || change.hasHandleOffsets)) {
-                if (side === "left") {
-                  point.leftHandleInOffsetX = change.handleInOffsetX;
-                  point.leftHandleInOffsetY = change.handleInOffsetY;
-                  point.leftHandleOutOffsetX = change.handleOutOffsetX;
-                  point.leftHandleOutOffsetY = change.handleOutOffsetY;
-                  delete point.leftHandleInOffset;
-                  delete point.leftHandleOutOffset;
-                } else {
-                  point.rightHandleInOffsetX = change.handleInOffsetX;
-                  point.rightHandleInOffsetY = change.handleInOffsetY;
-                  point.rightHandleOutOffsetX = change.handleOutOffsetX;
-                  point.rightHandleOutOffsetY = change.handleOutOffsetY;
-                  delete point.rightHandleInOffset;
-                  delete point.rightHandleOutOffset;
-                }
+                applyRibHandleOffsetCompensation(point, side, change);
               }
             } else if (sideIsEditable) {
               const baseContour = data.original.contours[target.contourIndex];
@@ -3541,31 +3556,11 @@ export class PointerTool extends BaseTool {
                 );
               }
 
-              if (side === "left") {
-                point.leftNudge = change.nudge;
-              } else {
-                point.rightNudge = change.nudge;
-              }
+              setRibNudgeValue(point, side, change.nudge);
 
               // Apply 2D handle offset compensation for interpolation or editable drag
               if (change.isInterpolation || change.hasHandleOffsets) {
-                if (side === "left") {
-                  point.leftHandleInOffsetX = change.handleInOffsetX;
-                  point.leftHandleInOffsetY = change.handleInOffsetY;
-                  point.leftHandleOutOffsetX = change.handleOutOffsetX;
-                  point.leftHandleOutOffsetY = change.handleOutOffsetY;
-                  // Clear legacy 1D offsets
-                  delete point.leftHandleInOffset;
-                  delete point.leftHandleOutOffset;
-                } else {
-                  point.rightHandleInOffsetX = change.handleInOffsetX;
-                  point.rightHandleInOffsetY = change.handleInOffsetY;
-                  point.rightHandleOutOffsetX = change.handleOutOffsetX;
-                  point.rightHandleOutOffsetY = change.handleOutOffsetY;
-                  // Clear legacy 1D offsets
-                  delete point.rightHandleInOffset;
-                  delete point.rightHandleOutOffset;
-                }
+                applyRibHandleOffsetCompensation(point, side, change);
               }
             } else {
               const baseContour = data.original.contours[target.contourIndex];
@@ -3741,8 +3736,7 @@ export class PointerTool extends BaseTool {
       const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
       halfWidth = leftHW + rightHW;
     }
-    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-    const nudge = skeletonPoint[nudgeKey] || 0;
+    const nudge = getRibNudgeValue(skeletonPoint, side);
 
     const expectedRibPoint = projectRibPoint(
       skeletonPoint,
@@ -3865,8 +3859,7 @@ export class PointerTool extends BaseTool {
       const rightHW = getPointHalfWidth(skeletonOnCurve, defaultWidth, "right");
       halfWidth = leftHW + rightHW;
     }
-    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-    const nudge = skeletonOnCurve[nudgeKey] || 0;
+    const nudge = getRibNudgeValue(skeletonOnCurve, side);
     return projectRibPoint(skeletonOnCurve, normal, halfWidth, side, nudge);
   }
 
@@ -4052,31 +4045,11 @@ export class PointerTool extends BaseTool {
               );
             }
 
-            if (side === "left") {
-              point.leftNudge = change.nudge;
-            } else {
-              point.rightNudge = change.nudge;
-            }
+            setRibNudgeValue(point, side, change.nudge);
 
             // Apply 2D handle offset compensation for interpolation or editable drag
             if (change.isInterpolation || change.hasHandleOffsets) {
-              if (side === "left") {
-                point.leftHandleInOffsetX = change.handleInOffsetX;
-                point.leftHandleInOffsetY = change.handleInOffsetY;
-                point.leftHandleOutOffsetX = change.handleOutOffsetX;
-                point.leftHandleOutOffsetY = change.handleOutOffsetY;
-                // Clear legacy 1D offsets
-                delete point.leftHandleInOffset;
-                delete point.leftHandleOutOffset;
-              } else {
-                point.rightHandleInOffsetX = change.handleInOffsetX;
-                point.rightHandleInOffsetY = change.handleInOffsetY;
-                point.rightHandleOutOffsetX = change.handleOutOffsetX;
-                point.rightHandleOutOffsetY = change.handleOutOffsetY;
-                // Clear legacy 1D offsets
-                delete point.rightHandleInOffset;
-                delete point.rightHandleOutOffset;
-              }
+              applyRibHandleOffsetCompensation(point, side, change);
             }
           }
 
@@ -4180,8 +4153,7 @@ export class PointerTool extends BaseTool {
             );
             if (anchorPos && draggedPos && oppositePos && oppositeHandleDir) {
               const point = contour.points[eh.skeletonPointIndex];
-              const detachedKey =
-                eh.side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+              const detachedKey = getHandleDetachedKey(eh.side);
               const detachedMode = !!point[detachedKey];
               const draggedState = this._readEditableHandleEqualizeState(
                 point,
@@ -4268,33 +4240,28 @@ export class PointerTool extends BaseTool {
             const change = behavior.applyDelta(delta, roundFunc);
 
             // Check if handle is in detached mode
-            const detachedKey = editableHandle.side === "left" ? "leftHandleDetached" : "rightHandleDetached";
-            const isDetached = point[detachedKey];
-
-            // Apply the offset to the appropriate key (1D offset)
-            const offsetKey = editableHandle.side === "left"
-              ? (editableHandle.handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
-              : (editableHandle.handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
-
-            const offsetXKey = editableHandle.side === "left"
-              ? (editableHandle.handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
-              : (editableHandle.handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
-            const offsetYKey = editableHandle.side === "left"
-              ? (editableHandle.handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
-              : (editableHandle.handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+            const editableHandleKeys = getEditableHandleKeys(
+              editableHandle.side,
+              editableHandle.handleType
+            );
+            const isDetached = point[editableHandleKeys.detachedKey];
 
             if (isDetached) {
               // Detached mode: update 2D offsets, preserve detached state
               // Use original values since delta is cumulative from drag start
               const originalPoint = data.original.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
               const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
-              point[offsetXKey] = (originalPoint[offsetXKey] || 0) + roundFunc(skeletonHandleDir.x * projectedDelta);
-              point[offsetYKey] = (originalPoint[offsetYKey] || 0) + roundFunc(skeletonHandleDir.y * projectedDelta);
+              point[editableHandleKeys.offsetXKey] =
+                (originalPoint[editableHandleKeys.offsetXKey] || 0) +
+                roundFunc(skeletonHandleDir.x * projectedDelta);
+              point[editableHandleKeys.offsetYKey] =
+                (originalPoint[editableHandleKeys.offsetYKey] || 0) +
+                roundFunc(skeletonHandleDir.y * projectedDelta);
             } else {
               // Normal mode: clear 2D offsets (they have priority), set 1D offset
-              delete point[offsetXKey];
-              delete point[offsetYKey];
-              point[offsetKey] = change.offset;
+              delete point[editableHandleKeys.offsetXKey];
+              delete point[editableHandleKeys.offsetYKey];
+              point[editableHandleKeys.offset1DKey] = change.offset;
             }
           }
 
@@ -4397,33 +4364,28 @@ export class PointerTool extends BaseTool {
           const point = working.contours[editableHandle.skeletonContourIndex].points[editableHandle.skeletonPointIndex];
 
           // Check if handle is in detached mode
-          const detachedKey = editableHandle.side === "left" ? "leftHandleDetached" : "rightHandleDetached";
-          const isDetached = point[detachedKey];
-
-          // Apply the offset (1D only for arrow keys, unless detached)
-          const offsetKey = editableHandle.side === "left"
-            ? (editableHandle.handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
-            : (editableHandle.handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
-
-          const offsetXKey = editableHandle.side === "left"
-            ? (editableHandle.handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
-            : (editableHandle.handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
-          const offsetYKey = editableHandle.side === "left"
-            ? (editableHandle.handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
-            : (editableHandle.handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+          const editableHandleKeys = getEditableHandleKeys(
+            editableHandle.side,
+            editableHandle.handleType
+          );
+          const isDetached = point[editableHandleKeys.detachedKey];
 
           if (isDetached) {
             // Detached mode: update 2D offsets, preserve detached state
             // Project delta onto skeleton handle direction
             const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
-            point[offsetXKey] = (point[offsetXKey] || 0) + Math.round(skeletonHandleDir.x * projectedDelta);
-            point[offsetYKey] = (point[offsetYKey] || 0) + Math.round(skeletonHandleDir.y * projectedDelta);
+            point[editableHandleKeys.offsetXKey] =
+              (point[editableHandleKeys.offsetXKey] || 0) +
+              Math.round(skeletonHandleDir.x * projectedDelta);
+            point[editableHandleKeys.offsetYKey] =
+              (point[editableHandleKeys.offsetYKey] || 0) +
+              Math.round(skeletonHandleDir.y * projectedDelta);
             // Don't touch 1D offset - let 2D offsets take priority
           } else {
             // Normal mode: clear 2D offsets (they have priority), set 1D offset
-            delete point[offsetXKey];
-            delete point[offsetYKey];
-            point[offsetKey] = change.offset;
+            delete point[editableHandleKeys.offsetXKey];
+            delete point[editableHandleKeys.offsetYKey];
+            point[editableHandleKeys.offset1DKey] = change.offset;
           }
         }
 
@@ -4706,27 +4668,12 @@ export class PointerTool extends BaseTool {
 
               // Apply nudge changes
               if (change.nudge !== undefined) {
-                const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-                point[nudgeKey] = change.nudge;
-            }
+                setRibNudgeValue(point, side, change.nudge);
+              }
 
             // Apply 2D handle offset compensation for interpolation/editable flows.
             if (change.isInterpolation || change.hasHandleOffsets) {
-              if (side === "left") {
-                point.leftHandleInOffsetX = change.handleInOffsetX;
-                point.leftHandleInOffsetY = change.handleInOffsetY;
-                point.leftHandleOutOffsetX = change.handleOutOffsetX;
-                point.leftHandleOutOffsetY = change.handleOutOffsetY;
-                delete point.leftHandleInOffset;
-                delete point.leftHandleOutOffset;
-              } else {
-                point.rightHandleInOffsetX = change.handleInOffsetX;
-                point.rightHandleInOffsetY = change.handleInOffsetY;
-                point.rightHandleOutOffsetX = change.handleOutOffsetX;
-                point.rightHandleOutOffsetY = change.handleOutOffsetY;
-                delete point.rightHandleInOffset;
-                delete point.rightHandleOutOffset;
-              }
+              applyRibHandleOffsetCompensation(point, side, change);
             }
           } else {
             // Use RibEditBehavior for non-editable ribs (width only)
@@ -4842,16 +4789,7 @@ export class PointerTool extends BaseTool {
   }
 
   _getEditableHandleOffsetKeys(side, handleType) {
-    const offset1DKey = side === "left"
-      ? (handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
-      : (handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
-    const offsetXKey = side === "left"
-      ? (handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
-      : (handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
-    const offsetYKey = side === "left"
-      ? (handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
-      : (handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
-    return { offset1DKey, offsetXKey, offsetYKey };
+    return getEditableHandleKeys(side, handleType);
   }
 
   _normalizeDirection(vectorValue, fallbackDirection) {
@@ -4995,8 +4933,7 @@ export class PointerTool extends BaseTool {
         );
         if (!draggedDir || !oppositeDir) continue;
 
-        const detachedKey =
-          editableHandle.side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+        const detachedKey = getHandleDetachedKey(editableHandle.side);
         const detachedMode = !!point[detachedKey];
 
         const draggedState = this._readEditableHandleEqualizeState(
@@ -6478,8 +6415,10 @@ export class PointerTool extends BaseTool {
         const isRightEditable = skeletonPoint.rightEditable === true;
 
         // Calculate nudge offsets (only if editable, to match generator behavior)
-        const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
-        const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+        const leftNudgeKey = getRibNudgeKey("left");
+        const rightNudgeKey = getRibNudgeKey("right");
+        const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint[leftNudgeKey] || 0) : 0;
+        const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint[rightNudgeKey] || 0) : 0;
 
         const singleSided = contour.singleSided ?? false;
         const singleSidedDirection = contour.singleSidedDirection ?? "left";
@@ -6490,9 +6429,9 @@ export class PointerTool extends BaseTool {
           const side = singleSidedDirection;
           const sign = side === "left" ? 1 : -1;
           const canNudge = totalWidth >= 0.5;
-          const nudge = side === "left"
-            ? ((isLeftEditable && canNudge) ? (skeletonPoint.leftNudge || 0) : 0)
-            : ((isRightEditable && canNudge) ? (skeletonPoint.rightNudge || 0) : 0);
+          const nudgeKey = getRibNudgeKey(side);
+          const canApplyNudge = side === "left" ? isLeftEditable : isRightEditable;
+          const nudge = (canApplyNudge && canNudge) ? (skeletonPoint[nudgeKey] || 0) : 0;
           const ribPoint = projectRibPoint(
             skeletonPoint,
             normal,
@@ -6608,8 +6547,10 @@ export class PointerTool extends BaseTool {
         // Apply nudge offset for editable points
         const isLeftEditable = skeletonPoint.leftEditable === true;
         const isRightEditable = skeletonPoint.rightEditable === true;
-        const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
-        const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+        const leftNudgeKey = getRibNudgeKey("left");
+        const rightNudgeKey = getRibNudgeKey("right");
+        const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint[leftNudgeKey] || 0) : 0;
+        const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint[rightNudgeKey] || 0) : 0;
 
         // Calculate rib endpoint positions (including nudge)
         const leftRibPoint = projectRibPoint(
@@ -6962,16 +6903,18 @@ export class PointerTool extends BaseTool {
         return null;
       }
       const canNudge = totalWidth >= 0.5;
-      const nudge = side === "left"
-        ? ((skeletonPoint.leftEditable && canNudge) ? (skeletonPoint.leftNudge || 0) : 0)
-        : ((skeletonPoint.rightEditable && canNudge) ? (skeletonPoint.rightNudge || 0) : 0);
+      const nudgeKey = getRibNudgeKey(side);
+      const canApplyNudge = side === "left" ? skeletonPoint.leftEditable : skeletonPoint.rightEditable;
+      const nudge = (canApplyNudge && canNudge) ? (skeletonPoint[nudgeKey] || 0) : 0;
       return projectRibPoint(skeletonPoint, normal, totalWidth, side, nudge);
     }
 
     const isLeftEditable = skeletonPoint.leftEditable === true;
     const isRightEditable = skeletonPoint.rightEditable === true;
-    const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
-    const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+    const leftNudgeKey = getRibNudgeKey("left");
+    const rightNudgeKey = getRibNudgeKey("right");
+    const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint[leftNudgeKey] || 0) : 0;
+    const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint[rightNudgeKey] || 0) : 0;
     const halfWidth = side === "left" ? leftHW : rightHW;
     const nudge = side === "left" ? leftNudge : rightNudge;
     return projectRibPoint(skeletonPoint, normal, halfWidth, side, nudge);

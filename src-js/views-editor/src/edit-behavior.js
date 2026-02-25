@@ -2005,11 +2005,11 @@ function clampHalfWidth(value, min = 0) {
   return value < min ? min : value;
 }
 
-function getRibNudgeKey(side) {
+export function getRibNudgeKey(side) {
   return side === "left" ? "leftNudge" : "rightNudge";
 }
 
-function getHandleOffsetKeys(side, handleType) {
+export function getHandleOffsetKeys(side, handleType) {
   const prefix = side === "left" ? "left" : "right";
   const stem = handleType === "in" ? "HandleInOffset" : "HandleOutOffset";
   return {
@@ -2019,11 +2019,15 @@ function getHandleOffsetKeys(side, handleType) {
   };
 }
 
-function getRibHandleOffsetKeys(side) {
+export function getRibHandleOffsetKeys(side) {
   return {
     in: getHandleOffsetKeys(side, "in"),
     out: getHandleOffsetKeys(side, "out"),
   };
+}
+
+export function getHandleDetachedKey(side) {
+  return side === "left" ? "leftHandleDetached" : "rightHandleDetached";
 }
 
 function getSkeletonHandleDirections(points, pointIndex, isClosed = true) {
