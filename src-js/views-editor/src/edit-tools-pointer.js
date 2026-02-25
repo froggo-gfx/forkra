@@ -31,7 +31,6 @@ import { Transform } from "@fontra/core/transform.js";
 import {
   arrowKeyDeltas,
   assert,
-  boolInt,
   commandKeyProperty,
   enumerate,
   parseSelection,
@@ -40,7 +39,12 @@ import {
 import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
-import { EditBehaviorFactory, constrainHorVerDiag, makeRoundFunc } from "./edit-behavior.js";
+import {
+  EditBehaviorFactory,
+  constrainHorVerDiag,
+  makeRoundFunc,
+  resolveBehaviorPresetName,
+} from "./edit-behavior.js";
 import {
   createSkeletonEditBehavior,
   getSkeletonBehaviorName,
@@ -7198,8 +7202,7 @@ function pointInCircleHandle(point, handle, handleSize) {
 }
 
 function getBehaviorName(event) {
-  const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
-  return behaviorNames[boolInt(event.shiftKey) + 2 * boolInt(event.altKey)];
+  return resolveBehaviorPresetName({ shift: event.shiftKey, alt: event.altKey });
 }
 
 function replace(setA, setB) {

@@ -20,6 +20,7 @@ import {
   buildPointMatchTree,
   findPointMatch,
 } from "./edit-behavior-support.js";
+import { getBehaviorPreset, resolveBehaviorPresetName } from "./edit-behavior.js";
 
 // Re-export flags for convenience
 export { ANY, NIL, OFF, SEL, SHA, SMO, UNS };
@@ -456,8 +457,9 @@ export class SkeletonEditBehavior {
     this.isClosed = this.contour.isClosed;
     this.selectedIndices = new Set(selectedPointIndices);
 
-    // Get behavior from behaviorTypes (same pattern as edit-behavior.js)
-    const behavior = behaviorTypes[behaviorName] || behaviorTypes["default"];
+    // Pull preset from the central behavior hub so regular/skeleton selection
+    // resolves modifiers through one source of truth.
+    const behavior = getBehaviorPreset("skeleton", behaviorName);
     this.matchTree = behavior.matchTree;
     this.constrainDelta = behavior.constrainDelta || ((v) => v);
     this.enableScalingEdit = enableScalingEdit;
@@ -855,8 +857,7 @@ export function createSkeletonEditBehavior(
  * Same logic as getBehaviorName in edit-tools-pointer.js
  */
 export function getSkeletonBehaviorName(shiftKey, altKey) {
-  const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
-  return behaviorNames[(shiftKey ? 1 : 0) + (altKey ? 2 : 0)];
+  return resolveBehaviorPresetName({ shift: shiftKey, alt: altKey });
 }
 
 /**

@@ -105,10 +105,10 @@ export class EditBehaviorFactory {
   _getBehavior(behaviorName, doFullTransform = false) {
     let behavior = this.behaviors[behaviorName];
     if (!behavior) {
-      let behaviorType = behaviorTypes[behaviorName];
+      let behaviorType = getBehaviorPreset("regular", behaviorName);
       if (!behaviorType) {
         console.log(`invalid behavior name: "${behaviorName}"`);
-        behaviorType = behaviorTypes["default"];
+        behaviorType = getBehaviorPreset("regular", "default");
       }
       if (this.enableScalingEdit && behaviorType.canDoScalingEdit) {
         behaviorType = { ...behaviorType, enableScalingEdit: true };
@@ -1389,3 +1389,44 @@ const behaviorTypes = {
     constrainDelta: constrainHorVerDiag,
   },
 };
+
+// Central behavior hub for pointer object kinds.
+// Step 7.5: introduce shared lookup tables only (wiring follows in Step 7.6).
+const REGULAR_BEHAVIOR_PRESETS = behaviorTypes;
+
+export const BEHAVIOR_TABLES = {
+  regular: REGULAR_BEHAVIOR_PRESETS,
+  // Skeleton currently mirrors regular presets.
+  // If skeleton-specific deltas are needed later, override only those entries.
+  skeleton: REGULAR_BEHAVIOR_PRESETS,
+  // Rib points intentionally expose a reduced preset surface.
+  rib: {
+    default: REGULAR_BEHAVIOR_PRESETS.default,
+    constrain: REGULAR_BEHAVIOR_PRESETS.constrain,
+  },
+};
+
+export function resolveBehaviorPresetName(flagsOrName) {
+  if (typeof flagsOrName === "string" && flagsOrName) {
+    return flagsOrName;
+  }
+  const flags = flagsOrName || {};
+  const shiftActive = !!(flags.shift || flags.shiftKey || flags.constrain);
+  const altActive = !!(flags.alt || flags.altKey || flags.alternate);
+  if (altActive && shiftActive) {
+    return "alternate-constrain";
+  }
+  if (altActive) {
+    return "alternate";
+  }
+  if (shiftActive) {
+    return "constrain";
+  }
+  return "default";
+}
+
+export function getBehaviorPreset(objectKind = "regular", flagsOrName = "default") {
+  const table = BEHAVIOR_TABLES[objectKind] || BEHAVIOR_TABLES.regular;
+  const presetName = resolveBehaviorPresetName(flagsOrName);
+  return table[presetName] || table.default || BEHAVIOR_TABLES.regular.default;
+}

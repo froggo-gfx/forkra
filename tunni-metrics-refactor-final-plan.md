@@ -153,8 +153,6 @@ import {
 
 ---
 
-## ОСТАЛОСЬ ВЫПОЛНИТЬ
-
 ## Шаг 06. Убрать `distance-angle.js`: математика в `measure-core`, рендер в `visualization-layer-definitions.js`
 **Общая проблема:** сейчас `distance-angle.js` смешивает вычисления и отрисовку; это тот же анти-паттерн, который мы уже убираем в Tunni.  
 **Аспект шага:** объединить `Q-measure` и distance/manhattan callouts на общей математике, а визуализацию держать только в визуализационном слое editor-а.  
@@ -177,6 +175,8 @@ function drawTunniLabels(...) { /* uses tunni-core + measure-core */ }
 - В коде нет runtime-импортов из `@fontra/core/distance-angle.js`.
 
 ---
+
+## ОСТАЛОСЬ ВЫПОЛНИТЬ
 
 ## Шаг 07. Единый helper generated contours
 **Общая проблема:** фильтрация generated contours дублируется в hit-test/visualization.  
@@ -257,6 +257,39 @@ const behavior = getBehaviorPreset("skeleton", behaviorName);
 - Skeleton drag + Shift/Alt модификаторы по baseline.
 - Rib drag/arrows работают с намеренно урезанным набором поведений.
 - `Q/X/Z`-флаги не ломают выбор preset (даже если для части objectKind они no-op).
+
+---
+
+## Шаг 07.7. Консолидация skeleton/rib behavior в `edit-behavior.js` и удаление `skeleton-edit-behavior.js`
+**Общая проблема:** после 7.6 источник preset общий, но реализация skeleton/rib все еще живет в отдельном файле, что нарушает целевой принцип «один behavior hub».  
+**Аспект шага:** финально убрать разрыв между regular и skeleton/rib behavior-слоем и оставить одну точку поддержки.  
+**Решение:** перенести `SkeletonEditBehavior`, `RibEditBehavior`, `EditableRibBehavior`, `InterpolatingRibBehavior`, `EditableHandleBehavior` и связанные фабрики/утилиты в `src-js/views-editor/src/edit-behavior.js`; затем перевести импорты pointer на `edit-behavior.js`; `src-js/views-editor/src/skeleton-edit-behavior.js` временно оставить как re-export shim и удалить после smoke-test.
+
+**Мокап кода:**
+```js
+// edit-behavior.js
+export class SkeletonEditBehavior { ... }
+export function createSkeletonEditBehavior(...) { ... }
+export class RibEditBehavior { ... }
+export function createRibEditBehavior(...) { ... }
+```
+
+```js
+// edit-tools-pointer.js
+import {
+  createSkeletonEditBehavior,
+  createRibEditBehavior,
+  createEditableRibBehavior,
+  createInterpolatingRibBehavior,
+  createEditableHandleBehavior,
+} from "./edit-behavior.js";
+```
+
+**Что тестировать вручную:**
+- Skeleton point drag/arrow + `Shift/Alt` + mixed selection не изменились.
+- Rib drag/arrow и ограничения (`linked/editable`, `Z`, interpolation) работают как baseline.
+- Generated handles drag/arrow и rollback/undo работают как baseline.
+- В рантайме нет импортов на `./skeleton-edit-behavior.js` из pointer.
 
 ---
 
