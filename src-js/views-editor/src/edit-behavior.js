@@ -1888,6 +1888,23 @@ function buildTangentFromNormal(normal) {
   return { x: -normal.y, y: normal.x };
 }
 
+function projectDelta(delta, axis) {
+  return delta.x * axis.x + delta.y * axis.y;
+}
+
+function projectToNormalSigned(delta, normal, side) {
+  const sign = side === "left" ? 1 : -1;
+  return sign * projectDelta(delta, normal);
+}
+
+function projectToTangent(delta, tangent) {
+  return projectDelta(delta, tangent);
+}
+
+function clampHalfWidth(value, min = 0) {
+  return value < min ? min : value;
+}
+
 function getRibNudgeKey(side) {
   return side === "left" ? "leftNudge" : "rightNudge";
 }
@@ -1956,7 +1973,7 @@ export class RibEditBehavior {
     // For left side, positive projection means wider
     // For right side, negative projection means wider
     const sign = this.side === "left" ? 1 : -1;
-    const dot = delta.x * this.normal.x + delta.y * this.normal.y;
+    const dot = projectDelta(delta, this.normal);
     return {
       x: sign * dot * this.normal.x,
       y: sign * dot * this.normal.y,
@@ -1970,17 +1987,13 @@ export class RibEditBehavior {
    */
   applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
     // Project delta onto normal
-    const sign = this.side === "left" ? 1 : -1;
-    const dot = delta.x * this.normal.x + delta.y * this.normal.y;
-    const projectedDelta = sign * dot;
+    const projectedDelta = projectToNormalSigned(delta, this.normal, this.side);
 
     // Calculate new half-width
     let newHalfWidth = this.originalHalfWidth + projectedDelta;
 
     // Clamp to minimum
-    if (newHalfWidth < this.minHalfWidth) {
-      newHalfWidth = this.minHalfWidth;
-    }
+    newHalfWidth = clampHalfWidth(newHalfWidth, this.minHalfWidth);
 
     // Return the width change object
     return {
@@ -2146,28 +2159,20 @@ export class EditableRibBehavior {
 
     // Constrain to tangent: only nudge changes
     if (constrainMode === "tangent") {
-      const tangentDot = delta.x * this.tangent.x + delta.y * this.tangent.y;
-      newNudge = this.originalNudge + tangentDot;
+      const tangentDelta = projectToTangent(delta, this.tangent);
+      newNudge = this.originalNudge + tangentDelta;
     }
     // Constrain to normal: only width changes
     else if (constrainMode === "normal") {
-      const sign = this.side === "left" ? 1 : -1;
-      const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
-      const normalDelta = sign * normalDot;
+      const normalDelta = projectToNormalSigned(delta, this.normal, this.side);
       newHalfWidth = this.originalHalfWidth + normalDelta;
-      if (newHalfWidth < this.minHalfWidth) {
-        newHalfWidth = this.minHalfWidth;
-      }
+      newHalfWidth = clampHalfWidth(newHalfWidth, this.minHalfWidth);
     }
     // Free movement (no constraint): width only (tangent requires Shift)
     else {
-      const sign = this.side === "left" ? 1 : -1;
-      const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
-      const normalDelta = sign * normalDot;
+      const normalDelta = projectToNormalSigned(delta, this.normal, this.side);
       newHalfWidth = this.originalHalfWidth + normalDelta;
-      if (newHalfWidth < this.minHalfWidth) {
-        newHalfWidth = this.minHalfWidth;
-      }
+      newHalfWidth = clampHalfWidth(newHalfWidth, this.minHalfWidth);
     }
 
     const result = {
@@ -2561,7 +2566,7 @@ export class EditableHandleBehavior {
    */
   applyDelta(delta, roundFunc = this.roundFunc) {
     // Project delta onto skeleton handle direction
-    const projectedDelta = delta.x * this.skeletonHandleDir.x + delta.y * this.skeletonHandleDir.y;
+    const projectedDelta = projectDelta(delta, this.skeletonHandleDir);
     const newOffset = this.originalOffset + projectedDelta;
 
     return {
