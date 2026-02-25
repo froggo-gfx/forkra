@@ -1,5 +1,39 @@
-import { intersect, distance, addVectors, subVectors, normalizeVector } from "./vector.js";
+import { distance, subVectors, normalizeVector } from "./vector.js";
 import { getSkeletonData } from "./skeleton-contour-generator.js";
+// Regular cubic Tunni math is centralized in tunni-core.js.
+// This module keeps interaction/hit-test/drawing and preserves legacy exports as wrappers.
+import {
+  calculateControlHandleDistance as coreCalculateControlHandleDistance,
+  calculateControlPointsFromTunni as coreCalculateControlPointsFromTunni,
+  calculateEqualizedControlPoints as coreCalculateEqualizedControlPoints,
+  calculateOnCurvePointsFromTunni as coreCalculateOnCurvePointsFromTunni,
+  calculateRegularTrueTunniPoint as coreCalculateRegularTrueTunniPoint,
+  calculateRegularTunniPoint as coreCalculateRegularTunniPoint,
+  areDistancesEqualized as coreAreDistancesEqualized,
+} from "./tunni-core.js";
+
+// Temporary debug instrumentation for refactor verification.
+// Keep enabled until final cleanup step in the plan.
+const LOG_TUNNI_WRAPPER_CALLS = true;
+
+function logTunniWrapperCall(name) {
+  // Runtime trace bucket to verify wrapper->core routing in live UI sessions.
+  const trace = (globalThis.__FONTRA_TUNNI_TRACE__ ??= {
+    core: {},
+    wrappers: {},
+    last: [],
+  });
+  trace.wrappers[name] = (trace.wrappers[name] || 0) + 1;
+  trace.last.push({ source: "wrapper", name, at: Date.now() });
+  if (trace.last.length > 100) {
+    trace.last.shift();
+  }
+
+  if (LOG_TUNNI_WRAPPER_CALLS) {
+    // Use warn to avoid DevTools debug-level filtering.
+    console.warn(`[tunni-calculations->core] ${name}`);
+  }
+}
 
 /* Distance and Angle imports
 import {
@@ -48,21 +82,11 @@ export function snapToGrid(point) {
 }
 
 export function calculateTunniPoint(segmentPoints) {
-  // segmentPoints should be an array of 4 points: [start, control1, control2, end]
-  if (segmentPoints.length !== 4) {
-    throw new Error("Segment must have exactly 4 points");
-  }
-  
-  const [p1, p2, p3, p4] = segmentPoints;
-  
-  // Calculate a point along the line segment between the two control points (p2 and p3)
- // This is the midpoint by default, but can be adjusted as needed
-  const tunniPoint = {
-    x: (p2.x + p3.x) / 2,
-    y: (p2.y + p3.y) / 2
-  };
-  
-  return tunniPoint;
+  // Step 4 migration note:
+  // Keep this export as a stable API surface for existing callers, but route the math
+  // through the dedicated core module so regular Tunni geometry has one source of truth.
+  logTunniWrapperCall("calculateTunniPoint");
+  return coreCalculateRegularTunniPoint(segmentPoints);
 }
 
 /**
@@ -71,28 +95,9 @@ export function calculateTunniPoint(segmentPoints) {
  * @returns {Object|null} The intersection point or null if lines are parallel
  */
 export function calculateTrueTunniPoint(segmentPoints) {
-  // segmentPoints should be an array of 4 points: [start, control1, control2, end]
-  if (segmentPoints.length !== 4) {
-    throw new Error("Segment must have exactly 4 points");
-  }
-  
-  const [p1, p2, p3, p4] = segmentPoints;
-  
-  // Calculate unit vectors for the original directions
-  const dir1 = normalizeVector(subVectors(p2, p1));
-  const dir2 = normalizeVector(subVectors(p3, p4));
-  
-  // Calculate the intersection point of the lines along the fixed directions
- // This represents where the lines would intersect if extended infinitely
-  const line1Start = p1;
-  const line1End = addVectors(p1, dir1);
-  const line2Start = p4;
-  const line2End = addVectors(p4, dir2);
-  
-  // Calculate intersection of the lines along the fixed directions
-  const intersection = intersect(line1Start, line1End, line2Start, line2End);
-  
-  return intersection;
+  // Wrapper retained intentionally for compatibility with current pointer/UI imports.
+  logTunniWrapperCall("calculateTrueTunniPoint");
+  return coreCalculateRegularTrueTunniPoint(segmentPoints);
 }
 
 /**
@@ -105,85 +110,14 @@ export function calculateTrueTunniPoint(segmentPoints) {
  * @returns {Array} Array of 2 new control points
  */
 export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equalizeDistances = false, useArithmeticMean = false, gridSnapEnabled = false) {
-  const [p1, p2, p3, p4] = segmentPoints;
-  
-  // Calculate unit vectors for the original directions
-  const dir1 = normalizeVector(subVectors(p2, p1));
-  const dir2 = normalizeVector(subVectors(p3, p4));
-  
-  // Calculate the intersection point of the lines along the fixed directions
-  // This represents where the lines would intersect if extended infinitely
-  const line1Start = p1;
-  const line1End = addVectors(p1, dir1);
-  const line2Start = p4;
-  const line2End = addVectors(p4, dir2);
-  
-  // Calculate intersection of the lines along the fixed directions
-  const intersection = intersect(line1Start, line1End, line2Start, line2End);
-  
-  if (!intersection) {
-    // Lines are parallel, return original control points
-    return [p2, p3];
-  }
-  
-  // Calculate original distances from on-curve points to off-curve points
-  const origDist1 = distance(p1, p2);
-  const origDist2 = distance(p4, p3);
-  
-  // If using arithmetic mean of original distances, calculate the mean
-  let targetDist1 = origDist1;
-  let targetDist2 = origDist2;
-  
-  if (useArithmeticMean) {
-    const arithmeticMean = (origDist1 + origDist2) / 2;
-    targetDist1 = arithmeticMean;
-    targetDist2 = arithmeticMean;
-  }
-  
-  // Calculate distances from on-curve points to the intersection point
-  const distToIntersection1 = distance(p1, intersection);
-  const distToIntersection2 = distance(p4, intersection);
-  
-  // Calculate distances from on-curve points to the new Tunni point
- const distToTunni1 = distance(p1, tunniPoint);
-  const distToTunni2 = distance(p4, tunniPoint);
-  
-  // Calculate additional distances beyond the intersection point
-  const additionalDist1 = distToTunni1 - distToIntersection1;
-  const additionalDist2 = distToTunni2 - distToIntersection2;
-  
-  // If equalizing distances, make additional distances equal
-  let finalAdditionalDist1 = additionalDist1;
-  let finalAdditionalDist2 = additionalDist2;
-  
-  if (equalizeDistances) {
-    const avgAdditionalDist = (additionalDist1 + additionalDist2) / 2;
-    finalAdditionalDist1 = avgAdditionalDist;
-    finalAdditionalDist2 = avgAdditionalDist;
-  }
-  
-  // Calculate new distances along fixed direction vectors
-  // The new distance is the target distance plus the (possibly equalized) additional distance
-  const newDistance1 = targetDist1 + finalAdditionalDist1;
-  const newDistance2 = targetDist2 + finalAdditionalDist2;
-  
-  // Calculate new control points along fixed direction vectors
- const newP2 = {
-    x: p1.x + newDistance1 * dir1.x,
-    y: p1.y + newDistance1 * dir1.y
-  };
-  
-  const newP3 = {
-    x: p4.x + newDistance2 * dir2.x,
-    y: p4.y + newDistance2 * dir2.y
-  };
-  
-  // Apply grid snapping if enabled
- if (gridSnapEnabled) {
-    return [snapToGrid(newP2), snapToGrid(newP3)];
-  }
-  
-  return [newP2, newP3];
+  logTunniWrapperCall("calculateControlPointsFromTunni");
+  return coreCalculateControlPointsFromTunni(
+    tunniPoint,
+    segmentPoints,
+    equalizeDistances,
+    useArithmeticMean,
+    gridSnapEnabled
+  );
 }
 
 /**
@@ -192,40 +126,8 @@ export function calculateControlPointsFromTunni(tunniPoint, segmentPoints, equal
  * @returns {Array} Array of 2 new control points
  */
 export function calculateEqualizedControlPoints(segmentPoints) {
-  const [p1, p2, p3, p4] = segmentPoints;
-  
-  const pt = calculateTrueTunniPoint(segmentPoints); // <- true Tunni point
-  if (!pt) return [p2, p3];
-
-  const dist1ToPt = distance(p1, pt);
-  const dist4ToPt = distance(p4, pt);
- if (dist1ToPt <= 0 || dist4ToPt <= 0) return [p2, p3];
-
-  // current tensions
-  const t1 = distance(p1, p2) / dist1ToPt;
-  const t2 = distance(p4, p3) / dist4ToPt;
-
-  const targetTension = (t1 + t2) / 2;
-
-  // directions are fixed
-  const dir1 = normalizeVector(subVectors(p2, p1));
-  const dir2 = normalizeVector(subVectors(p3, p4));
-
-  // new distances to hit equal tension
-  const newDist1 = targetTension * dist1ToPt;
- const newDist2 = targetTension * dist4ToPt;
-
-  const newP2 = {
-    x: p1.x + newDist1 * dir1.x,
-    y: p1.y + newDist1 * dir1.y
-  };
-
-  const newP3 = {
-    x: p4.x + newDist2 * dir2.x,
-    y: p4.y + newDist2 * dir2.y
-  };
-  
-  return [newP2, newP3];
+  logTunniWrapperCall("calculateEqualizedControlPoints");
+  return coreCalculateEqualizedControlPoints(segmentPoints);
 }
 
 export function balanceSegment(segmentPoints) {
@@ -273,15 +175,8 @@ export function balanceSegment(segmentPoints) {
  * @returns {boolean} - True if distances are already equalized, false otherwise
  */
 export function areDistancesEqualized(segmentPoints) {
- const [p1, p2, p3, p4] = segmentPoints;
-  
-  // Calculate distances from on-curve points to off-curve points
- const dist1 = distance(p1, p2);
-  const dist2 = distance(p4, p3);
-  
-  // Check if distances are equal within a small tolerance
-  const tolerance = 0.01; // Small tolerance for floating point comparison
-  return Math.abs(dist1 - dist2) < tolerance;
+  logTunniWrapperCall("areDistancesEqualized");
+  return coreAreDistancesEqualized(segmentPoints);
 }
 
 /**
@@ -290,24 +185,8 @@ export function areDistancesEqualized(segmentPoints) {
  * @returns {number} The Euclidean distance between the two control points
  */
 export function calculateControlHandleDistance(segmentPoints) {
-  // Validate that the segment is cubic (4 points)
-  if (!Array.isArray(segmentPoints) || segmentPoints.length !== 4) {
-    throw new Error("Segment must be an array of exactly 4 points");
-  }
-  
-  // Extract the control points (indices 1 and 2)
-  const controlPoint1 = segmentPoints[1];
-  const controlPoint2 = segmentPoints[2];
-  
-  // Validate that control points exist and have x,y coordinates
-  if (!controlPoint1 || !controlPoint2 ||
-      typeof controlPoint1.x !== 'number' || typeof controlPoint1.y !== 'number' ||
-      typeof controlPoint2.x !== 'number' || typeof controlPoint2.y !== 'number') {
-    throw new Error("Control points must have valid x and y coordinates");
-  }
-  
-  // Calculate and return the Euclidean distance between the control points
-  return distance(controlPoint1, controlPoint2);
+  logTunniWrapperCall("calculateControlHandleDistance");
+  return coreCalculateControlHandleDistance(segmentPoints);
 }
 
 /**
@@ -1451,56 +1330,11 @@ export function handleTrueTunniPointMouseUp(initialState, sceneController) {
  * @returns {Array} Array of 4 points with new on-curve positions
  */
 export function calculateOnCurvePointsFromTunni(tunniPoint, segmentPoints, equalizeDistances = true, gridSnapEnabled = false) {
-  const [p1, p2, p3, p4] = segmentPoints;
-  
-  // Calculate unit vectors for the original directions (from on-curve to off-curve)
-  const dir1 = normalizeVector(subVectors(p2, p1));
-  const dir2 = normalizeVector(subVectors(p3, p4));
-  
-  // Calculate original distances from on-curve points to their respective off-curve points
-  const origDist1 = distance(p1, p2);
-  const origDist2 = distance(p4, p3);
-  
-  // Calculate distances from on-curve points to the new Tunni point
-  const distToTunni1 = distance(p1, tunniPoint);
-  const distToTunni2 = distance(p4, tunniPoint);
-  
-  // Calculate the ratio of original distance to distance to Tunni point for each on-curve point
-  const ratio1 = origDist1 / distToTunni1;
-  const ratio2 = origDist2 / distToTunni2;
-  
-  let finalRatio1, finalRatio2;
-  
-  if (equalizeDistances) {
-    // Use average ratio to maintain equal distances
-    const avgRatio = (ratio1 + ratio2) / 2;
-    finalRatio1 = avgRatio;
-    finalRatio2 = avgRatio;
-  } else {
-    // Use individual ratios to allow uncoupled distances
-    finalRatio1 = ratio1;
-    finalRatio2 = ratio2;
-  }
-  
-  // Calculate new distances from Tunni point to on-curve points
-  const newDist1 = distToTunni1 * finalRatio1;
-  const newDist2 = distToTunni2 * finalRatio2;
-  
-  // Calculate new on-curve point positions along the fixed direction vectors
-  // The new on-curve points are positioned along the opposite direction from Tunni point
-  const newP1 = {
-    x: tunniPoint.x - newDist1 * dir1.x,
-    y: tunniPoint.y - newDist1 * dir1.y
- };
-  
-  const newP4 = {
-    x: tunniPoint.x - newDist2 * dir2.x,
-    y: tunniPoint.y - newDist2 * dir2.y
-  };
-  
-  // Return with original control points unchanged
-  if (gridSnapEnabled) {
-    return [snapToGrid(newP1), p2, p3, snapToGrid(newP4)];
-  }
-  return [newP1, p2, p3, newP4];
+  logTunniWrapperCall("calculateOnCurvePointsFromTunni");
+  return coreCalculateOnCurvePointsFromTunni(
+    tunniPoint,
+    segmentPoints,
+    equalizeDistances,
+    gridSnapEnabled
+  );
 }

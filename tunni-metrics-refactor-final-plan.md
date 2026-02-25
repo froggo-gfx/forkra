@@ -117,8 +117,6 @@ export function handleTension(segmentPoints, truePoint) {}
 
 ---
 
-## ОСТАЛОСЬ ВЫПОЛНИТЬ
-
 ## Шаг 04. Перевести `tunni-calculations.js` на `tunni-core.js`
 **Общая проблема:** старый файл держит дубли формул.  
 **Аспект шага:** regular Tunni путь использует только новый core.  
@@ -136,6 +134,8 @@ export function calculateTunniPoint(points) {
 - Regular Tunni drag/undo идентичны baseline.
 
 ---
+
+## ОСТАЛОСЬ ВЫПОЛНИТЬ
 
 ## Шаг 05. Перевести `src-js/views-editor/src/skeleton-tunni-calculations.js` на `tunni-core.js`
 **Общая проблема:** skeleton Tunni математика дублируется отдельно.  
