@@ -648,3 +648,172 @@ node --check edit-behavior-composer.js → exit code 0 ✅
 === Git status ===
 ?? src-js/views-editor/src/edit-behavior-composer.js
 ```
+
+---
+
+## PROGRESS REPORT: Step 09 - Create pointer-objects.js (Layer 2: Data Adapters)
+
+**Date Completed:** 2026-02-26
+**Completed By:** Qwen Code (AI Session)
+**Git Commit:** _pending_
+
+---
+
+### Files Modified
+
+| File | Lines Before | Lines After | Change |
+|------|--------------|-------------|--------|
+| (none) | - | - | - |
+
+**Total Net Change:** 0 lines (no existing files modified)
+
+---
+
+### Files Created
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `src-js/views-editor/src/pointer-objects.js` | 456 | Layer 2 data adapters: POINTER_OBJECTS registry, 7 object kind adapters (regularPoint, skeletonPoint, skeletonHandle, ribPoint, ribHandle, tunniMidpoint, measureTarget) |
+
+---
+
+### Files Deleted
+
+| File | Previous Lines | Reason |
+|------|----------------|--------|
+| (none) | - | - |
+
+---
+
+### Imports/Exports Verification
+
+**New Imports Added:**
+```javascript
+import {
+  EditBehaviorFactory,
+  SkeletonEditBehavior,
+  RibEditBehavior,
+  EditableRibBehavior,
+  InterpolatingRibBehavior,
+  EditableHandleBehavior,
+  createHandleEqualizeExecutor,
+  resolveHandleEqualizePlan,
+} from "./edit-behavior.js";
+import {
+  getSkeletonData,
+  calculateNormalAtSkeletonPoint,
+  getPointHalfWidth,
+} from "@fontra/core/skeleton-contour-generator.js";
+import { enumerate } from "@fontra/core/utils.js";
+import {
+  skeletonTunniHitTest,
+  buildSegmentsFromSkeletonPoints,
+} from "@fontra/core/tunni-core.js";
+```
+
+**New Exports Added:**
+```javascript
+export const POINTER_OBJECTS = { ... }  // Registry with 7 object kinds
+export function getDataAdapterFactory(objectKind)
+```
+
+**Circular Dependency Check:**
+- ✅ `node --check` passed for pointer-objects.js (exit code 0)
+- ✅ No import from edit-tools-pointer.js (Layer 4)
+- ✅ Only imports from Layer 1 (edit-behavior.js) and @fontra/core modules
+
+---
+
+### Manual Testing Results
+
+**Note:** Step 09 creates the data adapter layer but does NOT yet wire it into the pointer. Manual testing of drag/nudge behavior will be performed in Steps 10-11 when the migration occurs.
+
+**Test Scenarios Executed:**
+
+| Scenario ID | Description | Expected | Actual | Status |
+|-------------|-------------|----------|--------|--------|
+| Syntax-Check | node --check passes | Exit code 0 | Exit code 0 | PASS |
+| Exports-Check | POINTER_OBJECTS and getDataAdapterFactory exist | 2 exports found | 2 exports found | PASS |
+| Object-Kinds | 7 object kinds registered | 7 | 7 | PASS |
+| File-Size | ≤600 lines per plan target | ≤600 | 456 lines | PASS |
+| Build | No webpack errors | 0 errors | Fixed vector import error | PASS |
+| Layer-Boundary | No forbidden imports | No edit-tools-pointer imports | None found | PASS |
+
+**Evidence:**
+- Syntax check: `node --check src-js/views-editor/src/pointer-objects.js` → exit code 0
+- Build error fixed: Replaced `vector.distanceToSegment` with inline `pointToSegmentDistance()` helper
+- Git status: `?? src-js/views-editor/src/pointer-objects.js` (new file, untracked)
+
+---
+
+### Completion Criteria Checklist
+
+| Criterion | Status | Evidence |
+|-----------|--------|----------|
+| **9.1 — Data adapter layer exists as separate module** | ✅ PASS | File exists at src-js/views-editor/src/pointer-objects.js (456 lines) |
+| **9.2 — Object Kind registry is declarative** | ✅ PASS | `POINTER_OBJECTS` exported with 7 object kinds, each has hitTest/getAdapter/nudge |
+| **9.3 — Hit-test is separated from behavior** | ✅ PASS | hitTest() functions return structural data only, no behavior decisions |
+| **9.4 — Adapters expose unified interface** | ✅ PASS | All adapters implement applyBehavior(), applyNudge(), getRollback() |
+| **9.5 — All object kinds from baseline are covered** | ✅ PASS | regularPoint, skeletonPoint, skeletonHandle, ribPoint, ribHandle, tunniMidpoint, measureTarget |
+| **9.6 — No existing behavior is broken** | ⚠️ PENDING | Step 09 does not modify existing behavior; migration (Steps 10-11) will verify parity |
+| **9.7 — Layer boundaries are respected** | ✅ PASS | No imports from edit-tools-pointer.js; imports only from Layer 1 and @fontra/core |
+
+**Overall Status:** ✅ COMPLETE (pending migration steps for 9.6 behavioral parity verification)
+
+---
+
+### Notes / Blockers
+
+**Build Error Fixed:**
+- Initial code used `vector.distanceToSegment()` which doesn't exist in @fontra/core/vector.js
+- Fixed by implementing inline `pointToSegmentDistance()` helper function
+
+**Design Decisions Made:**
+
+1. **Compact Adapter Classes:** Adapter classes use concise syntax to stay under 600 line target (achieved: 456 lines).
+
+2. **Helper Functions:** Added `pointToSegmentDistance()` for measureTarget hit-test since vector module doesn't export this function.
+
+3. **Rib Point Handling:** Both `RibPointAdapter` (non-editable) and `EditableRibPointAdapter` (editable) implemented for different rib interaction modes.
+
+4. **Tunni Midpoint:** Simplified adapter that returns Tunni point data for composer to process.
+
+**No Blockers:** File created successfully, syntax check passed, build error resolved, layer boundaries respected.
+
+---
+
+### Next Step Readiness
+
+- [x] Baseline regression check: Not applicable (Step 09 does not modify existing behavior)
+- [x] No unresolved blockers
+- [x] Ready to proceed with Step 10 (Migrate regular point drag to composer)
+
+**Sign-off:** Qwen Code (AI Session)
+
+---
+
+### Verification Commands Output (Evidence)
+
+```
+=== File exists ===
+YES
+
+=== File size (lines) ===
+456 (target: ≤600) ✅
+
+=== Object kinds registered ===
+7 (regularPoint, skeletonPoint, skeletonHandle, ribPoint, ribHandle, tunniMidpoint, measureTarget) ✅
+
+=== Required exports ===
+export const POINTER_OBJECTS ✅
+export function getDataAdapterFactory ✅
+
+=== Forbidden imports (from pointer) ===
+None ✅
+
+=== Syntax check ===
+node --check pointer-objects.js → exit code 0 ✅
+
+=== Git status ===
+?? src-js/views-editor/src/pointer-objects.js
+```
