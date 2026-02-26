@@ -22,6 +22,7 @@ import {
   getBehaviorPreset,
   resolveModifierIntent,
   resolveModifierIntentResult,
+  resolveModifierPlan,
   BEHAVIOR_TABLES,
   EditBehaviorFactory,
   SkeletonEditBehavior,
@@ -56,6 +57,8 @@ function normalizeObjectKind(objectKind) {
 
 /**
  * Resolve behavior plan from object kind, modality, and modifiers.
+ * Uses resolveModifierPlan from edit-behavior.js which correctly handles
+ * presetByIntent mapping (e.g., constrain→default for nudge modality).
  *
  * @param {string} objectKind - The type of object: "regularPoint", "skeletonPoint", "ribPoint", etc.
  * @param {string} modality - The interaction mode: "drag" or "nudge"
@@ -76,63 +79,29 @@ export function resolveBehaviorPlan(objectKind, modality, modifiers = {}) {
     q: !!modifiers.qKey,
   };
 
-  // Resolve intent from modifiers using normalized objectKind
-  const intent = resolveModifierIntent(normalizedObjectKind, flags);
+  // Use resolveModifierPlan which correctly handles presetByIntent mapping
+  const modifierPlan = resolveModifierPlan(normalizedObjectKind, modality, flags);
 
-  // Map intent to behavior type
-  const behaviorType = mapIntentToBehaviorType(intent, modality);
-
-  // Check if this combination is supported using normalized objectKind
-  const supported = isBehaviorSupported(normalizedObjectKind, behaviorType, modality);
-
+  // Map modifierPlan to our behavior plan format
   const plan = {
     objectKind,  // Keep original objectKind for adapter routing
     normalizedObjectKind,  // Add normalized for behavior lookup
-    behaviorType,
+    behaviorType: modifierPlan.presetName || "default",
     modality,
-    supported,
+    supported: modifierPlan.supported,
+    intent: modifierPlan.intent,
   };
 
-  if (!supported) {
-    plan.reason = getUnsupportedReason(objectKind, behaviorType, modality);
+  if (!plan.supported) {
+    plan.reason = modifierPlan.unsupportedReason || "unknown";
   }
 
   return plan;
 }
 
 /**
- * Map modifier intent to behavior type name.
- * This is the central routing from modifiers to behavior semantics.
- * 
- * @param {string} intent - Intent string: "default", "constrain", "alternate", "equalize", etc.
- * @param {string} modality - "drag" or "nudge"
- * @returns {string} Behavior type name matching edit-behavior.js preset names
- */
-function mapIntentToBehaviorType(intent, modality) {
-  // resolveModifierIntent returns a string, not an object
-  // Map intent strings to behavior type names
-  switch (intent) {
-    case "equalize":
-      return "equalize";
-    case "interpolate":
-      return "interpolate";
-    case "alternate-constrain":
-      return "alternate-constrain";
-    case "alternate":
-      return "alternate";
-    case "constrain":
-      return "constrain";
-    case "quantize":
-      return "quantize";
-    case "tangent":
-      return "tangent";
-    default:
-      return "default";
-  }
-}
-
-/**
  * Check if a behavior is supported for the given object kind and modality.
+ * Note: This is now less critical since resolveModifierPlan handles support checking.
  */
 function isBehaviorSupported(objectKind, behaviorType, modality) {
   const table = getBehaviorTable(objectKind);
@@ -145,13 +114,6 @@ function isBehaviorSupported(objectKind, behaviorType, modality) {
 function getBehaviorTable(objectKind) {
   // Use imported BEHAVIOR_TABLES from edit-behavior.js
   return BEHAVIOR_TABLES[objectKind] || BEHAVIOR_TABLES.regular;
-}
-
-/**
- * Get reason why a behavior combination is not supported.
- */
-function getUnsupportedReason(objectKind, behaviorType, modality) {
-  return `Behavior "${behaviorType}" not supported for ${objectKind} in ${modality} mode`;
 }
 
 /**
@@ -453,45 +415,114 @@ function applyDragResultToGlyph(glyph, result, context) {
  * @param {Object} delta - Delta object: { x, y }
  * @param {Object} context - Context with sceneController, undoLabel, etc.
  */
-export async function runNudgeOrchestration(executor, delta, context) {
+export async function runNudgeOrchestration(planOrExecutor, delta, context) {
   const { sceneController, undoLabel = "Nudge" } = context;
-  
-  if (!executor) {
-    console.warn("runNudgeOrchestration: no executor provided");
+
+  // Check if we received a plan or an executor
+  let executor = planOrExecutor;
+  let plan = null;
+
+  if (planOrExecutor?.objectKind) {
+    // It's a plan, create executor inside editGlyph
+    plan = planOrExecutor;
+    executor = null;
+  }
+
+  if (!executor && !plan) {
+    console.warn("runNudgeOrchestration: no executor or plan provided");
     return;
   }
-  
+
   await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
     const allChanges = [];
     const rollbackParts = [];
-    
-    // Apply to all editing layers
-    for (const editLayerName of sceneController.editingLayerNames || []) {
-      const layer = glyph.layers[editLayerName];
-      if (!layer) continue;
-      
-      const roundFunc = (value) => makeRoundFunc(null)(value, true);
-      
-      // Apply delta through executor
-      const result = executor.applyDelta(delta, { roundFunc, layer, editLayerName });
-      
-      // Apply result to layer
-      const changes = applyNudgeResultToLayer(layer, result, context);
-      allChanges.push(changes);
-      
-      // Collect rollback
-      const rollback = executor.getRollback();
-      if (rollback) {
-        rollbackParts.push(consolidateChanges(rollback, ["layers", editLayerName, "glyph"]));
+
+    // Create executors inside editGlyph if we have a plan
+    if (plan && !executor) {
+      // Get all editing layers using the same method as legacy code
+      const layerInfo = Object.entries(
+        sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+      ).map(([layerName, layerGlyph]) => ({
+        layerName,
+        layerGlyph,
+        changePath: ["layers", layerName, "glyph"],
+      }));
+
+      if (!layerInfo.length) {
+        console.warn("runNudgeOrchestration: no editing layers found");
+        return;
+      }
+
+      // Create an executor for each layer
+      for (const layer of layerInfo) {
+        const adapterContext = {
+          glyph: layer.layerGlyph,
+          selection: context.selection,
+          sceneController,
+          scalingEditBehavior: context.scalingEditBehavior,
+          behaviorName: plan.behaviorType,  // Pass behavior name for adapter
+        };
+
+        const result = createBehaviorExecutor(plan, adapterContext);
+        if (result.executor) {
+          result.executor._layerInfo = [layer];  // Store this layer for rollback
+          // Apply delta through this executor
+          const roundFunc = (value) => makeRoundFunc(null)(value, true);
+          const nudgeResult = result.executor.applyDelta(delta, { roundFunc, layer: layer.layerGlyph, editLayerName: layer.layerName });
+          const changes = applyNudgeResultToLayer(layer.layerGlyph, nudgeResult, { editLayerName: layer.layerName });
+          allChanges.push(changes);
+
+          // Collect rollback
+          const rollback = result.executor.getRollback();
+          if (rollback) {
+            rollbackParts.push(consolidateChanges(rollback, layer.changePath));
+          }
+        }
+      }
+    } else if (executor) {
+      // Executor provided directly - apply to all editing layers
+      for (const editLayerName of sceneController.editingLayerNames || []) {
+        const layer = glyph.layers[editLayerName];
+        if (!layer) continue;
+
+        const roundFunc = (value) => makeRoundFunc(null)(value, true);
+
+        // Apply delta through executor
+        const result = executor.applyDelta(delta, { roundFunc, layer, editLayerName });
+
+        // Apply result to layer
+        const changes = applyNudgeResultToLayer(layer, result, { editLayerName });
+        allChanges.push(changes);
+
+        // Collect rollback
+        const rollback = executor.getRollback();
+        if (rollback) {
+          rollbackParts.push(consolidateChanges(rollback, ["layers", editLayerName, "glyph"]));
+        }
       }
     }
-    
+
     // Consolidate all changes
-    const combined = new ChangeCollector().concat(...allChanges);
-    await sendIncrementalChange(combined.change);
-    
+    const combined = consolidateChanges(allChanges);
+    await sendIncrementalChange(combined);
+
+    // Build rollback with proper path structure (LESSON FROM STEP 10)
+    const finalRollback = consolidateChanges(rollbackParts);
+    const rollbackChanges = [];
+    if (finalRollback && finalRollback.c) {
+      if (Array.isArray(finalRollback.c)) {
+        for (const rc of finalRollback.c) {
+          // Add the path to each individual rollback change
+          const rcWithPath = { ...rc, p: finalRollback.p };
+          rollbackChanges.push(rcWithPath);
+        }
+      } else {
+        rollbackChanges.push(finalRollback);
+      }
+    }
+
     return {
-      changes: combined,
+      changes: ChangeCollector.fromChanges(combined, consolidateChanges(rollbackChanges)),
       undoLabel: undoLabel,
       broadcast: true,
     };
@@ -500,24 +531,32 @@ export async function runNudgeOrchestration(executor, delta, context) {
 
 /**
  * Helper to apply nudge result to a layer.
- * This is a simplified implementation for Step 08.
+ * Handles both wrapped results ({editChange, pathChange}) and direct changes.
  */
 function applyNudgeResultToLayer(layer, result, context) {
   const { editLayerName } = context;
-  
+
+  if (!result) {
+    return consolidateChanges([]);
+  }
+
+  // Check for wrapped result format
   if (result.pathChange) {
     // For skeleton/rib changes
     applyChange(layer, result.pathChange);
     return consolidateChanges(result.pathChange, ["layers", editLayerName, "glyph"]);
   }
-  
+
   if (result.editChange) {
-    // For regular point changes
+    // For regular point changes (wrapped format)
     applyChange(layer, result.editChange);
     return consolidateChanges(result.editChange, ["layers", editLayerName, "glyph"]);
   }
-  
-  return consolidateChanges([]);
+
+  // Direct change format (what EditBehavior.makeChangeForDelta returns)
+  // The result itself is the change to apply
+  applyChange(layer, result);
+  return consolidateChanges(result, ["layers", editLayerName, "glyph"]);
 }
 
 /**

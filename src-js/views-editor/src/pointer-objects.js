@@ -385,16 +385,31 @@ class RegularPointAdapter {
     this.glyph = glyph;
     this.selection = selection;
     this.factory = new EditBehaviorFactory(glyph, selection);
-    // Capture initial rollback from the default behavior
-    this.initialRollback = this.factory.getBehavior("default").rollbackChange;
+    // Track current behavior name for proper rollback capture
+    this.currentBehaviorName = "default";
   }
+
   applyBehavior(behaviorDef, delta, context) {
-    return this.factory.getBehavior(behaviorDef.presetName).makeChangeForDelta(delta);
+    // Track the behavior being used for proper rollback
+    this.currentBehaviorName = behaviorDef.presetName;
+    const behavior = this.factory.getBehavior(behaviorDef.presetName);
+    return behavior.makeChangeForDelta(delta);
   }
+
   applyNudge(delta, context) {
-    return this.factory.getBehavior("default").makeChangeForDelta(delta);
+    // Get behavior name from context (passed by composer)
+    // For nudge, the behavior is determined by modifiers at the pointer level
+    const behaviorName = context?.behaviorName || "default";
+    this.currentBehaviorName = behaviorName;
+    const behavior = this.factory.getBehavior(behaviorName);
+    return behavior.makeChangeForDelta(delta);
   }
-  getRollback() { return this.initialRollback || []; }
+
+  getRollback() {
+    // Get rollback from the actual behavior being used, not just "default"
+    const behavior = this.factory.getBehavior(this.currentBehaviorName);
+    return behavior?.rollbackChange || [];
+  }
 }
 
 class SkeletonPointAdapter {

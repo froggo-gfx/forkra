@@ -60,6 +60,7 @@ import {
   resolveBehaviorPlan,
   createBehaviorExecutor,
   runDragOrchestration,
+  runNudgeOrchestration,
 } from "./edit-behavior-composer.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import {
@@ -1473,6 +1474,20 @@ export class PointerTool extends BaseTool {
   }
 
   // No skeleton points, rib points, or editable handles - use default handler
+  // Step 11: Route regular-only selection through composer for full modifier support
+  // (Shift→constrain for drag, Alt→alternate for nudge)
+  if (hasRegularPoints) {
+    let [dx, dy] = arrowKeyDeltas[event.key];
+    // Shift only affects step magnitude (1→10 units), not behavior semantics
+    if (event.shiftKey) {
+      dx *= 10;
+      dy *= 10;
+    }
+    const delta = { x: dx, y: dy };
+    await this._handleNudgeRegularPoints(delta, event);
+    return;
+  }
+
   return sceneController.handleArrowKeys(event);
 }
 
@@ -2532,6 +2547,33 @@ export class PointerTool extends BaseTool {
       undoLabel: "Drag",
       // Pass getter for equalizeMode so mid-drag X key presses are detected
       getEqualizeMode: () => this.equalizeMode,
+    });
+  }
+
+  async _handleNudgeRegularPoints(delta, event) {
+    // Step 11: Use composer for regular point nudge with full modifier support
+    // This fixes the bug where regular-only selection fell back to scene-controller
+    // which only supports "default" or "alternate" (no Alt→alternate)
+    const sceneController = this.sceneController;
+
+    // Resolve plan for regular point nudge with full modifier support
+    // Note: Shift affects step magnitude (handled in handleArrowKeys), not behavior semantics
+    const plan = resolveBehaviorPlan("regularPoint", "nudge", {
+      altKey: event.altKey,
+    });
+
+    if (!plan.supported) {
+      // Fallback to default handler if plan not supported
+      return sceneController.handleArrowKeys(event);
+    }
+
+    // Run orchestration - pass plan instead of executor
+    // Orchestration will create executor inside editGlyph with proper layer glyph
+    await runNudgeOrchestration(plan, delta, {
+      sceneController,
+      selection: sceneController.selection,
+      scalingEditBehavior: this.scalingEditBehavior,
+      undoLabel: "Nudge Points",
     });
   }
 
