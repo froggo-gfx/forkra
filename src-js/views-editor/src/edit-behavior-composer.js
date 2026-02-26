@@ -31,6 +31,7 @@ import {
   EditableHandleBehavior,
   makeRoundFunc,
 } from "./edit-behavior.js";
+import { getDataAdapterFactory } from "./pointer-objects.js";
 import {
   getSkeletonData,
   setSkeletonData,
@@ -179,177 +180,14 @@ export function createBehaviorExecutor(plan, context) {
 
 /**
  * Factory function to create data adapters for different object kinds.
- * This will be replaced by pointer-objects.js (Layer 2) after Step 09.
- * For now, this is a temporary implementation to support Step 08.
+ * Uses POINTER_OBJECTS registry from Layer 2 (pointer-objects.js).
  */
 function createDataAdapter(objectKind, context) {
-  const { data, selection, glyph, skeletonData, ribHit, handleInfo } = context;
-  
-  switch (objectKind) {
-    case "regularPoint": {
-      return new RegularPointDataAdapter(glyph || data, selection);
-    }
-    case "skeletonPoint": {
-      const skelData = skeletonData || getSkeletonData(glyph || data);
-      return new SkeletonPointDataAdapter(skelData, selection);
-    }
-    case "ribPoint": {
-      const skelData = skeletonData || getSkeletonData(glyph || data);
-      if (ribHit?.isEditable) {
-        return new EditableRibDataAdapter(skelData, ribHit);
-      }
-      return new RibDataAdapter(skelData, ribHit);
-    }
-    case "skeletonHandle": {
-      const skelData = skeletonData || getSkeletonData(glyph || data);
-      return new SkeletonHandleDataAdapter(skelData, selection);
-    }
-    default:
-      return null;
+  const getAdapter = getDataAdapterFactory(objectKind);
+  if (!getAdapter) {
+    return null;
   }
-}
-
-/**
- * Temporary data adapter for regular points.
- * Will be replaced by pointer-objects.js after Step 09.
- */
-class RegularPointDataAdapter {
-  constructor(glyph, selection) {
-    this.glyph = glyph;
-    this.selection = selection;
-    this.factory = new EditBehaviorFactory(glyph, selection);
-  }
-  
-  applyBehavior(behaviorDef, delta, context) {
-    const { roundFunc, event } = context;
-    const behaviorName = behaviorDef.presetName || "default";
-    const behavior = this.factory.getBehavior(behaviorName);
-    
-    // Apply rounding if provided
-    if (roundFunc) {
-      const roundedDelta = {
-        x: roundFunc(delta.x),
-        y: roundFunc(delta.y),
-      };
-      return behavior.makeChangeForDelta(roundedDelta);
-    }
-    
-    return behavior.makeChangeForDelta(delta);
-  }
-  
-  getRollback() {
-    // Return rollback changes from the factory's current behavior
-    const behavior = this.factory.getBehavior("default");
-    return behavior.rollbackChange || [];
-  }
-}
-
-/**
- * Temporary data adapter for skeleton points.
- * Will be replaced by pointer-objects.js after Step 09.
- */
-class SkeletonPointDataAdapter {
-  constructor(skeletonData, selection) {
-    this.skeletonData = skeletonData;
-    this.selection = selection;
-  }
-  
-  applyBehavior(behaviorDef, delta, context) {
-    const { roundFunc, event, contourIndex = 0 } = context;
-    const behaviorName = behaviorDef.presetName || "default";
-    
-    const behavior = new SkeletonEditBehavior(
-      this.skeletonData,
-      contourIndex,
-      Array.from(this.selection || []),
-      behaviorName,
-      false,
-      roundFunc || Math.round
-    );
-    
-    return behavior.applyDelta(delta);
-  }
-  
-  getRollback() {
-    return [];
-  }
-}
-
-/**
- * Temporary data adapter for rib points.
- * Will be replaced by pointer-objects.js after Step 09.
- */
-class RibDataAdapter {
-  constructor(skeletonData, ribHit) {
-    this.skeletonData = skeletonData;
-    this.ribHit = ribHit;
-  }
-  
-  applyBehavior(behaviorDef, delta, context) {
-    const { roundFunc } = context;
-    const behaviorName = behaviorDef.presetName || "default";
-    
-    const behavior = new RibEditBehavior(
-      this.skeletonData,
-      this.ribHit,
-      behaviorName
-    );
-    
-    return behavior.applyDelta(delta, roundFunc);
-  }
-  
-  getRollback() {
-    return [];
-  }
-}
-
-/**
- * Temporary data adapter for editable rib points.
- * Will be replaced by pointer-objects.js after Step 09.
- */
-class EditableRibDataAdapter {
-  constructor(skeletonData, ribHit) {
-    this.skeletonData = skeletonData;
-    this.ribHit = ribHit;
-  }
-  
-  applyBehavior(behaviorDef, delta, context) {
-    const { roundFunc } = context;
-    const behaviorName = behaviorDef.presetName || "default";
-    
-    const behavior = new EditableRibBehavior(
-      this.skeletonData,
-      this.ribHit,
-      behaviorName
-    );
-    
-    return behavior.applyDelta(delta, roundFunc);
-  }
-  
-  getRollback() {
-    return [];
-  }
-}
-
-/**
- * Temporary data adapter for skeleton handles.
- * Will be replaced by pointer-objects.js after Step 09.
- */
-class SkeletonHandleDataAdapter {
-  constructor(skeletonData, selection) {
-    this.skeletonData = skeletonData;
-    this.selection = selection;
-  }
-  
-  applyBehavior(behaviorDef, delta, context) {
-    // Handle-specific behavior (equalize, etc.)
-    // This is a simplified implementation for Step 08
-    return { changes: [], rollback: [] };
-  }
-  
-  getRollback() {
-    return [];
-  }
+  return getAdapter(context);
 }
 
 /**

@@ -56,6 +56,11 @@ import {
   resolveHandleEqualizePlan,
   resolveModifierPlan,
 } from "./edit-behavior.js";
+import {
+  resolveBehaviorPlan,
+  createBehaviorExecutor,
+  runDragOrchestration,
+} from "./edit-behavior-composer.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import {
   skeletonTunniHitTest,
@@ -2454,6 +2459,263 @@ export class PointerTool extends BaseTool {
     this._selectionBeforeSingleClick = undefined;
   }
 
+  async _handleDragRegularPointsComposer(eventStream, initialEvent) {
+    // Step 10: Use composer for regular point drag
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const glyph = positionedGlyph?.glyph;
+    if (!glyph) return;
+
+    // Get equalize handle info if X key is pressed
+    const initialPoint = sceneController.localPoint(initialEvent);
+    const initialClickedPointIndex =
+      this.sceneController.sceneModel.initialClickedPointIndex;
+    let equalizeHandleInfo = null;
+    if (initialClickedPointIndex !== undefined) {
+      const candidate = this._findEqualizeHandleForPath(
+        initialPoint,
+        sceneController.mouseClickMargin
+      );
+      if (candidate && candidate.pointIndex === initialClickedPointIndex) {
+        equalizeHandleInfo = candidate;
+      }
+    }
+
+    // Create context for composer
+    const context = {
+      sceneController,
+      glyph,
+      selection: sceneController.selection,
+      equalizeMode: this.equalizeMode,
+      equalizeHandleInfo,
+      scalingEditBehavior: this.scalingEditBehavior,
+    };
+
+    // Resolve plan for regular point drag
+    const plan = resolveBehaviorPlan("regularPoint", "drag", {
+      shiftKey: initialEvent.shiftKey,
+      altKey: initialEvent.altKey,
+      ctrlKey: initialEvent.ctrlKey,
+      metaKey: initialEvent.metaKey,
+      xKey: this.equalizeMode,
+    });
+
+    if (!plan.supported) {
+      // Fallback to legacy path if plan not supported
+      await this._handleDragRegularPointsLegacy(eventStream, initialEvent, context);
+      return;
+    }
+
+    // Create executor
+    const { executor } = createBehaviorExecutor(plan, context);
+    if (!executor) {
+      // Fallback to legacy path
+      await this._handleDragRegularPointsLegacy(eventStream, initialEvent, context);
+      return;
+    }
+
+    // Run orchestration
+    await runDragOrchestration(executor, eventStream, {
+      ...context,
+      computeDelta: (event) => {
+        const currentPoint = sceneController.localPoint(event);
+        return {
+          x: currentPoint.x - initialPoint.x,
+          y: currentPoint.y - initialPoint.y,
+        };
+      },
+      makeRoundFunc: (event) => makeRoundFunc(event),
+      undoLabel: "Drag",
+    });
+  }
+
+  async _handleDragRegularPointsLegacy(eventStream, initialEvent, context) {
+    // Legacy implementation for fallback when composer path is not available
+    // This is the original handleDragSelection code for regular points
+    const { sceneController, glyph, selection, equalizeMode, equalizeHandleInfo, scalingEditBehavior } = context;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const initialPoint = sceneController.localPoint(initialEvent);
+    let behaviorName = getBehaviorPresetNameFromEvent("regular", "drag", initialEvent);
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layerInfo = Object.entries(
+        sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+      ).map(([layerName, layerGlyph]) => {
+        const behaviorFactory = new EditBehaviorFactory(
+          layerGlyph,
+          selection,
+          scalingEditBehavior
+        );
+        return {
+          layerName,
+          layerGlyph,
+          changePath: ["layers", layerName, "glyph"],
+          pathPrefix: [],
+          connectDetector: sceneController.getPathConnectDetector(layerGlyph.path),
+          shouldConnect: false,
+          behaviorFactory,
+          editBehavior: behaviorFactory.getBehavior(behaviorName),
+        };
+      });
+
+      assert(layerInfo.length >= 1, "no layer to edit");
+      layerInfo[0].isPrimaryLayer = true;
+      const equalizeRollbackByLayer = new Map();
+      let equalizeUsed = false;
+      if (equalizeHandleInfo) {
+        for (const layer of layerInfo) {
+          const oppositePoint = layer.layerGlyph.path.getPoint(
+            equalizeHandleInfo.oppositeIndex
+          );
+          if (oppositePoint) {
+            equalizeRollbackByLayer.set(layer.layerName, {
+              x: oppositePoint.x,
+              y: oppositePoint.y,
+            });
+          }
+        }
+      }
+
+      let editChange;
+
+      for await (const event of eventStream) {
+        const newEditBehaviorName = getBehaviorPresetNameFromEvent("regular", "drag", event);
+
+        if (behaviorName !== newEditBehaviorName) {
+          behaviorName = newEditBehaviorName;
+          const rollbackChanges = [];
+          for (const layer of layerInfo) {
+            applyChange(layer.layerGlyph, layer.editBehavior.rollbackChange);
+            rollbackChanges.push(
+              consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
+            );
+            layer.editBehavior = layer.behaviorFactory.getBehavior(behaviorName);
+          }
+          await sendIncrementalChange(consolidateChanges(rollbackChanges));
+        }
+
+        const currentPoint = sceneController.localPoint(event);
+        const roundFunc = makeRoundFunc(event);
+        const delta = {
+          x: currentPoint.x - initialPoint.x,
+          y: currentPoint.y - initialPoint.y,
+        };
+
+        const deepEditChanges = [];
+
+        for (const layer of layerInfo) {
+          const layerEditChange = layer.editBehavior.makeChangeForDelta(delta);
+          applyChange(layer.layerGlyph, layerEditChange);
+          deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
+          layer.shouldConnect = layer.connectDetector.shouldConnect(layer.isPrimaryLayer);
+        }
+
+        // X-equalize during drag for regular handles
+        const regularEqualizeDragPlan = resolveHandleEqualizePlan("regular", "drag", {
+          x: equalizeMode,
+        });
+        const { executor: regularEqualizeExecutor } =
+          createHandleEqualizeExecutor(regularEqualizeDragPlan);
+        if (regularEqualizeExecutor && equalizeHandleInfo && positionedGlyph) {
+          const { pointIndex, smoothIndex, oppositeIndex } = equalizeHandleInfo;
+          const currentGlyphPoint = {
+            x: currentPoint.x - positionedGlyph.x,
+            y: currentPoint.y - positionedGlyph.y,
+          };
+          for (const layer of layerInfo) {
+            const path = layer.layerGlyph.path;
+            const smoothPt = path.getPoint(smoothIndex);
+            const dragResult = regularEqualizeExecutor.applyDrag({
+              smoothPoint: smoothPt,
+              cursorPoint: currentGlyphPoint,
+              constrainDiagonal: event.shiftKey,
+            });
+            if (!dragResult) {
+              continue;
+            }
+            const equalizeChanges = [
+              { f: "=xy", a: [pointIndex, dragResult.dragged.x, dragResult.dragged.y] },
+              {
+                f: "=xy",
+                a: [oppositeIndex, dragResult.opposite.x, dragResult.opposite.y],
+              },
+            ];
+            for (const change of equalizeChanges) {
+              applyChange(layer.layerGlyph.path, change);
+            }
+            deepEditChanges.push(
+              consolidateChanges(equalizeChanges, layer.changePath)
+            );
+            equalizeUsed = true;
+          }
+        }
+
+        editChange = consolidateChanges(deepEditChanges);
+        await sendIncrementalChange(editChange, true);
+      }
+
+      const rollbackParts = layerInfo.map((layer) =>
+        consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
+      );
+      if (equalizeUsed && equalizeHandleInfo) {
+        for (const layer of layerInfo) {
+          const oppositePoint = equalizeRollbackByLayer.get(layer.layerName);
+          if (!oppositePoint) continue;
+          rollbackParts.push(
+            consolidateChanges(
+              [
+                {
+                  f: "=xy",
+                  a: [
+                    equalizeHandleInfo.oppositeIndex,
+                    oppositePoint.x,
+                    oppositePoint.y,
+                  ],
+                },
+              ],
+              layer.changePath
+            )
+          );
+        }
+      }
+      let changes = ChangeCollector.fromChanges(
+        editChange,
+        consolidateChanges(rollbackParts)
+      );
+
+      let shouldConnect;
+      for (const layer of layerInfo) {
+        if (!layer.shouldConnect) {
+          continue;
+        }
+        shouldConnect = true;
+        if (layer.isPrimaryLayer) {
+          layer.connectDetector.clearConnectIndicator();
+        }
+
+        const connectChanges = recordChanges(layer.layerGlyph, (layerGlyph) => {
+          const connectResult = connectContours(
+            layerGlyph.path,
+            layer.connectDetector.connectSourcePointIndex,
+            layer.connectDetector.connectTargetPointIndex
+          );
+          if (connectResult) {
+            return connectResult.change;
+          }
+        });
+        if (connectChanges) {
+          changes = changes.concat(connectChanges.prefixed(layer.changePath));
+        }
+      }
+
+      return {
+        changes,
+        undoLabel: "Drag",
+        broadcast: true,
+      };
+    });
+  }
+
   async handleDragSelection(eventStream, initialEvent) {
     this.sceneController.sceneModel.showTransformSelection = false;
     this._selectionBeforeSingleClick = undefined;
@@ -2484,6 +2746,13 @@ export class PointerTool extends BaseTool {
       componentSelection?.length > 0 ||
       anchorSelection?.length > 0 ||
       guidelineSelection?.length > 0;
+
+    // Step 10: If only regular selection (no skeleton), use composer
+    if (hasRegularSelection && !hasSkeletonSelection) {
+      await this._handleDragRegularPointsComposer(eventStream, initialEvent);
+      this.sceneController.sceneModel.showTransformSelection = true;
+      return;
+    }
 
     // Check if any selected points are editable generated points
     // If so, redirect to dedicated handler
@@ -2523,7 +2792,7 @@ export class PointerTool extends BaseTool {
       return;
     }
 
-    // Handle regular selection (with optional skeleton selection)
+    // Handle mixed selection (regular + skeleton) - legacy path
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
         const initialPoint = sceneController.localPoint(initialEvent);
         const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
