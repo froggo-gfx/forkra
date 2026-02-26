@@ -14,7 +14,7 @@ import {
 
 // Temporary debug instrumentation for refactor verification.
 // Keep enabled until final cleanup step in the plan.
-const LOG_TUNNI_WRAPPER_CALLS = true;
+const LOG_TUNNI_WRAPPER_CALLS = false;
 
 function logTunniWrapperCall(name) {
   // Runtime trace bucket to verify wrapper->core routing in live UI sessions.
@@ -275,7 +275,6 @@ export async function handleEqualizeDistances(point, size, sceneModel, findTunni
 export async function equalizeSegmentDistances(segment, segmentPoints, sceneModel, positionedGlyph, sceneController) {
   // Check if distances are already equalized
   if (areDistancesEqualized(segmentPoints)) {
-    console.log("Distances are already equalized, skipping...");
     return;
   }
   

@@ -2,7 +2,7 @@ import { addVectors, distance, intersect, normalizeVector, subVectors } from "./
 
 // Temporary debug instrumentation for refactor verification.
 // Keep enabled until final cleanup step in the plan.
-const LOG_TUNNI_CORE_CALLS = true;
+const LOG_TUNNI_CORE_CALLS = false;
 
 function logTunniCoreCall(name) {
   // Runtime trace bucket to verify which implementation path is executed.

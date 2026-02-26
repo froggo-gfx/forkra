@@ -385,6 +385,8 @@ class RegularPointAdapter {
     this.glyph = glyph;
     this.selection = selection;
     this.factory = new EditBehaviorFactory(glyph, selection);
+    // Capture initial rollback from the default behavior
+    this.initialRollback = this.factory.getBehavior("default").rollbackChange;
   }
   applyBehavior(behaviorDef, delta, context) {
     return this.factory.getBehavior(behaviorDef.presetName).makeChangeForDelta(delta);
@@ -392,7 +394,7 @@ class RegularPointAdapter {
   applyNudge(delta, context) {
     return this.factory.getBehavior("default").makeChangeForDelta(delta);
   }
-  getRollback() { return []; }
+  getRollback() { return this.initialRollback || []; }
 }
 
 class SkeletonPointAdapter {

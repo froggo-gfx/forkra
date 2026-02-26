@@ -223,31 +223,47 @@ export async function runDragOrchestration(planOrExecutor, eventStream, context)
   }
 
   await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-    // Create executor inside editGlyph if we have a plan
+    // Create executors inside editGlyph if we have a plan
+    let executors = [];
+    
     if (plan && !executor) {
-      const editLayerName = sceneController.editingLayerNames?.[0];
-      const layerGlyph = editLayerName ? glyph.layers[editLayerName] : null;
+      // Get all editing layers using the same method as legacy code
+      const layerInfo = Object.entries(
+        sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+      ).map(([layerName, layerGlyph]) => ({
+        layerName,
+        layerGlyph,
+        changePath: ["layers", layerName, "glyph"],
+      }));
       
-      if (!layerGlyph) {
-        console.warn("runDragOrchestration: no editing layer found");
+      if (!layerInfo.length) {
+        console.warn("runDragOrchestration: no editing layers found");
         return;
       }
       
-      // Create context with layer glyph for adapter
-      const adapterContext = {
-        glyph: layerGlyph,
-        selection: context.selection,
-        sceneController,
-        scalingEditBehavior: context.scalingEditBehavior,
-      };
+      // Create an executor for each layer
+      for (const layer of layerInfo) {
+        const adapterContext = {
+          glyph: layer.layerGlyph,
+          selection: context.selection,
+          sceneController,
+          scalingEditBehavior: context.scalingEditBehavior,
+        };
+        
+        const result = createBehaviorExecutor(plan, adapterContext);
+        if (result.executor) {
+          result.executor._layerInfo = [layer];  // Store this layer for rollback
+          executors.push(result.executor);
+        }
+      }
       
-      const result = createBehaviorExecutor(plan, adapterContext);
-      executor = result.executor;
-      
-      if (!executor) {
-        console.warn("runDragOrchestration: failed to create executor", result.plan);
+      if (!executors.length) {
+        console.warn("runDragOrchestration: failed to create any executor");
         return;
       }
+      
+      // Use first executor for applyDelta (they all do the same thing)
+      executor = executors[0];
     }
 
     if (!executor) {
@@ -256,27 +272,58 @@ export async function runDragOrchestration(planOrExecutor, eventStream, context)
     }
 
     const accumulatedChanges = new ChangeCollector();
+    const rollbackParts = [];
 
     for await (const event of eventStream) {
       const delta = computeDelta ? computeDelta(event) : context.delta;
       const roundFunc = makeRoundFunc(event);
 
-      // Apply delta through executor
+      // Apply delta through executor (applies to all layers via applyDragResultToGlyph)
       const result = executor.applyDelta(delta, { roundFunc, event });
 
       // Apply result to glyph layers
       const changes = applyDragResultToGlyph(glyph, result, context);
 
-      // Accumulate changes
-      if (changes?.change) {
-        accumulatedChanges.concat(changes);
+      // Accumulate changes - push the whole change structure with path
+      if (changes) {
+        accumulatedChanges._ensureForwardChanges();
+        // Push the entire change object (which includes the path)
+        accumulatedChanges._forwardChanges.push(changes);
       }
 
       // Send incremental change
-      await sendIncrementalChange(changes?.change, true);
+      await sendIncrementalChange(changes, true);
     }
 
-    // Final commit
+    // Get rollback from all executors and wrap with layer paths
+    for (const exec of executors) {
+      const rollback = exec.getRollback();
+      if (rollback && exec._layerInfo) {
+        for (const layer of exec._layerInfo) {
+          const wrapped = consolidateChanges(rollback, layer.changePath);
+          rollbackParts.push(wrapped);
+        }
+      }
+    }
+
+    // Final commit with rollback - use accumulatedChanges directly
+    const finalRollback = consolidateChanges(rollbackParts);
+    
+    // Add rollback to the accumulated changes
+    if (finalRollback && finalRollback.c) {
+      accumulatedChanges._ensureRollbackChanges();
+      // Push rollback changes with the path added
+      if (Array.isArray(finalRollback.c)) {
+        for (const rc of finalRollback.c) {
+          // Add the path to each individual rollback change
+          const rcWithPath = { ...rc, p: finalRollback.p };
+          accumulatedChanges._rollbackChanges.push(rcWithPath);
+        }
+      } else {
+        accumulatedChanges._rollbackChanges.push(finalRollback);
+      }
+    }
+    
     await sendIncrementalChange(accumulatedChanges.change);
 
     return {
@@ -298,17 +345,23 @@ function applyDragResultToGlyph(glyph, result, context) {
   // Normalize result - adapter may return change directly or wrapped object
   const editChange = result?.editChange || result?.pathChange || result;
 
-  // Apply to all editing layers
-  for (const editLayerName of sceneController.editingLayerNames || []) {
-    const layer = glyph.layers[editLayerName];
-    if (!layer) continue;
+  if (!editChange) {
+    return consolidateChanges(allChanges);
+  }
 
-    if (editChange) {
-      applyChange(layer, editChange);
-      allChanges.push(
-        consolidateChanges(editChange, ["layers", editLayerName, "glyph"])
-      );
-    }
+  // Get editing layers using the same method as legacy code
+  const layerInfo = Object.entries(
+    sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+  ).map(([layerName, layerGlyph]) => ({
+    layerName,
+    layerGlyph,
+    changePath: ["layers", layerName, "glyph"],
+  }));
+  
+  // Apply to all editing layers (matching legacy code structure)
+  for (const layer of layerInfo) {
+    applyChange(layer.layerGlyph, editChange);
+    allChanges.push(consolidateChanges(editChange, layer.changePath));
   }
 
   return consolidateChanges(allChanges);
