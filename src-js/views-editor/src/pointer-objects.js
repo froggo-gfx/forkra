@@ -116,9 +116,11 @@ export const POINTER_OBJECTS = {
     },
 
     getAdapter(context) {
-      const { glyph, selection } = context;
-      const skeletonData = getSkeletonData(glyph);
-      return new SkeletonPointAdapter(skeletonData, selection);
+      const { glyph, selection, skeletonData } = context;
+      // Use skeletonData from context if available, otherwise get from glyph
+      const data = skeletonData || getSkeletonData(glyph);
+      if (!data) return null;
+      return new SkeletonPointAdapter(data, selection);
     },
 
     async nudge(context, delta, event) {
@@ -418,15 +420,38 @@ class SkeletonPointAdapter {
     this.selection = selection;
     this.currentBehaviorName = "default";
     // Capture initial state for rollback
-    this.initialSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+    this.initialSkeletonData = skeletonData ? JSON.parse(JSON.stringify(skeletonData)) : { contours: [] };
+    // Capture last behavior for rollback (like RegularPointAdapter)
+    this.lastBehavior = null;
   }
 
   _createBehavior(preset, roundFunc) {
-    const ci = Array.from(this.selection)[0] || 0;
+    if (!this.skeletonData || !this.skeletonData.contours) {
+      return null;
+    }
+    // Parse selection format: "contourIndex/pointIndex"
+    // Extract contour index from first selected point
+    const firstSelection = Array.from(this.selection)[0];
+    if (!firstSelection) return null;
+    const [contourIndexStr, pointIndexStr] = firstSelection.split("/");
+    const contourIndex = parseInt(contourIndexStr, 10);
+    const pointIndex = parseInt(pointIndexStr, 10);
+    
+    if (isNaN(contourIndex) || isNaN(pointIndex)) return null;
+    
+    // Extract all point indices for the same contour
+    const selectedPointIndices = [];
+    for (const sel of this.selection) {
+      const [ci, pi] = sel.split("/");
+      if (parseInt(ci, 10) === contourIndex) {
+        selectedPointIndices.push(parseInt(pi, 10));
+      }
+    }
+    
     return new SkeletonEditBehavior(
       this.skeletonData,
-      ci,
-      Array.from(this.selection),
+      contourIndex,
+      selectedPointIndices,
       preset,
       false,
       roundFunc
@@ -436,37 +461,59 @@ class SkeletonPointAdapter {
   applyBehavior(behaviorDef, delta, context) {
     this.currentBehaviorName = behaviorDef.presetName;
     const behavior = this._createBehavior(behaviorDef.presetName, context.roundFunc);
-    return behavior.applyDelta(delta);
+    if (!behavior) return false;
+    this.lastBehavior = behavior;
+    
+    // Apply delta - this mutates behavior's internal state
+    // Returns raw changes [{pointIndex, x, y}, ...]
+    const rawChanges = behavior.applyDelta(delta);
+    
+    // Mutate skeletonData in place (like legacy code)
+    for (const { pointIndex, x, y } of rawChanges) {
+      const point = this.skeletonData.contours[behavior.contourIndex].points[pointIndex];
+      point.x = x;
+      point.y = y;
+    }
+    
+    // Return true to indicate changes were made
+    return true;
   }
 
   applyNudge(delta, context) {
     const behaviorName = context?.behaviorName || "default";
     this.currentBehaviorName = behaviorName;
     const behavior = this._createBehavior(behaviorName, context.roundFunc);
-    return behavior.applyDelta(delta);
+    if (!behavior) return false;
+    this.lastBehavior = behavior;
+    
+    // Apply delta - this mutates behavior's internal state
+    // Returns raw changes [{pointIndex, x, y}, ...]
+    const rawChanges = behavior.applyDelta(delta);
+    
+    // Mutate skeletonData in place (like legacy code)
+    for (const { pointIndex, x, y } of rawChanges) {
+      const point = this.skeletonData.contours[behavior.contourIndex].points[pointIndex];
+      point.x = x;
+      point.y = y;
+    }
+    
+    // Return true to indicate changes were made
+    return true;
   }
 
   getRollback() {
-    // Build rollback from initial state to current state
-    const rollbackChanges = [];
-    const currentContours = this.skeletonData.contours;
-    const initialContours = this.initialSkeletonData.contours;
-
-    for (let ci = 0; ci < initialContours.length; ci++) {
-      const initialContour = initialContours[ci];
-      for (let pi = 0; pi < initialContour.points.length; pi++) {
-        const initialPt = initialContour.points[pi];
-        const currentPt = currentContours[ci]?.points[pi];
-        if (currentPt && (currentPt.x !== initialPt.x || currentPt.y !== initialPt.y)) {
-          rollbackChanges.push({
-            path: ["contours", ci, "points", pi],
-            op: "=",
-            value: { x: initialPt.x, y: initialPt.y, type: initialPt.type }
-          });
-        }
-      }
-    }
-    return rollbackChanges;
+    // Get rollback from behavior (like RegularPointAdapter)
+    if (!this.lastBehavior) return [];
+    
+    const rollback = this.lastBehavior.getRollback();
+    const contourIndex = this.lastBehavior.contourIndex;
+    
+    // Convert to change format
+    return rollback.map(({ pointIndex, x, y }) => ({
+      path: ["contours", contourIndex, "points", pointIndex],
+      op: "=",
+      value: { x, y, type: this.lastBehavior.points[pointIndex]?.type }
+    }));
   }
 }
 
@@ -567,5 +614,8 @@ class TunniMidpointAdapter {
 export function getDataAdapterFactory(objectKind) {
   const obj = POINTER_OBJECTS[objectKind];
   if (!obj) throw new Error(`Unknown object kind: ${objectKind}`);
-  return obj.getAdapter.bind(obj);
+  // Return a function that calls getAdapter with the context
+  return function(context) {
+    return obj.getAdapter(context);
+  };
 }

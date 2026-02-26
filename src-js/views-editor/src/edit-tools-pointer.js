@@ -1305,136 +1305,18 @@ export class PointerTool extends BaseTool {
         }
       }
 
-    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const editLayerName = sceneController.editingLayerNames?.[0];
-      if (!editLayerName || !glyph.layers[editLayerName]) {
+      // Check for fixed rib mode - use legacy
+      if (this.fixedRibMode || this.fixedRibCompressMode) {
+        await this._handleNudgeSkeletonPointsLegacy(delta, event);
         return;
       }
 
-      const layer = glyph.layers[editLayerName];
-      let skeletonData = getSkeletonData(layer);
-      if (!skeletonData) return;
+      // Regular skeleton nudge - use composer
+      await this._handleNudgeSkeletonPoints(delta, event);
+      return;
+    }
 
-      // Deep clone for manipulation
-      const originalSkeletonData = JSON.parse(JSON.stringify(skeletonData));
-      const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
-
-      const roundFunc = (value) => makeRoundFunc(event)(value, true);
-      const useFixedRib = this.fixedRibMode || this.fixedRibCompressMode;
-      let appliedFixedRib = false;
-
-      if (useFixedRib) {
-        let clickedSkeletonPoint = this.sceneController.sceneModel.initialClickedSkeletonPoint;
-        if (!clickedSkeletonPoint && skeletonPointSelection?.size) {
-          const firstKey = skeletonPointSelection.values().next().value;
-          if (firstKey) {
-            const [contourIdx, pointIdx] = firstKey.split("/").map(Number);
-            if (Number.isInteger(contourIdx) && Number.isInteger(pointIdx)) {
-              clickedSkeletonPoint = { contourIdx, pointIdx };
-            }
-          }
-        }
-
-        if (clickedSkeletonPoint) {
-          appliedFixedRib = applyFixedRibDragToSkeletonData(
-            originalSkeletonData,
-            workingSkeletonData,
-            skeletonPointSelection,
-            clickedSkeletonPoint,
-            delta,
-            roundFunc,
-            {
-              anchorToDragSide: this.fixedRibCompressMode,
-              scaleControlPoints: FIXED_RIB_SCALE_CONTROL_POINTS,
-            }
-          );
-        }
-      }
-
-      if (!appliedFixedRib) {
-        // Create behaviors and apply delta
-        const behaviorName = getBehaviorPresetNameFromEvent("skeleton", "nudge", event);
-        const behaviors = createSkeletonEditBehavior(
-          originalSkeletonData,
-          skeletonPointSelection,
-          behaviorName
-        );
-
-        for (const behavior of behaviors) {
-          const changes = behavior.applyDelta(delta);
-          const contour = workingSkeletonData.contours[behavior.contourIndex];
-          for (const { pointIndex, x, y } of changes) {
-            contour.points[pointIndex].x = x;
-            contour.points[pointIndex].y = y;
-          }
-        }
-      }
-
-      const allChanges = [];
-      const regularRollbackParts = [];
-
-      // 1. Regular point nudging (if any regular points selected)
-      if (hasRegularPoints) {
-        const layerInfo = Object.entries(
-          sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
-        ).map(([layerName, layerGlyph]) => {
-          const behaviorFactory = new EditBehaviorFactory(
-            layerGlyph,
-            sceneController.selection,
-            this.scalingEditBehavior
-          );
-          return {
-            layerName,
-            layerGlyph,
-            changePath: ["layers", layerName, "glyph"],
-            editBehavior: behaviorFactory.getBehavior(
-              getBehaviorPresetNameFromEvent("regular", "nudge", event)
-            ),
-          };
-        });
-
-        for (const { layerGlyph, changePath, editBehavior } of layerInfo) {
-          const editChange = editBehavior.makeChangeForDelta(delta);
-          applyChange(layerGlyph, editChange);
-          allChanges.push(consolidateChanges(editChange, changePath));
-          regularRollbackParts.push(
-            consolidateChanges(editBehavior.rollbackChange, changePath)
-          );
-        }
-      }
-
-      // 2. Update skeleton outline contours (in-place to preserve path structure)
-      const staticGlyph = layer.glyph;
-      const pathChange = recordChanges(staticGlyph, (sg) => {
-        regenerateSkeletonContours(sg, workingSkeletonData, { preferInPlace: true });
-      });
-      allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]).change);
-
-      // 3. Save skeletonData to customData
-      const customDataChange = recordChanges(layer, (l) => {
-        setSkeletonData(l, workingSkeletonData);
-      });
-      allChanges.push(customDataChange.prefixed(["layers", editLayerName]).change);
-
-      const editChange = consolidateChanges(allChanges);
-      await sendIncrementalChange(editChange);
-
-      const rollbackParts = [
-        ...regularRollbackParts,
-        pathChange.prefixed(["layers", editLayerName, "glyph"]).rollbackChange,
-        customDataChange.prefixed(["layers", editLayerName]).rollbackChange,
-      ];
-
-      return {
-        changes: ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts)),
-        undoLabel: translate("action.nudge-selection"),
-        broadcast: true,
-      };
-    });
-    return;
-  }
-
-  // Handle rib points (when no skeleton points selected)
+    // Handle rib points (when no skeleton points selected)
   if (hasRibPoints) {
     await this._handleArrowKeysForRibPoints(event, ribPointSelection);
     return;
@@ -1490,6 +1372,154 @@ export class PointerTool extends BaseTool {
 
   return sceneController.handleArrowKeys(event);
 }
+
+  async _handleNudgeSkeletonPoints(delta, event) {
+    // Step 13: Use composer for skeleton point nudge
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const glyph = positionedGlyph?.glyph;
+    if (!glyph) return;
+
+    // Parse selection
+    const parsed = parseSelection(sceneController.selection);
+    const selectedSkeletonPoints = parsed.skeletonPoint;
+    if (!selectedSkeletonPoints?.size) return;
+
+    // Get skeletonData for the adapter
+    const skeletonData = getSkeletonData(glyph);
+    if (!skeletonData) {
+      // Fallback to legacy if no skeletonData
+      await this._handleNudgeSkeletonPointsLegacy(delta, event);
+      return;
+    }
+
+    // Resolve plan for skeleton point nudge
+    const plan = resolveBehaviorPlan("skeletonPoint", "nudge", {
+      altKey: event.altKey,
+      // Note: shift affects step magnitude (handled in handleArrowKeys), not behavior semantics
+    });
+
+    if (!plan.supported) {
+      // Fallback to legacy
+      await this._handleNudgeSkeletonPointsLegacy(delta, event);
+      return;
+    }
+
+    // Run orchestration
+    await runNudgeOrchestration(plan, delta, {
+      sceneController,
+      selection: sceneController.selection,
+      scalingEditBehavior: this.scalingEditBehavior,
+      skeletonData: skeletonData,  // Pass skeletonData for adapter
+      undoLabel: translate("edit-tools-pointer.undo.nudge-skeleton-points"),
+    });
+  }
+
+  async _handleNudgeSkeletonPointsLegacy(delta, event) {
+    // Legacy implementation for skeleton point nudge
+    // Retained for:
+    // - Fixed rib mode
+    // - Multi-layer with mixed selection
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+
+    if (!positionedGlyph) return;
+
+    // Parse selection
+    const parsed = parseSelection(sceneController.selection);
+    const selectedSkeletonPoints = parsed.skeletonPoint;
+    if (!selectedSkeletonPoints?.size) return;
+
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = sceneController.editingLayerNames?.[0];
+      if (!editLayerName || !glyph.layers[editLayerName]) {
+        return;
+      }
+
+      const layer = glyph.layers[editLayerName];
+      let skeletonData = getSkeletonData(layer);
+      if (!skeletonData) return;
+
+      // Deep clone for manipulation
+      const originalSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+      const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+      const roundFunc = (value) => makeRoundFunc(event)(value, true);
+      const useFixedRib = this.fixedRibMode || this.fixedRibCompressMode;
+      let appliedFixedRib = false;
+
+      if (useFixedRib) {
+        let clickedSkeletonPoint = this.sceneController.sceneModel.initialClickedSkeletonPoint;
+        if (!clickedSkeletonPoint && selectedSkeletonPoints?.size) {
+          const firstKey = selectedSkeletonPoints.values().next().value;
+          if (firstKey) {
+            const [contourIdx, pointIdx] = firstKey.split("/").map(Number);
+            if (Number.isInteger(contourIdx) && Number.isInteger(pointIdx)) {
+              clickedSkeletonPoint = { contourIdx, pointIdx };
+            }
+          }
+        }
+
+        if (clickedSkeletonPoint) {
+          appliedFixedRib = applyFixedRibDragToSkeletonData(
+            originalSkeletonData,
+            workingSkeletonData,
+            selectedSkeletonPoints,
+            clickedSkeletonPoint,
+            delta,
+            roundFunc,
+            {
+              anchorToDragSide: this.fixedRibCompressMode,
+              scaleControlPoints: FIXED_RIB_SCALE_CONTROL_POINTS,
+            }
+          );
+        }
+      }
+
+      if (!appliedFixedRib) {
+        // Create behaviors and apply delta
+        const behaviorName = getBehaviorPresetNameFromEvent("skeleton", "nudge", event);
+        const behaviors = createSkeletonEditBehavior(
+          originalSkeletonData,
+          selectedSkeletonPoints,
+          behaviorName
+        );
+
+        for (const behavior of behaviors) {
+          const changes = behavior.applyDelta(delta);
+          const contour = workingSkeletonData.contours[behavior.contourIndex];
+          for (const { pointIndex, x, y } of changes) {
+            contour.points[pointIndex].x = x;
+            contour.points[pointIndex].y = y;
+          }
+        }
+      }
+
+      const allChanges = [];
+
+      // Update skeleton outline contours (in-place to preserve path structure)
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        regenerateSkeletonContours(sg, workingSkeletonData, { preferInPlace: true });
+      });
+      allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]).change);
+
+      // Save skeletonData to customData
+      const customDataChange = recordChanges(layer, (l) => {
+        setSkeletonData(l, workingSkeletonData);
+      });
+      allChanges.push(customDataChange.prefixed(["layers", editLayerName]).change);
+
+      const editChange = consolidateChanges(allChanges);
+      await sendIncrementalChange(editChange);
+
+      return {
+        changes: editChange,
+        undoLabel: translate("edit-tools-pointer.undo.nudge-skeleton-points"),
+        broadcast: true,
+      };
+    });
+  }
 
   setCursorForRotationHandle(handleName) {
     this.setCursor(`url('/images/cursor-rotate-${handleName}.svg') 16 16, auto`);
@@ -3543,6 +3573,14 @@ export class PointerTool extends BaseTool {
     const selectedSkeletonPoints = parsed.skeletonPoint;
     if (!selectedSkeletonPoints?.size) return;
 
+    // Get skeletonData for the adapter
+    const skeletonData = getSkeletonData(glyph);
+    if (!skeletonData) {
+      // Fallback to legacy if no skeletonData
+      await this._handleDragSkeletonPointsLegacy(eventStream, initialEvent);
+      return;
+    }
+
     // Resolve plan for skeleton point drag
     const plan = resolveBehaviorPlan("skeletonPoint", "drag", {
       shiftKey: initialEvent.shiftKey,
@@ -3569,6 +3607,7 @@ export class PointerTool extends BaseTool {
       sceneController,
       selection: sceneController.selection,
       scalingEditBehavior: this.scalingEditBehavior,
+      skeletonData: skeletonData,  // Pass skeletonData for adapter
       computeDelta: (event) => {
         const currentLocalPoint = sceneController.localPoint(event);
         const currentGlyphPoint = {

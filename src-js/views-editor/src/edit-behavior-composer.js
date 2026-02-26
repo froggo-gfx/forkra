@@ -229,13 +229,24 @@ export async function runDragOrchestration(planOrExecutor, eventStream, context)
       
       // Create an executor for each layer
       for (const layer of layerInfo) {
+        // Get skeletonData from the layer glyph for skeleton point plans
+        const skeletonData = plan.objectKind === "skeletonPoint" || plan.objectKind === "skeletonHandle"
+          ? getSkeletonData(layer.layerGlyph)
+          : null;
+        
+        // Skip layers without skeletonData for skeleton point plans
+        if ((plan.objectKind === "skeletonPoint" || plan.objectKind === "skeletonHandle") && !skeletonData) {
+          continue;
+        }
+        
         const adapterContext = {
           glyph: layer.layerGlyph,
+          skeletonData: skeletonData,  // Pass skeletonData for SkeletonPointAdapter
           selection: context.selection,
           sceneController,
           scalingEditBehavior: context.scalingEditBehavior,
         };
-        
+
         const result = createBehaviorExecutor(plan, adapterContext);
         if (result.executor) {
           result.executor._layerInfo = [layer];  // Store this layer for rollback
@@ -260,6 +271,20 @@ export async function runDragOrchestration(planOrExecutor, eventStream, context)
     const accumulatedChanges = new ChangeCollector();
     const rollbackParts = [];
     let currentBehaviorType = plan.behaviorType;
+    
+    // Track skeletonData for skeleton point plans (needed for regenerateSkeletonContours)
+    const skeletonDataMap = new Map();
+    if (plan.objectKind === "skeletonPoint" || plan.objectKind === "skeletonHandle") {
+      for (const exec of executors) {
+        const layer = exec._layerInfo?.[0];
+        if (layer) {
+          const skelData = getSkeletonData(layer.layerGlyph);
+          if (skelData) {
+            skeletonDataMap.set(layer.layerName, skelData);
+          }
+        }
+      }
+    }
 
     for await (const event of eventStream) {
       const delta = computeDelta ? computeDelta(event) : context.delta;
@@ -275,7 +300,7 @@ export async function runDragOrchestration(planOrExecutor, eventStream, context)
         ctrlKey: event.ctrlKey || event.metaKey,
         xKey: currentEqualizeMode,
       });
-      
+
       console.log("Mid-drag check:", {
         currentBehaviorType,
         newBehaviorType: newPlan.behaviorType,
@@ -283,18 +308,18 @@ export async function runDragOrchestration(planOrExecutor, eventStream, context)
         xKey: currentEqualizeMode,
         behaviorChanged: newPlan.supported && newPlan.behaviorType !== currentBehaviorType
       });
-      
+
       if (newPlan.supported && newPlan.behaviorType !== currentBehaviorType) {
         // Behavior changed - apply rollback and create new executor
         currentBehaviorType = newPlan.behaviorType;
-        
+
         const rollback = executor.getRollback();
         if (rollback && executors[0]._layerInfo) {
           for (const layer of executors[0]._layerInfo) {
             rollbackParts.push(consolidateChanges(rollback, layer.changePath));
           }
         }
-        
+
         // Create new executor with new behavior type
         const firstLayer = executors[0]._layerInfo[0];
         const adapterContext = {
@@ -303,7 +328,7 @@ export async function runDragOrchestration(planOrExecutor, eventStream, context)
           sceneController,
           scalingEditBehavior: context.scalingEditBehavior,
         };
-        
+
         const result = createBehaviorExecutor(newPlan, adapterContext);
         if (result.executor) {
           result.executor._layerInfo = executors[0]._layerInfo;
@@ -312,30 +337,104 @@ export async function runDragOrchestration(planOrExecutor, eventStream, context)
         }
       }
 
-      // Apply delta through executor (applies to all layers via applyDragResultToGlyph)
+      // Apply delta through executor
       const result = executor.applyDelta(delta, { roundFunc, event });
 
-      // Apply result to glyph layers
-      const changes = applyDragResultToGlyph(glyph, result, context);
+      // For skeleton points, handle specially (like legacy code)
+      if (plan.objectKind === "skeletonPoint" || plan.objectKind === "skeletonHandle") {
+        // Apply changes to each layer
+        for (const exec of executors) {
+          const layer = exec._layerInfo?.[0];
+          if (!layer) continue;
+          
+          const skeletonData = skeletonDataMap.get(layer.layerName);
+          if (!skeletonData) continue;
+          
+          // Regenerate skeleton contours on the glyph
+          const pathChange = recordChanges(layer.layerGlyph, (sg) => {
+            regenerateSkeletonContours(sg, skeletonData, { preferInPlace: true });
+          });
+          const prefixedPathChange = pathChange.prefixed(["layers", layer.layerName, "glyph"]);
+          
+          // Save skeletonData to customData
+          const customDataChange = recordChanges(layer, (l) => {
+            setSkeletonData(l, skeletonData);
+          });
+          const prefixedCustomDataChange = customDataChange.prefixed(["layers", layer.layerName]);
+          
+          // Accumulate forward changes
+          accumulatedChanges._ensureForwardChanges();
+          accumulatedChanges._forwardChanges.push(prefixedPathChange.change);
+          accumulatedChanges._forwardChanges.push(prefixedCustomDataChange.change);
+          
+          // Send incremental change
+          const incrementalChange = consolidateChanges([prefixedPathChange.change, prefixedCustomDataChange.change]);
+          await sendIncrementalChange(incrementalChange, true);
+        }
+      } else {
+        // Regular points - use standard path
+        // Apply result to glyph layers
+        const changes = applyDragResultToGlyph(glyph, result, context);
 
-      // Accumulate changes - push the whole change structure with path
-      if (changes) {
-        accumulatedChanges._ensureForwardChanges();
-        // Push the entire change object (which includes the path)
-        accumulatedChanges._forwardChanges.push(changes);
+        // Accumulate changes - push the whole change structure with path
+        if (changes) {
+          accumulatedChanges._ensureForwardChanges();
+          // Push the entire change object (which includes the path)
+          accumulatedChanges._forwardChanges.push(changes);
+        }
+
+        // Send incremental change
+        await sendIncrementalChange(changes, true);
       }
-
-      // Send incremental change
-      await sendIncrementalChange(changes, true);
     }
 
     // Get rollback from all executors and wrap with layer paths
-    for (const exec of executors) {
-      const rollback = exec.getRollback();
-      if (rollback && exec._layerInfo) {
-        for (const layer of exec._layerInfo) {
-          const wrapped = consolidateChanges(rollback, layer.changePath);
-          rollbackParts.push(wrapped);
+    // For skeleton points, we need to capture rollback using recordChanges before mutations
+    if (plan.objectKind === "skeletonPoint" || plan.objectKind === "skeletonHandle") {
+      // For skeleton points, capture rollback by restoring original positions and recording
+      for (const exec of executors) {
+        const layer = exec._layerInfo?.[0];
+        if (!layer) continue;
+        
+        const skeletonData = skeletonDataMap.get(layer.layerName);
+        if (!skeletonData) continue;
+        
+        const rollback = exec.getRollback();  // Returns [{path, op, value}, ...] for skeleton points
+        if (!rollback || !rollback.length) continue;
+        
+        // Capture rollback by recording the restoration of original positions
+        const rollbackChange = recordChanges(layer.layerGlyph, (sg) => {
+          // Apply rollback positions to skeletonData (rollback has original positions)
+          // Rollback format: {path: ["contours", contourIndex, "points", pointIndex], op: "=", value: {x, y, type}}
+          for (const change of rollback) {
+            if (change.path && change.path.length >= 4 && change.path[0] === "contours") {
+              const contourIndex = change.path[1];
+              const pointIndex = change.path[3];
+              const point = skeletonData.contours[contourIndex].points[pointIndex];
+              point.x = change.value.x;
+              point.y = change.value.y;
+            }
+          }
+          // Regenerate contours with restored positions
+          regenerateSkeletonContours(sg, skeletonData, { preferInPlace: true });
+        });
+        rollbackParts.push(rollbackChange.prefixed(["layers", layer.layerName, "glyph"]).rollbackChange);
+        
+        // Also capture customData rollback
+        const customDataRollback = recordChanges(layer, (l) => {
+          setSkeletonData(l, skeletonData);
+        });
+        rollbackParts.push(customDataRollback.prefixed(["layers", layer.layerName]).rollbackChange);
+      }
+    } else {
+      // Regular points - use executor rollback
+      for (const exec of executors) {
+        const rollback = exec.getRollback();
+        if (rollback && exec._layerInfo) {
+          for (const layer of exec._layerInfo) {
+            const wrapped = consolidateChanges(rollback, layer.changePath);
+            rollbackParts.push(wrapped);
+          }
         }
       }
     }
@@ -455,8 +554,17 @@ export async function runNudgeOrchestration(planOrExecutor, delta, context) {
 
       // Create an executor for each layer
       for (const layer of layerInfo) {
+        // Get skeletonData from the layer glyph
+        const skeletonData = getSkeletonData(layer.layerGlyph);
+
+        // Skip layers without skeletonData for skeleton point plans
+        if (plan.objectKind === "skeletonPoint" && !skeletonData) {
+          continue;
+        }
+
         const adapterContext = {
           glyph: layer.layerGlyph,
+          skeletonData: skeletonData,  // Pass skeletonData for SkeletonPointAdapter
           selection: context.selection,
           sceneController,
           scalingEditBehavior: context.scalingEditBehavior,
@@ -469,13 +577,35 @@ export async function runNudgeOrchestration(planOrExecutor, delta, context) {
           // Apply delta through this executor
           const roundFunc = (value) => makeRoundFunc(null)(value, true);
           const nudgeResult = result.executor.applyDelta(delta, { roundFunc, layer: layer.layerGlyph, editLayerName: layer.layerName });
-          const changes = applyNudgeResultToLayer(layer.layerGlyph, nudgeResult, { editLayerName: layer.layerName });
-          allChanges.push(changes);
+          
+          // For skeleton points, the adapter mutates skeletonData directly
+          // We need to regenerate contours and record changes like the legacy code
+          if (plan.objectKind === "skeletonPoint" && skeletonData) {
+            // Regenerate skeleton contours on the glyph
+            const pathChange = recordChanges(layer.layerGlyph, (sg) => {
+              regenerateSkeletonContours(sg, skeletonData, { preferInPlace: true });
+            });
+            allChanges.push(pathChange.prefixed(["layers", layer.layerName, "glyph"]).change);
+            
+            // Save skeletonData to customData
+            const customDataChange = recordChanges(layer, (l) => {
+              setSkeletonData(l, skeletonData);
+            });
+            allChanges.push(customDataChange.prefixed(["layers", layer.layerName]).change);
+            
+            // Collect rollback from both path and customData changes
+            rollbackParts.push(pathChange.prefixed(["layers", layer.layerName, "glyph"]).rollbackChange);
+            rollbackParts.push(customDataChange.prefixed(["layers", layer.layerName]).rollbackChange);
+          } else {
+            // Regular points - use the standard path
+            const changes = applyNudgeResultToLayer(layer.layerGlyph, nudgeResult, { editLayerName: layer.layerName });
+            allChanges.push(changes);
 
-          // Collect rollback
-          const rollback = result.executor.getRollback();
-          if (rollback) {
-            rollbackParts.push(consolidateChanges(rollback, layer.changePath));
+            // Collect rollback
+            const rollback = result.executor.getRollback();
+            if (rollback) {
+              rollbackParts.push(consolidateChanges(rollback, layer.changePath));
+            }
           }
         }
       }
@@ -506,23 +636,45 @@ export async function runNudgeOrchestration(planOrExecutor, delta, context) {
     const combined = consolidateChanges(allChanges);
     await sendIncrementalChange(combined);
 
-    // Build rollback with proper path structure (LESSON FROM STEP 10)
-    const finalRollback = consolidateChanges(rollbackParts);
+    // Build rollback - match runDragOrchestration pattern
     const rollbackChanges = [];
-    if (finalRollback && finalRollback.c) {
-      if (Array.isArray(finalRollback.c)) {
-        for (const rc of finalRollback.c) {
-          // Add the path to each individual rollback change
-          const rcWithPath = { ...rc, p: finalRollback.p };
-          rollbackChanges.push(rcWithPath);
+    for (const rollback of rollbackParts) {
+      if (rollback && rollback.c) {
+        if (Array.isArray(rollback.c)) {
+          for (const rc of rollback.c) {
+            // Add the path to each individual rollback change
+            const rcWithPath = { ...rc, p: rollback.p };
+            rollbackChanges.push(rcWithPath);
+          }
+        } else {
+          rollbackChanges.push(rollback);
+        }
+      }
+    }
+
+    // Create ChangeCollector with rollback (match runDragOrchestration)
+    const resultChangeCollector = new ChangeCollector();
+    if (combined && combined.c) {
+      if (Array.isArray(combined.c)) {
+        for (const fc of combined.c) {
+          resultChangeCollector._ensureForwardChanges();
+          resultChangeCollector._forwardChanges.push(fc);
         }
       } else {
-        rollbackChanges.push(finalRollback);
+        resultChangeCollector._ensureForwardChanges();
+        resultChangeCollector._forwardChanges.push(combined);
+      }
+    }
+
+    if (rollbackChanges.length) {
+      resultChangeCollector._ensureRollbackChanges();
+      for (const rc of rollbackChanges) {
+        resultChangeCollector._rollbackChanges.push(rc);
       }
     }
 
     return {
-      changes: ChangeCollector.fromChanges(combined, consolidateChanges(rollbackChanges)),
+      changes: resultChangeCollector,
       undoLabel: undoLabel,
       broadcast: true,
     };
