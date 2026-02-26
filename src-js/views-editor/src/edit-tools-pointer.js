@@ -2481,15 +2481,18 @@ export class PointerTool extends BaseTool {
       }
     }
 
-    // Create context for composer
-    const context = {
-      sceneController,
-      glyph,
-      selection: sceneController.selection,
-      equalizeMode: this.equalizeMode,
-      equalizeHandleInfo,
-      scalingEditBehavior: this.scalingEditBehavior,
-    };
+    // For now, if equalize is active, use legacy path
+    if (equalizeHandleInfo && this.equalizeMode) {
+      await this._handleDragRegularPointsLegacy(eventStream, initialEvent, {
+        sceneController,
+        glyph,
+        selection: sceneController.selection,
+        equalizeMode: this.equalizeMode,
+        equalizeHandleInfo,
+        scalingEditBehavior: this.scalingEditBehavior,
+      });
+      return;
+    }
 
     // Resolve plan for regular point drag
     const plan = resolveBehaviorPlan("regularPoint", "drag", {
@@ -2501,22 +2504,24 @@ export class PointerTool extends BaseTool {
     });
 
     if (!plan.supported) {
-      // Fallback to legacy path if plan not supported
-      await this._handleDragRegularPointsLegacy(eventStream, initialEvent, context);
-      return;
-    }
-
-    // Create executor
-    const { executor } = createBehaviorExecutor(plan, context);
-    if (!executor) {
       // Fallback to legacy path
-      await this._handleDragRegularPointsLegacy(eventStream, initialEvent, context);
+      await this._handleDragRegularPointsLegacy(eventStream, initialEvent, {
+        sceneController,
+        glyph,
+        selection: sceneController.selection,
+        equalizeMode: this.equalizeMode,
+        equalizeHandleInfo: null,
+        scalingEditBehavior: this.scalingEditBehavior,
+      });
       return;
     }
 
-    // Run orchestration
-    await runDragOrchestration(executor, eventStream, {
-      ...context,
+    // Run orchestration - pass plan instead of executor
+    // Orchestration will create executor inside editGlyph with proper layer glyph
+    await runDragOrchestration(plan, eventStream, {
+      sceneController,
+      selection: sceneController.selection,
+      scalingEditBehavior: this.scalingEditBehavior,
       computeDelta: (event) => {
         const currentPoint = sceneController.localPoint(event);
         return {
@@ -2524,7 +2529,6 @@ export class PointerTool extends BaseTool {
           y: currentPoint.y - initialPoint.y,
         };
       },
-      makeRoundFunc: (event) => makeRoundFunc(event),
       undoLabel: "Drag",
     });
   }

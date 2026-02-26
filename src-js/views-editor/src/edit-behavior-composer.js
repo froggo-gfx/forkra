@@ -192,49 +192,93 @@ function createDataAdapter(objectKind, context) {
 
 /**
  * Shared orchestration for drag modality.
- * 
+ *
  * Handles:
  * - Event stream iteration (for await (const event of eventStream))
  * - Layer iteration (applies changes to all editing layers)
  * - Change accumulation and incremental sending
- * 
+ *
  * Does NOT contain behavior-specific math (delegates to executor).
- * 
- * @param {Object} executor - Executor from createBehaviorExecutor() with applyDelta() method
+ *
+ * @param {Object} planOrExecutor - Either a plan from resolveBehaviorPlan() or an executor object
  * @param {AsyncIterable} eventStream - Stream of drag events
  * @param {Object} context - Context with sceneController, computeDelta, undoLabel, etc.
  */
-export async function runDragOrchestration(executor, eventStream, context) {
+export async function runDragOrchestration(planOrExecutor, eventStream, context) {
   const { sceneController, computeDelta, undoLabel = "Drag" } = context;
+
+  // Check if we received a plan or an executor
+  let executor = planOrExecutor;
+  let plan = null;
   
-  if (!executor) {
-    console.warn("runDragOrchestration: no executor provided");
+  if (planOrExecutor?.objectKind) {
+    // It's a plan, create executor inside editGlyph
+    plan = planOrExecutor;
+    executor = null;
+  }
+
+  if (!executor && !plan) {
+    console.warn("runDragOrchestration: no executor or plan provided");
     return;
   }
-  
+
   await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    // Create executor inside editGlyph if we have a plan
+    if (plan && !executor) {
+      const editLayerName = sceneController.editingLayerNames?.[0];
+      const layerGlyph = editLayerName ? glyph.layers[editLayerName] : null;
+      
+      if (!layerGlyph) {
+        console.warn("runDragOrchestration: no editing layer found");
+        return;
+      }
+      
+      // Create context with layer glyph for adapter
+      const adapterContext = {
+        glyph: layerGlyph,
+        selection: context.selection,
+        sceneController,
+        scalingEditBehavior: context.scalingEditBehavior,
+      };
+      
+      const result = createBehaviorExecutor(plan, adapterContext);
+      executor = result.executor;
+      
+      if (!executor) {
+        console.warn("runDragOrchestration: failed to create executor", result.plan);
+        return;
+      }
+    }
+
+    if (!executor) {
+      console.warn("runDragOrchestration: no executor available");
+      return;
+    }
+
     const accumulatedChanges = new ChangeCollector();
-    
+
     for await (const event of eventStream) {
       const delta = computeDelta ? computeDelta(event) : context.delta;
       const roundFunc = makeRoundFunc(event);
-      
+
       // Apply delta through executor
       const result = executor.applyDelta(delta, { roundFunc, event });
-      
+
       // Apply result to glyph layers
       const changes = applyDragResultToGlyph(glyph, result, context);
-      
+
       // Accumulate changes
-      accumulatedChanges.concat(changes);
-      
+      if (changes?.change) {
+        accumulatedChanges.concat(changes);
+      }
+
       // Send incremental change
-      await sendIncrementalChange(changes.change, true);
+      await sendIncrementalChange(changes?.change, true);
     }
-    
+
     // Final commit
     await sendIncrementalChange(accumulatedChanges.change);
-    
+
     return {
       changes: accumulatedChanges,
       undoLabel: undoLabel,
@@ -245,35 +289,28 @@ export async function runDragOrchestration(executor, eventStream, context) {
 
 /**
  * Helper to apply drag result to glyph layers.
- * This is a simplified implementation for Step 08.
+ * Handles both direct changes and wrapped result objects.
  */
 function applyDragResultToGlyph(glyph, result, context) {
   const { sceneController } = context;
   const allChanges = [];
-  
+
+  // Normalize result - adapter may return change directly or wrapped object
+  const editChange = result?.editChange || result?.pathChange || result;
+
   // Apply to all editing layers
   for (const editLayerName of sceneController.editingLayerNames || []) {
     const layer = glyph.layers[editLayerName];
     if (!layer) continue;
-    
-    // Apply changes based on result type
-    if (result.pathChange) {
-      // For skeleton/rib changes
-      applyChange(layer, result.pathChange);
+
+    if (editChange) {
+      applyChange(layer, editChange);
       allChanges.push(
-        consolidateChanges(result.pathChange, ["layers", editLayerName, "glyph"])
-      );
-    }
-    
-    if (result.editChange) {
-      // For regular point changes
-      applyChange(layer, result.editChange);
-      allChanges.push(
-        consolidateChanges(result.editChange, ["layers", editLayerName, "glyph"])
+        consolidateChanges(editChange, ["layers", editLayerName, "glyph"])
       );
     }
   }
-  
+
   return consolidateChanges(allChanges);
 }
 
