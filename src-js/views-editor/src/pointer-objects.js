@@ -416,18 +416,58 @@ class SkeletonPointAdapter {
   constructor(skeletonData, selection) {
     this.skeletonData = skeletonData;
     this.selection = selection;
+    this.currentBehaviorName = "default";
+    // Capture initial state for rollback
+    this.initialSkeletonData = JSON.parse(JSON.stringify(skeletonData));
   }
+
   _createBehavior(preset, roundFunc) {
     const ci = Array.from(this.selection)[0] || 0;
-    return new SkeletonEditBehavior(this.skeletonData, ci, Array.from(this.selection), preset, false, roundFunc);
+    return new SkeletonEditBehavior(
+      this.skeletonData,
+      ci,
+      Array.from(this.selection),
+      preset,
+      false,
+      roundFunc
+    );
   }
+
   applyBehavior(behaviorDef, delta, context) {
-    return this._createBehavior(behaviorDef.presetName, context.roundFunc).applyDelta(delta);
+    this.currentBehaviorName = behaviorDef.presetName;
+    const behavior = this._createBehavior(behaviorDef.presetName, context.roundFunc);
+    return behavior.applyDelta(delta);
   }
+
   applyNudge(delta, context) {
-    return this._createBehavior("default", context.roundFunc).applyDelta(delta);
+    const behaviorName = context?.behaviorName || "default";
+    this.currentBehaviorName = behaviorName;
+    const behavior = this._createBehavior(behaviorName, context.roundFunc);
+    return behavior.applyDelta(delta);
   }
-  getRollback() { return []; }
+
+  getRollback() {
+    // Build rollback from initial state to current state
+    const rollbackChanges = [];
+    const currentContours = this.skeletonData.contours;
+    const initialContours = this.initialSkeletonData.contours;
+
+    for (let ci = 0; ci < initialContours.length; ci++) {
+      const initialContour = initialContours[ci];
+      for (let pi = 0; pi < initialContour.points.length; pi++) {
+        const initialPt = initialContour.points[pi];
+        const currentPt = currentContours[ci]?.points[pi];
+        if (currentPt && (currentPt.x !== initialPt.x || currentPt.y !== initialPt.y)) {
+          rollbackChanges.push({
+            path: ["contours", ci, "points", pi],
+            op: "=",
+            value: { x: initialPt.x, y: initialPt.y, type: initialPt.type }
+          });
+        }
+      }
+    }
+    return rollbackChanges;
+  }
 }
 
 class SkeletonHandleAdapter {

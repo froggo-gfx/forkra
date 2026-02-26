@@ -2831,11 +2831,30 @@ export class PointerTool extends BaseTool {
 
     // If only skeleton selection, use dedicated handler
     if (hasSkeletonSelection && !hasRegularSelection) {
-      await this._handleDragSkeletonPoints(
-        eventStream,
-        initialEvent,
-        effectiveSkeletonPointSelection
-      );
+      // Check for equalize mode (X+drag) - use legacy
+      if (this.equalizeMode) {
+        await this._handleDragSkeletonPointsLegacy(
+          eventStream,
+          initialEvent,
+          effectiveSkeletonPointSelection
+        );
+        this.sceneController.sceneModel.showTransformSelection = true;
+        return;
+      }
+
+      // Check for fixed rib mode - use legacy
+      if (this.fixedRibMode || this.fixedRibCompressMode) {
+        await this._handleDragSkeletonPointsLegacy(
+          eventStream,
+          initialEvent,
+          effectiveSkeletonPointSelection
+        );
+        this.sceneController.sceneModel.showTransformSelection = true;
+        return;
+      }
+
+      // Regular skeleton drag - use composer
+      await this._handleDragSkeletonPointsComposer(eventStream, initialEvent);
       this.sceneController.sceneModel.showTransformSelection = true;
       return;
     }
@@ -3298,13 +3317,17 @@ export class PointerTool extends BaseTool {
   }
 
   /**
-   * Handle dragging skeleton points with the Pointer Tool.
+   * Handle dragging skeleton points with the Pointer Tool (LEGACY).
    * Uses the rule-based SkeletonEditBehavior system.
+   * This is the legacy implementation retained for:
+   * - Fixed rib mode
+   * - Equalize (X+drag)
+   * - Multi-layer skeleton handling
    * @param {AsyncIterable} eventStream - Event stream for drag
    * @param {Event} initialEvent - Initial mouse event
    * @param {Set} [overrideSelection] - Optional selection to use instead of parsing from sceneController
    */
-  async _handleDragSkeletonPoints(eventStream, initialEvent, overrideSelection) {
+  async _handleDragSkeletonPointsLegacy(eventStream, initialEvent, overrideSelection) {
     const sceneController = this.sceneController;
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
 
@@ -3505,6 +3528,58 @@ export class PointerTool extends BaseTool {
         undoLabel: translate("edit-tools-pointer.undo.move-skeleton-points"),
         broadcast: true,
       };
+    });
+  }
+
+  async _handleDragSkeletonPointsComposer(eventStream, initialEvent) {
+    // Step 12: Use composer for skeleton point drag
+    const sceneController = this.sceneController;
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const glyph = positionedGlyph?.glyph;
+    if (!glyph) return;
+
+    // Parse selection
+    const parsed = parseSelection(sceneController.selection);
+    const selectedSkeletonPoints = parsed.skeletonPoint;
+    if (!selectedSkeletonPoints?.size) return;
+
+    // Resolve plan for skeleton point drag
+    const plan = resolveBehaviorPlan("skeletonPoint", "drag", {
+      shiftKey: initialEvent.shiftKey,
+      altKey: initialEvent.altKey,
+      ctrlKey: initialEvent.ctrlKey || initialEvent.metaKey,
+      xKey: this.equalizeMode,
+    });
+
+    if (!plan.supported) {
+      // Fallback to legacy
+      await this._handleDragSkeletonPointsLegacy(eventStream, initialEvent);
+      return;
+    }
+
+    // Get initial point in glyph coordinates
+    const localPoint = sceneController.localPoint(initialEvent);
+    const startGlyphPoint = {
+      x: localPoint.x - positionedGlyph.x,
+      y: localPoint.y - positionedGlyph.y,
+    };
+
+    // Run orchestration
+    await runDragOrchestration(plan, eventStream, {
+      sceneController,
+      selection: sceneController.selection,
+      scalingEditBehavior: this.scalingEditBehavior,
+      computeDelta: (event) => {
+        const currentLocalPoint = sceneController.localPoint(event);
+        const currentGlyphPoint = {
+          x: currentLocalPoint.x - positionedGlyph.x,
+          y: currentLocalPoint.y - positionedGlyph.y,
+        };
+        return vector.subVectors(currentGlyphPoint, startGlyphPoint);
+      },
+      undoLabel: translate("edit-tools-pointer.undo.move-skeleton-points"),
+      // Pass getter for mid-drag modifier detection
+      getEqualizeMode: () => this.equalizeMode,
     });
   }
 
