@@ -2530,6 +2530,8 @@ export class PointerTool extends BaseTool {
         };
       },
       undoLabel: "Drag",
+      // Pass getter for equalizeMode so mid-drag X key presses are detected
+      getEqualizeMode: () => this.equalizeMode,
     });
   }
 

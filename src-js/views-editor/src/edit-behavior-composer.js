@@ -39,14 +39,33 @@ import {
 } from "@fontra/core/skeleton-contour-generator.js";
 
 /**
+ * Map objectKind from pointer-objects naming to behavior table naming.
+ * Pointer objects uses descriptive names like "regularPoint", "skeletonPoint".
+ * Behavior tables use base names like "regular", "skeleton", "rib".
+ */
+function normalizeObjectKind(objectKind) {
+  const mapping = {
+    regularPoint: "regular",
+    skeletonPoint: "skeleton",
+    ribPoint: "rib",
+    regularHandle: "regular",
+    skeletonHandle: "skeleton",
+  };
+  return mapping[objectKind] || objectKind;
+}
+
+/**
  * Resolve behavior plan from object kind, modality, and modifiers.
- * 
+ *
  * @param {string} objectKind - The type of object: "regularPoint", "skeletonPoint", "ribPoint", etc.
  * @param {string} modality - The interaction mode: "drag" or "nudge"
  * @param {Object} modifiers - Modifier state: { shiftKey, altKey, ctrlKey, metaKey, zKey, xKey, qKey }
  * @returns {Object} Plan object: { objectKind, behaviorType, modality, supported, reason? }
  */
 export function resolveBehaviorPlan(objectKind, modality, modifiers = {}) {
+  // Normalize objectKind to behavior table naming
+  const normalizedObjectKind = normalizeObjectKind(objectKind);
+
   // Normalize modifiers to flags object
   const flags = {
     shift: !!modifiers.shiftKey,
@@ -57,57 +76,59 @@ export function resolveBehaviorPlan(objectKind, modality, modifiers = {}) {
     q: !!modifiers.qKey,
   };
 
-  // Resolve intent from modifiers
-  const intent = resolveModifierIntent(objectKind, flags);
-  
+  // Resolve intent from modifiers using normalized objectKind
+  const intent = resolveModifierIntent(normalizedObjectKind, flags);
+
   // Map intent to behavior type
   const behaviorType = mapIntentToBehaviorType(intent, modality);
-  
-  // Check if this combination is supported
-  const supported = isBehaviorSupported(objectKind, behaviorType, modality);
-  
+
+  // Check if this combination is supported using normalized objectKind
+  const supported = isBehaviorSupported(normalizedObjectKind, behaviorType, modality);
+
   const plan = {
-    objectKind,
+    objectKind,  // Keep original objectKind for adapter routing
+    normalizedObjectKind,  // Add normalized for behavior lookup
     behaviorType,
     modality,
     supported,
   };
-  
+
   if (!supported) {
     plan.reason = getUnsupportedReason(objectKind, behaviorType, modality);
   }
-  
+
   return plan;
 }
 
 /**
  * Map modifier intent to behavior type name.
  * This is the central routing from modifiers to behavior semantics.
+ * 
+ * @param {string} intent - Intent string: "default", "constrain", "alternate", "equalize", etc.
+ * @param {string} modality - "drag" or "nudge"
+ * @returns {string} Behavior type name matching edit-behavior.js preset names
  */
 function mapIntentToBehaviorType(intent, modality) {
-  // For now, use the existing behavior naming from edit-behavior.js
-  // This can be refined as the refactor progresses
-  
-  if (intent.equalize) {
-    return "equalize";
+  // resolveModifierIntent returns a string, not an object
+  // Map intent strings to behavior type names
+  switch (intent) {
+    case "equalize":
+      return "equalize";
+    case "interpolate":
+      return "interpolate";
+    case "alternate-constrain":
+      return "alternate-constrain";
+    case "alternate":
+      return "alternate";
+    case "constrain":
+      return "constrain";
+    case "quantize":
+      return "quantize";
+    case "tangent":
+      return "tangent";
+    default:
+      return "default";
   }
-  if (intent.interpolate) {
-    return "interpolate";
-  }
-  if (intent.alternate && intent.constrain) {
-    return "alternate-constrain";
-  }
-  if (intent.alternate) {
-    return "alternate";
-  }
-  if (intent.constrain) {
-    return "constrain";
-  }
-  if (intent.quantize) {
-    return "quantize";
-  }
-  
-  return "default";
 }
 
 /**
@@ -144,23 +165,26 @@ export function createBehaviorExecutor(plan, context) {
   if (!plan.supported) {
     return { executor: null, plan };
   }
-  
-  const { objectKind, behaviorType, modality } = plan;
-  
-  // Get behavior definition from Layer 1
-  const behaviorDef = getBehaviorPreset(objectKind, behaviorType);
-  
+
+  const { objectKind, normalizedObjectKind, behaviorType, modality } = plan;
+
+  // Get behavior definition from Layer 1 using normalized objectKind
+  const behaviorDef = getBehaviorPreset(normalizedObjectKind, behaviorType);
+
   if (!behaviorDef) {
     return { executor: null, plan: { ...plan, supported: false, reason: "No behavior definition found" } };
   }
-  
-  // Create adapter based on object kind
+
+  // Add presetName to behaviorDef for adapter compatibility
+  behaviorDef.presetName = behaviorType;
+
+  // Create adapter based on original objectKind (for adapter routing)
   const adapter = createDataAdapter(objectKind, context);
-  
+
   if (!adapter) {
     return { executor: null, plan: { ...plan, supported: false, reason: "No adapter found for object kind" } };
   }
-  
+
   // Create unified executor
   const executor = {
     applyDelta(delta, options = {}) {
@@ -174,7 +198,7 @@ export function createBehaviorExecutor(plan, context) {
       return adapter.getRollback();
     },
   };
-  
+
   return { executor, plan };
 }
 
@@ -273,10 +297,58 @@ export async function runDragOrchestration(planOrExecutor, eventStream, context)
 
     const accumulatedChanges = new ChangeCollector();
     const rollbackParts = [];
+    let currentBehaviorType = plan.behaviorType;
 
     for await (const event of eventStream) {
       const delta = computeDelta ? computeDelta(event) : context.delta;
       const roundFunc = makeRoundFunc(event);
+
+      // Get current equalizeMode (supports mid-drag X key toggle)
+      const currentEqualizeMode = context.getEqualizeMode ? context.getEqualizeMode() : context.equalizeMode;
+
+      // Check if behavior changed (e.g., Shift pressed mid-drag, X toggled mid-drag)
+      const newPlan = resolveBehaviorPlan(plan.objectKind, "drag", {
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        ctrlKey: event.ctrlKey || event.metaKey,
+        xKey: currentEqualizeMode,
+      });
+      
+      console.log("Mid-drag check:", {
+        currentBehaviorType,
+        newBehaviorType: newPlan.behaviorType,
+        shiftKey: event.shiftKey,
+        xKey: currentEqualizeMode,
+        behaviorChanged: newPlan.supported && newPlan.behaviorType !== currentBehaviorType
+      });
+      
+      if (newPlan.supported && newPlan.behaviorType !== currentBehaviorType) {
+        // Behavior changed - apply rollback and create new executor
+        currentBehaviorType = newPlan.behaviorType;
+        
+        const rollback = executor.getRollback();
+        if (rollback && executors[0]._layerInfo) {
+          for (const layer of executors[0]._layerInfo) {
+            rollbackParts.push(consolidateChanges(rollback, layer.changePath));
+          }
+        }
+        
+        // Create new executor with new behavior type
+        const firstLayer = executors[0]._layerInfo[0];
+        const adapterContext = {
+          glyph: firstLayer.layerGlyph,
+          selection: context.selection,
+          sceneController,
+          scalingEditBehavior: context.scalingEditBehavior,
+        };
+        
+        const result = createBehaviorExecutor(newPlan, adapterContext);
+        if (result.executor) {
+          result.executor._layerInfo = executors[0]._layerInfo;
+          executors = [result.executor];
+          executor = result.executor;
+        }
+      }
 
       // Apply delta through executor (applies to all layers via applyDragResultToGlyph)
       const result = executor.applyDelta(delta, { roundFunc, event });
