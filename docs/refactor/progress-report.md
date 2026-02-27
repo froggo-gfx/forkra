@@ -12,18 +12,18 @@ Goal Alignment (Required Format)
 2. Solution
    - Document all pointer/editor actions in a single Actions section, tagged in-scope/out-of-scope, with inline evidence.
 3. Code Implementation
-   - Added Actions section in `docs/refactor/action-object-matrix.md` with pointer gestures and editor-registered actions.
+   - Added Actions section in `docs/refactor/action-object-matrix.md` with pointer gestures, drag/nudge modifier variants, and editor-registered actions.
 4. Why This Solves the Problem
    - A single, evidenced list is the required baseline for the matrix and prevents missing or implicit actions later.
 
 Passing Criteria (Required)
 Criterion: Every user-facing action that exists in pointer/editor bindings is listed.
 Result: PASS
-Evidence: `docs/refactor/action-object-matrix.md` lines 9-61 list all pointer gestures and editor-registered actions; verified against `src-js/views-editor/src/editor.js` lines 312-713 and `src-js/views-editor/src/edit-tools-pointer.js` lines 1041, 1230, 1480, 2045, 2382, 2417.
+Evidence: `docs/refactor/action-object-matrix.md` lines 9-74 list pointer gestures, drag/nudge modifier variants, and editor-registered actions; verified against `src-js/views-editor/src/editor.js` lines 312-713 and `src-js/views-editor/src/edit-tools-pointer.js` lines 1041, 1230, 1245, 1480, 1832, 2382, 2417, 2490, 2679, 4005, 7200.
 
 Criterion: No object kinds appear in the Actions section.
 Result: PASS
-Evidence: `docs/refactor/action-object-matrix.md` lines 6-61 contain only actions and tags; no object-kind names are present.
+Evidence: `docs/refactor/action-object-matrix.md` lines 6-74 contain only actions and tags; no object-kind names are present.
 
 Scope Boundary (Required)
 I did not change behavior outside this step. PASS

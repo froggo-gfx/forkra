@@ -15,6 +15,19 @@ Tag meaning: [in-scope] = current refactor scope (drag/nudge pipeline and their 
 - [out-of-scope] Double-click (selection behavior and point toggles). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDoubleClick` line 2045; `PointerTool.handlePointsDoubleClick` line 2127; `PointerTool._handleSkeletonPointsDoubleClick` line 2140; `PointerTool._handleSkeletonSegmentDoubleClick` line 2346.
 - [out-of-scope] Transform selection via bounds handles (scale/rotate). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDrag` lines 1676-1687; `PointerTool.handleBoundsTransformSelection` line 6079.
 
+**Modifier Variants (Drag/Nudge)**
+- [in-scope] Drag + Shift (behavior preset: constrain). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `getBehaviorName` line 7200; `PointerTool.handleDragSelection` line 2490.
+- [in-scope] Drag + Alt (behavior preset: alternate). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `getBehaviorName` line 7200; `PointerTool.handleDragSelection` line 2490.
+- [in-scope] Drag + Shift+Alt (behavior preset: alternate-constrain). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `getBehaviorName` line 7200; `PointerTool.handleDragSelection` line 2490.
+- [in-scope] Drag + X (equalize handles mode). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDrag` lines 1832-1844.
+- [in-scope] Drag + Z (rib tangent constraint). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleDragEditableGeneratedPoints` lines 4005-4007.
+- [in-scope] Drag + D (fixed rib). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDragSelection` lines 2679-2689.
+- [in-scope] Drag + S (fixed rib compress). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDragSelection` lines 2679-2689.
+- [in-scope] Nudge + Shift (10x delta). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1245-1251.
+- [in-scope] Nudge + Shift+Ctrl/Meta (100x delta). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1245-1249.
+- [in-scope] Nudge + X (equalize handles mode). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1254-1261; lines 1410-1424.
+- [in-scope] Nudge + D/S (fixed rib / compress). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1280-1307.
+
 **Registered Actions (editor.js)**
 - [out-of-scope] `action.undo`. Evidence: `src-js/views-editor/src/editor.js` `EditorController.initActions` line 312.
 - [out-of-scope] `action.redo`. Evidence: `src-js/views-editor/src/editor.js` `EditorController.initActions` line 319.
