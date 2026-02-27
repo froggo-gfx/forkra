@@ -303,7 +303,69 @@ Not applicable.
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Not applicable.
 
+```
 
+Matrix Evidence (Required for Drag/Nudge Steps)
+Not applicable.
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Not applicable.
+
+Step Header
+Phase 1, Step 1.1 - Adapter Contract
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Define a single adapter contract so the composer can call adapters safely without per-kind branching.
+2. Solution
+   - Document the adapter contract in `edit-behavior-registry.js` with explicit persistence ownership and change object shape.
+3. Code Implementation
+   - Added `src-js/views-editor/src/edit-behavior-registry.js` with a contract comment and exported contract notes.
+4. Why This Solves the Problem
+   - The contract explicitly states who writes canonical data and the shape of forward/rollback changes, enabling uniform orchestration.
+
+Passing Criteria (Required)
+Criterion: Contract is written down in `edit-behavior-registry.js`.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 1-15.
+
+Criterion: Contract explicitly states persistence ownership (only `applyToLayer` writes).
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 2-3.
+
+Criterion: Contract explicitly states the shape and meaning of `{ forward, rollback }`.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 4-5 and 11-14.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-registry.js
+Function(s): N/A (contract notes)
+Lines: 1-15
+Snippet:
+```js
+// Adapter Contract (applies to all object kinds)
+// - applyDelta(delta, context) does not touch persistence.
+// - applyToLayer(layer, layerName) is the only method that writes canonical data.
+// - applyToLayer returns { forward, rollback } change objects.
+// - rollback must match the shape undo/redo expects (recordChanges-compatible).
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 86-141
+Snippet:
+```md
+Step Header
+Phase 1, Step 1.1 - Adapter Contract
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Define a single adapter contract so the composer can call adapters safely without per-kind branching.
+2. Solution
 
 
 
