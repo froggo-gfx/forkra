@@ -84,6 +84,253 @@ Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Not applicable.
 
 Step Header
+Phase 2, Step 2.2 - Regular Drag Through Composer
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Route regular-only drag through the composer without changing behavior for other object kinds.
+2. Solution
+   - Extract the regular drag orchestration into the composer and add a regular-only branch in pointer.
+3. Code Implementation
+   - Implemented `runDragOrchestration` in `src-js/views-editor/src/edit-behavior-composer.js`.
+   - Moved equalize handle lookup into `src-js/views-editor/src/edit-behavior.js`.
+   - Added a regular-only branch in `src-js/views-editor/src/edit-tools-pointer.js` that calls the composer.
+4. Why This Solves the Problem
+   - Regular drag now routes through a uniform composer entry point while non-regular drag paths stay unchanged.
+
+Passing Criteria (Required)
+Criterion: Regular-only matrix cells pass with no deviations.
+Result: FAIL
+Evidence: Partial manual check only (regular point drag with composer breakpoint hit); full matrix rows not tested (see Matrix Evidence).
+
+Criterion: Non-regular drag behavior is unchanged (no regressions in skeleton/rib/Tunni baseline cells).
+Result: FAIL
+Evidence: Not tested; no manual verification for non-regular drag paths (see Matrix Evidence).
+
+Criterion: handleDragSelection contains a dedicated regular-only branch that calls the composer and returns.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` lines 2493-2511.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-composer.js
+Function(s): getBehaviorName, runDragOrchestration
+Lines: 15-238
+Snippet:
+```js
+function getBehaviorName(event) {
+  const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
+  return behaviorNames[(event.shiftKey ? 1 : 0) + (event.altKey ? 2 : 0)];
+}
+
+export async function runDragOrchestration(_context) {
+  const {
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior.js
+Function(s): findEqualizeHandleForPath, getEqualizeHandleInfoForPointIndex
+Lines: 1394-1466
+Snippet:
+```js
+export function findEqualizeHandleForPath(positionedGlyph, point, size) {
+  if (!positionedGlyph?.glyph?.path) {
+    return null;
+  }
+
+  const glyphPoint = {
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-tools-pointer.js
+Function(s): handleDragSelection
+Lines: 2493-2511
+Snippet:
+```js
+    if (hasRegularSelection && !hasSkeletonSelection) {
+      await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+        return runDragOrchestration({
+          sceneController,
+          selection: sceneController.selection,
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 86-281
+Snippet:
+```md
+Step Header
+Phase 2, Step 2.2 - Regular Drag Through Composer
+
+Goal Alignment (Required Format)
+1. Step Goal
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Row: R1
+Column: C1
+Behavior: drag regular on-curve points
+Evidence: Manual drag test performed; composer breakpoint hit; point drag behavior matches baseline.
+Result: FAIL (not enough detail to confirm on-curve vs off-curve)
+
+Row: R1
+Column: C2
+Behavior: drag regular off-curve points
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R1
+Column: C3
+Behavior: drag anchors
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R1
+Column: C4
+Behavior: drag guidelines
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R2
+Column: C1
+Behavior: drag+shift regular on-curve points (constrain)
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R2
+Column: C2
+Behavior: drag+shift regular off-curve points (constrain)
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R2
+Column: C3
+Behavior: drag+shift anchors (constrain)
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R2
+Column: C4
+Behavior: drag+shift guidelines (constrain)
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R3
+Column: C1
+Behavior: drag+alt regular on-curve points (alternate)
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R3
+Column: C2
+Behavior: drag+alt regular off-curve points (alternate)
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R3
+Column: C3
+Behavior: drag+alt anchors (alternate)
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R3
+Column: C4
+Behavior: drag+alt guidelines (alternate)
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R4
+Column: C1
+Behavior: drag+shift+alt regular on-curve points (alternate-constrain)
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R4
+Column: C2
+Behavior: drag+shift+alt regular off-curve points (alternate-constrain)
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R4
+Column: C3
+Behavior: drag+shift+alt anchors (alternate-constrain)
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R4
+Column: C4
+Behavior: drag+shift+alt guidelines (alternate-constrain)
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Result: FAIL (not tested)
+
+Row: R5
+Column: C2
+Behavior: drag+X equalize regular off-curve handles
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 139-178.
+Result: FAIL (not tested)
+
+Row: R6
+Column: C2
+Behavior: drag+X+shift equalize regular off-curve handles with constrain
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 139-178.
+Result: FAIL (not tested)
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Rollback shape: ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts)) with optional connectContours change concatenation.
+Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 185-238.
+
+Step Header
+Phase 2, Step 2.1 - Composer Skeleton (No Behavior Change)
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Create composer entry points with explicit context docs without wiring into pointer.
+2. Solution
+   - Use the existing composer file with documented context fields; do not change pointer routing.
+3. Code Implementation
+   - No runtime code changes; added this progress entry only.
+4. Why This Solves the Problem
+   - The composer API surface is documented and available while pointer routing remains unchanged.
+
+Passing Criteria (Required)
+Criterion: Composer file exists with documented function signatures.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` lines 4-37 show the JSDoc for required context fields and both composer functions.
+
+Criterion: Pointer is unchanged (no new imports, no routing changes).
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` lines 1-88 show no composer import; `handleArrowKeys` at lines 1230-1233 and `handleDragSelection` at lines 2417-2420 confirm legacy routing remains in pointer.
+
+Criterion: No functional change observed; baseline matrix cells (Yes/Specificity) still PASS.
+Result: PASS
+Evidence: No runtime code changes in this step; composer is not wired into pointer (see pointer references above).
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 86-128
+Snippet:
+```md
+Step Header
+Phase 2, Step 2.1 - Composer Skeleton (No Behavior Change)
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Create composer entry points with explicit context docs without wiring into pointer.
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Not applicable.
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Not applicable.
+
+Step Header
 Phase 1, Step 1.4 - Composer API Surface
 
 Goal Alignment (Required Format)
