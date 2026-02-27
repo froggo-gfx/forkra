@@ -11,9 +11,9 @@ We will refactor the editing pipeline to enforce domain separation while preserv
 - Composer is uniform and does not branch on object kind.
 - Adapters own persistence and translate edits into canonical changes.
 - Behaviors are rule definitions only; they do not know storage or layers.
-- The behavior table is `src-js/views-editor/src/edit-behavior.js` and is the single source of truth.
-  - Regular points and skeleton points must share this behavior table.
-  - Edge-case rules (rib points, Tunni-specific constraints) are added in this same table, not in a parallel behavior system.
+- The behavior table is `src-js/views-editor/src/edit-behavior.js` for all shared point behaviors.
+  - Regular points and skeleton points must share this table for their core behaviors.
+  - Singular/edge cases may live outside this table when reasonable, but must not duplicate or override the shared rules.
 - All edits emit standard change objects with rollback.
 
 ## Definitions
@@ -39,7 +39,8 @@ This is the target runtime flow for all edit actions.
 4. Behavior execution (existing rules, centralized)
    - Behavior rules compute delta or change instructions.
    - Behaviors do not know storage or layers.
-   - Behavior rules are defined in `edit-behavior.js` and used by both regular and skeleton points.
+   - Shared behavior rules live in `edit-behavior.js` and are used by both regular and skeleton points.
+   - Singular behaviors (rib, Tunni-specific constraints) may be implemented elsewhere if documented in the registry and matrix.
 5. Adapter apply (new)
    - Adapter translates behavior output into canonical changes:
      - Persistent kinds: edit their canonical storage directly.
@@ -272,7 +273,7 @@ Modifier logic is spread across pointer and skeleton logic.
 
 **Solution (Plain Language)**
 Define behavior preset resolution centrally based on current behavior. This function must be the single place that maps modifiers to behavior presets. If a modifier is an action override (not a behavior preset), that must be stated explicitly in the mapping.
-Behavior presets must refer to entries in the shared behavior table in `edit-behavior.js` (no new behavior tables elsewhere).
+Behavior presets must refer to entries in the shared behavior table in `edit-behavior.js`. Singular behaviors may be mapped separately, but the mapping must still be explicit and centralized here.
 
 **Code Snippets / Suggestions**
 - Use `docs/refactor/action-object-matrix.md` to list all modifiers that require mapping.
