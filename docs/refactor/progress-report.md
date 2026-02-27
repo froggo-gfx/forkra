@@ -84,6 +84,70 @@ Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Not applicable.
 
 Step Header
+Phase 1, Step 1.4 - Composer API Surface
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Define composer entry points so pointer can call drag/nudge orchestration without guesswork.
+2. Solution
+   - Add a composer file with stub functions and explicit context/return documentation.
+3. Code Implementation
+   - Added `src-js/views-editor/src/edit-behavior-composer.js` with `runDragOrchestration` and `runNudgeOrchestration`.
+4. Why This Solves the Problem
+   - Documented entry points lock the API surface without changing runtime behavior.
+
+Passing Criteria (Required)
+Criterion: Composer functions exist with documented inputs and outputs.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` lines 1-38 include JSDoc for required context fields and return shape.
+
+Criterion: Composer does not perform persistence or per-kind branching.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` lines 19-37 contain stub returns only.
+
+Criterion: No transform-related code is moved in this step.
+Result: PASS
+Evidence: Only new file added; no edits to transform code paths.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-composer.js
+Function(s): runDragOrchestration, runNudgeOrchestration
+Lines: 1-38
+Snippet:
+```js
+// Composer entry points (uniform orchestration).
+// These are scaffolding only in Phase 1. No persistence or per-kind branching.
+
+export async function runDragOrchestration(_context) {
+  return null;
+}
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 86-142
+Snippet:
+```md
+Step Header
+Phase 1, Step 1.4 - Composer API Surface
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Define composer entry points so pointer can call drag/nudge orchestration without guesswork.
+2. Solution
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Not applicable.
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Not applicable.
+
+Step Header
 Phase 1, Step 1.3 - Modifier -> Behavior Mapping
 
 Goal Alignment (Required Format)
@@ -139,7 +203,7 @@ export function resolveBehaviorPreset(_objectKind, action, modifiers) {
 
 File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
 Function(s): N/A (documentation)
-Lines: 86-152
+Lines: 150-216
 Snippet:
 ```md
 Step Header
