@@ -451,6 +451,7 @@ Add an explicit drag routing map to the action-object matrix. Every drag modifie
 **Code Snippets / Suggestions**
 - Update `docs/refactor/action-object-matrix.md` with a "Drag Routing" column.
 - If any row is "legacy," it must include a short reason and a removal step.
+- For this refactor, mark `component`, `componentOrigin`, `componentTCenter`, and `backgroundImage` as **legacy** in the drag routing map with reason "out of scope" and a deferral step.
 
 **Manual Testing Criteria**
 - N/A (documentation step).
@@ -537,6 +538,7 @@ Add an explicit nudge routing map to the action-object matrix with the same stat
 **Code Snippets / Suggestions**
 - Update `docs/refactor/action-object-matrix.md` with a "Nudge Routing" column.
 - If any row is "legacy," it must include a short reason and a removal step.
+- For this refactor, mark `component`, `componentOrigin`, `componentTCenter`, and `backgroundImage` as **legacy** in the nudge routing map with reason "out of scope" and a deferral step.
 
 **Manual Testing Criteria**
 - N/A (documentation step).
