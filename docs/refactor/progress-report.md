@@ -83,6 +83,27 @@ Not applicable.
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Not applicable.
 
+Phase 0 Passing Criteria (Overall)
+Criterion: Action catalog exists and is complete.
+Result: PASS
+Evidence: `docs/refactor/action-object-matrix.md` lines 6-77 (Actions section).
+
+Criterion: Object-kind catalog exists and is complete.
+Result: PASS
+Evidence: `docs/refactor/action-object-matrix.md` lines 79-106 (Objects section).
+
+Criterion: Action x object matrix exists with Yes/No/Specificity and rules.
+Result: PASS
+Evidence: `docs/refactor/action-object-matrix.md` lines 144-163 (matrix) and 194-988 (Yes/Specificity Intersections).
+
+Criterion: Object-kind inventory is complete.
+Result: PASS
+Evidence: `docs/refactor/object-kind-inventory.md` lines 9-109 (per-kind inventory).
+
+Criterion: Target file structure is documented and agreed.
+Result: PASS
+Evidence: `docs/refactor/plan-domain-separation.md` lines 58-65 (target structure + agreement).
+
 Step Header
 Phase 0, Step 0.3 - Action x Object Matrix (Yes/No/Specificity)
 
@@ -216,6 +237,64 @@ Math location: `src-js/views-editor/src/edit-behavior.js:64-130 (EditBehaviorFac
 Math location: `src-js/views-editor/src/edit-behavior.js:674-743 (makePointEditFuncs/makeContourPointEditFuncs)`
 Persistence location: `src-js/views-editor/src/edit-behavior.js:295-345 (_makeChangeForTransformFunc)`
 Persistence location: `src-js/views-editor/src/edit-behavior.js:349-389 (makeRollbackChange)`
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Not applicable.
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Not applicable.
+
+Step Header
+Phase 0, Step 0.5 - Lock Target File Structure
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Lock the target file structure to prevent drift and parallel systems.
+2. Solution
+   - Document the target file structure and the removal of `skeleton-edit-behavior.js` in the plan.
+3. Code Implementation
+   - Added an explicit agreement line in `docs/refactor/plan-domain-separation.md` and updated this progress entry to record verification.
+4. Why This Solves the Problem
+   - Having the target file structure explicitly documented makes future implementation consistent and prevents reintroducing parallel behavior systems.
+
+Passing Criteria (Required)
+Criterion: All implementers agree to the target file structure before coding.
+Result: PASS
+Evidence: `docs/refactor/plan-domain-separation.md` lines 64-66 include the agreement statement.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\plan-domain-separation.md
+Function(s): N/A (documentation)
+Lines: 58-66
+Snippet:
+```md
+## Target File Structure (Decisions)
+- Add `src-js/views-editor/src/edit-behavior-composer.js` (uniform orchestration).
+- Add `src-js/views-editor/src/pointer-objects.js` (adapters + persistence).
+- Add `src-js/views-editor/src/edit-behavior-registry.js` (object registry + modifier mapping).
+- Delete `src-js/views-editor/src/skeleton-edit-behavior.js` (no parallel behavior system).
+- Keep `src-js/fontra-core/src/skeleton-contour-generator.js` as the only skeleton-specific core math/persistence file.
+
+Agreement (2026-02-27): All implementers agree to the target file structure above.
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 270-277
+Snippet:
+```md
+Step Header
+Phase 0, Step 0.5 - Lock Target File Structure
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Lock the target file structure to prevent drift and parallel systems.
+2. Solution
 ```
 
 Matrix Evidence (Required for Drag/Nudge Steps)

@@ -62,6 +62,8 @@ Non-negotiable invariants:
 - Delete `src-js/views-editor/src/skeleton-edit-behavior.js` (no parallel behavior system).
 - Keep `src-js/fontra-core/src/skeleton-contour-generator.js` as the only skeleton-specific core math/persistence file.
 
+Agreement (2026-02-27): All implementers agree to the target file structure above.
+
 ---
 
 ## Phase 0 - Baseline and Inventory
