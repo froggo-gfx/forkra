@@ -83,6 +83,80 @@ Not applicable.
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Not applicable.
 
+Step Header
+Phase 1, Step 1.3 - Modifier -> Behavior Mapping
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Centralize modifier mapping so behavior presets and override modes are defined in one place.
+2. Solution
+   - Add a resolveBehaviorPreset function that returns both a base preset and active override modes.
+3. Code Implementation
+   - Added resolveBehaviorPreset in `src-js/views-editor/src/edit-behavior-registry.js` with drag and nudge modifier handling.
+4. Why This Solves the Problem
+   - The mapping is explicit and centralized, avoiding split modifier logic across pointer and skeleton code paths.
+
+Passing Criteria (Required)
+Criterion: Modifier mapping covers every modifier in the Phase 0 Action Catalog.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 99-144 handle shift/alt presets, X equalize, Z/D/S rib modes, and nudge scaling.
+
+Criterion: Each modifier has an explicit handling path (behavior preset or explicit non-preset).
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 113-141 explicitly push overrides or set presets.
+
+Criterion: Mapping logic is centralized and referenced only by composer.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 99-144 contain the only modifier mapping function in the codebase at this step.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-registry.js
+Function(s): resolveBehaviorPreset
+Lines: 101-141
+Snippet:
+```js
+export function resolveBehaviorPreset(_objectKind, action, modifiers) {
+  const {
+    shiftKey,
+    altKey,
+    ctrlKey,
+    metaKey,
+    equalizeMode,
+    tangentRibMode,
+    fixedRibMode,
+    fixedRibCompressMode,
+  } = modifiers || {};
+
+  const result = {
+    preset: null,
+    overrides: [],
+  };
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 86-152
+Snippet:
+```md
+Step Header
+Phase 1, Step 1.3 - Modifier -> Behavior Mapping
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Centralize modifier mapping so behavior presets and override modes are defined in one place.
+2. Solution
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Not applicable.
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Not applicable.
+
 Phase 0 Passing Criteria (Overall)
 Criterion: Action catalog exists and is complete.
 Result: PASS

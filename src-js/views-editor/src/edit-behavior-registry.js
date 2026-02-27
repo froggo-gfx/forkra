@@ -95,3 +95,51 @@ export const OBJECT_KINDS = {
     nonSelection: true,
   },
 };
+
+// Centralized modifier mapping for drag and nudge actions.
+// Returns a base preset plus any active override modes.
+export function resolveBehaviorPreset(_objectKind, action, modifiers) {
+  const {
+    shiftKey,
+    altKey,
+    ctrlKey,
+    metaKey,
+    equalizeMode,
+    tangentRibMode,
+    fixedRibMode,
+    fixedRibCompressMode,
+  } = modifiers || {};
+
+  const result = {
+    preset: null,
+    overrides: [],
+  };
+
+  if (action === "drag") {
+    const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
+    result.preset = behaviorNames[(shiftKey ? 1 : 0) + (altKey ? 2 : 0)];
+  }
+
+  if (equalizeMode) {
+    result.overrides.push("equalize");
+  }
+  if (tangentRibMode) {
+    result.overrides.push("rib-tangent");
+  }
+  if (fixedRibMode) {
+    result.overrides.push("rib-fixed");
+  }
+  if (fixedRibCompressMode) {
+    result.overrides.push("rib-fixed-compress");
+  }
+
+  if (action === "nudge" && shiftKey) {
+    if (ctrlKey || metaKey) {
+      result.overrides.push("nudge-scale-100");
+    } else {
+      result.overrides.push("nudge-scale-10");
+    }
+  }
+
+  return result;
+}
