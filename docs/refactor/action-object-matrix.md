@@ -266,7 +266,7 @@ for (const data of Object.values(layersData)) {
 Result: FAIL (not tested)
 
 R1/C7 (rib on-curve, drag) - Specificity  
-Behavior: Constraint along the rib (normal to skeleton contour). Movement allowed only if ribs are editable or belong to a single segment.
+Behavior: Constraint along the rib (normal to skeleton contour). Multi-select applies per rib: each rib moves along its own normal (outward/inward relative to its side).
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDragSelection` lines 2448-2466; `PointerTool._handleDragRibPoint` lines 3287-3295.  
 Snippet:
 ```js
@@ -284,7 +284,7 @@ if (!movementAllowed) {
 Result: FAIL (not tested)
 
 R1/C8 (rib off-curve, drag) - Specificity  
-Behavior: Angle is non-changable (derived from skeleton point handle angle); requires Editable flag to change distance from C7. Affected by skeleton off-curve distance change if Detached is off; unaffected if Detached is on.
+Behavior: Handle angle is fixed by the skeleton handle direction (basic rib-handle property). Editable flag controls whether distance/offset can change. Detached mode uses absolute offsets; non-detached uses directional offsets.
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDragSelection` lines 2463-2466; `PointerTool._handleDragEditableGeneratedHandles` lines 4141-4158.  
 Snippet:
 ```js
@@ -408,7 +408,7 @@ if (behaviorName !== lastBehaviorName) {
 Result: FAIL (not tested)
 
 R3/C7 (rib on-curve, drag+alt) - Specificity  
-Behavior: Requires Editable flag to perform; otherwise should adhere to behavior rules table.
+Behavior: Requires Editable flag. Apart from that gating, behavior follows the shared behavior table (Alt selects the alternate preset; no extra rib-specific math).
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleDragRibPoint` lines 3201-3205.  
 Snippet:
 ```js
@@ -420,7 +420,7 @@ const localPoint = sceneController.localPoint(initialEvent);
 Result: FAIL (not tested)
 
 R3/C8 (rib off-curve, drag+alt) - Specificity  
-Behavior: Requires Editable flag to perform; otherwise should adhere to behavior rules table.
+Behavior: Requires Editable flag. Apart from that gating, behavior follows the shared behavior table (Alt selects the alternate preset; no extra rib-specific math).
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleDragEditableGeneratedHandles` lines 4099-4145.  
 Snippet:
 ```js
@@ -661,7 +661,7 @@ if (hasSkeletonPoints) {
 Result: FAIL (not tested)
 
 R10/C7 (rib on-curve, nudge) - Specificity  
-Behavior: Constraint along the rib (normal to skeleton contour). Movement allowed only if ribs are editable or belong to a single segment.
+Behavior: Constraint along the rib (normal to skeleton contour). Multi-select applies per rib: each rib moves along its own normal (outward/inward relative to its side).
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4549-4556.  
 Snippet:
 ```js
@@ -677,7 +677,7 @@ if (!allTargetsEditable && !belongsToSingleSegment) {
 Result: FAIL (not tested)
 
 R10/C8 (rib off-curve, nudge) - Specificity  
-Behavior: Angle is non-changable (derived from skeleton point handle angle); requires Editable flag to change distance from C7. Affected by skeleton off-curve distance change if Detached is off; unaffected if Detached is on.
+Behavior: Handle angle is fixed by the skeleton handle direction (basic rib-handle property). Editable flag controls whether distance/offset can change. Detached mode uses absolute offsets; non-detached uses directional offsets.
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForEditableHandles` lines 4317-4339.  
 Snippet:
 ```js
