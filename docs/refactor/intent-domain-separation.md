@@ -50,3 +50,6 @@ Object kinds and persistence:
 
 ## Scope (Intent Only)
 This document does not define step by step tasks or file edits. It only captures the goal and architectural shape we must preserve during the refactor plan and implementation.
+
+Scope notes:
+- Tunni points are drag targets but remain non-selection (no parseSelection keys).

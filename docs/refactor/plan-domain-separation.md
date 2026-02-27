@@ -30,7 +30,7 @@ This is the target runtime flow for all edit actions.
    - It returns selection kinds and indices (point, guideline, skeletonPoint, skeletonRibPoint, etc).
 2. Registry lookup (new)
    - Registry provides capabilities for the selection kind:
-     - supported actions (drag, nudge, hover, etc)
+     - supported actions (drag, nudge, etc)
      - modifier mapping support
      - persistent vs virtual
      - adapter to use
@@ -76,7 +76,7 @@ List all user actions without tying them to object kinds. This keeps the refacto
 **Code Snippets / Suggestions**
 - Create `docs/refactor/action-object-matrix.md` with an Actions section.
 - Actions list should include (example, not exhaustive):
-  - drag, nudge, hover, select, copy/paste, delete
+  - drag, nudge, select, copy/paste, delete
   - equalize handles (X)
   - measure (Q / Alt+Q)
   - rib modifier modes (Z/D/S) as action modifiers
@@ -103,9 +103,9 @@ List all object kinds without tying them to actions.
   - point, handle, guideline
   - skeletonPoint, skeletonHandle, skeletonRibPoint
   - editableGeneratedPoint
-  - tunniPoint
   - skeletonSegment (selection-only)
 - Mark selection-only kinds explicitly.
+- Note that Tunni points are non-selection drag targets and must be tracked explicitly in the drag routing map.
 
 **Manual Testing Criteria**
 - N/A (documentation step).
@@ -150,6 +150,7 @@ Create a matrix that intersects actions with object kinds and marks each cell as
 - Every Yes/Specificity cell has a PASS/FAIL result and notes.
 
 ---
+
 
 ### Step 0.4 - Object-Kind Inventory
 **Problem Description**
@@ -247,11 +248,11 @@ Create a registry that lists object kinds and their capabilities. The registry i
 - Add `edit-behavior-registry.js` with:
 ```js
 export const OBJECT_KINDS = {
-  regularPoint: { selectionKey: "point", supports: ["drag","nudge","hover"], persistent: true },
-  guideline: { selectionKey: "guideline", supports: ["drag","nudge","hover"], persistent: true },
-  skeletonPoint: { selectionKey: "skeletonPoint", supports: ["drag","nudge","hover"], persistent: true },
-  ribPoint: { selectionKey: "skeletonRibPoint", supports: ["drag","nudge","hover"], persistent: false },
-  tunniPoint: { selectionKey: "tunniPoint", supports: ["drag"], persistent: false },
+  regularPoint: { selectionKey: "point", supports: ["drag","nudge"], persistent: true },
+  guideline: { selectionKey: "guideline", supports: ["drag","nudge"], persistent: true },
+  skeletonPoint: { selectionKey: "skeletonPoint", supports: ["drag","nudge"], persistent: true },
+  ribPoint: { selectionKey: "skeletonRibPoint", supports: ["drag","nudge"], persistent: false },
+  // Tunni points are non-selection drag targets; track them in the drag routing map.
 };
 ```
 - Selection key formats must match what `parseSelection()` accepts. Do not introduce new formats in this step.
@@ -302,14 +303,13 @@ export function resolveBehaviorPreset(objectKind, modifiers) {
 Composer entry points are undefined, risking drift and ad-hoc integration.
 
 **Solution (Plain Language)**
-Define composer entry points for drag, nudge, and hover orchestration. Document inputs and outputs precisely so pointer can call them without guesswork. Keep existing transform flows unchanged in this phase.
+Define composer entry points for drag and nudge orchestration. Document inputs and outputs precisely so pointer can call them without guesswork. Keep existing transform flows unchanged in this phase.
 
 **Code Snippets / Suggestions**
 - Define in `edit-behavior-composer.js`:
 ```js
 export async function runDragOrchestration(...) {}
 export async function runNudgeOrchestration(...) {}
-export function runHoverRouting(...) {}
 ```
 
 **Manual Testing Criteria**
@@ -342,7 +342,7 @@ Composer does not exist. Pointer directly constructs edit behaviors and applies 
 Create the composer file with explicit, documented entry points, but do not wire it into pointer yet. This is scaffolding only.
 
 **Code Snippets / Suggestions**
-- Add `edit-behavior-composer.js` with stub functions that accept the same inputs pointer currently uses for drag/nudge/hover.
+- Add `edit-behavior-composer.js` with stub functions that accept the same inputs pointer currently uses for drag/nudge.
 - Use a single `context` argument and document required fields in comments:
   - `sceneController`, `selection`, `initialEvent`, `eventStream`
   - `glyph`, `sendIncrementalChange` (from `sceneController.editGlyph`)
