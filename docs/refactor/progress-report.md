@@ -32,7 +32,7 @@ I did not add new math unless the step explicitly allows it. PASS
 Code Evidence (Required)
 File: C:\Users\frena\Desktop\fontra-test\docs\refactor\action-object-matrix.md
 Function(s): N/A (documentation)
-Lines: 6-16
+Lines: 6-30
 Snippet:
 ```md
 ## Actions (Step 0.1)
@@ -42,7 +42,6 @@ Tag meaning: [in-scope] = current refactor scope (drag/nudge pipeline and their 
 - [in-scope] Drag selection (mouse drag on selection). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDrag` line 1480; `PointerTool.handleDragSelection` line 2417.
 - [in-scope] Nudge selection (arrow keys). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` line 1230.
 - [out-of-scope] Hover selection (mouse move). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleHover` line 1041.
-- [out-of-scope] Single-click selection update (click/shift/alt add/subtract). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDrag` lines 1981-2003.
 ```
 
 File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
