@@ -356,7 +356,7 @@ Snippet:
 
 File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
 Function(s): N/A (documentation)
-Lines: 86-141
+Lines: 314-368
 Snippet:
 ```md
 Step Header
@@ -377,4 +377,81 @@ Goal Alignment (Required Format)
 
 
 
+```
 
+Matrix Evidence (Required for Drag/Nudge Steps)
+Not applicable.
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Not applicable.
+
+Step Header
+Phase 1, Step 1.2 - Object Registry
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Establish a single declarative registry of object kinds, selection keys, and capabilities.
+2. Solution
+   - Add an OBJECT_KINDS registry in `edit-behavior-registry.js` that lists all kinds and flags selection-only/non-selection cases.
+3. Code Implementation
+   - Added OBJECT_KINDS to `src-js/views-editor/src/edit-behavior-registry.js` with selection keys, supports, and flags.
+4. Why This Solves the Problem
+   - A single registry makes routing and capability checks uniform without per-kind branching or ad-hoc parsing.
+
+Passing Criteria (Required)
+Criterion: Registry includes all object kinds listed in the Phase 0 Object-Kind Catalog.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 20-96 include regular, anchor, guideline, skeleton, rib, editableGenerated, and Tunni entries; catalog in `docs/refactor/action-object-matrix.md` lines 79-106.
+
+Criterion: Each `selectionKey` value matches an existing `parseSelection()` format.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 21-96 match `src-js/fontra-core/src/utils.js` `parseSelection` lines 245-263 (string formats).
+
+Criterion: Registry does not add new selection formats.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 21-96 list only existing selection keys; non-selection Tunni uses `selectionKey: null`.
+
+Criterion: Registry contains no parsing logic (no string splitting, no regex).
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 17-96 contain only static data.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-registry.js
+Function(s): N/A (data registry)
+Lines: 17-97
+Snippet:
+```js
+// Object registry (declarative only; no parsing logic).
+// selectionKey must match parseSelection() formats exactly.
+// Use selectionKey: null for non-selection drag targets (e.g., Tunni points).
+export const OBJECT_KINDS = {
+  regularPoint: {
+    selectionKey: "point",
+    supports: ["drag", "nudge"],
+    persistent: true,
+  },
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 388-451
+Snippet:
+```md
+Step Header
+Phase 1, Step 1.2 - Object Registry
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Establish a single declarative registry of object kinds, selection keys, and capabilities.
+2. Solution
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Not applicable.
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Not applicable.
