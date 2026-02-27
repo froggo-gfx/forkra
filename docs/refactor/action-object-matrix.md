@@ -145,9 +145,9 @@ Tag meaning: Yes = handled directly by the `edit-behavior.js` behavior table. No
 | Row ID | Action | C1 Regular On-Curve | C2 Regular Off-Curve | C3 Anchor | C4 Guideline | C5 Skeleton On-Curve | C6 Skeleton Off-Curve | C7 Rib On-Curve | C8 Rib Off-Curve |
 |---|---|---|---|---|---|---|---|---|---|
 | R1 | drag | Yes | Yes | Yes | Yes | Specificity | Specificity | Specificity | Specificity |
-| R2 | drag+shift | Yes | Yes | Yes | Yes | Specificity | Specificity | Specificity | Specificity |
+| R2 | drag+shift | Yes | Yes | Yes | Yes | Specificity | Specificity | No | No |
 | R3 | drag+alt | Yes | Yes | Yes | Yes | Specificity | Specificity | Specificity | Specificity |
-| R4 | drag+shift+alt | Yes | Yes | Yes | Yes | Specificity | Specificity | Specificity | Specificity |
+| R4 | drag+shift+alt | Yes | Yes | Yes | Yes | Specificity | Specificity | No | No |
 | R5 | drag+X | No | Specificity | No | No | No | Specificity | No | No |
 | R6 | drag+X+shift | No | Specificity | No | No | No | Specificity | No | No |
 | R7 | drag+Z | No | No | No | No | No | No | Specificity | No |
@@ -166,9 +166,9 @@ Tag meaning: Yes = handled directly by the `edit-behavior.js` behavior table. No
 | Row ID | Action | C1 Regular On-Curve | C2 Regular Off-Curve | C3 Anchor | C4 Guideline | C5 Skeleton On-Curve | C6 Skeleton Off-Curve | C7 Rib On-Curve | C8 Rib Off-Curve |
 |---|---|---|---|---|---|---|---|---|---|
 | R1 | drag | Yes | Yes | Yes | Yes | Yes | Yes | Specificity | Specificity |
-| R2 | drag+shift | Yes | Yes | Yes | Yes | Yes | Yes | Specificity | Specificity |
+| R2 | drag+shift | Yes | Yes | Yes | Yes | Yes | Yes | No | No |
 | R3 | drag+alt | Yes | Yes | Yes | Yes | Yes | Yes | Specificity | Specificity |
-| R4 | drag+shift+alt | Yes | Yes | Yes | Yes | Yes | Yes | Specificity | Specificity |
+| R4 | drag+shift+alt | Yes | Yes | Yes | Yes | Yes | Yes | No | No |
 | R5 | drag+X | No | Specificity | No | No | No | Specificity | No | No |
 | R6 | drag+X+shift | No | Specificity | No | No | No | Specificity | No | No |
 | R7 | drag+Z | No | No | No | No | No | No | Specificity | No |
@@ -266,7 +266,7 @@ for (const data of Object.values(layersData)) {
 Result: FAIL (not tested)
 
 R1/C7 (rib on-curve, drag) - Specificity  
-Behavior: Rib on-curve drag uses rib handlers; skeletonRibPoint selection routes to `_handleDragRibPoint`, and editable generated points route to `_handleDragEditableGeneratedPoints`.  
+Behavior: Constraint along the rib (normal to skeleton contour). Movement allowed only if ribs are editable or belong to a single segment.
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDragSelection` lines 2448-2466; `PointerTool._handleDragRibPoint` lines 3287-3295.  
 Snippet:
 ```js
@@ -284,7 +284,7 @@ if (!movementAllowed) {
 Result: FAIL (not tested)
 
 R1/C8 (rib off-curve, drag) - Specificity  
-Behavior: Editable generated handles route to `_handleDragEditableGeneratedHandles` and move along skeleton handle direction.  
+Behavior: Angle is non-changable (derived from skeleton point handle angle); requires Editable flag to change distance from C7. Affected by skeleton off-curve distance change if Detached is off; unaffected if Detached is on.
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDragSelection` lines 2463-2466; `PointerTool._handleDragEditableGeneratedHandles` lines 4141-4158.  
 Snippet:
 ```js
@@ -352,38 +352,6 @@ if (behaviorName !== lastBehaviorName) {
 ```
 Result: FAIL (not tested)
 
-R2/C7 (rib on-curve, drag+shift) - Specificity  
-Behavior: Rib drag uses special handlers (not the edit-behavior table); shift does not route through the behavior table.  
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleDragRibPoint` lines 3287-3295.  
-Snippet:
-```js
-const allTargetsEditable = targetPoints.every((tp) => tp.isEditable);
-const belongsToSingleSegment = this._selectedRibTargetsBelongToSingleSegment(
-  targetPoints,
-  skeletonDataForCheck
-);
-const movementAllowed =
-  hasSkeletonSelection || allTargetsEditable || belongsToSingleSegment;
-if (!movementAllowed) {
-  return;
-}
-```
-Result: FAIL (not tested)
-
-R2/C8 (rib off-curve, drag+shift) - Specificity  
-Behavior: Editable generated handle drag uses special handler; shift has no behavior-table routing.  
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleDragEditableGeneratedHandles` lines 4099-4145.  
-Snippet:
-```js
-const skeletonHandleDir = this._getSkeletonHandleDirForPoint(
-  contour, eh.skeletonPointIndex, eh.handleType
-);
-if (!skeletonHandleDir) {
-  continue;
-}
-```
-Result: FAIL (not tested)
-
 R3/C1-C2 (regular on-curve + regular off-curve, drag+alt) - Yes  
 Behavior: Alt selects alternate behavior via getBehaviorName.  
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `getBehaviorName` lines 7200-7202; `PointerTool.handleDragSelection` line 2490.  
@@ -440,7 +408,7 @@ if (behaviorName !== lastBehaviorName) {
 Result: FAIL (not tested)
 
 R3/C7 (rib on-curve, drag+alt) - Specificity  
-Behavior: Alt enables interpolation in rib drag.  
+Behavior: Requires Editable flag to perform; otherwise should adhere to behavior rules table.
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleDragRibPoint` lines 3201-3205.  
 Snippet:
 ```js
@@ -452,7 +420,7 @@ const localPoint = sceneController.localPoint(initialEvent);
 Result: FAIL (not tested)
 
 R3/C8 (rib off-curve, drag+alt) - Specificity  
-Behavior: Editable handle drag uses special handler; alt has no behavior-table routing.  
+Behavior: Requires Editable flag to perform; otherwise should adhere to behavior rules table.
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleDragEditableGeneratedHandles` lines 4099-4145.  
 Snippet:
 ```js
@@ -520,32 +488,6 @@ if (behaviorName !== lastBehaviorName) {
 ```
 Result: FAIL (not tested)
 
-R4/C7 (rib on-curve, drag+shift+alt) - Specificity  
-Behavior: Alt enables interpolation in rib drag; shift has no special effect.  
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleDragRibPoint` lines 3201-3205.  
-Snippet:
-```js
-if (!positionedGlyph) return;
-const useInterpolation = initialEvent.altKey;
-// Get initial point in glyph coordinates
-const localPoint = sceneController.localPoint(initialEvent);
-```
-Result: FAIL (not tested)
-
-R4/C8 (rib off-curve, drag+shift+alt) - Specificity  
-Behavior: Editable handle drag uses special handler; shift+alt has no behavior-table routing.  
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleDragEditableGeneratedHandles` lines 4099-4145.  
-Snippet:
-```js
-const skeletonHandleDir = this._getSkeletonHandleDirForPoint(
-  contour, eh.skeletonPointIndex, eh.handleType
-);
-if (!skeletonHandleDir) {
-  continue;
-}
-```
-Result: FAIL (not tested)
-
 R5/C2 (regular off-curve, drag+X) - Specificity  
 Behavior: Equalize handles during drag when equalizeMode is active and a valid handle pair is found.  
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDragSelection` lines 2620-2636.  
@@ -606,7 +548,7 @@ if (event.shiftKey) {
 Result: FAIL (not tested)
 
 R7/C7 (rib on-curve, drag+Z) - Specificity  
-Behavior: Z constrains rib drag to tangent.  
+Behavior: Requires Editable flag; Z constrains rib drag to tangent.
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleDragEditableGeneratedPoints` lines 4003-4007.  
 Snippet:
 ```js
@@ -719,7 +661,7 @@ if (hasSkeletonPoints) {
 Result: FAIL (not tested)
 
 R10/C7 (rib on-curve, nudge) - Specificity  
-Behavior: Rib nudge requires editable ribs or single-segment selection.  
+Behavior: Constraint along the rib (normal to skeleton contour). Movement allowed only if ribs are editable or belong to a single segment.
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4549-4556.  
 Snippet:
 ```js
@@ -735,7 +677,7 @@ if (!allTargetsEditable && !belongsToSingleSegment) {
 Result: FAIL (not tested)
 
 R10/C8 (rib off-curve, nudge) - Specificity  
-Behavior: Editable handle nudge is constrained to skeleton handle direction.  
+Behavior: Angle is non-changable (derived from skeleton point handle angle); requires Editable flag to change distance from C7. Affected by skeleton off-curve distance change if Detached is off; unaffected if Detached is on.
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForEditableHandles` lines 4317-4339.  
 Snippet:
 ```js
@@ -816,7 +758,7 @@ if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
 Result: FAIL (not tested)
 
 R11/C7 (rib on-curve, nudge+shift) - Specificity  
-Behavior: Shift scales rib nudge delta.  
+Behavior: Shift scales rib nudge delta 10x; rib constraints still apply.  
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4558-4565.  
 Snippet:
 ```js
@@ -832,7 +774,7 @@ if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
 Result: FAIL (not tested)
 
 R11/C8 (rib off-curve, nudge+shift) - Specificity  
-Behavior: Shift scales editable handle nudge delta.  
+Behavior: Shift scales editable handle nudge delta 10x; handle constraints still apply.  
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForEditableHandles` lines 4317-4333.  
 Snippet:
 ```js
@@ -1078,4 +1020,7 @@ if (clickedSkeletonPoint) {
       anchorToDragSide: this.fixedRibCompressMode,
 ```
 Result: FAIL (not tested)
+
+
+
 
