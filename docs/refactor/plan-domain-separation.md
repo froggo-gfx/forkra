@@ -151,6 +151,28 @@ Create a matrix that intersects actions with object kinds and marks each cell as
 
 ---
 
+### Step 0.3b - Target Matrix (Intended State)
+**Problem Description**
+We only have a baseline matrix. Without an explicit target matrix, implementers will drift or treat baseline behavior as the goal.
+
+**Solution (Plain Language)**
+Add a target matrix that states the intended end-state behavior, using the same rows/columns as the baseline. This is the contract we will implement toward, and it must explicitly call out differences from baseline (e.g., skeleton drag/nudge should be Yes in the intended state for R1-R4 and R10-R12).
+
+**Code Snippets / Suggestions**
+- In `docs/refactor/action-object-matrix.md`, add a **Target Matrix (Intended State)** section directly after the baseline matrix.
+- Use the exact same row/column IDs as the baseline matrix.
+- Add a short **Delta vs Baseline** list below the target matrix, enumerating every cell that changes and why.
+
+**Manual Testing Criteria**
+- N/A (documentation step).
+
+**Strictest Possible Passing Criteria**
+- Target matrix exists and uses the same row/column IDs as the baseline.
+- Every intended change vs baseline is listed in the Delta section.
+- Skeleton drag/nudge intended behavior (R1-R4 and R10-R12) is explicitly marked Yes for skeleton on-curve and off-curve.
+
+---
+
 
 ### Step 0.4 - Object-Kind Inventory
 **Problem Description**
