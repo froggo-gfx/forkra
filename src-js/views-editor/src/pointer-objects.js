@@ -38,32 +38,6 @@ async function runSkeletonDragCanonical({
   );
 }
 
-async function runRibDragLegacy({
-  pointerTool,
-  eventStream,
-  initialEvent,
-  ribHit,
-  targetRibSelection,
-  preSelectedSkeletonPoints,
-}) {
-  pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint = {
-    contourIdx: ribHit.contourIndex,
-    pointIdx: ribHit.pointIndex,
-    side: ribHit.side,
-  };
-  try {
-    await pointerTool._handleDragRibPoint(
-      eventStream,
-      initialEvent,
-      ribHit,
-      targetRibSelection,
-      preSelectedSkeletonPoints
-    );
-  } finally {
-    delete pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint;
-  }
-}
-
 async function runEditableGeneratedPointsDragLegacy({
   pointerTool,
   eventStream,
@@ -162,6 +136,32 @@ async function runSkeletonHandleDragCanonical({
   return true;
 }
 
+async function runRibDragCanonical({
+  pointerTool,
+  eventStream,
+  initialEvent,
+  ribHit,
+  targetRibSelection,
+  preSelectedSkeletonPoints,
+}) {
+  pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint = {
+    contourIdx: ribHit.contourIndex,
+    pointIdx: ribHit.pointIndex,
+    side: ribHit.side,
+  };
+  try {
+    await pointerTool._handleDragRibPoint(
+      eventStream,
+      initialEvent,
+      ribHit,
+      targetRibSelection,
+      preSelectedSkeletonPoints
+    );
+  } finally {
+    delete pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint;
+  }
+}
+
 async function runRegularNudgeCanonical({
   pointerTool,
   sceneController,
@@ -199,12 +199,24 @@ async function runSkeletonNudgeCanonical({ pointerTool, event }) {
   return pointerTool._handleArrowKeysLegacy(event);
 }
 
+async function runRibNudgeCanonical({ pointerTool, sceneController, event }) {
+  const { skeletonRibPoint: ribPointSelection } = parseSelection(
+    sceneController.selection
+  );
+  if (!ribPointSelection?.size) {
+    return false;
+  }
+  await pointerTool._handleArrowKeysForRibPoints(event, ribPointSelection);
+  return true;
+}
+
 export const canonicalDragAdapters = {
   regularPoint: async (context) => runRegularDragCanonical(context),
   anchor: async (context) => runRegularDragCanonical(context),
   guideline: async (context) => runRegularDragCanonical(context),
   skeletonPoint: async (context) => runSkeletonDragCanonical(context),
   skeletonHandle: async (context) => runSkeletonHandleDragCanonical(context),
+  skeletonRibPoint: async (context) => runRibDragCanonical(context),
 };
 
 export const canonicalNudgeAdapters = {
@@ -213,13 +225,13 @@ export const canonicalNudgeAdapters = {
   guideline: async (context) => runRegularNudgeCanonical(context),
   skeletonPoint: async (context) => runSkeletonNudgeCanonical(context),
   skeletonHandle: async (context) => runSkeletonNudgeCanonical(context),
+  skeletonRibPoint: async (context) => runRibNudgeCanonical(context),
 };
 
 export const legacyDragAdapters = {
   component: async (context) => runRegularDragLegacy(context),
   componentOrigin: async (context) => runRegularDragLegacy(context),
   componentTCenter: async (context) => runRegularDragLegacy(context),
-  skeletonRibPoint: async (context) => runRibDragLegacy(context),
   editableGeneratedPoint: async (context) =>
     runEditableGeneratedPointsDragLegacy(context),
   editableGeneratedHandle: async (context) =>
@@ -242,6 +254,5 @@ export const legacyDragAdapters = {
 };
 
 export const legacyNudgeAdapters = {
-  skeletonRibPoint: async (context) => runNudgeLegacy(context),
   editableGeneratedPoint: async (context) => runNudgeLegacy(context),
 };

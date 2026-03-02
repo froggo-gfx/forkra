@@ -1645,6 +1645,97 @@ Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(roll
 Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 173-217; `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
 
 Step Header
+Phase 5, Step 5.4 - Canonical Adapters: Ribs (skeletonRibPoint)
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Replace legacy adapters for rib points so composer routes drag/nudge through canonical adapters.
+2. Solution
+   - Add canonical rib adapters and update routing maps to `CA` for C7.
+3. Code Implementation
+   - Added canonical rib adapters in `src-js/views-editor/src/pointer-objects.js`.
+   - Updated routing maps to `CA` for rib points in `src-js/views-editor/src/edit-behavior-registry.js` and `docs/refactor/action-object-matrix.md`.
+4. Why This Solves the Problem
+   - Rib drag/nudge for C7 now flows through canonical adapters selected by the routing map, removing legacy adapter reliance for ribs.
+
+Passing Criteria (Required)
+Criterion: All C7 drag/nudge rows PASS after migration.
+Result: PASS
+Evidence: Manual test 2026-03-02 (user): rib drag/nudge across modifier variants (alt/Z/shift) matches baseline.
+
+Criterion: No legacy pointer branch remains for ribs.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` DRAG_ROUTING_MAP/NUDGE_ROUTING_MAP lines 174-406 mark C7 as `CA`; `src-js/views-editor/src/pointer-objects.js` lines 206-237 define canonical rib adapters and legacy adapters omit skeletonRibPoint.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\pointer-objects.js
+Function(s): runRibDragCanonical, runRibNudgeCanonical, canonicalDragAdapters, canonicalNudgeAdapters
+Lines: 183-245
+Snippet:
+```js
+async function runRibDragCanonical({
+  pointerTool,
+  eventStream,
+  initialEvent,
+  ribHit,
+  targetRibSelection,
+  preSelectedSkeletonPoints,
+}) {
+  pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint = {
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-registry.js
+Function(s): DRAG_ROUTING_MAP, NUDGE_ROUTING_MAP
+Lines: 174-406
+Snippet:
+```js
+  R1: {
+    regularPoint: "CA",
+    anchor: "CA",
+    guideline: "CA",
+    skeletonPoint: "CA",
+    skeletonRibPoint: "CA",
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\action-object-matrix.md
+Function(s): N/A (documentation)
+Lines: 181-210
+Snippet:
+```md
+| R1 | drag | CA | CA | CA | CA | CA | CA | CA | CL | CL (out of scope; legacy adapter; revisit after Phase 6) | ...
+| R10 | nudge | CA | CA | CA | CA | CA | CA | CA | CL | L (out of scope; revisit after Phase 6) | ...
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 1730-1812
+Snippet:
+```md
+Step Header
+Phase 5, Step 5.4 - Canonical Adapters: Ribs (skeletonRibPoint)
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Row: R1, R3, R7
+Column: C7
+Behavior: Drag rib points, including alt and Z modifiers.
+Evidence: Manual test 2026-03-02 (user); matches baseline.
+Result: PASS
+
+Row: R10, R11, R18, R19, R20
+Column: C7
+Behavior: Nudge rib points, including shift/alt/Z variants.
+Evidence: Manual test 2026-03-02 (user); matches baseline.
+Result: PASS
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts))` for drag; `ChangeCollector.fromChanges(consolidateChanges(editChanges), consolidateChanges(rollbackChanges))` for nudge.
+Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 173-217; `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
+Step Header
 Phase 5, Step 5.3 - Canonical Adapters: Skeleton Core (skeletonPoint, skeletonHandle)
 
 Goal Alignment (Required Format)
