@@ -1645,6 +1645,96 @@ Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(roll
 Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 173-217; `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
 
 Step Header
+Phase 5, Step 5.5 - Canonical Adapters: Editable Generated (editableGeneratedPoint)
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Replace legacy adapters for editable generated points/handles so composer routes drag/nudge through canonical adapters.
+2. Solution
+   - Add canonical adapters for editable generated drag/nudge and update routing maps to `CA` for C8.
+3. Code Implementation
+   - Added canonical editable generated adapters in `src-js/views-editor/src/pointer-objects.js`.
+   - Updated routing maps to `CA` for editableGeneratedPoint/Handle in `src-js/views-editor/src/edit-behavior-registry.js` and `docs/refactor/action-object-matrix.md`.
+4. Why This Solves the Problem
+   - Editable generated drag/nudge for C8 now flows through canonical adapters selected by the routing map, removing legacy adapter reliance for these kinds.
+
+Passing Criteria (Required)
+Criterion: All C8 drag/nudge rows PASS after migration.
+Result: PASS
+Evidence: Manual test 2026-03-02 (user): editable generated points/handles drag and nudge (shift/alt variants) match baseline.
+
+Criterion: No legacy pointer branch remains for these kinds.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` DRAG_ROUTING_MAP/NUDGE_ROUTING_MAP lines 174-406 mark C8 as `CA`; `src-js/views-editor/src/pointer-objects.js` lines 183-260 define canonical editable generated adapters and legacy adapters omit editableGeneratedPoint/Handle.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\pointer-objects.js
+Function(s): runEditableGeneratedPointsDragCanonical, runEditableGeneratedHandlesDragCanonical, canonicalDragAdapters, canonicalNudgeAdapters
+Lines: 169-260
+Snippet:
+```js
+async function runEditableGeneratedPointsDragCanonical({
+  pointerTool,
+  eventStream,
+  initialEvent,
+  editablePoints,
+}) {
+  await pointerTool._handleDragEditableGeneratedPoints(
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-registry.js
+Function(s): DRAG_ROUTING_MAP, NUDGE_ROUTING_MAP
+Lines: 174-406
+Snippet:
+```js
+  R1: {
+    regularPoint: "CA",
+    anchor: "CA",
+    guideline: "CA",
+    skeletonPoint: "CA",
+    skeletonRibPoint: "CA",
+    editableGeneratedPoint: "CA",
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\action-object-matrix.md
+Function(s): N/A (documentation)
+Lines: 181-210
+Snippet:
+```md
+| R1 | drag | CA | CA | CA | CA | CA | CA | CA | CA | CL (out of scope; legacy adapter; revisit after Phase 6) | ...
+| R10 | nudge | CA | CA | CA | CA | CA | CA | CA | CA | L (out of scope; revisit after Phase 6) | ...
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 1818-1895
+Snippet:
+```md
+Step Header
+Phase 5, Step 5.5 - Canonical Adapters: Editable Generated (editableGeneratedPoint)
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Row: R1
+Column: C8
+Behavior: Drag editable generated points/handles.
+Evidence: Manual test 2026-03-02 (user); matches baseline.
+Result: PASS
+
+Row: R10, R11, R20
+Column: C8
+Behavior: Nudge editable generated handles, including shift/alt variants.
+Evidence: Manual test 2026-03-02 (user); matches baseline.
+Result: PASS
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts))` for drag; `ChangeCollector.fromChanges(consolidateChanges(editChanges), consolidateChanges(rollbackChanges))` for nudge.
+Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 173-217; `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
+Step Header
 Phase 5, Step 5.4 - Canonical Adapters: Ribs (skeletonRibPoint)
 
 Goal Alignment (Required Format)

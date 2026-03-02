@@ -38,32 +38,6 @@ async function runSkeletonDragCanonical({
   );
 }
 
-async function runEditableGeneratedPointsDragLegacy({
-  pointerTool,
-  eventStream,
-  initialEvent,
-  editablePoints,
-}) {
-  await pointerTool._handleDragEditableGeneratedPoints(
-    eventStream,
-    initialEvent,
-    editablePoints
-  );
-}
-
-async function runEditableGeneratedHandlesDragLegacy({
-  pointerTool,
-  eventStream,
-  initialEvent,
-  editableHandles,
-}) {
-  await pointerTool._handleDragEditableGeneratedHandles(
-    eventStream,
-    initialEvent,
-    editableHandles
-  );
-}
-
 async function runRegularEqualizeHandleLegacy({
   pointerTool,
   eventStream,
@@ -162,6 +136,32 @@ async function runRibDragCanonical({
   }
 }
 
+async function runEditableGeneratedPointsDragCanonical({
+  pointerTool,
+  eventStream,
+  initialEvent,
+  editablePoints,
+}) {
+  await pointerTool._handleDragEditableGeneratedPoints(
+    eventStream,
+    initialEvent,
+    editablePoints
+  );
+}
+
+async function runEditableGeneratedHandlesDragCanonical({
+  pointerTool,
+  eventStream,
+  initialEvent,
+  editableHandles,
+}) {
+  await pointerTool._handleDragEditableGeneratedHandles(
+    eventStream,
+    initialEvent,
+    editableHandles
+  );
+}
+
 async function runRegularNudgeCanonical({
   pointerTool,
   sceneController,
@@ -210,6 +210,10 @@ async function runRibNudgeCanonical({ pointerTool, sceneController, event }) {
   return true;
 }
 
+async function runEditableGeneratedNudgeCanonical({ pointerTool, event }) {
+  return pointerTool._handleArrowKeysLegacy(event);
+}
+
 export const canonicalDragAdapters = {
   regularPoint: async (context) => runRegularDragCanonical(context),
   anchor: async (context) => runRegularDragCanonical(context),
@@ -217,6 +221,9 @@ export const canonicalDragAdapters = {
   skeletonPoint: async (context) => runSkeletonDragCanonical(context),
   skeletonHandle: async (context) => runSkeletonHandleDragCanonical(context),
   skeletonRibPoint: async (context) => runRibDragCanonical(context),
+  editableGeneratedPoint: async (context) => runEditableGeneratedPointsDragCanonical(context),
+  editableGeneratedHandle: async (context) =>
+    runEditableGeneratedHandlesDragCanonical(context),
 };
 
 export const canonicalNudgeAdapters = {
@@ -226,16 +233,13 @@ export const canonicalNudgeAdapters = {
   skeletonPoint: async (context) => runSkeletonNudgeCanonical(context),
   skeletonHandle: async (context) => runSkeletonNudgeCanonical(context),
   skeletonRibPoint: async (context) => runRibNudgeCanonical(context),
+  editableGeneratedPoint: async (context) => runEditableGeneratedNudgeCanonical(context),
 };
 
 export const legacyDragAdapters = {
   component: async (context) => runRegularDragLegacy(context),
   componentOrigin: async (context) => runRegularDragLegacy(context),
   componentTCenter: async (context) => runRegularDragLegacy(context),
-  editableGeneratedPoint: async (context) =>
-    runEditableGeneratedPointsDragLegacy(context),
-  editableGeneratedHandle: async (context) =>
-    runEditableGeneratedHandlesDragLegacy(context),
   regularEqualizeHandle: async (context) => runRegularEqualizeHandleLegacy(context),
   mixedSelection: async ({
     pointerTool,
@@ -254,5 +258,4 @@ export const legacyDragAdapters = {
 };
 
 export const legacyNudgeAdapters = {
-  editableGeneratedPoint: async (context) => runNudgeLegacy(context),
 };
