@@ -23,6 +23,24 @@ We will refactor the editing pipeline to enforce domain separation while preserv
 - Virtual object: position is derived; adapter edits canonical data instead (rib points, Tunni points).
 - Baseline matrix: action x object table with Yes/No/Specificity; this is the parity contract for manual testing.
 
+## Adapter Purpose (Non-Negotiable)
+Adapters are the translation layer between behavior math and canonical storage. They exist so the same behavior
+engine can be reused across object kinds while each kind persists to its own data model.
+
+Adapters must:
+- Own persistence for their object kind (write canonical data and emit `{ forward, rollback }`).
+- Translate shared behavior output into object-specific updates (e.g., rib width/nudge, handle offsets).
+- Keep undo/redo shape consistent with `recordChanges`.
+
+Adapters must not:
+- Do selection parsing or pointer routing.
+- Contain modifier mapping (that belongs to the registry/composer).
+- Mix behavior rules with persistence (behavior stays math-only).
+
+Behavior reuse rule:
+- Use the shared behavior engine for any point-like movement.
+- Apply object-specific constraints or post-processing in the adapter (not in pointer).
+
 ## Desired Pipeline (Reference)
 This is the target runtime flow for all edit actions.
 
