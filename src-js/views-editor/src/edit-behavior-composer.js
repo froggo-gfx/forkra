@@ -14,8 +14,12 @@ import {
   NUDGE_ROUTING_MAP,
   getNudgeRowId,
 } from "./edit-behavior-registry.js";
-import { legacyDragAdapters } from "./pointer-objects.js";
-import { legacyNudgeAdapters } from "./pointer-objects.js";
+import {
+  canonicalDragAdapters,
+  canonicalNudgeAdapters,
+  legacyDragAdapters,
+  legacyNudgeAdapters,
+} from "./pointer-objects.js";
 
 // Composer entry points (uniform orchestration).
 // Phase 2: regular drag is routed here; other object kinds remain on legacy paths.
@@ -278,14 +282,18 @@ export async function runDragRoutingOrchestration(_context) {
     altKey: modifiers.altKey,
   });
   let routing = DRAG_ROUTING_MAP?.[rowId]?.[objectKind] || "NA";
-  if (routing !== "CL" && rowId !== baseRowId) {
+  const supportsRouting = (value) => value === "CL" || value === "CA";
+  if (!supportsRouting(routing) && rowId !== baseRowId) {
     routing = DRAG_ROUTING_MAP?.[baseRowId]?.[objectKind] || "NA";
   }
-  if (routing !== "CL") {
+  if (!supportsRouting(routing)) {
     return false;
   }
 
-  const adapter = legacyDragAdapters[objectKind];
+  const adapter =
+    routing === "CA"
+      ? canonicalDragAdapters[objectKind]
+      : legacyDragAdapters[objectKind];
   assert(adapter, `runDragRoutingOrchestration: missing adapter for ${objectKind}`);
 
   const adapterResult = await adapter({
@@ -327,17 +335,24 @@ export async function runNudgeRoutingOrchestration(_context) {
     altKey: modifiers.altKey,
   });
   let routing = NUDGE_ROUTING_MAP?.[rowId]?.[objectKind] || "NA";
-  if (routing !== "CL" && rowId !== baseRowId) {
+  const supportsRouting = (value) => value === "CL" || value === "CA";
+  if (!supportsRouting(routing) && rowId !== baseRowId) {
     routing = NUDGE_ROUTING_MAP?.[baseRowId]?.[objectKind] || "NA";
   }
-  if (routing !== "CL") {
+  if (!supportsRouting(routing)) {
     return false;
   }
 
-  const adapter = legacyNudgeAdapters[objectKind];
+  const adapter =
+    routing === "CA"
+      ? canonicalNudgeAdapters[objectKind]
+      : legacyNudgeAdapters[objectKind];
   assert(adapter, `runNudgeRoutingOrchestration: missing adapter for ${objectKind}`);
 
-  const adapterResult = await adapter(_context);
+  const adapterResult = await adapter({
+    ..._context,
+    runNudgeOrchestration,
+  });
   return adapterResult !== false;
 }
 

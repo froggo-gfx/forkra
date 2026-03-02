@@ -1,3 +1,5 @@
+import { arrowKeyDeltas, parseSelection } from "@fontra/core/utils.js";
+
 async function runRegularDragLegacy({
   pointerTool,
   eventStream,
@@ -138,10 +140,56 @@ async function runNudgeLegacy({ pointerTool, event }) {
   return pointerTool._handleArrowKeysLegacy(event);
 }
 
+async function runRegularDragCanonical(context) {
+  return runRegularDragLegacy(context);
+}
+
+async function runRegularNudgeCanonical({
+  pointerTool,
+  sceneController,
+  event,
+  runNudgeOrchestration,
+}) {
+  if (pointerTool.equalizeMode) {
+    const { point: regularPointSelection } = parseSelection(sceneController.selection);
+    if (regularPointSelection?.length) {
+      let [dx, dy] = arrowKeyDeltas[event.key] || [0, 0];
+      if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
+        dx *= 100;
+        dy *= 100;
+      } else if (event.shiftKey) {
+        dx *= 10;
+        dy *= 10;
+      }
+      const delta = { x: dx, y: dy };
+      const handled = await pointerTool._handleArrowKeysForEqualizePathHandles(
+        delta,
+        regularPointSelection
+      );
+      if (handled) {
+        return handled;
+      }
+    }
+  }
+  return runNudgeOrchestration({
+    sceneController,
+    event,
+  });
+}
+
+export const canonicalDragAdapters = {
+  regularPoint: async (context) => runRegularDragCanonical(context),
+  anchor: async (context) => runRegularDragCanonical(context),
+  guideline: async (context) => runRegularDragCanonical(context),
+};
+
+export const canonicalNudgeAdapters = {
+  regularPoint: async (context) => runRegularNudgeCanonical(context),
+  anchor: async (context) => runRegularNudgeCanonical(context),
+  guideline: async (context) => runRegularNudgeCanonical(context),
+};
+
 export const legacyDragAdapters = {
-  regularPoint: async (context) => runRegularDragLegacy(context),
-  anchor: async (context) => runRegularDragLegacy(context),
-  guideline: async (context) => runRegularDragLegacy(context),
   component: async (context) => runRegularDragLegacy(context),
   componentOrigin: async (context) => runRegularDragLegacy(context),
   componentTCenter: async (context) => runRegularDragLegacy(context),
@@ -181,9 +229,6 @@ export const legacyDragAdapters = {
 };
 
 export const legacyNudgeAdapters = {
-  regularPoint: async (context) => runNudgeLegacy(context),
-  anchor: async (context) => runNudgeLegacy(context),
-  guideline: async (context) => runNudgeLegacy(context),
   skeletonPoint: async (context) => runNudgeLegacy(context),
   skeletonHandle: async (context) => runNudgeLegacy(context),
   skeletonRibPoint: async (context) => runNudgeLegacy(context),

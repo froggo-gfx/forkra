@@ -174,9 +174,9 @@ export function resolveBehaviorPreset(_objectKind, action, modifiers) {
 // Drag routing map (Phase 3.3): rowId + objectKind -> routing value.
 export const DRAG_ROUTING_MAP = {
   R1: {
-    regularPoint: "CL",
-    anchor: "CL",
-    guideline: "CL",
+    regularPoint: "CA",
+    anchor: "CA",
+    guideline: "CA",
     component: "CL",
     componentOrigin: "CL",
     componentTCenter: "CL",
@@ -190,9 +190,9 @@ export const DRAG_ROUTING_MAP = {
     skeletonTunniPoint: "CL",
   },
   R2: {
-    regularPoint: "CL",
-    anchor: "CL",
-    guideline: "CL",
+    regularPoint: "CA",
+    anchor: "CA",
+    guideline: "CA",
     component: "CL",
     componentOrigin: "CL",
     componentTCenter: "CL",
@@ -206,7 +206,7 @@ export const DRAG_ROUTING_MAP = {
     skeletonTunniPoint: "NA",
   },
   R3: {
-    regularPoint: "CL",
+    regularPoint: "CA",
     anchor: "NA",
     guideline: "NA",
     component: "CL",
@@ -223,8 +223,8 @@ export const DRAG_ROUTING_MAP = {
   },
   R4: {
     regularPoint: "NA",
-    anchor: "CL",
-    guideline: "CL",
+    anchor: "CA",
+    guideline: "CA",
     component: "NA",
     componentOrigin: "NA",
     componentTCenter: "NA",
@@ -238,7 +238,7 @@ export const DRAG_ROUTING_MAP = {
     skeletonTunniPoint: "NA",
   },
   R5: {
-    regularPoint: "CL",
+    regularPoint: "CA",
     regularEqualizeHandle: "CL",
     anchor: "NA",
     guideline: "NA",
@@ -255,7 +255,7 @@ export const DRAG_ROUTING_MAP = {
     skeletonTunniPoint: "NA",
   },
   R6: {
-    regularPoint: "CL",
+    regularPoint: "CA",
     regularEqualizeHandle: "CL",
     anchor: "NA",
     guideline: "NA",
@@ -324,25 +324,25 @@ export const DRAG_ROUTING_MAP = {
 // Nudge routing map (Phase 4.3): rowId + objectKind -> routing value.
 export const NUDGE_ROUTING_MAP = {
   R10: {
-    regularPoint: "CL",
-    anchor: "CL",
-    guideline: "CL",
+    regularPoint: "CA",
+    anchor: "CA",
+    guideline: "CA",
     skeletonPoint: "CL",
     skeletonHandle: "NA",
     skeletonRibPoint: "CL",
     editableGeneratedPoint: "CL",
   },
   R11: {
-    regularPoint: "CL",
-    anchor: "CL",
-    guideline: "CL",
+    regularPoint: "CA",
+    anchor: "CA",
+    guideline: "CA",
     skeletonPoint: "CL",
     skeletonHandle: "NA",
     skeletonRibPoint: "CL",
     editableGeneratedPoint: "CL",
   },
   R13: {
-    regularPoint: "CL",
+    regularPoint: "CA",
     anchor: "NA",
     guideline: "NA",
     skeletonPoint: "NA",
@@ -351,7 +351,7 @@ export const NUDGE_ROUTING_MAP = {
     editableGeneratedPoint: "NA",
   },
   R14: {
-    regularPoint: "CL",
+    regularPoint: "CA",
     anchor: "NA",
     guideline: "NA",
     skeletonPoint: "NA",
@@ -396,9 +396,9 @@ export const NUDGE_ROUTING_MAP = {
     editableGeneratedPoint: "NA",
   },
   R20: {
-    regularPoint: "CL",
-    anchor: "CL",
-    guideline: "CL",
+    regularPoint: "CA",
+    anchor: "CA",
+    guideline: "CA",
     skeletonPoint: "CL",
     skeletonHandle: "NA",
     skeletonRibPoint: "CL",

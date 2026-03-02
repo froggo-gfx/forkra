@@ -1539,6 +1539,110 @@ Result: PASS
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts))` for drag, `ChangeCollector.fromChanges(consolidateChanges(editChanges), consolidateChanges(rollbackChanges))` for nudge.
 Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 173-217; `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
+
+Step Header
+Phase 5, Step 5.2 - Canonical Adapters: Regular Path Kinds (regularPoint, anchor, guideline)
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Replace legacy adapters for regular path kinds so composer routes drag/nudge through canonical adapters.
+2. Solution
+   - Add canonical adapters for regular points/anchors/guidelines and update routing maps to `CA` for C1-C4.
+3. Code Implementation
+   - Added canonical drag/nudge adapters in `src-js/views-editor/src/pointer-objects.js`.
+   - Composer now dispatches `CA` routes to canonical adapters in `src-js/views-editor/src/edit-behavior-composer.js`.
+   - Updated routing maps to `CA` for regularPoint/anchor/guideline in `src-js/views-editor/src/edit-behavior-registry.js` and `docs/refactor/action-object-matrix.md`.
+4. Why This Solves the Problem
+   - Regular drag/nudge for C1-C4 now flows through canonical adapters selected by the routing map, removing reliance on legacy adapter entries for these kinds.
+
+Passing Criteria (Required)
+Criterion: All C1-C4 drag/nudge rows PASS after migration.
+Result: PASS
+Evidence: Manual test 2026-03-02 (user): drag and nudge regular points, anchors, guidelines across modifier variants (shift/alt/X) match baseline.
+
+Criterion: No legacy pointer branch remains for these kinds.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` DRAG_ROUTING_MAP/NUDGE_ROUTING_MAP lines 174-406 mark C1-C4 as `CA`; `src-js/views-editor/src/edit-behavior-composer.js` lines 293-355 route `CA` to canonical adapters; `src-js/views-editor/src/pointer-objects.js` lines 180-190 define canonical adapters and legacy adapters omit regularPoint/anchor/guideline.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\pointer-objects.js
+Function(s): runRegularNudgeCanonical, canonicalDragAdapters, canonicalNudgeAdapters
+Lines: 147-189
+Snippet:
+```js
+async function runRegularNudgeCanonical({
+  pointerTool,
+  sceneController,
+  event,
+  runNudgeOrchestration,
+}) {
+  if (pointerTool.equalizeMode) {
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-composer.js
+Function(s): runDragRoutingOrchestration, runNudgeRoutingOrchestration
+Lines: 260-355
+Snippet:
+```js
+  const adapter =
+    routing === "CA"
+      ? canonicalDragAdapters[objectKind]
+      : legacyDragAdapters[objectKind];
+  assert(adapter, `runDragRoutingOrchestration: missing adapter for ${objectKind}`);
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-registry.js
+Function(s): DRAG_ROUTING_MAP, NUDGE_ROUTING_MAP
+Lines: 174-406
+Snippet:
+```js
+  R1: {
+    regularPoint: "CA",
+    anchor: "CA",
+    guideline: "CA",
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\action-object-matrix.md
+Function(s): N/A (documentation)
+Lines: 181-185
+Snippet:
+```md
+| R1 | drag | CA | CA | CA | CA | CL | CL | CL | CL | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | CL |
+| R2 | drag+shift | CA | CA | CA | CA | CL | CL | NA | NA | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | NA |
+| R3 | drag+alt | CA | CA | NA | NA | CL | CL | CL | NA | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | NA |
+| R4 | drag+shift+alt | NA | NA | CA | CA | CL | CL | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
+| R5 | drag+X | NA | CA | NA | NA | NA | CL | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 1542-1625
+Snippet:
+```md
+Step Header
+Phase 5, Step 5.2 - Canonical Adapters: Regular Path Kinds (regularPoint, anchor, guideline)
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Row: R1-R6
+Column: C1-C4
+Behavior: Drag regular points/anchors/guidelines, including shift/alt/X modifier variants.
+Evidence: Manual test 2026-03-02 (user); matches baseline.
+Result: PASS
+
+Row: R10-R14, R20
+Column: C1-C4
+Behavior: Nudge regular points/anchors/guidelines, including shift/alt/X modifier variants.
+Evidence: Manual test 2026-03-02 (user); matches baseline.
+Result: PASS
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts))` for drag; `ChangeCollector.fromChanges(consolidateChanges(editChanges), consolidateChanges(rollbackChanges))` for nudge.
+Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 173-217; `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
 Step Header
 Phase 4, Step 4.3 - Route Nudge Through Composer
 
