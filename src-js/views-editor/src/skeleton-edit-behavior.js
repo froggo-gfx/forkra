@@ -5,11 +5,7 @@
  * reusing the exact same rules and matching infrastructure from edit-behavior.js
  */
 
-import { polygonIsConvex } from "@fontra/core/convex-hull.js";
-import { Transform } from "@fontra/core/transform.js";
-import { reversed } from "@fontra/core/utils.js";
-import * as vector from "@fontra/core/vector.js";
-import { getPointBehaviorType } from "./edit-behavior.js";
+import { createPointBehaviorExecutor } from "./edit-behavior.js";
 import {
   ANY,
   NIL,
@@ -18,7 +14,6 @@ import {
   SHA,
   SMO,
   UNS,
-  findPointMatch,
 } from "./edit-behavior-support.js";
 
 // Re-export flags for convenience
@@ -44,359 +39,27 @@ export class SkeletonEditBehavior {
     this.points = this.contour.points;
     this.isClosed = this.contour.isClosed;
     this.selectedIndices = new Set(selectedPointIndices);
-
-    // Get behavior from shared behavior table (edit-behavior.js)
-    const behavior = getPointBehaviorType(behaviorName);
-    this.matchTree = behavior.matchTree;
-    this.constrainDelta = behavior.constrainDelta || ((v) => v);
-    this.actionFactories = behavior.actions;
     this.enableScalingEdit = enableScalingEdit;
     this.roundFunc = roundFunc;
-
-    // Mark selected points
-    this._preparePoints();
-
-    // Build edit functions for each point
-    this.editFuncs = this._buildEditFuncs();
-
-    // Store original positions for rollback
-    this.originalPositions = this.points.map((p) => ({ x: p.x, y: p.y }));
+    this.executor = createPointBehaviorExecutor({
+      points: this.points,
+      isClosed: this.isClosed,
+      selectedIndices: this.selectedIndices,
+      behaviorName,
+      enableScalingEdit,
+      roundFunc,
+    });
+    this.editFuncs = this.executor.editEntries;
+    this.originalPositions = this.executor.originalPositions;
+    this.constrainDelta = this.executor.constrainDelta;
   }
 
-  _preparePoints() {
-    // Add 'selected' flag to points for findPointMatch
-    for (let i = 0; i < this.points.length; i++) {
-      this.points[i].selected = this.selectedIndices.has(i);
-    }
-  }
-
-  _buildEditFuncs() {
-    const editFuncsTransform = [];
-    const editFuncsConstrain = [];
-    const numPoints = this.points.length;
-    const participatingPointIndices = [];
-
-    for (let i = 0; i < numPoints; i++) {
-      const [match, neighborIndices] = findPointMatch(
-        this.matchTree,
-        i,
-        this.points,
-        numPoints,
-        this.isClosed
-      );
-
-      if (!match) continue;
-
-      // Use direction to get correct neighbor order (same as edit-behavior.js)
-      const [prevPrevPrev, prevPrev, prev, thePoint, next, nextNext, nextNextNext] =
-        match.direction > 0 ? neighborIndices : reversed(neighborIndices);
-
-      const actionFactory = this.actionFactories?.[match.action];
-      if (!actionFactory) {
-        console.warn(`Unknown action: ${match.action}`);
-        continue;
-      }
-
-      participatingPointIndices.push(thePoint);
-
-      // Create action function with original points
-      const actionFunc = actionFactory(
-        this.points[prevPrevPrev],
-        this.points[prevPrev],
-        this.points[prev],
-        this.points[thePoint],
-        this.points[next],
-        this.points[nextNext]
-      );
-
-      const editEntry = {
-        pointIndex: thePoint,
-        neighborIndices: { prevPrevPrev, prevPrev, prev, thePoint, next, nextNext },
-        constrain: match.constrain,
-        actionFunc,
-      };
-
-      if (!match.constrain) {
-        editFuncsTransform.push(editEntry);
-      } else {
-        editFuncsConstrain.push(editEntry);
-      }
-    }
-
-    // Add segment-based additional edit funcs (for interpolation)
-    const additionalEditFuncs = this._makeAdditionalEditFuncs(participatingPointIndices);
-
-    // Transform (non-constrain) first, then constrain, then additional
-    return [...editFuncsTransform, ...editFuncsConstrain, ...additionalEditFuncs];
-  }
-
-  /**
-   * Create additional edit functions for segments.
-   * This handles floating off-curve points and scaling edits.
-   */
-  _makeAdditionalEditFuncs(participatingPointIndices) {
-    const additionalFuncs = [];
-    const points = this.points;
-
-    // Determine condition and segment func based on scaling mode
-    let conditionFunc, segmentFunc;
-    if (this.enableScalingEdit) {
-      segmentFunc = this._makeSegmentScalingEditFuncs.bind(this);
-      conditionFunc = (segment) =>
-        segment.length >= 4 &&
-        (points[segment[0]].selected || points[segment.at(-1)].selected) &&
-        segment.slice(1, -1).every((i) => !points[i].selected);
-    } else {
-      segmentFunc = this._makeSegmentFloatingOffCurveEditFuncs.bind(this);
-      conditionFunc = (segment) =>
-        segment.length >= 5 &&
-        points[segment[0]].selected &&
-        points[segment.at(-1)].selected &&
-        segment.slice(1, -1).every((i) => !points[i].selected);
-    }
-
-    for (const segment of this._iterSegmentPointIndices()) {
-      if (!conditionFunc(segment)) continue;
-      const [editFuncs, indices] = segmentFunc(segment);
-      additionalFuncs.push(...editFuncs);
-      participatingPointIndices.push(...indices);
-    }
-
-    return additionalFuncs;
-  }
-
-  /**
-   * Iterate over segments (on-curve to on-curve point spans)
-   */
-  *_iterSegmentPointIndices() {
-    const points = this.points;
-    const lastPointIndex = points.length - 1;
-    const firstOnCurve = this._findFirstOnCurvePoint();
-    if (firstOnCurve === undefined) {
-      return;
-    }
-    let currentOnCurve = firstOnCurve;
-    while (true) {
-      const indices = [...this._iterUntilNextOnCurvePoint(currentOnCurve)];
-      if (!indices.length) {
-        break;
-      }
-      yield indices;
-      currentOnCurve = indices.at(-1);
-      if (
-        (this.isClosed && currentOnCurve === firstOnCurve) ||
-        (!this.isClosed && currentOnCurve === lastPointIndex)
-      ) {
-        break;
-      }
-    }
-  }
-
-  _findFirstOnCurvePoint() {
-    const numPoints = this.points.length;
-    for (let i = 0; i < numPoints; i++) {
-      if (!this.points[i].type) {
-        return i;
-      }
-    }
-    return undefined;
-  }
-
-  *_iterUntilNextOnCurvePoint(startIndex) {
-    yield startIndex;
-    const numPoints = this.points.length;
-    for (let i = startIndex + 1; i < numPoints; i++) {
-      yield i;
-      if (!this.points[i].type) {
-        return;
-      }
-    }
-    if (!this.isClosed || !startIndex) {
-      return;
-    }
-    for (let i = 0; i < startIndex; i++) {
-      yield i;
-      if (!this.points[i].type) {
-        return;
-      }
-    }
-  }
-
-  /**
-   * Create edit functions for floating off-curve points between two selected on-curves.
-   * These off-curves should move with the transform.
-   */
-  _makeSegmentFloatingOffCurveEditFuncs(segment) {
-    const originalPoints = this.points;
-    const editFuncs = [];
-    const pointIndices = [];
-
-    // segment.slice(2, -2) gets the "floating" off-curves (not the handles adjacent to endpoints)
-    for (const i of segment.slice(2, -2)) {
-      pointIndices.push(i);
-      const pointIndex = i;
-      editFuncs.push({
-        pointIndex,
-        neighborIndices: { thePoint: pointIndex },
-        constrain: false,
-        // The actionFunc takes transform and returns new point position
-        actionFunc: (transform) => transform.constrained(originalPoints[pointIndex]),
-        isAdditional: true,
-      });
-    }
-    return [editFuncs, pointIndices];
-  }
-
-  /**
-   * Create edit functions for scaling a segment proportionally.
-   * When endpoints move, scale internal off-curves proportionally.
-   */
-  _makeSegmentScalingEditFuncs(segment) {
-    const originalPoints = this.points;
-    const editFuncs = [];
-    const pointIndices = [];
-
-    // Calculate original transform based on segment endpoints and their handles
-    const A = this._makeSegmentTransform(originalPoints, segment, false);
-    const Ainv = A?.inverse();
-
-    if (A && Ainv) {
-      // Shared state for transform calculation
-      let T = null;
-
-      // First entry calculates the new transform based on edited endpoint positions
-      editFuncs.push({
-        pointIndex: -1, // Marker for transform calculation
-        neighborIndices: {},
-        constrain: false,
-        actionFunc: (transform, editedPoints) => {
-          const B = this._makeSegmentTransform(editedPoints, segment, true);
-          T = B?.transform(Ainv);
-          return null; // Don't actually move any point
-        },
-        isTransformCalculation: true,
-      });
-
-      // Then create edit funcs for each internal point
-      for (const i of segment.slice(1, -1)) {
-        pointIndices.push(i);
-        const pointIndex = i;
-        editFuncs.push({
-          pointIndex,
-          neighborIndices: { thePoint: pointIndex },
-          constrain: false,
-          actionFunc: (transform, editedPoints) => {
-            if (T) {
-              return T.transformPointObject(originalPoints[pointIndex]);
-            }
-            return editedPoints ? editedPoints[pointIndex] : originalPoints[pointIndex];
-          },
-          isAdditional: true,
-        });
-      }
-    }
-    return [editFuncs, pointIndices];
-  }
-
-  /**
-   * Create a transform matrix from segment endpoint and handle positions.
-   */
-  _makeSegmentTransform(points, pointIndices, allowConcave) {
-    const pt0 = points[pointIndices[0]];
-    const pt1 = points[pointIndices[1]];
-    const pt2 = points[pointIndices.at(-2)];
-    const pt3 = points[pointIndices.at(-1)];
-    if (!pt0 || !pt1 || !pt2 || !pt3) {
-      return undefined;
-    }
-    if (!allowConcave && !polygonIsConvex([pt0, pt1, pt2, pt3])) {
-      return undefined;
-    }
-    const intersection = vector.intersect(pt0, pt1, pt2, pt3);
-    if (!intersection) {
-      return undefined;
-    }
-    const v1 = vector.subVectors(intersection, pt0);
-    const v2 = vector.subVectors(pt3, intersection);
-    return new Transform(v1.x, v1.y, v2.x, v2.y, pt0.x, pt0.y);
-  }
-
-  /**
-   * Apply a delta to all affected points
-   * Returns array of { pointIndex, x, y } for changed points
-   */
   applyDelta(delta, roundFunc = this.roundFunc) {
-    const editedPoints = [...this.points]; // Copy for mutation
-    const changes = [];
-
-    // Create transform object matching edit-behavior.js interface
-    const constrainedDelta = this.constrainDelta(delta);
-    const transformConstrained = (point) => ({
-      x: point.x + constrainedDelta.x,
-      y: point.y + constrainedDelta.y,
-    });
-    const transformFree = (point) => ({
-      x: point.x + delta.x,
-      y: point.y + delta.y,
-    });
-
-    const transform = {
-      constrained: transformConstrained,
-      free: transformFree,
-      constrainDelta: this.constrainDelta,
-    };
-
-    for (const editEntry of this.editFuncs) {
-      const { pointIndex, neighborIndices, actionFunc, isAdditional, isTransformCalculation } =
-        editEntry;
-
-      let newPoint;
-      if (isAdditional || isTransformCalculation) {
-        // Additional edit funcs take (transform, editedPoints) directly
-        newPoint = actionFunc(transform, editedPoints);
-      } else {
-        // Regular rule-based edit funcs take neighbor points as arguments
-        const { prevPrevPrev, prevPrev, prev, thePoint, next, nextNext } = neighborIndices;
-        newPoint = actionFunc(
-          transform,
-          editedPoints[prevPrevPrev],
-          editedPoints[prevPrev],
-          editedPoints[prev],
-          editedPoints[thePoint],
-          editedPoints[next],
-          editedPoints[nextNext]
-        );
-      }
-
-      // Skip transform calculation entries (they don't produce points)
-      if (isTransformCalculation || newPoint === null) {
-        continue;
-      }
-
-      // Update edited points for subsequent constrain actions
-      editedPoints[pointIndex] = { ...this.points[pointIndex], ...newPoint };
-
-      changes.push({
-        pointIndex,
-        x: roundFunc(newPoint.x),
-        y: roundFunc(newPoint.y),
-      });
-    }
-
-    return changes;
+    return this.executor.applyDelta(delta, roundFunc);
   }
 
-  /**
-   * Get rollback data to restore original positions
-   */
   getRollback() {
-    return this.editFuncs
-      .filter(({ pointIndex, isTransformCalculation }) => pointIndex >= 0 && !isTransformCalculation)
-      .map(({ pointIndex }) => ({
-        pointIndex,
-        x: this.originalPositions[pointIndex].x,
-        y: this.originalPositions[pointIndex].y,
-      }));
+    return this.executor.getRollback();
   }
 }
 

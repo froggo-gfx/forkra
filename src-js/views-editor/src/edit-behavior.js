@@ -1397,6 +1397,319 @@ export function getPointBehaviorType(behaviorName) {
 
 export const POINT_BEHAVIOR_TYPES = behaviorTypes;
 
+export function createPointBehaviorExecutor({
+  points,
+  isClosed,
+  selectedIndices,
+  behaviorName = "default",
+  enableScalingEdit = false,
+  roundFunc = Math.round,
+}) {
+  const behavior = getPointBehaviorType(behaviorName);
+  const matchTree = behavior.matchTree;
+  const constrainDelta = behavior.constrainDelta || ((v) => v);
+  const actionFactories = behavior.actions || {};
+  const selectedSet = new Set(selectedIndices || []);
+
+  for (let i = 0; i < points.length; i++) {
+    points[i].selected = selectedSet.has(i);
+  }
+
+  const editEntries = buildEditEntries();
+  const originalPositions = points.map((p) => ({ x: p.x, y: p.y }));
+
+  function buildEditEntries() {
+    const editFuncsTransform = [];
+    const editFuncsConstrain = [];
+    const numPoints = points.length;
+    const participatingPointIndices = [];
+
+    for (let i = 0; i < numPoints; i++) {
+      const [match, neighborIndices] = findPointMatch(
+        matchTree,
+        i,
+        points,
+        numPoints,
+        isClosed
+      );
+
+      if (!match) continue;
+
+      const [prevPrevPrev, prevPrev, prev, thePoint, next, nextNext] =
+        match.direction > 0 ? neighborIndices : reversed(neighborIndices);
+
+      const actionFactory = actionFactories[match.action];
+      if (!actionFactory) {
+        console.warn(`Unknown action: ${match.action}`);
+        continue;
+      }
+
+      participatingPointIndices.push(thePoint);
+
+      const actionFunc = actionFactory(
+        points[prevPrevPrev],
+        points[prevPrev],
+        points[prev],
+        points[thePoint],
+        points[next],
+        points[nextNext]
+      );
+
+      const editEntry = {
+        pointIndex: thePoint,
+        neighborIndices: { prevPrevPrev, prevPrev, prev, thePoint, next, nextNext },
+        constrain: match.constrain,
+        actionFunc,
+      };
+
+      if (!match.constrain) {
+        editFuncsTransform.push(editEntry);
+      } else {
+        editFuncsConstrain.push(editEntry);
+      }
+    }
+
+    const additionalEditFuncs = makeAdditionalEditEntries(participatingPointIndices);
+    return [...editFuncsTransform, ...editFuncsConstrain, ...additionalEditFuncs];
+  }
+
+  function makeAdditionalEditEntries(participatingPointIndices) {
+    const additionalFuncs = [];
+
+    let conditionFunc;
+    let segmentFunc;
+    if (enableScalingEdit) {
+      segmentFunc = makeSegmentScalingEditEntries;
+      conditionFunc = (segment) =>
+        segment.length >= 4 &&
+        (points[segment[0]].selected || points[segment.at(-1)].selected) &&
+        segment.slice(1, -1).every((i) => !points[i].selected);
+    } else {
+      segmentFunc = makeSegmentFloatingOffCurveEditEntries;
+      conditionFunc = (segment) =>
+        segment.length >= 5 &&
+        points[segment[0]].selected &&
+        points[segment.at(-1)].selected &&
+        segment.slice(1, -1).every((i) => !points[i].selected);
+    }
+
+    for (const segment of iterSegmentPointIndices()) {
+      if (!conditionFunc(segment)) continue;
+      const [editFuncs, indices] = segmentFunc(segment);
+      additionalFuncs.push(...editFuncs);
+      participatingPointIndices.push(...indices);
+    }
+
+    return additionalFuncs;
+  }
+
+  function* iterSegmentPointIndices() {
+    const lastPointIndex = points.length - 1;
+    const firstOnCurve = findFirstOnCurvePoint();
+    if (firstOnCurve === undefined) {
+      return;
+    }
+    let currentOnCurve = firstOnCurve;
+    while (true) {
+      const indices = [...iterUntilNextOnCurvePoint(currentOnCurve)];
+      if (!indices.length) {
+        break;
+      }
+      yield indices;
+      currentOnCurve = indices.at(-1);
+      if (
+        (isClosed && currentOnCurve === firstOnCurve) ||
+        (!isClosed && currentOnCurve === lastPointIndex)
+      ) {
+        break;
+      }
+    }
+  }
+
+  function findFirstOnCurvePoint() {
+    const numPoints = points.length;
+    for (let i = 0; i < numPoints; i++) {
+      if (!points[i].type) {
+        return i;
+      }
+    }
+    return undefined;
+  }
+
+  function* iterUntilNextOnCurvePoint(startIndex) {
+    yield startIndex;
+    const numPoints = points.length;
+    for (let i = startIndex + 1; i < numPoints; i++) {
+      yield i;
+      if (!points[i].type) {
+        return;
+      }
+    }
+    if (!isClosed || !startIndex) {
+      return;
+    }
+    for (let i = 0; i < startIndex; i++) {
+      yield i;
+      if (!points[i].type) {
+        return;
+      }
+    }
+  }
+
+  function makeSegmentFloatingOffCurveEditEntries(segment) {
+    const editFuncs = [];
+    const pointIndices = [];
+
+    for (const i of segment.slice(2, -2)) {
+      pointIndices.push(i);
+      const pointIndex = i;
+      editFuncs.push({
+        pointIndex,
+        neighborIndices: { thePoint: pointIndex },
+        constrain: false,
+        actionFunc: (transform) => transform.constrained(points[pointIndex]),
+        isAdditional: true,
+      });
+    }
+    return [editFuncs, pointIndices];
+  }
+
+  function makeSegmentScalingEditEntries(segment) {
+    const editFuncs = [];
+    const pointIndices = [];
+
+    const A = makeSegmentTransform(points, segment, false);
+    const Ainv = A?.inverse();
+
+    if (A && Ainv) {
+      let T = null;
+
+      editFuncs.push({
+        pointIndex: -1,
+        neighborIndices: {},
+        constrain: false,
+        actionFunc: (transform, editedPoints) => {
+          const B = makeSegmentTransform(editedPoints, segment, true);
+          T = B?.transform(Ainv);
+          return null;
+        },
+        isTransformCalculation: true,
+      });
+
+      for (const i of segment.slice(1, -1)) {
+        pointIndices.push(i);
+        const pointIndex = i;
+        editFuncs.push({
+          pointIndex,
+          neighborIndices: { thePoint: pointIndex },
+          constrain: false,
+          actionFunc: (transform, editedPoints) => {
+            if (T) {
+              return T.transformPointObject(points[pointIndex]);
+            }
+            return editedPoints ? editedPoints[pointIndex] : points[pointIndex];
+          },
+          isAdditional: true,
+        });
+      }
+    }
+    return [editFuncs, pointIndices];
+  }
+
+  function makeSegmentTransform(segmentPoints, pointIndices, allowConcave) {
+    const pt0 = segmentPoints[pointIndices[0]];
+    const pt1 = segmentPoints[pointIndices[1]];
+    const pt2 = segmentPoints[pointIndices.at(-2)];
+    const pt3 = segmentPoints[pointIndices.at(-1)];
+    if (!pt0 || !pt1 || !pt2 || !pt3) {
+      return undefined;
+    }
+    if (!allowConcave && !polygonIsConvex([pt0, pt1, pt2, pt3])) {
+      return undefined;
+    }
+    const intersection = vector.intersect(pt0, pt1, pt2, pt3);
+    if (!intersection) {
+      return undefined;
+    }
+    const v1 = vector.subVectors(intersection, pt0);
+    const v2 = vector.subVectors(pt3, intersection);
+    return new Transform(v1.x, v1.y, v2.x, v2.y, pt0.x, pt0.y);
+  }
+
+  function applyDelta(delta, overrideRoundFunc = roundFunc) {
+    const editedPoints = [...points];
+    const changes = [];
+
+    const constrainedDelta = constrainDelta(delta);
+    const transformConstrained = (point) => ({
+      x: point.x + constrainedDelta.x,
+      y: point.y + constrainedDelta.y,
+    });
+    const transformFree = (point) => ({
+      x: point.x + delta.x,
+      y: point.y + delta.y,
+    });
+
+    const transform = {
+      constrained: transformConstrained,
+      free: transformFree,
+      constrainDelta,
+    };
+
+    for (const editEntry of editEntries) {
+      const { pointIndex, neighborIndices, actionFunc, isAdditional, isTransformCalculation } =
+        editEntry;
+
+      let newPoint;
+      if (isAdditional || isTransformCalculation) {
+        newPoint = actionFunc(transform, editedPoints);
+      } else {
+        const { prevPrevPrev, prevPrev, prev, thePoint, next, nextNext } = neighborIndices;
+        newPoint = actionFunc(
+          transform,
+          editedPoints[prevPrevPrev],
+          editedPoints[prevPrev],
+          editedPoints[prev],
+          editedPoints[thePoint],
+          editedPoints[next],
+          editedPoints[nextNext]
+        );
+      }
+
+      if (isTransformCalculation || newPoint === null) {
+        continue;
+      }
+
+      editedPoints[pointIndex] = { ...points[pointIndex], ...newPoint };
+      changes.push({
+        pointIndex,
+        x: overrideRoundFunc(newPoint.x),
+        y: overrideRoundFunc(newPoint.y),
+      });
+    }
+
+    return changes;
+  }
+
+  function getRollback() {
+    return editEntries
+      .filter(({ pointIndex, isTransformCalculation }) => pointIndex >= 0 && !isTransformCalculation)
+      .map(({ pointIndex }) => ({
+        pointIndex,
+        x: originalPositions[pointIndex].x,
+        y: originalPositions[pointIndex].y,
+      }));
+  }
+
+  return {
+    applyDelta,
+    getRollback,
+    originalPositions,
+    editEntries,
+    constrainDelta,
+  };
+}
+
 export function findEqualizeHandleForPath(positionedGlyph, point, size) {
   if (!positionedGlyph?.glyph?.path) {
     return null;

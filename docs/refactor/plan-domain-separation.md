@@ -1,4 +1,4 @@
-﻿# Domain Separation Refactor Plan
+# Domain Separation Refactor Plan
 
 Date: 2026-02-27
 Status: Draft
@@ -638,57 +638,73 @@ Route all nudge operations through the composer, using the nudge routing map to 
 
 ---
 
-## Phase 5 - Replace Legacy Adapters With Canonical Adapters (Drag + Nudge Only, Matrix-Driven)
+## Phase 5 - Make edit-behavior Type-Agnostic + Replace Legacy Adapters (Drag + Nudge Only, Matrix-Driven)
 
-### Step 5.1 - Unify Skeleton + Rib Behaviors (Shared Execution)
+### Step 5.1 - Make edit-behavior Type-Agnostic (Single Behavior Engine)
 **Problem Description**
-Skeleton behavior execution still lives in a separate system, so behavior execution is not unified. This violates the core intent: a single, object-agnostic behavior engine with object-specific constraints only in adapters/orchestration.
+Behavior execution is still split (regular points vs skeleton points), so edit-behavior is not truly type-agnostic.
+This violates the core intent: a single behavior engine with object-specific constraints handled only by adapters/orchestration.
 
 **Solution (Plain Language)**
-Make `edit-behavior.js` the single source of truth for **behavior execution**, not just rules. Remove any parallel behavior engine. Anything that is not functionally unique must use the shared behavior executor. Rib/handle-specific math stays as helpers called by adapters, not as a separate behavior system.
+Make `edit-behavior.js` the **only** behavior execution engine for all point kinds. Regular, skeleton, and rib
+points must all use the same executor. Any logic that is functionally identical to regular behavior must be removed
+from object-specific modules and routed through the shared engine.
 
 **Implementation (Incremental Substeps)**
-**Step 5.1a - Shared Behavior Executor (edit-behavior.js)**
-- Extract the generic behavior executor currently embedded in `SkeletonEditBehavior` into `edit-behavior.js`.
-- Provide a stable API (example signature):
-  - `createPointBehaviorExecutor({ points, isClosed, selectedIndices, behaviorName, enableScalingEdit, roundFunc })`
-  - returns `{ changes, rollback }` where `changes` is `[{ pointIndex, x, y }]`.
-- Executor must include:
+**Step 5.1a - Define Type-Agnostic Behavior Execution Contract**
+- Document a behavior execution API in `edit-behavior.js` that is independent of object kind.
+- Required inputs (example):
+  - `points`, `isClosed`, `selectedIndices`, `behaviorName`, `enableScalingEdit`, `roundFunc`
+- Required outputs:
+  - `changes: [{ pointIndex, x, y }]`
+  - `rollback: [{ pointIndex, x, y }]`
+- Invariants:
+  - No persistence, no layer knowledge, no selection parsing.
+
+**Step 5.1b - Implement Shared Executor in edit-behavior.js**
+- Implement the executor to cover:
   - selection flagging
-  - point matching
+  - rule matching
   - segment iteration
   - floating off-curve edits
   - scaling segment edits
-  - delta application (applyDelta logic)
+  - delta application
+- **This executor becomes the single behavior engine.**
 
-**Step 5.1b - Move Rib/Handle Helpers to edit-behavior.js**
-- Move rib/handle helper behaviors into `edit-behavior.js`:
+**Step 5.1c - Refactor Regular Path Behavior to Use Shared Executor**
+- Update `EditBehavior` / `EditBehaviorFactory` to call the shared executor internally.
+- Ensure output change objects and rollback shape are identical to current behavior.
+- Remove any parallel rule execution logic for regular points.
+
+**Step 5.1d - Refactor Skeleton Behavior to Use Shared Executor**
+- Replace `SkeletonEditBehavior` / `createSkeletonEditBehavior` usage with the shared executor.
+- Keep skeleton-specific constraints in adapters/orchestration only.
+
+**Step 5.1e - Move Rib/Handle Helpers into edit-behavior.js**
+- Move rib/handle helpers into `edit-behavior.js`:
   - `RibEditBehavior`, `EditableRibBehavior`, `InterpolatingRibBehavior`, `EditableHandleBehavior`
   - `createRibEditBehavior`, `createEditableRibBehavior`, `createInterpolatingRibBehavior`, `createEditableHandleBehavior`
-- Any helper that is functionally identical to regular behavior must be removed in favor of the shared executor.
+- Remove any helper that is functionally identical to shared behaviors (naming differences do not count as uniqueness).
 
-**Step 5.1c - Pointer Skeleton Uses Shared Executor**
-- Replace `createSkeletonEditBehavior` / `SkeletonEditBehavior` usage in `edit-tools-pointer.js` with the shared executor API.
-- Keep skeleton-specific constraints (width/nudge/rib modes) in adapters/orchestration only.
-
-**Step 5.1d - Panel Transformation Uses Shared Executor**
+**Step 5.1f - Panel Transformation Uses Shared Executor**
 - Replace `SkeletonEditBehavior` usage in `panel-transformation.js` with the shared executor.
-- Maintain existing transform panel flow (batching/regeneration/rollback), only swap behavior execution.
+- Preserve existing transform panel batching/regeneration/rollback.
 
-**Step 5.1e - Remove skeleton-edit-behavior.js**
-- After all call sites are migrated, delete `skeleton-edit-behavior.js`.
-- Verify no imports remain.
+**Step 5.1g - Remove skeleton-edit-behavior.js**
+- Delete `skeleton-edit-behavior.js` after all call sites are migrated.
+- Verify no imports remain in repo.
 
 **Manual Testing Criteria**
+- Regular drag/nudge parity (C1-C4) unchanged.
 - Skeleton drag/nudge (R1/R10 C5-C6) using shared executor.
 - Rib drag/nudge (R1/R10 C7), including modifier variants (Z/D/S/Alt).
 - Transform panel: move/align/distribute skeleton selections and editable handles; undo/redo.
 
 **Strictest Possible Passing Criteria**
-- `edit-behavior.js` is the only behavior executor (shared for regular + skeleton).
-- No references to `SkeletonEditBehavior` or `createSkeletonEditBehavior` remain.
+- `edit-behavior.js` is the only behavior executor (shared for regular + skeleton + rib).
+- No parallel behavior engine remains (no `SkeletonEditBehavior` or equivalent).
 - `skeleton-edit-behavior.js` is removed.
-- No functionally shared behavior logic exists outside `edit-behavior.js` (naming differences do not count as uniqueness).
+- No functionally shared behavior logic exists outside `edit-behavior.js`.
 
 ---
 
@@ -697,7 +713,8 @@ Make `edit-behavior.js` the single source of truth for **behavior execution**, n
 Legacy adapters still call pointer logic for regular path kinds, so composer is not truly canonical.
 
 **Solution (Plain Language)**
-Replace legacy adapters for `regularPoint`, `anchor`, and `guideline` with canonical adapters that edit the standard path/anchor/guideline data directly for both drag and nudge.
+Replace legacy adapters for `regularPoint`, `anchor`, and `guideline` with canonical adapters that call the shared
+behavior executor and then persist standard path/anchor/guideline changes for drag and nudge.
 
 **Code Snippets / Suggestions**
 - Use `object-kind-inventory.md` to confirm current math + persistence locations.
@@ -719,7 +736,8 @@ Replace legacy adapters for `regularPoint`, `anchor`, and `guideline` with canon
 Skeleton core drag/nudge still relies on pointer-owned logic.
 
 **Solution (Plain Language)**
-Replace legacy adapters for `skeletonPoint` and `skeletonHandle` with canonical adapters that edit skeleton data directly and regenerate contours.
+Replace legacy adapters for `skeletonPoint` and `skeletonHandle` with canonical adapters that call the shared
+behavior executor and then edit skeleton data directly and regenerate contours.
 
 **Code Snippets / Suggestions**
 - Implement canonical adapters for drag + nudge for the two kinds.
@@ -740,7 +758,8 @@ Replace legacy adapters for `skeletonPoint` and `skeletonHandle` with canonical 
 Rib drag/nudge remains coupled to pointer-specific logic and modifiers.
 
 **Solution (Plain Language)**
-Replace legacy adapters for `skeletonRibPoint` with canonical adapters that edit skeleton data while preserving tangent/fixed constraints.
+Replace legacy adapters for `skeletonRibPoint` with canonical adapters that call the shared behavior executor (where applicable)
+and apply rib-specific constraints while editing skeleton data.
 
 **Code Snippets / Suggestions**
 - Implement canonical adapters for drag + nudge for rib points.
@@ -761,7 +780,8 @@ Replace legacy adapters for `skeletonRibPoint` with canonical adapters that edit
 Editable generated points/handles are still tied to pointer logic.
 
 **Solution (Plain Language)**
-Replace legacy adapters for `editableGeneratedPoint` with canonical adapters that translate virtual handle edits into skeleton data.
+Replace legacy adapters for `editableGeneratedPoint` with canonical adapters that call the shared behavior executor
+and translate virtual handle edits into skeleton data.
 
 **Code Snippets / Suggestions**
 - Implement canonical adapters for drag + nudge for editable generated points.
@@ -782,7 +802,8 @@ Replace legacy adapters for `editableGeneratedPoint` with canonical adapters tha
 After canonical adapters are in place, old pointer branches can linger and cause drift.
 
 **Solution (Plain Language)**
-Delete any remaining drag/nudge branches in pointer that are now covered by canonical adapters, and ensure routing maps show `CA` for all migrated kinds.
+Delete any remaining drag/nudge branches in pointer that are now covered by canonical adapters, and ensure routing
+maps show `CA` for all migrated kinds.
 
 **Manual Testing Criteria**
 - Full baseline matrix run.
@@ -794,12 +815,12 @@ Delete any remaining drag/nudge branches in pointer that are now covered by cano
 ---
 
 **Phase 5 Passing Criteria (Overall)**
+- edit-behavior is type-agnostic and is the single behavior execution engine.
 - All adapters for in-scope object kinds are canonical for drag and nudge (or explicitly deferred).
 - Pointer contains no legacy drag/nudge routing for canonical kinds.
 - Non-drag/nudge actions remain on legacy routing.
 
 ---
-
 ## Phase 6 - Final Parity Sweep
 
 ### Step 6.1 - Full Baseline Matrix
@@ -830,4 +851,5 @@ Run the full baseline matrix and record results.
 
 ## Notes
 This plan is intentionally strict and incremental. Each step can be implemented independently and verified before moving on.
+
 
