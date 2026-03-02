@@ -2469,11 +2469,12 @@ export class EditorController extends ViewController {
 
       // 2. Delete skeleton points AFTER regular (skeleton regen shifts path indices)
       if (hasSkeletonSelection) {
-        const editLayerName = this.sceneController.editingLayerNames?.[0];
-        const layer = editLayerName ? glyph.layers[editLayerName] : null;
-        let skeletonData = getSkeletonData(layer);
+        for (const editLayerName of this.sceneController.editingLayerNames || []) {
+          const layer = glyph.layers[editLayerName];
+          if (!layer) continue;
+          let skeletonData = getSkeletonData(layer);
+          if (!skeletonData) continue;
 
-        if (skeletonData) {
           skeletonData = JSON.parse(JSON.stringify(skeletonData));
           const effectiveSkeletonPointSelection = new Set(skeletonPointSelection || []);
 
@@ -2499,7 +2500,10 @@ export class EditorController extends ViewController {
             }
           }
 
-          const modified = deleteSkeletonPoints(skeletonData, effectiveSkeletonPointSelection);
+          const modified = deleteSkeletonPoints(
+            skeletonData,
+            effectiveSkeletonPointSelection
+          );
 
           if (modified) {
             const staticGlyph = layer.glyph;
