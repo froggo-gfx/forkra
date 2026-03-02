@@ -228,15 +228,12 @@ export async function runDragOrchestration(_context) {
  * Orchestrate nudge edits through the behavior pipeline.
  * Required context fields:
  * - sceneController
- * - selection
- * - glyph
- * - sendIncrementalChange
- * - scalingEditBehavior
- * - equalizeMode
- * - positionedGlyph
- * - initialClickedPointIndex
+ * - event
  * @returns {Promise<{ undoLabel, changes, broadcast }>}
  */
 export async function runNudgeOrchestration(_context) {
-  return null;
+  const { sceneController, event } = _context;
+  assert(sceneController, "runNudgeOrchestration: missing sceneController");
+  assert(event, "runNudgeOrchestration: missing event");
+  return sceneController.handleArrowKeys(event);
 }

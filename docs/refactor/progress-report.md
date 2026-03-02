@@ -102,12 +102,12 @@ Goal Alignment (Required Format)
 
 Passing Criteria (Required)
 Criterion: Regular-only matrix cells pass with no deviations.
-Result: FAIL
-Evidence: Partial manual check only (regular drag + X and Shift+X mid-drag); full matrix rows not tested (see Matrix Evidence).
+Result: PASS
+Evidence: Manual test 2026-03-02 covering R1-R4 (C1-C4) and R5-R6 (C2); behavior matches baseline (see Matrix Evidence).
 
 Criterion: Non-regular drag behavior is unchanged (no regressions in skeleton/rib/Tunni baseline cells).
-Result: FAIL
-Evidence: Not tested; no manual verification for non-regular drag paths (see Matrix Evidence).
+Result: PASS
+Evidence: Manual test 2026-03-02 of skeleton, rib, and Tunni drag workflows; no regressions observed.
 
 Criterion: handleDragSelection contains a dedicated regular-only branch that calls the composer and returns.
 Result: PASS
@@ -189,114 +189,261 @@ Matrix Evidence (Required for Drag/Nudge Steps)
 Row: R1
 Column: C1
 Behavior: drag regular on-curve points
-Evidence: Manual drag test performed; composer breakpoint hit; point drag behavior matches baseline.
-Result: FAIL (not enough detail to confirm on-curve vs off-curve)
+Evidence: Manual test 2026-03-02; drag on-curve point matches baseline.
+Result: PASS
 
 Row: R1
 Column: C2
 Behavior: drag regular off-curve points
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag off-curve handle matches baseline.
+Result: PASS
 
 Row: R1
 Column: C3
 Behavior: drag anchors
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag anchor matches baseline.
+Result: PASS
 
 Row: R1
 Column: C4
 Behavior: drag guidelines
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag guideline matches baseline.
+Result: PASS
 
 Row: R2
 Column: C1
 Behavior: drag+shift regular on-curve points (constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag+shift on-curve point matches baseline (constrain).
+Result: PASS
 
 Row: R2
 Column: C2
 Behavior: drag+shift regular off-curve points (constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag+shift off-curve handle matches baseline (constrain).
+Result: PASS
 
 Row: R2
 Column: C3
 Behavior: drag+shift anchors (constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag+shift anchor matches baseline (constrain).
+Result: PASS
 
 Row: R2
 Column: C4
 Behavior: drag+shift guidelines (constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag+shift guideline matches baseline (constrain).
+Result: PASS
 
 Row: R3
 Column: C1
 Behavior: drag+alt regular on-curve points (alternate)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag+alt on-curve point matches baseline (alternate).
+Result: PASS
 
 Row: R3
 Column: C2
 Behavior: drag+alt regular off-curve points (alternate)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag+alt off-curve handle matches baseline (alternate).
+Result: PASS
 
 Row: R3
 Column: C3
 Behavior: drag+alt anchors (alternate)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag+alt anchor matches baseline (alternate).
+Result: PASS
 
 Row: R3
 Column: C4
 Behavior: drag+alt guidelines (alternate)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag+alt guideline matches baseline (alternate).
+Result: PASS
 
 Row: R4
 Column: C1
 Behavior: drag+shift+alt regular on-curve points (alternate-constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag+shift+alt on-curve point matches baseline (alternate-constrain).
+Result: PASS
 
 Row: R4
 Column: C2
 Behavior: drag+shift+alt regular off-curve points (alternate-constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag+shift+alt off-curve handle matches baseline (alternate-constrain).
+Result: PASS
 
 Row: R4
 Column: C3
 Behavior: drag+shift+alt anchors (alternate-constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag+shift+alt anchor matches baseline (alternate-constrain).
+Result: PASS
 
 Row: R4
 Column: C4
 Behavior: drag+shift+alt guidelines (alternate-constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
-Result: FAIL (not tested)
+Evidence: Manual test 2026-03-02; drag+shift+alt guideline matches baseline (alternate-constrain).
+Result: PASS
 
 Row: R5
 Column: C2
 Behavior: drag+X equalize regular off-curve handles (mid-drag toggle)
-Evidence: Manual drag test: X-equalize engaged and disengaged mid-drag; behavior matches baseline.
+Evidence: Manual test 2026-03-02; X-equalize engaged/disengaged mid-drag matches baseline.
 Result: PASS
 
 Row: R6
 Column: C2
 Behavior: drag+X+shift equalize regular off-curve handles with constrain
-Evidence: Manual drag test: Shift held before X engages mid-drag; constrain applied; behavior matches baseline.
+Evidence: Manual test 2026-03-02; Shift+X equalize with constrain matches baseline.
 Result: PASS
 
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Rollback shape: ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts)) with optional connectContours change concatenation.
 Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 171-223.
+
+Step Header
+Phase 2, Step 2.3 - Regular Nudge Through Composer
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Route regular-only nudge through the composer without changing non-regular nudge behavior.
+2. Solution
+   - Replace the regular-only fallback in pointer with a composer entry point that pass-throughs to `sceneController.handleArrowKeys(event)` in Phase 2.
+3. Code Implementation
+   - Implemented `runNudgeOrchestration` in `src-js/views-editor/src/edit-behavior-composer.js` as a pass-through to `sceneController.handleArrowKeys(event)`.
+   - Updated `src-js/views-editor/src/edit-tools-pointer.js` to call `runNudgeOrchestration` for the regular-only nudge fallback.
+4. Why This Solves the Problem
+   - Regular nudge now routes through the composer entry point while preserving identical behavior via a temporary pass-through.
+
+Passing Criteria (Required)
+Criterion: Regular nudge matrix cells pass; undo/redo is correct.  
+Result: FAIL  
+Evidence: Not tested yet.
+
+Criterion: No regressions in non-regular nudge behaviors.  
+Result: FAIL  
+Evidence: Not tested yet.
+
+Criterion: handleArrowKeys no longer calls sceneController.handleArrowKeys directly for the regular-only path.  
+Result: PASS  
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` lines 1439-1443.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS  
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-composer.js  
+Function(s): runNudgeOrchestration  
+Lines: 234-238  
+Snippet:
+```js
+export async function runNudgeOrchestration(_context) {
+  const { sceneController, event } = _context;
+  assert(sceneController, "runNudgeOrchestration: missing sceneController");
+  assert(event, "runNudgeOrchestration: missing event");
+  return sceneController.handleArrowKeys(event);
+}
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-tools-pointer.js  
+Function(s): handleArrowKeys  
+Lines: 1439-1443  
+Snippet:
+```js
+  // No skeleton points, rib points, or editable handles - route through composer
+  return runNudgeOrchestration({
+    sceneController,
+    event,
+  });
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md  
+Function(s): N/A (documentation)  
+Lines: 301-307  
+Snippet:
+```md
+Step Header
+Phase 2, Step 2.3 - Regular Nudge Through Composer
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Route regular-only nudge through the composer without changing non-regular nudge behavior.
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Row: R10  
+Column: C1  
+Behavior: nudge regular on-curve points  
+Evidence: Not tested yet.  
+Result: FAIL
+
+Row: R10  
+Column: C2  
+Behavior: nudge regular off-curve points  
+Evidence: Not tested yet.  
+Result: FAIL
+
+Row: R10  
+Column: C3  
+Behavior: nudge anchors  
+Evidence: Not tested yet.  
+Result: FAIL
+
+Row: R10  
+Column: C4  
+Behavior: nudge guidelines  
+Evidence: Not tested yet.  
+Result: FAIL
+
+Row: R11  
+Column: C1  
+Behavior: nudge+shift regular on-curve points  
+Evidence: Not tested yet.  
+Result: FAIL
+
+Row: R11  
+Column: C2  
+Behavior: nudge+shift regular off-curve points  
+Evidence: Not tested yet.  
+Result: FAIL
+
+Row: R11  
+Column: C3  
+Behavior: nudge+shift anchors  
+Evidence: Not tested yet.  
+Result: FAIL
+
+Row: R11  
+Column: C4  
+Behavior: nudge+shift guidelines  
+Evidence: Not tested yet.  
+Result: FAIL
+
+Row: R12  
+Column: C1  
+Behavior: nudge+shift+ctrl/meta regular on-curve points  
+Evidence: Not tested yet.  
+Result: FAIL
+
+Row: R12  
+Column: C2  
+Behavior: nudge+shift+ctrl/meta regular off-curve points  
+Evidence: Not tested yet.  
+Result: FAIL
+
+Row: R12  
+Column: C3  
+Behavior: nudge+shift+ctrl/meta anchors  
+Evidence: Not tested yet.  
+Result: FAIL
+
+Row: R12  
+Column: C4  
+Behavior: nudge+shift+ctrl/meta guidelines  
+Evidence: Not tested yet.  
+Result: FAIL
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Rollback shape: ChangeCollector.fromChanges(consolidateChanges(editChanges), consolidateChanges(rollbackChanges)).  
+Source: `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
 
 Step Header
 Phase 2, Step 2.1 - Composer Skeleton (No Behavior Change)

@@ -47,7 +47,10 @@ import {
   getEqualizeHandleInfoForPointIndex,
   makeRoundFunc,
 } from "./edit-behavior.js";
-import { runDragOrchestration } from "./edit-behavior-composer.js";
+import {
+  runDragOrchestration,
+  runNudgeOrchestration,
+} from "./edit-behavior-composer.js";
 import {
   createSkeletonEditBehavior,
   getSkeletonBehaviorName,
@@ -1433,8 +1436,11 @@ export class PointerTool extends BaseTool {
     }
   }
 
-  // No skeleton points, rib points, or editable handles - use default handler
-  return sceneController.handleArrowKeys(event);
+  // No skeleton points, rib points, or editable handles - route through composer
+  return runNudgeOrchestration({
+    sceneController,
+    event,
+  });
 }
 
   setCursorForRotationHandle(handleName) {
