@@ -472,6 +472,8 @@ Add an explicit drag routing map to the action-object matrix. Every drag modifie
 - composer + legacy adapter (delegates to existing math)
 - composer + canonical adapter (new adapter)
 
+_Footnote: This explicit map is a safety guardrail, not a scalable end state. After Phase 3 parity is proven, consider generating the routing map from defaults + overrides (or capability groups) with a completeness check._
+
 **Code Snippets / Suggestions**
 - Update `docs/refactor/action-object-matrix.md` with a "Drag Routing" column.
 - If any row is "legacy," it must include a short reason and a removal step.

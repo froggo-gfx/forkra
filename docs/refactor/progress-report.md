@@ -1,4 +1,4 @@
-# Progress Report
+﻿# Progress Report
 
 Date: 2026-02-27
 Status: Draft
@@ -1037,7 +1037,7 @@ Evidence: `docs/refactor/action-object-matrix.md` lines 181-189 show all drag ro
 
 Criterion: Every legacy row has a stated removal step.
 Result: PASS
-Evidence: `docs/refactor/action-object-matrix.md` lines 181-189 include “out of scope; revisit after Phase 6” for legacy columns.
+Evidence: `docs/refactor/action-object-matrix.md` lines 181-189 include â€œout of scope; revisit after Phase 6â€ for legacy columns.
 
 Criterion: No drag routing work starts until the drag rows are complete and reviewed.
 Result: PASS
@@ -1296,3 +1296,134 @@ Result: FAIL
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts))`.
 Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` line 193.
+
+Step Header
+Phase 4, Step 4.1 - Nudge Routing Map (Guardrail)
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Add an explicit nudge routing map so every nudge modifier variant and object kind has a declared routing path.
+2. Solution
+   - Add a Nudge Routing Map table keyed by nudge rows and object kinds, with routing values and legacy deferrals.
+3. Code Implementation
+   - Added the Nudge Routing Map section to `docs/refactor/action-object-matrix.md`.
+4. Why This Solves the Problem
+   - The routing map forces complete, reviewed nudge routing declarations before composer routing work begins.
+
+Passing Criteria (Required)
+Criterion: Every nudge modifier variant is a matrix row (no modifier is implicit).
+Result: PASS
+Evidence: `docs/refactor/action-object-matrix.md` lines 138-146 list R10-R20 nudge modifier rows.
+
+Criterion: Every object kind with nudge = Yes/Specificity has a Nudge Routing value.
+Result: PASS
+Evidence: `docs/refactor/action-object-matrix.md` lines 200-210 fill routing values for C1-C8 across R10-R20.
+
+Criterion: No row is blank or TBD.
+Result: PASS
+Evidence: `docs/refactor/action-object-matrix.md` lines 200-210 show all nudge rows populated with CL/NA/L values.
+
+Criterion: Every legacy row has a stated removal step.
+Result: PASS
+Evidence: `docs/refactor/action-object-matrix.md` lines 200-210 include "out of scope; revisit after Phase 6" for legacy columns.
+
+Criterion: No nudge routing work starts until the nudge rows are complete and reviewed.
+Result: PASS
+Evidence: This step is documentation-only (see Code Evidence list; no routing code changed).
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\action-object-matrix.md
+Function(s): N/A (documentation)
+Lines: 191-210
+Snippet:
+```md
+## Nudge Routing Map (Step 4.1)
+Routing values:
+- `CL` = composer + legacy adapter
+- `CA` = composer + canonical adapter
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 1300-1304
+Snippet:
+```md
+Step Header
+Phase 4, Step 4.1 - Nudge Routing Map (Guardrail)
+
+Goal Alignment (Required Format)
+1. Step Goal
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Not applicable (routing map only; no Yes/Specificity behavior cells changed).
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Not applicable (documentation-only step).
+
+
+
+Step Header
+Phase 4, Step 4.2 - Legacy Nudge Adapters (No Math Changes)
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Create legacy nudge adapters that delegate to existing pointer nudge logic for all nudge-capable kinds.
+2. Solution
+   - Add a nudge adapter map in `pointer-objects.js` that calls existing pointer methods without new math.
+3. Code Implementation
+   - Added `legacyNudgeAdapters` in `src-js/views-editor/src/pointer-objects.js`.
+4. Why This Solves the Problem
+   - The composer can call a uniform adapter interface for nudge without changing behavior, enabling full routing in Step 4.3.
+
+Passing Criteria (Required)
+Criterion: Every nudge-capable object kind in the registry has a nudge adapter entry.
+Result: PASS
+Evidence: `src-js/views-editor/src/pointer-objects.js` lines 183-190 include regularPoint, anchor, guideline, skeletonPoint, skeletonHandle, skeletonRibPoint, and editableGeneratedPoint entries.
+
+Criterion: Adapters only call existing methods (no new math, no new conditionals).
+Result: PASS
+Evidence: `src-js/views-editor/src/pointer-objects.js` lines 137-139 and 183-190 delegate to `PointerTool.handleArrowKeys`.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\pointer-objects.js
+Function(s): runNudgeLegacy, legacyNudgeAdapters
+Lines: 137-190
+Snippet:
+```js
+async function runNudgeLegacy({ pointerTool, event }) {
+  return pointerTool.handleArrowKeys(event);
+}
+
+export const legacyNudgeAdapters = {
+  regularPoint: async (context) => runNudgeLegacy(context),
+  anchor: async (context) => runNudgeLegacy(context),
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 1370-1374
+Snippet:
+```md
+Step Header
+Phase 4, Step 4.2 - Legacy Nudge Adapters (No Math Changes)
+
+Goal Alignment (Required Format)
+1. Step Goal
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Not applicable (adapters only; no behavior matrix cells changed).
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Rollback shape: `ChangeCollector.fromChanges(consolidateChanges(editChanges), consolidateChanges(rollbackChanges))`.
+Source: `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
+

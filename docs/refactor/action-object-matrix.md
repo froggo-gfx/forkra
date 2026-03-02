@@ -188,6 +188,27 @@ Out-of-scope drag targets remain on legacy adapters when marked `CL`; `L` indica
 | R8 | drag+D | NA | NA | NA | NA | CL | NA | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
 | R9 | drag+S | NA | NA | NA | NA | CL | NA | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
 
+## Nudge Routing Map (Step 4.1)
+Routing values:
+- `CL` = composer + legacy adapter
+- `CA` = composer + canonical adapter
+- `L` = legacy (handled in pointer; reason + removal step required)
+- `NA` = not supported (No in baseline matrix)
+
+Out-of-scope nudge targets remain on legacy routing when marked `L`.
+
+| Row ID | Action | C1 Regular On-Curve | C2 Regular Off-Curve | C3 Anchor | C4 Guideline | C5 Skeleton On-Curve | C6 Skeleton Off-Curve | C7 Rib On-Curve | C8 Rib Off-Curve | component | componentOrigin | componentTCenter | backgroundImage |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| R10 | nudge | CL | CL | CL | CL | CL | CL | CL | CL | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R11 | nudge+shift | CL | CL | CL | CL | CL | CL | CL | CL | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R13 | nudge+X | NA | CL | NA | NA | NA | CL | NA | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R14 | nudge+X+shift | NA | CL | NA | NA | NA | CL | NA | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R16 | nudge+D | NA | NA | NA | NA | CL | NA | NA | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R17 | nudge+S | NA | NA | NA | NA | CL | NA | NA | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R18 | nudge+Z | NA | NA | NA | NA | NA | NA | CL | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R19 | nudge+Z+shift | NA | NA | NA | NA | NA | NA | CL | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R20 | nudge+alt | CL | CL | CL | CL | CL | CL | CL | CL | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+
 **Target Matrix (Intended State)**
 | Row ID | Action | C1 Regular On-Curve | C2 Regular Off-Curve | C3 Anchor | C4 Guideline | C5 Skeleton On-Curve | C6 Skeleton Off-Curve | C7 Rib On-Curve | C8 Rib Off-Curve |
 |---|---|---|---|---|---|---|---|---|---|

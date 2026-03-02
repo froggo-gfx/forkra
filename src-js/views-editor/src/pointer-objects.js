@@ -134,6 +134,10 @@ async function runSkeletonTunniDragLegacy({
   await pointerTool._handleSkeletonTunniDrag(eventStream, initialEvent, tunniHit);
 }
 
+async function runNudgeLegacy({ pointerTool, event }) {
+  return pointerTool.handleArrowKeys(event);
+}
+
 export const legacyDragAdapters = {
   regularPoint: async (context) => runRegularDragLegacy(context),
   anchor: async (context) => runRegularDragLegacy(context),
@@ -174,4 +178,14 @@ export const legacyDragAdapters = {
   },
   tunniPoint: async (context) => runTunniDragLegacy(context),
   skeletonTunniPoint: async (context) => runSkeletonTunniDragLegacy(context),
+};
+
+export const legacyNudgeAdapters = {
+  regularPoint: async (context) => runNudgeLegacy(context),
+  anchor: async (context) => runNudgeLegacy(context),
+  guideline: async (context) => runNudgeLegacy(context),
+  skeletonPoint: async (context) => runNudgeLegacy(context),
+  skeletonHandle: async (context) => runNudgeLegacy(context),
+  skeletonRibPoint: async (context) => runNudgeLegacy(context),
+  editableGeneratedPoint: async (context) => runNudgeLegacy(context),
 };
