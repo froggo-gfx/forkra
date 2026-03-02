@@ -95,6 +95,7 @@ Goal Alignment (Required Format)
    - Implemented `runDragOrchestration` in `src-js/views-editor/src/edit-behavior-composer.js`.
    - Moved equalize handle lookup and X-equalize drag math into `src-js/views-editor/src/edit-behavior.js`.
    - Composer now reads equalize mode via `getEqualizeMode` for mid-drag modifier changes.
+   - Pointer equalize keydown now uses base-key matching to allow Shift+X engagement.
    - Added a regular-only branch in `src-js/views-editor/src/edit-tools-pointer.js` that calls the composer.
 4. Why This Solves the Problem
    - Regular drag now routes through a uniform composer entry point while non-regular drag paths stay unchanged.
@@ -102,7 +103,7 @@ Goal Alignment (Required Format)
 Passing Criteria (Required)
 Criterion: Regular-only matrix cells pass with no deviations.
 Result: FAIL
-Evidence: Partial manual check only (regular point drag with composer breakpoint hit); full matrix rows not tested (see Matrix Evidence).
+Evidence: Partial manual check only (regular drag + X and Shift+X mid-drag); full matrix rows not tested (see Matrix Evidence).
 
 Criterion: Non-regular drag behavior is unchanged (no regressions in skeleton/rib/Tunni baseline cells).
 Result: FAIL
@@ -146,6 +147,21 @@ export function makeEqualizeDragChanges(
 ```
 
 File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-tools-pointer.js
+Function(s): handleKeyDown
+Lines: 907-936
+Snippet:
+```js
+      if (eventMatchesActionBaseKey(REALTIME_EQUALIZE_ACTION, event)) {
+        if (!this.equalizeMode) {
+          this.equalizeMode = true;
+          this._boundEqualizeKeyUp = (e) => this._handleEqualizeKeyUp(e);
+          window.addEventListener("keyup", this._boundEqualizeKeyUp);
+        }
+        return;
+      }
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-tools-pointer.js
 Function(s): handleDragSelection
 Lines: 2493-2511
 Snippet:
@@ -159,7 +175,7 @@ Snippet:
 
 File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
 Function(s): N/A (documentation)
-Lines: 86-281
+Lines: 86-299
 Snippet:
 ```md
 Step Header
@@ -275,8 +291,8 @@ Result: PASS
 Row: R6
 Column: C2
 Behavior: drag+X+shift equalize regular off-curve handles with constrain
-Evidence: `src-js/views-editor/src/edit-behavior.js` `makeEqualizeDragChanges` lines 1469-1509.
-Result: FAIL (not tested)
+Evidence: Manual drag test: Shift held before X engages mid-drag; constrain applied; behavior matches baseline.
+Result: PASS
 
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Rollback shape: ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts)) with optional connectContours change concatenation.

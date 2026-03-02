@@ -928,7 +928,7 @@ export class PointerTool extends BaseTool {
         }
         return;
       }
-      if (eventMatchesActionShortCut(REALTIME_EQUALIZE_ACTION, event)) {
+      if (eventMatchesActionBaseKey(REALTIME_EQUALIZE_ACTION, event)) {
         if (!this.equalizeMode) {
           this.equalizeMode = true;
           this._boundEqualizeKeyUp = (e) => this._handleEqualizeKeyUp(e);
