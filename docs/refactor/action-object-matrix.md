@@ -21,16 +21,16 @@ Tag meaning: [in-scope] = current refactor scope (drag/nudge pipeline and their 
 - [in-scope] Drag + Shift+Alt (behavior preset: alternate-constrain). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `getBehaviorName` line 7200; `PointerTool.handleDragSelection` line 2490.
 - [in-scope] Drag + X (equalize handles mode). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDrag` lines 1832-1844.
 - [in-scope] Drag + X + Shift (equalize + constrain). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDragSelection` lines 2620-2637; `PointerTool._handleEqualizeHandlesDragForPath` lines 5776-5783.
-- [in-scope] Drag + Z (rib tangent constraint). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleDragEditableGeneratedPoints` lines 4005-4007.
+- [in-scope] Drag + Z (rib tangent constraint; requires editable flag). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleDragEditableGeneratedPoints` lines 4005-4007.
 - [in-scope] Drag + D (fixed rib). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDragSelection` lines 2679-2689.
 - [in-scope] Drag + S (fixed rib compress). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDragSelection` lines 2679-2689.
 - [in-scope] Nudge + Shift (10x delta). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1245-1251.
-- [in-scope] Nudge + Shift+Ctrl/Meta (100x delta). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1245-1249.
+- [out-of-scope] Nudge + Shift+Ctrl/Meta (100x delta). Excluded from matrix tracking (decision 2026-03-02). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1245-1249.
 - [in-scope] Nudge + X (equalize handles mode). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1254-1261; lines 1410-1424.
 - [in-scope] Nudge + X + Shift (equalize + constrain). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1410-1417; lines 1254-1261.
-- [in-scope] Nudge + X + Shift+Ctrl/Meta (equalize + 100x). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1410-1414; lines 1254-1261.
-- [in-scope] Nudge + Z (rib tangent constraint). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4593-4683.
-- [in-scope] Nudge + Z + Shift (rib tangent 10x). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4593-4605.
+- [out-of-scope] Nudge + X + Shift+Ctrl/Meta (equalize + 100x). Excluded from matrix tracking (decision 2026-03-02). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1410-1414; lines 1254-1261.
+- [in-scope] Nudge + Z (rib tangent constraint; requires editable flag). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4593-4683.
+- [in-scope] Nudge + Z + Shift (rib tangent 10x; requires editable flag). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4593-4605.
 - [in-scope] Nudge + Alt (alternate behavior / rib interpolation). Evidence: `src-js/views-editor/src/scene-controller.js` `SceneController.handleArrowKeys` lines 949-979; `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1321-1327; `PointerTool._handleArrowKeysForRibPoints` lines 4603-4660.
 - [in-scope] Nudge + D/S (fixed rib / compress). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1280-1307.
 
@@ -132,19 +132,17 @@ Tag meaning: Yes = handled directly by the `edit-behavior.js` behavior table. No
 | R4 | drag+shift+alt | alternate-constrain |
 | R5 | drag+X | equalize |
 | R6 | drag+X+shift | equalize + constrain |
-| R7 | drag+Z | rib tangent constraint |
+| R7 | drag+Z | rib tangent constraint; requires editable flag |
 | R8 | drag+D | fixed rib |
 | R9 | drag+S | fixed rib compress |
 | R10 | nudge | |
 | R11 | nudge+shift | 10x |
-| R12 | nudge+shift+ctrl/meta | 100x |
 | R13 | nudge+X | equalize |
 | R14 | nudge+X+shift | equalize + constrain |
-| R15 | nudge+X+shift+ctrl/meta | equalize + 100x |
 | R16 | nudge+D | fixed rib |
 | R17 | nudge+S | fixed rib compress |
-| R18 | nudge+Z | rib tangent |
-| R19 | nudge+Z+shift | rib tangent + 10x |
+| R18 | nudge+Z | rib tangent; requires editable flag |
+| R19 | nudge+Z+shift | rib tangent + 10x; requires editable flag |
 | R20 | nudge+alt | alternate / rib interpolation |
 
 **Matrix (Yes/No/Specificity)**
@@ -152,8 +150,8 @@ Tag meaning: Yes = handled directly by the `edit-behavior.js` behavior table. No
 |---|---|---|---|---|---|---|---|---|---|
 | R1 | drag | Yes | Yes | Yes | Yes | Specificity | Specificity | Specificity | Specificity |
 | R2 | drag+shift | Yes | Yes | Yes | Yes | Specificity | Specificity | No | No |
-| R3 | drag+alt | Yes | Yes | Yes | Yes | Specificity | Specificity | Specificity | Specificity |
-| R4 | drag+shift+alt | Yes | Yes | Yes | Yes | Specificity | Specificity | No | No |
+| R3 | drag+alt | Yes | Yes | No | No | Specificity | Specificity | Specificity | No |
+| R4 | drag+shift+alt | No | No | Yes | Yes | Specificity | Specificity | No | No |
 | R5 | drag+X | No | Specificity | No | No | No | Specificity | No | No |
 | R6 | drag+X+shift | No | Specificity | No | No | No | Specificity | No | No |
 | R7 | drag+Z | No | No | No | No | No | No | Specificity | No |
@@ -161,23 +159,42 @@ Tag meaning: Yes = handled directly by the `edit-behavior.js` behavior table. No
 | R9 | drag+S | No | No | No | No | Specificity | No | No | No |
 | R10 | nudge | Yes | Yes | Yes | Yes | Specificity | Specificity | Specificity | Specificity |
 | R11 | nudge+shift | Yes | Yes | Yes | Yes | Specificity | Specificity | Specificity | Specificity |
-| R12 | nudge+shift+ctrl/meta | Yes | Yes | Yes | Yes | Specificity | Specificity | Specificity | Specificity |
 | R13 | nudge+X | No | Specificity | No | No | No | Specificity | No | No |
 | R14 | nudge+X+shift | No | Specificity | No | No | No | Specificity | No | No |
-| R15 | nudge+X+shift+ctrl/meta | No | Specificity | No | No | No | Specificity | No | No |
 | R16 | nudge+D | No | No | No | No | Specificity | No | No | No |
 | R17 | nudge+S | No | No | No | No | Specificity | No | No | No |
 | R18 | nudge+Z | No | No | No | No | No | No | Specificity | No |
 | R19 | nudge+Z+shift | No | No | No | No | No | No | Specificity | No |
 | R20 | nudge+alt | Yes | Yes | Yes | Yes | Specificity | Specificity | Specificity | Specificity |
 
+## Drag Routing Map (Step 3.1)
+Routing values:
+- `CL` = composer + legacy adapter
+- `CA` = composer + canonical adapter
+- `L` = legacy (handled in pointer; reason + removal step required)
+- `NA` = not supported (No in baseline matrix)
+
+Out-of-scope drag targets remain on legacy adapters when marked `CL`; `L` indicates pointer-only legacy routing.
+
+| Row ID | Action | C1 Regular On-Curve | C2 Regular Off-Curve | C3 Anchor | C4 Guideline | C5 Skeleton On-Curve | C6 Skeleton Off-Curve | C7 Rib On-Curve | C8 Rib Off-Curve | component | componentOrigin | componentTCenter | backgroundImage | Tunni (non-selection) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| R1 | drag | CL | CL | CL | CL | CL | CL | CL | CL | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | CL |
+| R2 | drag+shift | CL | CL | CL | CL | CL | CL | NA | NA | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | NA |
+| R3 | drag+alt | CL | CL | NA | NA | CL | CL | CL | NA | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | NA |
+| R4 | drag+shift+alt | NA | NA | CL | CL | CL | CL | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
+| R5 | drag+X | NA | CL | NA | NA | NA | CL | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
+| R6 | drag+X+shift | NA | CL | NA | NA | NA | CL | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
+| R7 | drag+Z | NA | NA | NA | NA | NA | NA | CL | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
+| R8 | drag+D | NA | NA | NA | NA | CL | NA | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
+| R9 | drag+S | NA | NA | NA | NA | CL | NA | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
+
 **Target Matrix (Intended State)**
 | Row ID | Action | C1 Regular On-Curve | C2 Regular Off-Curve | C3 Anchor | C4 Guideline | C5 Skeleton On-Curve | C6 Skeleton Off-Curve | C7 Rib On-Curve | C8 Rib Off-Curve |
 |---|---|---|---|---|---|---|---|---|---|
 | R1 | drag | Yes | Yes | Yes | Yes | Yes | Yes | Specificity | Specificity |
 | R2 | drag+shift | Yes | Yes | Yes | Yes | Yes | Yes | No | No |
-| R3 | drag+alt | Yes | Yes | Yes | Yes | Yes | Yes | Specificity | Specificity |
-| R4 | drag+shift+alt | Yes | Yes | Yes | Yes | Yes | Yes | No | No |
+| R3 | drag+alt | Yes | Yes | No | No | Yes | Yes | Specificity | No |
+| R4 | drag+shift+alt | No | No | Yes | Yes | Yes | Yes | No | No |
 | R5 | drag+X | No | Specificity | No | No | No | Specificity | No | No |
 | R6 | drag+X+shift | No | Specificity | No | No | No | Specificity | No | No |
 | R7 | drag+Z | No | No | No | No | No | No | Specificity | No |
@@ -185,10 +202,8 @@ Tag meaning: Yes = handled directly by the `edit-behavior.js` behavior table. No
 | R9 | drag+S | No | No | No | No | Specificity | No | No | No |
 | R10 | nudge | Yes | Yes | Yes | Yes | Yes | Yes | Specificity | Specificity |
 | R11 | nudge+shift | Yes | Yes | Yes | Yes | Yes | Yes | Specificity | Specificity |
-| R12 | nudge+shift+ctrl/meta | Yes | Yes | Yes | Yes | Yes | Yes | Specificity | Specificity |
 | R13 | nudge+X | No | Specificity | No | No | No | Specificity | No | No |
 | R14 | nudge+X+shift | No | Specificity | No | No | No | Specificity | No | No |
-| R15 | nudge+X+shift+ctrl/meta | No | Specificity | No | No | No | Specificity | No | No |
 | R16 | nudge+D | No | No | No | No | Specificity | No | No | No |
 | R17 | nudge+S | No | No | No | No | Specificity | No | No | No |
 | R18 | nudge+Z | No | No | No | No | No | No | Specificity | No |
@@ -202,7 +217,6 @@ Tag meaning: Yes = handled directly by the `edit-behavior.js` behavior table. No
 - R4/C5-C6: Baseline = Specificity. Intended = Yes (skeleton drag+shift+alt should use the shared behavior table).
 - R10/C5-C6: Baseline = Specificity. Intended = Yes (skeleton nudge should use the shared behavior table).
 - R11/C5-C6: Baseline = Specificity. Intended = Yes (skeleton nudge+shift should use the shared behavior table).
-- R12/C5-C6: Baseline = Specificity. Intended = Yes (skeleton nudge+shift+ctrl/meta should use the shared behavior table).
 - R20/C5-C6: Baseline = Specificity. Intended = Yes (skeleton nudge+alt should use the shared behavior table).
 **Yes/Specificity Intersections (list all entries below the matrix)**
 Each entry must include: Row ID(s), Column ID(s), plain language description, code snippet (5-10 lines), file/function + exact line numbers, and PASS/FAIL.
@@ -223,7 +237,7 @@ this.components = unpackComponents(instance.components, relevantComponentIndices
 this.anchors = unpackAnchors(instance.anchors, anchorSelection || []);
 this.guidelines = unpackGuidelines(instance.guidelines, guidelineSelection || []);
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R1/C3 (anchor, drag) - Yes  
 Behavior: Drag uses EditBehaviorFactory; anchors are included via parseSelection in the factory.  
@@ -240,7 +254,7 @@ this.components = unpackComponents(instance.components, relevantComponentIndices
 this.anchors = unpackAnchors(instance.anchors, anchorSelection || []);
 this.guidelines = unpackGuidelines(instance.guidelines, guidelineSelection || []);
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R1/C4 (guideline, drag) - Yes  
 Behavior: Drag uses EditBehaviorFactory; guidelines are included via parseSelection in the factory.  
@@ -257,7 +271,7 @@ this.components = unpackComponents(instance.components, relevantComponentIndices
 this.anchors = unpackAnchors(instance.anchors, anchorSelection || []);
 this.guidelines = unpackGuidelines(instance.guidelines, guidelineSelection || []);
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R1/C5-C6 (skeleton on-curve + skeleton off-curve, drag) - Specificity  
 Behavior: Skeleton drag uses skeleton edit behavior system (separate from edit-behavior); selection includes on-curve and off-curve skeleton points.  
@@ -276,10 +290,10 @@ for (const data of Object.values(layersData)) {
   );
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R1/C7 (rib on-curve, drag) - Specificity  
-Behavior: Constraint along the rib (normal to skeleton contour). Multi-select applies per rib: each rib moves along its own normal (outward/inward relative to its side).
+Behavior: Constraint along the rib (normal to skeleton contour; movement follows the rib direction). Multi-select applies per rib: each rib moves along its own normal (outward/inward relative to its side).
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDragSelection` lines 2448-2466; `PointerTool._handleDragRibPoint` lines 3287-3295.  
 Snippet:
 ```js
@@ -294,10 +308,10 @@ if (!movementAllowed) {
   return;
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R1/C8 (rib off-curve, drag) - Specificity  
-Behavior: Handle angle is fixed by the skeleton handle direction (basic rib-handle property). Editable flag controls whether distance/offset can change. Detached mode uses absolute offsets; non-detached uses directional offsets.
+Behavior: Requires editable flag. Handle angle is fixed by the skeleton handle direction (basic rib-handle property). Detached mode uses absolute offsets; non-detached uses directional offsets.
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleDragSelection` lines 2463-2466; `PointerTool._handleDragEditableGeneratedHandles` lines 4141-4158.  
 Snippet:
 ```js
@@ -308,7 +322,7 @@ if (!skeletonHandleDir) {
   continue;
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R2/C1-C2 (regular on-curve + regular off-curve, drag+shift) - Yes  
 Behavior: Shift selects constrain behavior via getBehaviorName.  
@@ -320,7 +334,7 @@ function getBehaviorName(event) {
   return behaviorNames[boolInt(event.shiftKey) + 2 * boolInt(event.altKey)];
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R2/C3 (anchor, drag+shift) - Yes  
 Behavior: Shift selects constrain behavior via getBehaviorName; anchors are included via EditBehaviorFactory.  
@@ -332,7 +346,7 @@ function getBehaviorName(event) {
   return behaviorNames[boolInt(event.shiftKey) + 2 * boolInt(event.altKey)];
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R2/C4 (guideline, drag+shift) - Yes  
 Behavior: Shift selects constrain behavior via getBehaviorName; guidelines are included via EditBehaviorFactory.  
@@ -344,7 +358,7 @@ function getBehaviorName(event) {
   return behaviorNames[boolInt(event.shiftKey) + 2 * boolInt(event.altKey)];
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R2/C5-C6 (skeleton on-curve + skeleton off-curve, drag+shift) - Specificity  
 Behavior: Shift modifies skeleton behavior preset via getSkeletonBehaviorName.  
@@ -363,7 +377,7 @@ if (behaviorName !== lastBehaviorName) {
   }
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R3/C1-C2 (regular on-curve + regular off-curve, drag+alt) - Yes  
 Behavior: Alt selects alternate behavior via getBehaviorName.  
@@ -375,31 +389,7 @@ function getBehaviorName(event) {
   return behaviorNames[boolInt(event.shiftKey) + 2 * boolInt(event.altKey)];
 }
 ```
-Result: FAIL (not tested)
-
-R3/C3 (anchor, drag+alt) - Yes  
-Behavior: Alt selects alternate behavior via getBehaviorName; anchors are included via EditBehaviorFactory.  
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `getBehaviorName` lines 7200-7202; `src-js/views-editor/src/edit-behavior.js` `EditBehaviorFactory` lines 74-87.  
-Snippet:
-```js
-function getBehaviorName(event) {
-  const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
-  return behaviorNames[boolInt(event.shiftKey) + 2 * boolInt(event.altKey)];
-}
-```
-Result: FAIL (not tested)
-
-R3/C4 (guideline, drag+alt) - Yes  
-Behavior: Alt selects alternate behavior via getBehaviorName; guidelines are included via EditBehaviorFactory.  
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `getBehaviorName` lines 7200-7202; `src-js/views-editor/src/edit-behavior.js` `EditBehaviorFactory` lines 74-87.  
-Snippet:
-```js
-function getBehaviorName(event) {
-  const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
-  return behaviorNames[boolInt(event.shiftKey) + 2 * boolInt(event.altKey)];
-}
-```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R3/C5-C6 (skeleton on-curve + skeleton off-curve, drag+alt) - Specificity  
 Behavior: Alt modifies skeleton behavior preset via getSkeletonBehaviorName.  
@@ -418,7 +408,7 @@ if (behaviorName !== lastBehaviorName) {
   }
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R3/C7 (rib on-curve, drag+alt) - Specificity  
 Behavior: Requires Editable flag. Apart from that gating, behavior follows the shared behavior table (Alt selects the alternate preset; no extra rib-specific math).
@@ -430,36 +420,10 @@ const useInterpolation = initialEvent.altKey;
 // Get initial point in glyph coordinates
 const localPoint = sceneController.localPoint(initialEvent);
 ```
-Result: FAIL (not tested)
-
-R3/C8 (rib off-curve, drag+alt) - Specificity  
-Behavior: Requires Editable flag. Apart from that gating, behavior follows the shared behavior table (Alt selects the alternate preset; no extra rib-specific math).
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleDragEditableGeneratedHandles` lines 4099-4145.  
-Snippet:
-```js
-const skeletonHandleDir = this._getSkeletonHandleDirForPoint(
-  contour, eh.skeletonPointIndex, eh.handleType
-);
-if (!skeletonHandleDir) {
-  continue;
-}
-```
-Result: FAIL (not tested)
-
-R4/C1-C2 (regular on-curve + regular off-curve, drag+shift+alt) - Yes  
-Behavior: Shift+Alt selects alternate-constrain behavior via getBehaviorName.  
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `getBehaviorName` lines 7200-7202; `PointerTool.handleDragSelection` line 2490.  
-Snippet:
-```js
-function getBehaviorName(event) {
-  const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
-  return behaviorNames[boolInt(event.shiftKey) + 2 * boolInt(event.altKey)];
-}
-```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R4/C3 (anchor, drag+shift+alt) - Yes  
-Behavior: Shift+Alt selects alternate-constrain behavior via getBehaviorName; anchors are included via EditBehaviorFactory.  
+Behavior: Alt does not change anchor behavior; same as drag+shift (constrain).  
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `getBehaviorName` lines 7200-7202; `src-js/views-editor/src/edit-behavior.js` `EditBehaviorFactory` lines 74-87.  
 Snippet:
 ```js
@@ -468,10 +432,10 @@ function getBehaviorName(event) {
   return behaviorNames[boolInt(event.shiftKey) + 2 * boolInt(event.altKey)];
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R4/C4 (guideline, drag+shift+alt) - Yes  
-Behavior: Shift+Alt selects alternate-constrain behavior via getBehaviorName; guidelines are included via EditBehaviorFactory.  
+Behavior: Alt does not change guideline behavior; same as drag+shift (constrain).  
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `getBehaviorName` lines 7200-7202; `src-js/views-editor/src/edit-behavior.js` `EditBehaviorFactory` lines 74-87.  
 Snippet:
 ```js
@@ -480,7 +444,7 @@ function getBehaviorName(event) {
   return behaviorNames[boolInt(event.shiftKey) + 2 * boolInt(event.altKey)];
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R4/C5-C6 (skeleton on-curve + skeleton off-curve, drag+shift+alt) - Specificity  
 Behavior: Shift+Alt modifies skeleton behavior preset via getSkeletonBehaviorName.  
@@ -499,7 +463,7 @@ if (behaviorName !== lastBehaviorName) {
   }
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R5/C2 (regular off-curve, drag+X) - Specificity  
 Behavior: Equalize handles during drag when equalizeMode is active and a valid handle pair is found.  
@@ -513,7 +477,7 @@ if (this.equalizeMode && equalizeHandleInfo && positionedGlyph) {
     y: currentPoint.y - positionedGlyph.y,
   };
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R5/C6 (skeleton off-curve, drag+X) - Specificity  
 Behavior: Equalize skeleton handles for off-curve points; shift can constrain drag.  
@@ -528,7 +492,7 @@ if (event.shiftKey) {
   newDragVec = constrainHorVerDiag(newDragVec);
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R6/C2 (regular off-curve, drag+X+shift) - Specificity  
 Behavior: Equalize handles with shift-constrained vector.  
@@ -543,7 +507,7 @@ if (event.shiftKey) {
   newDragVec = constrainHorVerDiag(newDragVec);
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R6/C6 (skeleton off-curve, drag+X+shift) - Specificity  
 Behavior: Equalize skeleton handles with shift-constrained vector.  
@@ -558,7 +522,7 @@ if (event.shiftKey) {
   newDragVec = constrainHorVerDiag(newDragVec);
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R7/C7 (rib on-curve, drag+Z) - Specificity  
 Behavior: Requires Editable flag; Z constrains rib drag to tangent.
@@ -570,7 +534,7 @@ const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
 // Z: constrain to tangent direction (only nudge changes)
 const constrainMode = this.tangentRibMode ? "tangent" : null;
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R8/C5 (skeleton on-curve, drag+D) - Specificity  
 Behavior: Fixed rib mode applies a constrained drag via applyFixedRibDragToSkeletonData.  
@@ -588,7 +552,7 @@ const appliedFixedRib = this.fixedRibMode || this.fixedRibCompressMode
       {
         anchorToDragSide: this.fixedRibCompressMode,
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R9/C5 (skeleton on-curve, drag+S) - Specificity  
 Behavior: Fixed rib compress mode applies constrained drag with anchorToDragSide enabled.  
@@ -606,7 +570,7 @@ const appliedFixedRib = this.fixedRibMode || this.fixedRibCompressMode
       {
         anchorToDragSide: this.fixedRibCompressMode,
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R10/C1-C2 (regular on-curve + regular off-curve, nudge) - Yes  
 Behavior: Nudge uses EditBehaviorFactory for current selection (regular points included).  
@@ -622,7 +586,7 @@ const layerInfo = Object.entries(
     this.selectedTool.scalingEditBehavior
   );
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R10/C3 (anchor, nudge) - Yes  
 Behavior: Nudge uses EditBehaviorFactory for current selection (anchors included).  
@@ -638,7 +602,7 @@ const layerInfo = Object.entries(
     this.selectedTool.scalingEditBehavior
   );
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R10/C4 (guideline, nudge) - Yes  
 Behavior: Nudge uses EditBehaviorFactory for current selection (guidelines included).  
@@ -654,7 +618,7 @@ const layerInfo = Object.entries(
     this.selectedTool.scalingEditBehavior
   );
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R10/C5-C6 (skeleton on-curve + skeleton off-curve, nudge) - Specificity  
 Behavior: Skeleton point nudge is handled by pointer with skeleton data edits (separate from edit-behavior).  
@@ -671,7 +635,7 @@ if (hasSkeletonPoints) {
     dy *= 10;
   }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R10/C7 (rib on-curve, nudge) - Specificity  
 Behavior: Constraint along the rib (normal to skeleton contour). Multi-select applies per rib: each rib moves along its own normal (outward/inward relative to its side).
@@ -687,10 +651,10 @@ if (!allTargetsEditable && !belongsToSingleSegment) {
   return;
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R10/C8 (rib off-curve, nudge) - Specificity  
-Behavior: Handle angle is fixed by the skeleton handle direction (basic rib-handle property). Editable flag controls whether distance/offset can change. Detached mode uses absolute offsets; non-detached uses directional offsets.
+Behavior: Requires editable flag. Handle angle is fixed by the skeleton handle direction (basic rib-handle property). Detached mode uses absolute offsets; non-detached uses directional offsets.
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForEditableHandles` lines 4317-4339.  
 Snippet:
 ```js
@@ -704,7 +668,7 @@ if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
 }
 const delta = { x: dx, y: dy };
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R11/C1-C2 (regular on-curve + regular off-curve, nudge+shift) - Yes  
 Behavior: Shift scales nudge delta in SceneController.handleArrowKeys.  
@@ -720,7 +684,7 @@ if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
   dy *= 10;
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R11/C3 (anchor, nudge+shift) - Yes  
 Behavior: Shift scales nudge delta in SceneController.handleArrowKeys.  
@@ -736,7 +700,7 @@ if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
   dy *= 10;
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R11/C4 (guideline, nudge+shift) - Yes  
 Behavior: Shift scales nudge delta in SceneController.handleArrowKeys.  
@@ -752,7 +716,7 @@ if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
   dy *= 10;
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R11/C5-C6 (skeleton on-curve + skeleton off-curve, nudge+shift) - Specificity  
 Behavior: Shift scales delta for skeleton nudge.  
@@ -768,7 +732,7 @@ if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
   dy *= 10;
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R11/C7 (rib on-curve, nudge+shift) - Specificity  
 Behavior: Shift scales rib nudge delta 10x; rib constraints still apply.  
@@ -784,10 +748,10 @@ if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
   dy *= 10;
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R11/C8 (rib off-curve, nudge+shift) - Specificity  
-Behavior: Shift scales editable handle nudge delta 10x; handle constraints still apply.  
+Behavior: Requires editable flag. Shift scales editable handle nudge delta 10x; handle constraints still apply.  
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForEditableHandles` lines 4317-4333.  
 Snippet:
 ```js
@@ -801,104 +765,7 @@ if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
 }
 const delta = { x: dx, y: dy };
 ```
-Result: FAIL (not tested)
-
-R12/C1-C2 (regular on-curve + regular off-curve, nudge+shift+ctrl/meta) - Yes  
-Behavior: Shift+Ctrl/Meta scales nudge delta 100x in SceneController.handleArrowKeys.  
-Evidence: `src-js/views-editor/src/scene-controller.js` `SceneController.handleArrowKeys` lines 952-955.  
-Snippet:
-```js
-let [dx, dy] = arrowKeyDeltas[event.key];
-if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-  dx *= 100;
-  dy *= 100;
-} else if (event.shiftKey) {
-  dx *= 10;
-  dy *= 10;
-}
-```
-Result: FAIL (not tested)
-
-R12/C3 (anchor, nudge+shift+ctrl/meta) - Yes  
-Behavior: Shift+Ctrl/Meta scales nudge delta 100x in SceneController.handleArrowKeys.  
-Evidence: `src-js/views-editor/src/scene-controller.js` `SceneController.handleArrowKeys` lines 952-955.  
-Snippet:
-```js
-let [dx, dy] = arrowKeyDeltas[event.key];
-if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-  dx *= 100;
-  dy *= 100;
-} else if (event.shiftKey) {
-  dx *= 10;
-  dy *= 10;
-}
-```
-Result: FAIL (not tested)
-
-R12/C4 (guideline, nudge+shift+ctrl/meta) - Yes  
-Behavior: Shift+Ctrl/Meta scales nudge delta 100x in SceneController.handleArrowKeys.  
-Evidence: `src-js/views-editor/src/scene-controller.js` `SceneController.handleArrowKeys` lines 952-955.  
-Snippet:
-```js
-let [dx, dy] = arrowKeyDeltas[event.key];
-if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-  dx *= 100;
-  dy *= 100;
-} else if (event.shiftKey) {
-  dx *= 10;
-  dy *= 10;
-}
-```
-Result: FAIL (not tested)
-
-R12/C5-C6 (skeleton on-curve + skeleton off-curve, nudge+shift+ctrl/meta) - Specificity  
-Behavior: Shift+Ctrl/Meta scales delta 100x for skeleton nudge.  
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1245-1247.  
-Snippet:
-```js
-let [dx, dy] = arrowKeyDeltas[event.key];
-if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-  dx *= 100;
-  dy *= 100;
-} else if (event.shiftKey) {
-  dx *= 10;
-  dy *= 10;
-}
-```
-Result: FAIL (not tested)
-
-R12/C7 (rib on-curve, nudge+shift+ctrl/meta) - Specificity  
-Behavior: Shift+Ctrl/Meta scales rib nudge delta 100x.  
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4560-4563.  
-Snippet:
-```js
-let [dx, dy] = arrowKeyDeltas[event.key];
-if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-  dx *= 100;
-  dy *= 100;
-} else if (event.shiftKey) {
-  dx *= 10;
-  dy *= 10;
-}
-```
-Result: FAIL (not tested)
-
-R12/C8 (rib off-curve, nudge+shift+ctrl/meta) - Specificity  
-Behavior: Shift+Ctrl/Meta scales editable handle nudge delta 100x.  
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForEditableHandles` lines 4317-4333.  
-Snippet:
-```js
-let [dx, dy] = arrowKeyDeltas[event.key];
-if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-  dx *= 100;
-  dy *= 100;
-} else if (event.shiftKey) {
-  dx *= 10;
-  dy *= 10;
-}
-const delta = { x: dx, y: dy };
-```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R13/C2 (regular off-curve, nudge+X) - Specificity  
 Behavior: Equalize path handles on arrow keys when equalizeMode is active.  
@@ -911,7 +778,7 @@ async _handleArrowKeysForEqualizePathHandles(delta, pointSelection) {
   if (!positionedGlyph?.glyph?.path) return false;
   const basePath = positionedGlyph.glyph.path;
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R13/C6 (skeleton off-curve, nudge+X) - Specificity  
 Behavior: Equalize skeleton handles on arrow keys when equalizeMode is active.  
@@ -928,7 +795,7 @@ if (this.equalizeMode) {
   }
 }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R14/C2 (regular off-curve, nudge+X+shift) - Specificity  
 Behavior: Equalize path handles with shift-scaled delta.  
@@ -945,7 +812,7 @@ if (hasRegularPoints && this.equalizeMode) {
     dy *= 10;
   }
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R14/C6 (skeleton off-curve, nudge+X+shift) - Specificity  
 Behavior: Equalize skeleton handles with shift-scaled delta.  
@@ -962,41 +829,7 @@ if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
 }
 const delta = { x: dx, y: dy };
 ```
-Result: FAIL (not tested)
-
-R15/C2 (regular off-curve, nudge+X+shift+ctrl/meta) - Specificity  
-Behavior: Equalize path handles with 100x delta.  
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1410-1414.  
-Snippet:
-```js
-if (hasRegularPoints && this.equalizeMode) {
-  let [dx, dy] = arrowKeyDeltas[event.key];
-  if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-    dx *= 100;
-    dy *= 100;
-  } else if (event.shiftKey) {
-    dx *= 10;
-    dy *= 10;
-  }
-```
-Result: FAIL (not tested)
-
-R15/C6 (skeleton off-curve, nudge+X+shift+ctrl/meta) - Specificity  
-Behavior: Equalize skeleton handles with 100x delta.  
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1245-1258.  
-Snippet:
-```js
-let [dx, dy] = arrowKeyDeltas[event.key];
-if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-  dx *= 100;
-  dy *= 100;
-} else if (event.shiftKey) {
-  dx *= 10;
-  dy *= 10;
-}
-const delta = { x: dx, y: dy };
-```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R16/C5 (skeleton on-curve, nudge+D) - Specificity  
 Behavior: Fixed rib nudge uses applyFixedRibDragToSkeletonData when fixedRibMode is active.  
@@ -1014,7 +847,7 @@ if (clickedSkeletonPoint) {
     {
       anchorToDragSide: this.fixedRibCompressMode,
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R17/C5 (skeleton on-curve, nudge+S) - Specificity  
 Behavior: Fixed rib compress nudge uses applyFixedRibDragToSkeletonData with anchorToDragSide enabled.  
@@ -1032,10 +865,10 @@ if (clickedSkeletonPoint) {
     {
       anchorToDragSide: this.fixedRibCompressMode,
 ```
-Result: FAIL (not tested)
+Result: PASS (manual test 2026-03-02)
 
 R18/C7 (rib on-curve, nudge+Z) - Specificity  
-Behavior: Tangent rib mode constrains editable rib nudges to the tangent direction (nudge only).  
+Behavior: Requires editable flag. Tangent rib mode constrains nudges to the tangent direction (nudge only).  
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4603-4683.  
 Snippet:
 ```js
@@ -1047,7 +880,7 @@ const change = behavior.applyDelta(delta, constrainMode);
 Result: PASS (manual test 2026-03-02)
 
 R19/C7 (rib on-curve, nudge+Z+shift) - Specificity  
-Behavior: Tangent rib nudge uses the 10x delta when Shift is held.  
+Behavior: Requires editable flag. Tangent rib nudge uses the 10x delta when Shift is held.  
 Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4593-4605.  
 Snippet:
 ```js

@@ -8,6 +8,8 @@ import {
   findEqualizeHandleForPath,
   makeEqualizeDragChanges,
 } from "./edit-behavior.js";
+import { DRAG_ROUTING_MAP, getDragRowId } from "./edit-behavior-registry.js";
+import { legacyDragAdapters } from "./pointer-objects.js";
 
 // Composer entry points (uniform orchestration).
 // Phase 2: regular drag is routed here; other object kinds remain on legacy paths.
@@ -222,6 +224,70 @@ export async function runDragOrchestration(_context) {
     changes: changes,
     broadcast: true,
   };
+}
+
+/**
+ * Route drag edits through the registry routing map and legacy adapters.
+ * Required context fields:
+ * - pointerTool
+ * - sceneController
+ * - initialEvent
+ * - eventStream
+ * - objectKind
+ * Optional fields:
+ * - forceRowId
+ * - overrideSelection
+ * - effectiveSkeletonPointSelection
+ * - ribHit
+ * - targetRibSelection
+ * - preSelectedSkeletonPoints
+ * - editablePoints
+ * - editableHandles
+ * - equalizeSkeletonInfo
+ * - tunniHit
+ * @returns {Promise<boolean>} handled
+ */
+export async function runDragRoutingOrchestration(_context) {
+  const { pointerTool, sceneController, initialEvent, eventStream, objectKind, forceRowId } =
+    _context;
+
+  assert(pointerTool, "runDragRoutingOrchestration: missing pointerTool");
+  assert(sceneController, "runDragRoutingOrchestration: missing sceneController");
+  assert(initialEvent, "runDragRoutingOrchestration: missing initialEvent");
+  assert(eventStream, "runDragRoutingOrchestration: missing eventStream");
+  assert(objectKind, "runDragRoutingOrchestration: missing objectKind");
+
+  const modifiers = {
+    shiftKey: initialEvent.shiftKey,
+    altKey: initialEvent.altKey,
+    equalizeMode: pointerTool.equalizeMode,
+    tangentRibMode: pointerTool.tangentRibMode,
+    fixedRibMode: pointerTool.fixedRibMode,
+    fixedRibCompressMode: pointerTool.fixedRibCompressMode,
+  };
+
+  const rowId = forceRowId || getDragRowId(modifiers);
+  const baseRowId = getDragRowId({
+    shiftKey: modifiers.shiftKey,
+    altKey: modifiers.altKey,
+  });
+  let routing = DRAG_ROUTING_MAP?.[rowId]?.[objectKind] || "NA";
+  if (routing !== "CL" && rowId !== baseRowId) {
+    routing = DRAG_ROUTING_MAP?.[baseRowId]?.[objectKind] || "NA";
+  }
+  if (routing !== "CL") {
+    return false;
+  }
+
+  const adapter = legacyDragAdapters[objectKind];
+  assert(adapter, `runDragRoutingOrchestration: missing adapter for ${objectKind}`);
+
+  const adapterResult = await adapter({
+    ..._context,
+    runDragOrchestration,
+  });
+
+  return adapterResult !== false;
 }
 
 /**

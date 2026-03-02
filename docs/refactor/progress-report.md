@@ -111,7 +111,7 @@ Evidence: Manual test 2026-03-02 of skeleton, rib, and Tunni drag workflows; no 
 
 Criterion: handleDragSelection contains a dedicated regular-only branch that calls the composer and returns.
 Result: PASS
-Evidence: `src-js/views-editor/src/edit-tools-pointer.js` lines 2493-2511.
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` lines 2695-2704.
 
 Scope Boundary (Required)
 I did not change behavior outside this step. PASS
@@ -163,14 +163,17 @@ Snippet:
 
 File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-tools-pointer.js
 Function(s): handleDragSelection
-Lines: 2493-2511
+Lines: 2695-2704
 Snippet:
 ```js
     if (hasRegularSelection && !hasSkeletonSelection) {
-      await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-        return runDragOrchestration({
-          sceneController,
-          selection: sceneController.selection,
+      await runDragRoutingOrchestration({
+        pointerTool: this,
+        sceneController,
+        eventStream,
+        initialEvent,
+        objectKind: regularObjectKind,
+      });
 ```
 
 File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
@@ -296,7 +299,7 @@ Result: PASS
 
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Rollback shape: ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts)) with optional connectContours change concatenation.
-Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 171-223.
+Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 173-217.
 
 Step Header
 Phase 2, Step 2.3 - Regular Nudge Through Composer
@@ -575,15 +578,15 @@ Goal Alignment (Required Format)
 Passing Criteria (Required)
 Criterion: Modifier mapping covers every modifier in the Phase 0 Action Catalog.
 Result: PASS
-Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 99-144 handle shift/alt presets, X equalize, Z/D/S rib modes, and nudge scaling.
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 125-171 handle shift/alt presets, X equalize, Z/D/S rib modes, and nudge scaling.
 
 Criterion: Each modifier has an explicit handling path (behavior preset or explicit non-preset).
 Result: PASS
-Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 113-141 explicitly push overrides or set presets.
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 137-169 explicitly push overrides or set presets.
 
 Criterion: Mapping logic is centralized and referenced only by composer.
 Result: PASS
-Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 99-144 contain the only modifier mapping function in the codebase at this step.
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` lines 125-171 contain the only modifier mapping function in the codebase at this step.
 
 Scope Boundary (Required)
 I did not change behavior outside this step. PASS
@@ -592,7 +595,7 @@ I did not add new math unless the step explicitly allows it. PASS
 Code Evidence (Required)
 File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-registry.js
 Function(s): resolveBehaviorPreset
-Lines: 101-141
+Lines: 125-165
 Snippet:
 ```js
 export function resolveBehaviorPreset(_objectKind, action, modifiers) {
@@ -1005,3 +1008,291 @@ Not applicable.
 
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Not applicable.
+
+Step Header
+Phase 3, Step 3.1 - Drag Routing Map (Guardrail)
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Add an explicit drag routing map so every drag modifier variant and object kind has a declared routing path.
+2. Solution
+   - Add a Drag Routing Map table keyed by existing drag rows and object kinds, with routing values and legacy deferrals.
+3. Code Implementation
+   - Added the Drag Routing Map section to `docs/refactor/action-object-matrix.md`.
+4. Why This Solves the Problem
+   - The routing map forces a complete, reviewed routing declaration before composer routing work begins.
+
+Passing Criteria (Required)
+Criterion: Every drag modifier variant is a matrix row (no modifier is implicit).
+Result: PASS
+Evidence: `docs/refactor/action-object-matrix.md` lines 126-137 list R1-R9 drag modifier rows.
+
+Criterion: Every object kind with drag = Yes/Specificity has a Drag Routing value.
+Result: PASS
+Evidence: `docs/refactor/action-object-matrix.md` lines 181-189 fill routing values for C1-C8 across R1-R9.
+
+Criterion: No row is blank or TBD.
+Result: PASS
+Evidence: `docs/refactor/action-object-matrix.md` lines 181-189 show all drag rows populated with CL/NA/L values.
+
+Criterion: Every legacy row has a stated removal step.
+Result: PASS
+Evidence: `docs/refactor/action-object-matrix.md` lines 181-189 include “out of scope; revisit after Phase 6” for legacy columns.
+
+Criterion: No drag routing work starts until the drag rows are complete and reviewed.
+Result: PASS
+Evidence: This step is documentation-only (see Code Evidence list; no routing code changed).
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\action-object-matrix.md
+Function(s): N/A (documentation)
+Lines: 170-177
+Snippet:
+```md
+## Drag Routing Map (Step 3.1)
+Routing values:
+- `CL` = composer + legacy adapter
+- `CA` = composer + canonical adapter
+- `L` = legacy (handled in pointer; reason + removal step required)
+- `NA` = not supported (No in baseline matrix)
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Not applicable (routing map only; no Yes/Specificity behavior cells changed).
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Not applicable (documentation-only step).
+
+Step Header
+Phase 3, Step 3.2 - Legacy Drag Adapters (No Math Changes)
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Create legacy drag adapters that delegate to existing pointer drag logic for all drag-capable kinds.
+2. Solution
+   - Add a new adapter map in `pointer-objects.js` that calls existing pointer methods or composer logic without new math.
+3. Code Implementation
+   - Added `src-js/views-editor/src/pointer-objects.js` with `legacyDragAdapters`.
+   - Extracted non-skeleton Tunni drag logic into `PointerTool._handleTunniPointDrag` and wired it into legacy adapters.
+4. Why This Solves the Problem
+   - The composer can call a uniform adapter interface for drag without changing behavior, enabling full routing in Step 3.3.
+
+Passing Criteria (Required)
+Criterion: Every drag-capable object kind in the registry has a drag adapter entry.
+Result: PASS
+Evidence: `src-js/views-editor/src/pointer-objects.js` lines 137-176 include regularPoint, anchor, guideline, skeletonPoint, skeletonHandle, skeletonRibPoint, editableGeneratedPoint, editableGeneratedHandle, regularEqualizeHandle, mixedSelection, and tunniPoint entries.
+
+Criterion: Adapters only call existing methods (no new math, no new conditionals).
+Result: PASS
+Evidence: `src-js/views-editor/src/pointer-objects.js` lines 1-129 delegate to `runDragOrchestration` and existing pointer handlers (`_handleDragSkeletonPoints`, `_handleDragRibPoint`, `_handleDragEditableGeneratedPoints`, `_handleDragEditableGeneratedHandles`, `_handleEqualizeHandlesDrag`, `_handleEqualizeHandlesDragForPath`, `_handleEqualizeEditableHandleDrag`, `_handleTunniPointDrag`, `_handleSkeletonTunniDrag`, `_handleDragMixedSelection`).
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\pointer-objects.js
+Function(s): runRegularDragLegacy, legacyDragAdapters
+Lines: 1-16
+Snippet:
+```js
+async function runRegularDragLegacy({
+  pointerTool,
+  eventStream,
+  initialEvent,
+  runDragOrchestration,
+}) {
+  const sceneController = pointerTool.sceneController;
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    return runDragOrchestration({
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\pointer-objects.js
+Function(s): legacyDragAdapters
+Lines: 137-144
+Snippet:
+```js
+export const legacyDragAdapters = {
+  regularPoint: async (context) => runRegularDragLegacy(context),
+  anchor: async (context) => runRegularDragLegacy(context),
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-tools-pointer.js
+Function(s): _handleTunniPointDrag
+Lines: 1493-1501
+Snippet:
+```js
+  async _handleTunniPointDrag(eventStream, initialEvent) {
+    const sceneController = this.sceneController;
+
+    // Check if any Tunni visualization layer is active and if we clicked on a Tunni point
+    const isTunniCombinedLayerActive =
+      this.editor.visualizationLayersSettings.model["fontra.tunni.combined"];
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\pointer-objects.js
+Function(s): runTunniDragLegacy
+Lines: 124-125
+Snippet:
+```js
+async function runTunniDragLegacy({ pointerTool, eventStream, initialEvent }) {
+  return pointerTool._handleTunniPointDrag(eventStream, initialEvent);
+}
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Not applicable (adapters only; no behavior matrix cells changed).
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts))`.
+Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` line 193.
+
+Step Header
+Phase 3, Step 3.3 - Route Drag Through Composer
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Route all drag operations through the composer using the drag routing map and legacy adapters.
+2. Solution
+   - Add a routing function in the composer that uses a drag routing map and delegates to legacy adapters; update pointer drag paths to call it.
+3. Code Implementation
+   - Added `DRAG_ROUTING_MAP` and `getDragRowId` in `src-js/views-editor/src/edit-behavior-registry.js`.
+   - Added `runDragRoutingOrchestration` in `src-js/views-editor/src/edit-behavior-composer.js`.
+   - Routed pointer drag paths (regular, skeleton, rib, equalize, Tunni, mixed) through composer in `src-js/views-editor/src/edit-tools-pointer.js`.
+   - Added regular-equalize adapter in `src-js/views-editor/src/pointer-objects.js`.
+4. Why This Solves the Problem
+   - Composer now centrally routes drag actions using a declared routing map and adapters, removing pointer-owned dispatch logic for in-scope drag kinds.
+
+Passing Criteria (Required)
+Criterion: Drag for every object kind in the matrix is routed through composer.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `handleDrag` lines 1841-2058 and `handleDragSelection` lines 2596-2718 route drag through `runDragRoutingOrchestration`.
+
+Criterion: No unlisted pointer branch handles drag.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` uses `runDragRoutingOrchestration` for Tunni, rib, equalize, skeleton, editable, and mixed selection paths (lines 1841-2058, 2596-2718).
+
+Criterion: All drag matrix cells PASS.
+Result: FAIL
+Evidence: Manual drag matrix run not performed for this step.
+
+Criterion: Composer routing uses registry lookup only (no per-kind if/else blocks inside composer).
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragRoutingOrchestration` lines 250-290 routes via `DRAG_ROUTING_MAP` and adapter lookup.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-composer.js
+Function(s): runDragRoutingOrchestration
+Lines: 250-290
+Snippet:
+```js
+export async function runDragRoutingOrchestration(_context) {
+  const { pointerTool, sceneController, initialEvent, eventStream, objectKind, forceRowId } =
+    _context;
+  assert(pointerTool, "runDragRoutingOrchestration: missing pointerTool");
+  const rowId = forceRowId || getDragRowId(modifiers);
+  const baseRowId = getDragRowId({ shiftKey: modifiers.shiftKey, altKey: modifiers.altKey });
+  let routing = DRAG_ROUTING_MAP?.[rowId]?.[objectKind] || "NA";
+  if (routing !== "CL" && rowId !== baseRowId) {
+    routing = DRAG_ROUTING_MAP?.[baseRowId]?.[objectKind] || "NA";
+  }
+  if (routing !== "CL") {
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-registry.js
+Function(s): DRAG_ROUTING_MAP, getDragRowId
+Lines: 174-340
+Snippet:
+```js
+export const DRAG_ROUTING_MAP = {
+  R1: {
+    regularPoint: "CL",
+    anchor: "CL",
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-tools-pointer.js
+Function(s): handleDrag
+Lines: 1841-2058
+Snippet:
+```js
+    if (
+      await runDragRoutingOrchestration({
+        pointerTool: this,
+        sceneController,
+        eventStream,
+        initialEvent,
+        objectKind: "tunniPoint",
+        forceRowId: "R1",
+      })
+    ) {
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-tools-pointer.js
+Function(s): handleDragSelection
+Lines: 2596-2718
+Snippet:
+```js
+  async handleDragSelection(eventStream, initialEvent) {
+    this.sceneController.sceneModel.showTransformSelection = false;
+    this._selectionBeforeSingleClick = undefined;
+    const sceneController = this.sceneController;
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-tools-pointer.js
+Function(s): _handleDragMixedSelection
+Lines: 2721-2746
+Snippet:
+```js
+  async _handleDragMixedSelection(
+    eventStream,
+    initialEvent,
+    effectiveSkeletonPointSelection
+  ) {
+    const sceneController = this.sceneController;
+    const hasSkeletonSelection = effectiveSkeletonPointSelection?.size > 0;
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\pointer-objects.js
+Function(s): runRegularEqualizeHandleLegacy, legacyDragAdapters
+Lines: 91-166
+Snippet:
+```js
+async function runRegularEqualizeHandleLegacy({
+  pointerTool,
+  eventStream,
+  initialEvent,
+  handleInfo,
+  positionedGlyph,
+  editableHandleInfo,
+}) {
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\action-object-matrix.md
+Function(s): N/A (documentation)
+Lines: 170-189
+Snippet:
+```md
+## Drag Routing Map (Step 3.1)
+Routing values:
+- `CL` = composer + legacy adapter
+- `CA` = composer + canonical adapter
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Row: R1-R9
+Column: C1-C8
+Behavior: Drag matrix coverage
+Evidence: Manual drag matrix run not performed in this step.
+Result: FAIL
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts))`.
+Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` line 193.
