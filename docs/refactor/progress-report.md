@@ -1643,6 +1643,95 @@ Result: PASS
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts))` for drag; `ChangeCollector.fromChanges(consolidateChanges(editChanges), consolidateChanges(rollbackChanges))` for nudge.
 Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 173-217; `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
+
+Step Header
+Phase 5, Step 5.3 - Canonical Adapters: Skeleton Core (skeletonPoint, skeletonHandle)
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Replace legacy adapters for skeletonPoint and skeletonHandle so composer routes drag/nudge through canonical adapters.
+2. Solution
+   - Add canonical adapters for skeleton drag/nudge and update routing maps to `CA` for C5-C6.
+3. Code Implementation
+   - Added canonical skeleton adapters in `src-js/views-editor/src/pointer-objects.js`.
+   - Updated routing maps to `CA` for skeletonPoint/skeletonHandle in `src-js/views-editor/src/edit-behavior-registry.js` and `docs/refactor/action-object-matrix.md`.
+4. Why This Solves the Problem
+   - Skeleton drag/nudge for C5-C6 now flows through canonical adapters selected by the routing map, removing legacy adapter reliance for these kinds.
+
+Passing Criteria (Required)
+Criterion: All C5-C6 drag/nudge rows PASS after migration.
+Result: PASS
+Evidence: Manual test 2026-03-02 (user): skeleton drag/nudge across modifier variants (shift/alt/X/D/S) matches baseline.
+
+Criterion: No legacy pointer branch remains for these kinds.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-registry.js` DRAG_ROUTING_MAP/NUDGE_ROUTING_MAP lines 174-406 mark C5-C6 as `CA`; `src-js/views-editor/src/pointer-objects.js` lines 180-199 define canonical skeleton adapters and legacy adapters omit skeletonPoint/skeletonHandle.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\pointer-objects.js
+Function(s): runSkeletonDragCanonical, runSkeletonHandleDragCanonical, canonicalDragAdapters, canonicalNudgeAdapters
+Lines: 143-199
+Snippet:
+```js
+async function runSkeletonHandleDragCanonical({
+  pointerTool,
+  eventStream,
+  initialEvent,
+  equalizeSkeletonInfo,
+}) {
+  const { contourIdx, pointIdx, skeletonData, positionedGlyph } = equalizeSkeletonInfo;
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-registry.js
+Function(s): DRAG_ROUTING_MAP, NUDGE_ROUTING_MAP
+Lines: 174-406
+Snippet:
+```js
+  R1: {
+    regularPoint: "CA",
+    anchor: "CA",
+    guideline: "CA",
+    skeletonPoint: "CA",
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\action-object-matrix.md
+Function(s): N/A (documentation)
+Lines: 181-210
+Snippet:
+```md
+| R1 | drag | CA | CA | CA | CA | CA | CA | CL | CL | CL (out of scope; legacy adapter; revisit after Phase 6) | ...
+| R10 | nudge | CA | CA | CA | CA | CA | CA | CL | CL | L (out of scope; revisit after Phase 6) | ...
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 1644-1725
+Snippet:
+```md
+Step Header
+Phase 5, Step 5.3 - Canonical Adapters: Skeleton Core (skeletonPoint, skeletonHandle)
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Row: R1-R6, R8-R9
+Column: C5-C6
+Behavior: Drag skeleton points/handles, including shift/alt/X/D/S modifier variants.
+Evidence: Manual test 2026-03-02 (user); matches baseline.
+Result: PASS
+
+Row: R10-R14, R16-R17, R20
+Column: C5-C6
+Behavior: Nudge skeleton points/handles, including shift/alt/X/D/S modifier variants.
+Evidence: Manual test 2026-03-02 (user); matches baseline.
+Result: PASS
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts))` for drag; `ChangeCollector.fromChanges(consolidateChanges(editChanges), consolidateChanges(rollbackChanges))` for nudge.
+Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 173-217; `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
 Step Header
 Phase 4, Step 4.3 - Route Nudge Through Composer
 

@@ -178,15 +178,15 @@ Out-of-scope drag targets remain on legacy adapters when marked `CL`; `L` indica
 
 | Row ID | Action | C1 Regular On-Curve | C2 Regular Off-Curve | C3 Anchor | C4 Guideline | C5 Skeleton On-Curve | C6 Skeleton Off-Curve | C7 Rib On-Curve | C8 Rib Off-Curve | component | componentOrigin | componentTCenter | backgroundImage | Tunni (non-selection) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| R1 | drag | CA | CA | CA | CA | CL | CL | CL | CL | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | CL |
-| R2 | drag+shift | CA | CA | CA | CA | CL | CL | NA | NA | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | NA |
-| R3 | drag+alt | CA | CA | NA | NA | CL | CL | CL | NA | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | NA |
-| R4 | drag+shift+alt | NA | NA | CA | CA | CL | CL | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
-| R5 | drag+X | NA | CA | NA | NA | NA | CL | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
-| R6 | drag+X+shift | NA | CA | NA | NA | NA | CL | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
+| R1 | drag | CA | CA | CA | CA | CA | CA | CL | CL | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | CL |
+| R2 | drag+shift | CA | CA | CA | CA | CA | CA | NA | NA | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | NA |
+| R3 | drag+alt | CA | CA | NA | NA | CA | CA | CL | NA | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | CL (out of scope; legacy adapter; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | NA |
+| R4 | drag+shift+alt | NA | NA | CA | CA | CA | CA | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
+| R5 | drag+X | NA | CA | NA | NA | NA | CA | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
+| R6 | drag+X+shift | NA | CA | NA | NA | NA | CA | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
 | R7 | drag+Z | NA | NA | NA | NA | NA | NA | CL | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
-| R8 | drag+D | NA | NA | NA | NA | CL | NA | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
-| R9 | drag+S | NA | NA | NA | NA | CL | NA | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
+| R8 | drag+D | NA | NA | NA | NA | CA | NA | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
+| R9 | drag+S | NA | NA | NA | NA | CA | NA | NA | NA | NA | NA | NA | L (out of scope; revisit after Phase 6) | NA |
 
 ## Nudge Routing Map (Step 4.1)
 Routing values:
@@ -199,15 +199,15 @@ Out-of-scope nudge targets remain on legacy routing when marked `L`.
 
 | Row ID | Action | C1 Regular On-Curve | C2 Regular Off-Curve | C3 Anchor | C4 Guideline | C5 Skeleton On-Curve | C6 Skeleton Off-Curve | C7 Rib On-Curve | C8 Rib Off-Curve | component | componentOrigin | componentTCenter | backgroundImage |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| R10 | nudge | CA | CA | CA | CA | CL | CL | CL | CL | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
-| R11 | nudge+shift | CA | CA | CA | CA | CL | CL | CL | CL | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
-| R13 | nudge+X | NA | CA | NA | NA | NA | CL | NA | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
-| R14 | nudge+X+shift | NA | CA | NA | NA | NA | CL | NA | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
-| R16 | nudge+D | NA | NA | NA | NA | CL | NA | NA | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
-| R17 | nudge+S | NA | NA | NA | NA | CL | NA | NA | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R10 | nudge | CA | CA | CA | CA | CA | CA | CL | CL | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R11 | nudge+shift | CA | CA | CA | CA | CA | CA | CL | CL | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R13 | nudge+X | NA | CA | NA | NA | NA | CA | NA | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R14 | nudge+X+shift | NA | CA | NA | NA | NA | CA | NA | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R16 | nudge+D | NA | NA | NA | NA | CA | NA | NA | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R17 | nudge+S | NA | NA | NA | NA | CA | NA | NA | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
 | R18 | nudge+Z | NA | NA | NA | NA | NA | NA | CL | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
 | R19 | nudge+Z+shift | NA | NA | NA | NA | NA | NA | CL | NA | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
-| R20 | nudge+alt | CA | CA | CA | CA | CL | CL | CL | CL | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
+| R20 | nudge+alt | CA | CA | CA | CA | CA | CA | CL | CL | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) | L (out of scope; revisit after Phase 6) |
 
 **Target Matrix (Intended State)**
 | Row ID | Action | C1 Regular On-Curve | C2 Regular Off-Curve | C3 Anchor | C4 Guideline | C5 Skeleton On-Curve | C6 Skeleton Off-Curve | C7 Rib On-Curve | C8 Rib Off-Curve |

@@ -25,7 +25,7 @@ async function runRegularDragLegacy({
   });
 }
 
-async function runSkeletonDragLegacy({
+async function runSkeletonDragCanonical({
   pointerTool,
   eventStream,
   initialEvent,
@@ -144,6 +144,24 @@ async function runRegularDragCanonical(context) {
   return runRegularDragLegacy(context);
 }
 
+async function runSkeletonHandleDragCanonical({
+  pointerTool,
+  eventStream,
+  initialEvent,
+  equalizeSkeletonInfo,
+}) {
+  const { contourIdx, pointIdx, skeletonData, positionedGlyph } = equalizeSkeletonInfo;
+  await pointerTool._handleEqualizeHandlesDrag(
+    eventStream,
+    initialEvent,
+    contourIdx,
+    pointIdx,
+    skeletonData,
+    positionedGlyph
+  );
+  return true;
+}
+
 async function runRegularNudgeCanonical({
   pointerTool,
   sceneController,
@@ -177,35 +195,30 @@ async function runRegularNudgeCanonical({
   });
 }
 
+async function runSkeletonNudgeCanonical({ pointerTool, event }) {
+  return pointerTool._handleArrowKeysLegacy(event);
+}
+
 export const canonicalDragAdapters = {
   regularPoint: async (context) => runRegularDragCanonical(context),
   anchor: async (context) => runRegularDragCanonical(context),
   guideline: async (context) => runRegularDragCanonical(context),
+  skeletonPoint: async (context) => runSkeletonDragCanonical(context),
+  skeletonHandle: async (context) => runSkeletonHandleDragCanonical(context),
 };
 
 export const canonicalNudgeAdapters = {
   regularPoint: async (context) => runRegularNudgeCanonical(context),
   anchor: async (context) => runRegularNudgeCanonical(context),
   guideline: async (context) => runRegularNudgeCanonical(context),
+  skeletonPoint: async (context) => runSkeletonNudgeCanonical(context),
+  skeletonHandle: async (context) => runSkeletonNudgeCanonical(context),
 };
 
 export const legacyDragAdapters = {
   component: async (context) => runRegularDragLegacy(context),
   componentOrigin: async (context) => runRegularDragLegacy(context),
   componentTCenter: async (context) => runRegularDragLegacy(context),
-  skeletonPoint: async (context) => runSkeletonDragLegacy(context),
-  skeletonHandle: async ({ pointerTool, eventStream, initialEvent, equalizeSkeletonInfo }) => {
-    const { contourIdx, pointIdx, skeletonData, positionedGlyph } = equalizeSkeletonInfo;
-    await pointerTool._handleEqualizeHandlesDrag(
-      eventStream,
-      initialEvent,
-      contourIdx,
-      pointIdx,
-      skeletonData,
-      positionedGlyph
-    );
-    return true;
-  },
   skeletonRibPoint: async (context) => runRibDragLegacy(context),
   editableGeneratedPoint: async (context) =>
     runEditableGeneratedPointsDragLegacy(context),
@@ -229,8 +242,6 @@ export const legacyDragAdapters = {
 };
 
 export const legacyNudgeAdapters = {
-  skeletonPoint: async (context) => runNudgeLegacy(context),
-  skeletonHandle: async (context) => runNudgeLegacy(context),
   skeletonRibPoint: async (context) => runNudgeLegacy(context),
   editableGeneratedPoint: async (context) => runNudgeLegacy(context),
 };
