@@ -135,7 +135,7 @@ async function runSkeletonTunniDragLegacy({
 }
 
 async function runNudgeLegacy({ pointerTool, event }) {
-  return pointerTool.handleArrowKeys(event);
+  return pointerTool._handleArrowKeysLegacy(event);
 }
 
 export const legacyDragAdapters = {

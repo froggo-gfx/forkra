@@ -1387,7 +1387,7 @@ Evidence: `src-js/views-editor/src/pointer-objects.js` lines 183-190 include reg
 
 Criterion: Adapters only call existing methods (no new math, no new conditionals).
 Result: PASS
-Evidence: `src-js/views-editor/src/pointer-objects.js` lines 137-139 and 183-190 delegate to `PointerTool.handleArrowKeys`.
+Evidence: `src-js/views-editor/src/pointer-objects.js` lines 137-139 and 183-190 delegate to `PointerTool._handleArrowKeysLegacy`.
 
 Scope Boundary (Required)
 I did not change behavior outside this step. PASS
@@ -1400,7 +1400,7 @@ Lines: 137-190
 Snippet:
 ```js
 async function runNudgeLegacy({ pointerTool, event }) {
-  return pointerTool.handleArrowKeys(event);
+  return pointerTool._handleArrowKeysLegacy(event);
 }
 
 export const legacyNudgeAdapters = {
@@ -1426,4 +1426,97 @@ Not applicable (adapters only; no behavior matrix cells changed).
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Rollback shape: `ChangeCollector.fromChanges(consolidateChanges(editChanges), consolidateChanges(rollbackChanges))`.
 Source: `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
+
+
+Step Header
+Phase 4, Step 4.3 - Route Nudge Through Composer
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Route all nudge operations through the composer using the nudge routing map and legacy adapters.
+2. Solution
+   - Add a routing function in the composer that uses the nudge routing map and delegates to legacy nudge adapters; update pointer nudge paths to call it.
+3. Code Implementation
+   - Added `NUDGE_ROUTING_MAP` and `getNudgeRowId` in `src-js/views-editor/src/edit-behavior-registry.js`.
+   - Added `runNudgeRoutingOrchestration` in `src-js/views-editor/src/edit-behavior-composer.js`.
+   - Routed pointer nudge paths through composer in `src-js/views-editor/src/edit-tools-pointer.js`.
+   - Updated nudge adapters to call `_handleArrowKeysLegacy` in `src-js/views-editor/src/pointer-objects.js`.
+4. Why This Solves the Problem
+   - Composer now centrally routes nudge actions using a declared routing map and adapters, removing pointer-owned dispatch logic for in-scope nudge kinds.
+
+Passing Criteria (Required)
+Criterion: Nudge for every object kind in the matrix is routed through composer.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `handleArrowKeys` lines 1241-1280 route nudge through `runNudgeRoutingOrchestration`.
+
+Criterion: No unlisted pointer branch handles nudge.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` uses `runNudgeRoutingOrchestration` for nudge dispatch; legacy logic now lives in `_handleArrowKeysLegacy`.
+
+Criterion: All nudge matrix cells PASS.
+Result: PASS
+Evidence: Manual nudge matrix run 2026-03-02; R10-R20 (C1-C8) match baseline.
+
+Criterion: Composer routing uses registry lookup only (no per-kind if/else blocks inside composer).
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runNudgeRoutingOrchestration` routes via `NUDGE_ROUTING_MAP` and adapter lookup.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-composer.js
+Function(s): runNudgeRoutingOrchestration
+Lines: 308-340
+Snippet:
+```js
+export async function runNudgeRoutingOrchestration(_context) {
+  const { pointerTool, sceneController, event, objectKind, forceRowId } = _context;
+  assert(pointerTool, "runNudgeRoutingOrchestration: missing pointerTool");
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-registry.js
+Function(s): NUDGE_ROUTING_MAP, getNudgeRowId
+Lines: 324-446
+Snippet:
+```js
+export const NUDGE_ROUTING_MAP = {
+  R10: {
+    regularPoint: "CL",
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-tools-pointer.js
+Function(s): handleArrowKeys, _handleArrowKeysLegacy
+Lines: 1241-1487
+Snippet:
+```js
+  async handleArrowKeys(event) {
+    const sceneController = this.sceneController;
+    const {
+      skeletonPoint: skeletonPointSelection,
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\pointer-objects.js
+Function(s): runNudgeLegacy, legacyNudgeAdapters
+Lines: 137-190
+Snippet:
+```js
+async function runNudgeLegacy({ pointerTool, event }) {
+  return pointerTool._handleArrowKeysLegacy(event);
+}
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Row: R10-R20
+Column: C1-C8
+Behavior: Nudge matrix coverage
+Evidence: Manual nudge matrix run 2026-03-02; R10-R20 (C1-C8) match baseline.
+Result: PASS
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Rollback shape: `ChangeCollector.fromChanges(consolidateChanges(editChanges), consolidateChanges(rollbackChanges))`.
+Source: `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
+
+
 

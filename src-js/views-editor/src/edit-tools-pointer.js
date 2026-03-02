@@ -50,6 +50,7 @@ import {
 import {
   runDragRoutingOrchestration,
   runNudgeOrchestration,
+  runNudgeRoutingOrchestration,
 } from "./edit-behavior-composer.js";
 import {
   createSkeletonEditBehavior,
@@ -1238,6 +1239,48 @@ export class PointerTool extends BaseTool {
    * Falls back to default handler for regular path points.
    */
   async handleArrowKeys(event) {
+    const sceneController = this.sceneController;
+    const {
+      skeletonPoint: skeletonPointSelection,
+      skeletonRibPoint: ribPointSelection,
+      point: regularPointSelection,
+      anchor: anchorSelection,
+      guideline: guidelineSelection,
+    } = parseSelection(sceneController.selection);
+
+    const hasSkeletonPoints = skeletonPointSelection?.size > 0;
+    const hasRibPoints = ribPointSelection?.size > 0;
+    const hasRegularPoints = regularPointSelection?.length > 0;
+    const hasAnchors = anchorSelection?.length > 0;
+    const hasGuidelines = guidelineSelection?.length > 0;
+
+    let objectKind = "regularPoint";
+    if (hasSkeletonPoints) {
+      objectKind = this.equalizeMode ? "skeletonHandle" : "skeletonPoint";
+    } else if (hasRibPoints) {
+      objectKind = "skeletonRibPoint";
+    } else if (hasRegularPoints) {
+      const editableHandles = this._getEditableGeneratedHandlesFromSelection(
+        regularPointSelection
+      );
+      if (editableHandles.length > 0) {
+        objectKind = "editableGeneratedPoint";
+      }
+    } else if (hasAnchors) {
+      objectKind = "anchor";
+    } else if (hasGuidelines) {
+      objectKind = "guideline";
+    }
+
+    return runNudgeRoutingOrchestration({
+      pointerTool: this,
+      sceneController,
+      event,
+      objectKind,
+    });
+  }
+
+  async _handleArrowKeysLegacy(event) {
     const sceneController = this.sceneController;
 
     // Check if we have skeleton points, rib points, and/or regular points selected

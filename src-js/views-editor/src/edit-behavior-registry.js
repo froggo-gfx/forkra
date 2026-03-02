@@ -321,6 +321,91 @@ export const DRAG_ROUTING_MAP = {
   },
 };
 
+// Nudge routing map (Phase 4.3): rowId + objectKind -> routing value.
+export const NUDGE_ROUTING_MAP = {
+  R10: {
+    regularPoint: "CL",
+    anchor: "CL",
+    guideline: "CL",
+    skeletonPoint: "CL",
+    skeletonHandle: "NA",
+    skeletonRibPoint: "CL",
+    editableGeneratedPoint: "CL",
+  },
+  R11: {
+    regularPoint: "CL",
+    anchor: "CL",
+    guideline: "CL",
+    skeletonPoint: "CL",
+    skeletonHandle: "NA",
+    skeletonRibPoint: "CL",
+    editableGeneratedPoint: "CL",
+  },
+  R13: {
+    regularPoint: "CL",
+    anchor: "NA",
+    guideline: "NA",
+    skeletonPoint: "NA",
+    skeletonHandle: "CL",
+    skeletonRibPoint: "NA",
+    editableGeneratedPoint: "NA",
+  },
+  R14: {
+    regularPoint: "CL",
+    anchor: "NA",
+    guideline: "NA",
+    skeletonPoint: "NA",
+    skeletonHandle: "CL",
+    skeletonRibPoint: "NA",
+    editableGeneratedPoint: "NA",
+  },
+  R16: {
+    regularPoint: "NA",
+    anchor: "NA",
+    guideline: "NA",
+    skeletonPoint: "CL",
+    skeletonHandle: "NA",
+    skeletonRibPoint: "NA",
+    editableGeneratedPoint: "NA",
+  },
+  R17: {
+    regularPoint: "NA",
+    anchor: "NA",
+    guideline: "NA",
+    skeletonPoint: "CL",
+    skeletonHandle: "NA",
+    skeletonRibPoint: "NA",
+    editableGeneratedPoint: "NA",
+  },
+  R18: {
+    regularPoint: "NA",
+    anchor: "NA",
+    guideline: "NA",
+    skeletonPoint: "NA",
+    skeletonHandle: "NA",
+    skeletonRibPoint: "CL",
+    editableGeneratedPoint: "NA",
+  },
+  R19: {
+    regularPoint: "NA",
+    anchor: "NA",
+    guideline: "NA",
+    skeletonPoint: "NA",
+    skeletonHandle: "NA",
+    skeletonRibPoint: "CL",
+    editableGeneratedPoint: "NA",
+  },
+  R20: {
+    regularPoint: "CL",
+    anchor: "CL",
+    guideline: "CL",
+    skeletonPoint: "CL",
+    skeletonHandle: "NA",
+    skeletonRibPoint: "CL",
+    editableGeneratedPoint: "CL",
+  },
+};
+
 export function getDragRowId(modifiers) {
   const {
     shiftKey,
@@ -339,4 +424,23 @@ export function getDragRowId(modifiers) {
   if (altKey) return "R3";
   if (shiftKey) return "R2";
   return "R1";
+}
+
+export function getNudgeRowId(modifiers) {
+  const {
+    shiftKey,
+    altKey,
+    equalizeMode,
+    tangentRibMode,
+    fixedRibMode,
+    fixedRibCompressMode,
+  } = modifiers || {};
+
+  if (tangentRibMode) return shiftKey ? "R19" : "R18";
+  if (fixedRibCompressMode) return "R17";
+  if (fixedRibMode) return "R16";
+  if (equalizeMode) return shiftKey ? "R14" : "R13";
+  if (altKey) return "R20";
+  if (shiftKey) return "R11";
+  return "R10";
 }

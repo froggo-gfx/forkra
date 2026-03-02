@@ -8,8 +8,14 @@ import {
   findEqualizeHandleForPath,
   makeEqualizeDragChanges,
 } from "./edit-behavior.js";
-import { DRAG_ROUTING_MAP, getDragRowId } from "./edit-behavior-registry.js";
+import {
+  DRAG_ROUTING_MAP,
+  getDragRowId,
+  NUDGE_ROUTING_MAP,
+  getNudgeRowId,
+} from "./edit-behavior-registry.js";
 import { legacyDragAdapters } from "./pointer-objects.js";
+import { legacyNudgeAdapters } from "./pointer-objects.js";
 
 // Composer entry points (uniform orchestration).
 // Phase 2: regular drag is routed here; other object kinds remain on legacy paths.
@@ -287,6 +293,51 @@ export async function runDragRoutingOrchestration(_context) {
     runDragOrchestration,
   });
 
+  return adapterResult !== false;
+}
+
+/**
+ * Orchestrate nudge edits through routing map + adapters.
+ * Required context fields:
+ * - pointerTool
+ * - sceneController
+ * - event
+ * - objectKind
+ * @returns {Promise<boolean>} handled
+ */
+export async function runNudgeRoutingOrchestration(_context) {
+  const { pointerTool, sceneController, event, objectKind, forceRowId } = _context;
+  assert(pointerTool, "runNudgeRoutingOrchestration: missing pointerTool");
+  assert(sceneController, "runNudgeRoutingOrchestration: missing sceneController");
+  assert(event, "runNudgeRoutingOrchestration: missing event");
+  assert(objectKind, "runNudgeRoutingOrchestration: missing objectKind");
+
+  const modifiers = {
+    shiftKey: event.shiftKey,
+    altKey: event.altKey,
+    equalizeMode: pointerTool.equalizeMode,
+    tangentRibMode: pointerTool.tangentRibMode,
+    fixedRibMode: pointerTool.fixedRibMode,
+    fixedRibCompressMode: pointerTool.fixedRibCompressMode,
+  };
+
+  const rowId = forceRowId || getNudgeRowId(modifiers);
+  const baseRowId = getNudgeRowId({
+    shiftKey: modifiers.shiftKey,
+    altKey: modifiers.altKey,
+  });
+  let routing = NUDGE_ROUTING_MAP?.[rowId]?.[objectKind] || "NA";
+  if (routing !== "CL" && rowId !== baseRowId) {
+    routing = NUDGE_ROUTING_MAP?.[baseRowId]?.[objectKind] || "NA";
+  }
+  if (routing !== "CL") {
+    return false;
+  }
+
+  const adapter = legacyNudgeAdapters[objectKind];
+  assert(adapter, `runNudgeRoutingOrchestration: missing adapter for ${objectKind}`);
+
+  const adapterResult = await adapter(_context);
   return adapterResult !== false;
 }
 
