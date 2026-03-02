@@ -4600,6 +4600,9 @@ export class PointerTool extends BaseTool {
       dy *= 10;
     }
     const delta = { x: dx, y: dy };
+    const useTangentConstraint = this.tangentRibMode;
+    const useInterpolation = event.altKey;
+    const constrainMode = useTangentConstraint ? "tangent" : null;
 
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const allChanges = [];
@@ -4622,8 +4625,7 @@ export class PointerTool extends BaseTool {
           const point = contour.points[pointIndex];
           if (point.type) continue;
 
-            if (isEditable) {
-              // Use EditableRibBehavior for editable ribs
+          if (isEditable) {
               const ribHit = {
                 contourIndex,
                 pointIndex,
@@ -4631,8 +4633,53 @@ export class PointerTool extends BaseTool {
                 normal,
                 onCurvePoint: point,
               };
-              const behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
-              const change = behavior.applyDelta(delta, null);
+              let behavior;
+              if (useInterpolation) {
+                const baseContour = originalSkeletonData.contours?.[contourIndex];
+                const basePoint = baseContour?.points?.[pointIndex];
+                const interpolationAxis = basePoint
+                  ? this._findHandlesForRibPointFromSkeleton(
+                      layer.glyph.path,
+                      basePoint,
+                      normal,
+                      baseContour,
+                      side
+                    )
+                  : null;
+                if (interpolationAxis) {
+                  behavior = createInterpolatingRibBehavior(
+                    originalSkeletonData,
+                    ribHit,
+                    interpolationAxis
+                  );
+                } else {
+                  behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
+                }
+                if (baseContour?.singleSided && basePoint) {
+                  const contourDefaultWidth =
+                    baseContour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+                  const leftHW = getPointHalfWidth(
+                    basePoint,
+                    contourDefaultWidth,
+                    "left"
+                  );
+                  const rightHW = getPointHalfWidth(
+                    basePoint,
+                    contourDefaultWidth,
+                    "right"
+                  );
+                  const totalWidth = leftHW + rightHW;
+                  if (behavior.setOriginalHalfWidth) {
+                    behavior.setOriginalHalfWidth(totalWidth);
+                  } else {
+                    behavior.originalHalfWidth = totalWidth;
+                  }
+                  behavior.minHalfWidth = 2;
+                }
+              } else {
+                behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
+              }
+              const change = behavior.applyDelta(delta, constrainMode);
 
               const baseContour = originalSkeletonData.contours[contourIndex];
               const basePoint = baseContour?.points[pointIndex];
@@ -4683,7 +4730,7 @@ export class PointerTool extends BaseTool {
               onCurvePoint: point,
             };
               const behavior = createRibEditBehavior(originalSkeletonData, ribHit);
-              const change = behavior.applyDelta(delta);
+              const change = behavior.applyDelta(delta, constrainMode);
 
               const baseContour = originalSkeletonData.contours[contourIndex];
               const basePoint = baseContour?.points[pointIndex];

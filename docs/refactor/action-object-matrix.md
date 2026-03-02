@@ -29,6 +29,9 @@ Tag meaning: [in-scope] = current refactor scope (drag/nudge pipeline and their 
 - [in-scope] Nudge + X (equalize handles mode). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1254-1261; lines 1410-1424.
 - [in-scope] Nudge + X + Shift (equalize + constrain). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1410-1417; lines 1254-1261.
 - [in-scope] Nudge + X + Shift+Ctrl/Meta (equalize + 100x). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1410-1414; lines 1254-1261.
+- [in-scope] Nudge + Z (rib tangent constraint). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4593-4683.
+- [in-scope] Nudge + Z + Shift (rib tangent 10x). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4593-4605.
+- [in-scope] Nudge + Alt (alternate behavior / rib interpolation). Evidence: `src-js/views-editor/src/scene-controller.js` `SceneController.handleArrowKeys` lines 949-979; `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1321-1327; `PointerTool._handleArrowKeysForRibPoints` lines 4603-4660.
 - [in-scope] Nudge + D/S (fixed rib / compress). Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1280-1307.
 
 **Registered Actions (editor.js)**
@@ -140,6 +143,9 @@ Tag meaning: Yes = handled directly by the `edit-behavior.js` behavior table. No
 | R15 | nudge+X+shift+ctrl/meta | equalize + 100x |
 | R16 | nudge+D | fixed rib |
 | R17 | nudge+S | fixed rib compress |
+| R18 | nudge+Z | rib tangent |
+| R19 | nudge+Z+shift | rib tangent + 10x |
+| R20 | nudge+alt | alternate / rib interpolation |
 
 **Matrix (Yes/No/Specificity)**
 | Row ID | Action | C1 Regular On-Curve | C2 Regular Off-Curve | C3 Anchor | C4 Guideline | C5 Skeleton On-Curve | C6 Skeleton Off-Curve | C7 Rib On-Curve | C8 Rib Off-Curve |
@@ -161,6 +167,9 @@ Tag meaning: Yes = handled directly by the `edit-behavior.js` behavior table. No
 | R15 | nudge+X+shift+ctrl/meta | No | Specificity | No | No | No | Specificity | No | No |
 | R16 | nudge+D | No | No | No | No | Specificity | No | No | No |
 | R17 | nudge+S | No | No | No | No | Specificity | No | No | No |
+| R18 | nudge+Z | No | No | No | No | No | No | Specificity | No |
+| R19 | nudge+Z+shift | No | No | No | No | No | No | Specificity | No |
+| R20 | nudge+alt | Yes | Yes | Yes | Yes | Specificity | Specificity | Specificity | Specificity |
 
 **Target Matrix (Intended State)**
 | Row ID | Action | C1 Regular On-Curve | C2 Regular Off-Curve | C3 Anchor | C4 Guideline | C5 Skeleton On-Curve | C6 Skeleton Off-Curve | C7 Rib On-Curve | C8 Rib Off-Curve |
@@ -182,6 +191,9 @@ Tag meaning: Yes = handled directly by the `edit-behavior.js` behavior table. No
 | R15 | nudge+X+shift+ctrl/meta | No | Specificity | No | No | No | Specificity | No | No |
 | R16 | nudge+D | No | No | No | No | Specificity | No | No | No |
 | R17 | nudge+S | No | No | No | No | Specificity | No | No | No |
+| R18 | nudge+Z | No | No | No | No | No | No | Specificity | No |
+| R19 | nudge+Z+shift | No | No | No | No | No | No | Specificity | No |
+| R20 | nudge+alt | Yes | Yes | Yes | Yes | Yes | Yes | Specificity | Specificity |
 
 **Delta vs Baseline**
 - R1/C5-C6: Baseline = Specificity. Intended = Yes (skeleton drag should use the shared behavior table).
@@ -191,6 +203,7 @@ Tag meaning: Yes = handled directly by the `edit-behavior.js` behavior table. No
 - R10/C5-C6: Baseline = Specificity. Intended = Yes (skeleton nudge should use the shared behavior table).
 - R11/C5-C6: Baseline = Specificity. Intended = Yes (skeleton nudge+shift should use the shared behavior table).
 - R12/C5-C6: Baseline = Specificity. Intended = Yes (skeleton nudge+shift+ctrl/meta should use the shared behavior table).
+- R20/C5-C6: Baseline = Specificity. Intended = Yes (skeleton nudge+alt should use the shared behavior table).
 **Yes/Specificity Intersections (list all entries below the matrix)**
 Each entry must include: Row ID(s), Column ID(s), plain language description, code snippet (5-10 lines), file/function + exact line numbers, and PASS/FAIL.
 If behavior is identical across multiple columns, list them together (e.g., C1-C2).
@@ -1020,6 +1033,134 @@ if (clickedSkeletonPoint) {
       anchorToDragSide: this.fixedRibCompressMode,
 ```
 Result: FAIL (not tested)
+
+R18/C7 (rib on-curve, nudge+Z) - Specificity  
+Behavior: Tangent rib mode constrains editable rib nudges to the tangent direction (nudge only).  
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4603-4683.  
+Snippet:
+```js
+const useTangentConstraint = this.tangentRibMode;
+const constrainMode = useTangentConstraint ? "tangent" : null;
+...
+const change = behavior.applyDelta(delta, constrainMode);
+```
+Result: PASS (manual test 2026-03-02)
+
+R19/C7 (rib on-curve, nudge+Z+shift) - Specificity  
+Behavior: Tangent rib nudge uses the 10x delta when Shift is held.  
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4593-4605.  
+Snippet:
+```js
+let [dx, dy] = arrowKeyDeltas[event.key];
+if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
+  dx *= 100;
+  dy *= 100;
+} else if (event.shiftKey) {
+  dx *= 10;
+  dy *= 10;
+}
+```
+Result: PASS (manual test 2026-03-02)
+
+R20/C1 (regular on-curve, nudge+alt) - Yes  
+Behavior: Alt uses the alternate behavior preset for regular points during nudge.  
+Evidence: `src-js/views-editor/src/scene-controller.js` `SceneController.handleArrowKeys` lines 949-979.  
+Snippet:
+```js
+editBehavior: behaviorFactory.getBehavior(
+  event.altKey ? "alternate" : "default"
+),
+```
+Result: PASS (manual test 2026-03-02)
+
+R20/C2 (regular off-curve, nudge+alt) - Yes  
+Behavior: Alt uses the alternate behavior preset for regular off-curve points during nudge.  
+Evidence: `src-js/views-editor/src/scene-controller.js` `SceneController.handleArrowKeys` lines 949-979.  
+Snippet:
+```js
+editBehavior: behaviorFactory.getBehavior(
+  event.altKey ? "alternate" : "default"
+),
+```
+Result: PASS (manual test 2026-03-02)
+
+R20/C3 (anchor, nudge+alt) - Yes  
+Behavior: Alt uses the alternate behavior preset for anchors during nudge.  
+Evidence: `src-js/views-editor/src/scene-controller.js` `SceneController.handleArrowKeys` lines 949-979.  
+Snippet:
+```js
+editBehavior: behaviorFactory.getBehavior(
+  event.altKey ? "alternate" : "default"
+),
+```
+Result: PASS (manual test 2026-03-02)
+
+R20/C4 (guideline, nudge+alt) - Yes  
+Behavior: Alt uses the alternate behavior preset for guidelines during nudge.  
+Evidence: `src-js/views-editor/src/scene-controller.js` `SceneController.handleArrowKeys` lines 949-979.  
+Snippet:
+```js
+editBehavior: behaviorFactory.getBehavior(
+  event.altKey ? "alternate" : "default"
+),
+```
+Result: PASS (manual test 2026-03-02)
+
+R20/C5 (skeleton on-curve, nudge+alt) - Specificity  
+Behavior: Skeleton nudge uses alternate skeleton behavior when Alt is held.  
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1321-1327.  
+Snippet:
+```js
+const behaviorName = getSkeletonBehaviorName(false, event.altKey);
+const behaviors = createSkeletonEditBehavior(
+  originalSkeletonData,
+  skeletonPointSelection,
+  behaviorName
+);
+```
+Result: PASS (manual test 2026-03-02)
+
+R20/C6 (skeleton off-curve, nudge+alt) - Specificity  
+Behavior: Skeleton off-curve nudge uses alternate skeleton behavior when Alt is held.  
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool.handleArrowKeys` lines 1321-1327.  
+Snippet:
+```js
+const behaviorName = getSkeletonBehaviorName(false, event.altKey);
+const behaviors = createSkeletonEditBehavior(
+  originalSkeletonData,
+  skeletonPointSelection,
+  behaviorName
+);
+```
+Result: PASS (manual test 2026-03-02)
+
+R20/C7 (rib on-curve, nudge+alt) - Specificity  
+Behavior: Alt engages interpolation behavior for editable ribs (falls back to editable if no axis).  
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForRibPoints` lines 4603-4660.  
+Snippet:
+```js
+const useInterpolation = event.altKey;
+...
+if (interpolationAxis) {
+  behavior = createInterpolatingRibBehavior(
+    originalSkeletonData,
+    ribHit,
+    interpolationAxis
+  );
+}
+```
+Result: PASS (manual test 2026-03-02)
+
+R20/C8 (rib off-curve, nudge+alt) - Specificity  
+Behavior: Editable generated handle nudge remains constrained to the skeleton handle direction (alt does not change behavior).  
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `PointerTool._handleArrowKeysForEditableHandles` lines 4352-4410.  
+Snippet:
+```js
+const change = behavior.applyDelta(delta);
+...
+point[offsetKey] = change.offset;
+```
+Result: PASS (manual test 2026-03-02)
 
 
 

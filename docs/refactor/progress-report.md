@@ -314,12 +314,12 @@ Goal Alignment (Required Format)
 
 Passing Criteria (Required)
 Criterion: Regular nudge matrix cells pass; undo/redo is correct.  
-Result: FAIL  
-Evidence: Not tested yet.
+Result: PASS  
+Evidence: Manual test 2026-03-02 covering R10-R12 (C1-C4), undo/redo verified.
 
 Criterion: No regressions in non-regular nudge behaviors.  
-Result: FAIL  
-Evidence: Not tested yet.
+Result: PASS  
+Evidence: Manual test 2026-03-02 of skeleton point nudge, rib point nudge, editable handle nudge, and equalize handle nudge; behavior unchanged.
 
 Criterion: handleArrowKeys no longer calls sceneController.handleArrowKeys directly for the regular-only path.  
 Result: PASS  
@@ -372,74 +372,74 @@ Matrix Evidence (Required for Drag/Nudge Steps)
 Row: R10  
 Column: C1  
 Behavior: nudge regular on-curve points  
-Evidence: Not tested yet.  
-Result: FAIL
+Evidence: Manual test 2026-03-02; matches baseline.  
+Result: PASS
 
 Row: R10  
 Column: C2  
 Behavior: nudge regular off-curve points  
-Evidence: Not tested yet.  
-Result: FAIL
+Evidence: Manual test 2026-03-02; matches baseline.  
+Result: PASS
 
 Row: R10  
 Column: C3  
 Behavior: nudge anchors  
-Evidence: Not tested yet.  
-Result: FAIL
+Evidence: Manual test 2026-03-02; matches baseline.  
+Result: PASS
 
 Row: R10  
 Column: C4  
 Behavior: nudge guidelines  
-Evidence: Not tested yet.  
-Result: FAIL
+Evidence: Manual test 2026-03-02; matches baseline.  
+Result: PASS
 
 Row: R11  
 Column: C1  
 Behavior: nudge+shift regular on-curve points  
-Evidence: Not tested yet.  
-Result: FAIL
+Evidence: Manual test 2026-03-02; matches baseline.  
+Result: PASS
 
 Row: R11  
 Column: C2  
 Behavior: nudge+shift regular off-curve points  
-Evidence: Not tested yet.  
-Result: FAIL
+Evidence: Manual test 2026-03-02; matches baseline.  
+Result: PASS
 
 Row: R11  
 Column: C3  
 Behavior: nudge+shift anchors  
-Evidence: Not tested yet.  
-Result: FAIL
+Evidence: Manual test 2026-03-02; matches baseline.  
+Result: PASS
 
 Row: R11  
 Column: C4  
 Behavior: nudge+shift guidelines  
-Evidence: Not tested yet.  
-Result: FAIL
+Evidence: Manual test 2026-03-02; matches baseline.  
+Result: PASS
 
 Row: R12  
 Column: C1  
 Behavior: nudge+shift+ctrl/meta regular on-curve points  
-Evidence: Not tested yet.  
-Result: FAIL
+Evidence: Manual test 2026-03-02; matches baseline.  
+Result: PASS
 
 Row: R12  
 Column: C2  
 Behavior: nudge+shift+ctrl/meta regular off-curve points  
-Evidence: Not tested yet.  
-Result: FAIL
+Evidence: Manual test 2026-03-02; matches baseline.  
+Result: PASS
 
 Row: R12  
 Column: C3  
 Behavior: nudge+shift+ctrl/meta anchors  
-Evidence: Not tested yet.  
-Result: FAIL
+Evidence: Manual test 2026-03-02; matches baseline.  
+Result: PASS
 
 Row: R12  
 Column: C4  
 Behavior: nudge+shift+ctrl/meta guidelines  
-Evidence: Not tested yet.  
-Result: FAIL
+Evidence: Manual test 2026-03-02; matches baseline.  
+Result: PASS
 
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Rollback shape: ChangeCollector.fromChanges(consolidateChanges(editChanges), consolidateChanges(rollbackChanges)).  

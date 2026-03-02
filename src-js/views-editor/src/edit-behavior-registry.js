@@ -119,6 +119,9 @@ export function resolveBehaviorPreset(_objectKind, action, modifiers) {
     const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
     result.preset = behaviorNames[(shiftKey ? 1 : 0) + (altKey ? 2 : 0)];
   }
+  if (action === "nudge") {
+    result.preset = altKey ? "alternate" : "default";
+  }
 
   if (equalizeMode) {
     result.overrides.push("equalize");
