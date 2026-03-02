@@ -30,12 +30,12 @@ import {
 import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
-import { EditBehaviorFactory } from "./edit-behavior.js";
-import Panel from "./panel.js";
 import {
+  EditBehaviorFactory,
   createEditableHandleBehavior,
-  SkeletonEditBehavior,
-} from "./skeleton-edit-behavior.js";
+  createPointBehaviorExecutor,
+} from "./edit-behavior.js";
+import Panel from "./panel.js";
 
 export default class TransformationPanel extends Panel {
   identifier = "selection-transformation";
@@ -1469,14 +1469,13 @@ export default class TransformationPanel extends Panel {
             for (const { delta, obj } of skeletonPointMoves) {
               const contour = newSkeletonData.contours?.[obj.contourIdx];
               if (!contour) continue;
-
-              const behavior = new SkeletonEditBehavior(
-                newSkeletonData,
-                obj.contourIdx,
-                [obj.pointIdx],
-                "default"
-              );
-              const changes = behavior.applyDelta(delta);
+              const executor = createPointBehaviorExecutor({
+                points: contour.points,
+                isClosed: contour.isClosed,
+                selectedIndices: [obj.pointIdx],
+                behaviorName: "default",
+              });
+              const changes = executor.applyDelta(delta);
               for (const { pointIndex, x, y } of changes) {
                 contour.points[pointIndex].x = x;
                 contour.points[pointIndex].y = y;
@@ -1617,14 +1616,13 @@ class SkeletonMovableObject {
     // Deep clone skeleton data to modify
     const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
 
-    // Use SkeletonEditBehavior to properly move the point and its adjacent handles
-    const behavior = new SkeletonEditBehavior(
-      newSkeletonData,
-      this.contourIdx,
-      [this.pointIdx],
-      "default"
-    );
-    const changes = behavior.applyDelta(delta);
+    const executor = createPointBehaviorExecutor({
+      points: newSkeletonData.contours[this.contourIdx].points,
+      isClosed: newSkeletonData.contours[this.contourIdx].isClosed,
+      selectedIndices: [this.pointIdx],
+      behaviorName: "default",
+    });
+    const changes = executor.applyDelta(delta);
 
     // Apply changes to the skeleton data
     const skelContour = newSkeletonData.contours[this.contourIdx];

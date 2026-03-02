@@ -27,6 +27,8 @@ import {
   findPointMatch,
 } from "./edit-behavior-support.js";
 
+export { ANY, NIL, OFF, SEL, SHA, SMO, UNS };
+
 //// grid
 let magneticSnapEnabled = false;
 export function toggleMagneticSnap() {
@@ -111,9 +113,8 @@ export class EditBehaviorFactory {
         console.log(`invalid behavior name: "${behaviorName}"`);
         behaviorType = behaviorTypes["default"];
       }
-      if (this.enableScalingEdit && behaviorType.canDoScalingEdit) {
-        behaviorType = { ...behaviorType, enableScalingEdit: true };
-      }
+      const enableScalingEdit =
+        this.enableScalingEdit && behaviorType.canDoScalingEdit;
       behavior = new EditBehavior(
         this.contours,
         this.components,
@@ -122,6 +123,8 @@ export class EditBehaviorFactory {
         this.backgroundImage,
         this.componentOriginIndices,
         this.componentTCenterIndices,
+        behaviorName,
+        enableScalingEdit,
         behaviorType,
         doFullTransform
       );
@@ -140,6 +143,8 @@ class EditBehavior {
     backgroundImage,
     componentOriginIndices,
     componentTCenterIndices,
+    behaviorName,
+    enableScalingEdit,
     behavior,
     doFullTransform
   ) {
@@ -147,11 +152,10 @@ class EditBehavior {
     //// grid
     this.roundFunc = makeRoundFunc();
     this.constrainDelta = behavior.constrainDelta || ((v) => v);
-    const [pointEditFuncs, participatingPointIndices] = makePointEditFuncs(
-      contours,
-      behavior
-    );
-    this.pointEditFuncs = pointEditFuncs;
+    const { executors: pointExecutors, participatingPointIndices } =
+      makePointExecutors(contours, behaviorName, enableScalingEdit, this.roundFunc);
+    this.pointExecutors = pointExecutors;
+    this.contours = contours;
 
     const componentRollbackChanges = [];
     this.componentEditFuncs = [];
@@ -306,15 +310,22 @@ class EditBehavior {
       transformComponent: transformComponentFunc,
       transformBackgroundImage: transformBackgroundImageFunc,
     };
-    const pathChanges = this.pointEditFuncs
-      ?.map((editFunc) => {
-        const result = editFunc(transform);
-        if (result) {
-          const [pointIndex, x, y] = result;
-          return makePointChange(pointIndex, this.roundFunc(x), this.roundFunc(y));
+    const pathChanges = [];
+    if (this.pointExecutors?.length) {
+      for (let contourIndex = 0; contourIndex < this.pointExecutors.length; contourIndex++) {
+        const executor = this.pointExecutors[contourIndex];
+        const contour = this.contours[contourIndex];
+        if (!executor || !contour) {
+          continue;
         }
-      })
-      .filter((change) => change);
+        const contourChanges = executor.applyTransform(transform, this.roundFunc);
+        for (const { pointIndex, x, y } of contourChanges) {
+          pathChanges.push(
+            makePointChange(pointIndex + contour.startIndex, x, y)
+          );
+        }
+      }
+    }
     const componentChanges = this.componentEditFuncs?.map((editFunc) => {
       return editFunc(transform);
     });
@@ -672,258 +683,51 @@ function unpackGuidelines(guidelines, selectedGuidelineIndices) {
   return unpackedGuidelines;
 }
 
-function makePointEditFuncs(contours, behavior) {
-  const pointEditFuncs = [];
+function collectSelectedIndices(points) {
+  const selected = [];
+  for (let i = 0; i < points.length; i++) {
+    if (points[i]?.selected) {
+      selected.push(i);
+    }
+  }
+  return selected;
+}
+
+function getParticipatingPointIndices(editEntries) {
+  const indices = new Set();
+  for (const entry of editEntries) {
+    if (entry.pointIndex >= 0 && !entry.isTransformCalculation) {
+      indices.add(entry.pointIndex);
+    }
+  }
+  return [...indices].sort((a, b) => a - b);
+}
+
+function makePointExecutors(contours, behaviorName, enableScalingEdit, roundFunc) {
+  const executors = new Array(contours.length);
   const participatingPointIndices = new Array(contours.length);
+
   for (let contourIndex = 0; contourIndex < contours.length; contourIndex++) {
     const contour = contours[contourIndex];
     if (!contour) {
       continue;
     }
-    const [editFuncs, pointIndices] = makeContourPointEditFuncs(contour, behavior);
-    pointEditFuncs.push(...editFuncs);
-    participatingPointIndices[contourIndex] = pointIndices;
-  }
-  return [pointEditFuncs, participatingPointIndices];
-}
-
-function makeContourPointEditFuncs(contour, behavior) {
-  const startIndex = contour.startIndex;
-  const originalPoints = contour.points;
-  const editPoints = Array.from(originalPoints); // will be modified
-  const additionalEditPoints = Array.from(originalPoints); // will be modified
-  const numPoints = originalPoints.length;
-  let participatingPointIndices = [];
-  const editFuncsTransform = [];
-  const editFuncsConstrain = [];
-
-  // console.log("------");
-  for (let i = 0; i < numPoints; i++) {
-    const [match, neighborIndices] = findPointMatch(
-      behavior.matchTree,
-      i,
-      originalPoints,
-      numPoints,
-      contour.isClosed
-    );
-    if (match === undefined) {
-      continue;
-    }
-    // console.log(i, match.action, match.ruleIndex);
-    const [prevPrevPrev, prevPrev, prev, thePoint, next, nextNext, nextNextNext] =
-      match.direction > 0 ? neighborIndices : reversed(neighborIndices);
-    participatingPointIndices.push(thePoint);
-    const actionFunctionFactory = behavior.actions[match.action];
-    if (actionFunctionFactory === undefined) {
-      console.log(`Undefined action function: ${match.action}`);
-      continue;
-    }
-    const actionFunc = actionFunctionFactory(
-      originalPoints[prevPrevPrev],
-      originalPoints[prevPrev],
-      originalPoints[prev],
-      originalPoints[thePoint],
-      originalPoints[next],
-      originalPoints[nextNext]
-    );
-    if (!match.constrain) {
-      // transform
-      editFuncsTransform.push((transform) => {
-        const point = actionFunc(
-          transform,
-          originalPoints[prevPrevPrev],
-          originalPoints[prevPrev],
-          originalPoints[prev],
-          originalPoints[thePoint],
-          originalPoints[next],
-          originalPoints[nextNext]
-        );
-        editPoints[thePoint] = point;
-        additionalEditPoints[thePoint] = point;
-        return [thePoint + startIndex, point.x, point.y];
-      });
-    } else {
-      // constrain
-      editFuncsConstrain.push((transform) => {
-        const point = actionFunc(
-          transform,
-          editPoints[prevPrevPrev],
-          editPoints[prevPrev],
-          editPoints[prev],
-          editPoints[thePoint],
-          editPoints[next],
-          editPoints[nextNext]
-        );
-        additionalEditPoints[thePoint] = point;
-        return [thePoint + startIndex, point.x, point.y];
-      });
-    }
-  }
-
-  let conditionFunc, segmentFunc;
-  if (behavior.enableScalingEdit) {
-    segmentFunc = makeSegmentScalingEditFuncs;
-    conditionFunc = (segment, points) =>
-      segment.length >= 4 &&
-      (points[segment[0]].selected || points[segment.at(-1)].selected) &&
-      segment.slice(1, -1).every((i) => !points[i].selected);
-  } else {
-    segmentFunc = makeSegmentFloatingOffCurveEditFuncs;
-    conditionFunc = (segment, points) =>
-      segment.length >= 5 &&
-      points[segment[0]].selected &&
-      points[segment.at(-1)].selected &&
-      segment.slice(1, -1).every((i) => !points[i].selected);
-  }
-
-  const [additionalEditFuncs, additionalPointIndices] = makeAdditionalEditFuncs(
-    contour,
-    additionalEditPoints,
-    conditionFunc,
-    segmentFunc
-  );
-  if (additionalPointIndices.length) {
-    participatingPointIndices = [
-      ...new Set([...participatingPointIndices, ...additionalPointIndices]),
-    ].sort((a, b) => a - b);
-  }
-  return [
-    [...editFuncsTransform, ...editFuncsConstrain, ...additionalEditFuncs],
-    participatingPointIndices,
-  ];
-}
-
-function makeAdditionalEditFuncs(contour, editPoints, conditionFunc, segmentFunc) {
-  const points = contour.points;
-  const editFuncs = [];
-  const participatingPointIndices = [];
-  for (const segment of iterSegmentPointIndices(points, contour.isClosed)) {
-    if (!conditionFunc(segment, points)) {
-      continue;
-    }
-    const [segmentEditFunc, pointIndices] = segmentFunc(segment, contour, editPoints);
-    editFuncs.push(...segmentEditFunc);
-    participatingPointIndices.push(...pointIndices);
-  }
-  return [editFuncs, participatingPointIndices];
-}
-
-function makeSegmentFloatingOffCurveEditFuncs(segment, contour, editPoints) {
-  const originalPoints = contour.points;
-  const startIndex = contour.startIndex;
-  const editFuncs = [];
-  const pointIndices = [];
-
-  for (const i of segment.slice(2, -2)) {
-    pointIndices.push(i);
-    editFuncs.push((transform) => {
-      const point = transform.constrained(originalPoints[i]);
-      return [i + startIndex, point.x, point.y];
+    const selectedIndices = collectSelectedIndices(contour.points);
+    const executor = createPointBehaviorExecutor({
+      points: contour.points,
+      isClosed: contour.isClosed,
+      selectedIndices,
+      behaviorName,
+      enableScalingEdit,
+      roundFunc,
     });
+    executors[contourIndex] = executor;
+    participatingPointIndices[contourIndex] = getParticipatingPointIndices(
+      executor.editEntries
+    );
   }
-  return [editFuncs, pointIndices];
-}
 
-function makeSegmentScalingEditFuncs(segment, contour, editPoints) {
-  const originalPoints = contour.points;
-  const startIndex = contour.startIndex;
-  const editFuncs = [];
-  const pointIndices = [];
-  const A = makeSegmentTransform(originalPoints, segment, false);
-  const Ainv = A?.inverse();
-
-  if (A && Ainv) {
-    let T;
-    editFuncs.push((transform) => {
-      const B = makeSegmentTransform(editPoints, segment, true);
-      T = B?.transform(Ainv);
-    });
-    for (const i of segment.slice(1, -1)) {
-      pointIndices.push(i);
-      editFuncs.push((transform) => {
-        let point;
-        if (T) {
-          point = T.transformPointObject(originalPoints[i]);
-        } else {
-          point = editPoints[i];
-        }
-        return [i + startIndex, point.x, point.y];
-      });
-    }
-  }
-  return [editFuncs, pointIndices];
-}
-
-function makeSegmentTransform(points, pointIndices, allowConcave) {
-  const pt0 = points[pointIndices[0]];
-  const pt1 = points[pointIndices[1]];
-  const pt2 = points[pointIndices.at(-2)];
-  const pt3 = points[pointIndices.at(-1)];
-  if (!allowConcave && !polygonIsConvex([pt0, pt1, pt2, pt3])) {
-    return;
-  }
-  const intersection = vector.intersect(pt0, pt1, pt2, pt3);
-  if (!intersection) {
-    return undefined;
-  }
-  const v1 = vector.subVectors(intersection, pt0);
-  const v2 = vector.subVectors(pt3, intersection);
-  return new Transform(v1.x, v1.y, v2.x, v2.y, pt0.x, pt0.y);
-}
-
-function* iterSegmentPointIndices(originalPoints, isClosed) {
-  const lastPointIndex = originalPoints.length - 1;
-  const firstOnCurve = findFirstOnCurvePoint(originalPoints, isClosed);
-  if (firstOnCurve === undefined) {
-    return;
-  }
-  let currentOnCurve = firstOnCurve;
-  while (true) {
-    const indices = [
-      ...iterUntilNextOnCurvePoint(originalPoints, currentOnCurve, isClosed),
-    ];
-    if (!indices.length) {
-      break;
-    }
-    yield indices;
-    currentOnCurve = indices.at(-1);
-    if (
-      (isClosed && currentOnCurve == firstOnCurve) ||
-      (!isClosed && currentOnCurve == lastPointIndex)
-    ) {
-      break;
-    }
-  }
-}
-
-function findFirstOnCurvePoint(points, isClosed) {
-  const numPoints = points.length;
-  for (let i = 0; i < numPoints; i++) {
-    if (!points[i].type) {
-      return i;
-    }
-  }
-  return undefined;
-}
-
-function* iterUntilNextOnCurvePoint(points, startIndex, isClosed) {
-  yield startIndex;
-  const numPoints = points.length;
-  for (let i = startIndex + 1; i < numPoints; i++) {
-    yield i;
-    if (!points[i].type) {
-      return;
-    }
-  }
-  if (!isClosed || !startIndex) {
-    return;
-  }
-  for (let i = 0; i < startIndex; i++) {
-    yield i;
-    if (!points[i].type) {
-      return;
-    }
-  }
+  return { executors, participatingPointIndices };
 }
 
 export function constrainHorVerDiag(vector) {
@@ -1397,6 +1201,19 @@ export function getPointBehaviorType(behaviorName) {
 
 export const POINT_BEHAVIOR_TYPES = behaviorTypes;
 
+// Type-agnostic point behavior executor.
+// Inputs:
+// - points: array of point objects (will be read, not mutated except `selected`)
+// - isClosed: contour closed flag
+// - selectedIndices: indices of selected points in this contour
+// - behaviorName: "default" | "constrain" | "alternate" | "alternate-constrain"
+// - enableScalingEdit: enable segment-scaling behavior when supported
+// - roundFunc: rounding function for output coordinates
+// Outputs:
+// - applyTransform(transform): returns [{ pointIndex, x, y }]
+// - applyDelta(delta): delta wrapper around applyTransform
+// - getRollback(): returns [{ pointIndex, x, y }]
+// Invariants: no persistence, no layer knowledge, no selection parsing.
 export function createPointBehaviorExecutor({
   points,
   isClosed,
@@ -1636,24 +1453,14 @@ export function createPointBehaviorExecutor({
     return new Transform(v1.x, v1.y, v2.x, v2.y, pt0.x, pt0.y);
   }
 
-  function applyDelta(delta, overrideRoundFunc = roundFunc) {
+  function applyTransform(transform, overrideRoundFunc = roundFunc) {
     const editedPoints = [...points];
     const changes = [];
 
-    const constrainedDelta = constrainDelta(delta);
-    const transformConstrained = (point) => ({
-      x: point.x + constrainedDelta.x,
-      y: point.y + constrainedDelta.y,
-    });
-    const transformFree = (point) => ({
-      x: point.x + delta.x,
-      y: point.y + delta.y,
-    });
-
-    const transform = {
-      constrained: transformConstrained,
-      free: transformFree,
-      constrainDelta,
+    const resolvedTransform = {
+      constrained: transform.constrained,
+      free: transform.free || transform.constrained,
+      constrainDelta: transform.constrainDelta || constrainDelta,
     };
 
     for (const editEntry of editEntries) {
@@ -1662,11 +1469,11 @@ export function createPointBehaviorExecutor({
 
       let newPoint;
       if (isAdditional || isTransformCalculation) {
-        newPoint = actionFunc(transform, editedPoints);
+        newPoint = actionFunc(resolvedTransform, editedPoints);
       } else {
         const { prevPrevPrev, prevPrev, prev, thePoint, next, nextNext } = neighborIndices;
         newPoint = actionFunc(
-          transform,
+          resolvedTransform,
           editedPoints[prevPrevPrev],
           editedPoints[prevPrev],
           editedPoints[prev],
@@ -1691,6 +1498,27 @@ export function createPointBehaviorExecutor({
     return changes;
   }
 
+  function applyDelta(delta, overrideRoundFunc = roundFunc) {
+    const constrainedDelta = constrainDelta(delta);
+    const transformConstrained = (point) => ({
+      x: point.x + constrainedDelta.x,
+      y: point.y + constrainedDelta.y,
+    });
+    const transformFree = (point) => ({
+      x: point.x + delta.x,
+      y: point.y + delta.y,
+    });
+
+    return applyTransform(
+      {
+        constrained: transformConstrained,
+        free: transformFree,
+        constrainDelta,
+      },
+      overrideRoundFunc
+    );
+  }
+
   function getRollback() {
     return editEntries
       .filter(({ pointIndex, isTransformCalculation }) => pointIndex >= 0 && !isTransformCalculation)
@@ -1702,12 +1530,653 @@ export function createPointBehaviorExecutor({
   }
 
   return {
+    applyTransform,
     applyDelta,
     getRollback,
     originalPositions,
     editEntries,
     constrainDelta,
   };
+}
+
+/**
+ * Skeleton behavior helpers (modifiers, ribs, and editable handles).
+ */
+/**
+ * Helper to get behavior name from event modifiers.
+ * Same logic as getBehaviorName in edit-tools-pointer.js
+ */
+export function getSkeletonBehaviorName(shiftKey, altKey) {
+  const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
+  return behaviorNames[(shiftKey ? 1 : 0) + (altKey ? 2 : 0)];
+}
+
+/**
+ * RibEditBehavior - Handles dragging of rib points (width control points).
+ * Constrains movement to the normal direction and updates point width.
+ */
+export class RibEditBehavior {
+  constructor(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint,
+    roundFunc = Math.round
+  ) {
+    this.skeletonData = skeletonData;
+    this.contourIndex = contourIndex;
+    this.pointIndex = pointIndex;
+    this.side = side;
+    this.normal = normal;
+    this.onCurvePoint = onCurvePoint;
+    this.roundFunc = roundFunc;
+
+    const contour = skeletonData.contours[contourIndex];
+    const point = contour.points[pointIndex];
+    const defaultWidth = contour.defaultWidth || 20;
+
+    if (side === "left") {
+      this.originalHalfWidth =
+        point.leftWidth !== undefined
+          ? point.leftWidth
+          : point.width !== undefined
+            ? point.width / 2
+            : defaultWidth / 2;
+    } else {
+      this.originalHalfWidth =
+        point.rightWidth !== undefined
+          ? point.rightWidth
+          : point.width !== undefined
+            ? point.width / 2
+            : defaultWidth / 2;
+    }
+
+    this.minHalfWidth = 0;
+  }
+
+  constrainToNormal(delta) {
+    const sign = this.side === "left" ? 1 : -1;
+    const dot = delta.x * this.normal.x + delta.y * this.normal.y;
+    return {
+      x: sign * dot * this.normal.x,
+      y: sign * dot * this.normal.y,
+    };
+  }
+
+  applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
+    const sign = this.side === "left" ? 1 : -1;
+    const dot = delta.x * this.normal.x + delta.y * this.normal.y;
+    const projectedDelta = sign * dot;
+
+    let newHalfWidth = this.originalHalfWidth + projectedDelta;
+    if (newHalfWidth < this.minHalfWidth) {
+      newHalfWidth = this.minHalfWidth;
+    }
+
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: roundFunc(newHalfWidth),
+    };
+  }
+
+  getRollback() {
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: Math.round(this.originalHalfWidth),
+    };
+  }
+}
+
+export function createRibEditBehavior(skeletonData, ribHit) {
+  const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
+  return new RibEditBehavior(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint,
+    ribHit.roundFunc || Math.round
+  );
+}
+
+/**
+ * EditableRibBehavior - Handles dragging of editable rib points.
+ * - Width follows normal component by default.
+ * - Nudge follows tangent only when constrained (e.g. Shift).
+ * - Constrain modes can lock width or nudge.
+ */
+export class EditableRibBehavior {
+  constructor(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint,
+    roundFunc = Math.round
+  ) {
+    this.skeletonData = skeletonData;
+    this.contourIndex = contourIndex;
+    this.pointIndex = pointIndex;
+    this.side = side;
+    this.normal = normal;
+    this.tangent = { x: -normal.y, y: normal.x };
+    this.onCurvePoint = onCurvePoint;
+    this.roundFunc = roundFunc;
+
+    const contour = skeletonData.contours[contourIndex];
+    const point = contour.points[pointIndex];
+    const points = contour.points;
+    const defaultWidth = contour.defaultWidth || 20;
+
+    if (side === "left") {
+      this.originalHalfWidth =
+        point.leftWidth !== undefined
+          ? point.leftWidth
+          : point.width !== undefined
+            ? point.width / 2
+            : defaultWidth / 2;
+    } else {
+      this.originalHalfWidth =
+        point.rightWidth !== undefined
+          ? point.rightWidth
+          : point.width !== undefined
+            ? point.width / 2
+            : defaultWidth / 2;
+    }
+
+    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+    this.originalNudge = point[nudgeKey] || 0;
+
+    this.minHalfWidth = 0;
+
+    this._initHandleOffsets(point, points, pointIndex, side);
+  }
+
+  _initHandleOffsets(point, points, pointIndex, side) {
+    this.skeletonHandleInDir = null;
+    this.skeletonHandleOutDir = null;
+
+    const prevIdx = (pointIndex - 1 + points.length) % points.length;
+    if (points[prevIdx]?.type) {
+      const dx = points[prevIdx].x - point.x;
+      const dy = points[prevIdx].y - point.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) {
+        this.skeletonHandleInDir = { x: dx / len, y: dy / len };
+      }
+    }
+
+    const nextIdx = (pointIndex + 1) % points.length;
+    if (points[nextIdx]?.type) {
+      const dx = points[nextIdx].x - point.x;
+      const dy = points[nextIdx].y - point.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) {
+        this.skeletonHandleOutDir = { x: dx / len, y: dy / len };
+      }
+    }
+
+    const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+    const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+    const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+    const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+    const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+    const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+
+    const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
+    const has2DOut =
+      point[handleOutXKey] !== undefined || point[handleOutYKey] !== undefined;
+
+    this.hasHandleOffsets =
+      has2DIn ||
+      has2DOut ||
+      point[handleIn1DKey] !== undefined ||
+      point[handleOut1DKey] !== undefined;
+
+    if (has2DIn) {
+      this.originalHandleInOffsetX = point[handleInXKey] || 0;
+      this.originalHandleInOffsetY = point[handleInYKey] || 0;
+    } else if (point[handleIn1DKey]) {
+      const dir = this.skeletonHandleInDir || this.tangent;
+      this.originalHandleInOffsetX = dir.x * point[handleIn1DKey];
+      this.originalHandleInOffsetY = dir.y * point[handleIn1DKey];
+    } else {
+      this.originalHandleInOffsetX = 0;
+      this.originalHandleInOffsetY = 0;
+    }
+
+    if (has2DOut) {
+      this.originalHandleOutOffsetX = point[handleOutXKey] || 0;
+      this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
+    } else if (point[handleOut1DKey]) {
+      const dir = this.skeletonHandleOutDir || this.tangent;
+      this.originalHandleOutOffsetX = dir.x * point[handleOut1DKey];
+      this.originalHandleOutOffsetY = dir.y * point[handleOut1DKey];
+    } else {
+      this.originalHandleOutOffsetX = 0;
+      this.originalHandleOutOffsetY = 0;
+    }
+  }
+
+  applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
+    let newNudge = this.originalNudge;
+    let newHalfWidth = this.originalHalfWidth;
+
+    if (constrainMode === "tangent") {
+      const tangentDot = delta.x * this.tangent.x + delta.y * this.tangent.y;
+      newNudge = this.originalNudge + tangentDot;
+    } else if (constrainMode === "normal") {
+      const sign = this.side === "left" ? 1 : -1;
+      const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
+      const normalDelta = sign * normalDot;
+      newHalfWidth = this.originalHalfWidth + normalDelta;
+      if (newHalfWidth < this.minHalfWidth) {
+        newHalfWidth = this.minHalfWidth;
+      }
+    } else {
+      const sign = this.side === "left" ? 1 : -1;
+      const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
+      const normalDelta = sign * normalDot;
+      newHalfWidth = this.originalHalfWidth + normalDelta;
+      if (newHalfWidth < this.minHalfWidth) {
+        newHalfWidth = this.minHalfWidth;
+      }
+    }
+
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: roundFunc(newHalfWidth),
+      nudge: roundFunc(newNudge),
+    };
+  }
+
+  getRollback() {
+    const result = {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: Math.round(this.originalHalfWidth),
+      nudge: Math.round(this.originalNudge),
+    };
+
+    if (this.hasHandleOffsets) {
+      result.handleInOffsetX = Math.round(this.originalHandleInOffsetX);
+      result.handleInOffsetY = Math.round(this.originalHandleInOffsetY);
+      result.handleOutOffsetX = Math.round(this.originalHandleOutOffsetX);
+      result.handleOutOffsetY = Math.round(this.originalHandleOutOffsetY);
+      result.hasHandleOffsets = true;
+    }
+
+    return result;
+  }
+
+  setOriginalHalfWidth(halfWidth) {
+    this.originalHalfWidth = halfWidth;
+  }
+}
+
+export function createEditableRibBehavior(skeletonData, ribHit) {
+  const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
+  return new EditableRibBehavior(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint,
+    ribHit.roundFunc || Math.round
+  );
+}
+
+/**
+ * InterpolatingRibBehavior - Handles dragging of editable rib points with Alt key.
+ */
+export class InterpolatingRibBehavior {
+  constructor(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint,
+    interpolationAxis = null,
+    roundFunc = Math.round
+  ) {
+    this.skeletonData = skeletonData;
+    this.contourIndex = contourIndex;
+    this.pointIndex = pointIndex;
+    this.side = side;
+    this.normal = normal;
+    this.tangent = { x: -normal.y, y: normal.x };
+    this.onCurvePoint = onCurvePoint;
+    this.interpolationAxis = interpolationAxis || null;
+    this.roundFunc = roundFunc;
+
+    const contour = skeletonData.contours[contourIndex];
+    const point = contour.points[pointIndex];
+    const points = contour.points;
+    const isClosed = !!contour.isClosed;
+    const defaultWidth = contour.defaultWidth || 20;
+
+    this.skeletonHandleInDir = null;
+    this.skeletonHandleOutDir = null;
+    this.hasIncomingHandle = false;
+    this.hasOutgoingHandle = false;
+
+    const prevIdx =
+      isClosed || pointIndex > 0 ? (pointIndex - 1 + points.length) % points.length : null;
+    if (prevIdx !== null && points[prevIdx]?.type) {
+      this.hasIncomingHandle = true;
+      const dx = points[prevIdx].x - point.x;
+      const dy = points[prevIdx].y - point.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) {
+        this.skeletonHandleInDir = { x: dx / len, y: dy / len };
+      }
+    }
+
+    const nextIdx =
+      isClosed || pointIndex < points.length - 1 ? (pointIndex + 1) % points.length : null;
+    if (nextIdx !== null && points[nextIdx]?.type) {
+      this.hasOutgoingHandle = true;
+      const dx = points[nextIdx].x - point.x;
+      const dy = points[nextIdx].y - point.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) {
+        this.skeletonHandleOutDir = { x: dx / len, y: dy / len };
+      }
+    }
+
+    if (side === "left") {
+      this.originalHalfWidth =
+        point.leftWidth !== undefined
+          ? point.leftWidth
+          : point.width !== undefined
+            ? point.width / 2
+            : defaultWidth / 2;
+    } else {
+      this.originalHalfWidth =
+        point.rightWidth !== undefined
+          ? point.rightWidth
+          : point.width !== undefined
+            ? point.width / 2
+            : defaultWidth / 2;
+    }
+
+    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+    this.originalNudge = point[nudgeKey] || 0;
+
+    const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+    const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+    const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+    const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+    const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+    const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+
+    const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
+    const has2DOut =
+      point[handleOutXKey] !== undefined || point[handleOutYKey] !== undefined;
+
+    if (has2DIn) {
+      this.originalHandleInOffsetX = point[handleInXKey] || 0;
+      this.originalHandleInOffsetY = point[handleInYKey] || 0;
+    } else if (point[handleIn1DKey]) {
+      const dir = this.skeletonHandleInDir || this.tangent;
+      this.originalHandleInOffsetX = dir.x * point[handleIn1DKey];
+      this.originalHandleInOffsetY = dir.y * point[handleIn1DKey];
+    } else {
+      this.originalHandleInOffsetX = 0;
+      this.originalHandleInOffsetY = 0;
+    }
+
+    if (has2DOut) {
+      this.originalHandleOutOffsetX = point[handleOutXKey] || 0;
+      this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
+    } else if (point[handleOut1DKey]) {
+      const dir = this.skeletonHandleOutDir || this.tangent;
+      this.originalHandleOutOffsetX = dir.x * point[handleOut1DKey];
+      this.originalHandleOutOffsetY = dir.y * point[handleOut1DKey];
+    } else {
+      this.originalHandleOutOffsetX = 0;
+      this.originalHandleOutOffsetY = 0;
+    }
+
+    this._recalculateRibPos();
+
+    const prevHandle = this.interpolationAxis?.prevHandle || null;
+    const nextHandle = this.interpolationAxis?.nextHandle || null;
+    const segmentAnchor = this.interpolationAxis?.segmentAnchor || null;
+    let lineStart = this.interpolationAxis?.lineStart || null;
+    let lineEnd = this.interpolationAxis?.lineEnd || null;
+
+    if (!lineStart || !lineEnd) {
+      if (prevHandle && nextHandle) {
+        lineStart = prevHandle;
+        lineEnd = nextHandle;
+      } else if (prevHandle || nextHandle) {
+        lineStart = segmentAnchor || this.originalRibPos;
+        lineEnd = prevHandle || nextHandle;
+      }
+    }
+
+    if (!lineStart || !lineEnd) {
+      lineStart = this.originalRibPos;
+      lineEnd = {
+        x: this.originalRibPos.x + this.tangent.x,
+        y: this.originalRibPos.y + this.tangent.y,
+      };
+    }
+
+    this.hasIncomingHandle = this.interpolationAxis?.hasPrevHandle ?? this.hasIncomingHandle;
+    this.hasOutgoingHandle = this.interpolationAxis?.hasNextHandle ?? this.hasOutgoingHandle;
+
+    this.lineDir = {
+      x: lineEnd.x - lineStart.x,
+      y: lineEnd.y - lineStart.y,
+    };
+    this.lineLength = Math.hypot(this.lineDir.x, this.lineDir.y);
+
+    if (this.lineLength > 0.001) {
+      this.lineDir.x /= this.lineLength;
+      this.lineDir.y /= this.lineLength;
+    } else {
+      this.lineDir = { ...this.tangent };
+      this.lineLength = 1;
+    }
+  }
+
+  _recalculateRibPos() {
+    const sign = this.side === "left" ? 1 : -1;
+    this.originalRibPos = {
+      x:
+        this.onCurvePoint.x +
+        sign * this.normal.x * this.originalHalfWidth +
+        this.tangent.x * this.originalNudge,
+      y:
+        this.onCurvePoint.y +
+        sign * this.normal.y * this.originalHalfWidth +
+        this.tangent.y * this.originalNudge,
+    };
+  }
+
+  setOriginalHalfWidth(halfWidth) {
+    this.originalHalfWidth = halfWidth;
+    this._recalculateRibPos();
+  }
+
+  applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
+    const deltaAlongLine = delta.x * this.lineDir.x + delta.y * this.lineDir.y;
+
+    const lineDirDotTangent = this.lineDir.x * this.tangent.x + this.lineDir.y * this.tangent.y;
+    const deltaNudge = lineDirDotTangent * deltaAlongLine;
+    const newNudge = this.originalNudge + deltaNudge;
+
+    const handleOffsetDeltaX = -this.tangent.x * deltaNudge;
+    const handleOffsetDeltaY = -this.tangent.y * deltaNudge;
+
+    const newHandleInOffsetX =
+      this.originalHandleInOffsetX + (this.hasIncomingHandle ? handleOffsetDeltaX : 0);
+    const newHandleInOffsetY =
+      this.originalHandleInOffsetY + (this.hasIncomingHandle ? handleOffsetDeltaY : 0);
+    const newHandleOutOffsetX =
+      this.originalHandleOutOffsetX + (this.hasOutgoingHandle ? handleOffsetDeltaX : 0);
+    const newHandleOutOffsetY =
+      this.originalHandleOutOffsetY + (this.hasOutgoingHandle ? handleOffsetDeltaY : 0);
+
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: roundFunc(this.originalHalfWidth),
+      nudge: roundFunc(newNudge),
+      handleInOffsetX: roundFunc(newHandleInOffsetX),
+      handleInOffsetY: roundFunc(newHandleInOffsetY),
+      handleOutOffsetX: roundFunc(newHandleOutOffsetX),
+      handleOutOffsetY: roundFunc(newHandleOutOffsetY),
+      isInterpolation: true,
+    };
+  }
+
+  getRollback() {
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      halfWidth: Math.round(this.originalHalfWidth),
+      nudge: Math.round(this.originalNudge),
+      handleInOffsetX: Math.round(this.originalHandleInOffsetX),
+      handleInOffsetY: Math.round(this.originalHandleInOffsetY),
+      handleOutOffsetX: Math.round(this.originalHandleOutOffsetX),
+      handleOutOffsetY: Math.round(this.originalHandleOutOffsetY),
+      isInterpolation: true,
+    };
+  }
+}
+
+export function createInterpolatingRibBehavior(
+  skeletonData,
+  ribHit,
+  interpolationAxis = null
+) {
+  const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
+  return new InterpolatingRibBehavior(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    normal,
+    onCurvePoint,
+    interpolationAxis,
+    ribHit.roundFunc || Math.round
+  );
+}
+
+/**
+ * EditableHandleBehavior - Handles dragging of editable generated control points (handles).
+ * Movement is constrained to the direction of the corresponding skeleton handle.
+ */
+export class EditableHandleBehavior {
+  constructor(
+    skeletonData,
+    contourIndex,
+    pointIndex,
+    side,
+    handleType,
+    skeletonHandleDir,
+    roundFunc = Math.round
+  ) {
+    this.skeletonData = skeletonData;
+    this.contourIndex = contourIndex;
+    this.pointIndex = pointIndex;
+    this.side = side;
+    this.handleType = handleType;
+    this.skeletonHandleDir = skeletonHandleDir;
+    this.roundFunc = roundFunc;
+
+    const contour = skeletonData.contours[contourIndex];
+    const point = contour.points[pointIndex];
+
+    this.offsetKey =
+      side === "left"
+        ? handleType === "in"
+          ? "leftHandleInOffset"
+          : "leftHandleOutOffset"
+        : handleType === "in"
+          ? "rightHandleInOffset"
+          : "rightHandleOutOffset";
+
+    const offsetXKey =
+      side === "left"
+        ? handleType === "in"
+          ? "leftHandleInOffsetX"
+          : "leftHandleOutOffsetX"
+        : handleType === "in"
+          ? "rightHandleInOffsetX"
+          : "rightHandleOutOffsetX";
+    const offsetYKey =
+      side === "left"
+        ? handleType === "in"
+          ? "leftHandleInOffsetY"
+          : "leftHandleOutOffsetY"
+        : handleType === "in"
+          ? "rightHandleInOffsetY"
+          : "rightHandleOutOffsetY";
+
+    const has2D = point[offsetXKey] !== undefined || point[offsetYKey] !== undefined;
+
+    if (has2D) {
+      const offset2DX = point[offsetXKey] || 0;
+      const offset2DY = point[offsetYKey] || 0;
+      this.originalOffset = offset2DX * skeletonHandleDir.x + offset2DY * skeletonHandleDir.y;
+    } else {
+      this.originalOffset = point[this.offsetKey] || 0;
+    }
+  }
+
+  applyDelta(delta, roundFunc = this.roundFunc) {
+    const projectedDelta = delta.x * this.skeletonHandleDir.x + delta.y * this.skeletonHandleDir.y;
+    const newOffset = this.originalOffset + projectedDelta;
+
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      handleType: this.handleType,
+      offset: roundFunc(newOffset),
+    };
+  }
+
+  getRollback() {
+    return {
+      contourIndex: this.contourIndex,
+      pointIndex: this.pointIndex,
+      side: this.side,
+      handleType: this.handleType,
+      offset: Math.round(this.originalOffset),
+    };
+  }
+}
+
+export function createEditableHandleBehavior(skeletonData, handleInfo, skeletonHandleDir) {
+  return new EditableHandleBehavior(
+    skeletonData,
+    handleInfo.skeletonContourIndex,
+    handleInfo.skeletonPointIndex,
+    handleInfo.side,
+    handleInfo.handleType,
+    skeletonHandleDir,
+    handleInfo.roundFunc || Math.round
+  );
 }
 
 export function findEqualizeHandleForPath(positionedGlyph, point, size) {

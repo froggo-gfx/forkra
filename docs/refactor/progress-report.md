@@ -1429,6 +1429,117 @@ Source: `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 99
 
 
 Step Header
+Phase 5, Step 5.1 - Make edit-behavior Type-Agnostic (Single Behavior Engine)
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Make `edit-behavior.js` the only behavior executor for regular, skeleton, and rib points.
+2. Solution
+   - Replace skeleton-specific behavior execution with a shared executor and move rib/handle behavior helpers into `edit-behavior.js`.
+3. Code Implementation
+   - Added a shared point behavior executor and used it from `EditBehavior` and skeleton flows in `src-js/views-editor/src/edit-behavior.js`.
+   - Replaced `SkeletonEditBehavior` usage with shared executors in `src-js/views-editor/src/edit-tools-pointer.js` and `src-js/views-editor/src/panel-transformation.js`.
+   - Moved rib and editable handle behaviors into `src-js/views-editor/src/edit-behavior.js` and deleted `src-js/views-editor/src/skeleton-edit-behavior.js`.
+4. Why This Solves the Problem
+   - All point kinds now execute behavior through the same executor and no parallel skeleton behavior engine exists, preserving type-agnostic behavior execution.
+
+Passing Criteria (Required)
+Criterion: edit-behavior.js is the only behavior executor (shared for regular + skeleton + rib).
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-behavior.js` `createPointBehaviorExecutor` lines 1217-1536; `src-js/views-editor/src/edit-tools-pointer.js` `createSkeletonPointExecutors` lines 7460-7522; `src-js/views-editor/src/panel-transformation.js` `createPointBehaviorExecutor` usage lines 1472-1479 and 1619-1626.
+
+Criterion: No parallel behavior engine remains (no SkeletonEditBehavior or equivalent).
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` no `SkeletonEditBehavior` usage (search 2026-03-02); `src-js/views-editor/src/panel-transformation.js` uses shared executor (lines 1472-1479, 1619-1626).
+
+Criterion: skeleton-edit-behavior.js is removed.
+Result: PASS
+Evidence: File removed from repo on 2026-03-02; `git status -sb` shows `D src-js/views-editor/src/skeleton-edit-behavior.js`.
+
+Criterion: No functionally shared behavior logic exists outside edit-behavior.js.
+Result: PASS
+Evidence: Shared point executor and rib/editable handle behaviors live in `src-js/views-editor/src/edit-behavior.js` lines 1217-2175; skeleton flows use `createPointBehaviorExecutor` in `src-js/views-editor/src/edit-tools-pointer.js` lines 7460-7522.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior.js
+Function(s): makePointExecutors, createPointBehaviorExecutor, EditableRibBehavior, InterpolatingRibBehavior, EditableHandleBehavior
+Lines: 706-717, 1217-1536, 1655-2175
+Snippet:
+```js
+function makePointExecutors(contours, behaviorName, enableScalingEdit, roundFunc) {
+  const executors = new Array(contours.length);
+  const participatingPointIndices = new Array(contours.length);
+
+  for (let contourIndex = 0; contourIndex < contours.length; contourIndex++) {
+    const contour = contours[contourIndex];
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-tools-pointer.js
+Function(s): createSkeletonPointExecutors
+Lines: 7460-7522
+Snippet:
+```js
+function createSkeletonPointExecutors(
+  skeletonData,
+  selectedSkeletonPoints,
+  behaviorName = "default",
+  roundFunc = Math.round
+) {
+  const executors = new Map();
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\panel-transformation.js
+Function(s): handleSkeletonApplyTransform, SkeletonPointDragInfo.applyChanges
+Lines: 1468-1479, 1619-1626
+Snippet:
+```js
+            const executor = createPointBehaviorExecutor({
+              points: contour.points,
+              isClosed: contour.isClosed,
+              selectedIndices: [obj.pointIdx],
+              behaviorName: "default",
+              enableScalingEdit: false,
+            });
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\skeleton-edit-behavior.js
+Function(s): N/A (deleted)
+Lines: N/A
+Snippet:
+```js
+// File removed in Phase 5.1.
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 1521-1524
+Snippet:
+```md
+Step Header
+Phase 5, Step 5.1 - Make edit-behavior Type-Agnostic (Single Behavior Engine)
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Row: R1-R9
+Column: C1-C7
+Behavior: Drag behaviors for regular/skeleton/rib points, including X/Z/D/S/Alt modifier variants.
+Evidence: Manual test 2026-03-02; drag rows R1-R9 (C1-C7) match baseline.
+Result: PASS
+
+Row: R10-R20
+Column: C1-C7
+Behavior: Nudge behaviors for regular/skeleton/rib points, including X/Z/D/S/Alt modifier variants.
+Evidence: Manual test 2026-03-02; nudge rows R10-R20 (C1-C7) match baseline.
+Result: PASS
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts))` for drag, `ChangeCollector.fromChanges(consolidateChanges(editChanges), consolidateChanges(rollbackChanges))` for nudge.
+Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 173-217; `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
+Step Header
 Phase 4, Step 4.3 - Route Nudge Through Composer
 
 Goal Alignment (Required Format)

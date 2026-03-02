@@ -43,17 +43,10 @@ import * as vector from "@fontra/core/vector.js";
 import {
   EditBehaviorFactory,
   constrainHorVerDiag,
+  createPointBehaviorExecutor,
   findEqualizeHandleForPath,
   getEqualizeHandleInfoForPointIndex,
   makeRoundFunc,
-} from "./edit-behavior.js";
-import {
-  runDragRoutingOrchestration,
-  runNudgeOrchestration,
-  runNudgeRoutingOrchestration,
-} from "./edit-behavior-composer.js";
-import {
-  createSkeletonEditBehavior,
   getSkeletonBehaviorName,
   createRibEditBehavior,
   RibEditBehavior,
@@ -62,7 +55,12 @@ import {
   createInterpolatingRibBehavior,
   createEditableHandleBehavior,
   EditableHandleBehavior,
-} from "./skeleton-edit-behavior.js";
+} from "./edit-behavior.js";
+import {
+  runDragRoutingOrchestration,
+  runNudgeOrchestration,
+  runNudgeRoutingOrchestration,
+} from "./edit-behavior-composer.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import {
   skeletonTunniHitTest,
@@ -1364,15 +1362,15 @@ export class PointerTool extends BaseTool {
       if (!appliedFixedRib) {
         // Create behaviors and apply delta
         const behaviorName = getSkeletonBehaviorName(false, event.altKey);
-        const behaviors = createSkeletonEditBehavior(
+        const behaviors = createSkeletonPointExecutors(
           originalSkeletonData,
           skeletonPointSelection,
           behaviorName
         );
 
-        for (const behavior of behaviors) {
-          const changes = behavior.applyDelta(delta);
-          const contour = workingSkeletonData.contours[behavior.contourIndex];
+        for (const { contourIndex, executor } of behaviors) {
+          const changes = executor.applyDelta(delta);
+          const contour = workingSkeletonData.contours[contourIndex];
           for (const { pointIndex, x, y } of changes) {
             contour.points[pointIndex].x = x;
             contour.points[pointIndex].y = y;
@@ -2839,7 +2837,7 @@ export class PointerTool extends BaseTool {
             layer,
             originalSkeletonData: JSON.parse(JSON.stringify(skeletonData)),
             workingSkeletonData: JSON.parse(JSON.stringify(skeletonData)),
-            behaviors: createSkeletonEditBehavior(
+            behaviors: createSkeletonPointExecutors(
               JSON.parse(JSON.stringify(skeletonData)),
               effectiveSkeletonPointSelection,
               getSkeletonBehaviorName(initialEvent.shiftKey, initialEvent.altKey)
@@ -2879,7 +2877,7 @@ export class PointerTool extends BaseTool {
           );
           if (newSkeletonBehaviorName !== skeletonEditState.lastBehaviorName) {
             skeletonEditState.lastBehaviorName = newSkeletonBehaviorName;
-            skeletonEditState.behaviors = createSkeletonEditBehavior(
+            skeletonEditState.behaviors = createSkeletonPointExecutors(
               skeletonEditState.originalSkeletonData,
               effectiveSkeletonPointSelection,
               newSkeletonBehaviorName
@@ -2977,9 +2975,9 @@ export class PointerTool extends BaseTool {
 
           if (!appliedFixedRib) {
             // Apply behavior changes
-            for (const behavior of behaviors) {
-              const changes = behavior.applyDelta(delta, roundFunc);
-              const contour = workingSkeletonData.contours[behavior.contourIndex];
+            for (const { contourIndex, executor } of behaviors) {
+              const changes = executor.applyDelta(delta, roundFunc);
+              const contour = workingSkeletonData.contours[contourIndex];
               for (const { pointIndex, x, y } of changes) {
                 contour.points[pointIndex].x = x;
                 contour.points[pointIndex].y = y;
@@ -3237,7 +3235,7 @@ export class PointerTool extends BaseTool {
 
   /**
    * Handle dragging skeleton points with the Pointer Tool.
-   * Uses the rule-based SkeletonEditBehavior system.
+   * Uses the shared point behavior executor system.
    * @param {AsyncIterable} eventStream - Event stream for drag
    * @param {Event} initialEvent - Initial mouse event
    * @param {Set} [overrideSelection] - Optional selection to use instead of parsing from sceneController
@@ -3290,7 +3288,7 @@ export class PointerTool extends BaseTool {
 
       // Create initial behaviors for each layer
       for (const data of Object.values(layersData)) {
-        data.behaviors = createSkeletonEditBehavior(
+        data.behaviors = createSkeletonPointExecutors(
           data.original,
           selectedSkeletonPoints,
           lastBehaviorName
@@ -3359,7 +3357,7 @@ export class PointerTool extends BaseTool {
         if (behaviorName !== lastBehaviorName) {
           lastBehaviorName = behaviorName;
           for (const data of Object.values(layersData)) {
-            data.behaviors = createSkeletonEditBehavior(
+            data.behaviors = createSkeletonPointExecutors(
               data.original,
               selectedSkeletonPoints,
               behaviorName
@@ -3400,9 +3398,9 @@ export class PointerTool extends BaseTool {
 
             if (!appliedFixedRib) {
               // Apply behavior changes
-              for (const behavior of behaviors) {
-                const changes = behavior.applyDelta(delta, roundFunc);
-                const contour = working.contours[behavior.contourIndex];
+              for (const { contourIndex, executor } of behaviors) {
+                const changes = executor.applyDelta(delta, roundFunc);
+                const contour = working.contours[contourIndex];
                 for (const { pointIndex, x, y } of changes) {
                   contour.points[pointIndex].x = x;
                   contour.points[pointIndex].y = y;
@@ -7457,6 +7455,42 @@ function pointInCircleHandle(point, handle, handleSize) {
 function getBehaviorName(event) {
   const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
   return behaviorNames[boolInt(event.shiftKey) + 2 * boolInt(event.altKey)];
+}
+
+function createSkeletonPointExecutors(
+  skeletonData,
+  selectedSkeletonPoints,
+  behaviorName = "default",
+  roundFunc = Math.round
+) {
+  if (!selectedSkeletonPoints || selectedSkeletonPoints.size === 0) {
+    return [];
+  }
+  const byContour = new Map();
+
+  for (const selKey of selectedSkeletonPoints) {
+    const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+    if (!byContour.has(contourIdx)) {
+      byContour.set(contourIdx, []);
+    }
+    byContour.get(contourIdx).push(pointIdx);
+  }
+
+  const behaviors = [];
+  for (const [contourIdx, pointIndices] of byContour) {
+    const contour = skeletonData?.contours?.[contourIdx];
+    if (!contour) continue;
+    const executor = createPointBehaviorExecutor({
+      points: contour.points,
+      isClosed: contour.isClosed,
+      selectedIndices: pointIndices,
+      behaviorName,
+      roundFunc,
+    });
+    behaviors.push({ contourIndex: contourIdx, executor });
+  }
+
+  return behaviors;
 }
 
 function replace(setA, setB) {
