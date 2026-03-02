@@ -821,9 +821,209 @@ maps show `CA` for all migrated kinds.
 - Non-drag/nudge actions remain on legacy routing.
 
 ---
-## Phase 6 - Final Parity Sweep
+## Phase 6 - Pointer Transport-Only (Drag + Nudge)
+Scope: This phase is limited to drag and nudge actions. Pointer remains the hit-test/selection/cursor owner.
+Goal: Pointer is transport-only for drag/nudge; adapters own persistence; composer routes uniformly.
 
-### Step 6.1 - Full Baseline Matrix
+### Step 6.1 - Skeleton Drag (skeletonPoint)
+**Problem Description**
+Pointer still owns skeleton drag math and persistence.
+
+**Solution (Plain Language)**
+Move skeleton drag behavior out of pointer and into the canonical adapter for `skeletonPoint` while preserving behavior.
+
+**Code Snippets / Suggestions**
+- Inline the logic of `PointerTool._handleDragSkeletonPoints` into the canonical drag adapter for `skeletonPoint` in `pointer-objects.js`.
+- Remove the pointer method or reduce it to a no-op wrapper that is no longer referenced by pointer routing.
+
+**Manual Testing Criteria**
+- Drag skeleton on-curve/off-curve points with modifiers (shift/alt/shift+alt). Confirm parity.
+
+**Strictest Possible Passing Criteria**
+- No skeleton drag persistence remains in pointer.
+- Drag rows R1-R4 (C5) PASS.
+
+---
+
+### Step 6.2 - Skeleton Equalize Drag (skeletonHandle, X)
+**Problem Description**
+Pointer still owns skeleton handle equalize drag (X).
+
+**Solution (Plain Language)**
+Move skeleton equalize drag logic into the canonical adapter for `skeletonHandle`.
+
+**Code Snippets / Suggestions**
+- Inline `PointerTool._handleEqualizeHandlesDrag` into the `skeletonHandle` drag adapter.
+- Remove the pointer method or leave as unreferenced internal helper.
+
+**Manual Testing Criteria**
+- Drag skeleton handles with X and X+Shift.
+
+**Strictest Possible Passing Criteria**
+- No skeleton equalize drag persistence remains in pointer.
+- Drag rows R5-R6 (C6) PASS.
+
+---
+
+### Step 6.3 - Skeleton Nudge (skeletonPoint)
+**Problem Description**
+Pointer still owns skeleton nudge math and persistence.
+
+**Solution (Plain Language)**
+Move skeleton nudge logic into the canonical adapter for `skeletonPoint`.
+
+**Code Snippets / Suggestions**
+- Inline the skeleton-nudge branch of `PointerTool._handleArrowKeysLegacy` into the adapter.
+
+**Manual Testing Criteria**
+- Nudge skeleton points with normal/shift/alt/D/S.
+
+**Strictest Possible Passing Criteria**
+- No skeleton nudge persistence remains in pointer.
+- Nudge rows R10/R11/R16/R17/R20 (C5) PASS.
+
+---
+
+### Step 6.4 - Skeleton Equalize Nudge (skeletonHandle, X)
+**Problem Description**
+Pointer still owns skeleton equalize nudge.
+
+**Solution (Plain Language)**
+Move skeleton equalize nudge into the canonical adapter for `skeletonHandle`.
+
+**Code Snippets / Suggestions**
+- Inline `PointerTool._handleArrowKeysForEqualizeSkeletonHandles` into the adapter.
+
+**Manual Testing Criteria**
+- Nudge skeleton handles with X and X+Shift.
+
+**Strictest Possible Passing Criteria**
+- No skeleton equalize nudge persistence remains in pointer.
+- Nudge rows R13/R14 (C6) PASS.
+
+---
+
+### Step 6.5 - Rib Drag (skeletonRibPoint)
+**Problem Description**
+Pointer still owns rib drag math and persistence.
+
+**Solution (Plain Language)**
+Move rib drag logic into the canonical adapter for `skeletonRibPoint`.
+
+**Code Snippets / Suggestions**
+- Inline `PointerTool._handleDragRibPoint` into the adapter.
+
+**Manual Testing Criteria**
+- Drag ribs with normal/alt/Z.
+
+**Strictest Possible Passing Criteria**
+- No rib drag persistence remains in pointer.
+- Drag rows R1/R3/R7 (C7) PASS.
+
+---
+
+### Step 6.6 - Rib Nudge (skeletonRibPoint)
+**Problem Description**
+Pointer still owns rib nudge math and persistence.
+
+**Solution (Plain Language)**
+Move rib nudge logic into the canonical adapter for `skeletonRibPoint`.
+
+**Code Snippets / Suggestions**
+- Inline `PointerTool._handleArrowKeysForRibPoints` into the adapter.
+
+**Manual Testing Criteria**
+- Nudge ribs with normal/shift/alt/Z/Z+shift.
+
+**Strictest Possible Passing Criteria**
+- No rib nudge persistence remains in pointer.
+- Nudge rows R10/R11/R18/R19/R20 (C7) PASS.
+
+---
+
+### Step 6.7 - Editable Generated Drag (editableGeneratedPoint)
+**Problem Description**
+Pointer still owns editable generated point drag logic.
+
+**Solution (Plain Language)**
+Move editable generated point drag logic into the canonical adapter.
+
+**Code Snippets / Suggestions**
+- Inline `PointerTool._handleDragEditableGeneratedPoints` into the adapter.
+
+**Manual Testing Criteria**
+- Drag editable generated points.
+
+**Strictest Possible Passing Criteria**
+- No editable generated drag persistence remains in pointer.
+- Drag row R1 (C8) PASS.
+
+---
+
+### Step 6.8 - Editable Generated Handle Drag (editableGeneratedHandle)
+**Problem Description**
+Pointer still owns editable generated handle drag logic.
+
+**Solution (Plain Language)**
+Move editable generated handle drag logic into the canonical adapter.
+
+**Code Snippets / Suggestions**
+- Inline `PointerTool._handleDragEditableGeneratedHandles` into the adapter.
+
+**Manual Testing Criteria**
+- Drag editable generated handles.
+
+**Strictest Possible Passing Criteria**
+- No editable generated handle drag persistence remains in pointer.
+- Drag row R1 (C8) PASS.
+
+---
+
+### Step 6.9 - Editable Generated Nudge (editableGeneratedPoint/Handle)
+**Problem Description**
+Pointer still owns editable generated handle nudge logic.
+
+**Solution (Plain Language)**
+Move editable generated nudge logic into the canonical adapter.
+
+**Code Snippets / Suggestions**
+- Inline `PointerTool._handleArrowKeysForEditableHandles` into the adapter.
+
+**Manual Testing Criteria**
+- Nudge editable generated handles with normal/shift/alt.
+
+**Strictest Possible Passing Criteria**
+- No editable generated nudge persistence remains in pointer.
+- Nudge rows R10/R11/R20 (C8) PASS.
+
+---
+
+### Step 6.10 - Pointer Transport-Only Audit (Drag/Nudge)
+**Problem Description**
+Pointer may still contain drag/nudge persistence or math.
+
+**Solution (Plain Language)**
+Verify pointer is transport-only for drag/nudge and remove any remaining drag/nudge persistence.
+
+**Manual Testing Criteria**
+- N/A (audit step).
+
+**Strictest Possible Passing Criteria**
+- `edit-tools-pointer.js` contains no drag/nudge persistence (`recordChanges`, `applyChange`, `regenerateSkeletonContours`, `setSkeletonData`) for CA kinds.
+- Drag/nudge entrypoints only route to composer.
+
+---
+
+**Phase 6 Passing Criteria (Overall)**
+- Pointer is transport-only for drag and nudge.
+- Adapters own persistence for C5-C8.
+- Drag/nudge matrix cells touched in Phase 6 PASS.
+
+---
+
+## Phase 7 - Final Parity Sweep
+
+### Step 7.1 - Full Baseline Matrix
 **Problem Description**
 Final confirmation of parity is required.
 
@@ -839,7 +1039,7 @@ Run the full baseline matrix and record results.
 
 ---
 
-**Phase 6 Passing Criteria (Overall)**
+**Phase 7 Passing Criteria (Overall)**
 - Baseline matrix is fully PASS.
 - Mainline parity for regular-only workflows is confirmed.
 
