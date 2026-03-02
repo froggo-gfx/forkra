@@ -2501,6 +2501,7 @@ export class PointerTool extends BaseTool {
           sendIncrementalChange,
           scalingEditBehavior: this.scalingEditBehavior,
           equalizeMode: this.equalizeMode,
+          getEqualizeMode: () => this.equalizeMode,
           positionedGlyph: this.sceneModel.getSelectedPositionedGlyph(),
           initialClickedPointIndex:
             this.sceneController.sceneModel.initialClickedPointIndex,

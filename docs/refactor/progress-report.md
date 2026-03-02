@@ -94,6 +94,7 @@ Goal Alignment (Required Format)
 3. Code Implementation
    - Implemented `runDragOrchestration` in `src-js/views-editor/src/edit-behavior-composer.js`.
    - Moved equalize handle lookup and X-equalize drag math into `src-js/views-editor/src/edit-behavior.js`.
+   - Composer now reads equalize mode via `getEqualizeMode` for mid-drag modifier changes.
    - Added a regular-only branch in `src-js/views-editor/src/edit-tools-pointer.js` that calls the composer.
 4. Why This Solves the Problem
    - Regular drag now routes through a uniform composer entry point while non-regular drag paths stay unchanged.
@@ -118,7 +119,7 @@ I did not add new math unless the step explicitly allows it. PASS
 Code Evidence (Required)
 File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-composer.js
 Function(s): getBehaviorName, runDragOrchestration
-Lines: 15-222
+Lines: 15-224
 Snippet:
 ```js
 function getBehaviorName(event) {
@@ -178,98 +179,98 @@ Result: FAIL (not enough detail to confirm on-curve vs off-curve)
 Row: R1
 Column: C2
 Behavior: drag regular off-curve points
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R1
 Column: C3
 Behavior: drag anchors
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R1
 Column: C4
 Behavior: drag guidelines
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R2
 Column: C1
 Behavior: drag+shift regular on-curve points (constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R2
 Column: C2
 Behavior: drag+shift regular off-curve points (constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R2
 Column: C3
 Behavior: drag+shift anchors (constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R2
 Column: C4
 Behavior: drag+shift guidelines (constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R3
 Column: C1
 Behavior: drag+alt regular on-curve points (alternate)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R3
 Column: C2
 Behavior: drag+alt regular off-curve points (alternate)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R3
 Column: C3
 Behavior: drag+alt anchors (alternate)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R3
 Column: C4
 Behavior: drag+alt guidelines (alternate)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R4
 Column: C1
 Behavior: drag+shift+alt regular on-curve points (alternate-constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R4
 Column: C2
 Behavior: drag+shift+alt regular off-curve points (alternate-constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R4
 Column: C3
 Behavior: drag+shift+alt anchors (alternate-constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R4
 Column: C4
 Behavior: drag+shift+alt guidelines (alternate-constrain)
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-238.
+Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 35-224.
 Result: FAIL (not tested)
 
 Row: R5
 Column: C2
-Behavior: drag+X equalize regular off-curve handles
-Evidence: `src-js/views-editor/src/edit-behavior.js` `makeEqualizeDragChanges` lines 1469-1509.
-Result: FAIL (not tested)
+Behavior: drag+X equalize regular off-curve handles (mid-drag toggle)
+Evidence: Manual drag test: X-equalize engaged and disengaged mid-drag; behavior matches baseline.
+Result: PASS
 
 Row: R6
 Column: C2
@@ -279,7 +280,7 @@ Result: FAIL (not tested)
 
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Rollback shape: ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts)) with optional connectContours change concatenation.
-Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 168-221.
+Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 171-223.
 
 Step Header
 Phase 2, Step 2.1 - Composer Skeleton (No Behavior Change)

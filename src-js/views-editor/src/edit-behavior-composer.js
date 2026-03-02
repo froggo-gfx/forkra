@@ -28,6 +28,7 @@ function getBehaviorName(event) {
  * - sendIncrementalChange
  * - scalingEditBehavior
  * - equalizeMode
+ * - getEqualizeMode (optional; use for live modifier state)
  * - positionedGlyph
  * - initialClickedPointIndex
  * @returns {Promise<{ undoLabel, changes, broadcast }>}
@@ -42,9 +43,11 @@ export async function runDragOrchestration(_context) {
     sendIncrementalChange,
     scalingEditBehavior,
     equalizeMode,
+    getEqualizeMode,
     positionedGlyph,
     initialClickedPointIndex,
   } = _context;
+  const readEqualizeMode = getEqualizeMode || (() => equalizeMode);
 
   assert(sceneController, "runDragOrchestration: missing sceneController");
 
@@ -137,7 +140,7 @@ export async function runDragOrchestration(_context) {
     }
 
     // X-equalize during drag for regular handles (mid-drag activation supported)
-    if (equalizeMode && equalizeHandleInfo && positionedGlyph) {
+    if (readEqualizeMode() && equalizeHandleInfo && positionedGlyph) {
       const currentGlyphPoint = {
         x: currentPoint.x - positionedGlyph.x,
         y: currentPoint.y - positionedGlyph.y,
