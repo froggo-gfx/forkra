@@ -639,7 +639,29 @@ Route all nudge operations through the composer, using the nudge routing map to 
 
 ## Phase 5 - Replace Legacy Adapters With Canonical Adapters (Drag + Nudge Only, Matrix-Driven)
 
-### Step 5.1 - Canonical Adapters: Regular Path Kinds (regularPoint, anchor, guideline)
+### Step 5.1 - Unify Skeleton + Rib Behaviors (Shared Table)
+**Problem Description**
+Skeleton and rib behavior math still lives in parallel systems, which violates the unified behavior intent.
+
+**Solution (Plain Language)**
+Move skeleton and rib behavior rules into the shared behavior table in `edit-behavior.js`, and forbid use of `createSkeletonEditBehavior` or any parallel behavior table for canonical adapters.
+
+**Code Snippets / Suggestions**
+- Move skeleton behavior presets/rules into `edit-behavior.js`.
+- Move rib tangent/fixed/alt rules into `edit-behavior.js` where they apply.
+- Add explicit applicability guards (object kind + modifier) inside the shared table rather than creating new tables.
+- `skeleton-edit-behavior.js` must not be used by canonical adapters.
+
+**Manual Testing Criteria**
+- Run a minimal smoke set: skeleton drag/nudge (R1/R10 C5-C6) and rib drag/nudge (R1/R10 C7) using the shared behavior table.
+
+**Strictest Possible Passing Criteria**
+- `createSkeletonEditBehavior` is not referenced by canonical adapters.
+- Shared behavior table covers skeleton and rib presets used by the composer.
+
+---
+
+### Step 5.2 - Canonical Adapters: Regular Path Kinds (regularPoint, anchor, guideline)
 **Problem Description**
 Legacy adapters still call pointer logic for regular path kinds, so composer is not truly canonical.
 
@@ -661,7 +683,7 @@ Replace legacy adapters for `regularPoint`, `anchor`, and `guideline` with canon
 
 ---
 
-### Step 5.2 - Canonical Adapters: Skeleton Core (skeletonPoint, skeletonHandle)
+### Step 5.3 - Canonical Adapters: Skeleton Core (skeletonPoint, skeletonHandle)
 **Problem Description**
 Skeleton core drag/nudge still relies on pointer-owned logic.
 
@@ -682,7 +704,7 @@ Replace legacy adapters for `skeletonPoint` and `skeletonHandle` with canonical 
 
 ---
 
-### Step 5.3 - Canonical Adapters: Ribs (skeletonRibPoint)
+### Step 5.4 - Canonical Adapters: Ribs (skeletonRibPoint)
 **Problem Description**
 Rib drag/nudge remains coupled to pointer-specific logic and modifiers.
 
@@ -703,7 +725,7 @@ Replace legacy adapters for `skeletonRibPoint` with canonical adapters that edit
 
 ---
 
-### Step 5.4 - Canonical Adapters: Editable Generated (editableGeneratedPoint)
+### Step 5.5 - Canonical Adapters: Editable Generated (editableGeneratedPoint)
 **Problem Description**
 Editable generated points/handles are still tied to pointer logic.
 
@@ -724,7 +746,7 @@ Replace legacy adapters for `editableGeneratedPoint` with canonical adapters tha
 
 ---
 
-### Step 5.5 - Final Cleanup: Remove Remaining Legacy Drag/Nudge Branches
+### Step 5.6 - Final Cleanup: Remove Remaining Legacy Drag/Nudge Branches
 **Problem Description**
 After canonical adapters are in place, old pointer branches can linger and cause drift.
 
@@ -736,22 +758,6 @@ Delete any remaining drag/nudge branches in pointer that are now covered by cano
 
 **Strictest Possible Passing Criteria**
 - No pointer branches remain for drag/nudge on kinds marked `CA`.
-- Drag and nudge matrix cells PASS.
-
----
-
-### Step 5.2 - Remove Legacy Pointer Branches
-**Problem Description**
-After canonical adapters are in place for drag/nudge, old pointer branches remain and cause drift.
-
-**Solution (Plain Language)**
-Delete legacy pointer branches for drag/nudge that are now handled through composer + canonical adapters.
-
-**Manual Testing Criteria**
-- Full baseline matrix run.
-
-**Strictest Possible Passing Criteria**
-- No pointer branches remain for drag/nudge on object kinds marked "composer + canonical adapter."
 - Drag and nudge matrix cells PASS.
 
 ---
@@ -793,3 +799,4 @@ Run the full baseline matrix and record results.
 
 ## Notes
 This plan is intentionally strict and incremental. Each step can be implemented independently and verified before moving on.
+
