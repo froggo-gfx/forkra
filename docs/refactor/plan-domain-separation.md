@@ -15,6 +15,7 @@ We will refactor the editing pipeline to enforce domain separation while preserv
   - Regular points and skeleton points must share this table for their core behaviors.
   - Singular/edge cases (rib, Tunni-specific constraints) are handled in the same file, as separate rules/tables if needed.
   - No parallel behavior system in a separate file.
+  - **"Unique/specific" means functional uniqueness, not naming.** If a behavior is the same action as regular points (e.g. X-equalize), it must use the shared behavior function rather than a skeleton/rib-specific duplicate.
 - All edits emit standard change objects with rollback.
 
 ## Definitions
@@ -639,25 +640,55 @@ Route all nudge operations through the composer, using the nudge routing map to 
 
 ## Phase 5 - Replace Legacy Adapters With Canonical Adapters (Drag + Nudge Only, Matrix-Driven)
 
-### Step 5.1 - Unify Skeleton + Rib Behaviors (Shared Table)
+### Step 5.1 - Unify Skeleton + Rib Behaviors (Shared Execution)
 **Problem Description**
-Skeleton and rib behavior math still lives in parallel systems, which violates the unified behavior intent.
+Skeleton behavior execution still lives in a separate system, so behavior execution is not unified. This violates the core intent: a single, object-agnostic behavior engine with object-specific constraints only in adapters/orchestration.
 
 **Solution (Plain Language)**
-Move skeleton and rib behavior rules into the shared behavior table in `edit-behavior.js`, and forbid use of `createSkeletonEditBehavior` or any parallel behavior table for canonical adapters.
+Make `edit-behavior.js` the single source of truth for **behavior execution**, not just rules. Remove any parallel behavior engine. Anything that is not functionally unique must use the shared behavior executor. Rib/handle-specific math stays as helpers called by adapters, not as a separate behavior system.
 
-**Code Snippets / Suggestions**
-- Move skeleton behavior presets/rules into `edit-behavior.js`.
-- Move rib tangent/fixed/alt rules into `edit-behavior.js` where they apply.
-- Add explicit applicability guards (object kind + modifier) inside the shared table rather than creating new tables.
-- `skeleton-edit-behavior.js` must not be used by canonical adapters.
+**Implementation (Incremental Substeps)**
+**Step 5.1a - Shared Behavior Executor (edit-behavior.js)**
+- Extract the generic behavior executor currently embedded in `SkeletonEditBehavior` into `edit-behavior.js`.
+- Provide a stable API (example signature):
+  - `createPointBehaviorExecutor({ points, isClosed, selectedIndices, behaviorName, enableScalingEdit, roundFunc })`
+  - returns `{ changes, rollback }` where `changes` is `[{ pointIndex, x, y }]`.
+- Executor must include:
+  - selection flagging
+  - point matching
+  - segment iteration
+  - floating off-curve edits
+  - scaling segment edits
+  - delta application (applyDelta logic)
+
+**Step 5.1b - Move Rib/Handle Helpers to edit-behavior.js**
+- Move rib/handle helper behaviors into `edit-behavior.js`:
+  - `RibEditBehavior`, `EditableRibBehavior`, `InterpolatingRibBehavior`, `EditableHandleBehavior`
+  - `createRibEditBehavior`, `createEditableRibBehavior`, `createInterpolatingRibBehavior`, `createEditableHandleBehavior`
+- Any helper that is functionally identical to regular behavior must be removed in favor of the shared executor.
+
+**Step 5.1c - Pointer Skeleton Uses Shared Executor**
+- Replace `createSkeletonEditBehavior` / `SkeletonEditBehavior` usage in `edit-tools-pointer.js` with the shared executor API.
+- Keep skeleton-specific constraints (width/nudge/rib modes) in adapters/orchestration only.
+
+**Step 5.1d - Panel Transformation Uses Shared Executor**
+- Replace `SkeletonEditBehavior` usage in `panel-transformation.js` with the shared executor.
+- Maintain existing transform panel flow (batching/regeneration/rollback), only swap behavior execution.
+
+**Step 5.1e - Remove skeleton-edit-behavior.js**
+- After all call sites are migrated, delete `skeleton-edit-behavior.js`.
+- Verify no imports remain.
 
 **Manual Testing Criteria**
-- Run a minimal smoke set: skeleton drag/nudge (R1/R10 C5-C6) and rib drag/nudge (R1/R10 C7) using the shared behavior table.
+- Skeleton drag/nudge (R1/R10 C5-C6) using shared executor.
+- Rib drag/nudge (R1/R10 C7), including modifier variants (Z/D/S/Alt).
+- Transform panel: move/align/distribute skeleton selections and editable handles; undo/redo.
 
 **Strictest Possible Passing Criteria**
-- `createSkeletonEditBehavior` is not referenced by canonical adapters.
-- Shared behavior table covers skeleton and rib presets used by the composer.
+- `edit-behavior.js` is the only behavior executor (shared for regular + skeleton).
+- No references to `SkeletonEditBehavior` or `createSkeletonEditBehavior` remain.
+- `skeleton-edit-behavior.js` is removed.
+- No functionally shared behavior logic exists outside `edit-behavior.js` (naming differences do not count as uniqueness).
 
 ---
 

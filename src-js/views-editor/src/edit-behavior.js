@@ -1391,6 +1391,12 @@ const behaviorTypes = {
   },
 };
 
+export function getPointBehaviorType(behaviorName) {
+  return behaviorTypes[behaviorName] || behaviorTypes["default"];
+}
+
+export const POINT_BEHAVIOR_TYPES = behaviorTypes;
+
 export function findEqualizeHandleForPath(positionedGlyph, point, size) {
   if (!positionedGlyph?.glyph?.path) {
     return null;
