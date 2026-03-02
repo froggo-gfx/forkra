@@ -1645,6 +1645,79 @@ Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(roll
 Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 173-217; `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
 
 Step Header
+Phase 5, Step 5.6 - Final Cleanup: Remove Remaining Legacy Drag/Nudge Branches
+
+Goal Alignment (Required Format)
+1. Step Goal
+   - Remove any remaining pointer drag/nudge branches for kinds now routed via canonical adapters.
+2. Solution
+   - Verify pointer drag/nudge dispatch goes through composer routing for all CA kinds and keep legacy adapters only for out-of-scope kinds.
+3. Code Implementation
+   - No deletions were required because no pointer drag/nudge branches for CA kinds remained; verification confirms routing maps and pointer dispatch are fully composer-driven for CA kinds.
+4. Why This Solves the Problem
+   - Pointer no longer branches on CA kinds for drag/nudge; canonical adapters are the only routing targets for those kinds.
+
+Passing Criteria (Required)
+Criterion: No pointer branches remain for drag/nudge on kinds marked CA.
+Result: PASS
+Evidence: `src-js/views-editor/src/edit-tools-pointer.js` `handleDragSelection` lines 2637-2757 and `handleArrowKeys` lines 1239-1278 route drag/nudge through composer; `src-js/views-editor/src/pointer-objects.js` `legacyDragAdapters` lines 239-258 includes only out-of-scope kinds.
+
+Criterion: Drag and nudge matrix cells PASS.
+Result: PASS
+Evidence: Manual test 2026-03-02 (user) across drag/nudge rows R1-R20 (C1-C8), recorded as PASS in prior step entries.
+
+Scope Boundary (Required)
+I did not change behavior outside this step. PASS
+I did not add new math unless the step explicitly allows it. PASS
+
+Code Evidence (Required)
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-tools-pointer.js
+Function(s): handleDragSelection, handleArrowKeys
+Lines: 2637-2757, 1239-1278
+Snippet:
+```js
+    if (hasRegularSelection && !hasSkeletonSelection) {
+      await runDragRoutingOrchestration({
+        pointerTool: this,
+        sceneController,
+        eventStream,
+        initialEvent,
+        objectKind: regularObjectKind,
+      });
+```
+
+File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\pointer-objects.js
+Function(s): canonicalDragAdapters, canonicalNudgeAdapters, legacyDragAdapters
+Lines: 217-258
+Snippet:
+```js
+export const canonicalDragAdapters = {
+  regularPoint: async (context) => runRegularDragCanonical(context),
+  anchor: async (context) => runRegularDragCanonical(context),
+  guideline: async (context) => runRegularDragCanonical(context),
+  skeletonPoint: async (context) => runSkeletonDragCanonical(context),
+```
+
+File: C:\Users\frena\Desktop\fontra-test\docs\refactor\progress-report.md
+Function(s): N/A (documentation)
+Lines: 1647-1719
+Snippet:
+```md
+Step Header
+Phase 5, Step 5.6 - Final Cleanup: Remove Remaining Legacy Drag/Nudge Branches
+```
+
+Matrix Evidence (Required for Drag/Nudge Steps)
+Row: R1-R20
+Column: C1-C8
+Behavior: Drag and nudge coverage for all Yes/Specificity cells.
+Evidence: Manual test 2026-03-02 (user); matches baseline.
+Result: PASS
+
+Undo/Redo Evidence (Required for Drag/Nudge Steps)
+Rollback shape: `ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts))` for drag; `ChangeCollector.fromChanges(consolidateChanges(editChanges), consolidateChanges(rollbackChanges))` for nudge.
+Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 173-217; `src-js/views-editor/src/scene-controller.js` `handleArrowKeys` lines 994-996.
+Step Header
 Phase 5, Step 5.5 - Canonical Adapters: Editable Generated (editableGeneratedPoint)
 
 Goal Alignment (Required Format)
