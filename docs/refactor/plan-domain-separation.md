@@ -639,29 +639,104 @@ Route all nudge operations through the composer, using the nudge routing map to 
 
 ## Phase 5 - Replace Legacy Adapters With Canonical Adapters (Drag + Nudge Only, Matrix-Driven)
 
-### Step 5.1 - Canonical Adapter Replacement Loop (Guardrail)
+### Step 5.1 - Canonical Adapters: Regular Path Kinds (regularPoint, anchor, guideline)
 **Problem Description**
-Legacy adapters still call pointer logic. We need to replace them systematically without missing any object kind.
+Legacy adapters still call pointer logic for regular path kinds, so composer is not truly canonical.
 
 **Solution (Plain Language)**
-Replace legacy adapters one object kind at a time, following the registry order, but only for drag and nudge actions. Each replacement must update the drag/nudge routing maps and pass matrix tests before moving on.
+Replace legacy adapters for `regularPoint`, `anchor`, and `guideline` with canonical adapters that edit the standard path/anchor/guideline data directly for both drag and nudge.
 
 **Code Snippets / Suggestions**
-- For each object kind in `OBJECT_KINDS` (in registry order):
-  1. Use `object-kind-inventory.md` to identify current math + persistence locations.
-  2. Implement a canonical adapter that covers drag and nudge only:
-     - edits canonical storage for persistent kinds
-     - translates virtual edits into canonical storage changes
-  3. Update the drag/nudge routing maps from "composer + legacy adapter" to "composer + canonical adapter."
-  4. Run the drag and nudge matrix tests for that object's Yes/Specificity rows.
-- If a kind cannot be migrated in this plan, mark it explicitly as "legacy" with a follow-up step and date.
+- Use `object-kind-inventory.md` to confirm current math + persistence locations.
+- Implement canonical adapters for drag + nudge for the three kinds.
+- Update drag/nudge routing maps from `CL` to `CA` for these kinds.
+- Remove any now-dead pointer branches that only served these kinds.
 
 **Manual Testing Criteria**
-- For each migrated kind, run all drag and nudge Yes/Specificity matrix rows for that kind.
+- Run all drag and nudge Yes/Specificity rows for C1-C4.
 
 **Strictest Possible Passing Criteria**
-- No object kind is skipped without an explicit legacy marker and a follow-up step.
-- Each migrated kind passes its drag/nudge matrix rows before the next kind is started.
+- All C1-C4 drag/nudge rows PASS after migration.
+- No legacy pointer branch remains for these kinds.
+
+---
+
+### Step 5.2 - Canonical Adapters: Skeleton Core (skeletonPoint, skeletonHandle)
+**Problem Description**
+Skeleton core drag/nudge still relies on pointer-owned logic.
+
+**Solution (Plain Language)**
+Replace legacy adapters for `skeletonPoint` and `skeletonHandle` with canonical adapters that edit skeleton data directly and regenerate contours.
+
+**Code Snippets / Suggestions**
+- Implement canonical adapters for drag + nudge for the two kinds.
+- Update drag/nudge routing maps from `CL` to `CA` for these kinds.
+- Remove any now-dead pointer branches that only served these kinds.
+
+**Manual Testing Criteria**
+- Run all drag and nudge Yes/Specificity rows for C5-C6, including equalize, fixed rib, and alt variants.
+
+**Strictest Possible Passing Criteria**
+- All C5-C6 drag/nudge rows PASS after migration.
+- No legacy pointer branch remains for these kinds.
+
+---
+
+### Step 5.3 - Canonical Adapters: Ribs (skeletonRibPoint)
+**Problem Description**
+Rib drag/nudge remains coupled to pointer-specific logic and modifiers.
+
+**Solution (Plain Language)**
+Replace legacy adapters for `skeletonRibPoint` with canonical adapters that edit skeleton data while preserving tangent/fixed constraints.
+
+**Code Snippets / Suggestions**
+- Implement canonical adapters for drag + nudge for rib points.
+- Update drag/nudge routing maps from `CL` to `CA` for C7.
+- Remove pointer-only rib branches after parity is confirmed.
+
+**Manual Testing Criteria**
+- Run all drag and nudge Yes/Specificity rows for C7, including Z/D/S and Alt variants.
+
+**Strictest Possible Passing Criteria**
+- All C7 drag/nudge rows PASS after migration.
+- No legacy pointer branch remains for ribs.
+
+---
+
+### Step 5.4 - Canonical Adapters: Editable Generated (editableGeneratedPoint)
+**Problem Description**
+Editable generated points/handles are still tied to pointer logic.
+
+**Solution (Plain Language)**
+Replace legacy adapters for `editableGeneratedPoint` with canonical adapters that translate virtual handle edits into skeleton data.
+
+**Code Snippets / Suggestions**
+- Implement canonical adapters for drag + nudge for editable generated points.
+- Update drag/nudge routing maps from `CL` to `CA` for C8.
+- Remove pointer-only editable-handle branches after parity is confirmed.
+
+**Manual Testing Criteria**
+- Run all drag and nudge Yes/Specificity rows for C8 (including equalize and alt cases).
+
+**Strictest Possible Passing Criteria**
+- All C8 drag/nudge rows PASS after migration.
+- No legacy pointer branch remains for editable generated handles.
+
+---
+
+### Step 5.5 - Final Cleanup: Remove Remaining Legacy Drag/Nudge Branches
+**Problem Description**
+After canonical adapters are in place, old pointer branches can linger and cause drift.
+
+**Solution (Plain Language)**
+Delete any remaining drag/nudge branches in pointer that are now covered by canonical adapters, and ensure routing maps show `CA` for all migrated kinds.
+
+**Manual Testing Criteria**
+- Full baseline matrix run.
+
+**Strictest Possible Passing Criteria**
+- No pointer branches remain for drag/nudge on kinds marked `CA`.
+- Drag and nudge matrix cells PASS.
 
 ---
 
