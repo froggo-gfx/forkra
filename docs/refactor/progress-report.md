@@ -93,7 +93,7 @@ Goal Alignment (Required Format)
    - Extract the regular drag orchestration into the composer and add a regular-only branch in pointer.
 3. Code Implementation
    - Implemented `runDragOrchestration` in `src-js/views-editor/src/edit-behavior-composer.js`.
-   - Moved equalize handle lookup into `src-js/views-editor/src/edit-behavior.js`.
+   - Moved equalize handle lookup and X-equalize drag math into `src-js/views-editor/src/edit-behavior.js`.
    - Added a regular-only branch in `src-js/views-editor/src/edit-tools-pointer.js` that calls the composer.
 4. Why This Solves the Problem
    - Regular drag now routes through a uniform composer entry point while non-regular drag paths stay unchanged.
@@ -118,7 +118,7 @@ I did not add new math unless the step explicitly allows it. PASS
 Code Evidence (Required)
 File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior-composer.js
 Function(s): getBehaviorName, runDragOrchestration
-Lines: 15-238
+Lines: 15-222
 Snippet:
 ```js
 function getBehaviorName(event) {
@@ -131,16 +131,17 @@ export async function runDragOrchestration(_context) {
 ```
 
 File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-behavior.js
-Function(s): findEqualizeHandleForPath, getEqualizeHandleInfoForPointIndex
-Lines: 1394-1466
+Function(s): findEqualizeHandleForPath, getEqualizeHandleInfoForPointIndex, makeEqualizeDragChanges
+Lines: 1394-1510
 Snippet:
 ```js
-export function findEqualizeHandleForPath(positionedGlyph, point, size) {
-  if (!positionedGlyph?.glyph?.path) {
-    return null;
-  }
-
-  const glyphPoint = {
+export function makeEqualizeDragChanges(
+  path,
+  equalizeHandleInfo,
+  currentGlyphPoint,
+  shiftKey
+) {
+  if (!path || !equalizeHandleInfo || !currentGlyphPoint) {
 ```
 
 File: C:\Users\frena\Desktop\fontra-test\src-js\views-editor\src\edit-tools-pointer.js
@@ -267,18 +268,18 @@ Result: FAIL (not tested)
 Row: R5
 Column: C2
 Behavior: drag+X equalize regular off-curve handles
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 139-178.
+Evidence: `src-js/views-editor/src/edit-behavior.js` `makeEqualizeDragChanges` lines 1469-1509.
 Result: FAIL (not tested)
 
 Row: R6
 Column: C2
 Behavior: drag+X+shift equalize regular off-curve handles with constrain
-Evidence: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 139-178.
+Evidence: `src-js/views-editor/src/edit-behavior.js` `makeEqualizeDragChanges` lines 1469-1509.
 Result: FAIL (not tested)
 
 Undo/Redo Evidence (Required for Drag/Nudge Steps)
 Rollback shape: ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts)) with optional connectContours change concatenation.
-Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 185-238.
+Source: `src-js/views-editor/src/edit-behavior-composer.js` `runDragOrchestration` lines 168-221.
 
 Step Header
 Phase 2, Step 2.1 - Composer Skeleton (No Behavior Change)

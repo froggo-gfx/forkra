@@ -5,8 +5,8 @@ import { connectContours } from "@fontra/core/path-functions.js";
 import { assert } from "@fontra/core/utils.js";
 import {
   EditBehaviorFactory,
-  constrainHorVerDiag,
   findEqualizeHandleForPath,
+  makeEqualizeDragChanges,
 } from "./edit-behavior.js";
 
 // Composer entry points (uniform orchestration).
@@ -138,38 +138,21 @@ export async function runDragOrchestration(_context) {
 
     // X-equalize during drag for regular handles (mid-drag activation supported)
     if (equalizeMode && equalizeHandleInfo && positionedGlyph) {
-      const { pointIndex, smoothIndex, oppositeIndex } = equalizeHandleInfo;
       const currentGlyphPoint = {
         x: currentPoint.x - positionedGlyph.x,
         y: currentPoint.y - positionedGlyph.y,
       };
       for (const layer of layerInfo) {
         const path = layer.layerGlyph.path;
-        const smoothPt = path.getPoint(smoothIndex);
-        if (!smoothPt) continue;
-        let newDragVec = {
-          x: currentGlyphPoint.x - smoothPt.x,
-          y: currentGlyphPoint.y - smoothPt.y,
-        };
-        if (event.shiftKey) {
-          newDragVec = constrainHorVerDiag(newDragVec);
-        }
-        const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
-        if (newDragLen < 1) {
+        const equalizeChanges = makeEqualizeDragChanges(
+          path,
+          equalizeHandleInfo,
+          currentGlyphPoint,
+          event.shiftKey
+        );
+        if (!equalizeChanges) {
           continue;
         }
-        const newDragPos = {
-          x: Math.round(smoothPt.x + newDragVec.x),
-          y: Math.round(smoothPt.y + newDragVec.y),
-        };
-        const newOppPos = {
-          x: Math.round(smoothPt.x - newDragVec.x),
-          y: Math.round(smoothPt.y - newDragVec.y),
-        };
-        const equalizeChanges = [
-          { f: "=xy", a: [pointIndex, newDragPos.x, newDragPos.y] },
-          { f: "=xy", a: [oppositeIndex, newOppPos.x, newOppPos.y] },
-        ];
         for (const change of equalizeChanges) {
           applyChange(layer.layerGlyph.path, change);
         }

@@ -1465,3 +1465,46 @@ export function getEqualizeHandleInfoForPointIndex(path, pointIndex) {
 
   return { pointIndex, smoothIndex, oppositeIndex };
 }
+
+export function makeEqualizeDragChanges(
+  path,
+  equalizeHandleInfo,
+  currentGlyphPoint,
+  shiftKey
+) {
+  if (!path || !equalizeHandleInfo || !currentGlyphPoint) {
+    return null;
+  }
+
+  const { pointIndex, smoothIndex, oppositeIndex } = equalizeHandleInfo;
+  const smoothPt = path.getPoint(smoothIndex);
+  if (!smoothPt) {
+    return null;
+  }
+
+  let newDragVec = {
+    x: currentGlyphPoint.x - smoothPt.x,
+    y: currentGlyphPoint.y - smoothPt.y,
+  };
+  if (shiftKey) {
+    newDragVec = constrainHorVerDiag(newDragVec);
+  }
+  const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
+  if (newDragLen < 1) {
+    return null;
+  }
+
+  const newDragPos = {
+    x: Math.round(smoothPt.x + newDragVec.x),
+    y: Math.round(smoothPt.y + newDragVec.y),
+  };
+  const newOppPos = {
+    x: Math.round(smoothPt.x - newDragVec.x),
+    y: Math.round(smoothPt.y - newDragVec.y),
+  };
+
+  return [
+    { f: "=xy", a: [pointIndex, newDragPos.x, newDragPos.y] },
+    { f: "=xy", a: [oppositeIndex, newOppPos.x, newOppPos.y] },
+  ];
+}
