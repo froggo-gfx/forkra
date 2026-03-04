@@ -164,12 +164,11 @@ async function runRegularPointLikeOrchestration({
   sceneController,
   selection,
   pointerTool,
-  glyph,
-  sendIncrementalChange,
   eventStream,
   initialEvent,
   event,
   runPointLikeInputKernel,
+  runPointLikeSessionKernel,
   equalizeHandleInfo: equalizeHandleInfoOverride,
 }) {
   assert(sceneController, "runRegularPointLikeOrchestration: missing sceneController");
@@ -177,6 +176,10 @@ async function runRegularPointLikeOrchestration({
   assert(
     typeof runPointLikeInputKernel === "function",
     "runRegularPointLikeOrchestration: missing runPointLikeInputKernel"
+  );
+  assert(
+    typeof runPointLikeSessionKernel === "function",
+    "runRegularPointLikeOrchestration: missing runPointLikeSessionKernel"
   );
 
   const isDrag = mode === "drag";
@@ -203,77 +206,90 @@ async function runRegularPointLikeOrchestration({
     ? pointerTool.sceneController.sceneModel.initialClickedPointIndex
     : undefined;
 
-  let equalizeHandleInfo = equalizeHandleInfoOverride || null;
-  if (!equalizeHandleInfo && isDrag && positionedGlyph && initialClickedPointIndex !== undefined) {
-    const initialPoint = sceneController.localPoint(initialEvent);
-    const candidate = findEqualizeHandleForPath(
-      positionedGlyph,
-      initialPoint,
-      sceneController.mouseClickMargin
-    );
-    if (candidate && candidate.pointIndex === initialClickedPointIndex) {
-      equalizeHandleInfo = candidate;
-    }
-  }
-
-  const layerInfo = Object.entries(
-    sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
-  ).map(([layerName, layerGlyph]) => {
-    const behaviorFactory = new EditBehaviorFactory(
-      layerGlyph,
-      selection,
-      pointerTool.scalingEditBehavior
-    );
-    return {
-      layerName,
-      layerGlyph,
-      changePath: ["layers", layerName, "glyph"],
-      connectDetector: sceneController.getPathConnectDetector(layerGlyph.path),
-      shouldConnect: false,
-      behaviorFactory,
-      editBehavior: behaviorFactory.getBehavior(initialBehaviorName),
-    };
-  });
-  assert(layerInfo.length >= 1, "no layer to edit");
-  layerInfo[0].isPrimaryLayer = true;
-
-  const equalizeRollbackByLayer = new Map();
-  let equalizeUsed = false;
-  if (equalizeHandleInfo) {
-    for (const layer of layerInfo) {
-      const draggedPoint = layer.layerGlyph.path.getPoint(equalizeHandleInfo.pointIndex);
-      const oppositePoint = layer.layerGlyph.path.getPoint(
-        equalizeHandleInfo.oppositeIndex
-      );
-      if (draggedPoint || oppositePoint) {
-        equalizeRollbackByLayer.set(layer.layerName, {
-          draggedPoint: draggedPoint
-            ? {
-                x: draggedPoint.x,
-                y: draggedPoint.y,
-              }
-            : null,
-          oppositePoint: oppositePoint
-            ? {
-                x: oppositePoint.x,
-                y: oppositePoint.y,
-              }
-            : null,
-        });
-      }
-    }
-  }
-
-  let editChange;
-  await runPointLikeInputKernel({
+  return runPointLikeSessionKernel({
     mode,
+    runPointLikeInputKernel,
+    withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
     eventStream,
     initialEvent,
     event,
     getBehaviorNameForEvent: isDrag ? getBehaviorName : undefined,
     getPointForEvent: isDrag ? (nextEvent) => sceneController.localPoint(nextEvent) : undefined,
+    onSessionStart: ({ glyph }) => {
+      let equalizeHandleInfo = equalizeHandleInfoOverride || null;
+      if (
+        !equalizeHandleInfo &&
+        isDrag &&
+        positionedGlyph &&
+        initialClickedPointIndex !== undefined
+      ) {
+        const initialPoint = sceneController.localPoint(initialEvent);
+        const candidate = findEqualizeHandleForPath(
+          positionedGlyph,
+          initialPoint,
+          sceneController.mouseClickMargin
+        );
+        if (candidate && candidate.pointIndex === initialClickedPointIndex) {
+          equalizeHandleInfo = candidate;
+        }
+      }
+
+      const layerInfo = Object.entries(
+        sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+      ).map(([layerName, layerGlyph]) => {
+        const behaviorFactory = new EditBehaviorFactory(
+          layerGlyph,
+          selection,
+          pointerTool.scalingEditBehavior
+        );
+        return {
+          layerName,
+          layerGlyph,
+          changePath: ["layers", layerName, "glyph"],
+          connectDetector: sceneController.getPathConnectDetector(layerGlyph.path),
+          shouldConnect: false,
+          behaviorFactory,
+          editBehavior: behaviorFactory.getBehavior(initialBehaviorName),
+        };
+      });
+      assert(layerInfo.length >= 1, "no layer to edit");
+      layerInfo[0].isPrimaryLayer = true;
+
+      const equalizeRollbackByLayer = new Map();
+      if (equalizeHandleInfo) {
+        for (const layer of layerInfo) {
+          const draggedPoint = layer.layerGlyph.path.getPoint(equalizeHandleInfo.pointIndex);
+          const oppositePoint = layer.layerGlyph.path.getPoint(equalizeHandleInfo.oppositeIndex);
+          if (draggedPoint || oppositePoint) {
+            equalizeRollbackByLayer.set(layer.layerName, {
+              draggedPoint: draggedPoint
+                ? {
+                    x: draggedPoint.x,
+                    y: draggedPoint.y,
+                  }
+                : null,
+              oppositePoint: oppositePoint
+                ? {
+                    x: oppositePoint.x,
+                    y: oppositePoint.y,
+                  }
+                : null,
+            });
+          }
+        }
+      }
+
+      return {
+        layerInfo,
+        equalizeHandleInfo,
+        equalizeRollbackByLayer,
+        equalizeUsed: false,
+        editChange: null,
+      };
+    },
     onBehaviorChanged: isDrag
-      ? async ({ behaviorName }) => {
+      ? async ({ behaviorName, sessionState, sendIncrementalChange }) => {
+          const { layerInfo } = sessionState;
           const rollbackChanges = [];
           for (const layer of layerInfo) {
             applyChange(layer.layerGlyph, layer.editBehavior.rollbackChange);
@@ -285,7 +301,14 @@ async function runRegularPointLikeOrchestration({
           await sendIncrementalChange(consolidateChanges(rollbackChanges));
         }
       : undefined,
-    onInput: async ({ event: inputEvent, currentPoint, delta }) => {
+    onInput: async ({
+      event: inputEvent,
+      currentPoint,
+      delta,
+      sessionState,
+      sendIncrementalChange,
+    }) => {
+      const { layerInfo, equalizeHandleInfo } = sessionState;
       const deepEditChanges = [];
       for (const layer of layerInfo) {
         const layerEditChange = layer.editBehavior.makeChangeForDelta(delta);
@@ -315,92 +338,99 @@ async function runRegularPointLikeOrchestration({
             applyChange(layer.layerGlyph.path, change);
           }
           deepEditChanges.push(consolidateChanges(equalizeChanges, layer.changePath));
-          equalizeUsed = true;
+          sessionState.equalizeUsed = true;
         }
       }
 
-      editChange = consolidateChanges(deepEditChanges);
-      await sendIncrementalChange(editChange, isDrag);
+      sessionState.editChange = consolidateChanges(deepEditChanges);
+      await sendIncrementalChange(sessionState.editChange, isDrag);
+    },
+    onSessionEnd: ({ sessionState }) => {
+      const {
+        layerInfo,
+        equalizeHandleInfo,
+        equalizeRollbackByLayer,
+        equalizeUsed,
+        editChange,
+      } = sessionState;
+
+      if (!editChange) {
+        return;
+      }
+
+      const rollbackParts = layerInfo.map((layer) =>
+        consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
+      );
+      if (equalizeUsed && equalizeHandleInfo) {
+        for (const layer of layerInfo) {
+          const rollbackPoints = equalizeRollbackByLayer.get(layer.layerName);
+          if (!rollbackPoints) {
+            continue;
+          }
+          const equalizeRollbackChanges = [];
+          if (rollbackPoints.draggedPoint) {
+            equalizeRollbackChanges.push({
+              f: "=xy",
+              a: [
+                equalizeHandleInfo.pointIndex,
+                rollbackPoints.draggedPoint.x,
+                rollbackPoints.draggedPoint.y,
+              ],
+            });
+          }
+          if (rollbackPoints.oppositePoint) {
+            equalizeRollbackChanges.push({
+              f: "=xy",
+              a: [
+                equalizeHandleInfo.oppositeIndex,
+                rollbackPoints.oppositePoint.x,
+                rollbackPoints.oppositePoint.y,
+              ],
+            });
+          }
+          if (!equalizeRollbackChanges.length) {
+            continue;
+          }
+          rollbackParts.push(consolidateChanges(equalizeRollbackChanges, layer.changePath));
+        }
+      }
+
+      let changes = ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts));
+      let shouldConnect = false;
+      for (const layer of layerInfo) {
+        if (!layer.shouldConnect) {
+          continue;
+        }
+        shouldConnect = true;
+        if (isDrag && layer.isPrimaryLayer) {
+          layer.connectDetector.clearConnectIndicator();
+        }
+        const connectChanges = recordChanges(layer.layerGlyph, (workingLayerGlyph) => {
+          const selectionUpdate = connectContours(
+            workingLayerGlyph.path,
+            layer.connectDetector.connectSourcePointIndex,
+            layer.connectDetector.connectTargetPointIndex
+          );
+          if (layer.isPrimaryLayer) {
+            sceneController.selection = selectionUpdate;
+          }
+        });
+        if (connectChanges.hasChange) {
+          changes = changes.concat(connectChanges.prefixed(layer.changePath));
+        }
+      }
+
+      return {
+        undoLabel: isDrag
+          ? shouldConnect
+            ? translate("edit-tools-pointer.undo.drag-selection-and-connect-contours")
+            : translate("edit-tools-pointer.undo.drag-selection")
+          : translate("action.nudge-selection"),
+        changes,
+        broadcast: true,
+      };
     },
   });
-
-  if (!editChange) {
-    return;
-  }
-
-  const rollbackParts = layerInfo.map((layer) =>
-    consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
-  );
-  if (equalizeUsed && equalizeHandleInfo) {
-    for (const layer of layerInfo) {
-      const rollbackPoints = equalizeRollbackByLayer.get(layer.layerName);
-      if (!rollbackPoints) {
-        continue;
-      }
-      const equalizeRollbackChanges = [];
-      if (rollbackPoints.draggedPoint) {
-        equalizeRollbackChanges.push({
-          f: "=xy",
-          a: [
-            equalizeHandleInfo.pointIndex,
-            rollbackPoints.draggedPoint.x,
-            rollbackPoints.draggedPoint.y,
-          ],
-        });
-      }
-      if (rollbackPoints.oppositePoint) {
-        equalizeRollbackChanges.push({
-          f: "=xy",
-          a: [
-            equalizeHandleInfo.oppositeIndex,
-            rollbackPoints.oppositePoint.x,
-            rollbackPoints.oppositePoint.y,
-          ],
-        });
-      }
-      if (!equalizeRollbackChanges.length) {
-        continue;
-      }
-      rollbackParts.push(
-        consolidateChanges(equalizeRollbackChanges, layer.changePath)
-      );
-    }
-  }
-
-  let changes = ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts));
-  let shouldConnect = false;
-  for (const layer of layerInfo) {
-    if (!layer.shouldConnect) {
-      continue;
-    }
-    shouldConnect = true;
-    if (isDrag && layer.isPrimaryLayer) {
-      layer.connectDetector.clearConnectIndicator();
-    }
-    const connectChanges = recordChanges(layer.layerGlyph, (workingLayerGlyph) => {
-      const selectionUpdate = connectContours(
-        workingLayerGlyph.path,
-        layer.connectDetector.connectSourcePointIndex,
-        layer.connectDetector.connectTargetPointIndex
-      );
-      if (layer.isPrimaryLayer) {
-        sceneController.selection = selectionUpdate;
-      }
-    });
-    if (connectChanges.hasChange) {
-      changes = changes.concat(connectChanges.prefixed(layer.changePath));
-    }
-  }
-
-  return {
-    undoLabel: isDrag
-      ? shouldConnect
-        ? translate("edit-tools-pointer.undo.drag-selection-and-connect-contours")
-        : translate("edit-tools-pointer.undo.drag-selection")
-      : translate("action.nudge-selection"),
-    changes,
-    broadcast: true,
-  };
 }
 
 async function runRegularPointLikeAdapter({
@@ -412,23 +442,21 @@ async function runRegularPointLikeAdapter({
   initialEvent,
   event,
   runPointLikeInputKernel,
+  runPointLikeSessionKernel,
 }) {
   const sceneController = pointerTool.sceneController;
   const effectiveSelection = selection || sceneController.selection;
-  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-    return runRegularPointLikeOrchestration({
-      mode,
-      sceneController,
-      selection: effectiveSelection,
-      pointerTool,
-      glyph,
-      sendIncrementalChange,
-      eventStream,
-      initialEvent,
-      event,
-      runPointLikeInputKernel,
-      equalizeHandleInfo,
-    });
+  await runRegularPointLikeOrchestration({
+    mode,
+    sceneController,
+    selection: effectiveSelection,
+    pointerTool,
+    eventStream,
+    initialEvent,
+    event,
+    runPointLikeInputKernel,
+    runPointLikeSessionKernel,
+    equalizeHandleInfo,
   });
   return makeAdapterResult();
 }
@@ -600,133 +628,6 @@ async function runRegularPointLikeCanonical(context, mode) {
   });
 }
 
-async function runSkeletonPointLikeSession({
-  mode,
-  sceneController,
-  eventStream,
-  initialEvent,
-  event,
-  positionedGlyph,
-  runPointLikeInputKernel,
-  createLayersData,
-  getBehaviorNameForEvent,
-  onBehaviorChanged,
-  applyLayerInput,
-  undoLabel = translate("action.nudge-selection"),
-  regenerateOptions,
-  cloneOnPersist = false,
-}) {
-  assert(sceneController, "runSkeletonPointLikeSession: missing sceneController");
-  assert(
-    typeof runPointLikeInputKernel === "function",
-    "runSkeletonPointLikeSession: missing runPointLikeInputKernel"
-  );
-  assert(
-    typeof createLayersData === "function",
-    "runSkeletonPointLikeSession: missing createLayersData"
-  );
-  assert(
-    typeof applyLayerInput === "function",
-    "runSkeletonPointLikeSession: missing applyLayerInput"
-  );
-
-  const isDrag = mode === "drag";
-  assert(isDrag || mode === "nudge", "runSkeletonPointLikeSession: invalid mode");
-  assert(
-    isDrag ? eventStream && initialEvent : event,
-    "runSkeletonPointLikeSession: missing input stream/event"
-  );
-  if (isDrag) {
-    assert(positionedGlyph, "runSkeletonPointLikeSession: missing positionedGlyph");
-    assert(
-      typeof getBehaviorNameForEvent === "function",
-      "runSkeletonPointLikeSession(drag): missing getBehaviorNameForEvent"
-    );
-  }
-
-  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-    const layersData = createLayersData(glyph);
-    if (!Object.keys(layersData).length) {
-      return;
-    }
-
-    let accumulatedChanges = new ChangeCollector();
-    let finalChanges;
-    await runPointLikeInputKernel({
-      mode,
-      eventStream,
-      initialEvent,
-      event,
-      getBehaviorNameForEvent: isDrag ? getBehaviorNameForEvent : undefined,
-      getPointForEvent: isDrag
-        ? (nextEvent) => {
-            const localPoint = sceneController.localPoint(nextEvent);
-            return {
-              x: localPoint.x - positionedGlyph.x,
-              y: localPoint.y - positionedGlyph.y,
-            };
-          }
-        : undefined,
-      onBehaviorChanged: onBehaviorChanged
-        ? async ({ behaviorName }) => onBehaviorChanged({ behaviorName, layersData })
-        : undefined,
-      onInput: async ({ event: inputEvent, delta, currentPoint, behaviorName }) => {
-        const allChanges = [];
-        for (const [editLayerName, data] of Object.entries(layersData)) {
-          const changed = applyLayerInput({
-            editLayerName,
-            data,
-            event: inputEvent,
-            delta,
-            currentPoint,
-            behaviorName,
-          });
-          if (!changed) {
-            continue;
-          }
-          const { prefixedPath, prefixedCustomData } = makeSkeletonLayerPersistenceChanges({
-            layer: data.layer,
-            working: data.working,
-            editLayerName,
-            regenerateOptions,
-            cloneOnPersist,
-          });
-          allChanges.push(prefixedPath, prefixedCustomData);
-        }
-        if (!allChanges.length) {
-          return;
-        }
-        const combinedChange = new ChangeCollector().concat(...allChanges);
-        if (isDrag) {
-          accumulatedChanges = accumulatedChanges.concat(combinedChange);
-          await sendIncrementalChange(combinedChange.change, true);
-          return;
-        }
-        finalChanges = combinedChange;
-      },
-    });
-
-    if (isDrag) {
-      await sendIncrementalChange(accumulatedChanges.change);
-      return {
-        changes: accumulatedChanges,
-        undoLabel,
-        broadcast: true,
-      };
-    }
-
-    if (!finalChanges) {
-      return;
-    }
-    await sendIncrementalChange(finalChanges.change);
-    return {
-      changes: finalChanges,
-      undoLabel,
-      broadcast: true,
-    };
-  });
-}
-
 function applySkeletonEqualizeToContour({
   mode,
   contour,
@@ -776,6 +677,7 @@ async function runSkeletonPointLikeOrchestration({
   initialEvent,
   event,
   runPointLikeInputKernel,
+  runPointLikeSessionKernel,
   contourIndex,
   pointIndex,
   smoothIndex,
@@ -787,6 +689,10 @@ async function runSkeletonPointLikeOrchestration({
   assert(
     typeof runPointLikeInputKernel === "function",
     "runSkeletonPointLikeOrchestration: missing runPointLikeInputKernel"
+  );
+  assert(
+    typeof runPointLikeSessionKernel === "function",
+    "runSkeletonPointLikeOrchestration: missing runPointLikeSessionKernel"
   );
   const isDrag = mode === "drag";
   const isNudge = mode === "nudge";
@@ -803,19 +709,126 @@ async function runSkeletonPointLikeOrchestration({
     return;
   }
 
+  const runSkeletonSession = async ({
+    getBehaviorNameForEvent,
+    createLayersData,
+    onBehaviorChanged,
+    applyLayerInput,
+    undoLabel = translate("action.nudge-selection"),
+    regenerateOptions,
+    cloneOnPersist = false,
+  }) => {
+    await runPointLikeSessionKernel({
+      mode,
+      runPointLikeInputKernel,
+      withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
+      eventStream,
+      initialEvent,
+      event,
+      getBehaviorNameForEvent: isDrag ? getBehaviorNameForEvent : undefined,
+      getPointForEvent: isDrag
+        ? (nextEvent) => {
+            const localPoint = sceneController.localPoint(nextEvent);
+            return {
+              x: localPoint.x - positionedGlyph.x,
+              y: localPoint.y - positionedGlyph.y,
+            };
+          }
+        : undefined,
+      onSessionStart: ({ glyph }) => {
+        const layersData = createLayersData(glyph);
+        return {
+          layersData,
+          skip: !Object.keys(layersData).length,
+          accumulatedChanges: new ChangeCollector(),
+          finalChanges: null,
+        };
+      },
+      onBehaviorChanged: onBehaviorChanged
+        ? async ({ behaviorName, sessionState }) => {
+            if (sessionState.skip) {
+              return;
+            }
+            onBehaviorChanged({ behaviorName, layersData: sessionState.layersData });
+          }
+        : undefined,
+      onInput: async ({
+        event: inputEvent,
+        delta,
+        currentPoint,
+        behaviorName,
+        sessionState,
+        sendIncrementalChange,
+      }) => {
+        if (sessionState.skip) {
+          return;
+        }
+        const allChanges = [];
+        for (const [editLayerName, data] of Object.entries(sessionState.layersData)) {
+          const changed = applyLayerInput({
+            editLayerName,
+            data,
+            event: inputEvent,
+            delta,
+            currentPoint,
+            behaviorName,
+          });
+          if (!changed) {
+            continue;
+          }
+          const { prefixedPath, prefixedCustomData } = makeSkeletonLayerPersistenceChanges({
+            layer: data.layer,
+            working: data.working,
+            editLayerName,
+            regenerateOptions,
+            cloneOnPersist,
+          });
+          allChanges.push(prefixedPath, prefixedCustomData);
+        }
+        if (!allChanges.length) {
+          return;
+        }
+        const combinedChange = new ChangeCollector().concat(...allChanges);
+        if (isDrag) {
+          sessionState.accumulatedChanges =
+            sessionState.accumulatedChanges.concat(combinedChange);
+          await sendIncrementalChange(combinedChange.change, true);
+          return;
+        }
+        sessionState.finalChanges = combinedChange;
+      },
+      onSessionEnd: async ({ sessionState, sendIncrementalChange }) => {
+        if (sessionState.skip) {
+          return;
+        }
+        if (isDrag) {
+          await sendIncrementalChange(sessionState.accumulatedChanges.change);
+          return {
+            changes: sessionState.accumulatedChanges,
+            undoLabel,
+            broadcast: true,
+          };
+        }
+        if (!sessionState.finalChanges) {
+          return;
+        }
+        await sendIncrementalChange(sessionState.finalChanges.change);
+        return {
+          changes: sessionState.finalChanges,
+          undoLabel,
+          broadcast: true,
+        };
+      },
+    });
+  };
+
   if (variant === "normal") {
     assert(
       selectedSkeletonPoints?.size,
       "runSkeletonPointLikeOrchestration(normal): missing skeleton selection"
     );
     if (isDrag) {
-      await runSkeletonPointLikeSession({
-        mode,
-        sceneController,
-        eventStream,
-        initialEvent,
-        positionedGlyph,
-        runPointLikeInputKernel,
+      await runSkeletonSession({
         createLayersData: (glyph) => {
           const layersData = createSkeletonLayersData({
             glyph,
@@ -867,11 +880,7 @@ async function runSkeletonPointLikeOrchestration({
 
     const roundFunc = (value) => makeRoundFunc(event)(value, true);
     const behaviorName = getSkeletonBehaviorName(false, event.altKey);
-    await runSkeletonPointLikeSession({
-      mode,
-      sceneController,
-      event,
-      runPointLikeInputKernel,
+    await runSkeletonSession({
       createLayersData: (glyph) => {
         const layersData = createSkeletonLayersData({
           glyph,
@@ -909,13 +918,7 @@ async function runSkeletonPointLikeOrchestration({
   }
 
   if (isDrag) {
-    await runSkeletonPointLikeSession({
-      mode,
-      sceneController,
-      eventStream,
-      initialEvent,
-      positionedGlyph,
-      runPointLikeInputKernel,
+    await runSkeletonSession({
       createLayersData: (glyph) =>
         createSkeletonLayersData({
           glyph,
@@ -951,11 +954,7 @@ async function runSkeletonPointLikeOrchestration({
     offCurvePoints?.length,
     "runSkeletonPointLikeOrchestration(equalize/nudge): missing off-curve selection"
   );
-  await runSkeletonPointLikeSession({
-    mode,
-    sceneController,
-    event,
-    runPointLikeInputKernel,
+  await runSkeletonSession({
     createLayersData: (glyph) =>
       createSkeletonLayersData({
         glyph,
@@ -992,14 +991,24 @@ async function runSkeletonPointLikeOrchestration({
 }
 
 async function runSkeletonPointLikeCanonical(context, mode) {
-  const { pointerTool, sceneController, objectKind, overrideSelection, runPointLikeInputKernel } =
-    context;
+  const {
+    pointerTool,
+    sceneController,
+    objectKind,
+    overrideSelection,
+    runPointLikeInputKernel,
+    runPointLikeSessionKernel,
+  } = context;
   assert(pointerTool, "runSkeletonPointLikeCanonical: missing pointerTool");
   assert(sceneController, "runSkeletonPointLikeCanonical: missing sceneController");
   assert(objectKind, "runSkeletonPointLikeCanonical: missing objectKind");
   assert(
     typeof runPointLikeInputKernel === "function",
     "runSkeletonPointLikeCanonical: missing runPointLikeInputKernel"
+  );
+  assert(
+    typeof runPointLikeSessionKernel === "function",
+    "runSkeletonPointLikeCanonical: missing runPointLikeSessionKernel"
   );
 
   const selectedSkeletonPoints =
@@ -1048,6 +1057,7 @@ async function runSkeletonPointLikeCanonical(context, mode) {
     initialEvent: context.initialEvent,
     event: context.event,
     runPointLikeInputKernel,
+    runPointLikeSessionKernel,
   });
   return makeAdapterResult();
 }
@@ -1084,13 +1094,23 @@ function getSelectedOffCurveSkeletonPoints({
 }
 
 async function runSkeletonHandlePointLikeCanonical(context, mode) {
-  const { sceneController, pointerTool, objectKind, runPointLikeInputKernel } = context;
+  const {
+    sceneController,
+    pointerTool,
+    objectKind,
+    runPointLikeInputKernel,
+    runPointLikeSessionKernel,
+  } = context;
   assert(sceneController, "runSkeletonHandlePointLikeCanonical: missing sceneController");
   assert(pointerTool, "runSkeletonHandlePointLikeCanonical: missing pointerTool");
   assert(objectKind, "runSkeletonHandlePointLikeCanonical: missing objectKind");
   assert(
     typeof runPointLikeInputKernel === "function",
     "runSkeletonHandlePointLikeCanonical: missing runPointLikeInputKernel"
+  );
+  assert(
+    typeof runPointLikeSessionKernel === "function",
+    "runSkeletonHandlePointLikeCanonical: missing runPointLikeSessionKernel"
   );
 
   if (mode === "drag") {
@@ -1117,6 +1137,7 @@ async function runSkeletonHandlePointLikeCanonical(context, mode) {
       eventStream: context.eventStream,
       initialEvent: context.initialEvent,
       runPointLikeInputKernel,
+      runPointLikeSessionKernel,
       contourIndex: contourIdx,
       pointIndex: pointIdx,
       smoothIndex: equalizeInfo.smoothIndex,
@@ -1144,6 +1165,7 @@ async function runSkeletonHandlePointLikeCanonical(context, mode) {
     pointerTool,
     event: context.event,
     runPointLikeInputKernel,
+    runPointLikeSessionKernel,
     offCurvePoints,
   });
   return makeAdapterResult();

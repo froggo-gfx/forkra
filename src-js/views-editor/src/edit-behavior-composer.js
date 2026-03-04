@@ -86,6 +86,71 @@ export async function runPointLikeInputKernel({
   });
 }
 
+export async function runPointLikeSessionKernel({
+  mode,
+  runPointLikeInputKernel: inputKernel = runPointLikeInputKernel,
+  withEditSession,
+  eventStream,
+  initialEvent,
+  event,
+  getBehaviorNameForEvent,
+  getPointForEvent,
+  onSessionStart,
+  onBehaviorChanged,
+  onInput,
+  onSessionEnd,
+}) {
+  assert(mode === "drag" || mode === "nudge", "runPointLikeSessionKernel: invalid mode");
+  assert(
+    typeof withEditSession === "function",
+    "runPointLikeSessionKernel: missing withEditSession"
+  );
+  assert(typeof onInput === "function", "runPointLikeSessionKernel: missing onInput");
+  assert(
+    typeof inputKernel === "function",
+    "runPointLikeSessionKernel: missing runPointLikeInputKernel"
+  );
+
+  return withEditSession(async (sendIncrementalChange, glyph) => {
+    const sessionState = onSessionStart
+      ? (await onSessionStart({ mode, sendIncrementalChange, glyph })) || {}
+      : {};
+
+    await inputKernel({
+      mode,
+      eventStream,
+      initialEvent,
+      event,
+      getBehaviorNameForEvent,
+      getPointForEvent,
+      onBehaviorChanged: onBehaviorChanged
+        ? async (payload) => {
+            await onBehaviorChanged({
+              ...payload,
+              mode,
+              sessionState,
+              sendIncrementalChange,
+              glyph,
+            });
+          }
+        : undefined,
+      onInput: async (payload) => {
+        await onInput({
+          ...payload,
+          mode,
+          sessionState,
+          sendIncrementalChange,
+          glyph,
+        });
+      },
+    });
+
+    if (onSessionEnd) {
+      return onSessionEnd({ mode, sessionState, sendIncrementalChange, glyph });
+    }
+  });
+}
+
 /**
  * Route drag edits through the registry routing map and adapters.
  * Required context fields:
@@ -149,6 +214,7 @@ export async function runDragRoutingOrchestration(_context) {
   const adapterResult = await adapter({
     ..._context,
     runPointLikeInputKernel,
+    runPointLikeSessionKernel,
   });
 
   if (adapterResult === false) {
@@ -210,6 +276,7 @@ export async function runNudgeRoutingOrchestration(_context) {
     ..._context,
     runNudgeOrchestration,
     runPointLikeInputKernel,
+    runPointLikeSessionKernel,
   });
   if (adapterResult === false) {
     return false;

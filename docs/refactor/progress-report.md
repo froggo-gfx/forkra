@@ -345,3 +345,34 @@ Status: In Progress
 - Manual test results:
   - NOT RUN in this terminal session (requires UI verification).
 - Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Cross-Cut: Collapse basic regular+skeleton session lifecycle into composer
+
+- Problem: Basic regular and skeleton canonical paths still duplicated session lifecycle (`editGlyph` session wrapping, input-loop hookup, session start/end handling), so only input-delta policy was unified while orchestration lifecycle remained split.
+- Code analysis:
+  - Updated `src-js/views-editor/src/edit-behavior-composer.js`.
+  - Added shared orchestration-only `runPointLikeSessionKernel(...)`:
+    - wraps adapter-provided edit session via `withEditSession(...)`,
+    - runs `runPointLikeInputKernel(...)`,
+    - dispatches strategy callbacks (`onSessionStart`, `onBehaviorChanged`, `onInput`, `onSessionEnd`),
+    - keeps composer persistence-free (no `applyChange`/`recordChanges`/skeleton regeneration calls).
+  - Updated drag/nudge routing injection to pass `runPointLikeSessionKernel` into canonical adapters.
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Refactored regular basic orchestration to use composer session kernel:
+    - `runRegularPointLikeOrchestration(...)` now delegates lifecycle/session wrapping to `runPointLikeSessionKernel(...)` and keeps regular-specific persistence logic in adapter callbacks.
+    - `runRegularPointLikeAdapter(...)` no longer owns direct `sceneController.editGlyph(...)` wrapping.
+  - Refactored skeleton basic orchestration to use composer session kernel:
+    - removed adapter-local `runSkeletonPointLikeSession(...)`.
+    - `runSkeletonPointLikeOrchestration(...)` now uses shared `runSkeletonSession(...)` wrapper over `runPointLikeSessionKernel(...)` for normal/equalize drag+nudge variants.
+  - Updated canonical skeleton entrypoints to require/pass `runPointLikeSessionKernel`:
+    - `runSkeletonPointLikeCanonical(...)`
+    - `runSkeletonHandlePointLikeCanonical(...)`
+  - Kept all legacy/special-case fallbacks unchanged (mixed/fixed-rib/tunni/rib/editable paths out of scope).
+  - Verification:
+    - `node --check src-js/views-editor/src/edit-behavior-composer.js`
+    - `node --check src-js/views-editor/src/pointer-objects.js`
+    - `npm run bundle` (success, only existing webpack size warnings).
+- Comparison: Yes (architecture-level). Basic regular+skeleton drag/nudge now share one composer-owned session lifecycle kernel while preserving SoT composer purity and adapter-owned persistence math/translation.
+- Manual test results:
+  - NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
