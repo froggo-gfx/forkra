@@ -71,3 +71,22 @@ Status: In Progress
 - Comparison: Yes. The adapter API is now explicit in the adapter module and enforced at the composer boundary; this closes the contract drift identified in Step 2.1. Adapter persistence ownership migration remains tracked in later phase steps.
 - Manual test results: PASS (N/A - contract step).
 - Undo/redo verification: PASS (N/A - contract step).
+
+## Phase 2 - Step 2.2: Composer is orchestration-only
+
+- Problem: `edit-behavior-composer.js` still contained regular drag persistence (`applyChange`, `recordChanges`, connect logic), which violated the SoT boundary that composer should only orchestrate routing.
+- Code analysis:
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Moved regular drag orchestration/persistence implementation into adapter-side code (`runRegularDragOrchestration`), including behavior selection, incremental updates, equalize updates, rollback aggregation, and connect-contour persistence.
+  - `runRegularDragLegacy` now calls adapter-local orchestration instead of receiving a composer callback.
+  - Updated `src-js/views-editor/src/edit-behavior-composer.js`.
+  - Removed drag persistence implementation and reduced composer to routing-only entry points (`runDragRoutingOrchestration`, `runNudgeRoutingOrchestration`, `runNudgeOrchestration`).
+  - Drag routing now invokes adapters directly (`adapter(_context)`), instead of passing a persistence-capable `runDragOrchestration` helper from composer.
+  - Verified syntax with `node --check` for both edited files.
+- Comparison: Yes. Composer no longer performs drag/nudge persistence work and only orchestrates routing decisions; persistence logic is now adapter-owned for the regular drag path and remains adapter-owned/wrapped for other in-scope paths.
+- Manual test results: PASS.
+  - Drag regular point: PASS
+  - Drag skeleton on-curve point: PASS
+- Undo/redo verification: PASS.
+  - Regular point drag undo/redo: PASS
+  - Skeleton on-curve drag undo/redo: PASS
