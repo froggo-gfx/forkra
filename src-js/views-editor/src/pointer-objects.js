@@ -6,11 +6,16 @@ import {
   getSkeletonData,
   regenerateSkeletonContours,
   setSkeletonData,
+  calculateNormalAtSkeletonPoint,
+  getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { assert, parseSelection } from "@fontra/core/utils.js";
 import {
   computeEqualizedHandlePositions,
   EditBehaviorFactory,
+  createRibEditBehavior,
+  createEditableRibBehavior,
+  createInterpolatingRibBehavior,
   createPointBehaviorExecutor,
   findEqualizeHandleForPath,
   getSkeletonBehaviorName,
@@ -19,6 +24,7 @@ import {
   makeRoundFunc,
   resolveEqualizePairForContourPoint,
 } from "./edit-behavior.js";
+import { buildSegmentsFromSkeletonPoints } from "./skeleton-tunni-calculations.js";
 
 // Adapter contract for drag/nudge routing:
 // - When handled, adapters return `{ forward, rollback }`.
@@ -29,6 +35,8 @@ export const ADAPTER_CONTRACT = Object.freeze({
   unhandledResult: "false",
   persistenceOwner: "adapter",
 });
+
+const DEFAULT_SKELETON_WIDTH = 80;
 
 function makeAdapterResult(forward = null, rollback = null) {
   return { forward, rollback };
@@ -50,6 +58,141 @@ function filterSelectionByPrefixes(selection, prefixes) {
     }
   }
   return filtered;
+}
+
+function hasAsymmetricWidths(point) {
+  return point.leftWidth !== undefined || point.rightWidth !== undefined;
+}
+
+function isWidthLinked(point) {
+  if (point.widthLinked !== undefined) {
+    return !!point.widthLinked;
+  }
+  return !hasAsymmetricWidths(point);
+}
+
+function clearEditableWhenCollapsed(point, leftHW, rightHW) {
+  if (leftHW <= 0) {
+    point.leftEditable = false;
+  }
+  if (rightHW <= 0) {
+    point.rightEditable = false;
+  }
+}
+
+function applyLinkedWidthDelta(
+  point,
+  basePoint,
+  defaultWidth,
+  side,
+  delta,
+  linked,
+  roundFunc = Math.round
+) {
+  const baseLeft = getPointHalfWidth(basePoint, defaultWidth, "left");
+  const baseRight = getPointHalfWidth(basePoint, defaultWidth, "right");
+  const baseHasAsym = hasAsymmetricWidths(basePoint);
+
+  if (linked) {
+    const newLeft = Math.max(0, roundFunc(baseLeft + delta));
+    const newRight = Math.max(0, roundFunc(baseRight + delta));
+    if (baseHasAsym) {
+      point.leftWidth = newLeft;
+      point.rightWidth = newRight;
+      delete point.width;
+    } else {
+      point.width = Math.max(0, newLeft + newRight);
+      delete point.leftWidth;
+      delete point.rightWidth;
+    }
+    clearEditableWhenCollapsed(point, newLeft, newRight);
+    return;
+  }
+
+  const newLeft =
+    side === "left" ? Math.max(0, roundFunc(baseLeft + delta)) : Math.max(0, roundFunc(baseLeft));
+  const newRight =
+    side === "right"
+      ? Math.max(0, roundFunc(baseRight + delta))
+      : Math.max(0, roundFunc(baseRight));
+  point.leftWidth = newLeft;
+  point.rightWidth = newRight;
+  delete point.width;
+  clearEditableWhenCollapsed(point, newLeft, newRight);
+}
+
+function collectSelectedRibPointTargets(skeletonData, ribPointSelection) {
+  const result = [];
+  if (!skeletonData?.contours?.length || !ribPointSelection?.size) {
+    return result;
+  }
+  for (const key of ribPointSelection) {
+    const parts = key.split("/");
+    if (parts.length !== 3) {
+      continue;
+    }
+    const contourIndex = parseInt(parts[0]);
+    const pointIndex = parseInt(parts[1]);
+    const side = parts[2];
+    if (
+      !Number.isInteger(contourIndex) ||
+      !Number.isInteger(pointIndex) ||
+      (side !== "left" && side !== "right")
+    ) {
+      continue;
+    }
+    const contour = skeletonData.contours[contourIndex];
+    const point = contour?.points?.[pointIndex];
+    if (!point || point.type) {
+      continue;
+    }
+    const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+    result.push({
+      contourIndex,
+      pointIndex,
+      side,
+      isEditable: point[editableKey] === true,
+    });
+  }
+  return result;
+}
+
+function selectedRibTargetsBelongToSingleSegment(targets, skeletonData) {
+  if (!targets?.length) {
+    return false;
+  }
+  if (targets.length === 1) {
+    return true;
+  }
+  if (targets.length !== 2) {
+    return false;
+  }
+
+  const [a, b] = targets;
+  if (
+    a.contourIndex !== b.contourIndex ||
+    a.side !== b.side ||
+    a.pointIndex === b.pointIndex
+  ) {
+    return false;
+  }
+
+  const contour = skeletonData?.contours?.[a.contourIndex];
+  if (!contour?.points?.length) {
+    return false;
+  }
+
+  const segments = buildSegmentsFromSkeletonPoints(contour.points, !!contour.isClosed);
+  for (const segment of segments) {
+    const sameDirection =
+      segment.startIndex === a.pointIndex && segment.endIndex === b.pointIndex;
+    const oppositeDirection =
+      segment.startIndex === b.pointIndex && segment.endIndex === a.pointIndex;
+    if (sameDirection || oppositeDirection) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function createSkeletonPointExecutors(
@@ -1248,18 +1391,210 @@ async function runEditableGeneratedNudgeCanonical(context) {
 }
 
 async function runSkeletonRibPointNudgeCanonical(context) {
-  const { pointerTool, sceneController, event } = context;
+  const { pointerTool, sceneController, event, runPointLikeInputKernel } = context;
+  assert(pointerTool, "runSkeletonRibPointNudgeCanonical: missing pointerTool");
+  assert(sceneController, "runSkeletonRibPointNudgeCanonical: missing sceneController");
+  assert(event, "runSkeletonRibPointNudgeCanonical: missing event");
+  assert(
+    typeof runPointLikeInputKernel === "function",
+    "runSkeletonRibPointNudgeCanonical: missing runPointLikeInputKernel"
+  );
+
   const { skeletonRibPoint: ribPointSelection } = parseSelection(
     sceneController.selection
   );
   if (!ribPointSelection?.size) {
     return false;
   }
-  return runPointerMethodAdapter({
-    pointerTool,
-    methodName: "_handleArrowKeysForRibPoints",
-    args: [event, ribPointSelection],
+
+  const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
+  const referenceLayerName = sceneController.editingLayerNames?.[0];
+  const referenceLayer = referenceLayerName
+    ? positionedGlyph?.varGlyph?.glyph?.layers?.[referenceLayerName]
+    : null;
+  const referenceSkeletonData = getSkeletonData(referenceLayer);
+  if (!referenceSkeletonData?.contours?.length) {
+    return makeAdapterResult();
+  }
+
+  const ribTargets = collectSelectedRibPointTargets(
+    referenceSkeletonData,
+    ribPointSelection
+  );
+  if (!ribTargets.length) {
+    return makeAdapterResult();
+  }
+
+  const allTargetsEditable = ribTargets.every((target) => target.isEditable);
+  const belongsToSingleSegment = selectedRibTargetsBelongToSingleSegment(
+    ribTargets,
+    referenceSkeletonData
+  );
+  if (!allTargetsEditable && !belongsToSingleSegment) {
+    return makeAdapterResult();
+  }
+
+  const constrainMode = pointerTool.tangentRibMode ? "tangent" : null;
+  const useInterpolation = event.altKey;
+
+  await runPointLikeInputKernel({
+    mode: "nudge",
+    event,
+    onInput: async ({ delta }) => {
+      await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+        const allChanges = [];
+
+        for (const editLayerName of sceneController.editingLayerNames || []) {
+          const layer = glyph.layers[editLayerName];
+          const originalSkeletonData = getSkeletonData(layer);
+          if (!originalSkeletonData?.contours?.length) {
+            continue;
+          }
+
+          const workingSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
+
+          for (const target of ribTargets) {
+            const { contourIndex, pointIndex, side } = target;
+            const contour = workingSkeletonData.contours?.[contourIndex];
+            const point = contour?.points?.[pointIndex];
+            const baseContour = originalSkeletonData.contours?.[contourIndex];
+            const basePoint = baseContour?.points?.[pointIndex];
+            if (!contour || !baseContour || !point || !basePoint || point.type || basePoint.type) {
+              continue;
+            }
+
+            const normal = calculateNormalAtSkeletonPoint(baseContour, pointIndex);
+            if (!normal) {
+              continue;
+            }
+            const contourDefaultWidth =
+              baseContour.defaultWidth ?? contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+            const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+            const isEditable = basePoint[editableKey] === true;
+            const ribHit = {
+              contourIndex,
+              pointIndex,
+              side,
+              normal,
+              onCurvePoint: point,
+            };
+
+            if (isEditable) {
+              let behavior;
+              if (useInterpolation) {
+                const interpolationAxis =
+                  typeof pointerTool._findHandlesForRibPointFromSkeleton === "function"
+                    ? pointerTool._findHandlesForRibPointFromSkeleton(
+                        layer.glyph.path,
+                        basePoint,
+                        normal,
+                        baseContour,
+                        side
+                      )
+                    : null;
+                if (interpolationAxis) {
+                  behavior = createInterpolatingRibBehavior(
+                    originalSkeletonData,
+                    ribHit,
+                    interpolationAxis
+                  );
+                } else {
+                  behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
+                }
+                if (baseContour.singleSided) {
+                  const leftHW = getPointHalfWidth(basePoint, contourDefaultWidth, "left");
+                  const rightHW = getPointHalfWidth(basePoint, contourDefaultWidth, "right");
+                  const totalWidth = leftHW + rightHW;
+                  if (behavior.setOriginalHalfWidth) {
+                    behavior.setOriginalHalfWidth(totalWidth);
+                  } else {
+                    behavior.originalHalfWidth = totalWidth;
+                  }
+                  behavior.minHalfWidth = 2;
+                }
+              } else {
+                behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
+              }
+
+              const change = behavior.applyDelta(delta, constrainMode);
+              const linked = isWidthLinked(basePoint);
+              const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
+              applyLinkedWidthDelta(
+                point,
+                basePoint,
+                contourDefaultWidth,
+                side,
+                deltaWidth,
+                linked,
+                Math.round
+              );
+              if (change.nudge !== undefined) {
+                point[side === "left" ? "leftNudge" : "rightNudge"] = change.nudge;
+              }
+              if (change.handleInOffsetX !== undefined) {
+                point[side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX"] =
+                  change.handleInOffsetX;
+              }
+              if (change.handleInOffsetY !== undefined) {
+                point[side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY"] =
+                  change.handleInOffsetY;
+              }
+              if (change.handleOutOffsetX !== undefined) {
+                point[side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX"] =
+                  change.handleOutOffsetX;
+              }
+              if (change.handleOutOffsetY !== undefined) {
+                point[side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY"] =
+                  change.handleOutOffsetY;
+              }
+              continue;
+            }
+
+            const behavior = createRibEditBehavior(originalSkeletonData, ribHit);
+            const change = behavior.applyDelta(delta, constrainMode);
+            const linked = isWidthLinked(basePoint);
+            const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
+            applyLinkedWidthDelta(
+              point,
+              basePoint,
+              contourDefaultWidth,
+              side,
+              deltaWidth,
+              linked,
+              Math.round
+            );
+          }
+
+          const pathChange = recordChanges(layer.glyph, (sg) => {
+            regenerateSkeletonContours(sg, workingSkeletonData);
+          });
+          const customDataChange = recordChanges(layer, (l) => {
+            setSkeletonData(l, workingSkeletonData);
+          });
+          if (pathChange.hasChange) {
+            allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+          }
+          if (customDataChange.hasChange) {
+            allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+          }
+        }
+
+        if (!allChanges.length) {
+          return;
+        }
+
+        const combined = new ChangeCollector().concat(...allChanges);
+        await sendIncrementalChange(combined.change);
+
+        return {
+          changes: combined,
+          undoLabel: translate("action.nudge-selection"),
+          broadcast: true,
+        };
+      });
+    },
   });
+  return makeAdapterResult();
 }
 
 export const canonicalDragAdapters = {

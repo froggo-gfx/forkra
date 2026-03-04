@@ -376,3 +376,31 @@ Status: In Progress
 - Manual test results:
   - NOT RUN in this terminal session (requires UI verification).
 - Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Step 4.7: Rib points (nudge)
+
+- Problem: Rib-point nudge canonical routing still called pointer-owned `_handleArrowKeysForRibPoints(...)`, so rib nudge persistence was not adapter-owned.
+- Code analysis:
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Replaced `runSkeletonRibPointNudgeCanonical(...)` pointer-method forwarding with a canonical adapter-owned edit flow:
+    - Parses rib selection and validates target eligibility.
+    - Keeps baseline rib guard: if selection is mixed non-editable and not on a single segment, treat as handled no-op.
+    - Uses `runPointLikeInputKernel({ mode: "nudge" })` for nudge delta input.
+    - Applies rib changes per editing layer via adapter-owned persistence (`regenerateSkeletonContours` + `setSkeletonData` + incremental change send).
+  - Added adapter-local rib helpers (moved out of pointer ownership for this path):
+    - `collectSelectedRibPointTargets(...)`
+    - `selectedRibTargetsBelongToSingleSegment(...)`
+    - width-link helpers (`isWidthLinked`, `applyLinkedWidthDelta`, etc.).
+  - Preserved modifier behavior for this step:
+    - `Z` tangent nudge constraint through `constrainMode`.
+    - `Alt` interpolation path for editable ribs via `createInterpolatingRibBehavior(...)` (with fallback to editable rib behavior when no interpolation axis is available).
+    - shift scaling remains sourced from shared nudge input kernel.
+  - Added/updated imports in `pointer-objects.js` for skeleton/rib helpers required by adapter-owned nudge persistence.
+  - Verification:
+    - `node --check src-js/views-editor/src/pointer-objects.js`
+    - `npm run -s bundle` (success; only existing webpack size warnings).
+- Comparison: Yes (code-level). Rib nudge canonical path is now adapter-owned (no pointer nudge handler invocation for `skeletonRibPoint` canonical routing), with persistence and translation performed in `pointer-objects.js`.
+- Manual test results:
+  - Nudge rib points with arrow keys: NOT RUN in this terminal session (requires UI verification).
+  - Repeat with shift and alt modifiers: NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
