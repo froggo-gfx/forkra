@@ -1,6 +1,6 @@
 ﻿# Action/Object Matrix
 
-Date: 2026-02-27
+Date: 2026-03-04
 Status: Draft
 
 ## Actions (Step 0.1)
@@ -79,7 +79,7 @@ Tag meaning: [in-scope] = current refactor scope (drag/nudge pipeline and their 
 - [out-of-scope] `actions.glyph-editor-appearance.${layerDef.identifier}` (generated per visualization layer). Evidence: `src-js/views-editor/src/editor.js` `EditorController.initActions` line 696.
 - [out-of-scope] `action.find-glyphs-that-use` (conditional). Evidence: `src-js/views-editor/src/editor.js` `EditorController.initActionsAfterStart` line 713.
 
-## Objects (Step 0.2)
+## Objects (SoT Alignment)
 Tag meaning: [selection-only] = selection key exists but is not an editable object kind.
 
 **Core Path/Guides**
@@ -94,11 +94,12 @@ Tag meaning: [selection-only] = selection key exists but is not an editable obje
 
 **Skeleton**
 - skeletonPoint - format: `skeletonPoint/contourIndex/pointIndex`. Evidence: `src-js/fontra-core/src/utils.js` `parseSelection` lines 245-249; `src-js/views-editor/src/scene-model.js` `selectionAtRect` lines 1556-1578.
-- skeletonHandle - format: `skeletonHandle/contourIndex/pointIndex/in|out`. Evidence: `src-js/fontra-core/src/utils.js` `parseSelection` lines 249-252.
+- skeleton off-curve point (legacy selection alias: `skeletonHandle/contourIndex/pointIndex/in|out`). Evidence: `src-js/fontra-core/src/utils.js` `parseSelection` lines 249-252.
 - skeletonSegment [selection-only] - format: `skeletonSegment/contourIndex/segmentIndex`. Evidence: `src-js/fontra-core/src/utils.js` `parseSelection` lines 252-255; `src-js/views-editor/src/scene-model.js` `_selectionAtPoint` lines 640-648.
 - skeletonRibPoint - format: `skeletonRibPoint/contourIndex/pointIndex/left|right`. Evidence: `src-js/fontra-core/src/utils.js` `parseSelection` lines 255-258; `src-js/views-editor/src/scene-model.js` `selectionAtRect` lines 1525-1534.
 - editableGeneratedPoint - format: `editableGeneratedPoint/pathPointIndex/skeletonContourIndex/skeletonPointIndex/side`. Evidence: `src-js/fontra-core/src/utils.js` `parseSelection` lines 258-260; `src-js/views-editor/src/panel-skeleton-parameters.js` `_getSelectedRibSides` lines 3755-3778.
 NOTE: This key is parseable but drag/nudge behavior is reached via point selection (derived editable rib state). Step 0.3 treats it as a specificity of `point`/`skeletonRibPoint`.
+NOTE: Unified behavior terminology treats skeleton edits as `skeletonPoint` on-curve/off-curve, not as a separate "skeleton handle" object kind.
 
 **Measure Mode (Selection-Only)**
 - measurePoint [selection-only] - format: `measurePoint/index`. Evidence: `src-js/views-editor/src/scene-model.js` `pointSelectionAtPoint` lines 699-703.

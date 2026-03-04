@@ -1,10 +1,10 @@
 # Object-Kind Inventory
 
-Date: 2026-02-27  
+Date: 2026-03-04  
 Status: Draft
 
 ## Scope
-In-scope object kinds only (points, anchors, guidelines, skeleton points/ribs/handles, editable generated points/handles, Tunni points). Components/background images are out of scope.
+In-scope object kinds only (points, anchors, guidelines, skeleton on-curve/off-curve points, rib points, editable generated points/handles, Tunni points). Components/background images are out of scope.
 
 ## Regular point (on-curve/off-curve)
 Selection key format: `point/index` (parseSelection) - `src-js/fontra-core/src/utils.js:261-263`
@@ -57,8 +57,8 @@ Routing location: `src-js/views-editor/src/edit-tools-pointer.js:2417-2484 (hand
 Parity-defining: Yes
 Notes: On-curve/off-curve indicated by `point.type`. Skeleton segment selection can be converted to skeleton point selection in pointer.
 
-## Skeleton handle (off-curve)
-Selection key format: `skeletonHandle/contourIndex/pointIndex/in|out` - `src-js/fontra-core/src/utils.js:249-251`
+## Skeleton off-curve point (legacy selection key alias: skeletonHandle)
+Selection key format: `skeletonHandle/contourIndex/pointIndex/in|out` (legacy alias for off-curve skeleton-point workflows) - `src-js/fontra-core/src/utils.js:249-251`
 Math location: `src-js/views-editor/src/edit-tools-pointer.js:4705-4734 (_getSkeletonHandleDirForPoint)`
 Math location: `src-js/fontra-core/src/skeleton-contour-generator.js:255-307 (applyHandleOffsetToControlPoint)`
 Math location: `src-js/views-editor/src/skeleton-edit-behavior.js:1508-1595 (EditableHandleBehavior)`
@@ -67,7 +67,7 @@ Persistence location: `src-js/views-editor/src/edit-tools-pointer.js:4317-4434 (
 Routing location: `src-js/views-editor/src/edit-tools-pointer.js:2451-2469 (handleDragSelection routes to editable handles)`
 Routing location: `src-js/views-editor/src/edit-tools-pointer.js:3868-3883 (_getEditableGeneratedHandlesFromSelection)`
 Parity-defining: Yes
-Notes: Selection key exists but no direct hit-test uses it. Handle edits are derived from generated point selection and routed through editable handle logic.
+Notes: Selection key exists but no direct hit-test uses it. Handle edits are derived from generated point selection and routed through editable handle logic. SoT terminology treats these as skeleton off-curve point edits.
 
 ## Skeleton rib point (on-curve)
 Selection key format: `skeletonRibPoint/contourIndex/pointIndex/left|right` - `src-js/fontra-core/src/utils.js:255-257`

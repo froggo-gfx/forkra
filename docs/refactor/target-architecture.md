@@ -1,6 +1,6 @@
 # Target Architecture: File Structure and Data Flow
 
-Date: 2026-03-03
+Date: 2026-03-04
 Status: **Target State Specification**
 
 Primary Goal: Unify all editable object kinds under a single behavior set.
@@ -69,7 +69,7 @@ src-js/views-editor/src/pointer-objects.js
   - anchor (FULL IMPLEMENTATION)
   - guideline (FULL IMPLEMENTATION)
   - skeletonPoint (on-curve) (FULL IMPLEMENTATION)
-  - skeletonHandle (off-curve) (FULL IMPLEMENTATION)
+  - skeletonPoint (off-curve) (FULL IMPLEMENTATION)
   - skeletonRibPoint (FULL IMPLEMENTATION)
   - editableGeneratedPoint (FULL IMPLEMENTATION)
   - editableGeneratedHandle (FULL IMPLEMENTATION)
@@ -81,6 +81,7 @@ src-js/views-editor/src/pointer-objects.js
 1. **Translation:** Convert `{x, y}` from behavior → object-specific format
 2. **Persistence:** Write canonical data, regenerate paths if needed
 3. **Return:** `{forward, rollback}` change objects
+4. **Terminology:** Treat skeleton off-curve edits as skeleton off-curve points, not a separate skeleton-handle object kind.
 
 **Must NOT:**
 - Call `pointerTool._handle*` methods (this is the current bug)
@@ -364,7 +365,7 @@ User Action: Mouse down on rib handle (diamond on side of skeleton point), drag,
 | **anchor** | `EditBehavior` | None (identity) | `layerGlyph.anchors` |
 | **guideline** | `EditBehavior` | None (identity) | `layerGlyph.guidelines` |
 | **skeletonPoint (on-curve)** | `EditBehavior` | None (identity) | `skeletonData` + regenerate |
-| **skeletonOffCurve (skeletonHandle)** | `EditBehavior` | None (identity) | `skeletonData` + regenerate |
+| **skeletonPoint (off-curve)** | `EditBehavior` | None (identity) | `skeletonData` + regenerate |
 | **skeletonRibPoint** | `EditBehavior` | `{x,y}` -> `halfWidth` (normal projection) | `skeletonData` + regenerate |
 | **editableGeneratedPoint** | `EditBehavior` | `{x,y}` → `{halfWidth, nudge}` | `skeletonData` + regenerate |
 | **editableGeneratedHandle** | `EditBehavior` | `{x,y}` → `handleOffset` | `skeletonData` + regenerate |

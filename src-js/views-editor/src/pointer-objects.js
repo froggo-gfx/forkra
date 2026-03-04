@@ -234,6 +234,8 @@ export const canonicalNudgeAdapters = {
   skeletonHandle: async (context) => runSkeletonNudgeCanonical(context),
   skeletonRibPoint: async (context) => runRibNudgeCanonical(context),
   editableGeneratedPoint: async (context) => runEditableGeneratedNudgeCanonical(context),
+  editableGeneratedHandle: async (context) =>
+    runEditableGeneratedNudgeCanonical(context),
 };
 
 export const legacyDragAdapters = {

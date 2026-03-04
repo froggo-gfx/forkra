@@ -15,23 +15,29 @@ export const ADAPTER_CONTRACT = {
 };
 
 // Object registry (declarative only; no parsing logic).
-// selectionKey must match parseSelection() formats exactly.
-// Use selectionKey: null for non-selection drag targets (e.g., Tunni points).
+// selectionKey must match parseSelection() key names for selection-based kinds.
+// Use selectionKey: null for non-selection object kinds (e.g., Tunni points).
+// In-scope unified-behavior kinds: regularPoint, anchor, guideline, skeletonPoint,
+// skeletonHandle (legacy off-curve alias), skeletonRibPoint, editableGeneratedPoint,
+// editableGeneratedHandle.
 export const OBJECT_KINDS = {
   regularPoint: {
     selectionKey: "point",
     supports: ["drag", "nudge"],
     persistent: true,
+    inScope: true,
   },
   anchor: {
     selectionKey: "anchor",
     supports: ["drag", "nudge"],
     persistent: true,
+    inScope: true,
   },
   guideline: {
     selectionKey: "guideline",
     supports: ["drag", "nudge"],
     persistent: true,
+    inScope: true,
   },
   component: {
     selectionKey: "component",
@@ -55,11 +61,14 @@ export const OBJECT_KINDS = {
     selectionKey: "skeletonPoint",
     supports: ["drag", "nudge"],
     persistent: true,
+    inScope: true,
   },
   skeletonHandle: {
     selectionKey: "skeletonHandle",
     supports: ["drag", "nudge"],
     persistent: true,
+    inScope: true,
+    legacyAliasFor: "skeleton off-curve point",
   },
   skeletonSegment: {
     selectionKey: "skeletonSegment",
@@ -69,12 +78,14 @@ export const OBJECT_KINDS = {
   skeletonRibPoint: {
     selectionKey: "skeletonRibPoint",
     supports: ["drag", "nudge"],
-    persistent: false,
+    persistent: true,
+    inScope: true,
   },
   editableGeneratedPoint: {
     selectionKey: "editableGeneratedPoint",
     supports: ["drag", "nudge"],
-    persistent: false,
+    persistent: true,
+    inScope: true,
   },
   measurePoint: {
     selectionKey: "measurePoint",
@@ -96,9 +107,10 @@ export const OBJECT_KINDS = {
   },
   editableGeneratedHandle: {
     selectionKey: null,
-    supports: ["drag"],
-    persistent: false,
+    supports: ["drag", "nudge"],
+    persistent: true,
     nonSelection: true,
+    inScope: true,
   },
   regularEqualizeHandle: {
     selectionKey: null,
@@ -331,6 +343,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonHandle: "NA",
     skeletonRibPoint: "CA",
     editableGeneratedPoint: "CA",
+    editableGeneratedHandle: "CA",
   },
   R11: {
     regularPoint: "CA",
@@ -340,6 +353,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonHandle: "NA",
     skeletonRibPoint: "CA",
     editableGeneratedPoint: "CA",
+    editableGeneratedHandle: "CA",
   },
   R13: {
     regularPoint: "CA",
@@ -349,6 +363,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonHandle: "CA",
     skeletonRibPoint: "NA",
     editableGeneratedPoint: "NA",
+    editableGeneratedHandle: "NA",
   },
   R14: {
     regularPoint: "CA",
@@ -358,6 +373,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonHandle: "CA",
     skeletonRibPoint: "NA",
     editableGeneratedPoint: "NA",
+    editableGeneratedHandle: "NA",
   },
   R16: {
     regularPoint: "NA",
@@ -367,6 +383,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonHandle: "NA",
     skeletonRibPoint: "NA",
     editableGeneratedPoint: "NA",
+    editableGeneratedHandle: "NA",
   },
   R17: {
     regularPoint: "NA",
@@ -376,6 +393,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonHandle: "NA",
     skeletonRibPoint: "NA",
     editableGeneratedPoint: "NA",
+    editableGeneratedHandle: "NA",
   },
   R18: {
     regularPoint: "NA",
@@ -385,6 +403,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonHandle: "NA",
     skeletonRibPoint: "CA",
     editableGeneratedPoint: "NA",
+    editableGeneratedHandle: "NA",
   },
   R19: {
     regularPoint: "NA",
@@ -394,6 +413,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonHandle: "NA",
     skeletonRibPoint: "CA",
     editableGeneratedPoint: "NA",
+    editableGeneratedHandle: "NA",
   },
   R20: {
     regularPoint: "CA",
@@ -403,6 +423,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonHandle: "NA",
     skeletonRibPoint: "CA",
     editableGeneratedPoint: "CA",
+    editableGeneratedHandle: "CA",
   },
 };
 
