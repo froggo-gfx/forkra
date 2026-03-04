@@ -79,6 +79,7 @@ import { SkeletonPenTool } from "./edit-tools-skeleton.js";
 import {
   getSkeletonData,
   regenerateSkeletonContours,
+  resolveGeneratedContourIndices,
   setSkeletonData,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { SceneController } from "./scene-controller.js";
@@ -113,6 +114,86 @@ const MIN_CANVAS_SPACE = 200;
 
 const PASTE_BEHAVIOR_REPLACE = "replace";
 const PASTE_BEHAVIOR_ADD = "add";
+
+function makeContourSignatureKeyFromPackedContour(contour) {
+  if (!contour) {
+    return "";
+  }
+  const pointTypes = Array.from(contour.pointTypes || []).map(
+    (pointType) => pointType & VarPackedPath.POINT_TYPE_MASK
+  );
+  return `${contour.isClosed ? 1 : 0}|${pointTypes.length}|${pointTypes.join(",")}`;
+}
+
+function collectContourSignatureInfo(path) {
+  const indicesByKey = new Map();
+  const keyByContour = [];
+  const occurrenceByContour = [];
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    const key = makeContourSignatureKeyFromPackedContour(path.getContour(contourIndex));
+    const indices = indicesByKey.get(key) || [];
+    occurrenceByContour[contourIndex] = indices.length;
+    indices.push(contourIndex);
+    indicesByKey.set(key, indices);
+    keyByContour[contourIndex] = key;
+  }
+  return { indicesByKey, keyByContour, occurrenceByContour };
+}
+
+function remapPointSelectionForTargetPath(pointSelection, referencePath, targetPath) {
+  if (
+    !pointSelection?.length ||
+    !referencePath ||
+    !targetPath ||
+    referencePath === targetPath
+  ) {
+    return pointSelection;
+  }
+  const referenceInfo = collectContourSignatureInfo(referencePath);
+  const targetInfo = collectContourSignatureInfo(targetPath);
+  const mappedSelection = [];
+  for (const pointIndex of pointSelection) {
+    if (pointIndex < 0 || pointIndex >= referencePath.numPoints) {
+      continue;
+    }
+    const [refContourIndex, refContourPointIndex] =
+      referencePath.getContourAndPointIndex(pointIndex);
+    const key = referenceInfo.keyByContour[refContourIndex];
+    const occurrence = referenceInfo.occurrenceByContour[refContourIndex];
+    const targetContourCandidates = targetInfo.indicesByKey.get(key);
+    if (!targetContourCandidates || occurrence >= targetContourCandidates.length) {
+      continue;
+    }
+    const targetContourIndex = targetContourCandidates[occurrence];
+    if (refContourPointIndex >= targetPath.getNumPointsOfContour(targetContourIndex)) {
+      continue;
+    }
+    mappedSelection.push(
+      targetPath.getAbsolutePointIndex(targetContourIndex, refContourPointIndex)
+    );
+  }
+  mappedSelection.sort((a, b) => a - b);
+  return [...new Set(mappedSelection)];
+}
+
+function filterPointSelectionByExcludedContours(
+  path,
+  pointSelection,
+  excludedContourIndices
+) {
+  if (!pointSelection?.length || !excludedContourIndices?.size || !path) {
+    return pointSelection;
+  }
+  const filteredSelection = pointSelection.filter((pointIndex) => {
+    if (pointIndex < 0 || pointIndex >= path.numPoints) {
+      return false;
+    }
+    const contourIndex = path.getContourIndex(pointIndex);
+    return !excludedContourIndices.has(contourIndex);
+  });
+  filteredSelection.sort((a, b) => a - b);
+  return [...new Set(filteredSelection)];
+}
 
 export class EditorController extends ViewController {
   constructor(font) {
@@ -1738,20 +1819,25 @@ export class EditorController extends ViewController {
     }
 
     // Check if skeleton points are selected
-    const { skeletonPoint: skeletonPointSelection } = parseSelection(
-      this.sceneController.selection
-    );
-    const hasSkeletonSelection = skeletonPointSelection?.size > 0;
+    const {
+      skeletonPoint: skeletonPointSelection,
+      skeletonSegment: skeletonSegmentSelection,
+    } = parseSelection(this.sceneController.selection);
+    const hasSkeletonSelection =
+      skeletonPointSelection?.size > 0 || skeletonSegmentSelection?.size > 0;
 
     // Collect skeleton contour indices from selection
     const selectedSkeletonContours = new Set();
     if (hasSkeletonSelection) {
-      for (const selKey of skeletonPointSelection) {
+      for (const selKey of skeletonPointSelection || []) {
+        const [contourIdx] = selKey.split("/").map(Number);
+        selectedSkeletonContours.add(contourIdx);
+      }
+      for (const selKey of skeletonSegmentSelection || []) {
         const [contourIdx] = selKey.split("/").map(Number);
         selectedSkeletonContours.add(contourIdx);
       }
     }
-
     const layerGlyphs = [];
     let flattenedPath;
     const backgroundImageData = {};
@@ -1761,7 +1847,17 @@ export class EditorController extends ViewController {
       this.sceneController.getEditingLayerFromGlyphLayers(varGlyph.layers)
     )) {
       const layerGlyph = layer.glyph || layer;
-      const copyResult = this._prepareCopyOrCut(layerGlyph, doCut, !flattenedPath);
+      const fullLayer = varGlyph.layers[layerName];
+      const layerSkeletonData = hasSkeletonSelection ? getSkeletonData(fullLayer) : null;
+      const generatedContourIndices = layerSkeletonData
+        ? resolveGeneratedContourIndices(layerGlyph.path, layerSkeletonData)
+        : [];
+      const copyResult = this._prepareCopyOrCut(layerGlyph, doCut, !flattenedPath, {
+        excludeGeneratedContourIndices:
+          hasSkeletonSelection && generatedContourIndices.length
+            ? new Set(generatedContourIndices)
+            : null,
+      });
       if (!copyResult.instance) {
         return;
       }
@@ -1783,15 +1879,14 @@ export class EditorController extends ViewController {
 
       // Collect skeleton data if skeleton points are selected
       if (hasSkeletonSelection) {
-        // Get skeleton data from the full layer object, not the glyph
-        const fullLayer = varGlyph.layers[layerName];
-        const skeletonData = getSkeletonData(fullLayer);
-        if (skeletonData?.contours?.length) {
+        if (layerSkeletonData?.contours?.length) {
           // Copy only selected contours
           const copiedContours = [];
           for (const contourIdx of selectedSkeletonContours) {
-            if (contourIdx < skeletonData.contours.length) {
-              copiedContours.push(JSON.parse(JSON.stringify(skeletonData.contours[contourIdx])));
+            if (contourIdx < layerSkeletonData.contours.length) {
+              copiedContours.push(
+                JSON.parse(JSON.stringify(layerSkeletonData.contours[contourIdx]))
+              );
             }
           }
           if (copiedContours.length) {
@@ -1822,7 +1917,12 @@ export class EditorController extends ViewController {
     };
   }
 
-  _prepareCopyOrCut(editInstance, doCut = false, wantFlattenedPath = false) {
+  _prepareCopyOrCut(
+    editInstance,
+    doCut = false,
+    wantFlattenedPath = false,
+    { excludeGeneratedContourIndices = null } = {}
+  ) {
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     const glyphController = positionedGlyph?.glyph;
     if (!glyphController) {
@@ -1867,8 +1967,16 @@ export class EditorController extends ViewController {
     let guidelines;
     let backgroundImage;
     const flattenedPathList = wantFlattenedPath ? [] : undefined;
-    if (pointIndices) {
-      path = filterPathByPointIndices(editInstance.path, pointIndices, doCut);
+    const filteredPointIndices =
+      pointIndices && excludeGeneratedContourIndices?.size
+        ? pointIndices.filter((pointIndex) => {
+            const contourIndex = editInstance.path.getContourIndex(pointIndex);
+            return !excludeGeneratedContourIndices.has(contourIndex);
+          })
+        : pointIndices;
+
+    if (filteredPointIndices?.length) {
+      path = filterPathByPointIndices(editInstance.path, filteredPointIndices, doCut);
       flattenedPathList?.push(path);
     }
     if (componentIndices) {
@@ -2430,12 +2538,86 @@ export class EditorController extends ViewController {
           const layerGlyphs = this.sceneController.getEditingLayerFromGlyphLayers(
             subject.layers
           );
-          for (const layerGlyph of Object.values(layerGlyphs)) {
+          const referenceLayerName =
+            this.sceneController.sceneSettings?.editLayerName || Object.keys(layerGlyphs)[0];
+          const referencePath =
+            (referenceLayerName && layerGlyphs[referenceLayerName]?.path) ||
+            Object.values(layerGlyphs)[0]?.path;
+          const referencePathSnapshot = referencePath?.copy?.() || referencePath;
+          const shouldLogMixedDeleteDebug =
+            !!(hasSkeletonSelection && pointSelection?.length && referencePath);
+          for (const [layerName, layerGlyph] of Object.entries(layerGlyphs)) {
             if (event.altKey) {
-              this._prepareCopyOrCut(layerGlyph, true, false);
+              const layer = subject.layers[layerName];
+              const skeletonData = hasSkeletonSelection && layer ? getSkeletonData(layer) : null;
+              const generatedContourIndices = skeletonData
+                ? resolveGeneratedContourIndices(layerGlyph.path, skeletonData)
+                : [];
+              this._prepareCopyOrCut(layerGlyph, true, false, {
+                excludeGeneratedContourIndices:
+                  hasSkeletonSelection && generatedContourIndices.length
+                    ? new Set(generatedContourIndices)
+                    : null,
+              });
             } else {
               if (pointSelection) {
-                deleteSelectedPoints(layerGlyph.path, pointSelection);
+                const numPointsBefore = layerGlyph.path.numPoints;
+                const mappedPointSelection =
+                  layerName === referenceLayerName
+                    ? pointSelection
+                    : remapPointSelectionForTargetPath(
+                        pointSelection,
+                        referencePathSnapshot,
+                        layerGlyph.path
+                      );
+                let effectivePointSelection = mappedPointSelection;
+                if (hasSkeletonSelection) {
+                  const layer = subject.layers[layerName];
+                  const skeletonData = layer ? getSkeletonData(layer) : null;
+                  const generatedContourIndices = skeletonData
+                    ? resolveGeneratedContourIndices(layerGlyph.path, skeletonData)
+                    : [];
+                  if (generatedContourIndices.length) {
+                    effectivePointSelection = filterPointSelectionByExcludedContours(
+                      layerGlyph.path,
+                      mappedPointSelection,
+                      new Set(generatedContourIndices)
+                    );
+                  }
+                }
+                if (shouldLogMixedDeleteDebug) {
+                  const payload = {
+                    referenceLayerName,
+                    layerName,
+                    sourcePointSelection: pointSelection,
+                    mappedPointSelection,
+                    effectivePointSelection,
+                    numPointsBefore,
+                    numPointsReference: referencePathSnapshot?.numPoints,
+                  };
+                  console.log("[mixed-delete-debug] point-mapping", payload);
+                  console.log("[mixed-delete-debug-json] point-mapping", JSON.stringify(payload));
+                }
+                deleteSelectedPoints(layerGlyph.path, effectivePointSelection);
+                if (shouldLogMixedDeleteDebug) {
+                  const payload = {
+                    layerName,
+                    numPointsBefore,
+                    numPointsAfter: layerGlyph.path.numPoints,
+                  };
+                  console.log("[mixed-delete-debug] point-delete-result", payload);
+                  console.log(
+                    "[mixed-delete-debug-json] point-delete-result",
+                    JSON.stringify(payload)
+                  );
+                }
+                const layer = subject.layers[layerName];
+                const skeletonData = layer ? getSkeletonData(layer) : null;
+                if (skeletonData?.contours?.length && !hasSkeletonSelection) {
+                  const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+                  regenerateSkeletonContours(layerGlyph, workingSkeletonData);
+                  setSkeletonData(layer, workingSkeletonData);
+                }
               }
               if (componentSelection) {
                 for (const componentIndex of reversed(componentSelection)) {
@@ -2472,10 +2654,15 @@ export class EditorController extends ViewController {
         for (const editLayerName of this.sceneController.editingLayerNames || []) {
           const layer = glyph.layers[editLayerName];
           if (!layer) continue;
-          let skeletonData = getSkeletonData(layer);
-          if (!skeletonData) continue;
+          const storedSkeletonData = getSkeletonData(layer);
+          if (!storedSkeletonData) continue;
 
-          skeletonData = JSON.parse(JSON.stringify(skeletonData));
+          const resolvedGeneratedContourIndices = resolveGeneratedContourIndices(
+            layer.glyph?.path,
+            storedSkeletonData
+          );
+          let skeletonData = JSON.parse(JSON.stringify(storedSkeletonData));
+          skeletonData.generatedContourIndices = resolvedGeneratedContourIndices;
           const effectiveSkeletonPointSelection = new Set(skeletonPointSelection || []);
 
           // Support deleting full skeleton contours via selected skeleton segments.
@@ -2504,6 +2691,22 @@ export class EditorController extends ViewController {
             skeletonData,
             effectiveSkeletonPointSelection
           );
+          const shouldLogMixedDeleteDebug =
+            !!(hasRegularSelection && hasSkeletonSelection && pointSelection?.length);
+          if (shouldLogMixedDeleteDebug) {
+            const payload = {
+              editLayerName,
+              modified,
+              skeletonSelectionSize: effectiveSkeletonPointSelection.size,
+              generatedContourIndices: skeletonData.generatedContourIndices,
+              pathNumPointsBeforeRegen: layer.glyph?.path?.numPoints,
+            };
+            console.log("[mixed-delete-debug] skeleton-delete-input", payload);
+            console.log(
+              "[mixed-delete-debug-json] skeleton-delete-input",
+              JSON.stringify(payload)
+            );
+          }
 
           if (modified) {
             const staticGlyph = layer.glyph;
@@ -2512,6 +2715,18 @@ export class EditorController extends ViewController {
             const pathChange = recordChanges(staticGlyph, (sg) => {
               regenerateSkeletonContours(sg, skeletonData);
             });
+            if (shouldLogMixedDeleteDebug) {
+              const payload = {
+                editLayerName,
+                pathNumPointsAfterRegen: staticGlyph.path?.numPoints,
+                generatedContourIndicesAfterRegen: skeletonData.generatedContourIndices,
+              };
+              console.log("[mixed-delete-debug] skeleton-delete-result", payload);
+              console.log(
+                "[mixed-delete-debug-json] skeleton-delete-result",
+                JSON.stringify(payload)
+              );
+            }
             allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
 
             // Save updated skeletonData
@@ -2549,11 +2764,15 @@ export class EditorController extends ViewController {
       }
 
       const layer = glyph.layers[editLayerName];
-      let skeletonData = getSkeletonData(layer);
-      if (!skeletonData) return;
+      const storedSkeletonData = getSkeletonData(layer);
+      if (!storedSkeletonData) return;
 
       // Deep clone for manipulation
-      skeletonData = JSON.parse(JSON.stringify(skeletonData));
+      let skeletonData = JSON.parse(JSON.stringify(storedSkeletonData));
+      skeletonData.generatedContourIndices = resolveGeneratedContourIndices(
+        layer.glyph?.path,
+        storedSkeletonData
+      );
 
       // Delete points with shape preservation (logic in path-functions.js)
       const modified = deleteSkeletonPoints(skeletonData, skeletonPointSelection);
@@ -3140,7 +3359,9 @@ export class EditorController extends ViewController {
       ? positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName]
       : null;
     const skeletonData = layer ? getSkeletonData(layer) : null;
-    const generatedContourIndices = new Set(skeletonData?.generatedContourIndices || []);
+    const generatedContourIndices = new Set(
+      skeletonData ? resolveGeneratedContourIndices(instance.path, skeletonData) : []
+    );
 
     // Collect skeleton on-curve points
     const skeletonOnCurvePoints = [];

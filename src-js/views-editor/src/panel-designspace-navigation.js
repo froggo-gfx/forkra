@@ -1625,8 +1625,22 @@ export default class DesignspaceNavigationPanel extends Panel {
     const varGlyphController =
       await this.sceneModel.getSelectedVariableGlyphController();
     const sources = varGlyphController?.sources || [];
-    const sourceInterpolationStatus =
-      varGlyphController?.sourceInterpolationStatus || [];
+    let sourceInterpolationStatus = varGlyphController?.sourceInterpolationStatus || [];
+    if (
+      varGlyphController &&
+      sourceInterpolationStatus.some((status) => status?.error)
+    ) {
+      // Verify that interpolation status is not stale; if it is, use the fresh value.
+      const cachedStatus = sourceInterpolationStatus;
+      varGlyphController.clearModelCache();
+      const refreshedStatus = varGlyphController.sourceInterpolationStatus || [];
+      if (!interpolationStatusArraysEqual(cachedStatus, refreshedStatus)) {
+        console.warn(
+          "[designspace-navigation] stale sourceInterpolationStatus detected; using recomputed status"
+        );
+        sourceInterpolationStatus = refreshedStatus;
+      }
+    }
     const interpolationContributions =
       varGlyphController?.getInterpolationContributions({
         ...this.sceneSettings.fontLocationSourceMapped,
@@ -3016,6 +3030,27 @@ function interpolationContributionCell(item, colDesc) {
   updateFromItem();
 
   return iconElement;
+}
+
+function interpolationStatusArraysEqual(statusA, statusB) {
+  if (!Array.isArray(statusA) || !Array.isArray(statusB)) {
+    return statusA === statusB;
+  }
+  if (statusA.length !== statusB.length) {
+    return false;
+  }
+  for (let i = 0; i < statusA.length; i++) {
+    const a = statusA[i] || {};
+    const b = statusB[i] || {};
+    if (
+      a.error !== b.error ||
+      a.discreteLocationKey !== b.discreteLocationKey ||
+      !!a.isModelError !== !!b.isModelError
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function statusListCell(item, colDesc) {

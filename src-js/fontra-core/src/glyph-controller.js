@@ -206,6 +206,7 @@ export class VariableGlyphController {
   clearDeltasCache() {
     // Call this when a source layer changed
     delete this._deltas;
+    delete this._sourceInterpolationStatus;
   }
 
   clearModelCache() {
@@ -336,7 +337,8 @@ export class VariableGlyphController {
       errors[layerName] = checkInterpolationCompatibility(
         layerName,
         layerGlyphs,
-        errors
+        errors,
+        { glyphName: this.name }
       );
       if (Object.keys(errors[layerName]).length <= sources.length / 2) {
         // The number of incompatible sources is half of all sources or less:
@@ -1209,6 +1211,44 @@ function makeEmptyComponentPlaceholderGlyph() {
   return StaticGlyph.fromObject({ path: path });
 }
 
+function makeContourCompatibilityKey(contour) {
+  const pointTypes = Array.from(contour?.pointTypes || []).map(
+    (pointType) => pointType & VarPackedPath.POINT_TYPE_MASK
+  );
+  return `${contour?.isClosed ? 1 : 0}|${pointTypes.length}|${pointTypes.join(",")}`;
+}
+
+function normalizePathContourOrderForCompatibility(path) {
+  if (!path || path.numContours < 2) {
+    return path;
+  }
+
+  const contourEntries = [];
+  const keyCounts = new Map();
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    const key = makeContourCompatibilityKey(path.getContour(contourIndex));
+    contourEntries.push({ contourIndex, key });
+    keyCounts.set(key, (keyCounts.get(key) || 0) + 1);
+  }
+
+  // Keep original order when contour signatures are ambiguous.
+  if ([...keyCounts.values()].some((count) => count > 1)) {
+    return path;
+  }
+
+  const sortedEntries = [...contourEntries].sort((a, b) => compare(a.key, b.key));
+  const alreadySorted = sortedEntries.every(
+    (entry, sortedIndex) => entry.contourIndex === sortedIndex
+  );
+  if (alreadySorted) {
+    return path;
+  }
+
+  return VarPackedPath.fromUnpackedContours(
+    sortedEntries.map((entry) => path.getUnpackedContour(entry.contourIndex))
+  );
+}
+
 function ensureGlyphCompatibility(layers, glyphDependencies) {
   const layerGlyphs = layers.map(({ glyph }) => glyph);
 
@@ -1220,10 +1260,12 @@ function ensureGlyphCompatibility(layers, glyphDependencies) {
 
   const guidelinesAreCompatible = areGuidelinesCompatible(layerGlyphs);
 
-  return layers.map(({ sourceLocation, glyph, componentLocationFallbackValues }) =>
-    StaticGlyph.fromObject(
+  return layers.map(({ sourceLocation, glyph, componentLocationFallbackValues }) => {
+    const normalizedPath = normalizePathContourOrderForCompatibility(glyph.path);
+    return StaticGlyph.fromObject(
       {
         ...glyph,
+        path: normalizedPath,
         components: componentsAreCompatible
           ? normalizeComponents(glyph, sourceLocation, componentLocationFallbackValues)
           : glyph.components,
@@ -1234,8 +1276,8 @@ function ensureGlyphCompatibility(layers, glyphDependencies) {
         backgroundImage: undefined, // The background image isn't meant to interpolate
       },
       true // noCopy
-    )
-  );
+    );
+  });
 }
 
 function areComponentsCompatible(glyphs) {
@@ -1329,9 +1371,11 @@ function normalizeComponents(glyph, sourceLocation, componentLocationFallbackVal
 }
 
 function stripNonInterpolatablesAndSortAnchors(glyph) {
+  const normalizedPath = normalizePathContourOrderForCompatibility(glyph.path);
   return StaticGlyph.fromObject(
     {
       ...glyph,
+      path: normalizedPath,
       components: glyph.components.map((component) => {
         return {
           ...component,
@@ -1346,10 +1390,90 @@ function stripNonInterpolatablesAndSortAnchors(glyph) {
   );
 }
 
+function summarizePathForInterpolation(path) {
+  if (!path) {
+    return { numContours: 0, numPoints: 0, contours: [] };
+  }
+  const contours = [];
+  let contourStart = 0;
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    const contourInfo = path.contourInfo[contourIndex];
+    const contourEnd = contourInfo.endPoint;
+    let onCurve = 0;
+    let offCurveQuad = 0;
+    let offCurveCubic = 0;
+    let offCurveOther = 0;
+    for (let pointIndex = contourStart; pointIndex <= contourEnd; pointIndex++) {
+      const pointType = path.pointTypes[pointIndex] & VarPackedPath.POINT_TYPE_MASK;
+      if (pointType === VarPackedPath.ON_CURVE) {
+        onCurve++;
+      } else if (pointType === VarPackedPath.OFF_CURVE_QUAD) {
+        offCurveQuad++;
+      } else if (pointType === VarPackedPath.OFF_CURVE_CUBIC) {
+        offCurveCubic++;
+      } else {
+        offCurveOther++;
+      }
+    }
+    contours.push({
+      contourIndex,
+      isClosed: !!contourInfo.isClosed,
+      points: contourEnd - contourStart + 1,
+      onCurve,
+      offCurveQuad,
+      offCurveCubic,
+      offCurveOther,
+    });
+    contourStart = contourEnd + 1;
+  }
+  return {
+    numContours: path.numContours,
+    numPoints: path.numPoints,
+    contours,
+  };
+}
+
+function summarizeGlyphForInterpolation(glyph) {
+  return {
+    path: summarizePathForInterpolation(glyph?.path),
+    components: (glyph?.components || []).map((component) => component.name || "<unnamed>"),
+    anchors: (glyph?.anchors || [])
+      .map((anchor) => anchor.name || "<unnamed>")
+      .sort(compare),
+  };
+}
+
+function logInterpolationCompatibilityFailure(
+  context,
+  referenceLayerName,
+  targetLayerName,
+  errorMessage,
+  referenceGlyph,
+  targetGlyph,
+  { cachedReciprocal = false } = {}
+) {
+  const payload = {
+    glyphName: context?.glyphName || null,
+    referenceLayerName,
+    targetLayerName,
+    cachedReciprocal,
+    errorMessage,
+    referenceSummary: summarizeGlyphForInterpolation(referenceGlyph),
+    targetSummary: summarizeGlyphForInterpolation(targetGlyph),
+  };
+  console.error("[interpolation-debug] layer compatibility failure", payload);
+  try {
+    console.error("[interpolation-debug-json]", JSON.stringify(payload));
+  } catch (error) {
+    console.error("[interpolation-debug-json] <stringify-failed>", String(error));
+  }
+}
+
 function checkInterpolationCompatibility(
   referenceLayerName,
   layerGlyphs,
-  previousErrors
+  previousErrors,
+  context = null
 ) {
   const referenceGlyph = layerGlyphs[referenceLayerName];
   const errors = {};
@@ -1361,12 +1485,30 @@ function checkInterpolationCompatibility(
       const error = previousErrors[layerName][referenceLayerName];
       if (error) {
         errors[layerName] = error;
+        logInterpolationCompatibilityFailure(
+          context,
+          referenceLayerName,
+          layerName,
+          error,
+          referenceGlyph,
+          glyph,
+          { cachedReciprocal: true }
+        );
       }
     } else {
       try {
         const _ = addItemwise(referenceGlyph, glyph);
       } catch (error) {
-        errors[layerName] = error.message;
+        const errorMessage = error?.message || String(error);
+        errors[layerName] = errorMessage;
+        logInterpolationCompatibilityFailure(
+          context,
+          referenceLayerName,
+          layerName,
+          errorMessage,
+          referenceGlyph,
+          glyph
+        );
       }
     }
   }

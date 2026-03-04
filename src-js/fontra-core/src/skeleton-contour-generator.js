@@ -3707,6 +3707,18 @@ function _sanitizeGeneratedIndices(indices) {
   return sanitized;
 }
 
+function _arrayShallowEqual(a, b) {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function _packedContoursEqual(contourA, contourB) {
   if (!contourA || !contourB) {
     return false;
@@ -3749,6 +3761,71 @@ function _recoverGeneratedIndices(path, generatedContours) {
     }
   }
   return recoveredIndices;
+}
+
+function _recoverGeneratedIndicesForMapping(path, generatedContours) {
+  if (!path || !generatedContours.length) {
+    return [];
+  }
+  const packedGeneratedContours = generatedContours.map((contour) => packContour(contour));
+  const usedIndices = new Set();
+  const recoveredIndices = [];
+  for (const packedGeneratedContour of packedGeneratedContours) {
+    let foundIndex = -1;
+    for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+      if (usedIndices.has(contourIndex)) {
+        continue;
+      }
+      const existingContour = path.getContour(contourIndex);
+      if (_packedContoursEqual(existingContour, packedGeneratedContour)) {
+        foundIndex = contourIndex;
+        break;
+      }
+    }
+    if (foundIndex < 0) {
+      return [];
+    }
+    usedIndices.add(foundIndex);
+    recoveredIndices.push(foundIndex);
+  }
+  return recoveredIndices;
+}
+
+/**
+ * Resolve generated contour indices against the current path geometry.
+ * Uses contour matching as primary source of truth, with stored indices as fallback.
+ */
+export function resolveGeneratedContourIndices(path, skeletonData) {
+  if (!path || !skeletonData) {
+    return [];
+  }
+  const generatedContours = generateContoursFromSkeleton(skeletonData);
+  if (!generatedContours.length) {
+    return [];
+  }
+
+  const recoveredMappingIndices = _sanitizeGeneratedIndices(
+    _recoverGeneratedIndicesForMapping(path, generatedContours)
+  );
+  if (recoveredMappingIndices.length === generatedContours.length) {
+    return recoveredMappingIndices;
+  }
+
+  const storedIndices = _sanitizeGeneratedIndices(skeletonData.generatedContourIndices).filter(
+    (index) => index < path.numContours
+  );
+  if (storedIndices.length === generatedContours.length) {
+    return storedIndices;
+  }
+
+  const recoveredLooseIndices = _sanitizeGeneratedIndices(
+    _recoverGeneratedIndices(path, generatedContours)
+  );
+  if (recoveredLooseIndices.length === generatedContours.length) {
+    return recoveredLooseIndices;
+  }
+
+  return [];
 }
 
 function _canUpdateGeneratedContoursInPlace(path, generatedContours, oldGeneratedIndices) {
@@ -3795,14 +3872,33 @@ export function regenerateSkeletonContours(
   const path = staticGlyph.path;
   const generatedContours = generateContoursFromSkeleton(skeletonData);
   let oldGeneratedIndices = _sanitizeGeneratedIndices(skeletonData.generatedContourIndices);
+  const oldIndicesAreUsable =
+    oldGeneratedIndices.length === generatedContours.length &&
+    oldGeneratedIndices.every((index) => index < path.numContours);
 
-  // Recovery path: if indices were not stored, infer them from contours that already
-  // match the generated skeleton geometry. This prevents one-time duplicates and
-  // cleans previously duplicated generated contours as well.
-  if (!oldGeneratedIndices.length && generatedContours.length) {
-    const recoveredIndices = _recoverGeneratedIndices(path, generatedContours);
-    if (recoveredIndices.length >= generatedContours.length) {
-      oldGeneratedIndices = _sanitizeGeneratedIndices(recoveredIndices);
+  // Recovery path: infer indices from contours matching generated geometry.
+  // Do this not only when indices are missing, but also when stored indices drift
+  // after non-skeleton contour edits that shift contour ordering.
+  if (generatedContours.length) {
+    const recoveredIndices = _sanitizeGeneratedIndices(
+      _recoverGeneratedIndices(path, generatedContours)
+    );
+    const recoveredMappingIndices = _sanitizeGeneratedIndices(
+      _recoverGeneratedIndicesForMapping(path, generatedContours)
+    );
+    const hasRecoveredMapping = recoveredMappingIndices.length === generatedContours.length;
+    const recoveredHasDuplicates = recoveredIndices.length > generatedContours.length;
+    const shouldRecover =
+      !oldIndicesAreUsable ||
+      (hasRecoveredMapping && !_arrayShallowEqual(oldGeneratedIndices, recoveredMappingIndices));
+    if (shouldRecover && recoveredIndices.length >= generatedContours.length) {
+      // If there are extra matching contours, preserve all for a cleanup pass
+      // (replace-at-existing will be skipped because lengths differ).
+      if (recoveredHasDuplicates) {
+        oldGeneratedIndices = recoveredIndices;
+      } else if (hasRecoveredMapping) {
+        oldGeneratedIndices = recoveredMappingIndices;
+      }
     }
   }
 
