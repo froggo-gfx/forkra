@@ -3,6 +3,23 @@
 Date: 2026-03-04
 Status: Draft (authoritative once approved)
 
+## Intro (Context for New Sessions)
+We previously attempted a multi‑phase refactor and ended up with scope drift: individual steps did not actually
+advance the unified‑behavior goal. This SoT exists to prevent that. All work now must align to the unified behavior
+goal, and every step must be justified against this document and the plan.
+
+What we are doing now:
+- Stop treating “domain separation” as the goal. Unified behavior is the goal; domain separation is the method.
+- Use the plan to define granular steps with manual UI tests and explicit verification.
+- Require progress‑report style reasoning per step (problem → code analysis → comparison → tests).
+
+Files to read at the start of any session:
+- `docs/refactor/sot-unified-behavior.md` (this file, authoritative intent and architecture)
+- `docs/refactor/plan-domain-separation.md` (granular steps and testing requirements)
+- `docs/refactor/action-object-matrix.md` (parity contract and manual test matrix)
+- `docs/refactor/object-kind-inventory.md` (object kinds and current logic locations)
+- `docs/refactor/target-architecture.md` (target file responsibilities and flows)
+
 ## 1. Intent (Primary Goal)
 Unify all editable object kinds under a single behavior set so the same behavior rules apply everywhere.
 
