@@ -133,3 +133,81 @@ Status: In Progress
   - Drag regular points and anchors (default/shift/alt): PASS (user verified).
   - Drag editable generated points (left/right): PASS (user verified).
 - Undo/redo verification: PASS (user verified).
+
+## Phase 4 - Step 4.1: Regular points/anchors/guidelines (drag)
+
+- Problem: Canonical regular drag routing was functionally working, but adapter boundaries were still implicit because canonical regular drag and legacy component drag shared the same adapter entrypoint.
+- Code analysis:
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Added `filterSelectionByPrefixes(selection, prefixes)` utility and applied it to canonical regular drag routing.
+  - Updated `runRegularDragAdapter(...)` to accept an explicit `selection` override and pass that to `runRegularDragOrchestration(...)`.
+  - Updated `runRegularDragCanonical(...)` to:
+    - assert required context (`sceneController`, `objectKind`),
+    - scope canonical regular drag to `point/`, `anchor/`, and `guideline/` selections only,
+    - call `runRegularDragAdapter(...)` with this filtered selection.
+  - Added `runLegacyComponentDragAdapter(...)` and routed `legacyDragAdapters.component/componentOrigin/componentTCenter` through it so component legacy routes remain explicit and separate from canonical regular routes.
+  - Verified syntax with `node --check src-js/views-editor/src/pointer-objects.js`.
+- Comparison: Yes (code-level). Canonical regular drag now explicitly uses shared behavior + adapter persistence over regular point/anchor/guideline selection only, while legacy component drag remains on separate legacy adapter entries.
+- Manual test results:
+  - Drag regular on-curve/off-curve points: NOT RUN in this terminal session (requires UI verification).
+  - Drag anchors: NOT RUN in this terminal session (requires UI verification).
+  - Drag guidelines: NOT RUN in this terminal session (requires UI verification).
+  - Repeat with shift and alt modifiers: NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Step 4.2: Regular points/anchors/guidelines (nudge)
+
+- Problem: Regular nudge canonical routing still delegated to generic `sceneController.handleArrowKeys(...)` over full selection state, so regular canonical adapter boundaries were implicit and could include non-regular selection keys.
+- Code analysis:
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Added adapter-owned `runRegularNudgeOrchestration(...)` using shared `EditBehaviorFactory` behavior output and adapter-side persistence via `sceneController.editGlyph(...)`.
+  - In `runRegularNudgeCanonical(...)`:
+    - Added explicit context assertions (`sceneController`, `objectKind`).
+    - Scoped selection to canonical regular kinds only (`point/`, `anchor/`, `guideline/`) using `filterSelectionByPrefixes(...)`.
+    - Kept equalize-path nudge fallback for regular points in equalize mode.
+    - Replaced generic nudge orchestration call with explicit `runRegularNudgeOrchestration(...)`.
+  - Verified syntax with `node --check src-js/views-editor/src/pointer-objects.js`.
+- Comparison: Yes (code-level). Regular canonical nudge now executes an explicit adapter-owned shared-behavior + persistence path over regular-only selection scope, matching the Phase 4.2 migration intent.
+- Manual test results:
+  - Nudge regular points with arrow keys: NOT RUN in this terminal session (requires UI verification).
+  - Nudge anchors with arrow keys: NOT RUN in this terminal session (requires UI verification).
+  - Nudge guidelines with arrow keys: NOT RUN in this terminal session (requires UI verification).
+  - Repeat with shift and shift+ctrl/meta modifiers: NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Step 4.3: Skeleton on-curve/off-curve (drag)
+
+- Problem: Skeleton point drag canonical routing still delegated directly to pointer-owned `_handleDragSkeletonPoints`, so skeleton drag math/persistence remained pointer-owned.
+- Code analysis:
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Added adapter-local skeleton point executor helper `createSkeletonPointExecutors(...)` using shared behavior primitives (`createPointBehaviorExecutor` + `getSkeletonBehaviorName`).
+  - Added adapter-owned skeleton drag flow:
+    - `runSkeletonPointDragOrchestration(...)` for per-layer skeleton behavior application, contour regeneration, and skeleton customData persistence.
+    - `runSkeletonPointDragCanonical(...)` as canonical adapter entrypoint.
+  - Updated `canonicalDragAdapters.skeletonPoint` to use `runSkeletonPointDragCanonical(...)` instead of pointer-method invocation map.
+  - Transitional fallback retained for fixed-rib drag modes (`D` / `S`) to pointer handler path to preserve behavior while broader fixed-rib migration remains pending.
+  - Verified syntax with `node --check src-js/views-editor/src/pointer-objects.js`.
+- Comparison: Yes (code-level). Default/shift/alt skeleton drag now runs through adapter-owned shared-behavior + skeleton persistence flow in canonical adapter space instead of direct pointer handler routing.
+- Manual test results:
+  - Drag skeleton on-curve points: NOT RUN in this terminal session (requires UI verification).
+  - Drag skeleton off-curve points: NOT RUN in this terminal session (requires UI verification).
+  - Repeat with shift and alt modifiers: NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Step 4.4: Skeleton on-curve/off-curve (nudge)
+
+- Problem: Skeleton point nudge canonical routing still delegated to pointer-owned `_handleArrowKeysLegacy`, so skeleton nudge math/persistence remained pointer-owned.
+- Code analysis:
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Added adapter-owned skeleton nudge flow:
+    - `runSkeletonPointNudgeOrchestration(...)` for skeleton delta application, outline regeneration (`preferInPlace`), and skeleton customData persistence.
+    - `runSkeletonPointNudgeCanonical(...)` as canonical adapter entrypoint.
+  - Updated `canonicalNudgeAdapters.skeletonPoint` to use `runSkeletonPointNudgeCanonical(...)` instead of pointer-method invocation map.
+  - Transitional fallback retained to pointer legacy nudge path for mixed regular+skeleton selections and fixed-rib nudge modes (`D` / `S`) to preserve current behavior while those paths are migrated in later steps.
+  - Verified syntax with `node --check src-js/views-editor/src/pointer-objects.js`.
+- Comparison: Yes (code-level). Default/shift/alt skeleton nudge now runs through canonical adapter-owned behavior + persistence flow; pointer legacy path is still used for transitional fixed-rib/mixed cases.
+- Manual test results:
+  - Nudge skeleton on-curve points: NOT RUN in this terminal session (requires UI verification).
+  - Nudge skeleton off-curve points: NOT RUN in this terminal session (requires UI verification).
+  - Repeat with shift and alt modifiers: NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
