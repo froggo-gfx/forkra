@@ -211,3 +211,53 @@ Status: In Progress
   - Nudge skeleton off-curve points: NOT RUN in this terminal session (requires UI verification).
   - Repeat with shift and alt modifiers: NOT RUN in this terminal session (requires UI verification).
 - Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Step 4.5: Skeleton equalize (drag + nudge)
+
+- Problem: Skeleton equalize paths (`X` drag and `X` nudge for off-curve points) still routed through pointer-owned handlers, so canonical adapters were not actually owning this object-kind specificity.
+- Code analysis:
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Added adapter-local skeleton equalize helpers:
+    - `getSkeletonHandleEqualizeInfo(...)`
+    - `runSkeletonHandleEqualizeDragOrchestration(...)`
+    - `runSkeletonHandleEqualizeNudgeOrchestration(...)`
+    - plus canonical entrypoints `runSkeletonHandleEqualizeDragCanonical(...)` and `runSkeletonHandleEqualizeNudgeCanonical(...)`.
+  - Updated canonical adapter maps:
+    - `canonicalDragAdapters.skeletonHandle` now routes to adapter-owned equalize drag canonical implementation.
+    - `canonicalNudgeAdapters.skeletonHandle` now routes to adapter-owned equalize nudge canonical implementation.
+  - Removed pointer-method forwarding for skeleton-handle canonical drag by deleting `skeletonHandle` from `buildCanonicalDragPointerInvocation(...)`.
+  - Removed pointer-legacy forwarding for skeleton/equalize from `buildCanonicalNudgePointerInvocation(...)` for this route.
+  - Preserved fallback semantics for nudge when equalize is not applicable:
+    - if no off-curve skeleton points are selected, canonical skeleton-handle nudge delegates to `runSkeletonPointNudgeCanonical(...)` (which retains existing mixed/fixed-rib fallback behavior).
+  - Verified syntax with `node --check src-js/views-editor/src/pointer-objects.js`.
+- Comparison: Yes (code-level). Skeleton equalize drag+nudge now run through canonical adapter-owned translation/persistence paths instead of pointer-owned `_handleEqualizeHandlesDrag(...)`/`_handleArrowKeysLegacy(...)` forwarding for `skeletonHandle`.
+- Manual test results:
+  - Drag skeleton off-curve points with X: NOT RUN in this terminal session (requires UI verification).
+  - Drag skeleton off-curve points with X+shift: NOT RUN in this terminal session (requires UI verification).
+  - Nudge skeleton off-curve points with X: NOT RUN in this terminal session (requires UI verification).
+  - Nudge skeleton off-curve points with X+shift: NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Cross-Cut: Move drag kernel to composer
+
+- Problem: Shared drag-loop orchestration still lived in `pointer-objects.js`, leaving composer as mostly routing boilerplate and keeping cross-kind drag control flow in adapters.
+- Code analysis:
+  - Updated `src-js/views-editor/src/edit-behavior-composer.js`.
+  - Added composer-owned `runPointLikeDragKernel(...)` to centralize shared drag-session logic:
+    - modifier/behavior switching,
+    - per-event point sampling,
+    - delta computation relative to initial point,
+    - callback dispatch for behavior-change and event application.
+  - Updated `runDragRoutingOrchestration(...)` to inject `runPointLikeDragKernel` into adapter context.
+  - Updated `src-js/views-editor/src/pointer-objects.js` to consume composer-provided kernel for:
+    - regular drag orchestration,
+    - skeleton point drag orchestration,
+    - skeleton equalize drag orchestration.
+  - Removed adapter-owned `runUnifiedDragEventStream(...)` and direct `vector.subVectors(...)` drag delta use in favor of kernel-provided deltas.
+  - Verified syntax with:
+    - `node --check src-js/views-editor/src/edit-behavior-composer.js`
+    - `node --check src-js/views-editor/src/pointer-objects.js`
+- Comparison: Partially. Shared drag-loop policy is now composer-owned (better boundary), but pointer adapters still contain substantial persistence-specific drag logic and remain large; additional consolidation is needed for major file-size reduction.
+- Manual test results:
+  - NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).

@@ -12,6 +12,52 @@ import {
   legacyNudgeAdapters,
 } from "./pointer-objects.js";
 
+export async function runPointLikeDragKernel({
+  eventStream,
+  initialEvent,
+  getBehaviorNameForEvent,
+  getPointForEvent,
+  onBehaviorChanged,
+  onEvent,
+}) {
+  assert(eventStream, "runPointLikeDragKernel: missing eventStream");
+  assert(initialEvent, "runPointLikeDragKernel: missing initialEvent");
+  assert(
+    typeof getBehaviorNameForEvent === "function",
+    "runPointLikeDragKernel: missing getBehaviorNameForEvent"
+  );
+  assert(
+    typeof getPointForEvent === "function",
+    "runPointLikeDragKernel: missing getPointForEvent"
+  );
+  assert(typeof onEvent === "function", "runPointLikeDragKernel: missing onEvent");
+
+  const initialPoint = getPointForEvent(initialEvent);
+  let behaviorName = getBehaviorNameForEvent(initialEvent);
+
+  for await (const event of eventStream) {
+    const nextBehaviorName = getBehaviorNameForEvent(event);
+    if (nextBehaviorName !== behaviorName) {
+      behaviorName = nextBehaviorName;
+      if (onBehaviorChanged) {
+        await onBehaviorChanged({ behaviorName, event, initialPoint });
+      }
+    }
+    const currentPoint = getPointForEvent(event);
+    const delta = {
+      x: currentPoint.x - initialPoint.x,
+      y: currentPoint.y - initialPoint.y,
+    };
+    await onEvent({
+      event,
+      behaviorName,
+      initialPoint,
+      currentPoint,
+      delta,
+    });
+  }
+}
+
 /**
  * Route drag edits through the registry routing map and adapters.
  * Required context fields:
@@ -72,7 +118,10 @@ export async function runDragRoutingOrchestration(_context) {
       : legacyDragAdapters[objectKind];
   assert(adapter, `runDragRoutingOrchestration: missing adapter for ${objectKind}`);
 
-  const adapterResult = await adapter(_context);
+  const adapterResult = await adapter({
+    ..._context,
+    runPointLikeDragKernel,
+  });
 
   if (adapterResult === false) {
     return false;

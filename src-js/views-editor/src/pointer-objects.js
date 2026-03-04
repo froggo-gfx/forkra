@@ -8,8 +8,8 @@ import {
   setSkeletonData,
 } from "@fontra/core/skeleton-contour-generator.js";
 import { arrowKeyDeltas, assert, parseSelection } from "@fontra/core/utils.js";
-import * as vector from "@fontra/core/vector.js";
 import {
+  constrainHorVerDiag,
   EditBehaviorFactory,
   createPointBehaviorExecutor,
   findEqualizeHandleForPath,
@@ -86,24 +86,113 @@ function createSkeletonPointExecutors(
   return behaviors;
 }
 
-async function runUnifiedDragEventStream({
-  eventStream,
-  initialEvent,
-  getBehaviorNameForEvent,
-  onBehaviorChanged,
-  onEvent,
-}) {
-  let behaviorName = getBehaviorNameForEvent(initialEvent);
-  for await (const event of eventStream) {
-    const nextBehaviorName = getBehaviorNameForEvent(event);
-    if (nextBehaviorName !== behaviorName) {
-      behaviorName = nextBehaviorName;
-      if (onBehaviorChanged) {
-        await onBehaviorChanged(behaviorName, event);
-      }
-    }
-    await onEvent(event, behaviorName);
+function getSkeletonHandleEqualizeInfo(contour, pointIndex) {
+  if (!contour?.points?.length) {
+    return null;
   }
+  const numPoints = contour.points.length;
+
+  let smoothIndex = null;
+  let oppositeIndex = null;
+
+  const prevIndex = (pointIndex - 1 + numPoints) % numPoints;
+  const nextIndex = (pointIndex + 1) % numPoints;
+  const prevPoint = contour.points[prevIndex];
+  const nextPoint = contour.points[nextIndex];
+
+  if (!prevPoint?.type && prevPoint?.smooth) {
+    const prevPrevIndex = (prevIndex - 1 + numPoints) % numPoints;
+    const prevPrevPoint = contour.points[prevPrevIndex];
+    if (prevPrevPoint?.type === "cubic") {
+      smoothIndex = prevIndex;
+      oppositeIndex = prevPrevIndex;
+    }
+  }
+
+  if (smoothIndex === null && !nextPoint?.type && nextPoint?.smooth) {
+    const nextNextIndex = (nextIndex + 1) % numPoints;
+    const nextNextPoint = contour.points[nextNextIndex];
+    if (nextNextPoint?.type === "cubic") {
+      smoothIndex = nextIndex;
+      oppositeIndex = nextNextIndex;
+    }
+  }
+
+  if (smoothIndex === null || oppositeIndex === null) {
+    return null;
+  }
+  return { smoothIndex, oppositeIndex };
+}
+
+function createSkeletonLayersData({
+  glyph,
+  editingLayerNames,
+  requireContourIndex = null,
+}) {
+  const layersData = {};
+  for (const editLayerName of editingLayerNames) {
+    const layer = glyph.layers[editLayerName];
+    const skeletonData = layer ? getSkeletonData(layer) : null;
+    if (!skeletonData) {
+      continue;
+    }
+    if (
+      requireContourIndex !== null &&
+      !skeletonData?.contours?.[requireContourIndex]
+    ) {
+      continue;
+    }
+    layersData[editLayerName] = {
+      layer,
+      original: JSON.parse(JSON.stringify(skeletonData)),
+      working: JSON.parse(JSON.stringify(skeletonData)),
+    };
+  }
+  return layersData;
+}
+
+function resetWorkingContoursFromOriginal(original, working, contourIndex = null) {
+  const resetContour = (index) => {
+    const origContour = original.contours[index];
+    const workContour = working.contours[index];
+    if (!origContour || !workContour) {
+      return;
+    }
+    for (let pi = 0; pi < origContour.points.length; pi++) {
+      workContour.points[pi].x = origContour.points[pi].x;
+      workContour.points[pi].y = origContour.points[pi].y;
+    }
+  };
+  if (contourIndex !== null) {
+    resetContour(contourIndex);
+    return;
+  }
+  for (let ci = 0; ci < original.contours.length; ci++) {
+    resetContour(ci);
+  }
+}
+
+function makeSkeletonLayerPersistenceChanges({
+  layer,
+  working,
+  editLayerName,
+  regenerateOptions,
+  cloneOnPersist = false,
+}) {
+  const pathChange = recordChanges(layer.glyph, (sg) => {
+    regenerateSkeletonContours(sg, working, regenerateOptions);
+  });
+  const prefixedPath = pathChange.prefixed(["layers", editLayerName, "glyph"]);
+
+  const customDataChange = recordChanges(layer, (l) => {
+    setSkeletonData(
+      l,
+      cloneOnPersist ? JSON.parse(JSON.stringify(working)) : working
+    );
+  });
+  const prefixedCustomData = customDataChange.prefixed(["layers", editLayerName]);
+
+  return { prefixedPath, prefixedCustomData };
 }
 
 async function runRegularDragOrchestration(_context) {
@@ -119,10 +208,15 @@ async function runRegularDragOrchestration(_context) {
     getEqualizeMode,
     positionedGlyph,
     initialClickedPointIndex,
+    runPointLikeDragKernel,
   } = _context;
   const readEqualizeMode = getEqualizeMode || (() => equalizeMode);
 
   assert(sceneController, "runRegularDragOrchestration: missing sceneController");
+  assert(
+    typeof runPointLikeDragKernel === "function",
+    "runRegularDragOrchestration: missing runPointLikeDragKernel"
+  );
 
   const initialPoint = sceneController.localPoint(initialEvent);
   const initialBehaviorName = getBehaviorName(initialEvent);
@@ -178,28 +272,23 @@ async function runRegularDragOrchestration(_context) {
 
   let editChange;
 
-  await runUnifiedDragEventStream({
+  await runPointLikeDragKernel({
     eventStream,
     initialEvent,
     getBehaviorNameForEvent: getBehaviorName,
-    onBehaviorChanged: async (newBehaviorName) => {
+    getPointForEvent: (event) => sceneController.localPoint(event),
+    onBehaviorChanged: async ({ behaviorName }) => {
       const rollbackChanges = [];
       for (const layer of layerInfo) {
         applyChange(layer.layerGlyph, layer.editBehavior.rollbackChange);
         rollbackChanges.push(
           consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
         );
-        layer.editBehavior = layer.behaviorFactory.getBehavior(newBehaviorName);
+        layer.editBehavior = layer.behaviorFactory.getBehavior(behaviorName);
       }
       await sendIncrementalChange(consolidateChanges(rollbackChanges));
     },
-    onEvent: async (event) => {
-      const currentPoint = sceneController.localPoint(event);
-      const delta = {
-        x: currentPoint.x - initialPoint.x,
-        y: currentPoint.y - initialPoint.y,
-      };
-
+    onEvent: async ({ event, currentPoint, delta }) => {
       const deepEditChanges = [];
 
       for (const layer of layerInfo) {
@@ -299,6 +388,7 @@ async function runRegularDragAdapter({
   selection,
   eventStream,
   initialEvent,
+  runPointLikeDragKernel,
 }) {
   const sceneController = pointerTool.sceneController;
   const effectiveSelection = selection || sceneController.selection;
@@ -316,6 +406,7 @@ async function runRegularDragAdapter({
       positionedGlyph: pointerTool.sceneModel.getSelectedPositionedGlyph(),
       initialClickedPointIndex:
         pointerTool.sceneController.sceneModel.initialClickedPointIndex,
+      runPointLikeDragKernel,
     });
   });
   return makeAdapterResult();
@@ -430,12 +521,108 @@ async function runRegularDragCanonical(context) {
   });
 }
 
+async function runSkeletonDragSession({
+  sceneController,
+  eventStream,
+  initialEvent,
+  positionedGlyph,
+  runPointLikeDragKernel,
+  createLayersData,
+  getBehaviorNameForEvent,
+  onBehaviorChanged,
+  applyLayerDelta,
+  undoLabel,
+}) {
+  assert(sceneController, "runSkeletonDragSession: missing sceneController");
+  assert(eventStream, "runSkeletonDragSession: missing eventStream");
+  assert(initialEvent, "runSkeletonDragSession: missing initialEvent");
+  assert(positionedGlyph, "runSkeletonDragSession: missing positionedGlyph");
+  assert(
+    typeof runPointLikeDragKernel === "function",
+    "runSkeletonDragSession: missing runPointLikeDragKernel"
+  );
+  assert(
+    typeof createLayersData === "function",
+    "runSkeletonDragSession: missing createLayersData"
+  );
+  assert(
+    typeof getBehaviorNameForEvent === "function",
+    "runSkeletonDragSession: missing getBehaviorNameForEvent"
+  );
+  assert(
+    typeof applyLayerDelta === "function",
+    "runSkeletonDragSession: missing applyLayerDelta"
+  );
+
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const layersData = createLayersData(glyph);
+    if (!Object.keys(layersData).length) {
+      return;
+    }
+
+    let accumulatedChanges = new ChangeCollector();
+    await runPointLikeDragKernel({
+      eventStream,
+      initialEvent,
+      getBehaviorNameForEvent,
+      getPointForEvent: (event) => {
+        const localPoint = sceneController.localPoint(event);
+        return {
+          x: localPoint.x - positionedGlyph.x,
+          y: localPoint.y - positionedGlyph.y,
+        };
+      },
+      onBehaviorChanged: onBehaviorChanged
+        ? async ({ behaviorName }) => onBehaviorChanged({ behaviorName, layersData })
+        : undefined,
+      onEvent: async ({ event, delta, currentPoint, behaviorName }) => {
+        const allChanges = [];
+        for (const [editLayerName, data] of Object.entries(layersData)) {
+          const changed = applyLayerDelta({
+            editLayerName,
+            data,
+            event,
+            delta,
+            currentPoint,
+            behaviorName,
+          });
+          if (!changed) {
+            continue;
+          }
+          const { prefixedPath, prefixedCustomData } =
+            makeSkeletonLayerPersistenceChanges({
+              layer: data.layer,
+              working: data.working,
+              editLayerName,
+              cloneOnPersist: true,
+            });
+          allChanges.push(prefixedPath, prefixedCustomData);
+        }
+        if (!allChanges.length) {
+          return;
+        }
+        const combinedChange = new ChangeCollector().concat(...allChanges);
+        accumulatedChanges = accumulatedChanges.concat(combinedChange);
+        await sendIncrementalChange(combinedChange.change, true);
+      },
+    });
+
+    await sendIncrementalChange(accumulatedChanges.change);
+    return {
+      changes: accumulatedChanges,
+      undoLabel,
+      broadcast: true,
+    };
+  });
+}
+
 async function runSkeletonPointDragOrchestration({
   sceneController,
   pointerTool,
   selectedSkeletonPoints,
   eventStream,
   initialEvent,
+  runPointLikeDragKernel,
 }) {
   assert(sceneController, "runSkeletonPointDragOrchestration: missing sceneController");
   assert(pointerTool, "runSkeletonPointDragOrchestration: missing pointerTool");
@@ -449,33 +636,33 @@ async function runSkeletonPointDragOrchestration({
     return;
   }
 
-  const localPoint = sceneController.localPoint(initialEvent);
-  const startGlyphPoint = {
-    x: localPoint.x - positionedGlyph.x,
-    y: localPoint.y - positionedGlyph.y,
-  };
-
-  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-    const layersData = {};
-    for (const editLayerName of sceneController.editingLayerNames) {
-      const layer = glyph.layers[editLayerName];
-      const skeletonData = layer ? getSkeletonData(layer) : null;
-      if (!skeletonData) {
-        continue;
+  await runSkeletonDragSession({
+    sceneController,
+    eventStream,
+    initialEvent,
+    positionedGlyph,
+    runPointLikeDragKernel,
+    createLayersData: (glyph) => {
+      const layersData = createSkeletonLayersData({
+        glyph,
+        editingLayerNames: sceneController.editingLayerNames,
+      });
+      const initialBehaviorName = getSkeletonBehaviorName(
+        initialEvent.shiftKey,
+        initialEvent.altKey
+      );
+      for (const data of Object.values(layersData)) {
+        data.behaviors = createSkeletonPointExecutors(
+          data.original,
+          selectedSkeletonPoints,
+          initialBehaviorName
+        );
       }
-      layersData[editLayerName] = {
-        layer,
-        original: JSON.parse(JSON.stringify(skeletonData)),
-        working: JSON.parse(JSON.stringify(skeletonData)),
-        behaviors: null,
-      };
-    }
-
-    if (!Object.keys(layersData).length) {
-      return;
-    }
-
-    const applySkeletonBehaviorsByName = (behaviorName) => {
+      return layersData;
+    },
+    getBehaviorNameForEvent: (event) =>
+      getSkeletonBehaviorName(event.shiftKey, event.altKey),
+    onBehaviorChanged: ({ behaviorName, layersData }) => {
       for (const data of Object.values(layersData)) {
         data.behaviors = createSkeletonPointExecutors(
           data.original,
@@ -483,79 +670,22 @@ async function runSkeletonPointDragOrchestration({
           behaviorName
         );
       }
-    };
-
-    const initialBehaviorName = getSkeletonBehaviorName(
-      initialEvent.shiftKey,
-      initialEvent.altKey
-    );
-    applySkeletonBehaviorsByName(initialBehaviorName);
-
-    let accumulatedChanges = new ChangeCollector();
-
-    await runUnifiedDragEventStream({
-      eventStream,
-      initialEvent,
-      getBehaviorNameForEvent: (event) =>
-        getSkeletonBehaviorName(event.shiftKey, event.altKey),
-      onBehaviorChanged: async (behaviorName) => {
-        applySkeletonBehaviorsByName(behaviorName);
-      },
-      onEvent: async (event) => {
-        const roundFunc = makeRoundFunc(event);
-        const currentLocalPoint = sceneController.localPoint(event);
-        const currentGlyphPoint = {
-          x: currentLocalPoint.x - positionedGlyph.x,
-          y: currentLocalPoint.y - positionedGlyph.y,
-        };
-        const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
-
-        const allChanges = [];
-        for (const [editLayerName, data] of Object.entries(layersData)) {
-          const { layer, original, working, behaviors } = data;
-
-          for (let ci = 0; ci < original.contours.length; ci++) {
-            const origContour = original.contours[ci];
-            const workContour = working.contours[ci];
-            for (let pi = 0; pi < origContour.points.length; pi++) {
-              workContour.points[pi].x = origContour.points[pi].x;
-              workContour.points[pi].y = origContour.points[pi].y;
-            }
-          }
-
-          for (const { contourIndex, executor } of behaviors) {
-            const changes = executor.applyDelta(delta, roundFunc);
-            const contour = working.contours[contourIndex];
-            for (const { pointIndex, x, y } of changes) {
-              contour.points[pointIndex].x = x;
-              contour.points[pointIndex].y = y;
-            }
-          }
-
-          const staticGlyph = layer.glyph;
-          const pathChange = recordChanges(staticGlyph, (sg) => {
-            regenerateSkeletonContours(sg, working);
-          });
-          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-          const customDataChange = recordChanges(layer, (l) => {
-            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
-          });
-          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+    },
+    applyLayerDelta: ({ data, event, delta }) => {
+      const roundFunc = makeRoundFunc(event);
+      const { original, working, behaviors } = data;
+      resetWorkingContoursFromOriginal(original, working);
+      for (const { contourIndex, executor } of behaviors) {
+        const changes = executor.applyDelta(delta, roundFunc);
+        const contour = working.contours[contourIndex];
+        for (const { pointIndex, x, y } of changes) {
+          contour.points[pointIndex].x = x;
+          contour.points[pointIndex].y = y;
         }
-
-        const combinedChange = new ChangeCollector().concat(...allChanges);
-        accumulatedChanges = accumulatedChanges.concat(combinedChange);
-        await sendIncrementalChange(combinedChange.change, true);
-      },
-    });
-
-    await sendIncrementalChange(accumulatedChanges.change);
-    return {
-      changes: accumulatedChanges,
-      undoLabel: translate("edit-tools-pointer.undo.move-skeleton-points"),
-      broadcast: true,
-    };
+      }
+      return true;
+    },
+    undoLabel: translate("edit-tools-pointer.undo.move-skeleton-points"),
   });
 }
 
@@ -567,6 +697,7 @@ async function runSkeletonPointDragCanonical(context) {
     initialEvent,
     overrideSelection,
     objectKind,
+    runPointLikeDragKernel,
   } = context;
   assert(pointerTool, "runSkeletonPointDragCanonical: missing pointerTool");
   assert(sceneController, "runSkeletonPointDragCanonical: missing sceneController");
@@ -593,6 +724,127 @@ async function runSkeletonPointDragCanonical(context) {
     selectedSkeletonPoints,
     eventStream,
     initialEvent,
+    runPointLikeDragKernel,
+  });
+  return makeAdapterResult();
+}
+
+async function runSkeletonHandleEqualizeDragOrchestration({
+  sceneController,
+  eventStream,
+  initialEvent,
+  contourIndex,
+  pointIndex,
+  smoothIndex,
+  oppositeIndex,
+  positionedGlyph,
+  runPointLikeDragKernel,
+}) {
+  assert(
+    sceneController,
+    "runSkeletonHandleEqualizeDragOrchestration: missing sceneController"
+  );
+  assert(
+    typeof runPointLikeDragKernel === "function",
+    "runSkeletonHandleEqualizeDragOrchestration: missing runPointLikeDragKernel"
+  );
+  assert(eventStream, "runSkeletonHandleEqualizeDragOrchestration: missing eventStream");
+  assert(initialEvent, "runSkeletonHandleEqualizeDragOrchestration: missing initialEvent");
+  assert(
+    positionedGlyph,
+    "runSkeletonHandleEqualizeDragOrchestration: missing positionedGlyph"
+  );
+
+  await runSkeletonDragSession({
+    sceneController,
+    eventStream,
+    initialEvent,
+    positionedGlyph,
+    runPointLikeDragKernel,
+    createLayersData: (glyph) =>
+      createSkeletonLayersData({
+        glyph,
+        editingLayerNames: sceneController.editingLayerNames,
+        requireContourIndex: contourIndex,
+      }),
+    getBehaviorNameForEvent: () => "equalize",
+    applyLayerDelta: ({ event, currentPoint, data }) => {
+      const roundFunc = makeRoundFunc(event);
+      const { original, working } = data;
+      resetWorkingContoursFromOriginal(original, working, contourIndex);
+      const workContour = working.contours[contourIndex];
+      if (!workContour) {
+        return false;
+      }
+
+      const smoothPoint = workContour.points[smoothIndex];
+      if (!smoothPoint) {
+        return false;
+      }
+      let newDragVec = {
+        x: currentPoint.x - smoothPoint.x,
+        y: currentPoint.y - smoothPoint.y,
+      };
+      if (event.shiftKey) {
+        newDragVec = constrainHorVerDiag(newDragVec);
+      }
+      if (Math.hypot(newDragVec.x, newDragVec.y) < 1) {
+        return false;
+      }
+
+      workContour.points[pointIndex].x = roundFunc(smoothPoint.x + newDragVec.x);
+      workContour.points[pointIndex].y = roundFunc(smoothPoint.y + newDragVec.y);
+      workContour.points[oppositeIndex].x = roundFunc(smoothPoint.x - newDragVec.x);
+      workContour.points[oppositeIndex].y = roundFunc(smoothPoint.y - newDragVec.y);
+      return true;
+    },
+    undoLabel: "Equalize Skeleton Handles",
+  });
+}
+
+async function runSkeletonHandleEqualizeDragCanonical(context) {
+  const {
+    sceneController,
+    eventStream,
+    initialEvent,
+    equalizeSkeletonInfo,
+    objectKind,
+    runPointLikeDragKernel,
+  } = context;
+  assert(
+    sceneController,
+    "runSkeletonHandleEqualizeDragCanonical: missing sceneController"
+  );
+  assert(objectKind, "runSkeletonHandleEqualizeDragCanonical: missing objectKind");
+  assert(
+    equalizeSkeletonInfo,
+    "runSkeletonHandleEqualizeDragCanonical: missing equalizeSkeletonInfo"
+  );
+
+  const { contourIdx, pointIdx, skeletonData, positionedGlyph } = equalizeSkeletonInfo;
+  if (!skeletonData || !positionedGlyph) {
+    return makeAdapterResult();
+  }
+  const contour = skeletonData?.contours?.[contourIdx];
+  const clickedPoint = contour?.points?.[pointIdx];
+  if (!contour || clickedPoint?.type !== "cubic") {
+    return makeAdapterResult();
+  }
+  const equalizeInfo = getSkeletonHandleEqualizeInfo(contour, pointIdx);
+  if (!equalizeInfo) {
+    return makeAdapterResult();
+  }
+
+  await runSkeletonHandleEqualizeDragOrchestration({
+    sceneController,
+    eventStream,
+    initialEvent,
+    contourIndex: contourIdx,
+    pointIndex: pointIdx,
+    smoothIndex: equalizeInfo.smoothIndex,
+    oppositeIndex: equalizeInfo.oppositeIndex,
+    positionedGlyph,
+    runPointLikeDragKernel,
   });
   return makeAdapterResult();
 }
@@ -601,100 +853,64 @@ async function runLegacyComponentDragAdapter(context) {
   return runRegularDragAdapter(context);
 }
 
-function buildCanonicalDragPointerInvocation({
-  objectKind,
-  pointerTool,
-  eventStream,
-  initialEvent,
-  overrideSelection,
-  ribHit,
-  editablePoints,
-  editableHandles,
-  equalizeSkeletonInfo,
-  targetRibSelection,
-  preSelectedSkeletonPoints,
-}) {
-  switch (objectKind) {
-    case "skeletonPoint":
-      return {
-        pointerTool,
-        methodName: "_handleDragSkeletonPoints",
-        args: [eventStream, initialEvent, overrideSelection],
+async function runSkeletonRibPointDragCanonical(context) {
+  const {
+    pointerTool,
+    eventStream,
+    initialEvent,
+    ribHit,
+    targetRibSelection,
+    preSelectedSkeletonPoints,
+  } = context;
+  assert(pointerTool, "runSkeletonRibPointDragCanonical: missing pointerTool");
+  assert(ribHit, "runSkeletonRibPointDragCanonical: missing ribHit");
+  return runPointerMethodAdapter({
+    pointerTool,
+    methodName: "_handleDragRibPoint",
+    args: [
+      eventStream,
+      initialEvent,
+      ribHit,
+      targetRibSelection,
+      preSelectedSkeletonPoints,
+    ],
+    before: () => {
+      pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint = {
+        contourIdx: ribHit.contourIndex,
+        pointIdx: ribHit.pointIndex,
+        side: ribHit.side,
       };
-    case "skeletonHandle": {
-      assert(
-        equalizeSkeletonInfo,
-        "buildCanonicalDragPointerInvocation: missing equalizeSkeletonInfo for skeletonHandle"
-      );
-      const { contourIdx, pointIdx, skeletonData, positionedGlyph } =
-        equalizeSkeletonInfo || {};
-      return {
-        pointerTool,
-        methodName: "_handleEqualizeHandlesDrag",
-        args: [
-          eventStream,
-          initialEvent,
-          contourIdx,
-          pointIdx,
-          skeletonData,
-          positionedGlyph,
-        ],
-      };
-    }
-    case "skeletonRibPoint":
-      assert(
-        ribHit,
-        "buildCanonicalDragPointerInvocation: missing ribHit for skeletonRibPoint"
-      );
-      return {
-        pointerTool,
-        methodName: "_handleDragRibPoint",
-        args: [
-          eventStream,
-          initialEvent,
-          ribHit,
-          targetRibSelection,
-          preSelectedSkeletonPoints,
-        ],
-        before: () => {
-          pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint = {
-            contourIdx: ribHit.contourIndex,
-            pointIdx: ribHit.pointIndex,
-            side: ribHit.side,
-          };
-        },
-        after: () => {
-          delete pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint;
-        },
-      };
-    case "editableGeneratedPoint":
-      assert(
-        editablePoints,
-        "buildCanonicalDragPointerInvocation: missing editablePoints for editableGeneratedPoint"
-      );
-      return {
-        pointerTool,
-        methodName: "_handleDragEditableGeneratedPoints",
-        args: [eventStream, initialEvent, editablePoints],
-      };
-    case "editableGeneratedHandle":
-      assert(
-        editableHandles,
-        "buildCanonicalDragPointerInvocation: missing editableHandles for editableGeneratedHandle"
-      );
-      return {
-        pointerTool,
-        methodName: "_handleDragEditableGeneratedHandles",
-        args: [eventStream, initialEvent, editableHandles],
-      };
-    default:
-      return null;
-  }
+    },
+    after: () => {
+      delete pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint;
+    },
+  });
 }
 
-async function runCanonicalDragPointerAdapter(context) {
-  const invocation = buildCanonicalDragPointerInvocation(context);
-  return runPointerMethodAdapter(invocation);
+async function runEditableGeneratedPointDragCanonical(context) {
+  const { pointerTool, eventStream, initialEvent, editablePoints } = context;
+  assert(
+    editablePoints,
+    "runEditableGeneratedPointDragCanonical: missing editablePoints"
+  );
+  return runPointerMethodAdapter({
+    pointerTool,
+    methodName: "_handleDragEditableGeneratedPoints",
+    args: [eventStream, initialEvent, editablePoints],
+  });
+}
+
+async function runEditableGeneratedHandleDragCanonical(context) {
+  const { pointerTool, eventStream, initialEvent, editableHandles } = context;
+  assert(
+    editableHandles,
+    "runEditableGeneratedHandleDragCanonical: missing editableHandles"
+  );
+  return runPointerMethodAdapter({
+    pointerTool,
+    methodName: "_handleDragEditableGeneratedHandles",
+    args: [eventStream, initialEvent, editableHandles],
+  });
 }
 
 async function runRegularNudgeOrchestration({
@@ -837,20 +1053,14 @@ async function runSkeletonPointNudgeOrchestration({
         }
       }
 
-      const staticGlyph = layer.glyph;
-      const pathChange = recordChanges(staticGlyph, (sg) => {
-        regenerateSkeletonContours(sg, workingSkeletonData, { preferInPlace: true });
+      const { prefixedPath, prefixedCustomData } = makeSkeletonLayerPersistenceChanges({
+        layer,
+        working: workingSkeletonData,
+        editLayerName,
+        regenerateOptions: { preferInPlace: true },
       });
-      const prefixedPath = pathChange.prefixed(["layers", editLayerName, "glyph"]);
-      allChanges.push(prefixedPath.change);
-      rollbackParts.push(prefixedPath.rollbackChange);
-
-      const customDataChange = recordChanges(layer, (l) => {
-        setSkeletonData(l, workingSkeletonData);
-      });
-      const prefixedCustomData = customDataChange.prefixed(["layers", editLayerName]);
-      allChanges.push(prefixedCustomData.change);
-      rollbackParts.push(prefixedCustomData.rollbackChange);
+      allChanges.push(prefixedPath.change, prefixedCustomData.change);
+      rollbackParts.push(prefixedPath.rollbackChange, prefixedCustomData.rollbackChange);
     }
 
     if (!allChanges.length) {
@@ -954,44 +1164,192 @@ async function runRegularNudgeCanonical({
   return makeAdapterResult();
 }
 
-function buildCanonicalNudgePointerInvocation({
+function getSelectedOffCurveSkeletonPoints({
   pointerTool,
-  sceneController,
-  event,
-  objectKind,
+  selectedSkeletonPoints,
 }) {
-  switch (objectKind) {
-    case "skeletonPoint":
-    case "skeletonHandle":
-    case "editableGeneratedPoint":
-    case "editableGeneratedHandle":
-      return {
-        pointerTool,
-        methodName: "_handleArrowKeysLegacy",
-        args: [event],
-        allowFalse: true,
-      };
-    case "skeletonRibPoint": {
-      const { skeletonRibPoint: ribPointSelection } = parseSelection(
-        sceneController.selection
-      );
-      if (!ribPointSelection?.size) {
-        return null;
-      }
-      return {
-        pointerTool,
-        methodName: "_handleArrowKeysForRibPoints",
-        args: [event, ribPointSelection],
-      };
-    }
-    default:
-      return null;
+  const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
+  if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+    return [];
   }
+  const editLayerName =
+    pointerTool.sceneModel?.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+  if (!editLayerName) {
+    return [];
+  }
+  const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+  const skeletonData = layer ? getSkeletonData(layer) : null;
+  if (!skeletonData) {
+    return [];
+  }
+
+  const offCurvePoints = [];
+  for (const key of selectedSkeletonPoints) {
+    const [contourIdx, pointIdx] = key.split("/").map(Number);
+    const contour = skeletonData.contours[contourIdx];
+    const point = contour?.points?.[pointIdx];
+    if (point?.type === "cubic") {
+      offCurvePoints.push({ contourIdx, pointIdx });
+    }
+  }
+  return offCurvePoints;
 }
 
-async function runCanonicalNudgePointerAdapter(context) {
-  const invocation = buildCanonicalNudgePointerInvocation(context);
-  return runPointerMethodAdapter(invocation);
+async function runSkeletonHandleEqualizeNudgeOrchestration({
+  sceneController,
+  offCurvePoints,
+  event,
+}) {
+  assert(
+    sceneController,
+    "runSkeletonHandleEqualizeNudgeOrchestration: missing sceneController"
+  );
+  assert(
+    offCurvePoints?.length,
+    "runSkeletonHandleEqualizeNudgeOrchestration: missing off-curve selection"
+  );
+  assert(event, "runSkeletonHandleEqualizeNudgeOrchestration: missing event");
+
+  let [dx, dy] = arrowKeyDeltas[event.key] || [0, 0];
+  if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
+    dx *= 100;
+    dy *= 100;
+  } else if (event.shiftKey) {
+    dx *= 10;
+    dy *= 10;
+  }
+  const delta = { x: dx, y: dy };
+
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const allChanges = [];
+    for (const editLayerName of sceneController.editingLayerNames) {
+      const layer = glyph.layers[editLayerName];
+      const layerSkeletonData = layer ? getSkeletonData(layer) : null;
+      if (!layerSkeletonData) {
+        continue;
+      }
+
+      const working = JSON.parse(JSON.stringify(layerSkeletonData));
+      let changed = false;
+
+      for (const { contourIdx, pointIdx } of offCurvePoints) {
+        const contour = working.contours[contourIdx];
+        if (!contour) {
+          continue;
+        }
+        const point = contour.points[pointIdx];
+        if (!point || point.type !== "cubic") {
+          continue;
+        }
+
+        point.x = Math.round(point.x + delta.x);
+        point.y = Math.round(point.y + delta.y);
+
+        const equalizeInfo = getSkeletonHandleEqualizeInfo(contour, pointIdx);
+        if (!equalizeInfo) {
+          continue;
+        }
+        const smoothPoint = contour.points[equalizeInfo.smoothIndex];
+        const draggedPoint = contour.points[pointIdx];
+        const oppositePoint = contour.points[equalizeInfo.oppositeIndex];
+        if (!smoothPoint || !draggedPoint || !oppositePoint) {
+          continue;
+        }
+
+        const draggedLength = Math.hypot(
+          draggedPoint.x - smoothPoint.x,
+          draggedPoint.y - smoothPoint.y
+        );
+        const oppositeDirX = oppositePoint.x - smoothPoint.x;
+        const oppositeDirY = oppositePoint.y - smoothPoint.y;
+        const oppositeLength = Math.hypot(oppositeDirX, oppositeDirY);
+        if (oppositeLength > 0.001) {
+          const scale = draggedLength / oppositeLength;
+          oppositePoint.x = Math.round(smoothPoint.x + oppositeDirX * scale);
+          oppositePoint.y = Math.round(smoothPoint.y + oppositeDirY * scale);
+        }
+        changed = true;
+      }
+
+      if (!changed) {
+        continue;
+      }
+
+      const { prefixedPath, prefixedCustomData } = makeSkeletonLayerPersistenceChanges({
+        layer,
+        working,
+        editLayerName,
+        regenerateOptions: { preferInPlace: true },
+      });
+      allChanges.push(prefixedPath, prefixedCustomData);
+    }
+
+    if (!allChanges.length) {
+      return;
+    }
+    const combined = new ChangeCollector().concat(...allChanges);
+    await sendIncrementalChange(combined.change);
+    return {
+      changes: combined,
+      undoLabel: "Nudge skeleton handles (equalize)",
+      broadcast: true,
+    };
+  });
+}
+
+async function runSkeletonHandleEqualizeNudgeCanonical(context) {
+  const { sceneController, pointerTool, event, objectKind } = context;
+  assert(
+    sceneController,
+    "runSkeletonHandleEqualizeNudgeCanonical: missing sceneController"
+  );
+  assert(pointerTool, "runSkeletonHandleEqualizeNudgeCanonical: missing pointerTool");
+  assert(objectKind, "runSkeletonHandleEqualizeNudgeCanonical: missing objectKind");
+
+  const selectedSkeletonPoints = parseSelection(sceneController.selection).skeletonPoint;
+  if (!selectedSkeletonPoints?.size) {
+    return false;
+  }
+
+  const offCurvePoints = getSelectedOffCurveSkeletonPoints({
+    pointerTool,
+    selectedSkeletonPoints,
+  });
+  if (!offCurvePoints.length) {
+    return runSkeletonPointNudgeCanonical(context);
+  }
+
+  await runSkeletonHandleEqualizeNudgeOrchestration({
+    sceneController,
+    offCurvePoints,
+    event,
+  });
+  return makeAdapterResult();
+}
+
+async function runEditableGeneratedNudgeCanonical(context) {
+  const { pointerTool, event } = context;
+  return runPointerMethodAdapter({
+    pointerTool,
+    methodName: "_handleArrowKeysLegacy",
+    args: [event],
+    allowFalse: true,
+  });
+}
+
+async function runSkeletonRibPointNudgeCanonical(context) {
+  const { pointerTool, sceneController, event } = context;
+  const { skeletonRibPoint: ribPointSelection } = parseSelection(
+    sceneController.selection
+  );
+  if (!ribPointSelection?.size) {
+    return false;
+  }
+  return runPointerMethodAdapter({
+    pointerTool,
+    methodName: "_handleArrowKeysForRibPoints",
+    args: [event, ribPointSelection],
+  });
 }
 
 export const canonicalDragAdapters = {
@@ -999,10 +1357,12 @@ export const canonicalDragAdapters = {
   anchor: async (context) => runRegularDragCanonical(context),
   guideline: async (context) => runRegularDragCanonical(context),
   skeletonPoint: async (context) => runSkeletonPointDragCanonical(context),
-  skeletonHandle: async (context) => runCanonicalDragPointerAdapter(context),
-  skeletonRibPoint: async (context) => runCanonicalDragPointerAdapter(context),
-  editableGeneratedPoint: async (context) => runCanonicalDragPointerAdapter(context),
-  editableGeneratedHandle: async (context) => runCanonicalDragPointerAdapter(context),
+  skeletonHandle: async (context) => runSkeletonHandleEqualizeDragCanonical(context),
+  skeletonRibPoint: async (context) => runSkeletonRibPointDragCanonical(context),
+  editableGeneratedPoint: async (context) =>
+    runEditableGeneratedPointDragCanonical(context),
+  editableGeneratedHandle: async (context) =>
+    runEditableGeneratedHandleDragCanonical(context),
 };
 
 export const canonicalNudgeAdapters = {
@@ -1010,10 +1370,11 @@ export const canonicalNudgeAdapters = {
   anchor: async (context) => runRegularNudgeCanonical(context),
   guideline: async (context) => runRegularNudgeCanonical(context),
   skeletonPoint: async (context) => runSkeletonPointNudgeCanonical(context),
-  skeletonHandle: async (context) => runCanonicalNudgePointerAdapter(context),
-  skeletonRibPoint: async (context) => runCanonicalNudgePointerAdapter(context),
-  editableGeneratedPoint: async (context) => runCanonicalNudgePointerAdapter(context),
-  editableGeneratedHandle: async (context) => runCanonicalNudgePointerAdapter(context),
+  skeletonHandle: async (context) => runSkeletonHandleEqualizeNudgeCanonical(context),
+  skeletonRibPoint: async (context) => runSkeletonRibPointNudgeCanonical(context),
+  editableGeneratedPoint: async (context) => runEditableGeneratedNudgeCanonical(context),
+  editableGeneratedHandle: async (context) =>
+    runEditableGeneratedNudgeCanonical(context),
 };
 
 export const legacyDragAdapters = {
