@@ -90,3 +90,23 @@ Status: In Progress
 - Undo/redo verification: PASS.
   - Regular point drag undo/redo: PASS
   - Skeleton on-curve drag undo/redo: PASS
+
+## Phase 2 - Step 2.3: Canonical adapter wrappers are consolidated
+
+- Problem: Canonical adapters had repeated per-kind wrapper functions that only forwarded arguments to pointer handlers, which increased routing duplication without adding adapter behavior.
+- Code analysis:
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Replaced duplicated per-kind canonical drag/nudge wrapper functions with shared invocation helpers:
+    - `runPointerMethodAdapter()`
+    - `buildCanonicalDragPointerInvocation()` / `runCanonicalDragPointerAdapter()`
+    - `buildCanonicalNudgePointerInvocation()` / `runCanonicalNudgePointerAdapter()`
+  - Kept regular drag and regular nudge orchestration adapters unchanged; only non-regular canonical routes were consolidated into invocation maps.
+  - Preserved adapter contract behavior: handled routes return `{ forward, rollback }`, and unhandled routes return `false`.
+  - Added assertion guards for required drag context (`equalizeSkeletonInfo`, `ribHit`, `editablePoints`, `editableHandles`) in canonical drag invocation setup.
+  - Updated `docs/refactor/plan-domain-separation.md` to explicitly define Step 2.3 and its verification criteria.
+- Comparison: Yes. Canonical routing now uses shared invocation helpers instead of per-kind forwarding wrapper functions, while preserving existing behavior paths and adapter contract semantics.
+- Manual test results: PASS (user verified).
+  - Drag skeleton on-curve point: PASS
+  - Drag rib point: PASS
+  - Nudge skeleton point: PASS
+- Undo/redo verification: PASS (user verified).

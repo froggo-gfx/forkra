@@ -240,18 +240,32 @@ async function runRegularDragAdapter({
   return makeAdapterResult();
 }
 
-async function runSkeletonDragCanonical({
-  pointerTool,
-  eventStream,
-  initialEvent,
-  overrideSelection,
-}) {
-  await pointerTool._handleDragSkeletonPoints(
-    eventStream,
-    initialEvent,
-    overrideSelection
+async function runPointerMethodAdapter(invocation) {
+  if (!invocation) {
+    return false;
+  }
+  const { pointerTool, methodName, args = [], allowFalse = false, before, after } =
+    invocation;
+  assert(pointerTool, "runPointerMethodAdapter: missing pointerTool");
+  const method = pointerTool?.[methodName];
+  assert(
+    typeof method === "function",
+    `runPointerMethodAdapter: missing pointer method ${methodName}`
   );
-  return makeAdapterResult();
+  if (before) {
+    before();
+  }
+  try {
+    const handled = await method.call(pointerTool, ...args);
+    if (allowFalse && handled === false) {
+      return false;
+    }
+    return makeAdapterResult();
+  } finally {
+    if (after) {
+      after();
+    }
+  }
 }
 
 async function runRegularEqualizeHandleLegacy({
@@ -313,89 +327,104 @@ async function runSkeletonTunniDragLegacy({
   return makeAdapterResult();
 }
 
-async function runNudgeLegacy({ pointerTool, event }) {
-  const handled = await pointerTool._handleArrowKeysLegacy(event);
-  if (handled === false) {
-    return false;
-  }
-  return makeAdapterResult();
-}
-
 async function runRegularDragCanonical(context) {
   return runRegularDragAdapter(context);
 }
 
-async function runSkeletonHandleDragCanonical({
+function buildCanonicalDragPointerInvocation({
+  objectKind,
   pointerTool,
   eventStream,
   initialEvent,
-  equalizeSkeletonInfo,
-}) {
-  const { contourIdx, pointIdx, skeletonData, positionedGlyph } = equalizeSkeletonInfo;
-  await pointerTool._handleEqualizeHandlesDrag(
-    eventStream,
-    initialEvent,
-    contourIdx,
-    pointIdx,
-    skeletonData,
-    positionedGlyph
-  );
-  return makeAdapterResult();
-}
-
-async function runRibDragCanonical({
-  pointerTool,
-  eventStream,
-  initialEvent,
+  overrideSelection,
   ribHit,
+  editablePoints,
+  editableHandles,
+  equalizeSkeletonInfo,
   targetRibSelection,
   preSelectedSkeletonPoints,
 }) {
-  pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint = {
-    contourIdx: ribHit.contourIndex,
-    pointIdx: ribHit.pointIndex,
-    side: ribHit.side,
-  };
-  try {
-    await pointerTool._handleDragRibPoint(
-      eventStream,
-      initialEvent,
-      ribHit,
-      targetRibSelection,
-      preSelectedSkeletonPoints
-    );
-  } finally {
-    delete pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint;
+  switch (objectKind) {
+    case "skeletonPoint":
+      return {
+        pointerTool,
+        methodName: "_handleDragSkeletonPoints",
+        args: [eventStream, initialEvent, overrideSelection],
+      };
+    case "skeletonHandle": {
+      assert(
+        equalizeSkeletonInfo,
+        "buildCanonicalDragPointerInvocation: missing equalizeSkeletonInfo for skeletonHandle"
+      );
+      const { contourIdx, pointIdx, skeletonData, positionedGlyph } =
+        equalizeSkeletonInfo || {};
+      return {
+        pointerTool,
+        methodName: "_handleEqualizeHandlesDrag",
+        args: [
+          eventStream,
+          initialEvent,
+          contourIdx,
+          pointIdx,
+          skeletonData,
+          positionedGlyph,
+        ],
+      };
+    }
+    case "skeletonRibPoint":
+      assert(
+        ribHit,
+        "buildCanonicalDragPointerInvocation: missing ribHit for skeletonRibPoint"
+      );
+      return {
+        pointerTool,
+        methodName: "_handleDragRibPoint",
+        args: [
+          eventStream,
+          initialEvent,
+          ribHit,
+          targetRibSelection,
+          preSelectedSkeletonPoints,
+        ],
+        before: () => {
+          pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint = {
+            contourIdx: ribHit.contourIndex,
+            pointIdx: ribHit.pointIndex,
+            side: ribHit.side,
+          };
+        },
+        after: () => {
+          delete pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint;
+        },
+      };
+    case "editableGeneratedPoint":
+      assert(
+        editablePoints,
+        "buildCanonicalDragPointerInvocation: missing editablePoints for editableGeneratedPoint"
+      );
+      return {
+        pointerTool,
+        methodName: "_handleDragEditableGeneratedPoints",
+        args: [eventStream, initialEvent, editablePoints],
+      };
+    case "editableGeneratedHandle":
+      assert(
+        editableHandles,
+        "buildCanonicalDragPointerInvocation: missing editableHandles for editableGeneratedHandle"
+      );
+      return {
+        pointerTool,
+        methodName: "_handleDragEditableGeneratedHandles",
+        args: [eventStream, initialEvent, editableHandles],
+      };
+    default:
+      return null;
   }
-  return makeAdapterResult();
 }
 
-async function runEditableGeneratedPointsDragCanonical({
-  pointerTool,
-  eventStream,
-  initialEvent,
-  editablePoints,
-}) {
-  await pointerTool._handleDragEditableGeneratedPoints(
-    eventStream,
-    initialEvent,
-    editablePoints
-  );
-  return makeAdapterResult();
-}
-
-async function runEditableGeneratedHandlesDragCanonical({
-  pointerTool,
-  eventStream,
-  initialEvent,
-  editableHandles,
-}) {
-  await pointerTool._handleDragEditableGeneratedHandles(
-    eventStream,
-    initialEvent,
-    editableHandles
-  );
-  return makeAdapterResult();
+async function runCanonicalDragPointerAdapter(context) {
+  const invocation = buildCanonicalDragPointerInvocation(context);
+  return runPointerMethodAdapter(invocation);
 }
 
 async function runRegularNudgeCanonical({
@@ -435,47 +464,66 @@ async function runRegularNudgeCanonical({
   return makeAdapterResult();
 }
 
-async function runSkeletonNudgeCanonical({ pointerTool, event }) {
-  return runNudgeLegacy({ pointerTool, event });
-}
-
-async function runRibNudgeCanonical({ pointerTool, sceneController, event }) {
-  const { skeletonRibPoint: ribPointSelection } = parseSelection(
-    sceneController.selection
-  );
-  if (!ribPointSelection?.size) {
-    return false;
+function buildCanonicalNudgePointerInvocation({
+  pointerTool,
+  sceneController,
+  event,
+  objectKind,
+}) {
+  switch (objectKind) {
+    case "skeletonPoint":
+    case "skeletonHandle":
+    case "editableGeneratedPoint":
+    case "editableGeneratedHandle":
+      return {
+        pointerTool,
+        methodName: "_handleArrowKeysLegacy",
+        args: [event],
+        allowFalse: true,
+      };
+    case "skeletonRibPoint": {
+      const { skeletonRibPoint: ribPointSelection } = parseSelection(
+        sceneController.selection
+      );
+      if (!ribPointSelection?.size) {
+        return null;
+      }
+      return {
+        pointerTool,
+        methodName: "_handleArrowKeysForRibPoints",
+        args: [event, ribPointSelection],
+      };
+    }
+    default:
+      return null;
   }
-  await pointerTool._handleArrowKeysForRibPoints(event, ribPointSelection);
-  return makeAdapterResult();
 }
 
-async function runEditableGeneratedNudgeCanonical({ pointerTool, event }) {
-  return runNudgeLegacy({ pointerTool, event });
+async function runCanonicalNudgePointerAdapter(context) {
+  const invocation = buildCanonicalNudgePointerInvocation(context);
+  return runPointerMethodAdapter(invocation);
 }
 
 export const canonicalDragAdapters = {
   regularPoint: async (context) => runRegularDragCanonical(context),
   anchor: async (context) => runRegularDragCanonical(context),
   guideline: async (context) => runRegularDragCanonical(context),
-  skeletonPoint: async (context) => runSkeletonDragCanonical(context),
-  skeletonHandle: async (context) => runSkeletonHandleDragCanonical(context),
-  skeletonRibPoint: async (context) => runRibDragCanonical(context),
-  editableGeneratedPoint: async (context) => runEditableGeneratedPointsDragCanonical(context),
-  editableGeneratedHandle: async (context) =>
-    runEditableGeneratedHandlesDragCanonical(context),
+  skeletonPoint: async (context) => runCanonicalDragPointerAdapter(context),
+  skeletonHandle: async (context) => runCanonicalDragPointerAdapter(context),
+  skeletonRibPoint: async (context) => runCanonicalDragPointerAdapter(context),
+  editableGeneratedPoint: async (context) => runCanonicalDragPointerAdapter(context),
+  editableGeneratedHandle: async (context) => runCanonicalDragPointerAdapter(context),
 };
 
 export const canonicalNudgeAdapters = {
   regularPoint: async (context) => runRegularNudgeCanonical(context),
   anchor: async (context) => runRegularNudgeCanonical(context),
   guideline: async (context) => runRegularNudgeCanonical(context),
-  skeletonPoint: async (context) => runSkeletonNudgeCanonical(context),
-  skeletonHandle: async (context) => runSkeletonNudgeCanonical(context),
-  skeletonRibPoint: async (context) => runRibNudgeCanonical(context),
-  editableGeneratedPoint: async (context) => runEditableGeneratedNudgeCanonical(context),
-  editableGeneratedHandle: async (context) =>
-    runEditableGeneratedNudgeCanonical(context),
+  skeletonPoint: async (context) => runCanonicalNudgePointerAdapter(context),
+  skeletonHandle: async (context) => runCanonicalNudgePointerAdapter(context),
+  skeletonRibPoint: async (context) => runCanonicalNudgePointerAdapter(context),
+  editableGeneratedPoint: async (context) => runCanonicalNudgePointerAdapter(context),
+  editableGeneratedHandle: async (context) => runCanonicalNudgePointerAdapter(context),
 };
 
 export const legacyDragAdapters = {

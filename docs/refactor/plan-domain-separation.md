@@ -114,6 +114,20 @@ Verification criteria:
 - Composer contains no applyChange/recordChanges for drag/nudge.
 - Progress report entry added.
 
+### Step 2.3: Canonical adapter wrappers are consolidated
+Problem aspect: Canonical adapters still had duplicated per-kind wrapper functions that only forwarded to pointer handlers, which made routing maintenance noisy and unclear.
+Solution (plain language): Replace per-kind canonical wrapper functions with explicit canonical pointer-method invocation maps in `pointer-objects.js`, while preserving adapter contract return semantics.
+Code snippets:
+- src-js/views-editor/src/pointer-objects.js
+Manual tests:
+- Drag a skeleton on-curve point.
+- Drag a rib point.
+- Nudge a skeleton point.
+Verification criteria:
+- Canonical adapter map uses shared invocation helpers instead of per-kind forwarding wrappers.
+- Adapter contract remains `{forward, rollback}` or `false`.
+- Progress report entry added.
+
 ## Phase 3: Unify Behavior Engine
 
 ### Step 3.1: Remove per-kind behavior classes from edit-behavior.js
