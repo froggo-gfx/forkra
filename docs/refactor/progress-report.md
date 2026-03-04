@@ -404,3 +404,28 @@ Status: In Progress
   - Nudge rib points with arrow keys: NOT RUN in this terminal session (requires UI verification).
   - Repeat with shift and alt modifiers: NOT RUN in this terminal session (requires UI verification).
 - Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Step 4.8: Editable generated points (drag)
+
+- Problem: Editable generated point drag canonical routing still delegated to pointer-owned `_handleDragEditableGeneratedPoints(...)`, so translation/persistence for generated-point drag was not adapter-owned.
+- Code analysis:
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Replaced `runEditableGeneratedPointDragCanonical(...)` pointer-method forwarding with adapter-owned orchestration:
+    - Uses `runPointLikeSessionKernel(...)` + `runPointLikeInputKernel(...)` in drag mode.
+    - Builds per-layer editable-point behavior state from skeleton data.
+    - Applies generated-point drag deltas through rib behaviors (`createEditableRibBehavior` / `createInterpolatingRibBehavior`) and translates results into skeleton width/nudge/handle-offset updates.
+    - Persists in adapter with `regenerateSkeletonContours(...)` and `setSkeletonData(...)` for each editing layer.
+    - Emits incremental + final consolidated changes for undo/redo.
+  - Preserved existing specificity behavior:
+    - `Alt` interpolation path for editable generated points (using interpolation-axis lookup when available).
+    - `Z` tangent constraint through `pointerTool.tangentRibMode`.
+  - Verification:
+    - `node --check src-js/views-editor/src/pointer-objects.js`
+    - `npm run -s bundle` (success; only existing webpack size warnings).
+- Comparison: Yes (code-level). Editable generated point drag now executes in canonical adapter-owned translation/persistence flow rather than pointer drag handler forwarding.
+- Manual test results:
+  - Drag editable generated points (left/right): PASS (non-editable sides correctly no-op).
+  - Alt interpolation drag path: PASS.
+  - Z tangent drag path: PASS.
+  - Confirm skeleton widths update during drag when side is editable: PASS.
+- Undo/redo verification: NOT RUN in this terminal session (user did not explicitly report).

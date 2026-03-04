@@ -1356,16 +1356,227 @@ async function runSkeletonRibPointDragCanonical(context) {
 }
 
 async function runEditableGeneratedPointDragCanonical(context) {
-  const { pointerTool, eventStream, initialEvent, editablePoints } = context;
+  const {
+    pointerTool,
+    sceneController,
+    eventStream,
+    initialEvent,
+    editablePoints,
+    runPointLikeInputKernel,
+    runPointLikeSessionKernel,
+  } = context;
+  assert(pointerTool, "runEditableGeneratedPointDragCanonical: missing pointerTool");
+  assert(sceneController, "runEditableGeneratedPointDragCanonical: missing sceneController");
+  assert(eventStream, "runEditableGeneratedPointDragCanonical: missing eventStream");
+  assert(initialEvent, "runEditableGeneratedPointDragCanonical: missing initialEvent");
   assert(
     editablePoints,
     "runEditableGeneratedPointDragCanonical: missing editablePoints"
   );
-  return runPointerMethodAdapter({
-    pointerTool,
-    methodName: "_handleDragEditableGeneratedPoints",
-    args: [eventStream, initialEvent, editablePoints],
-  });
+  assert(
+    typeof runPointLikeInputKernel === "function",
+    "runEditableGeneratedPointDragCanonical: missing runPointLikeInputKernel"
+  );
+  assert(
+    typeof runPointLikeSessionKernel === "function",
+    "runEditableGeneratedPointDragCanonical: missing runPointLikeSessionKernel"
+  );
+
+  const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
+  if (!positionedGlyph || !editablePoints.length) {
+    return makeAdapterResult();
+  }
+
+  const useInterpolation = initialEvent.altKey;
+  const generatedPath = positionedGlyph.glyph.path;
+  const editablePointsWithInterpolation = useInterpolation
+    ? editablePoints.map((editablePoint) => {
+        const interpolationAxis =
+          typeof pointerTool._findAdjacentHandlesForRibPoint === "function"
+            ? pointerTool._findAdjacentHandlesForRibPoint(
+                generatedPath,
+                editablePoint.pointIndex
+              )
+            : null;
+        return { ...editablePoint, interpolationAxis };
+      })
+    : editablePoints.map((editablePoint) => ({
+        ...editablePoint,
+        interpolationAxis: null,
+      }));
+
+  const previousCursor = pointerTool.canvasController.canvas.style.cursor;
+  pointerTool.canvasController.canvas.style.cursor = "pointer";
+
+  try {
+    await runPointLikeSessionKernel({
+      mode: "drag",
+      runPointLikeInputKernel,
+      withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
+      eventStream,
+      initialEvent,
+      getBehaviorNameForEvent: () => "editable-generated-point",
+      getPointForEvent: (nextEvent) => {
+        const localPoint = sceneController.localPoint(nextEvent);
+        return {
+          x: localPoint.x - positionedGlyph.x,
+          y: localPoint.y - positionedGlyph.y,
+        };
+      },
+      onSessionStart: ({ glyph }) => {
+        const layersData = {};
+        for (const editLayerName of sceneController.editingLayerNames || []) {
+          const layer = glyph.layers[editLayerName];
+          const skeletonData = getSkeletonData(layer);
+          if (!skeletonData) {
+            continue;
+          }
+          layersData[editLayerName] = {
+            layer,
+            original: JSON.parse(JSON.stringify(skeletonData)),
+            working: JSON.parse(JSON.stringify(skeletonData)),
+            behaviors: [],
+          };
+        }
+
+        for (const data of Object.values(layersData)) {
+          for (const editablePoint of editablePointsWithInterpolation) {
+            const contour = data.original.contours?.[editablePoint.skeletonContourIndex];
+            const skeletonPoint = contour?.points?.[editablePoint.skeletonPointIndex];
+            if (!contour || !skeletonPoint || skeletonPoint.type) {
+              continue;
+            }
+            const normal = calculateNormalAtSkeletonPoint(
+              contour,
+              editablePoint.skeletonPointIndex
+            );
+            if (!normal) {
+              continue;
+            }
+            const ribHit = {
+              contourIndex: editablePoint.skeletonContourIndex,
+              pointIndex: editablePoint.skeletonPointIndex,
+              side: editablePoint.side,
+              normal,
+              onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
+            };
+
+            let behavior;
+            if (useInterpolation && editablePoint.interpolationAxis) {
+              behavior = createInterpolatingRibBehavior(
+                data.original,
+                ribHit,
+                editablePoint.interpolationAxis
+              );
+            } else {
+              behavior = createEditableRibBehavior(data.original, ribHit);
+            }
+            data.behaviors.push({ behavior, editablePoint });
+          }
+        }
+
+        return {
+          layersData,
+          accumulatedChanges: new ChangeCollector(),
+          skip: !Object.keys(layersData).length,
+        };
+      },
+      onInput: async ({ event: dragEvent, delta, sessionState, sendIncrementalChange }) => {
+        if (sessionState.skip) {
+          return;
+        }
+        const roundFunc = makeRoundFunc(dragEvent);
+        const constrainMode = pointerTool.tangentRibMode ? "tangent" : null;
+        const allChanges = [];
+
+        for (const [editLayerName, data] of Object.entries(sessionState.layersData)) {
+          const { layer, original, working, behaviors } = data;
+          for (const { behavior, editablePoint } of behaviors) {
+            const change = behavior.applyDelta(delta, constrainMode, roundFunc);
+            const contour = working.contours?.[editablePoint.skeletonContourIndex];
+            const point = contour?.points?.[editablePoint.skeletonPointIndex];
+            const baseContour = original.contours?.[editablePoint.skeletonContourIndex];
+            const basePoint = baseContour?.points?.[editablePoint.skeletonPointIndex];
+            if (!contour || !point || !baseContour || !basePoint || point.type || basePoint.type) {
+              continue;
+            }
+
+            const defaultWidth = baseContour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+            const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
+            const linked = isWidthLinked(basePoint);
+            applyLinkedWidthDelta(
+              point,
+              basePoint,
+              defaultWidth,
+              editablePoint.side,
+              deltaWidth,
+              linked,
+              roundFunc
+            );
+
+            if (editablePoint.side === "left") {
+              point.leftNudge = change.nudge;
+            } else {
+              point.rightNudge = change.nudge;
+            }
+
+            if (change.isInterpolation || change.hasHandleOffsets) {
+              if (editablePoint.side === "left") {
+                point.leftHandleInOffsetX = change.handleInOffsetX;
+                point.leftHandleInOffsetY = change.handleInOffsetY;
+                point.leftHandleOutOffsetX = change.handleOutOffsetX;
+                point.leftHandleOutOffsetY = change.handleOutOffsetY;
+                delete point.leftHandleInOffset;
+                delete point.leftHandleOutOffset;
+              } else {
+                point.rightHandleInOffsetX = change.handleInOffsetX;
+                point.rightHandleInOffsetY = change.handleInOffsetY;
+                point.rightHandleOutOffsetX = change.handleOutOffsetX;
+                point.rightHandleOutOffsetY = change.handleOutOffsetY;
+                delete point.rightHandleInOffset;
+                delete point.rightHandleOutOffset;
+              }
+            }
+          }
+
+          const pathChange = recordChanges(layer.glyph, (sg) => {
+            regenerateSkeletonContours(sg, working);
+          });
+          const customDataChange = recordChanges(layer, (l) => {
+            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
+          });
+          if (pathChange.hasChange) {
+            allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+          }
+          if (customDataChange.hasChange) {
+            allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+          }
+        }
+
+        if (!allChanges.length) {
+          return;
+        }
+        const combined = new ChangeCollector().concat(...allChanges);
+        sessionState.accumulatedChanges =
+          sessionState.accumulatedChanges.concat(combined);
+        await sendIncrementalChange(combined.change, true);
+      },
+      onSessionEnd: async ({ sessionState, sendIncrementalChange }) => {
+        if (sessionState.skip) {
+          return;
+        }
+        await sendIncrementalChange(sessionState.accumulatedChanges.change);
+        return {
+          changes: sessionState.accumulatedChanges,
+          undoLabel: "Edit generated point",
+          broadcast: true,
+        };
+      },
+    });
+  } finally {
+    pointerTool.canvasController.canvas.style.cursor = previousCursor || "default";
+  }
+  return makeAdapterResult();
 }
 
 async function runEditableGeneratedHandleDragCanonical(context) {
@@ -1380,6 +1591,7 @@ async function runEditableGeneratedHandleDragCanonical(context) {
     args: [eventStream, initialEvent, editableHandles],
   });
 }
+
 async function runEditableGeneratedNudgeCanonical(context) {
   const { pointerTool, event } = context;
   return runPointerMethodAdapter({
