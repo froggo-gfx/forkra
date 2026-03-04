@@ -15,11 +15,13 @@ import {
   EditBehaviorFactory,
   applyLinkedWidthDelta,
   buildRibInterpolationAxisFromPath,
+  createEditableHandleBehavior,
   createRibEditBehavior,
   createEditableRibBehavior,
   createInterpolatingRibBehavior,
   createPointBehaviorExecutor,
   findEqualizeHandleForPath,
+  getEqualizeHandleInfoForPointIndex,
   findRibInterpolationAxisFromSkeletonPath,
   getSkeletonBehaviorName,
   isWidthLinked,
@@ -62,6 +64,220 @@ function filterSelectionByPrefixes(selection, prefixes) {
     }
   }
   return filtered;
+}
+
+function getEditableHandleOffsetKeys(side, handleType) {
+  const offset1DKey =
+    side === "left"
+      ? handleType === "in"
+        ? "leftHandleInOffset"
+        : "leftHandleOutOffset"
+      : handleType === "in"
+        ? "rightHandleInOffset"
+        : "rightHandleOutOffset";
+  const offsetXKey =
+    side === "left"
+      ? handleType === "in"
+        ? "leftHandleInOffsetX"
+        : "leftHandleOutOffsetX"
+      : handleType === "in"
+        ? "rightHandleInOffsetX"
+        : "rightHandleOutOffsetX";
+  const offsetYKey =
+    side === "left"
+      ? handleType === "in"
+        ? "leftHandleInOffsetY"
+        : "leftHandleOutOffsetY"
+      : handleType === "in"
+        ? "rightHandleInOffsetY"
+        : "rightHandleOutOffsetY";
+  return { offset1DKey, offsetXKey, offsetYKey };
+}
+
+function getSkeletonHandleDirectionForPoint(contour, pointIndex, handleType) {
+  const points = contour?.points;
+  const numPoints = points?.length || 0;
+  const isClosed = !!contour?.isClosed;
+  if (!numPoints) {
+    return null;
+  }
+  const skeletonPoint = points[pointIndex];
+  if (!skeletonPoint || skeletonPoint.type) {
+    return null;
+  }
+
+  let controlPoint = null;
+  if (handleType === "out") {
+    const nextIdx = (pointIndex + 1) % numPoints;
+    if (isClosed || pointIndex < numPoints - 1) {
+      const nextPt = points[nextIdx];
+      if (nextPt?.type === "cubic") {
+        controlPoint = nextPt;
+      }
+    }
+  } else {
+    const prevIdx = (pointIndex - 1 + numPoints) % numPoints;
+    if (isClosed || pointIndex > 0) {
+      const prevPt = points[prevIdx];
+      if (prevPt?.type === "cubic") {
+        controlPoint = prevPt;
+      }
+    }
+  }
+
+  if (!controlPoint) {
+    return null;
+  }
+  const dir = {
+    x: controlPoint.x - skeletonPoint.x,
+    y: controlPoint.y - skeletonPoint.y,
+  };
+  const length = Math.hypot(dir.x, dir.y);
+  if (length < 0.001) {
+    return null;
+  }
+  return { x: dir.x / length, y: dir.y / length };
+}
+
+function normalizeDirection(vectorValue, fallbackDirection) {
+  const len = Math.hypot(vectorValue?.x || 0, vectorValue?.y || 0);
+  if (len > 1e-9) {
+    return { x: vectorValue.x / len, y: vectorValue.y / len };
+  }
+  const fallbackLen = Math.hypot(fallbackDirection?.x || 0, fallbackDirection?.y || 0);
+  if (fallbackLen > 1e-9) {
+    return {
+      x: fallbackDirection.x / fallbackLen,
+      y: fallbackDirection.y / fallbackLen,
+    };
+  }
+  return { x: 1, y: 0 };
+}
+
+function readEditableHandleEqualizeState({
+  point,
+  side,
+  handleType,
+  anchorPos,
+  currentHandlePos,
+  skeletonHandleDir,
+  detachedMode,
+}) {
+  const keys = getEditableHandleOffsetKeys(side, handleType);
+  const has2D = point[keys.offsetXKey] !== undefined || point[keys.offsetYKey] !== undefined;
+  const offsetX = point[keys.offsetXKey] || 0;
+  const offsetY = point[keys.offsetYKey] || 0;
+  const offset1D = point[keys.offset1DKey] || 0;
+
+  const currentVec = {
+    x: currentHandlePos.x - anchorPos.x,
+    y: currentHandlePos.y - anchorPos.y,
+  };
+  const originalLength = Math.hypot(currentVec.x, currentVec.y);
+  const direction = normalizeDirection(currentVec, skeletonHandleDir);
+  const normalizedSkeletonDir = normalizeDirection(skeletonHandleDir, direction);
+
+  let baseControlPos = null;
+  if (!detachedMode) {
+    if (has2D) {
+      baseControlPos = {
+        x: currentHandlePos.x - offsetX,
+        y: currentHandlePos.y - offsetY,
+      };
+    } else {
+      baseControlPos = {
+        x: currentHandlePos.x - normalizedSkeletonDir.x * offset1D,
+        y: currentHandlePos.y - normalizedSkeletonDir.y * offset1D,
+      };
+    }
+  }
+
+  return {
+    keys,
+    direction,
+    skeletonDir: normalizedSkeletonDir,
+    originalLength,
+    baseControlPos,
+    detachedMode,
+  };
+}
+
+function applyEditableHandleEqualizedLength({
+  point,
+  state,
+  targetLength,
+  anchorPos,
+  roundFunc = Math.round,
+}) {
+  const desiredPos = {
+    x: anchorPos.x + state.direction.x * targetLength,
+    y: anchorPos.y + state.direction.y * targetLength,
+  };
+
+  if (state.detachedMode) {
+    point[state.keys.offsetXKey] = roundFunc(desiredPos.x - anchorPos.x);
+    point[state.keys.offsetYKey] = roundFunc(desiredPos.y - anchorPos.y);
+    return;
+  }
+
+  const baseControlPos = state.baseControlPos || desiredPos;
+  const relX = desiredPos.x - baseControlPos.x;
+  const relY = desiredPos.y - baseControlPos.y;
+  point[state.keys.offsetXKey] = roundFunc(relX);
+  point[state.keys.offsetYKey] = roundFunc(relY);
+  point[state.keys.offset1DKey] = roundFunc(relX * state.skeletonDir.x + relY * state.skeletonDir.y);
+}
+
+function collectEditableGeneratedPointsFromPointSelection({
+  sceneController,
+  pointerTool,
+  pointSelection,
+}) {
+  if (!pointSelection?.length) {
+    return [];
+  }
+  const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
+  if (!positionedGlyph) {
+    return [];
+  }
+  const result = [];
+  for (const pointIndex of pointSelection) {
+    const ribInfo = sceneController.sceneModel._getEditableRibPointForGeneratedPoint(
+      positionedGlyph,
+      pointIndex
+    );
+    if (!ribInfo) {
+      continue;
+    }
+    result.push({ pointIndex, ...ribInfo });
+  }
+  return result;
+}
+
+function collectEditableGeneratedHandlesFromPointSelection({
+  sceneController,
+  pointerTool,
+  pointSelection,
+}) {
+  if (!pointSelection?.length) {
+    return [];
+  }
+  const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
+  if (!positionedGlyph) {
+    return [];
+  }
+  const result = [];
+  for (const pointIndex of pointSelection) {
+    const handleInfo = sceneController.sceneModel._getEditableHandleForGeneratedPoint(
+      positionedGlyph,
+      pointIndex
+    );
+    if (!handleInfo) {
+      continue;
+    }
+    result.push({ pointIndex, ...handleInfo });
+  }
+  return result;
 }
 
 function collectSelectedRibPointTargets(skeletonData, ribPointSelection) {
@@ -1298,71 +1514,85 @@ async function runSkeletonRibPointDragCanonical(context) {
   });
 }
 
-async function runEditableGeneratedPointDragCanonical(context) {
+async function runEditableGeneratedPointLikeCanonical(context, mode) {
+  const isDrag = mode === "drag";
   const {
     pointerTool,
     sceneController,
     eventStream,
     initialEvent,
+    event,
     editablePoints,
     runPointLikeInputKernel,
     runPointLikeSessionKernel,
   } = context;
-  assert(pointerTool, "runEditableGeneratedPointDragCanonical: missing pointerTool");
-  assert(sceneController, "runEditableGeneratedPointDragCanonical: missing sceneController");
-  assert(eventStream, "runEditableGeneratedPointDragCanonical: missing eventStream");
-  assert(initialEvent, "runEditableGeneratedPointDragCanonical: missing initialEvent");
-  assert(
-    editablePoints,
-    "runEditableGeneratedPointDragCanonical: missing editablePoints"
-  );
+  assert(pointerTool, "runEditableGeneratedPointLikeCanonical: missing pointerTool");
+  assert(sceneController, "runEditableGeneratedPointLikeCanonical: missing sceneController");
   assert(
     typeof runPointLikeInputKernel === "function",
-    "runEditableGeneratedPointDragCanonical: missing runPointLikeInputKernel"
+    "runEditableGeneratedPointLikeCanonical: missing runPointLikeInputKernel"
   );
   assert(
     typeof runPointLikeSessionKernel === "function",
-    "runEditableGeneratedPointDragCanonical: missing runPointLikeSessionKernel"
+    "runEditableGeneratedPointLikeCanonical: missing runPointLikeSessionKernel"
   );
+  if (isDrag) {
+    assert(eventStream, "runEditableGeneratedPointLikeCanonical: missing eventStream");
+    assert(initialEvent, "runEditableGeneratedPointLikeCanonical: missing initialEvent");
+  } else {
+    assert(event, "runEditableGeneratedPointLikeCanonical: missing event");
+  }
 
   const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
-  if (!positionedGlyph || !editablePoints.length) {
+  const resolvedEditablePoints =
+    editablePoints ||
+    collectEditableGeneratedPointsFromPointSelection({
+      sceneController,
+      pointerTool,
+      pointSelection: parseSelection(sceneController.selection).point,
+    });
+  if (!positionedGlyph || !resolvedEditablePoints?.length) {
     return makeAdapterResult();
   }
 
-  const useInterpolation = initialEvent.altKey;
+  const useInterpolation = isDrag ? initialEvent.altKey : event.altKey;
   const generatedPath = positionedGlyph.glyph.path;
   const editablePointsWithInterpolation = useInterpolation
-    ? editablePoints.map((editablePoint) => {
+    ? resolvedEditablePoints.map((editablePoint) => {
         const interpolationAxis = buildRibInterpolationAxisFromPath(
           generatedPath,
           editablePoint.pointIndex
         );
         return { ...editablePoint, interpolationAxis };
       })
-    : editablePoints.map((editablePoint) => ({
+    : resolvedEditablePoints.map((editablePoint) => ({
         ...editablePoint,
         interpolationAxis: null,
       }));
 
   const previousCursor = pointerTool.canvasController.canvas.style.cursor;
-  pointerTool.canvasController.canvas.style.cursor = "pointer";
+  if (isDrag) {
+    pointerTool.canvasController.canvas.style.cursor = "pointer";
+  }
 
   try {
     await runPointLikeSessionKernel({
-      mode: "drag",
+      mode,
       runPointLikeInputKernel,
       withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
       eventStream,
       initialEvent,
-      getBehaviorNameForEvent: () => "editable-generated-point",
-      getPointForEvent: (nextEvent) => {
-        const localPoint = sceneController.localPoint(nextEvent);
-        return {
-          x: localPoint.x - positionedGlyph.x,
-          y: localPoint.y - positionedGlyph.y,
-        };
-      },
+      event,
+      getBehaviorNameForEvent: isDrag ? () => "editable-generated-point" : undefined,
+      getPointForEvent: isDrag
+        ? (nextEvent) => {
+            const localPoint = sceneController.localPoint(nextEvent);
+            return {
+              x: localPoint.x - positionedGlyph.x,
+              y: localPoint.y - positionedGlyph.y,
+            };
+          }
+        : undefined,
       onSessionStart: ({ glyph }) => {
         const layersData = {};
         for (const editLayerName of sceneController.editingLayerNames || []) {
@@ -1421,12 +1651,12 @@ async function runEditableGeneratedPointDragCanonical(context) {
           skip: !Object.keys(layersData).length,
         };
       },
-      onInput: async ({ event: dragEvent, delta, sessionState, sendIncrementalChange }) => {
+      onInput: async ({ event: inputEvent, delta, sessionState, sendIncrementalChange }) => {
         if (sessionState.skip) {
           return;
         }
-        const roundFunc = makeRoundFunc(dragEvent);
-        const constrainMode = pointerTool.tangentRibMode ? "tangent" : null;
+        const roundFunc = isDrag ? makeRoundFunc(inputEvent) : Math.round;
+        const constrainMode = isDrag && pointerTool.tangentRibMode ? "tangent" : null;
         const allChanges = [];
 
         for (const [editLayerName, data] of Object.entries(sessionState.layersData)) {
@@ -1497,49 +1727,358 @@ async function runEditableGeneratedPointDragCanonical(context) {
           return;
         }
         const combined = new ChangeCollector().concat(...allChanges);
-        sessionState.accumulatedChanges =
-          sessionState.accumulatedChanges.concat(combined);
-        await sendIncrementalChange(combined.change, true);
+        sessionState.accumulatedChanges = sessionState.accumulatedChanges.concat(combined);
+        await sendIncrementalChange(combined.change, isDrag);
       },
       onSessionEnd: async ({ sessionState, sendIncrementalChange }) => {
         if (sessionState.skip) {
           return;
         }
-        await sendIncrementalChange(sessionState.accumulatedChanges.change);
+        if (isDrag) {
+          await sendIncrementalChange(sessionState.accumulatedChanges.change);
+        }
         return {
           changes: sessionState.accumulatedChanges,
-          undoLabel: "Edit generated point",
+          undoLabel: isDrag ? "Edit generated point" : "Nudge generated point",
           broadcast: true,
         };
       },
     });
   } finally {
-    pointerTool.canvasController.canvas.style.cursor = previousCursor || "default";
+    if (isDrag) {
+      pointerTool.canvasController.canvas.style.cursor = previousCursor || "default";
+    }
   }
   return makeAdapterResult();
 }
 
-async function runEditableGeneratedHandleDragCanonical(context) {
-  const { pointerTool, eventStream, initialEvent, editableHandles } = context;
-  assert(
-    editableHandles,
-    "runEditableGeneratedHandleDragCanonical: missing editableHandles"
-  );
-  return runPointerMethodAdapter({
+async function runEditableGeneratedHandleLikeCanonical(context, mode) {
+  const isDrag = mode === "drag";
+  const {
     pointerTool,
-    methodName: "_handleDragEditableGeneratedHandles",
-    args: [eventStream, initialEvent, editableHandles],
-  });
+    sceneController,
+    eventStream,
+    initialEvent,
+    event,
+    editableHandles,
+    runPointLikeInputKernel,
+    runPointLikeSessionKernel,
+  } = context;
+  assert(pointerTool, "runEditableGeneratedHandleLikeCanonical: missing pointerTool");
+  assert(sceneController, "runEditableGeneratedHandleLikeCanonical: missing sceneController");
+  assert(
+    typeof runPointLikeInputKernel === "function",
+    "runEditableGeneratedHandleLikeCanonical: missing runPointLikeInputKernel"
+  );
+  assert(
+    typeof runPointLikeSessionKernel === "function",
+    "runEditableGeneratedHandleLikeCanonical: missing runPointLikeSessionKernel"
+  );
+  if (isDrag) {
+    assert(eventStream, "runEditableGeneratedHandleLikeCanonical: missing eventStream");
+    assert(initialEvent, "runEditableGeneratedHandleLikeCanonical: missing initialEvent");
+  } else {
+    assert(event, "runEditableGeneratedHandleLikeCanonical: missing event");
+  }
+
+  const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
+  const resolvedEditableHandles =
+    editableHandles ||
+    collectEditableGeneratedHandlesFromPointSelection({
+      sceneController,
+      pointerTool,
+      pointSelection: parseSelection(sceneController.selection).point,
+    });
+  if (!positionedGlyph || !resolvedEditableHandles?.length) {
+    return makeAdapterResult();
+  }
+
+  const previousCursor = pointerTool.canvasController.canvas.style.cursor;
+  if (isDrag) {
+    pointerTool.canvasController.canvas.style.cursor = "pointer";
+  }
+
+  try {
+    await runPointLikeSessionKernel({
+      mode,
+      runPointLikeInputKernel,
+      withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
+      eventStream,
+      initialEvent,
+      event,
+      getBehaviorNameForEvent: isDrag ? () => "editable-generated-handle" : undefined,
+      getPointForEvent: isDrag
+        ? (nextEvent) => {
+            const localPoint = sceneController.localPoint(nextEvent);
+            return {
+              x: localPoint.x - positionedGlyph.x,
+              y: localPoint.y - positionedGlyph.y,
+            };
+          }
+        : undefined,
+      onSessionStart: ({ glyph }) => {
+        const layersData = {};
+        for (const editLayerName of sceneController.editingLayerNames || []) {
+          const layer = glyph.layers[editLayerName];
+          const skeletonData = getSkeletonData(layer);
+          if (!skeletonData) {
+            continue;
+          }
+          layersData[editLayerName] = {
+            layer,
+            original: JSON.parse(JSON.stringify(skeletonData)),
+            working: JSON.parse(JSON.stringify(skeletonData)),
+            behaviors: [],
+          };
+        }
+
+        for (const data of Object.values(layersData)) {
+          const layerPath = data.layer?.glyph?.path;
+          for (const editableHandle of resolvedEditableHandles) {
+            const contour = data.original.contours?.[editableHandle.skeletonContourIndex];
+            if (!contour) {
+              continue;
+            }
+            const skeletonHandleDir = getSkeletonHandleDirectionForPoint(
+              contour,
+              editableHandle.skeletonPointIndex,
+              editableHandle.handleType
+            );
+            if (!skeletonHandleDir) {
+              continue;
+            }
+            let equalizeState = null;
+            if (layerPath) {
+              const equalizeInfo = getEqualizeHandleInfoForPointIndex(
+                layerPath,
+                editableHandle.pointIndex
+              );
+              if (equalizeInfo) {
+                const anchorPos = layerPath.getPoint(equalizeInfo.smoothIndex);
+                const draggedPos = layerPath.getPoint(equalizeInfo.pointIndex);
+                const oppositePos = layerPath.getPoint(equalizeInfo.oppositeIndex);
+                const oppositeHandleType =
+                  editableHandle.handleType === "in" ? "out" : "in";
+                const oppositeHandleDir = getSkeletonHandleDirectionForPoint(
+                  contour,
+                  editableHandle.skeletonPointIndex,
+                  oppositeHandleType
+                );
+                if (anchorPos && draggedPos && oppositePos && oppositeHandleDir) {
+                  const point = contour.points?.[editableHandle.skeletonPointIndex];
+                  if (!point) {
+                    continue;
+                  }
+                  const detachedKey =
+                    editableHandle.side === "left"
+                      ? "leftHandleDetached"
+                      : "rightHandleDetached";
+                  const detachedMode = !!point?.[detachedKey];
+                  const draggedState = readEditableHandleEqualizeState({
+                    point,
+                    side: editableHandle.side,
+                    handleType: editableHandle.handleType,
+                    anchorPos,
+                    currentHandlePos: draggedPos,
+                    skeletonHandleDir,
+                    detachedMode,
+                  });
+                  const oppositeState = readEditableHandleEqualizeState({
+                    point,
+                    side: editableHandle.side,
+                    handleType: oppositeHandleType,
+                    anchorPos,
+                    currentHandlePos: oppositePos,
+                    skeletonHandleDir: oppositeHandleDir,
+                    detachedMode,
+                  });
+                  equalizeState = { anchorPos, draggedState, oppositeState };
+                }
+              }
+            }
+            data.behaviors.push({
+              behavior: createEditableHandleBehavior(
+                data.original,
+                editableHandle,
+                skeletonHandleDir
+              ),
+              editableHandle,
+              skeletonHandleDir,
+              equalizeState,
+            });
+          }
+        }
+
+        return {
+          layersData,
+          accumulatedChanges: new ChangeCollector(),
+          equalizeUsed: false,
+          skip: !Object.keys(layersData).length,
+        };
+      },
+      onInput: async ({ event: inputEvent, delta, sessionState, sendIncrementalChange }) => {
+        if (sessionState.skip) {
+          return;
+        }
+        const roundFunc = isDrag ? makeRoundFunc(inputEvent) : Math.round;
+        const allChanges = [];
+
+        for (const [editLayerName, data] of Object.entries(sessionState.layersData)) {
+          const { layer, original, working, behaviors } = data;
+
+          for (const { behavior, editableHandle, skeletonHandleDir, equalizeState } of behaviors) {
+            const contour = working.contours?.[editableHandle.skeletonContourIndex];
+            const point = contour?.points?.[editableHandle.skeletonPointIndex];
+            const baseContour = original.contours?.[editableHandle.skeletonContourIndex];
+            const basePoint = baseContour?.points?.[editableHandle.skeletonPointIndex];
+            if (!point || !basePoint) {
+              continue;
+            }
+
+            if (pointerTool.equalizeMode && equalizeState) {
+              const projectedDelta =
+                delta.x * equalizeState.draggedState.direction.x +
+                delta.y * equalizeState.draggedState.direction.y;
+              const targetLength = Math.max(
+                0,
+                equalizeState.draggedState.originalLength + projectedDelta
+              );
+              applyEditableHandleEqualizedLength({
+                point,
+                state: equalizeState.draggedState,
+                targetLength,
+                anchorPos: equalizeState.anchorPos,
+                roundFunc,
+              });
+              applyEditableHandleEqualizedLength({
+                point,
+                state: equalizeState.oppositeState,
+                targetLength,
+                anchorPos: equalizeState.anchorPos,
+                roundFunc,
+              });
+              sessionState.equalizeUsed = true;
+              continue;
+            }
+
+            const change = behavior.applyDelta(delta, roundFunc);
+            const detachedKey =
+              editableHandle.side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+            const { offset1DKey, offsetXKey, offsetYKey } = getEditableHandleOffsetKeys(
+              editableHandle.side,
+              editableHandle.handleType
+            );
+
+            if (point[detachedKey]) {
+              const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
+              const baseOffsetX = isDrag ? basePoint[offsetXKey] || 0 : point[offsetXKey] || 0;
+              const baseOffsetY = isDrag ? basePoint[offsetYKey] || 0 : point[offsetYKey] || 0;
+              point[offsetXKey] = baseOffsetX + roundFunc(skeletonHandleDir.x * projectedDelta);
+              point[offsetYKey] = baseOffsetY + roundFunc(skeletonHandleDir.y * projectedDelta);
+            } else {
+              delete point[offsetXKey];
+              delete point[offsetYKey];
+              point[offset1DKey] = change.offset;
+            }
+          }
+
+          const pathChange = recordChanges(layer.glyph, (sg) => {
+            regenerateSkeletonContours(sg, working);
+          });
+          const customDataChange = recordChanges(layer, (l) => {
+            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
+          });
+          if (pathChange.hasChange) {
+            allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+          }
+          if (customDataChange.hasChange) {
+            allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+          }
+        }
+
+        if (!allChanges.length) {
+          return;
+        }
+        const combined = new ChangeCollector().concat(...allChanges);
+        sessionState.accumulatedChanges = sessionState.accumulatedChanges.concat(combined);
+        await sendIncrementalChange(combined.change, isDrag);
+      },
+      onSessionEnd: async ({ sessionState, sendIncrementalChange }) => {
+        if (sessionState.skip) {
+          return;
+        }
+        if (isDrag) {
+          await sendIncrementalChange(sessionState.accumulatedChanges.change);
+        }
+        return {
+          changes: sessionState.accumulatedChanges,
+          undoLabel: isDrag
+            ? sessionState.equalizeUsed
+              ? "Equalize editable rib handles"
+              : "Edit generated handle"
+            : sessionState.equalizeUsed
+              ? "Nudge handles (equalize)"
+              : "Nudge generated handle",
+          broadcast: true,
+        };
+      },
+    });
+  } finally {
+    if (isDrag) {
+      pointerTool.canvasController.canvas.style.cursor = previousCursor || "default";
+    }
+  }
+  return makeAdapterResult();
+}
+
+async function runEditableGeneratedPointDragCanonical(context) {
+  return runEditableGeneratedPointLikeCanonical(context, "drag");
+}
+
+async function runEditableGeneratedHandleDragCanonical(context) {
+  return runEditableGeneratedHandleLikeCanonical(context, "drag");
 }
 
 async function runEditableGeneratedNudgeCanonical(context) {
-  const { pointerTool, event } = context;
-  return runPointerMethodAdapter({
-    pointerTool,
-    methodName: "_handleArrowKeysLegacy",
-    args: [event],
-    allowFalse: true,
-  });
+  const { sceneController, pointerTool, editablePoints, editableHandles } = context;
+  assert(sceneController, "runEditableGeneratedNudgeCanonical: missing sceneController");
+  assert(pointerTool, "runEditableGeneratedNudgeCanonical: missing pointerTool");
+
+  const pointSelection = parseSelection(sceneController.selection).point;
+  const resolvedEditableHandles =
+    editableHandles ||
+    collectEditableGeneratedHandlesFromPointSelection({
+      sceneController,
+      pointerTool,
+      pointSelection,
+    });
+  if (resolvedEditableHandles.length) {
+    return runEditableGeneratedHandleLikeCanonical(
+      {
+        ...context,
+        editableHandles: resolvedEditableHandles,
+      },
+      "nudge"
+    );
+  }
+
+  const resolvedEditablePoints =
+    editablePoints ||
+    collectEditableGeneratedPointsFromPointSelection({
+      sceneController,
+      pointerTool,
+      pointSelection,
+    });
+  if (resolvedEditablePoints.length) {
+    return runEditableGeneratedPointLikeCanonical(
+      {
+        ...context,
+        editablePoints: resolvedEditablePoints,
+      },
+      "nudge"
+    );
+  }
+  return false;
 }
 
 async function runSkeletonRibPointNudgeCanonical(context) {

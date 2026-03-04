@@ -458,3 +458,56 @@ Status: In Progress
 - Manual test results:
   - NOT RUN in this terminal session (requires UI verification).
 - Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Step 4.9: Editable generated handles (drag)
+
+- Problem: Editable generated handle drag canonical routing still delegated to pointer-owned `_handleDragEditableGeneratedHandles(...)`, so handle translation/persistence remained pointer-owned instead of adapter-owned.
+- Code analysis:
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Added adapter-local reusable helpers for editable-generated handle orchestration:
+    - `getEditableHandleOffsetKeys(...)`
+    - `getSkeletonHandleDirectionForPoint(...)`
+    - `collectEditableGeneratedHandlesFromPointSelection(...)`
+  - Added canonical session implementation `runEditableGeneratedHandleLikeCanonical(context, mode)` and switched drag canonical route to use it:
+    - `runEditableGeneratedHandleDragCanonical(...)` now calls `runEditableGeneratedHandleLikeCanonical(..., "drag")`.
+    - No pointer private drag method invocation remains for this route.
+  - Canonical drag flow now:
+    - builds per-layer editable-handle behaviors via `createEditableHandleBehavior(...)`,
+    - applies delta projection in adapter,
+    - persists via `regenerateSkeletonContours(...)` + `setSkeletonData(...)`,
+    - emits incremental/final changes with undo label `"Edit generated handle"`.
+  - Verification:
+    - `node --check src-js/views-editor/src/pointer-objects.js`
+    - `npm run -s bundle` (success; only existing webpack size warnings).
+- Comparison: Yes (code-level). Editable generated handle drag is now canonical adapter-owned and no longer forwarded to pointer drag handler.
+- Manual test results:
+  - Drag editable generated handles and confirm skeleton handle offsets update: NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Step 4.10: Editable generated points/handles (nudge)
+
+- Problem: Nudge for editable generated points/handles was pointer-owned via `_handleArrowKeysLegacy(...)`, so canonical nudge adapters were wrappers rather than owner of translation/persistence.
+- Code analysis:
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Replaced pointer-legacy forwarding in `runEditableGeneratedNudgeCanonical(...)` with canonical adapter-owned routing:
+    - resolves current editable generated handle/point targets from selection context,
+    - prioritizes editable generated handles when present (legacy parity),
+    - routes to canonical point-like/handle-like nudge session implementations.
+  - Added canonical point-like session implementation:
+    - `runEditableGeneratedPointLikeCanonical(context, mode)` now supports both drag and nudge; nudge uses shared input/session kernels and adapter-owned persistence.
+  - Added canonical handle-like session implementation:
+    - `runEditableGeneratedHandleLikeCanonical(context, mode)` now supports both drag and nudge; nudge applies constrained handle-offset changes and persists in adapter.
+  - Updated `src-js/views-editor/src/edit-tools-pointer.js` nudge routing context:
+    - computes `editableGeneratedPoints` and `editableGeneratedHandles` up front,
+    - routes object kind to `editableGeneratedHandle` or `editableGeneratedPoint` explicitly,
+    - passes `editablePoints` / `editableHandles` into `runNudgeRoutingOrchestration(...)`.
+  - Verification:
+    - `node --check src-js/views-editor/src/pointer-objects.js`
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+    - `npm run -s bundle` (success; only existing webpack size warnings).
+- Comparison: Yes (code-level). Editable generated nudge now runs through canonical adapter-owned translation/persistence paths instead of pointer-owned `_handleArrowKeysLegacy(...)` forwarding.
+- Manual test results:
+  - Nudge editable generated points with arrow keys: NOT RUN in this terminal session (requires UI verification).
+  - Nudge editable generated handles with arrow keys: NOT RUN in this terminal session (requires UI verification).
+  - Repeat with shift and alt modifiers: NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).

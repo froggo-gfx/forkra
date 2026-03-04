@@ -1184,19 +1184,22 @@ export class PointerTool extends BaseTool {
     const hasRegularPoints = regularPointSelection?.length > 0;
     const hasAnchors = anchorSelection?.length > 0;
     const hasGuidelines = guidelineSelection?.length > 0;
+    const editableGeneratedPoints = hasRegularPoints
+      ? this._getEditableGeneratedPointsFromSelection(regularPointSelection)
+      : [];
+    const editableGeneratedHandles = hasRegularPoints
+      ? this._getEditableGeneratedHandlesFromSelection(regularPointSelection)
+      : [];
 
     let objectKind = "regularPoint";
     if (hasSkeletonPoints) {
       objectKind = this.equalizeMode ? "skeletonHandle" : "skeletonPoint";
     } else if (hasRibPoints) {
       objectKind = "skeletonRibPoint";
-    } else if (hasRegularPoints) {
-      const editableHandles = this._getEditableGeneratedHandlesFromSelection(
-        regularPointSelection
-      );
-      if (editableHandles.length > 0) {
-        objectKind = "editableGeneratedPoint";
-      }
+    } else if (editableGeneratedHandles.length > 0) {
+      objectKind = "editableGeneratedHandle";
+    } else if (editableGeneratedPoints.length > 0) {
+      objectKind = "editableGeneratedPoint";
     } else if (hasAnchors) {
       objectKind = "anchor";
     } else if (hasGuidelines) {
@@ -1208,6 +1211,8 @@ export class PointerTool extends BaseTool {
       sceneController,
       event,
       objectKind,
+      editablePoints: editableGeneratedPoints,
+      editableHandles: editableGeneratedHandles,
     });
   }
 

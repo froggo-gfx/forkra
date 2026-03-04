@@ -343,7 +343,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonHandle: "CA",
     skeletonRibPoint: "NA",
     editableGeneratedPoint: "NA",
-    editableGeneratedHandle: "NA",
+    editableGeneratedHandle: "CA",
   },
   R14: {
     regularPoint: "CA",
@@ -353,7 +353,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonHandle: "CA",
     skeletonRibPoint: "NA",
     editableGeneratedPoint: "NA",
-    editableGeneratedHandle: "NA",
+    editableGeneratedHandle: "CA",
   },
   R16: {
     regularPoint: "NA",
