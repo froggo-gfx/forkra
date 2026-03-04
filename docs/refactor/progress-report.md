@@ -429,3 +429,32 @@ Status: In Progress
   - Z tangent drag path: PASS.
   - Confirm skeleton widths update during drag when side is editable: PASS.
 - Undo/redo verification: NOT RUN in this terminal session (user did not explicitly report).
+
+## Phase 4 - Cross-Cut: Remove adapter->pointer helper dependencies and dedupe rib helpers
+
+- Problem: Canonical adapter code still called pointer private helper methods for rib interpolation axis resolution, and rib helper logic (width-link + projection helpers) was duplicated between `pointer-objects.js` and `edit-tools-pointer.js`.
+- Code analysis:
+  - Updated `src-js/views-editor/src/edit-behavior.js`.
+  - Added shared exported rib helper utilities:
+    - `projectRibPoint(...)`
+    - `isWidthLinked(...)`
+    - `applyLinkedWidthDelta(...)`
+    - `buildRibInterpolationAxisFromPath(...)`
+    - `findRibInterpolationAxisFromSkeletonPath(...)`
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Removed local duplicated rib width helpers and switched canonical adapter usage to shared helpers from `edit-behavior.js`.
+  - Removed adapter calls to pointer private interpolation helpers:
+    - replaced `_findAdjacentHandlesForRibPoint(...)` usage with `buildRibInterpolationAxisFromPath(...)`.
+    - replaced `_findHandlesForRibPointFromSkeleton(...)` usage with `findRibInterpolationAxisFromSkeletonPath(...)`.
+  - Updated `src-js/views-editor/src/edit-tools-pointer.js`.
+  - Removed duplicated local rib helper function implementations and imported shared helper exports from `edit-behavior.js`.
+  - Simplified pointer interpolation helper methods to wrappers around shared helper functions.
+  - Verification:
+    - `node --check src-js/views-editor/src/edit-behavior.js`
+    - `node --check src-js/views-editor/src/pointer-objects.js`
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+    - `npm run -s bundle` (success; only existing webpack size warnings).
+- Comparison: Yes (code-level). Adapter->pointer helper dependency for rib interpolation math is removed, and rib helper logic now has a single shared implementation path used by both pointer and adapters.
+- Manual test results:
+  - NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).

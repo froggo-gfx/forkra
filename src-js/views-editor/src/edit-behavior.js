@@ -7,6 +7,10 @@ import {
 } from "@fontra/core/transform.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import {
+  calculateNormalAtSkeletonPoint,
+  getPointHalfWidth,
+} from "@fontra/core/skeleton-contour-generator.js";
+import {
   assert,
   enumerate,
   parseSelection,
@@ -1549,6 +1553,267 @@ export function createPointBehaviorExecutor({
 export function getSkeletonBehaviorName(shiftKey, altKey) {
   const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
   return behaviorNames[(shiftKey ? 1 : 0) + (altKey ? 2 : 0)];
+}
+
+const DEFAULT_SKELETON_WIDTH = 80;
+
+export function projectRibPoint(point, normal, halfWidth, side, nudge = 0) {
+  const sign = side === "left" ? 1 : -1;
+  const tangent = { x: -normal.y, y: normal.x };
+  const baseX = Math.round(point.x + sign * normal.x * halfWidth);
+  const baseY = Math.round(point.y + sign * normal.y * halfWidth);
+  return {
+    x: Math.round(baseX + tangent.x * nudge),
+    y: Math.round(baseY + tangent.y * nudge),
+  };
+}
+
+export function hasAsymmetricWidths(point) {
+  return point.leftWidth !== undefined || point.rightWidth !== undefined;
+}
+
+export function isWidthLinked(point) {
+  if (point.widthLinked !== undefined) {
+    return !!point.widthLinked;
+  }
+  return !hasAsymmetricWidths(point);
+}
+
+export function clearEditableWhenCollapsed(point, leftHW, rightHW) {
+  if (leftHW <= 0) {
+    point.leftEditable = false;
+  }
+  if (rightHW <= 0) {
+    point.rightEditable = false;
+  }
+}
+
+export function applyLinkedWidthDelta(
+  point,
+  basePoint,
+  defaultWidth,
+  side,
+  delta,
+  linked,
+  roundFunc = Math.round
+) {
+  const baseLeft = getPointHalfWidth(basePoint, defaultWidth, "left");
+  const baseRight = getPointHalfWidth(basePoint, defaultWidth, "right");
+  const baseHasAsym = hasAsymmetricWidths(basePoint);
+
+  if (linked) {
+    const newLeft = Math.max(0, roundFunc(baseLeft + delta));
+    const newRight = Math.max(0, roundFunc(baseRight + delta));
+    if (baseHasAsym) {
+      point.leftWidth = newLeft;
+      point.rightWidth = newRight;
+      delete point.width;
+    } else {
+      point.width = Math.max(0, newLeft + newRight);
+      delete point.leftWidth;
+      delete point.rightWidth;
+    }
+    clearEditableWhenCollapsed(point, newLeft, newRight);
+    return;
+  }
+
+  const newLeft =
+    side === "left" ? Math.max(0, roundFunc(baseLeft + delta)) : Math.max(0, roundFunc(baseLeft));
+  const newRight =
+    side === "right"
+      ? Math.max(0, roundFunc(baseRight + delta))
+      : Math.max(0, roundFunc(baseRight));
+  point.leftWidth = newLeft;
+  point.rightWidth = newRight;
+  delete point.width;
+  clearEditableWhenCollapsed(point, newLeft, newRight);
+}
+
+export function buildRibInterpolationAxisFromPath(path, ribPointIndex) {
+  const numPoints = path?.numPoints ?? 0;
+  if (ribPointIndex < 0 || ribPointIndex >= numPoints) {
+    return null;
+  }
+
+  const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(ribPointIndex);
+  const numContourPoints = path.getNumPointsOfContour(contourIndex);
+  const contourStart = ribPointIndex - contourPointIndex;
+
+  const wrapIndex = (idx) => {
+    const relative = idx - contourStart;
+    const wrapped = ((relative % numContourPoints) + numContourPoints) % numContourPoints;
+    return contourStart + wrapped;
+  };
+
+  const prevIdx = wrapIndex(ribPointIndex - 1);
+  const nextIdx = wrapIndex(ribPointIndex + 1);
+
+  const prevType = path.pointTypes[prevIdx] & VarPackedPath.POINT_TYPE_MASK;
+  const nextType = path.pointTypes[nextIdx] & VarPackedPath.POINT_TYPE_MASK;
+  const prevIsOnCurve = prevType === VarPackedPath.ON_CURVE;
+  const nextIsOnCurve = nextType === VarPackedPath.ON_CURVE;
+
+  const prevHandle = !prevIsOnCurve ? path.getPoint(prevIdx) : null;
+  const nextHandle = !nextIsOnCurve ? path.getPoint(nextIdx) : null;
+  const ribPoint = path.getPoint(ribPointIndex);
+
+  let segmentAnchor = null;
+  if (prevHandle && !nextHandle) {
+    segmentAnchor = nextIsOnCurve ? path.getPoint(nextIdx) : null;
+  } else if (nextHandle && !prevHandle) {
+    segmentAnchor = prevIsOnCurve ? path.getPoint(prevIdx) : null;
+  }
+
+  let lineStart = null;
+  let lineEnd = null;
+
+  if (prevHandle && nextHandle) {
+    lineStart = prevHandle;
+    lineEnd = nextHandle;
+  } else if (prevHandle || nextHandle) {
+    lineStart = segmentAnchor || ribPoint;
+    lineEnd = prevHandle || nextHandle;
+  } else {
+    return null;
+  }
+
+  const axisDx = lineEnd.x - lineStart.x;
+  const axisDy = lineEnd.y - lineStart.y;
+  if (Math.hypot(axisDx, axisDy) < 0.001) {
+    return null;
+  }
+
+  return {
+    prevHandle,
+    nextHandle,
+    segmentAnchor,
+    lineStart,
+    lineEnd,
+    hasPrevHandle: !!prevHandle,
+    hasNextHandle: !!nextHandle,
+  };
+}
+
+function offsetSkeletonHandle(skelHandle, skelOnCurve, normal, contour, side) {
+  const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+  const halfWidth =
+    side === "left"
+      ? skelOnCurve.leftWidth ??
+        (skelOnCurve.width !== undefined ? skelOnCurve.width / 2 : defaultWidth / 2)
+      : skelOnCurve.rightWidth ??
+        (skelOnCurve.width !== undefined ? skelOnCurve.width / 2 : defaultWidth / 2);
+  const sign = side === "left" ? 1 : -1;
+
+  return {
+    x: skelHandle.x + sign * normal.x * halfWidth,
+    y: skelHandle.y + sign * normal.y * halfWidth,
+  };
+}
+
+function offsetSkeletonOnCurve(skeletonOnCurve, contour, pointIndex, side) {
+  const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
+  const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+  let halfWidth = getPointHalfWidth(skeletonOnCurve, defaultWidth, side);
+  if (contour.singleSided) {
+    const leftHW = getPointHalfWidth(skeletonOnCurve, defaultWidth, "left");
+    const rightHW = getPointHalfWidth(skeletonOnCurve, defaultWidth, "right");
+    halfWidth = leftHW + rightHW;
+  }
+  const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+  const nudge = skeletonOnCurve[nudgeKey] || 0;
+  return projectRibPoint(skeletonOnCurve, normal, halfWidth, side, nudge);
+}
+
+export function findRibInterpolationAxisFromSkeletonPath(
+  path,
+  skeletonPoint,
+  normal,
+  contour,
+  side
+) {
+  if (!path || !contour?.points?.length || !skeletonPoint) {
+    return null;
+  }
+
+  const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+  let halfWidth = getPointHalfWidth(skeletonPoint, defaultWidth, side);
+  if (contour.singleSided) {
+    const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+    const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+    halfWidth = leftHW + rightHW;
+  }
+  const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
+  const nudge = skeletonPoint[nudgeKey] || 0;
+
+  const expectedRibPoint = projectRibPoint(skeletonPoint, normal, halfWidth, side, nudge);
+
+  const ribPointIndex = path.pointIndexNearPoint(expectedRibPoint, 3);
+  if (ribPointIndex !== undefined) {
+    const axisFromPath = buildRibInterpolationAxisFromPath(path, ribPointIndex);
+    if (axisFromPath) {
+      return axisFromPath;
+    }
+  }
+
+  const points = contour.points;
+  const pointIndex = points.findIndex(
+    (point) => point === skeletonPoint || (point.x === skeletonPoint.x && point.y === skeletonPoint.y)
+  );
+  if (pointIndex < 0) {
+    return null;
+  }
+
+  let prevHandle = null;
+  let nextHandle = null;
+  let segmentAnchor = null;
+  const isClosed = !!contour.isClosed;
+
+  const prevIdx = isClosed || pointIndex > 0 ? (pointIndex - 1 + points.length) % points.length : null;
+  if (prevIdx !== null && points[prevIdx]?.type) {
+    prevHandle = offsetSkeletonHandle(points[prevIdx], skeletonPoint, normal, contour, side);
+  }
+
+  const nextIdx =
+    isClosed || pointIndex < points.length - 1 ? (pointIndex + 1) % points.length : null;
+  if (nextIdx !== null && points[nextIdx]?.type) {
+    nextHandle = offsetSkeletonHandle(points[nextIdx], skeletonPoint, normal, contour, side);
+  }
+
+  if (prevHandle && !nextHandle && nextIdx !== null && !points[nextIdx]?.type) {
+    segmentAnchor = offsetSkeletonOnCurve(points[nextIdx], contour, nextIdx, side);
+  } else if (nextHandle && !prevHandle && prevIdx !== null && !points[prevIdx]?.type) {
+    segmentAnchor = offsetSkeletonOnCurve(points[prevIdx], contour, prevIdx, side);
+  }
+
+  if (!prevHandle && !nextHandle) {
+    return null;
+  }
+
+  let lineStart = null;
+  let lineEnd = null;
+  if (prevHandle && nextHandle) {
+    lineStart = prevHandle;
+    lineEnd = nextHandle;
+  } else {
+    lineStart = segmentAnchor || expectedRibPoint;
+    lineEnd = prevHandle || nextHandle;
+  }
+
+  const axisDx = lineEnd.x - lineStart.x;
+  const axisDy = lineEnd.y - lineStart.y;
+  if (Math.hypot(axisDx, axisDy) < 0.001) {
+    return null;
+  }
+
+  return {
+    prevHandle,
+    nextHandle,
+    segmentAnchor,
+    lineStart,
+    lineEnd,
+    hasPrevHandle: !!prevHandle,
+    hasNextHandle: !!nextHandle,
+  };
 }
 
 export function createRibEditBehavior(skeletonData, ribHit) {

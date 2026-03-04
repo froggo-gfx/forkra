@@ -13,12 +13,16 @@ import { assert, parseSelection } from "@fontra/core/utils.js";
 import {
   computeEqualizedHandlePositions,
   EditBehaviorFactory,
+  applyLinkedWidthDelta,
+  buildRibInterpolationAxisFromPath,
   createRibEditBehavior,
   createEditableRibBehavior,
   createInterpolatingRibBehavior,
   createPointBehaviorExecutor,
   findEqualizeHandleForPath,
+  findRibInterpolationAxisFromSkeletonPath,
   getSkeletonBehaviorName,
+  isWidthLinked,
   makeRegularEqualizeNudgeChanges,
   makeEqualizeDragChanges,
   makeRoundFunc,
@@ -58,67 +62,6 @@ function filterSelectionByPrefixes(selection, prefixes) {
     }
   }
   return filtered;
-}
-
-function hasAsymmetricWidths(point) {
-  return point.leftWidth !== undefined || point.rightWidth !== undefined;
-}
-
-function isWidthLinked(point) {
-  if (point.widthLinked !== undefined) {
-    return !!point.widthLinked;
-  }
-  return !hasAsymmetricWidths(point);
-}
-
-function clearEditableWhenCollapsed(point, leftHW, rightHW) {
-  if (leftHW <= 0) {
-    point.leftEditable = false;
-  }
-  if (rightHW <= 0) {
-    point.rightEditable = false;
-  }
-}
-
-function applyLinkedWidthDelta(
-  point,
-  basePoint,
-  defaultWidth,
-  side,
-  delta,
-  linked,
-  roundFunc = Math.round
-) {
-  const baseLeft = getPointHalfWidth(basePoint, defaultWidth, "left");
-  const baseRight = getPointHalfWidth(basePoint, defaultWidth, "right");
-  const baseHasAsym = hasAsymmetricWidths(basePoint);
-
-  if (linked) {
-    const newLeft = Math.max(0, roundFunc(baseLeft + delta));
-    const newRight = Math.max(0, roundFunc(baseRight + delta));
-    if (baseHasAsym) {
-      point.leftWidth = newLeft;
-      point.rightWidth = newRight;
-      delete point.width;
-    } else {
-      point.width = Math.max(0, newLeft + newRight);
-      delete point.leftWidth;
-      delete point.rightWidth;
-    }
-    clearEditableWhenCollapsed(point, newLeft, newRight);
-    return;
-  }
-
-  const newLeft =
-    side === "left" ? Math.max(0, roundFunc(baseLeft + delta)) : Math.max(0, roundFunc(baseLeft));
-  const newRight =
-    side === "right"
-      ? Math.max(0, roundFunc(baseRight + delta))
-      : Math.max(0, roundFunc(baseRight));
-  point.leftWidth = newLeft;
-  point.rightWidth = newRight;
-  delete point.width;
-  clearEditableWhenCollapsed(point, newLeft, newRight);
 }
 
 function collectSelectedRibPointTargets(skeletonData, ribPointSelection) {
@@ -1391,13 +1334,10 @@ async function runEditableGeneratedPointDragCanonical(context) {
   const generatedPath = positionedGlyph.glyph.path;
   const editablePointsWithInterpolation = useInterpolation
     ? editablePoints.map((editablePoint) => {
-        const interpolationAxis =
-          typeof pointerTool._findAdjacentHandlesForRibPoint === "function"
-            ? pointerTool._findAdjacentHandlesForRibPoint(
-                generatedPath,
-                editablePoint.pointIndex
-              )
-            : null;
+        const interpolationAxis = buildRibInterpolationAxisFromPath(
+          generatedPath,
+          editablePoint.pointIndex
+        );
         return { ...editablePoint, interpolationAxis };
       })
     : editablePoints.map((editablePoint) => ({
@@ -1694,16 +1634,13 @@ async function runSkeletonRibPointNudgeCanonical(context) {
             if (isEditable) {
               let behavior;
               if (useInterpolation) {
-                const interpolationAxis =
-                  typeof pointerTool._findHandlesForRibPointFromSkeleton === "function"
-                    ? pointerTool._findHandlesForRibPointFromSkeleton(
-                        layer.glyph.path,
-                        basePoint,
-                        normal,
-                        baseContour,
-                        side
-                      )
-                    : null;
+                const interpolationAxis = findRibInterpolationAxisFromSkeletonPath(
+                  layer.glyph.path,
+                  basePoint,
+                  normal,
+                  baseContour,
+                  side
+                );
                 if (interpolationAxis) {
                   behavior = createInterpolatingRibBehavior(
                     originalSkeletonData,
