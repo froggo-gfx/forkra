@@ -7,7 +7,7 @@ import {
   regenerateSkeletonContours,
   setSkeletonData,
 } from "@fontra/core/skeleton-contour-generator.js";
-import { arrowKeyDeltas, assert, parseSelection } from "@fontra/core/utils.js";
+import { assert, parseSelection } from "@fontra/core/utils.js";
 import {
   constrainHorVerDiag,
   EditBehaviorFactory,
@@ -616,6 +616,56 @@ async function runSkeletonDragSession({
   });
 }
 
+async function runSkeletonNudgeSession({
+  sceneController,
+  createLayersData,
+  applyLayerNudge,
+  undoLabel = translate("action.nudge-selection"),
+}) {
+  assert(sceneController, "runSkeletonNudgeSession: missing sceneController");
+  assert(
+    typeof createLayersData === "function",
+    "runSkeletonNudgeSession: missing createLayersData"
+  );
+  assert(
+    typeof applyLayerNudge === "function",
+    "runSkeletonNudgeSession: missing applyLayerNudge"
+  );
+
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const layersData = createLayersData(glyph);
+    if (!Object.keys(layersData).length) {
+      return;
+    }
+
+    const allChanges = [];
+    for (const [editLayerName, data] of Object.entries(layersData)) {
+      const changed = applyLayerNudge({ editLayerName, data });
+      if (!changed) {
+        continue;
+      }
+      const { prefixedPath, prefixedCustomData } = makeSkeletonLayerPersistenceChanges({
+        layer: data.layer,
+        working: data.working,
+        editLayerName,
+        regenerateOptions: { preferInPlace: true },
+      });
+      allChanges.push(prefixedPath, prefixedCustomData);
+    }
+
+    if (!allChanges.length) {
+      return;
+    }
+    const combined = new ChangeCollector().concat(...allChanges);
+    await sendIncrementalChange(combined.change);
+    return {
+      changes: combined,
+      undoLabel,
+      broadcast: true,
+    };
+  });
+}
+
 async function runSkeletonPointDragOrchestration({
   sceneController,
   pointerTool,
@@ -917,21 +967,13 @@ async function runRegularNudgeOrchestration({
   sceneController,
   selection,
   event,
+  delta,
   scalingEditBehavior,
 }) {
   assert(sceneController, "runRegularNudgeOrchestration: missing sceneController");
   assert(selection?.size, "runRegularNudgeOrchestration: missing regular selection");
   assert(event, "runRegularNudgeOrchestration: missing event");
-
-  let [dx, dy] = arrowKeyDeltas[event.key] || [0, 0];
-  if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-    dx *= 100;
-    dy *= 100;
-  } else if (event.shiftKey) {
-    dx *= 10;
-    dy *= 10;
-  }
-  const delta = { x: dx, y: dy };
+  assert(delta, "runRegularNudgeOrchestration: missing delta");
 
   await sceneController.editGlyph((sendIncrementalChange, glyph) => {
     const layerInfo = Object.entries(
@@ -1004,6 +1046,7 @@ async function runSkeletonPointNudgeOrchestration({
   sceneController,
   selectedSkeletonPoints,
   event,
+  delta,
 }) {
   assert(sceneController, "runSkeletonPointNudgeOrchestration: missing sceneController");
   assert(
@@ -1011,76 +1054,56 @@ async function runSkeletonPointNudgeOrchestration({
     "runSkeletonPointNudgeOrchestration: missing skeleton selection"
   );
   assert(event, "runSkeletonPointNudgeOrchestration: missing event");
-
-  let [dx, dy] = arrowKeyDeltas[event.key] || [0, 0];
-  if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-    dx *= 100;
-    dy *= 100;
-  } else if (event.shiftKey) {
-    dx *= 10;
-    dy *= 10;
-  }
-  const delta = { x: dx, y: dy };
+  assert(delta, "runSkeletonPointNudgeOrchestration: missing delta");
   const roundFunc = (value) => makeRoundFunc(event)(value, true);
   const behaviorName = getSkeletonBehaviorName(false, event.altKey);
 
-  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-    const allChanges = [];
-    const rollbackParts = [];
-
-    for (const editLayerName of sceneController.editingLayerNames) {
-      const layer = glyph.layers[editLayerName];
-      const skeletonData = layer ? getSkeletonData(layer) : null;
-      if (!skeletonData) {
-        continue;
+  await runSkeletonNudgeSession({
+    sceneController,
+    createLayersData: (glyph) => {
+      const layersData = createSkeletonLayersData({
+        glyph,
+        editingLayerNames: sceneController.editingLayerNames,
+      });
+      for (const data of Object.values(layersData)) {
+        data.behaviors = createSkeletonPointExecutors(
+          data.original,
+          selectedSkeletonPoints,
+          behaviorName,
+          roundFunc
+        );
       }
-
-      const originalSkeletonData = JSON.parse(JSON.stringify(skeletonData));
-      const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
-      const behaviors = createSkeletonPointExecutors(
-        originalSkeletonData,
-        selectedSkeletonPoints,
-        behaviorName,
-        roundFunc
-      );
-
-      for (const { contourIndex, executor } of behaviors) {
+      return layersData;
+    },
+    applyLayerNudge: ({ data }) => {
+      let changed = false;
+      for (const { contourIndex, executor } of data.behaviors) {
         const changes = executor.applyDelta(delta);
-        const contour = workingSkeletonData.contours[contourIndex];
+        if (!changes?.length) {
+          continue;
+        }
+        changed = true;
+        const contour = data.working.contours[contourIndex];
         for (const { pointIndex, x, y } of changes) {
           contour.points[pointIndex].x = x;
           contour.points[pointIndex].y = y;
         }
       }
-
-      const { prefixedPath, prefixedCustomData } = makeSkeletonLayerPersistenceChanges({
-        layer,
-        working: workingSkeletonData,
-        editLayerName,
-        regenerateOptions: { preferInPlace: true },
-      });
-      allChanges.push(prefixedPath.change, prefixedCustomData.change);
-      rollbackParts.push(prefixedPath.rollbackChange, prefixedCustomData.rollbackChange);
-    }
-
-    if (!allChanges.length) {
-      return;
-    }
-    const editChange = consolidateChanges(allChanges);
-    await sendIncrementalChange(editChange);
-    return {
-      changes: ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackParts)),
-      undoLabel: translate("action.nudge-selection"),
-      broadcast: true,
-    };
+      return changed;
+    },
   });
 }
 
 async function runSkeletonPointNudgeCanonical(context) {
-  const { pointerTool, sceneController, event, objectKind } = context;
+  const { pointerTool, sceneController, event, objectKind, runPointLikeNudgeKernel } =
+    context;
   assert(pointerTool, "runSkeletonPointNudgeCanonical: missing pointerTool");
   assert(sceneController, "runSkeletonPointNudgeCanonical: missing sceneController");
   assert(objectKind, "runSkeletonPointNudgeCanonical: missing objectKind");
+  assert(
+    typeof runPointLikeNudgeKernel === "function",
+    "runSkeletonPointNudgeCanonical: missing runPointLikeNudgeKernel"
+  );
 
   const parsedSelection = parseSelection(sceneController.selection);
   const selectedSkeletonPoints = parsedSelection.skeletonPoint;
@@ -1106,10 +1129,16 @@ async function runSkeletonPointNudgeCanonical(context) {
     });
   }
 
-  await runSkeletonPointNudgeOrchestration({
-    sceneController,
-    selectedSkeletonPoints,
+  await runPointLikeNudgeKernel({
     event,
+    onNudge: async ({ delta }) => {
+      await runSkeletonPointNudgeOrchestration({
+        sceneController,
+        selectedSkeletonPoints,
+        event,
+        delta,
+      });
+    },
   });
   return makeAdapterResult();
 }
@@ -1119,9 +1148,14 @@ async function runRegularNudgeCanonical({
   sceneController,
   event,
   objectKind,
+  runPointLikeNudgeKernel,
 }) {
   assert(sceneController, "runRegularNudgeCanonical: missing sceneController");
   assert(objectKind, "runRegularNudgeCanonical: missing objectKind");
+  assert(
+    typeof runPointLikeNudgeKernel === "function",
+    "runRegularNudgeCanonical: missing runPointLikeNudgeKernel"
+  );
 
   const regularSelection = filterSelectionByPrefixes(sceneController.selection, [
     "point/",
@@ -1133,33 +1167,29 @@ async function runRegularNudgeCanonical({
     `runRegularNudgeCanonical: no regular point/anchor/guideline selection for ${objectKind}`
   );
 
-  if (pointerTool.equalizeMode) {
-    const { point: regularPointSelection } = parseSelection(regularSelection);
-    if (regularPointSelection?.length) {
-      let [dx, dy] = arrowKeyDeltas[event.key] || [0, 0];
-      if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-        dx *= 100;
-        dy *= 100;
-      } else if (event.shiftKey) {
-        dx *= 10;
-        dy *= 10;
-      }
-      const delta = { x: dx, y: dy };
-      const handled = await pointerTool._handleArrowKeysForEqualizePathHandles(
-        delta,
-        regularPointSelection
-      );
-      if (handled) {
-        return makeAdapterResult();
-      }
-    }
-  }
-
-  await runRegularNudgeOrchestration({
-    sceneController,
-    selection: regularSelection,
+  await runPointLikeNudgeKernel({
     event,
-    scalingEditBehavior: pointerTool.scalingEditBehavior,
+    onNudge: async ({ delta }) => {
+      if (pointerTool.equalizeMode) {
+        const { point: regularPointSelection } = parseSelection(regularSelection);
+        if (regularPointSelection?.length) {
+          const handled = await pointerTool._handleArrowKeysForEqualizePathHandles(
+            delta,
+            regularPointSelection
+          );
+          if (handled) {
+            return;
+          }
+        }
+      }
+      await runRegularNudgeOrchestration({
+        sceneController,
+        selection: regularSelection,
+        event,
+        delta,
+        scalingEditBehavior: pointerTool.scalingEditBehavior,
+      });
+    },
   });
   return makeAdapterResult();
 }
@@ -1199,6 +1229,7 @@ async function runSkeletonHandleEqualizeNudgeOrchestration({
   sceneController,
   offCurvePoints,
   event,
+  delta,
 }) {
   assert(
     sceneController,
@@ -1209,29 +1240,28 @@ async function runSkeletonHandleEqualizeNudgeOrchestration({
     "runSkeletonHandleEqualizeNudgeOrchestration: missing off-curve selection"
   );
   assert(event, "runSkeletonHandleEqualizeNudgeOrchestration: missing event");
+  assert(delta, "runSkeletonHandleEqualizeNudgeOrchestration: missing delta");
 
-  let [dx, dy] = arrowKeyDeltas[event.key] || [0, 0];
-  if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-    dx *= 100;
-    dy *= 100;
-  } else if (event.shiftKey) {
-    dx *= 10;
-    dy *= 10;
-  }
-  const delta = { x: dx, y: dy };
-
-  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-    const allChanges = [];
-    for (const editLayerName of sceneController.editingLayerNames) {
-      const layer = glyph.layers[editLayerName];
-      const layerSkeletonData = layer ? getSkeletonData(layer) : null;
-      if (!layerSkeletonData) {
-        continue;
+  await runSkeletonNudgeSession({
+    sceneController,
+    createLayersData: (glyph) => {
+      const layersData = {};
+      for (const editLayerName of sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        const skeletonData = layer ? getSkeletonData(layer) : null;
+        if (!skeletonData) {
+          continue;
+        }
+        layersData[editLayerName] = {
+          layer,
+          working: JSON.parse(JSON.stringify(skeletonData)),
+        };
       }
-
-      const working = JSON.parse(JSON.stringify(layerSkeletonData));
+      return layersData;
+    },
+    applyLayerNudge: ({ data }) => {
       let changed = false;
-
+      const { working } = data;
       for (const { contourIdx, pointIdx } of offCurvePoints) {
         const contour = working.contours[contourIdx];
         if (!contour) {
@@ -1270,41 +1300,25 @@ async function runSkeletonHandleEqualizeNudgeOrchestration({
         }
         changed = true;
       }
-
-      if (!changed) {
-        continue;
-      }
-
-      const { prefixedPath, prefixedCustomData } = makeSkeletonLayerPersistenceChanges({
-        layer,
-        working,
-        editLayerName,
-        regenerateOptions: { preferInPlace: true },
-      });
-      allChanges.push(prefixedPath, prefixedCustomData);
-    }
-
-    if (!allChanges.length) {
-      return;
-    }
-    const combined = new ChangeCollector().concat(...allChanges);
-    await sendIncrementalChange(combined.change);
-    return {
-      changes: combined,
-      undoLabel: "Nudge skeleton handles (equalize)",
-      broadcast: true,
-    };
+      return changed;
+    },
+    undoLabel: "Nudge skeleton handles (equalize)",
   });
 }
 
 async function runSkeletonHandleEqualizeNudgeCanonical(context) {
-  const { sceneController, pointerTool, event, objectKind } = context;
+  const { sceneController, pointerTool, event, objectKind, runPointLikeNudgeKernel } =
+    context;
   assert(
     sceneController,
     "runSkeletonHandleEqualizeNudgeCanonical: missing sceneController"
   );
   assert(pointerTool, "runSkeletonHandleEqualizeNudgeCanonical: missing pointerTool");
   assert(objectKind, "runSkeletonHandleEqualizeNudgeCanonical: missing objectKind");
+  assert(
+    typeof runPointLikeNudgeKernel === "function",
+    "runSkeletonHandleEqualizeNudgeCanonical: missing runPointLikeNudgeKernel"
+  );
 
   const selectedSkeletonPoints = parseSelection(sceneController.selection).skeletonPoint;
   if (!selectedSkeletonPoints?.size) {
@@ -1319,10 +1333,16 @@ async function runSkeletonHandleEqualizeNudgeCanonical(context) {
     return runSkeletonPointNudgeCanonical(context);
   }
 
-  await runSkeletonHandleEqualizeNudgeOrchestration({
-    sceneController,
-    offCurvePoints,
+  await runPointLikeNudgeKernel({
     event,
+    onNudge: async ({ delta }) => {
+      await runSkeletonHandleEqualizeNudgeOrchestration({
+        sceneController,
+        offCurvePoints,
+        event,
+        delta,
+      });
+    },
   });
   return makeAdapterResult();
 }

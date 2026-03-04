@@ -1,4 +1,4 @@
-import { assert } from "@fontra/core/utils.js";
+import { arrowKeyDeltas, assert } from "@fontra/core/utils.js";
 import {
   DRAG_ROUTING_MAP,
   getDragRowId,
@@ -56,6 +56,25 @@ export async function runPointLikeDragKernel({
       delta,
     });
   }
+}
+
+function getNudgeDeltaForEvent(event) {
+  let [dx, dy] = arrowKeyDeltas[event.key] || [0, 0];
+  if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
+    dx *= 100;
+    dy *= 100;
+  } else if (event.shiftKey) {
+    dx *= 10;
+    dy *= 10;
+  }
+  return { x: dx, y: dy };
+}
+
+export async function runPointLikeNudgeKernel({ event, onNudge }) {
+  assert(event, "runPointLikeNudgeKernel: missing event");
+  assert(typeof onNudge === "function", "runPointLikeNudgeKernel: missing onNudge");
+  const delta = getNudgeDeltaForEvent(event);
+  await onNudge({ event, delta });
 }
 
 /**
@@ -181,6 +200,7 @@ export async function runNudgeRoutingOrchestration(_context) {
   const adapterResult = await adapter({
     ..._context,
     runNudgeOrchestration,
+    runPointLikeNudgeKernel,
   });
   if (adapterResult === false) {
     return false;

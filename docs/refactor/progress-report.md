@@ -261,3 +261,28 @@ Status: In Progress
 - Manual test results:
   - NOT RUN in this terminal session (requires UI verification).
 - Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Cross-Cut: Move nudge kernel to composer
+
+- Problem: Nudge delta computation and skeleton nudge session orchestration were duplicated across canonical adapters (`regular`, `skeletonPoint`, and `skeletonHandle` equalize), leaving composer as routing-only and adapters with repeated flow logic.
+- Code analysis:
+  - Updated `src-js/views-editor/src/edit-behavior-composer.js`.
+  - Added `runPointLikeNudgeKernel(...)` and shared `getNudgeDeltaForEvent(...)`.
+  - Updated `runNudgeRoutingOrchestration(...)` to pass `runPointLikeNudgeKernel` into adapter context.
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Added shared `runSkeletonNudgeSession(...)` for one-shot skeleton nudge persistence flow.
+  - Updated canonical nudge adapters to use kernel-provided delta instead of per-function delta math:
+    - `runRegularNudgeCanonical(...)`
+    - `runSkeletonPointNudgeCanonical(...)`
+    - `runSkeletonHandleEqualizeNudgeCanonical(...)`
+  - Updated underlying orchestration functions to accept `delta` from kernel and removed local arrow-key delta code.
+  - Kept existing fallback behavior:
+    - mixed regular+skeleton/fixed-rib nudge still routes to legacy pointer path via `runSkeletonPointNudgeCanonical(...)`.
+    - skeleton-handle equalize nudge still falls back to skeleton-point canonical nudge when no off-curve targets are selected.
+  - Verified syntax with:
+    - `node --check src-js/views-editor/src/edit-behavior-composer.js`
+    - `node --check src-js/views-editor/src/pointer-objects.js`
+- Comparison: Yes (architecture-level). Nudge session delta policy is now composer-owned and shared, and skeleton nudge session orchestration is consolidated into one helper. Adapter code remains large, but duplicate nudge control-flow blocks were reduced.
+- Manual test results:
+  - NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
