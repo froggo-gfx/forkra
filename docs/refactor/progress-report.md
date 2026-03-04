@@ -54,3 +54,20 @@ Status: In Progress
 - Comparison: Yes. Both drag and nudge routing maps now declare explicit routing for all in-scope object kinds across all matrix-listed modifier rows, and every Yes/Specificity matrix cell has an explicit routing value.
 - Manual test results: PASS (N/A - definition step).
 - Undo/redo verification: PASS (N/A - definition step).
+
+## Phase 2 - Step 2.1: Adapter contract is explicit
+
+- Problem: Adapter behavior was inconsistent: wrappers returned booleans or `undefined`, and contract wording lived in the registry with a shape that did not match actual adapter entry points.
+- Code analysis:
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Added explicit `ADAPTER_CONTRACT` and `makeAdapterResult()` in the adapter module.
+  - Standardized adapter return semantics:
+    - handled routes return `{ forward, rollback }` (currently `null` placeholders for transitional wrappers),
+    - unhandled routes return `false`.
+  - Updated `src-js/views-editor/src/edit-behavior-composer.js`.
+  - Added routing-time assertions in `runDragRoutingOrchestration` and `runNudgeRoutingOrchestration` that adapters must return `{ forward, rollback }` or `false`.
+  - Updated `src-js/views-editor/src/edit-behavior-registry.js`.
+  - Removed the stale contract object from registry and replaced it with a reference to the pointer-objects contract so registry remains declarative.
+- Comparison: Yes. The adapter API is now explicit in the adapter module and enforced at the composer boundary; this closes the contract drift identified in Step 2.1. Adapter persistence ownership migration remains tracked in later phase steps.
+- Manual test results: PASS (N/A - contract step).
+- Undo/redo verification: PASS (N/A - contract step).

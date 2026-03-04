@@ -1,5 +1,19 @@
 import { arrowKeyDeltas, parseSelection } from "@fontra/core/utils.js";
 
+// Adapter contract for drag/nudge routing:
+// - When handled, adapters return `{ forward, rollback }`.
+// - During migration, wrappers may return `{ forward: null, rollback: null }`.
+// - Unhandled routes return `false` so composer can continue fallback logic.
+export const ADAPTER_CONTRACT = Object.freeze({
+  handledResultShape: "{ forward, rollback }",
+  unhandledResult: "false",
+  persistenceOwner: "adapter",
+});
+
+function makeAdapterResult(forward = null, rollback = null) {
+  return { forward, rollback };
+}
+
 async function runRegularDragLegacy({
   pointerTool,
   eventStream,
@@ -23,6 +37,7 @@ async function runRegularDragLegacy({
         pointerTool.sceneController.sceneModel.initialClickedPointIndex,
     });
   });
+  return makeAdapterResult();
 }
 
 async function runSkeletonDragCanonical({
@@ -36,6 +51,7 @@ async function runSkeletonDragCanonical({
     initialEvent,
     overrideSelection
   );
+  return makeAdapterResult();
 }
 
 async function runRegularEqualizeHandleLegacy({
@@ -61,7 +77,7 @@ async function runRegularEqualizeHandleLegacy({
         [editableHandleInfo]
       );
     }
-    return;
+    return makeAdapterResult();
   }
   await pointerTool._handleEqualizeHandlesDragForPath(
     eventStream,
@@ -69,10 +85,15 @@ async function runRegularEqualizeHandleLegacy({
     handleInfo,
     positionedGlyph
   );
+  return makeAdapterResult();
 }
 
 async function runTunniDragLegacy({ pointerTool, eventStream, initialEvent }) {
-  return pointerTool._handleTunniPointDrag(eventStream, initialEvent);
+  const handled = await pointerTool._handleTunniPointDrag(eventStream, initialEvent);
+  if (handled === false) {
+    return false;
+  }
+  return makeAdapterResult();
 }
 
 async function runSkeletonTunniDragLegacy({
@@ -81,11 +102,23 @@ async function runSkeletonTunniDragLegacy({
   initialEvent,
   tunniHit,
 }) {
-  await pointerTool._handleSkeletonTunniDrag(eventStream, initialEvent, tunniHit);
+  const handled = await pointerTool._handleSkeletonTunniDrag(
+    eventStream,
+    initialEvent,
+    tunniHit
+  );
+  if (handled === false) {
+    return false;
+  }
+  return makeAdapterResult();
 }
 
 async function runNudgeLegacy({ pointerTool, event }) {
-  return pointerTool._handleArrowKeysLegacy(event);
+  const handled = await pointerTool._handleArrowKeysLegacy(event);
+  if (handled === false) {
+    return false;
+  }
+  return makeAdapterResult();
 }
 
 async function runRegularDragCanonical(context) {
@@ -107,7 +140,7 @@ async function runSkeletonHandleDragCanonical({
     skeletonData,
     positionedGlyph
   );
-  return true;
+  return makeAdapterResult();
 }
 
 async function runRibDragCanonical({
@@ -134,6 +167,7 @@ async function runRibDragCanonical({
   } finally {
     delete pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint;
   }
+  return makeAdapterResult();
 }
 
 async function runEditableGeneratedPointsDragCanonical({
@@ -147,6 +181,7 @@ async function runEditableGeneratedPointsDragCanonical({
     initialEvent,
     editablePoints
   );
+  return makeAdapterResult();
 }
 
 async function runEditableGeneratedHandlesDragCanonical({
@@ -160,6 +195,7 @@ async function runEditableGeneratedHandlesDragCanonical({
     initialEvent,
     editableHandles
   );
+  return makeAdapterResult();
 }
 
 async function runRegularNudgeCanonical({
@@ -185,18 +221,22 @@ async function runRegularNudgeCanonical({
         regularPointSelection
       );
       if (handled) {
-        return handled;
+        return makeAdapterResult();
       }
     }
   }
-  return runNudgeOrchestration({
+  const handled = await runNudgeOrchestration({
     sceneController,
     event,
   });
+  if (handled === false) {
+    return false;
+  }
+  return makeAdapterResult();
 }
 
 async function runSkeletonNudgeCanonical({ pointerTool, event }) {
-  return pointerTool._handleArrowKeysLegacy(event);
+  return runNudgeLegacy({ pointerTool, event });
 }
 
 async function runRibNudgeCanonical({ pointerTool, sceneController, event }) {
@@ -207,11 +247,11 @@ async function runRibNudgeCanonical({ pointerTool, sceneController, event }) {
     return false;
   }
   await pointerTool._handleArrowKeysForRibPoints(event, ribPointSelection);
-  return true;
+  return makeAdapterResult();
 }
 
 async function runEditableGeneratedNudgeCanonical({ pointerTool, event }) {
-  return pointerTool._handleArrowKeysLegacy(event);
+  return runNudgeLegacy({ pointerTool, event });
 }
 
 export const canonicalDragAdapters = {
@@ -249,11 +289,15 @@ export const legacyDragAdapters = {
     initialEvent,
     effectiveSkeletonPointSelection,
   }) => {
-    return pointerTool._handleDragMixedSelection(
+    const handled = await pointerTool._handleDragMixedSelection(
       eventStream,
       initialEvent,
       effectiveSkeletonPointSelection
     );
+    if (handled === false) {
+      return false;
+    }
+    return makeAdapterResult();
   },
   tunniPoint: async (context) => runTunniDragLegacy(context),
   skeletonTunniPoint: async (context) => runSkeletonTunniDragLegacy(context),

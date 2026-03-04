@@ -301,7 +301,14 @@ export async function runDragRoutingOrchestration(_context) {
     runDragOrchestration,
   });
 
-  return adapterResult !== false;
+  if (adapterResult === false) {
+    return false;
+  }
+  assert(
+    adapterResult && "forward" in adapterResult && "rollback" in adapterResult,
+    `runDragRoutingOrchestration: adapter ${objectKind} must return { forward, rollback } or false`
+  );
+  return true;
 }
 
 /**
@@ -353,7 +360,14 @@ export async function runNudgeRoutingOrchestration(_context) {
     ..._context,
     runNudgeOrchestration,
   });
-  return adapterResult !== false;
+  if (adapterResult === false) {
+    return false;
+  }
+  assert(
+    adapterResult && "forward" in adapterResult && "rollback" in adapterResult,
+    `runNudgeRoutingOrchestration: adapter ${objectKind} must return { forward, rollback } or false`
+  );
+  return true;
 }
 
 /**
