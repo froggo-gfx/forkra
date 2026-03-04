@@ -86,6 +86,26 @@ function createSkeletonPointExecutors(
   return behaviors;
 }
 
+async function runUnifiedDragEventStream({
+  eventStream,
+  initialEvent,
+  getBehaviorNameForEvent,
+  onBehaviorChanged,
+  onEvent,
+}) {
+  let behaviorName = getBehaviorNameForEvent(initialEvent);
+  for await (const event of eventStream) {
+    const nextBehaviorName = getBehaviorNameForEvent(event);
+    if (nextBehaviorName !== behaviorName) {
+      behaviorName = nextBehaviorName;
+      if (onBehaviorChanged) {
+        await onBehaviorChanged(behaviorName, event);
+      }
+    }
+    await onEvent(event, behaviorName);
+  }
+}
+
 async function runRegularDragOrchestration(_context) {
   const {
     sceneController,
@@ -105,7 +125,7 @@ async function runRegularDragOrchestration(_context) {
   assert(sceneController, "runRegularDragOrchestration: missing sceneController");
 
   const initialPoint = sceneController.localPoint(initialEvent);
-  let behaviorName = getBehaviorName(initialEvent);
+  const initialBehaviorName = getBehaviorName(initialEvent);
   let equalizeHandleInfo = null;
   if (positionedGlyph && initialClickedPointIndex !== undefined) {
     const candidate = findEqualizeHandleForPath(
@@ -134,7 +154,7 @@ async function runRegularDragOrchestration(_context) {
       connectDetector: sceneController.getPathConnectDetector(layerGlyph.path),
       shouldConnect: false,
       behaviorFactory,
-      editBehavior: behaviorFactory.getBehavior(behaviorName),
+      editBehavior: behaviorFactory.getBehavior(initialBehaviorName),
     };
   });
 
@@ -158,64 +178,65 @@ async function runRegularDragOrchestration(_context) {
 
   let editChange;
 
-  for await (const event of eventStream) {
-    const newEditBehaviorName = getBehaviorName(event);
-
-    if (behaviorName !== newEditBehaviorName) {
-      behaviorName = newEditBehaviorName;
+  await runUnifiedDragEventStream({
+    eventStream,
+    initialEvent,
+    getBehaviorNameForEvent: getBehaviorName,
+    onBehaviorChanged: async (newBehaviorName) => {
       const rollbackChanges = [];
       for (const layer of layerInfo) {
         applyChange(layer.layerGlyph, layer.editBehavior.rollbackChange);
         rollbackChanges.push(
           consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
         );
-        layer.editBehavior = layer.behaviorFactory.getBehavior(behaviorName);
+        layer.editBehavior = layer.behaviorFactory.getBehavior(newBehaviorName);
       }
       await sendIncrementalChange(consolidateChanges(rollbackChanges));
-    }
-
-    const currentPoint = sceneController.localPoint(event);
-    const delta = {
-      x: currentPoint.x - initialPoint.x,
-      y: currentPoint.y - initialPoint.y,
-    };
-
-    const deepEditChanges = [];
-
-    for (const layer of layerInfo) {
-      const layerEditChange = layer.editBehavior.makeChangeForDelta(delta);
-      applyChange(layer.layerGlyph, layerEditChange);
-      deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
-      layer.shouldConnect = layer.connectDetector.shouldConnect(layer.isPrimaryLayer);
-    }
-
-    if (readEqualizeMode() && equalizeHandleInfo && positionedGlyph) {
-      const currentGlyphPoint = {
-        x: currentPoint.x - positionedGlyph.x,
-        y: currentPoint.y - positionedGlyph.y,
+    },
+    onEvent: async (event) => {
+      const currentPoint = sceneController.localPoint(event);
+      const delta = {
+        x: currentPoint.x - initialPoint.x,
+        y: currentPoint.y - initialPoint.y,
       };
-      for (const layer of layerInfo) {
-        const path = layer.layerGlyph.path;
-        const equalizeChanges = makeEqualizeDragChanges(
-          path,
-          equalizeHandleInfo,
-          currentGlyphPoint,
-          event.shiftKey
-        );
-        if (!equalizeChanges) {
-          continue;
-        }
-        for (const change of equalizeChanges) {
-          applyChange(layer.layerGlyph.path, change);
-        }
-        deepEditChanges.push(consolidateChanges(equalizeChanges, layer.changePath));
-        equalizeUsed = true;
-      }
-    }
 
-    editChange = consolidateChanges(deepEditChanges);
-    await sendIncrementalChange(editChange, true);
-  }
+      const deepEditChanges = [];
+
+      for (const layer of layerInfo) {
+        const layerEditChange = layer.editBehavior.makeChangeForDelta(delta);
+        applyChange(layer.layerGlyph, layerEditChange);
+        deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
+        layer.shouldConnect = layer.connectDetector.shouldConnect(layer.isPrimaryLayer);
+      }
+
+      if (readEqualizeMode() && equalizeHandleInfo && positionedGlyph) {
+        const currentGlyphPoint = {
+          x: currentPoint.x - positionedGlyph.x,
+          y: currentPoint.y - positionedGlyph.y,
+        };
+        for (const layer of layerInfo) {
+          const path = layer.layerGlyph.path;
+          const equalizeChanges = makeEqualizeDragChanges(
+            path,
+            equalizeHandleInfo,
+            currentGlyphPoint,
+            event.shiftKey
+          );
+          if (!equalizeChanges) {
+            continue;
+          }
+          for (const change of equalizeChanges) {
+            applyChange(layer.layerGlyph.path, change);
+          }
+          deepEditChanges.push(consolidateChanges(equalizeChanges, layer.changePath));
+          equalizeUsed = true;
+        }
+      }
+
+      editChange = consolidateChanges(deepEditChanges);
+      await sendIncrementalChange(editChange, true);
+    },
+  });
 
   const rollbackParts = layerInfo.map((layer) =>
     consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
@@ -454,79 +475,80 @@ async function runSkeletonPointDragOrchestration({
       return;
     }
 
-    let lastBehaviorName = getSkeletonBehaviorName(
+    const applySkeletonBehaviorsByName = (behaviorName) => {
+      for (const data of Object.values(layersData)) {
+        data.behaviors = createSkeletonPointExecutors(
+          data.original,
+          selectedSkeletonPoints,
+          behaviorName
+        );
+      }
+    };
+
+    const initialBehaviorName = getSkeletonBehaviorName(
       initialEvent.shiftKey,
       initialEvent.altKey
     );
-    for (const data of Object.values(layersData)) {
-      data.behaviors = createSkeletonPointExecutors(
-        data.original,
-        selectedSkeletonPoints,
-        lastBehaviorName
-      );
-    }
+    applySkeletonBehaviorsByName(initialBehaviorName);
 
     let accumulatedChanges = new ChangeCollector();
 
-    for await (const event of eventStream) {
-      const roundFunc = makeRoundFunc(event);
-      const currentLocalPoint = sceneController.localPoint(event);
-      const currentGlyphPoint = {
-        x: currentLocalPoint.x - positionedGlyph.x,
-        y: currentLocalPoint.y - positionedGlyph.y,
-      };
-      const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
-      const behaviorName = getSkeletonBehaviorName(event.shiftKey, event.altKey);
+    await runUnifiedDragEventStream({
+      eventStream,
+      initialEvent,
+      getBehaviorNameForEvent: (event) =>
+        getSkeletonBehaviorName(event.shiftKey, event.altKey),
+      onBehaviorChanged: async (behaviorName) => {
+        applySkeletonBehaviorsByName(behaviorName);
+      },
+      onEvent: async (event) => {
+        const roundFunc = makeRoundFunc(event);
+        const currentLocalPoint = sceneController.localPoint(event);
+        const currentGlyphPoint = {
+          x: currentLocalPoint.x - positionedGlyph.x,
+          y: currentLocalPoint.y - positionedGlyph.y,
+        };
+        const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
 
-      if (behaviorName !== lastBehaviorName) {
-        lastBehaviorName = behaviorName;
-        for (const data of Object.values(layersData)) {
-          data.behaviors = createSkeletonPointExecutors(
-            data.original,
-            selectedSkeletonPoints,
-            behaviorName
-          );
-        }
-      }
+        const allChanges = [];
+        for (const [editLayerName, data] of Object.entries(layersData)) {
+          const { layer, original, working, behaviors } = data;
 
-      const allChanges = [];
-      for (const [editLayerName, data] of Object.entries(layersData)) {
-        const { layer, original, working, behaviors } = data;
-
-        for (let ci = 0; ci < original.contours.length; ci++) {
-          const origContour = original.contours[ci];
-          const workContour = working.contours[ci];
-          for (let pi = 0; pi < origContour.points.length; pi++) {
-            workContour.points[pi].x = origContour.points[pi].x;
-            workContour.points[pi].y = origContour.points[pi].y;
+          for (let ci = 0; ci < original.contours.length; ci++) {
+            const origContour = original.contours[ci];
+            const workContour = working.contours[ci];
+            for (let pi = 0; pi < origContour.points.length; pi++) {
+              workContour.points[pi].x = origContour.points[pi].x;
+              workContour.points[pi].y = origContour.points[pi].y;
+            }
           }
-        }
 
-        for (const { contourIndex, executor } of behaviors) {
-          const changes = executor.applyDelta(delta, roundFunc);
-          const contour = working.contours[contourIndex];
-          for (const { pointIndex, x, y } of changes) {
-            contour.points[pointIndex].x = x;
-            contour.points[pointIndex].y = y;
+          for (const { contourIndex, executor } of behaviors) {
+            const changes = executor.applyDelta(delta, roundFunc);
+            const contour = working.contours[contourIndex];
+            for (const { pointIndex, x, y } of changes) {
+              contour.points[pointIndex].x = x;
+              contour.points[pointIndex].y = y;
+            }
           }
+
+          const staticGlyph = layer.glyph;
+          const pathChange = recordChanges(staticGlyph, (sg) => {
+            regenerateSkeletonContours(sg, working);
+          });
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+          const customDataChange = recordChanges(layer, (l) => {
+            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
+          });
+          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
         }
 
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          regenerateSkeletonContours(sg, working);
-        });
-        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-        const customDataChange = recordChanges(layer, (l) => {
-          setSkeletonData(l, JSON.parse(JSON.stringify(working)));
-        });
-        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-      }
-
-      const combinedChange = new ChangeCollector().concat(...allChanges);
-      accumulatedChanges = accumulatedChanges.concat(combinedChange);
-      await sendIncrementalChange(combinedChange.change, true);
-    }
+        const combinedChange = new ChangeCollector().concat(...allChanges);
+        accumulatedChanges = accumulatedChanges.concat(combinedChange);
+        await sendIncrementalChange(combinedChange.change, true);
+      },
+    });
 
     await sendIncrementalChange(accumulatedChanges.change);
     return {
