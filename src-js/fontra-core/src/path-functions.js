@@ -1286,15 +1286,22 @@ export function deleteSkeletonPoints(skeletonData, pointSelection) {
   const pointsByContour = groupSkeletonSelectionByContour(expandedSelection);
 
   // 3. Process each contour
+  let didModify = false;
   const contoursToRemove = [];
   for (const [contourIdx, indices] of pointsByContour) {
     const contour = skeletonData.contours[contourIdx];
     if (!contour) continue;
+    const validIndices = indices.filter(
+      (pointIdx) => Number.isInteger(pointIdx) && pointIdx >= 0 && pointIdx < contour.points.length
+    );
+    if (!validIndices.length) {
+      continue;
+    }
 
     let inheritFirstCap = null;
     let inheritLastCap = null;
     if (!contour.isClosed) {
-      const deleteSet = new Set(indices);
+      const deleteSet = new Set(validIndices);
       const firstOnCurve = getEndpointOnCurveIndex(contour.points, false);
       const lastOnCurve = getEndpointOnCurveIndex(contour.points, true);
       if (firstOnCurve !== null && deleteSet.has(firstOnCurve)) {
@@ -1305,7 +1312,7 @@ export function deleteSkeletonPoints(skeletonData, pointSelection) {
       }
     }
 
-    const newPoints = rebuildSkeletonContour(contour.points, indices, contour.isClosed);
+    const newPoints = rebuildSkeletonContour(contour.points, validIndices, contour.isClosed);
 
     if (!contour.isClosed && newPoints.length) {
       const newFirstOnCurve = getEndpointOnCurveIndex(newPoints, false);
@@ -1330,8 +1337,10 @@ export function deleteSkeletonPoints(skeletonData, pointSelection) {
     const hasOnCurve = newPoints.some((p) => !p.type);
     if (!hasOnCurve || newPoints.length === 0) {
       contoursToRemove.push(contourIdx);
+      didModify = true;
     } else {
       contour.points = newPoints;
+      didModify = true;
     }
   }
 
@@ -1340,7 +1349,7 @@ export function deleteSkeletonPoints(skeletonData, pointSelection) {
     skeletonData.contours.splice(idx, 1);
   }
 
-  return pointsByContour.size > 0;
+  return didModify;
 }
 
 /**

@@ -3872,9 +3872,12 @@ export function regenerateSkeletonContours(
   const path = staticGlyph.path;
   const generatedContours = generateContoursFromSkeleton(skeletonData);
   let oldGeneratedIndices = _sanitizeGeneratedIndices(skeletonData.generatedContourIndices);
+  const oldIndicesAllInRange = oldGeneratedIndices.every((index) => index < path.numContours);
   const oldIndicesAreUsable =
     oldGeneratedIndices.length === generatedContours.length &&
-    oldGeneratedIndices.every((index) => index < path.numContours);
+    oldIndicesAllInRange;
+  const oldIndicesCanPurge =
+    oldGeneratedIndices.length > generatedContours.length && oldIndicesAllInRange;
 
   // Recovery path: infer indices from contours matching generated geometry.
   // Do this not only when indices are missing, but also when stored indices drift
@@ -3889,8 +3892,11 @@ export function regenerateSkeletonContours(
     const hasRecoveredMapping = recoveredMappingIndices.length === generatedContours.length;
     const recoveredHasDuplicates = recoveredIndices.length > generatedContours.length;
     const shouldRecover =
-      !oldIndicesAreUsable ||
-      (hasRecoveredMapping && !_arrayShallowEqual(oldGeneratedIndices, recoveredMappingIndices));
+      recoveredHasDuplicates ||
+      (!oldIndicesAreUsable && !oldIndicesCanPurge) ||
+      (oldIndicesAreUsable &&
+        hasRecoveredMapping &&
+        !_arrayShallowEqual(oldGeneratedIndices, recoveredMappingIndices));
     if (shouldRecover && recoveredIndices.length >= generatedContours.length) {
       // If there are extra matching contours, preserve all for a cleanup pass
       // (replace-at-existing will be skipped because lengths differ).
