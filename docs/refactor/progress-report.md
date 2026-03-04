@@ -110,3 +110,26 @@ Status: In Progress
   - Drag rib point: PASS
   - Nudge skeleton point: PASS
 - Undo/redo verification: PASS (user verified).
+
+## Phase 3 - Step 3.1: Remove per-kind behavior classes from edit-behavior.js
+
+- Problem: `edit-behavior.js` still contained per-kind behavior classes (`RibEditBehavior`, `EditableRibBehavior`, `InterpolatingRibBehavior`, `EditableHandleBehavior`), which violated the unified-behavior target of removing parallel per-kind behavior engines.
+- Code analysis:
+  - Updated `src-js/views-editor/src/edit-behavior.js`.
+  - Removed exports of the four per-kind classes and replaced them with function-based behavior objects returned by existing factory APIs:
+    - `createRibEditBehavior(...)`
+    - `createEditableRibBehavior(...)`
+    - `createInterpolatingRibBehavior(...)`
+    - `createEditableHandleBehavior(...)`
+  - Preserved behavior object shape used by callers (`applyDelta`, `getRollback`, mutable fields like `originalHalfWidth`, `minHalfWidth`, and `setOriginalHalfWidth` where needed) to avoid routing changes in this step.
+  - Updated `src-js/views-editor/src/edit-tools-pointer.js`:
+    - Removed class imports no longer exported by `edit-behavior.js`.
+    - Replaced direct `new RibEditBehavior(...)` usage with `createRibEditBehavior(...)` factory usage.
+  - Verified syntax with:
+    - `node --check src-js/views-editor/src/edit-behavior.js`
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+- Comparison: Yes (code-level). The targeted per-kind class exports were removed from `edit-behavior.js`, and drag/nudge callers now consume factory-returned behavior objects without class constructors. Runtime parity remains subject to manual UI verification.
+- Manual test results:
+  - Drag regular points and anchors (default/shift/alt): PASS (user verified).
+  - Drag editable generated points (left/right): PASS (user verified).
+- Undo/redo verification: PASS (user verified).

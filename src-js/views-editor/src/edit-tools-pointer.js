@@ -49,12 +49,9 @@ import {
   makeRoundFunc,
   getSkeletonBehaviorName,
   createRibEditBehavior,
-  RibEditBehavior,
   createEditableRibBehavior,
-  EditableRibBehavior,
   createInterpolatingRibBehavior,
   createEditableHandleBehavior,
-  EditableHandleBehavior,
 } from "./edit-behavior.js";
 import {
   runDragRoutingOrchestration,
@@ -3668,14 +3665,13 @@ export class PointerTool extends BaseTool {
                 data.ribBehaviors.push({ behavior, target: tp });
             } else {
               // Non-editable single-sided: constrained to normal direction
-              const behavior = new RibEditBehavior(
-                data.original,
-                tp.contourIndex,
-                tp.pointIndex,
-                tp.side,
+              const behavior = createRibEditBehavior(data.original, {
+                contourIndex: tp.contourIndex,
+                pointIndex: tp.pointIndex,
+                side: tp.side,
                 normal,
-                { x: skeletonPoint.x, y: skeletonPoint.y }
-              );
+                onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
+              });
               // Override to track totalWidth; min 2 UPM since it's the full width
               behavior.originalHalfWidth = totalWidth;
               behavior.minHalfWidth = 2;

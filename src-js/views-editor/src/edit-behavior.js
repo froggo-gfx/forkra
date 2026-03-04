@@ -1551,99 +1551,68 @@ export function getSkeletonBehaviorName(shiftKey, altKey) {
   return behaviorNames[(shiftKey ? 1 : 0) + (altKey ? 2 : 0)];
 }
 
-/**
- * RibEditBehavior - Handles dragging of rib points (width control points).
- * Constrains movement to the normal direction and updates point width.
- */
-export class RibEditBehavior {
-  constructor(
+export function createRibEditBehavior(skeletonData, ribHit) {
+  const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
+  const roundFunc = ribHit.roundFunc || Math.round;
+  const contour = skeletonData.contours[contourIndex];
+  const point = contour.points[pointIndex];
+  const defaultWidth = contour.defaultWidth || 20;
+
+  return {
     skeletonData,
     contourIndex,
     pointIndex,
     side,
     normal,
     onCurvePoint,
-    roundFunc = Math.round
-  ) {
-    this.skeletonData = skeletonData;
-    this.contourIndex = contourIndex;
-    this.pointIndex = pointIndex;
-    this.side = side;
-    this.normal = normal;
-    this.onCurvePoint = onCurvePoint;
-    this.roundFunc = roundFunc;
-
-    const contour = skeletonData.contours[contourIndex];
-    const point = contour.points[pointIndex];
-    const defaultWidth = contour.defaultWidth || 20;
-
-    if (side === "left") {
-      this.originalHalfWidth =
-        point.leftWidth !== undefined
+    roundFunc,
+    originalHalfWidth:
+      side === "left"
+        ? point.leftWidth !== undefined
           ? point.leftWidth
           : point.width !== undefined
             ? point.width / 2
-            : defaultWidth / 2;
-    } else {
-      this.originalHalfWidth =
-        point.rightWidth !== undefined
+            : defaultWidth / 2
+        : point.rightWidth !== undefined
           ? point.rightWidth
           : point.width !== undefined
             ? point.width / 2
-            : defaultWidth / 2;
-    }
+            : defaultWidth / 2,
+    minHalfWidth: 0,
+    constrainToNormal(delta) {
+      const sign = this.side === "left" ? 1 : -1;
+      const dot = delta.x * this.normal.x + delta.y * this.normal.y;
+      return {
+        x: sign * dot * this.normal.x,
+        y: sign * dot * this.normal.y,
+      };
+    },
+    applyDelta(delta, constrainMode = null, round = this.roundFunc) {
+      const sign = this.side === "left" ? 1 : -1;
+      const dot = delta.x * this.normal.x + delta.y * this.normal.y;
+      const projectedDelta = sign * dot;
 
-    this.minHalfWidth = 0;
-  }
+      let newHalfWidth = this.originalHalfWidth + projectedDelta;
+      if (newHalfWidth < this.minHalfWidth) {
+        newHalfWidth = this.minHalfWidth;
+      }
 
-  constrainToNormal(delta) {
-    const sign = this.side === "left" ? 1 : -1;
-    const dot = delta.x * this.normal.x + delta.y * this.normal.y;
-    return {
-      x: sign * dot * this.normal.x,
-      y: sign * dot * this.normal.y,
-    };
-  }
-
-  applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
-    const sign = this.side === "left" ? 1 : -1;
-    const dot = delta.x * this.normal.x + delta.y * this.normal.y;
-    const projectedDelta = sign * dot;
-
-    let newHalfWidth = this.originalHalfWidth + projectedDelta;
-    if (newHalfWidth < this.minHalfWidth) {
-      newHalfWidth = this.minHalfWidth;
-    }
-
-    return {
-      contourIndex: this.contourIndex,
-      pointIndex: this.pointIndex,
-      side: this.side,
-      halfWidth: roundFunc(newHalfWidth),
-    };
-  }
-
-  getRollback() {
-    return {
-      contourIndex: this.contourIndex,
-      pointIndex: this.pointIndex,
-      side: this.side,
-      halfWidth: Math.round(this.originalHalfWidth),
-    };
-  }
-}
-
-export function createRibEditBehavior(skeletonData, ribHit) {
-  const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
-  return new RibEditBehavior(
-    skeletonData,
-    contourIndex,
-    pointIndex,
-    side,
-    normal,
-    onCurvePoint,
-    ribHit.roundFunc || Math.round
-  );
+      return {
+        contourIndex: this.contourIndex,
+        pointIndex: this.pointIndex,
+        side: this.side,
+        halfWidth: round(newHalfWidth),
+      };
+    },
+    getRollback() {
+      return {
+        contourIndex: this.contourIndex,
+        pointIndex: this.pointIndex,
+        side: this.side,
+        halfWidth: Math.round(this.originalHalfWidth),
+      };
+    },
+  };
 }
 
 /**
@@ -1652,415 +1621,148 @@ export function createRibEditBehavior(skeletonData, ribHit) {
  * - Nudge follows tangent only when constrained (e.g. Shift).
  * - Constrain modes can lock width or nudge.
  */
-export class EditableRibBehavior {
-  constructor(
-    skeletonData,
-    contourIndex,
-    pointIndex,
-    side,
-    normal,
-    onCurvePoint,
-    roundFunc = Math.round
-  ) {
-    this.skeletonData = skeletonData;
-    this.contourIndex = contourIndex;
-    this.pointIndex = pointIndex;
-    this.side = side;
-    this.normal = normal;
-    this.tangent = { x: -normal.y, y: normal.x };
-    this.onCurvePoint = onCurvePoint;
-    this.roundFunc = roundFunc;
-
-    const contour = skeletonData.contours[contourIndex];
-    const point = contour.points[pointIndex];
-    const points = contour.points;
-    const defaultWidth = contour.defaultWidth || 20;
-
-    if (side === "left") {
-      this.originalHalfWidth =
-        point.leftWidth !== undefined
-          ? point.leftWidth
-          : point.width !== undefined
-            ? point.width / 2
-            : defaultWidth / 2;
-    } else {
-      this.originalHalfWidth =
-        point.rightWidth !== undefined
-          ? point.rightWidth
-          : point.width !== undefined
-            ? point.width / 2
-            : defaultWidth / 2;
-    }
-
-    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-    this.originalNudge = point[nudgeKey] || 0;
-
-    this.minHalfWidth = 0;
-
-    this._initHandleOffsets(point, points, pointIndex, side);
-  }
-
-  _initHandleOffsets(point, points, pointIndex, side) {
-    this.skeletonHandleInDir = null;
-    this.skeletonHandleOutDir = null;
-
-    const prevIdx = (pointIndex - 1 + points.length) % points.length;
-    if (points[prevIdx]?.type) {
-      const dx = points[prevIdx].x - point.x;
-      const dy = points[prevIdx].y - point.y;
-      const len = Math.hypot(dx, dy);
-      if (len > 0.001) {
-        this.skeletonHandleInDir = { x: dx / len, y: dy / len };
-      }
-    }
-
-    const nextIdx = (pointIndex + 1) % points.length;
-    if (points[nextIdx]?.type) {
-      const dx = points[nextIdx].x - point.x;
-      const dy = points[nextIdx].y - point.y;
-      const len = Math.hypot(dx, dy);
-      if (len > 0.001) {
-        this.skeletonHandleOutDir = { x: dx / len, y: dy / len };
-      }
-    }
-
-    const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
-    const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
-    const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
-    const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
-    const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
-    const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
-
-    const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
-    const has2DOut =
-      point[handleOutXKey] !== undefined || point[handleOutYKey] !== undefined;
-
-    this.hasHandleOffsets =
-      has2DIn ||
-      has2DOut ||
-      point[handleIn1DKey] !== undefined ||
-      point[handleOut1DKey] !== undefined;
-
-    if (has2DIn) {
-      this.originalHandleInOffsetX = point[handleInXKey] || 0;
-      this.originalHandleInOffsetY = point[handleInYKey] || 0;
-    } else if (point[handleIn1DKey]) {
-      const dir = this.skeletonHandleInDir || this.tangent;
-      this.originalHandleInOffsetX = dir.x * point[handleIn1DKey];
-      this.originalHandleInOffsetY = dir.y * point[handleIn1DKey];
-    } else {
-      this.originalHandleInOffsetX = 0;
-      this.originalHandleInOffsetY = 0;
-    }
-
-    if (has2DOut) {
-      this.originalHandleOutOffsetX = point[handleOutXKey] || 0;
-      this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
-    } else if (point[handleOut1DKey]) {
-      const dir = this.skeletonHandleOutDir || this.tangent;
-      this.originalHandleOutOffsetX = dir.x * point[handleOut1DKey];
-      this.originalHandleOutOffsetY = dir.y * point[handleOut1DKey];
-    } else {
-      this.originalHandleOutOffsetX = 0;
-      this.originalHandleOutOffsetY = 0;
-    }
-  }
-
-  applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
-    let newNudge = this.originalNudge;
-    let newHalfWidth = this.originalHalfWidth;
-
-    if (constrainMode === "tangent") {
-      const tangentDot = delta.x * this.tangent.x + delta.y * this.tangent.y;
-      newNudge = this.originalNudge + tangentDot;
-    } else if (constrainMode === "normal") {
-      const sign = this.side === "left" ? 1 : -1;
-      const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
-      const normalDelta = sign * normalDot;
-      newHalfWidth = this.originalHalfWidth + normalDelta;
-      if (newHalfWidth < this.minHalfWidth) {
-        newHalfWidth = this.minHalfWidth;
-      }
-    } else {
-      const sign = this.side === "left" ? 1 : -1;
-      const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
-      const normalDelta = sign * normalDot;
-      newHalfWidth = this.originalHalfWidth + normalDelta;
-      if (newHalfWidth < this.minHalfWidth) {
-        newHalfWidth = this.minHalfWidth;
-      }
-    }
-
-    return {
-      contourIndex: this.contourIndex,
-      pointIndex: this.pointIndex,
-      side: this.side,
-      halfWidth: roundFunc(newHalfWidth),
-      nudge: roundFunc(newNudge),
-    };
-  }
-
-  getRollback() {
-    const result = {
-      contourIndex: this.contourIndex,
-      pointIndex: this.pointIndex,
-      side: this.side,
-      halfWidth: Math.round(this.originalHalfWidth),
-      nudge: Math.round(this.originalNudge),
-    };
-
-    if (this.hasHandleOffsets) {
-      result.handleInOffsetX = Math.round(this.originalHandleInOffsetX);
-      result.handleInOffsetY = Math.round(this.originalHandleInOffsetY);
-      result.handleOutOffsetX = Math.round(this.originalHandleOutOffsetX);
-      result.handleOutOffsetY = Math.round(this.originalHandleOutOffsetY);
-      result.hasHandleOffsets = true;
-    }
-
-    return result;
-  }
-
-  setOriginalHalfWidth(halfWidth) {
-    this.originalHalfWidth = halfWidth;
-  }
-}
-
 export function createEditableRibBehavior(skeletonData, ribHit) {
   const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
-  return new EditableRibBehavior(
+  const roundFunc = ribHit.roundFunc || Math.round;
+  const contour = skeletonData.contours[contourIndex];
+  const point = contour.points[pointIndex];
+  const points = contour.points;
+  const defaultWidth = contour.defaultWidth || 20;
+  const tangent = { x: -normal.y, y: normal.x };
+
+  const behavior = {
     skeletonData,
     contourIndex,
     pointIndex,
     side,
     normal,
+    tangent,
     onCurvePoint,
-    ribHit.roundFunc || Math.round
-  );
-}
-
-/**
- * InterpolatingRibBehavior - Handles dragging of editable rib points with Alt key.
- */
-export class InterpolatingRibBehavior {
-  constructor(
-    skeletonData,
-    contourIndex,
-    pointIndex,
-    side,
-    normal,
-    onCurvePoint,
-    interpolationAxis = null,
-    roundFunc = Math.round
-  ) {
-    this.skeletonData = skeletonData;
-    this.contourIndex = contourIndex;
-    this.pointIndex = pointIndex;
-    this.side = side;
-    this.normal = normal;
-    this.tangent = { x: -normal.y, y: normal.x };
-    this.onCurvePoint = onCurvePoint;
-    this.interpolationAxis = interpolationAxis || null;
-    this.roundFunc = roundFunc;
-
-    const contour = skeletonData.contours[contourIndex];
-    const point = contour.points[pointIndex];
-    const points = contour.points;
-    const isClosed = !!contour.isClosed;
-    const defaultWidth = contour.defaultWidth || 20;
-
-    this.skeletonHandleInDir = null;
-    this.skeletonHandleOutDir = null;
-    this.hasIncomingHandle = false;
-    this.hasOutgoingHandle = false;
-
-    const prevIdx =
-      isClosed || pointIndex > 0 ? (pointIndex - 1 + points.length) % points.length : null;
-    if (prevIdx !== null && points[prevIdx]?.type) {
-      this.hasIncomingHandle = true;
-      const dx = points[prevIdx].x - point.x;
-      const dy = points[prevIdx].y - point.y;
-      const len = Math.hypot(dx, dy);
-      if (len > 0.001) {
-        this.skeletonHandleInDir = { x: dx / len, y: dy / len };
-      }
-    }
-
-    const nextIdx =
-      isClosed || pointIndex < points.length - 1 ? (pointIndex + 1) % points.length : null;
-    if (nextIdx !== null && points[nextIdx]?.type) {
-      this.hasOutgoingHandle = true;
-      const dx = points[nextIdx].x - point.x;
-      const dy = points[nextIdx].y - point.y;
-      const len = Math.hypot(dx, dy);
-      if (len > 0.001) {
-        this.skeletonHandleOutDir = { x: dx / len, y: dy / len };
-      }
-    }
-
-    if (side === "left") {
-      this.originalHalfWidth =
-        point.leftWidth !== undefined
+    roundFunc,
+    originalHalfWidth:
+      side === "left"
+        ? point.leftWidth !== undefined
           ? point.leftWidth
           : point.width !== undefined
             ? point.width / 2
-            : defaultWidth / 2;
-    } else {
-      this.originalHalfWidth =
-        point.rightWidth !== undefined
+            : defaultWidth / 2
+        : point.rightWidth !== undefined
           ? point.rightWidth
           : point.width !== undefined
             ? point.width / 2
-            : defaultWidth / 2;
-    }
+            : defaultWidth / 2,
+    originalNudge: point[side === "left" ? "leftNudge" : "rightNudge"] || 0,
+    minHalfWidth: 0,
+    skeletonHandleInDir: null,
+    skeletonHandleOutDir: null,
+    hasHandleOffsets: false,
+    originalHandleInOffsetX: 0,
+    originalHandleInOffsetY: 0,
+    originalHandleOutOffsetX: 0,
+    originalHandleOutOffsetY: 0,
+    applyDelta(delta, constrainMode = null, round = this.roundFunc) {
+      let newNudge = this.originalNudge;
+      let newHalfWidth = this.originalHalfWidth;
 
-    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-    this.originalNudge = point[nudgeKey] || 0;
-
-    const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
-    const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
-    const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
-    const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
-    const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
-    const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
-
-    const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
-    const has2DOut =
-      point[handleOutXKey] !== undefined || point[handleOutYKey] !== undefined;
-
-    if (has2DIn) {
-      this.originalHandleInOffsetX = point[handleInXKey] || 0;
-      this.originalHandleInOffsetY = point[handleInYKey] || 0;
-    } else if (point[handleIn1DKey]) {
-      const dir = this.skeletonHandleInDir || this.tangent;
-      this.originalHandleInOffsetX = dir.x * point[handleIn1DKey];
-      this.originalHandleInOffsetY = dir.y * point[handleIn1DKey];
-    } else {
-      this.originalHandleInOffsetX = 0;
-      this.originalHandleInOffsetY = 0;
-    }
-
-    if (has2DOut) {
-      this.originalHandleOutOffsetX = point[handleOutXKey] || 0;
-      this.originalHandleOutOffsetY = point[handleOutYKey] || 0;
-    } else if (point[handleOut1DKey]) {
-      const dir = this.skeletonHandleOutDir || this.tangent;
-      this.originalHandleOutOffsetX = dir.x * point[handleOut1DKey];
-      this.originalHandleOutOffsetY = dir.y * point[handleOut1DKey];
-    } else {
-      this.originalHandleOutOffsetX = 0;
-      this.originalHandleOutOffsetY = 0;
-    }
-
-    this._recalculateRibPos();
-
-    const prevHandle = this.interpolationAxis?.prevHandle || null;
-    const nextHandle = this.interpolationAxis?.nextHandle || null;
-    const segmentAnchor = this.interpolationAxis?.segmentAnchor || null;
-    let lineStart = this.interpolationAxis?.lineStart || null;
-    let lineEnd = this.interpolationAxis?.lineEnd || null;
-
-    if (!lineStart || !lineEnd) {
-      if (prevHandle && nextHandle) {
-        lineStart = prevHandle;
-        lineEnd = nextHandle;
-      } else if (prevHandle || nextHandle) {
-        lineStart = segmentAnchor || this.originalRibPos;
-        lineEnd = prevHandle || nextHandle;
+      if (constrainMode === "tangent") {
+        const tangentDot = delta.x * this.tangent.x + delta.y * this.tangent.y;
+        newNudge = this.originalNudge + tangentDot;
+      } else {
+        const sign = this.side === "left" ? 1 : -1;
+        const normalDot = delta.x * this.normal.x + delta.y * this.normal.y;
+        const normalDelta = sign * normalDot;
+        newHalfWidth = this.originalHalfWidth + normalDelta;
+        if (newHalfWidth < this.minHalfWidth) {
+          newHalfWidth = this.minHalfWidth;
+        }
       }
-    }
 
-    if (!lineStart || !lineEnd) {
-      lineStart = this.originalRibPos;
-      lineEnd = {
-        x: this.originalRibPos.x + this.tangent.x,
-        y: this.originalRibPos.y + this.tangent.y,
+      return {
+        contourIndex: this.contourIndex,
+        pointIndex: this.pointIndex,
+        side: this.side,
+        halfWidth: round(newHalfWidth),
+        nudge: round(newNudge),
       };
+    },
+    getRollback() {
+      const result = {
+        contourIndex: this.contourIndex,
+        pointIndex: this.pointIndex,
+        side: this.side,
+        halfWidth: Math.round(this.originalHalfWidth),
+        nudge: Math.round(this.originalNudge),
+      };
+
+      if (this.hasHandleOffsets) {
+        result.handleInOffsetX = Math.round(this.originalHandleInOffsetX);
+        result.handleInOffsetY = Math.round(this.originalHandleInOffsetY);
+        result.handleOutOffsetX = Math.round(this.originalHandleOutOffsetX);
+        result.handleOutOffsetY = Math.round(this.originalHandleOutOffsetY);
+        result.hasHandleOffsets = true;
+      }
+
+      return result;
+    },
+    setOriginalHalfWidth(halfWidth) {
+      this.originalHalfWidth = halfWidth;
+    },
+  };
+
+  const prevIdx = (pointIndex - 1 + points.length) % points.length;
+  if (points[prevIdx]?.type) {
+    const dx = points[prevIdx].x - point.x;
+    const dy = points[prevIdx].y - point.y;
+    const len = Math.hypot(dx, dy);
+    if (len > 0.001) {
+      behavior.skeletonHandleInDir = { x: dx / len, y: dy / len };
     }
+  }
 
-    this.hasIncomingHandle = this.interpolationAxis?.hasPrevHandle ?? this.hasIncomingHandle;
-    this.hasOutgoingHandle = this.interpolationAxis?.hasNextHandle ?? this.hasOutgoingHandle;
-
-    this.lineDir = {
-      x: lineEnd.x - lineStart.x,
-      y: lineEnd.y - lineStart.y,
-    };
-    this.lineLength = Math.hypot(this.lineDir.x, this.lineDir.y);
-
-    if (this.lineLength > 0.001) {
-      this.lineDir.x /= this.lineLength;
-      this.lineDir.y /= this.lineLength;
-    } else {
-      this.lineDir = { ...this.tangent };
-      this.lineLength = 1;
+  const nextIdx = (pointIndex + 1) % points.length;
+  if (points[nextIdx]?.type) {
+    const dx = points[nextIdx].x - point.x;
+    const dy = points[nextIdx].y - point.y;
+    const len = Math.hypot(dx, dy);
+    if (len > 0.001) {
+      behavior.skeletonHandleOutDir = { x: dx / len, y: dy / len };
     }
   }
 
-  _recalculateRibPos() {
-    const sign = this.side === "left" ? 1 : -1;
-    this.originalRibPos = {
-      x:
-        this.onCurvePoint.x +
-        sign * this.normal.x * this.originalHalfWidth +
-        this.tangent.x * this.originalNudge,
-      y:
-        this.onCurvePoint.y +
-        sign * this.normal.y * this.originalHalfWidth +
-        this.tangent.y * this.originalNudge,
-    };
+  const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+  const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+  const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+  const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+  const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+  const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+
+  const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
+  const has2DOut = point[handleOutXKey] !== undefined || point[handleOutYKey] !== undefined;
+  behavior.hasHandleOffsets =
+    has2DIn ||
+    has2DOut ||
+    point[handleIn1DKey] !== undefined ||
+    point[handleOut1DKey] !== undefined;
+
+  if (has2DIn) {
+    behavior.originalHandleInOffsetX = point[handleInXKey] || 0;
+    behavior.originalHandleInOffsetY = point[handleInYKey] || 0;
+  } else if (point[handleIn1DKey]) {
+    const dir = behavior.skeletonHandleInDir || behavior.tangent;
+    behavior.originalHandleInOffsetX = dir.x * point[handleIn1DKey];
+    behavior.originalHandleInOffsetY = dir.y * point[handleIn1DKey];
   }
 
-  setOriginalHalfWidth(halfWidth) {
-    this.originalHalfWidth = halfWidth;
-    this._recalculateRibPos();
+  if (has2DOut) {
+    behavior.originalHandleOutOffsetX = point[handleOutXKey] || 0;
+    behavior.originalHandleOutOffsetY = point[handleOutYKey] || 0;
+  } else if (point[handleOut1DKey]) {
+    const dir = behavior.skeletonHandleOutDir || behavior.tangent;
+    behavior.originalHandleOutOffsetX = dir.x * point[handleOut1DKey];
+    behavior.originalHandleOutOffsetY = dir.y * point[handleOut1DKey];
   }
 
-  applyDelta(delta, constrainMode = null, roundFunc = this.roundFunc) {
-    const deltaAlongLine = delta.x * this.lineDir.x + delta.y * this.lineDir.y;
-
-    const lineDirDotTangent = this.lineDir.x * this.tangent.x + this.lineDir.y * this.tangent.y;
-    const deltaNudge = lineDirDotTangent * deltaAlongLine;
-    const newNudge = this.originalNudge + deltaNudge;
-
-    const handleOffsetDeltaX = -this.tangent.x * deltaNudge;
-    const handleOffsetDeltaY = -this.tangent.y * deltaNudge;
-
-    const newHandleInOffsetX =
-      this.originalHandleInOffsetX + (this.hasIncomingHandle ? handleOffsetDeltaX : 0);
-    const newHandleInOffsetY =
-      this.originalHandleInOffsetY + (this.hasIncomingHandle ? handleOffsetDeltaY : 0);
-    const newHandleOutOffsetX =
-      this.originalHandleOutOffsetX + (this.hasOutgoingHandle ? handleOffsetDeltaX : 0);
-    const newHandleOutOffsetY =
-      this.originalHandleOutOffsetY + (this.hasOutgoingHandle ? handleOffsetDeltaY : 0);
-
-    return {
-      contourIndex: this.contourIndex,
-      pointIndex: this.pointIndex,
-      side: this.side,
-      halfWidth: roundFunc(this.originalHalfWidth),
-      nudge: roundFunc(newNudge),
-      handleInOffsetX: roundFunc(newHandleInOffsetX),
-      handleInOffsetY: roundFunc(newHandleInOffsetY),
-      handleOutOffsetX: roundFunc(newHandleOutOffsetX),
-      handleOutOffsetY: roundFunc(newHandleOutOffsetY),
-      isInterpolation: true,
-    };
-  }
-
-  getRollback() {
-    return {
-      contourIndex: this.contourIndex,
-      pointIndex: this.pointIndex,
-      side: this.side,
-      halfWidth: Math.round(this.originalHalfWidth),
-      nudge: Math.round(this.originalNudge),
-      handleInOffsetX: Math.round(this.originalHandleInOffsetX),
-      handleInOffsetY: Math.round(this.originalHandleInOffsetY),
-      handleOutOffsetX: Math.round(this.originalHandleOutOffsetX),
-      handleOutOffsetY: Math.round(this.originalHandleOutOffsetY),
-      isInterpolation: true,
-    };
-  }
+  return behavior;
 }
 
 export function createInterpolatingRibBehavior(
@@ -2069,114 +1771,284 @@ export function createInterpolatingRibBehavior(
   interpolationAxis = null
 ) {
   const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
-  return new InterpolatingRibBehavior(
+  const roundFunc = ribHit.roundFunc || Math.round;
+  const contour = skeletonData.contours[contourIndex];
+  const point = contour.points[pointIndex];
+  const points = contour.points;
+  const isClosed = !!contour.isClosed;
+  const defaultWidth = contour.defaultWidth || 20;
+  const tangent = { x: -normal.y, y: normal.x };
+
+  const behavior = {
     skeletonData,
     contourIndex,
     pointIndex,
     side,
     normal,
+    tangent,
     onCurvePoint,
-    interpolationAxis,
-    ribHit.roundFunc || Math.round
-  );
+    interpolationAxis: interpolationAxis || null,
+    roundFunc,
+    skeletonHandleInDir: null,
+    skeletonHandleOutDir: null,
+    hasIncomingHandle: false,
+    hasOutgoingHandle: false,
+    originalHalfWidth:
+      side === "left"
+        ? point.leftWidth !== undefined
+          ? point.leftWidth
+          : point.width !== undefined
+            ? point.width / 2
+            : defaultWidth / 2
+        : point.rightWidth !== undefined
+          ? point.rightWidth
+          : point.width !== undefined
+            ? point.width / 2
+            : defaultWidth / 2,
+    originalNudge: point[side === "left" ? "leftNudge" : "rightNudge"] || 0,
+    originalHandleInOffsetX: 0,
+    originalHandleInOffsetY: 0,
+    originalHandleOutOffsetX: 0,
+    originalHandleOutOffsetY: 0,
+    originalRibPos: null,
+    lineDir: { x: 0, y: 0 },
+    lineLength: 0,
+    _recalculateRibPos() {
+      const sign = this.side === "left" ? 1 : -1;
+      this.originalRibPos = {
+        x:
+          this.onCurvePoint.x +
+          sign * this.normal.x * this.originalHalfWidth +
+          this.tangent.x * this.originalNudge,
+        y:
+          this.onCurvePoint.y +
+          sign * this.normal.y * this.originalHalfWidth +
+          this.tangent.y * this.originalNudge,
+      };
+    },
+    setOriginalHalfWidth(halfWidth) {
+      this.originalHalfWidth = halfWidth;
+      this._recalculateRibPos();
+    },
+    applyDelta(delta, constrainMode = null, round = this.roundFunc) {
+      const deltaAlongLine = delta.x * this.lineDir.x + delta.y * this.lineDir.y;
+
+      const lineDirDotTangent = this.lineDir.x * this.tangent.x + this.lineDir.y * this.tangent.y;
+      const deltaNudge = lineDirDotTangent * deltaAlongLine;
+      const newNudge = this.originalNudge + deltaNudge;
+
+      const handleOffsetDeltaX = -this.tangent.x * deltaNudge;
+      const handleOffsetDeltaY = -this.tangent.y * deltaNudge;
+
+      const newHandleInOffsetX =
+        this.originalHandleInOffsetX + (this.hasIncomingHandle ? handleOffsetDeltaX : 0);
+      const newHandleInOffsetY =
+        this.originalHandleInOffsetY + (this.hasIncomingHandle ? handleOffsetDeltaY : 0);
+      const newHandleOutOffsetX =
+        this.originalHandleOutOffsetX + (this.hasOutgoingHandle ? handleOffsetDeltaX : 0);
+      const newHandleOutOffsetY =
+        this.originalHandleOutOffsetY + (this.hasOutgoingHandle ? handleOffsetDeltaY : 0);
+
+      return {
+        contourIndex: this.contourIndex,
+        pointIndex: this.pointIndex,
+        side: this.side,
+        halfWidth: round(this.originalHalfWidth),
+        nudge: round(newNudge),
+        handleInOffsetX: round(newHandleInOffsetX),
+        handleInOffsetY: round(newHandleInOffsetY),
+        handleOutOffsetX: round(newHandleOutOffsetX),
+        handleOutOffsetY: round(newHandleOutOffsetY),
+        isInterpolation: true,
+      };
+    },
+    getRollback() {
+      return {
+        contourIndex: this.contourIndex,
+        pointIndex: this.pointIndex,
+        side: this.side,
+        halfWidth: Math.round(this.originalHalfWidth),
+        nudge: Math.round(this.originalNudge),
+        handleInOffsetX: Math.round(this.originalHandleInOffsetX),
+        handleInOffsetY: Math.round(this.originalHandleInOffsetY),
+        handleOutOffsetX: Math.round(this.originalHandleOutOffsetX),
+        handleOutOffsetY: Math.round(this.originalHandleOutOffsetY),
+        isInterpolation: true,
+      };
+    },
+  };
+
+  const prevIdx =
+    isClosed || pointIndex > 0 ? (pointIndex - 1 + points.length) % points.length : null;
+  if (prevIdx !== null && points[prevIdx]?.type) {
+    behavior.hasIncomingHandle = true;
+    const dx = points[prevIdx].x - point.x;
+    const dy = points[prevIdx].y - point.y;
+    const len = Math.hypot(dx, dy);
+    if (len > 0.001) {
+      behavior.skeletonHandleInDir = { x: dx / len, y: dy / len };
+    }
+  }
+
+  const nextIdx =
+    isClosed || pointIndex < points.length - 1 ? (pointIndex + 1) % points.length : null;
+  if (nextIdx !== null && points[nextIdx]?.type) {
+    behavior.hasOutgoingHandle = true;
+    const dx = points[nextIdx].x - point.x;
+    const dy = points[nextIdx].y - point.y;
+    const len = Math.hypot(dx, dy);
+    if (len > 0.001) {
+      behavior.skeletonHandleOutDir = { x: dx / len, y: dy / len };
+    }
+  }
+
+  const handleInXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
+  const handleInYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
+  const handleOutXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
+  const handleOutYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
+  const handleIn1DKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
+  const handleOut1DKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
+
+  const has2DIn = point[handleInXKey] !== undefined || point[handleInYKey] !== undefined;
+  const has2DOut = point[handleOutXKey] !== undefined || point[handleOutYKey] !== undefined;
+
+  if (has2DIn) {
+    behavior.originalHandleInOffsetX = point[handleInXKey] || 0;
+    behavior.originalHandleInOffsetY = point[handleInYKey] || 0;
+  } else if (point[handleIn1DKey]) {
+    const dir = behavior.skeletonHandleInDir || behavior.tangent;
+    behavior.originalHandleInOffsetX = dir.x * point[handleIn1DKey];
+    behavior.originalHandleInOffsetY = dir.y * point[handleIn1DKey];
+  }
+
+  if (has2DOut) {
+    behavior.originalHandleOutOffsetX = point[handleOutXKey] || 0;
+    behavior.originalHandleOutOffsetY = point[handleOutYKey] || 0;
+  } else if (point[handleOut1DKey]) {
+    const dir = behavior.skeletonHandleOutDir || behavior.tangent;
+    behavior.originalHandleOutOffsetX = dir.x * point[handleOut1DKey];
+    behavior.originalHandleOutOffsetY = dir.y * point[handleOut1DKey];
+  }
+
+  behavior._recalculateRibPos();
+
+  const prevHandle = behavior.interpolationAxis?.prevHandle || null;
+  const nextHandle = behavior.interpolationAxis?.nextHandle || null;
+  const segmentAnchor = behavior.interpolationAxis?.segmentAnchor || null;
+  let lineStart = behavior.interpolationAxis?.lineStart || null;
+  let lineEnd = behavior.interpolationAxis?.lineEnd || null;
+
+  if (!lineStart || !lineEnd) {
+    if (prevHandle && nextHandle) {
+      lineStart = prevHandle;
+      lineEnd = nextHandle;
+    } else if (prevHandle || nextHandle) {
+      lineStart = segmentAnchor || behavior.originalRibPos;
+      lineEnd = prevHandle || nextHandle;
+    }
+  }
+
+  if (!lineStart || !lineEnd) {
+    lineStart = behavior.originalRibPos;
+    lineEnd = {
+      x: behavior.originalRibPos.x + behavior.tangent.x,
+      y: behavior.originalRibPos.y + behavior.tangent.y,
+    };
+  }
+
+  behavior.hasIncomingHandle = behavior.interpolationAxis?.hasPrevHandle ?? behavior.hasIncomingHandle;
+  behavior.hasOutgoingHandle = behavior.interpolationAxis?.hasNextHandle ?? behavior.hasOutgoingHandle;
+
+  behavior.lineDir = {
+    x: lineEnd.x - lineStart.x,
+    y: lineEnd.y - lineStart.y,
+  };
+  behavior.lineLength = Math.hypot(behavior.lineDir.x, behavior.lineDir.y);
+  if (behavior.lineLength > 0.001) {
+    behavior.lineDir.x /= behavior.lineLength;
+    behavior.lineDir.y /= behavior.lineLength;
+  } else {
+    behavior.lineDir = { ...behavior.tangent };
+    behavior.lineLength = 1;
+  }
+
+  return behavior;
 }
 
-/**
- * EditableHandleBehavior - Handles dragging of editable generated control points (handles).
- * Movement is constrained to the direction of the corresponding skeleton handle.
- */
-export class EditableHandleBehavior {
-  constructor(
+export function createEditableHandleBehavior(skeletonData, handleInfo, skeletonHandleDir) {
+  const contourIndex = handleInfo.skeletonContourIndex;
+  const pointIndex = handleInfo.skeletonPointIndex;
+  const side = handleInfo.side;
+  const handleType = handleInfo.handleType;
+  const roundFunc = handleInfo.roundFunc || Math.round;
+
+  const contour = skeletonData.contours[contourIndex];
+  const point = contour.points[pointIndex];
+
+  const offsetKey =
+    side === "left"
+      ? handleType === "in"
+        ? "leftHandleInOffset"
+        : "leftHandleOutOffset"
+      : handleType === "in"
+        ? "rightHandleInOffset"
+        : "rightHandleOutOffset";
+
+  const offsetXKey =
+    side === "left"
+      ? handleType === "in"
+        ? "leftHandleInOffsetX"
+        : "leftHandleOutOffsetX"
+      : handleType === "in"
+        ? "rightHandleInOffsetX"
+        : "rightHandleOutOffsetX";
+  const offsetYKey =
+    side === "left"
+      ? handleType === "in"
+        ? "leftHandleInOffsetY"
+        : "leftHandleOutOffsetY"
+      : handleType === "in"
+        ? "rightHandleInOffsetY"
+        : "rightHandleOutOffsetY";
+
+  const has2D = point[offsetXKey] !== undefined || point[offsetYKey] !== undefined;
+  const originalOffset = has2D
+    ? (point[offsetXKey] || 0) * skeletonHandleDir.x +
+      (point[offsetYKey] || 0) * skeletonHandleDir.y
+    : point[offsetKey] || 0;
+
+  return {
     skeletonData,
     contourIndex,
     pointIndex,
     side,
     handleType,
     skeletonHandleDir,
-    roundFunc = Math.round
-  ) {
-    this.skeletonData = skeletonData;
-    this.contourIndex = contourIndex;
-    this.pointIndex = pointIndex;
-    this.side = side;
-    this.handleType = handleType;
-    this.skeletonHandleDir = skeletonHandleDir;
-    this.roundFunc = roundFunc;
+    roundFunc,
+    offsetKey,
+    originalOffset,
+    applyDelta(delta, round = this.roundFunc) {
+      const projectedDelta = delta.x * this.skeletonHandleDir.x + delta.y * this.skeletonHandleDir.y;
+      const newOffset = this.originalOffset + projectedDelta;
 
-    const contour = skeletonData.contours[contourIndex];
-    const point = contour.points[pointIndex];
-
-    this.offsetKey =
-      side === "left"
-        ? handleType === "in"
-          ? "leftHandleInOffset"
-          : "leftHandleOutOffset"
-        : handleType === "in"
-          ? "rightHandleInOffset"
-          : "rightHandleOutOffset";
-
-    const offsetXKey =
-      side === "left"
-        ? handleType === "in"
-          ? "leftHandleInOffsetX"
-          : "leftHandleOutOffsetX"
-        : handleType === "in"
-          ? "rightHandleInOffsetX"
-          : "rightHandleOutOffsetX";
-    const offsetYKey =
-      side === "left"
-        ? handleType === "in"
-          ? "leftHandleInOffsetY"
-          : "leftHandleOutOffsetY"
-        : handleType === "in"
-          ? "rightHandleInOffsetY"
-          : "rightHandleOutOffsetY";
-
-    const has2D = point[offsetXKey] !== undefined || point[offsetYKey] !== undefined;
-
-    if (has2D) {
-      const offset2DX = point[offsetXKey] || 0;
-      const offset2DY = point[offsetYKey] || 0;
-      this.originalOffset = offset2DX * skeletonHandleDir.x + offset2DY * skeletonHandleDir.y;
-    } else {
-      this.originalOffset = point[this.offsetKey] || 0;
-    }
-  }
-
-  applyDelta(delta, roundFunc = this.roundFunc) {
-    const projectedDelta = delta.x * this.skeletonHandleDir.x + delta.y * this.skeletonHandleDir.y;
-    const newOffset = this.originalOffset + projectedDelta;
-
-    return {
-      contourIndex: this.contourIndex,
-      pointIndex: this.pointIndex,
-      side: this.side,
-      handleType: this.handleType,
-      offset: roundFunc(newOffset),
-    };
-  }
-
-  getRollback() {
-    return {
-      contourIndex: this.contourIndex,
-      pointIndex: this.pointIndex,
-      side: this.side,
-      handleType: this.handleType,
-      offset: Math.round(this.originalOffset),
-    };
-  }
-}
-
-export function createEditableHandleBehavior(skeletonData, handleInfo, skeletonHandleDir) {
-  return new EditableHandleBehavior(
-    skeletonData,
-    handleInfo.skeletonContourIndex,
-    handleInfo.skeletonPointIndex,
-    handleInfo.side,
-    handleInfo.handleType,
-    skeletonHandleDir,
-    handleInfo.roundFunc || Math.round
-  );
+      return {
+        contourIndex: this.contourIndex,
+        pointIndex: this.pointIndex,
+        side: this.side,
+        handleType: this.handleType,
+        offset: round(newOffset),
+      };
+    },
+    getRollback() {
+      return {
+        contourIndex: this.contourIndex,
+        pointIndex: this.pointIndex,
+        side: this.side,
+        handleType: this.handleType,
+        offset: Math.round(this.originalOffset),
+      };
+    },
+  };
 }
 
 export function findEqualizeHandleForPath(positionedGlyph, point, size) {
