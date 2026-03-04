@@ -100,12 +100,6 @@ export const OBJECT_KINDS = {
     nonSelection: true,
     inScope: true,
   },
-  regularEqualizeHandle: {
-    selectionKey: null,
-    supports: ["drag"],
-    persistent: false,
-    nonSelection: true,
-  },
   mixedSelection: {
     selectionKey: null,
     supports: ["drag"],
@@ -239,7 +233,6 @@ export const DRAG_ROUTING_MAP = {
   },
   R5: {
     regularPoint: "CA",
-    regularEqualizeHandle: "CL",
     anchor: "NA",
     guideline: "NA",
     component: "NA",
@@ -256,7 +249,6 @@ export const DRAG_ROUTING_MAP = {
   },
   R6: {
     regularPoint: "CA",
-    regularEqualizeHandle: "CL",
     anchor: "NA",
     guideline: "NA",
     component: "NA",

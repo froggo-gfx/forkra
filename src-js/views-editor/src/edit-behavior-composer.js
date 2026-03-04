@@ -12,53 +12,60 @@ import {
   legacyNudgeAdapters,
 } from "./pointer-objects.js";
 
-export async function runPointLikeDragKernel({
+export async function runPointLikeInputKernel({
+  mode,
   eventStream,
   initialEvent,
+  event,
   getBehaviorNameForEvent,
   getPointForEvent,
   onBehaviorChanged,
-  onEvent,
+  onInput,
 }) {
-  assert(eventStream, "runPointLikeDragKernel: missing eventStream");
-  assert(initialEvent, "runPointLikeDragKernel: missing initialEvent");
-  assert(
-    typeof getBehaviorNameForEvent === "function",
-    "runPointLikeDragKernel: missing getBehaviorNameForEvent"
-  );
-  assert(
-    typeof getPointForEvent === "function",
-    "runPointLikeDragKernel: missing getPointForEvent"
-  );
-  assert(typeof onEvent === "function", "runPointLikeDragKernel: missing onEvent");
+  assert(mode === "drag" || mode === "nudge", "runPointLikeInputKernel: invalid mode");
+  assert(typeof onInput === "function", "runPointLikeInputKernel: missing onInput");
 
-  const initialPoint = getPointForEvent(initialEvent);
-  let behaviorName = getBehaviorNameForEvent(initialEvent);
+  if (mode === "drag") {
+    assert(eventStream, "runPointLikeInputKernel(drag): missing eventStream");
+    assert(initialEvent, "runPointLikeInputKernel(drag): missing initialEvent");
+    assert(
+      typeof getBehaviorNameForEvent === "function",
+      "runPointLikeInputKernel(drag): missing getBehaviorNameForEvent"
+    );
+    assert(
+      typeof getPointForEvent === "function",
+      "runPointLikeInputKernel(drag): missing getPointForEvent"
+    );
 
-  for await (const event of eventStream) {
-    const nextBehaviorName = getBehaviorNameForEvent(event);
-    if (nextBehaviorName !== behaviorName) {
-      behaviorName = nextBehaviorName;
-      if (onBehaviorChanged) {
-        await onBehaviorChanged({ behaviorName, event, initialPoint });
+    const initialPoint = getPointForEvent(initialEvent);
+    let behaviorName = getBehaviorNameForEvent(initialEvent);
+
+    for await (const dragEvent of eventStream) {
+      const nextBehaviorName = getBehaviorNameForEvent(dragEvent);
+      if (nextBehaviorName !== behaviorName) {
+        behaviorName = nextBehaviorName;
+        if (onBehaviorChanged) {
+          await onBehaviorChanged({ behaviorName, event: dragEvent, initialPoint });
+        }
       }
+      const currentPoint = getPointForEvent(dragEvent);
+      const delta = {
+        x: currentPoint.x - initialPoint.x,
+        y: currentPoint.y - initialPoint.y,
+      };
+      await onInput({
+        mode,
+        event: dragEvent,
+        behaviorName,
+        initialPoint,
+        currentPoint,
+        delta,
+      });
     }
-    const currentPoint = getPointForEvent(event);
-    const delta = {
-      x: currentPoint.x - initialPoint.x,
-      y: currentPoint.y - initialPoint.y,
-    };
-    await onEvent({
-      event,
-      behaviorName,
-      initialPoint,
-      currentPoint,
-      delta,
-    });
+    return;
   }
-}
 
-function getNudgeDeltaForEvent(event) {
+  assert(event, "runPointLikeInputKernel(nudge): missing event");
   let [dx, dy] = arrowKeyDeltas[event.key] || [0, 0];
   if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
     dx *= 100;
@@ -67,14 +74,16 @@ function getNudgeDeltaForEvent(event) {
     dx *= 10;
     dy *= 10;
   }
-  return { x: dx, y: dy };
-}
-
-export async function runPointLikeNudgeKernel({ event, onNudge }) {
-  assert(event, "runPointLikeNudgeKernel: missing event");
-  assert(typeof onNudge === "function", "runPointLikeNudgeKernel: missing onNudge");
-  const delta = getNudgeDeltaForEvent(event);
-  await onNudge({ event, delta });
+  const delta = { x: dx, y: dy };
+  await onInput({
+    mode,
+    event,
+    behaviorName:
+      typeof getBehaviorNameForEvent === "function"
+        ? getBehaviorNameForEvent(event)
+        : undefined,
+    delta,
+  });
 }
 
 /**
@@ -139,7 +148,7 @@ export async function runDragRoutingOrchestration(_context) {
 
   const adapterResult = await adapter({
     ..._context,
-    runPointLikeDragKernel,
+    runPointLikeInputKernel,
   });
 
   if (adapterResult === false) {
@@ -200,7 +209,7 @@ export async function runNudgeRoutingOrchestration(_context) {
   const adapterResult = await adapter({
     ..._context,
     runNudgeOrchestration,
-    runPointLikeNudgeKernel,
+    runPointLikeInputKernel,
   });
   if (adapterResult === false) {
     return false;

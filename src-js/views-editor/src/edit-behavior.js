@@ -2126,6 +2126,181 @@ export function getEqualizeHandleInfoForPointIndex(path, pointIndex) {
   return { pointIndex, smoothIndex, oppositeIndex };
 }
 
+export function resolveEqualizePairForContourPoint(contourOrPath, pointIndex) {
+  if (pointIndex === undefined || pointIndex === null || pointIndex < 0) {
+    return null;
+  }
+
+  if (contourOrPath?.pointTypes && typeof contourOrPath.getPoint === "function") {
+    return getEqualizeHandleInfoForPointIndex(contourOrPath, pointIndex);
+  }
+
+  const contour = contourOrPath;
+  if (!contour?.points?.length) {
+    return null;
+  }
+  const numPoints = contour.points.length;
+  if (pointIndex >= numPoints) {
+    return null;
+  }
+  const clickedPoint = contour.points[pointIndex];
+  if (clickedPoint?.type !== "cubic") {
+    return null;
+  }
+
+  let smoothIndex = null;
+  let oppositeIndex = null;
+
+  const prevIndex = (pointIndex - 1 + numPoints) % numPoints;
+  const nextIndex = (pointIndex + 1) % numPoints;
+  const prevPoint = contour.points[prevIndex];
+  const nextPoint = contour.points[nextIndex];
+
+  if (!prevPoint?.type && prevPoint?.smooth) {
+    const prevPrevIndex = (prevIndex - 1 + numPoints) % numPoints;
+    const prevPrevPoint = contour.points[prevPrevIndex];
+    if (prevPrevPoint?.type === "cubic") {
+      smoothIndex = prevIndex;
+      oppositeIndex = prevPrevIndex;
+    }
+  }
+
+  if (smoothIndex === null && !nextPoint?.type && nextPoint?.smooth) {
+    const nextNextIndex = (nextIndex + 1) % numPoints;
+    const nextNextPoint = contour.points[nextNextIndex];
+    if (nextNextPoint?.type === "cubic") {
+      smoothIndex = nextIndex;
+      oppositeIndex = nextNextIndex;
+    }
+  }
+
+  if (smoothIndex === null || oppositeIndex === null) {
+    return null;
+  }
+  return { pointIndex, smoothIndex, oppositeIndex };
+}
+
+export function computeEqualizedHandlePositions({
+  mode,
+  smoothPoint,
+  draggedPoint,
+  oppositePoint,
+  currentPoint,
+  delta,
+  shiftKey = false,
+  roundFunc = Math.round,
+  nudgeOppositePolicy = "mirror",
+}) {
+  if (!smoothPoint || !draggedPoint || !oppositePoint) {
+    return null;
+  }
+
+  if (mode === "drag") {
+    if (!currentPoint) {
+      return null;
+    }
+    let dragVec = {
+      x: currentPoint.x - smoothPoint.x,
+      y: currentPoint.y - smoothPoint.y,
+    };
+    if (shiftKey) {
+      dragVec = constrainHorVerDiag(dragVec);
+    }
+    if (Math.hypot(dragVec.x, dragVec.y) < 1) {
+      return null;
+    }
+    return {
+      draggedX: roundFunc(smoothPoint.x + dragVec.x),
+      draggedY: roundFunc(smoothPoint.y + dragVec.y),
+      oppositeX: roundFunc(smoothPoint.x - dragVec.x),
+      oppositeY: roundFunc(smoothPoint.y - dragVec.y),
+    };
+  }
+
+  if (mode !== "nudge" || !delta) {
+    return null;
+  }
+
+  const draggedX = roundFunc(draggedPoint.x + delta.x);
+  const draggedY = roundFunc(draggedPoint.y + delta.y);
+  const draggedVec = {
+    x: draggedX - smoothPoint.x,
+    y: draggedY - smoothPoint.y,
+  };
+
+  if (nudgeOppositePolicy === "preserve-direction") {
+    const oppositeVec = {
+      x: oppositePoint.x - smoothPoint.x,
+      y: oppositePoint.y - smoothPoint.y,
+    };
+    const oppositeLength = Math.hypot(oppositeVec.x, oppositeVec.y);
+    if (oppositeLength > 0.001) {
+      const draggedLength = Math.hypot(draggedVec.x, draggedVec.y);
+      const scale = draggedLength / oppositeLength;
+      return {
+        draggedX,
+        draggedY,
+        oppositeX: roundFunc(smoothPoint.x + oppositeVec.x * scale),
+        oppositeY: roundFunc(smoothPoint.y + oppositeVec.y * scale),
+      };
+    }
+    return {
+      draggedX,
+      draggedY,
+      oppositeX: roundFunc(oppositePoint.x),
+      oppositeY: roundFunc(oppositePoint.y),
+    };
+  }
+
+  return {
+    draggedX,
+    draggedY,
+    oppositeX: roundFunc(smoothPoint.x - draggedVec.x),
+    oppositeY: roundFunc(smoothPoint.y - draggedVec.y),
+  };
+}
+
+export function makeRegularEqualizeNudgeChanges(
+  path,
+  pointSelection,
+  delta,
+  { roundFunc = Math.round } = {}
+) {
+  if (!path || !pointSelection?.length || !delta) {
+    return [];
+  }
+  const equalizeChanges = [];
+  for (const pointIndex of pointSelection) {
+    const pairInfo = resolveEqualizePairForContourPoint(path, pointIndex);
+    if (!pairInfo) {
+      continue;
+    }
+    const smoothPoint = path.getPoint(pairInfo.smoothIndex);
+    const draggedPoint = path.getPoint(pairInfo.pointIndex);
+    const oppositePoint = path.getPoint(pairInfo.oppositeIndex);
+    const nextPositions = computeEqualizedHandlePositions({
+      mode: "nudge",
+      smoothPoint,
+      draggedPoint,
+      oppositePoint,
+      delta,
+      roundFunc,
+      nudgeOppositePolicy: "mirror",
+    });
+    if (!nextPositions) {
+      continue;
+    }
+    equalizeChanges.push(
+      { f: "=xy", a: [pairInfo.pointIndex, nextPositions.draggedX, nextPositions.draggedY] },
+      {
+        f: "=xy",
+        a: [pairInfo.oppositeIndex, nextPositions.oppositeX, nextPositions.oppositeY],
+      }
+    );
+  }
+  return equalizeChanges;
+}
+
 export function makeEqualizeDragChanges(
   path,
   equalizeHandleInfo,
@@ -2138,33 +2313,26 @@ export function makeEqualizeDragChanges(
 
   const { pointIndex, smoothIndex, oppositeIndex } = equalizeHandleInfo;
   const smoothPt = path.getPoint(smoothIndex);
+  const draggedPt = path.getPoint(pointIndex);
+  const oppositePt = path.getPoint(oppositeIndex);
   if (!smoothPt) {
     return null;
   }
 
-  let newDragVec = {
-    x: currentGlyphPoint.x - smoothPt.x,
-    y: currentGlyphPoint.y - smoothPt.y,
-  };
-  if (shiftKey) {
-    newDragVec = constrainHorVerDiag(newDragVec);
-  }
-  const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
-  if (newDragLen < 1) {
+  const nextPositions = computeEqualizedHandlePositions({
+    mode: "drag",
+    smoothPoint: smoothPt,
+    draggedPoint: draggedPt,
+    oppositePoint: oppositePt,
+    currentPoint: currentGlyphPoint,
+    shiftKey,
+  });
+  if (!nextPositions) {
     return null;
   }
 
-  const newDragPos = {
-    x: Math.round(smoothPt.x + newDragVec.x),
-    y: Math.round(smoothPt.y + newDragVec.y),
-  };
-  const newOppPos = {
-    x: Math.round(smoothPt.x - newDragVec.x),
-    y: Math.round(smoothPt.y - newDragVec.y),
-  };
-
   return [
-    { f: "=xy", a: [pointIndex, newDragPos.x, newDragPos.y] },
-    { f: "=xy", a: [oppositeIndex, newOppPos.x, newOppPos.y] },
+    { f: "=xy", a: [pointIndex, nextPositions.draggedX, nextPositions.draggedY] },
+    { f: "=xy", a: [oppositeIndex, nextPositions.oppositeX, nextPositions.oppositeY] },
   ];
 }

@@ -286,3 +286,62 @@ Status: In Progress
 - Manual test results:
   - NOT RUN in this terminal session (requires UI verification).
 - Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Cross-Cut: Debloat basic drag+nudge orchestration
+
+- Problem: Basic regular/skeleton drag+nudge orchestration was still split across near-duplicate functions, so adapter routing looked unified but code structure remained bloated.
+- Code analysis:
+  - Updated `src-js/views-editor/src/edit-behavior-composer.js`.
+  - Replaced separate composer kernels (`runPointLikeDragKernel`, `runPointLikeNudgeKernel`) with one mode-based kernel: `runPointLikeInputKernel({ mode: \"drag\" | \"nudge\", ... })`.
+  - Updated composer routing injection so canonical adapters receive the single input kernel in both drag and nudge paths.
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Merged regular drag+nudge orchestration into:
+    - `runRegularPointLikeOrchestration(...)`
+    - `runRegularPointLikeAdapter(...)`
+    - `runRegularPointLikeCanonical(context, mode)`
+  - Merged skeleton drag+nudge/equalize orchestration into:
+    - `runSkeletonPointLikeSession(...)`
+    - `runSkeletonPointLikeOrchestration({ mode, variant })`
+    - `runSkeletonPointLikeCanonical(context, mode)`
+    - `runSkeletonHandlePointLikeCanonical(context, mode)`
+  - Kept legacy/special-case routes (rib/editable/tunni/mixed/fixed-rib fallback) intact; only aligned signatures and canonical mapping to the new mode-based entrypoints.
+  - Preserved regular equalize nudge short-circuit via `_handleArrowKeysForEqualizePathHandles(...)` before regular nudge persistence path.
+  - Updated canonical adapter maps to route through unified mode handlers for basic kinds.
+  - Verified build with `npm run bundle` (success, only existing webpack size warnings).
+  - Net file-size reduction:
+    - `pointer-objects.js`: 1426 -> 1259 lines.
+    - `edit-behavior-composer.js`: 227 -> 236 lines (small increase from kernel unification API).
+- Comparison: Yes (code-level). Basic regular/skeleton drag+nudge now use shared mode-based orchestration kernels instead of parallel per-mode orchestration functions, with legacy/special-case behavior kept out of scope for this step.
+- Manual test results:
+  - NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Cross-Cut: Equalize kernel unification and regular equalize canonical routing
+
+- Problem: Equalize math and pair-resolution were duplicated across pointer/adapters, and regular `X` nudge still depended on pointer fallback (`_handleArrowKeysForEqualizePathHandles(...)`) instead of canonical adapter ownership.
+- Code analysis:
+  - Updated `src-js/views-editor/src/edit-behavior.js`.
+  - Added shared equalize helpers:
+    - `resolveEqualizePairForContourPoint(...)`
+    - `computeEqualizedHandlePositions(...)`
+    - `makeRegularEqualizeNudgeChanges(...)`
+  - Refactored existing `makeEqualizeDragChanges(...)` to use shared equalize position computation.
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Removed adapter-local duplicate skeleton equalize pair helper and switched skeleton/regular equalize paths to shared behavior helpers.
+  - Added canonical regular equalize nudge adapter flow (`runRegularEqualizeNudgeCanonical(...)`) and removed regular canonical dependency on pointer fallback equalize nudge handling.
+  - Added regular equalize drag context passthrough (`selectionOverride` + `equalizeHandleInfo`) to canonical regular point route.
+  - Added explicit equalize rollback coverage for both dragged and opposite points to keep undo/redo correct when equalize drag runs with empty regular selection.
+  - Preserved skeleton equalize nudge parity by keeping opposite handle unchanged when opposite vector length is near zero (preserve-direction mode).
+  - Updated `src-js/views-editor/src/edit-behavior-registry.js` and `src-js/views-editor/src/edit-tools-pointer.js`:
+    - removed `regularEqualizeHandle` object kind routing,
+    - routed regular X+drag via canonical `regularPoint` adapter context.
+  - Verification:
+    - `node --check src-js/views-editor/src/edit-behavior.js`
+    - `node --check src-js/views-editor/src/pointer-objects.js`
+    - `node --check src-js/views-editor/src/edit-behavior-registry.js`
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+    - `npm run bundle` (success, only existing webpack size warnings).
+- Comparison: Yes (code-level). Equalize math now has a shared behavior-level kernel used by both regular and skeleton adapter flows, and regular equalize nudge canonical routing no longer requires pointer fallback on the canonical path.
+- Manual test results:
+  - NOT RUN in this terminal session (requires UI verification).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).

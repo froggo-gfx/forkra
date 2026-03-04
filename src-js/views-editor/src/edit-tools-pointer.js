@@ -2054,19 +2054,14 @@ export class PointerTool extends BaseTool {
       const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
       const handleInfo = findEqualizeHandleForPath(positionedGlyph, point, size);
       if (handleInfo && positionedGlyph) {
-        const editableHandleInfo = this.sceneModel._getEditableHandleForGeneratedPoint(
-          positionedGlyph,
-          handleInfo.pointIndex
-        );
         await runDragRoutingOrchestration({
           pointerTool: this,
           sceneController,
           eventStream,
           initialEvent,
-          objectKind: "regularEqualizeHandle",
-          handleInfo,
-          positionedGlyph,
-          editableHandleInfo,
+          objectKind: "regularPoint",
+          selectionOverride: new Set(),
+          equalizeHandleInfo: handleInfo,
         });
         initialEvent.preventDefault();
         return;
