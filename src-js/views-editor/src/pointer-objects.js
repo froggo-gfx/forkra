@@ -2,6 +2,7 @@ import { recordChanges } from "@fontra/core/change-recorder.js";
 import { ChangeCollector, applyChange, consolidateChanges } from "@fontra/core/changes.js";
 import { translate } from "@fontra/core/localization.js";
 import { connectContours } from "@fontra/core/path-functions.js";
+import * as vector from "@fontra/core/vector.js";
 import {
   getSkeletonData,
   regenerateSkeletonContours,
@@ -9,9 +10,10 @@ import {
   calculateNormalAtSkeletonPoint,
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
-import { assert, parseSelection } from "@fontra/core/utils.js";
+import { arrowKeyDeltas, assert, parseSelection } from "@fontra/core/utils.js";
 import {
   computeEqualizedHandlePositions,
+  constrainHorVerDiag,
   EditBehaviorFactory,
   applyLinkedWidthDelta,
   buildRibInterpolationAxisFromPath,
@@ -30,7 +32,10 @@ import {
   makeRoundFunc,
   resolveEqualizePairForContourPoint,
 } from "./edit-behavior.js";
-import { buildSegmentsFromSkeletonPoints } from "./skeleton-tunni-calculations.js";
+import {
+  buildSegmentsFromSkeletonPoints,
+  calculateSkeletonTrueTunniPoint,
+} from "./skeleton-tunni-calculations.js";
 
 // Adapter contract for drag/nudge routing:
 // - When handled, adapters return `{ forward, rollback }`.
@@ -43,6 +48,7 @@ export const ADAPTER_CONTRACT = Object.freeze({
 });
 
 const DEFAULT_SKELETON_WIDTH = 80;
+const FIXED_RIB_SCALE_CONTROL_POINTS = true;
 
 function makeAdapterResult(forward = null, rollback = null) {
   return { forward, rollback };
@@ -388,6 +394,683 @@ function createSkeletonPointExecutors(
     behaviors.push({ contourIndex: contourIdx, executor });
   }
   return behaviors;
+}
+
+function findPrevOnCurveIndex(points, startIndex, isClosed) {
+  for (let i = startIndex - 1; i >= 0; i--) {
+    if (points[i] && !points[i].type) {
+      return i;
+    }
+  }
+  if (!isClosed) {
+    return null;
+  }
+  for (let i = points.length - 1; i > startIndex; i--) {
+    if (points[i] && !points[i].type) {
+      return i;
+    }
+  }
+  return null;
+}
+
+function findNextOnCurveIndex(points, startIndex, isClosed) {
+  for (let i = startIndex + 1; i < points.length; i++) {
+    if (points[i] && !points[i].type) {
+      return i;
+    }
+  }
+  if (!isClosed) {
+    return null;
+  }
+  for (let i = 0; i < startIndex; i++) {
+    if (points[i] && !points[i].type) {
+      return i;
+    }
+  }
+  return null;
+}
+
+function resetWidthStateFromOriginal(origPoint, workPoint) {
+  if (origPoint.width === undefined) {
+    delete workPoint.width;
+  } else {
+    workPoint.width = origPoint.width;
+  }
+  if (origPoint.leftWidth === undefined) {
+    delete workPoint.leftWidth;
+  } else {
+    workPoint.leftWidth = origPoint.leftWidth;
+  }
+  if (origPoint.rightWidth === undefined) {
+    delete workPoint.rightWidth;
+  } else {
+    workPoint.rightWidth = origPoint.rightWidth;
+  }
+}
+
+function enforceSmoothColinearityForSkeleton(points, isClosed, roundFunc = Math.round) {
+  if (!points || points.length < 2) {
+    return;
+  }
+  const numPoints = points.length;
+
+  for (let i = 0; i < numPoints; i++) {
+    const point = points[i];
+    if (!point || point.type || !point.smooth || point.skipColinear) {
+      continue;
+    }
+    if (!isClosed && (i === 0 || i === numPoints - 1)) {
+      continue;
+    }
+
+    const prevIdx = (i - 1 + numPoints) % numPoints;
+    const nextIdx = (i + 1) % numPoints;
+    const prevPoint = points[prevIdx];
+    const nextPoint = points[nextIdx];
+    if (!prevPoint || !nextPoint) {
+      continue;
+    }
+
+    const prevIsOnCurve = !prevPoint.type;
+    const nextIsOnCurve = !nextPoint.type;
+
+    if (!prevIsOnCurve && !nextIsOnCurve) {
+      const vecIn = { x: prevPoint.x - point.x, y: prevPoint.y - point.y };
+      const vecOut = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
+      const lenIn = Math.hypot(vecIn.x, vecIn.y);
+      const lenOut = Math.hypot(vecOut.x, vecOut.y);
+      if (lenIn < 1e-3 || lenOut < 1e-3) {
+        continue;
+      }
+
+      const dirIn = { x: vecIn.x / lenIn, y: vecIn.y / lenIn };
+      const dirOut = { x: vecOut.x / lenOut, y: vecOut.y / lenOut };
+      const weighted = {
+        x: dirOut.x * lenOut - dirIn.x * lenIn,
+        y: dirOut.y * lenOut - dirIn.y * lenIn,
+      };
+      const weightedLen = Math.hypot(weighted.x, weighted.y);
+      if (weightedLen < 1e-6) {
+        continue;
+      }
+      const tangent = { x: weighted.x / weightedLen, y: weighted.y / weightedLen };
+      prevPoint.x = roundFunc(point.x - tangent.x * lenIn);
+      prevPoint.y = roundFunc(point.y - tangent.y * lenIn);
+      nextPoint.x = roundFunc(point.x + tangent.x * lenOut);
+      nextPoint.y = roundFunc(point.y + tangent.y * lenOut);
+      continue;
+    }
+
+    if (prevIsOnCurve && !nextIsOnCurve) {
+      const vec = { x: point.x - prevPoint.x, y: point.y - prevPoint.y };
+      const len = Math.hypot(vec.x, vec.y);
+      const handleLen = Math.hypot(nextPoint.x - point.x, nextPoint.y - point.y);
+      if (len < 1e-3 || handleLen < 1e-3) {
+        continue;
+      }
+      const dir = { x: vec.x / len, y: vec.y / len };
+      nextPoint.x = roundFunc(point.x + dir.x * handleLen);
+      nextPoint.y = roundFunc(point.y + dir.y * handleLen);
+      continue;
+    }
+
+    if (!prevIsOnCurve && nextIsOnCurve) {
+      const vec = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
+      const len = Math.hypot(vec.x, vec.y);
+      const handleLen = Math.hypot(prevPoint.x - point.x, prevPoint.y - point.y);
+      if (len < 1e-3 || handleLen < 1e-3) {
+        continue;
+      }
+      const dir = { x: vec.x / len, y: vec.y / len };
+      prevPoint.x = roundFunc(point.x - dir.x * handleLen);
+      prevPoint.y = roundFunc(point.y - dir.y * handleLen);
+    }
+  }
+}
+
+function normalizeVectorSafe(vec, epsilon = 1e-6) {
+  const len = Math.hypot(vec.x, vec.y);
+  if (!(len > epsilon)) {
+    return null;
+  }
+  return { x: vec.x / len, y: vec.y / len };
+}
+
+function rotateVector(vec, cos, sin) {
+  return {
+    x: vec.x * cos - vec.y * sin,
+    y: vec.x * sin + vec.y * cos,
+  };
+}
+
+function calculateHandleTensionsForSegment(segment) {
+  if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
+    return null;
+  }
+  const [cp1, cp2] = segment.controlPoints;
+  const start = segment.startPoint;
+  const end = segment.endPoint;
+  const trueTunni = calculateSkeletonTrueTunniPoint(segment);
+  const tensionPoint = trueTunni || {
+    x: (cp1.x + cp2.x) / 2,
+    y: (cp1.y + cp2.y) / 2,
+  };
+  const distStart = Math.hypot(tensionPoint.x - start.x, tensionPoint.y - start.y);
+  const distEnd = Math.hypot(tensionPoint.x - end.x, tensionPoint.y - end.y);
+  const lenStart = Math.hypot(cp1.x - start.x, cp1.y - start.y);
+  const lenEnd = Math.hypot(cp2.x - end.x, cp2.y - end.y);
+  const tensionStart = distStart > 1e-6 ? lenStart / distStart : null;
+  const tensionEnd = distEnd > 1e-6 ? lenEnd / distEnd : null;
+  return { tensionStart, tensionEnd, lenStart, lenEnd };
+}
+
+function computeHandleLengthsFromTensions(
+  startPoint,
+  startDir,
+  endPoint,
+  endDir,
+  tensionStart,
+  tensionEnd
+) {
+  const line1End = { x: startPoint.x + startDir.x, y: startPoint.y + startDir.y };
+  const line2End = { x: endPoint.x + endDir.x, y: endPoint.y + endDir.y };
+  const intersection = vector.intersect(startPoint, line1End, endPoint, line2End);
+  let distStartToTunni = null;
+  let distEndToTunni = null;
+  if (intersection && Number.isFinite(intersection.t1) && Number.isFinite(intersection.t2)) {
+    distStartToTunni = Math.abs(intersection.t1);
+    distEndToTunni = Math.abs(intersection.t2);
+  } else {
+    const distTotal = vector.distance(startPoint, endPoint);
+    distStartToTunni = distTotal / 2;
+    distEndToTunni = distTotal / 2;
+  }
+
+  const startLen = Number.isFinite(tensionStart)
+    ? tensionStart * distStartToTunni
+    : null;
+  const endLen = Number.isFinite(tensionEnd) ? tensionEnd * distEndToTunni : null;
+  return { startLen, endLen };
+}
+
+function applyFixedRibDragToSkeletonData(
+  originalSkeletonData,
+  workingSkeletonData,
+  selectedSkeletonPoints,
+  clickedSkeletonPoint,
+  dragDelta,
+  roundFunc,
+  options = {}
+) {
+  if (!selectedSkeletonPoints?.size || !clickedSkeletonPoint) {
+    return false;
+  }
+
+  const { contourIdx, pointIdx } = clickedSkeletonPoint;
+  const clickedContour = originalSkeletonData.contours?.[contourIdx];
+  const clickedPoint = clickedContour?.points?.[pointIdx];
+  if (!clickedContour || !clickedPoint || clickedPoint.type) {
+    return false;
+  }
+
+  const clickedNormal = calculateNormalAtSkeletonPoint(clickedContour, pointIdx);
+  const normalLen = Math.hypot(clickedNormal.x, clickedNormal.y);
+  if (!(normalLen > 1e-6)) {
+    return false;
+  }
+
+  const d = dragDelta.x * clickedNormal.x + dragDelta.y * clickedNormal.y;
+  const hasMovement = Math.abs(d) >= 1e-6;
+
+  const selectedByContour = new Map();
+  for (const key of selectedSkeletonPoints) {
+    const [ci, pi] = key.split("/").map(Number);
+    if (!selectedByContour.has(ci)) {
+      selectedByContour.set(ci, new Set());
+    }
+    selectedByContour.get(ci).add(pi);
+  }
+
+  for (const [ci, pointSet] of selectedByContour) {
+    const origContour = originalSkeletonData.contours?.[ci];
+    const workContour = workingSkeletonData.contours?.[ci];
+    if (!origContour || !workContour) {
+      continue;
+    }
+
+    const points = origContour.points;
+    const isClosed = !!origContour.isClosed;
+    const defaultWidth = origContour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+    const singleSided = origContour.singleSided ?? false;
+    const singleSidedDirection = origContour.singleSidedDirection ?? "left";
+    const anchorToDragSide = !!options.anchorToDragSide;
+    const scaleControlPoints = !!options.scaleControlPoints;
+    const anchorSide = singleSided
+      ? singleSidedDirection
+      : anchorToDragSide
+        ? d >= 0
+          ? "left"
+          : "right"
+        : d >= 0
+          ? "right"
+          : "left";
+
+    for (let pi = 0; pi < points.length; pi++) {
+      const origPoint = points[pi];
+      const workPoint = workContour.points[pi];
+      if (!origPoint || !workPoint) {
+        continue;
+      }
+      resetWidthStateFromOriginal(origPoint, workPoint);
+    }
+
+    const onCurveDeltas = new Map();
+    if (hasMovement) {
+      for (const pi of pointSet) {
+        const origPoint = points[pi];
+        if (!origPoint || origPoint.type) {
+          continue;
+        }
+
+        const normal = calculateNormalAtSkeletonPoint(origContour, pi);
+        const len = Math.hypot(normal.x, normal.y);
+        if (!(len > 1e-6)) {
+          continue;
+        }
+
+        onCurveDeltas.set(pi, { dx: normal.x * d, dy: normal.y * d });
+
+        const workPoint = workContour.points[pi];
+        const leftHW = getPointHalfWidth(origPoint, defaultWidth, "left");
+        const rightHW = getPointHalfWidth(origPoint, defaultWidth, "right");
+
+        if (singleSided) {
+          const total = leftHW + rightHW;
+          const raw = anchorSide === "left" ? total - d : total + d;
+          const clamped = Math.max(2, roundFunc(raw));
+          workPoint.width = clamped;
+          delete workPoint.leftWidth;
+          delete workPoint.rightWidth;
+          continue;
+        }
+
+        const linked = isWidthLinked(origPoint);
+        const delta = anchorSide === "left" ? -d : d;
+        applyLinkedWidthDelta(
+          workPoint,
+          origPoint,
+          defaultWidth,
+          anchorSide,
+          delta,
+          linked,
+          roundFunc
+        );
+      }
+    }
+
+    if (hasMovement) {
+      for (let pi = 0; pi < points.length; pi++) {
+        const origPoint = points[pi];
+        const workPoint = workContour.points[pi];
+        if (!origPoint || !workPoint || origPoint.type) {
+          continue;
+        }
+        const delta = onCurveDeltas.get(pi) || null;
+        if (delta && (delta.dx || delta.dy)) {
+          workPoint.x = roundFunc(origPoint.x + delta.dx);
+          workPoint.y = roundFunc(origPoint.y + delta.dy);
+        }
+      }
+
+      if (scaleControlPoints) {
+        const segments = buildSegmentsFromSkeletonPoints(points, isClosed);
+        const baseHandleDirections = new Map();
+        const baseHandleLengths = new Map();
+        const handleAnchorByIndex = new Map();
+        const segmentTransforms = new Map();
+        const segmentTensions = new Map();
+        const baseSmoothTangents = new Map();
+
+        for (const segment of segments) {
+          if (!segment?.controlIndices?.length) {
+            continue;
+          }
+          const startIdx = segment.startIndex;
+          const endIdx = segment.endIndex;
+          const origStart = points[startIdx];
+          const origEnd = points[endIdx];
+          const newStart = workContour.points[startIdx];
+          const newEnd = workContour.points[endIdx];
+          if (!origStart || !origEnd || !newStart || !newEnd) {
+            continue;
+          }
+
+          const origVec = { x: origEnd.x - origStart.x, y: origEnd.y - origStart.y };
+          const newVec = { x: newEnd.x - newStart.x, y: newEnd.y - newStart.y };
+          const origLen = Math.hypot(origVec.x, origVec.y);
+          const newLen = Math.hypot(newVec.x, newVec.y);
+          const useTransform = origLen > 1e-6 && newLen > 1e-6;
+          const scale = origLen > 1e-6 ? newLen / origLen : 1;
+
+          let cos = 1;
+          let sin = 0;
+          if (useTransform) {
+            const invLen = 1 / (origLen * newLen);
+            cos = (origVec.x * newVec.x + origVec.y * newVec.y) * invLen;
+            sin = (origVec.x * newVec.y - origVec.y * newVec.x) * invLen;
+          }
+
+          segmentTransforms.set(segment.segmentIndex, { cos, sin, scale, useTransform });
+
+          if (segment.controlIndices.length === 2) {
+            const tensionInfo = calculateHandleTensionsForSegment(segment);
+            if (tensionInfo) {
+              segmentTensions.set(segment.segmentIndex, tensionInfo);
+            }
+          }
+
+          for (const cpIdx of segment.controlIndices) {
+            const origCp = points[cpIdx];
+            if (!origCp) {
+              continue;
+            }
+            const isFirst = cpIdx === segment.controlIndices[0];
+            const isLast = cpIdx === segment.controlIndices[segment.controlIndices.length - 1];
+            const anchorIdx = isFirst ? startIdx : isLast ? endIdx : null;
+            const anchorPoint = anchorIdx !== null ? points[anchorIdx] : origStart;
+            if (anchorIdx !== null) {
+              handleAnchorByIndex.set(cpIdx, anchorIdx);
+            }
+            const rel = { x: origCp.x - anchorPoint.x, y: origCp.y - anchorPoint.y };
+            const rotated = useTransform ? rotateVector(rel, cos, sin) : rel;
+            const dir = normalizeVectorSafe(rotated);
+            if (dir) {
+              baseHandleDirections.set(cpIdx, dir);
+            }
+            baseHandleLengths.set(cpIdx, Math.hypot(rel.x, rel.y));
+          }
+        }
+
+        const numPoints = points.length;
+        for (let i = 0; i < numPoints; i++) {
+          const point = points[i];
+          if (!point || point.type || !point.smooth || point.skipColinear) {
+            continue;
+          }
+          if (!isClosed && (i === 0 || i === numPoints - 1)) {
+            continue;
+          }
+
+          const prevIdx = (i - 1 + numPoints) % numPoints;
+          const nextIdx = (i + 1) % numPoints;
+          const prevPoint = points[prevIdx];
+          const nextPoint = points[nextIdx];
+          if (!prevPoint || !nextPoint) {
+            continue;
+          }
+
+          const prevIsOnCurve = !prevPoint.type;
+          const nextIsOnCurve = !nextPoint.type;
+          if (prevIsOnCurve || nextIsOnCurve) {
+            continue;
+          }
+
+          const vecIn = { x: prevPoint.x - point.x, y: prevPoint.y - point.y };
+          const vecOut = { x: nextPoint.x - point.x, y: nextPoint.y - point.y };
+          const lenIn = Math.hypot(vecIn.x, vecIn.y);
+          const lenOut = Math.hypot(vecOut.x, vecOut.y);
+          if (!(lenIn > 1e-6) || !(lenOut > 1e-6)) {
+            continue;
+          }
+          const dirIn = { x: vecIn.x / lenIn, y: vecIn.y / lenIn };
+          const dirOut = { x: vecOut.x / lenOut, y: vecOut.y / lenOut };
+          const weighted = {
+            x: dirOut.x * lenOut - dirIn.x * lenIn,
+            y: dirOut.y * lenOut - dirIn.y * lenIn,
+          };
+          const tangent =
+            normalizeVectorSafe(weighted) || dirOut || { x: -dirIn.x, y: -dirIn.y };
+          baseSmoothTangents.set(i, tangent);
+        }
+
+        const smoothHandleOverrides = new Map();
+        for (let i = 0; i < numPoints; i++) {
+          const point = points[i];
+          if (!point || point.type || !point.smooth || point.skipColinear) {
+            continue;
+          }
+          if (!isClosed && (i === 0 || i === numPoints - 1)) {
+            continue;
+          }
+
+          const prevIdx = (i - 1 + numPoints) % numPoints;
+          const nextIdx = (i + 1) % numPoints;
+          const prevPoint = points[prevIdx];
+          const nextPoint = points[nextIdx];
+          if (!prevPoint || !nextPoint) {
+            continue;
+          }
+
+          const prevIsOnCurve = !prevPoint.type;
+          const nextIsOnCurve = !nextPoint.type;
+          const workPoint = workContour.points[i];
+          const workPrev = workContour.points[prevIdx];
+          const workNext = workContour.points[nextIdx];
+
+          if (!prevIsOnCurve && !nextIsOnCurve) {
+            let tangent = baseSmoothTangents.get(i) || null;
+            const dirIn =
+              baseHandleDirections.get(prevIdx) ||
+              normalizeVectorSafe({ x: prevPoint.x - point.x, y: prevPoint.y - point.y });
+            const dirOut =
+              baseHandleDirections.get(nextIdx) ||
+              normalizeVectorSafe({ x: nextPoint.x - point.x, y: nextPoint.y - point.y });
+            const lenIn =
+              baseHandleLengths.get(prevIdx) ??
+              Math.hypot(prevPoint.x - point.x, prevPoint.y - point.y);
+            const lenOut =
+              baseHandleLengths.get(nextIdx) ??
+              Math.hypot(nextPoint.x - point.x, nextPoint.y - point.y);
+            if (!tangent) {
+              if (dirIn && dirOut) {
+                const weighted = {
+                  x: dirOut.x * lenOut - dirIn.x * lenIn,
+                  y: dirOut.y * lenOut - dirIn.y * lenIn,
+                };
+                tangent =
+                  normalizeVectorSafe(weighted) || dirOut || { x: -dirIn.x, y: -dirIn.y };
+              } else if (dirOut) {
+                tangent = dirOut;
+              } else if (dirIn) {
+                tangent = { x: -dirIn.x, y: -dirIn.y };
+              }
+            }
+            if (!tangent) {
+              continue;
+            }
+            smoothHandleOverrides.set(nextIdx, { dir: tangent, anchorIdx: i });
+            smoothHandleOverrides.set(prevIdx, {
+              dir: { x: -tangent.x, y: -tangent.y },
+              anchorIdx: i,
+            });
+            continue;
+          }
+
+          if (prevIsOnCurve && !nextIsOnCurve) {
+            if (!workPoint || !workPrev) {
+              continue;
+            }
+            const linearVec = { x: workPoint.x - workPrev.x, y: workPoint.y - workPrev.y };
+            const dir = normalizeVectorSafe(linearVec);
+            if (!dir) {
+              continue;
+            }
+            smoothHandleOverrides.set(nextIdx, { dir, anchorIdx: i });
+            continue;
+          }
+
+          if (!prevIsOnCurve && nextIsOnCurve) {
+            if (!workPoint || !workNext) {
+              continue;
+            }
+            const linearVec = { x: workNext.x - workPoint.x, y: workNext.y - workPoint.y };
+            const dir = normalizeVectorSafe(linearVec);
+            if (!dir) {
+              continue;
+            }
+            smoothHandleOverrides.set(prevIdx, {
+              dir: { x: -dir.x, y: -dir.y },
+              anchorIdx: i,
+            });
+          }
+        }
+
+        for (const segment of segments) {
+          if (!segment?.controlIndices?.length) {
+            continue;
+          }
+          const startIdx = segment.startIndex;
+          const endIdx = segment.endIndex;
+          const origStart = points[startIdx];
+          const origEnd = points[endIdx];
+          const newStart = workContour.points[startIdx];
+          const newEnd = workContour.points[endIdx];
+          if (!origStart || !origEnd || !newStart || !newEnd) {
+            continue;
+          }
+          const transform = segmentTransforms.get(segment.segmentIndex);
+          const scale = transform?.scale ?? 1;
+
+          if (segment.controlIndices.length === 2) {
+            const cpStartIdx = segment.controlIndices[0];
+            const cpEndIdx = segment.controlIndices[segment.controlIndices.length - 1];
+            const origCpStart = points[cpStartIdx];
+            const origCpEnd = points[cpEndIdx];
+            const workCpStart = workContour.points[cpStartIdx];
+            const workCpEnd = workContour.points[cpEndIdx];
+            if (!origCpStart || !origCpEnd || !workCpStart || !workCpEnd) {
+              continue;
+            }
+
+            const overrideStart = smoothHandleOverrides.get(cpStartIdx);
+            const overrideEnd = smoothHandleOverrides.get(cpEndIdx);
+            const baseStartDir =
+              baseHandleDirections.get(cpStartIdx) ||
+              normalizeVectorSafe({ x: origCpStart.x - origStart.x, y: origCpStart.y - origStart.y });
+            const baseEndDir =
+              baseHandleDirections.get(cpEndIdx) ||
+              normalizeVectorSafe({ x: origCpEnd.x - origEnd.x, y: origCpEnd.y - origEnd.y });
+            const fallbackStartDir =
+              normalizeVectorSafe({ x: newEnd.x - newStart.x, y: newEnd.y - newStart.y }) ||
+              { x: 1, y: 0 };
+            const fallbackEndDir =
+              normalizeVectorSafe({ x: newStart.x - newEnd.x, y: newStart.y - newEnd.y }) || {
+                x: -fallbackStartDir.x,
+                y: -fallbackStartDir.y,
+              };
+            const startDir = overrideStart?.dir || baseStartDir || fallbackStartDir;
+            const endDir = overrideEnd?.dir || baseEndDir || fallbackEndDir;
+
+            const tensionInfo = segmentTensions.get(segment.segmentIndex);
+            const { startLen, endLen } = computeHandleLengthsFromTensions(
+              newStart,
+              startDir,
+              newEnd,
+              endDir,
+              tensionInfo?.tensionStart ?? null,
+              tensionInfo?.tensionEnd ?? null
+            );
+
+            const origStartLen =
+              tensionInfo?.lenStart ??
+              Math.hypot(origCpStart.x - origStart.x, origCpStart.y - origStart.y);
+            const origEndLen =
+              tensionInfo?.lenEnd ??
+              Math.hypot(origCpEnd.x - origEnd.x, origCpEnd.y - origEnd.y);
+
+            const finalStartLen = Number.isFinite(startLen) ? startLen : origStartLen * scale;
+            const finalEndLen = Number.isFinite(endLen) ? endLen : origEndLen * scale;
+
+            workCpStart.x = roundFunc(newStart.x + startDir.x * finalStartLen);
+            workCpStart.y = roundFunc(newStart.y + startDir.y * finalStartLen);
+            workCpEnd.x = roundFunc(newEnd.x + endDir.x * finalEndLen);
+            workCpEnd.y = roundFunc(newEnd.y + endDir.y * finalEndLen);
+            continue;
+          }
+
+          for (const cpIdx of segment.controlIndices) {
+            const origCp = points[cpIdx];
+            const workCp = workContour.points[cpIdx];
+            if (!origCp || !workCp) {
+              continue;
+            }
+
+            const override = smoothHandleOverrides.get(cpIdx);
+            const anchorIdx = override?.anchorIdx ?? handleAnchorByIndex.get(cpIdx) ?? startIdx;
+            const origAnchor = points[anchorIdx];
+            const newAnchor = workContour.points[anchorIdx];
+            if (!origAnchor || !newAnchor) {
+              continue;
+            }
+
+            const origVec = { x: origCp.x - origAnchor.x, y: origCp.y - origAnchor.y };
+            const origLen = Math.hypot(origVec.x, origVec.y);
+            if (!(origLen > 1e-6)) {
+              workCp.x = roundFunc(newAnchor.x);
+              workCp.y = roundFunc(newAnchor.y);
+              continue;
+            }
+            const dir =
+              override?.dir ||
+              baseHandleDirections.get(cpIdx) ||
+              { x: origVec.x / origLen, y: origVec.y / origLen };
+            const newLen = origLen * scale;
+            workCp.x = roundFunc(newAnchor.x + dir.x * newLen);
+            workCp.y = roundFunc(newAnchor.y + dir.y * newLen);
+          }
+        }
+      } else {
+        for (let pi = 0; pi < points.length; pi++) {
+          const origPoint = points[pi];
+          const workPoint = workContour.points[pi];
+          if (!origPoint || !workPoint || !origPoint.type) {
+            continue;
+          }
+
+          const prevOn = findPrevOnCurveIndex(points, pi, isClosed);
+          const nextOn = findNextOnCurveIndex(points, pi, isClosed);
+          const hasPrevHandle =
+            prevOn !== null &&
+            (pi === prevOn + 1 || (isClosed && prevOn === points.length - 1 && pi === 0));
+          const hasNextHandle =
+            nextOn !== null &&
+            (pi === nextOn - 1 || (isClosed && nextOn === 0 && pi === points.length - 1));
+          const prevDelta = hasPrevHandle ? onCurveDeltas.get(prevOn) : null;
+          const nextDelta = hasNextHandle ? onCurveDeltas.get(nextOn) : null;
+          let delta = null;
+          if (prevDelta && nextDelta) {
+            delta = {
+              dx: (prevDelta.dx + nextDelta.dx) / 2,
+              dy: (prevDelta.dy + nextDelta.dy) / 2,
+            };
+          } else {
+            delta = prevDelta || nextDelta;
+          }
+
+          if (delta && (delta.dx || delta.dy)) {
+            workPoint.x = roundFunc(origPoint.x + delta.dx);
+            workPoint.y = roundFunc(origPoint.y + delta.dy);
+          }
+        }
+      }
+
+      if (!scaleControlPoints) {
+        enforceSmoothColinearityForSkeleton(workContour.points, isClosed, roundFunc);
+      }
+    }
+  }
+
+  return true;
 }
 
 function createSkeletonLayersData({
@@ -761,34 +1444,6 @@ async function runRegularPointLikeAdapter({
     equalizeHandleInfo,
   });
   return makeAdapterResult();
-}
-
-async function runPointerMethodAdapter(invocation) {
-  if (!invocation) {
-    return false;
-  }
-  const { pointerTool, methodName, args = [], allowFalse = false, before, after } =
-    invocation;
-  assert(pointerTool, "runPointerMethodAdapter: missing pointerTool");
-  const method = pointerTool?.[methodName];
-  assert(
-    typeof method === "function",
-    `runPointerMethodAdapter: missing pointer method ${methodName}`
-  );
-  if (before) {
-    before();
-  }
-  try {
-    const handled = await method.call(pointerTool, ...args);
-    if (allowFalse && handled === false) {
-      return false;
-    }
-    return makeAdapterResult();
-  } finally {
-    if (after) {
-      after();
-    }
-  }
 }
 
 async function runTunniDragLegacy({ pointerTool, eventStream, initialEvent }) {
@@ -1319,34 +1974,12 @@ async function runSkeletonPointLikeCanonical(context, mode) {
     return false;
   }
 
-  if (mode === "drag" && (pointerTool.fixedRibMode || pointerTool.fixedRibCompressMode)) {
-    return runPointerMethodAdapter({
-      pointerTool,
-      methodName: "_handleDragSkeletonPoints",
-      args: [context.eventStream, context.initialEvent, selectedSkeletonPoints],
-      allowFalse: true,
+  if (pointerTool.fixedRibMode || pointerTool.fixedRibCompressMode) {
+    return runFixedRibSkeletonPointLikeCanonical({
+      ...context,
+      mode,
+      selectedSkeletonPoints,
     });
-  }
-
-  if (mode === "nudge") {
-    const parsedSelection = parseSelection(sceneController.selection);
-    const hasRegularSelection =
-      (parsedSelection.point?.length || 0) > 0 ||
-      (parsedSelection.anchor?.length || 0) > 0 ||
-      (parsedSelection.guideline?.length || 0) > 0;
-
-    if (
-      hasRegularSelection ||
-      pointerTool.fixedRibMode ||
-      pointerTool.fixedRibCompressMode
-    ) {
-      return runPointerMethodAdapter({
-        pointerTool,
-        methodName: "_handleArrowKeysLegacy",
-        args: [context.event],
-        allowFalse: true,
-      });
-    }
   }
 
   await runSkeletonPointLikeOrchestration({
@@ -1360,6 +1993,132 @@ async function runSkeletonPointLikeCanonical(context, mode) {
     event: context.event,
     runPointLikeInputKernel,
     runPointLikeSessionKernel,
+  });
+  return makeAdapterResult();
+}
+
+function resolveClickedSkeletonPoint(pointerTool, selectedSkeletonPoints) {
+  let clickedSkeletonPoint = pointerTool.sceneController.sceneModel.initialClickedSkeletonPoint;
+  if (!clickedSkeletonPoint && selectedSkeletonPoints?.size) {
+    const firstKey = selectedSkeletonPoints.values().next().value;
+    if (firstKey) {
+      const [contourIdx, pointIdx] = firstKey.split("/").map(Number);
+      if (Number.isInteger(contourIdx) && Number.isInteger(pointIdx)) {
+        clickedSkeletonPoint = { contourIdx, pointIdx };
+      }
+    }
+  }
+  return clickedSkeletonPoint;
+}
+
+async function runFixedRibSkeletonPointLikeCanonical({
+  mode,
+  pointerTool,
+  sceneController,
+  selectedSkeletonPoints,
+  eventStream,
+  initialEvent,
+  event,
+  runPointLikeInputKernel,
+  runPointLikeSessionKernel,
+}) {
+  const clickedSkeletonPoint = resolveClickedSkeletonPoint(
+    pointerTool,
+    selectedSkeletonPoints
+  );
+  if (!clickedSkeletonPoint) {
+    return makeAdapterResult();
+  }
+
+  await runPointLikeSessionKernel({
+    mode,
+    runPointLikeInputKernel,
+    withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
+    eventStream,
+    initialEvent,
+    event,
+    getBehaviorNameForEvent: mode === "drag" ? () => "default" : undefined,
+    getPointForEvent:
+      mode === "drag"
+        ? (nextEvent) => {
+            const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
+            const localPoint = sceneController.localPoint(nextEvent);
+            return {
+              x: localPoint.x - positionedGlyph.x,
+              y: localPoint.y - positionedGlyph.y,
+            };
+          }
+        : undefined,
+    onSessionStart: ({ glyph }) => {
+      const layersData = createSkeletonLayersData({
+        glyph,
+        editingLayerNames: sceneController.editingLayerNames,
+      });
+      return {
+        clickedSkeletonPoint,
+        layersData,
+        accumulatedChanges: new ChangeCollector(),
+        skip: !Object.keys(layersData).length,
+      };
+    },
+    onInput: async ({ event: inputEvent, delta, sessionState, sendIncrementalChange }) => {
+      if (sessionState.skip) {
+        return;
+      }
+      const roundFunc = mode === "drag" ? makeRoundFunc(inputEvent) : Math.round;
+      const allChanges = [];
+      for (const [editLayerName, data] of Object.entries(sessionState.layersData)) {
+        const appliedFixedRib = applyFixedRibDragToSkeletonData(
+          data.original,
+          data.working,
+          selectedSkeletonPoints,
+          sessionState.clickedSkeletonPoint,
+          delta,
+          roundFunc,
+          {
+            anchorToDragSide: pointerTool.fixedRibCompressMode,
+            scaleControlPoints: FIXED_RIB_SCALE_CONTROL_POINTS,
+          }
+        );
+        if (!appliedFixedRib) {
+          continue;
+        }
+
+        const pathChange = recordChanges(data.layer.glyph, (sg) => {
+          regenerateSkeletonContours(sg, data.working, { preferInPlace: true });
+        });
+        const customDataChange = recordChanges(data.layer, (layer) => {
+          setSkeletonData(layer, JSON.parse(JSON.stringify(data.working)));
+        });
+        if (pathChange.hasChange) {
+          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+        }
+        if (customDataChange.hasChange) {
+          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+        }
+      }
+
+      if (!allChanges.length) {
+        return;
+      }
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      sessionState.accumulatedChanges = sessionState.accumulatedChanges.concat(combined);
+      await sendIncrementalChange(combined.change, mode === "drag");
+    },
+    onSessionEnd: async ({ sessionState, sendIncrementalChange }) => {
+      if (sessionState.skip) {
+        return;
+      }
+      if (mode === "drag") {
+        await sendIncrementalChange(sessionState.accumulatedChanges.change);
+      }
+      return {
+        changes: sessionState.accumulatedChanges,
+        undoLabel: translate("action.nudge-selection"),
+        broadcast: true,
+      };
+    },
   });
   return makeAdapterResult();
 }
@@ -1483,6 +2242,7 @@ async function runLegacyComponentDragAdapter(context) {
 async function runSkeletonRibPointDragCanonical(context) {
   const {
     pointerTool,
+    sceneController,
     eventStream,
     initialEvent,
     ribHit,
@@ -1490,28 +2250,312 @@ async function runSkeletonRibPointDragCanonical(context) {
     preSelectedSkeletonPoints,
   } = context;
   assert(pointerTool, "runSkeletonRibPointDragCanonical: missing pointerTool");
+  assert(sceneController, "runSkeletonRibPointDragCanonical: missing sceneController");
   assert(ribHit, "runSkeletonRibPointDragCanonical: missing ribHit");
-  return runPointerMethodAdapter({
-    pointerTool,
-    methodName: "_handleDragRibPoint",
-    args: [
-      eventStream,
-      initialEvent,
-      ribHit,
-      targetRibSelection,
-      preSelectedSkeletonPoints,
-    ],
-    before: () => {
-      pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint = {
-        contourIdx: ribHit.contourIndex,
-        pointIdx: ribHit.pointIndex,
-        side: ribHit.side,
+  const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
+  if (!positionedGlyph) {
+    return makeAdapterResult();
+  }
+
+  const localPoint = sceneController.localPoint(initialEvent);
+  const startGlyphPoint = {
+    x: localPoint.x - positionedGlyph.x,
+    y: localPoint.y - positionedGlyph.y,
+  };
+  const useInterpolation = initialEvent.altKey;
+  const referenceLayerName = sceneController.editingLayerNames?.[0];
+  const referenceLayer = referenceLayerName
+    ? positionedGlyph?.varGlyph?.glyph?.layers?.[referenceLayerName]
+    : null;
+  const referenceSkeletonData = getSkeletonData(referenceLayer);
+  if (!referenceSkeletonData?.contours?.length) {
+    return makeAdapterResult();
+  }
+
+  const defaultRibKey = `${ribHit.contourIndex}/${ribHit.pointIndex}/${ribHit.side}`;
+  const selectedRibKeys =
+    targetRibSelection?.size > 0 ? new Set(targetRibSelection) : new Set([defaultRibKey]);
+  const targetPointsMap = new Map();
+  const addTargetRibPoint = (contourIndex, pointIndex, side) => {
+    const key = `${contourIndex}/${pointIndex}/${side}`;
+    if (targetPointsMap.has(key)) {
+      return;
+    }
+    const contour = referenceSkeletonData.contours?.[contourIndex];
+    const point = contour?.points?.[pointIndex];
+    if (!point || point.type) {
+      return;
+    }
+    const isSingleSided = contour.singleSided ?? false;
+    const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+    targetPointsMap.set(key, {
+      ribKey: key,
+      contourIndex,
+      pointIndex,
+      side,
+      isLinked: isWidthLinked(point),
+      isSingleSided,
+      isEditable: point[editableKey] === true,
+    });
+  };
+
+  for (const key of selectedRibKeys) {
+    const [ci, pi, side] = key.split("/");
+    const contourIndex = Number(ci);
+    const pointIndex = Number(pi);
+    if (
+      Number.isInteger(contourIndex) &&
+      Number.isInteger(pointIndex) &&
+      (side === "left" || side === "right")
+    ) {
+      addTargetRibPoint(contourIndex, pointIndex, side);
+    }
+  }
+
+  if (preSelectedSkeletonPoints?.size) {
+    for (const key of preSelectedSkeletonPoints) {
+      const [ci, pi] = key.split("/").map(Number);
+      if (!Number.isInteger(ci) || !Number.isInteger(pi)) {
+        continue;
+      }
+      const contour = referenceSkeletonData.contours?.[ci];
+      const point = contour?.points?.[pi];
+      if (!point || point.type) {
+        continue;
+      }
+      const side = contour.singleSided
+        ? contour.singleSidedDirection ?? "left"
+        : ribHit.side;
+      addTargetRibPoint(ci, pi, side);
+    }
+  }
+
+  const targetPoints = [...targetPointsMap.values()];
+  if (!targetPoints.length) {
+    return makeAdapterResult();
+  }
+
+  const hasSkeletonSelection = preSelectedSkeletonPoints?.size > 0;
+  if (!hasSkeletonSelection) {
+    sceneController.selection = new Set(
+      targetPoints.map((target) => `skeletonRibPoint/${target.ribKey}`)
+    );
+  }
+
+  const allTargetsEditable = targetPoints.every((target) => target.isEditable);
+  const belongsToSingleSegment = selectedRibTargetsBelongToSingleSegment(
+    targetPoints,
+    referenceSkeletonData
+  );
+  if (!hasSkeletonSelection && !allTargetsEditable && !belongsToSingleSegment) {
+    return makeAdapterResult();
+  }
+
+  const previousCursor = pointerTool.canvasController.canvas.style.cursor;
+  pointerTool.canvasController.canvas.style.cursor = "pointer";
+
+  try {
+    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const layersData = {};
+      for (const editLayerName of sceneController.editingLayerNames || []) {
+        const layer = glyph.layers[editLayerName];
+        const skeletonData = getSkeletonData(layer);
+        if (!skeletonData) {
+          continue;
+        }
+        layersData[editLayerName] = {
+          layer,
+          original: JSON.parse(JSON.stringify(skeletonData)),
+          working: JSON.parse(JSON.stringify(skeletonData)),
+          ribBehaviors: [],
+        };
+      }
+      if (!Object.keys(layersData).length) {
+        return;
+      }
+
+      for (const data of Object.values(layersData)) {
+        for (const target of targetPoints) {
+          const contour = data.original.contours?.[target.contourIndex];
+          const skeletonPoint = contour?.points?.[target.pointIndex];
+          if (!contour || !skeletonPoint) {
+            continue;
+          }
+          const normal = calculateNormalAtSkeletonPoint(contour, target.pointIndex);
+          if (!normal) {
+            continue;
+          }
+          const ribHitForPoint = {
+            contourIndex: target.contourIndex,
+            pointIndex: target.pointIndex,
+            side: target.side,
+            normal,
+            onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
+          };
+
+          let behavior;
+          if (target.isSingleSided) {
+            const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+            const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+            const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+            const totalWidth = leftHW + rightHW;
+
+            if (target.isEditable) {
+              if (useInterpolation) {
+                const interpolationAxis = findRibInterpolationAxisFromSkeletonPath(
+                  data.layer.glyph.path,
+                  skeletonPoint,
+                  normal,
+                  contour,
+                  target.side
+                );
+                behavior = interpolationAxis
+                  ? createInterpolatingRibBehavior(data.original, ribHitForPoint, interpolationAxis)
+                  : createEditableRibBehavior(data.original, ribHitForPoint);
+              } else {
+                behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+              }
+              if (behavior.setOriginalHalfWidth) {
+                behavior.setOriginalHalfWidth(totalWidth);
+              } else {
+                behavior.originalHalfWidth = totalWidth;
+              }
+              behavior.minHalfWidth = 2;
+            } else {
+              behavior = createRibEditBehavior(data.original, ribHitForPoint);
+              behavior.originalHalfWidth = totalWidth;
+              behavior.minHalfWidth = 2;
+            }
+          } else if (target.isEditable) {
+            if (useInterpolation) {
+              const interpolationAxis = findRibInterpolationAxisFromSkeletonPath(
+                data.layer.glyph.path,
+                skeletonPoint,
+                normal,
+                contour,
+                target.side
+              );
+              behavior = interpolationAxis
+                ? createInterpolatingRibBehavior(data.original, ribHitForPoint, interpolationAxis)
+                : createEditableRibBehavior(data.original, ribHitForPoint);
+            } else {
+              behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+            }
+          } else {
+            behavior = createRibEditBehavior(data.original, ribHitForPoint);
+          }
+
+          data.ribBehaviors.push({ behavior, target });
+        }
+      }
+
+      let accumulatedChanges = new ChangeCollector();
+
+      for await (const inputEvent of eventStream) {
+        pointerTool.canvasController.canvas.style.cursor = "pointer";
+        const roundFunc = makeRoundFunc(inputEvent);
+        const currentLocalPoint = sceneController.localPoint(inputEvent);
+        const currentGlyphPoint = {
+          x: currentLocalPoint.x - positionedGlyph.x,
+          y: currentLocalPoint.y - positionedGlyph.y,
+        };
+        const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+        const constrainMode = pointerTool.tangentRibMode ? "tangent" : null;
+        const baseNormalDelta =
+          hasSkeletonSelection && !useInterpolation && constrainMode !== "tangent"
+            ? (ribHit.side === "left" ? 1 : -1) *
+              (delta.x * ribHit.normal.x + delta.y * ribHit.normal.y)
+            : null;
+        const allChanges = [];
+
+        for (const [editLayerName, data] of Object.entries(layersData)) {
+          const { layer, working, ribBehaviors } = data;
+          for (const { behavior, target } of ribBehaviors) {
+            const contour = working.contours?.[target.contourIndex];
+            const point = contour?.points?.[target.pointIndex];
+            const baseContour = data.original.contours?.[target.contourIndex];
+            const basePoint = baseContour?.points?.[target.pointIndex];
+            if (!contour || !point || !baseContour || !basePoint || point.type || basePoint.type) {
+              continue;
+            }
+
+            const contourDefaultWidth =
+              baseContour.defaultWidth ?? contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+            const linked = isWidthLinked(basePoint);
+            const change =
+              baseNormalDelta !== null
+                ? {
+                    halfWidth: Math.round(behavior.originalHalfWidth + baseNormalDelta),
+                    nudge: behavior.originalNudge,
+                    handleInOffsetX: behavior.originalHandleInOffsetX,
+                    handleInOffsetY: behavior.originalHandleInOffsetY,
+                    handleOutOffsetX: behavior.originalHandleOutOffsetX,
+                    handleOutOffsetY: behavior.originalHandleOutOffsetY,
+                  }
+                : behavior.applyDelta(delta, constrainMode, roundFunc);
+            const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
+            applyLinkedWidthDelta(
+              point,
+              basePoint,
+              contourDefaultWidth,
+              target.side,
+              deltaWidth,
+              linked,
+              roundFunc
+            );
+            if (change.nudge !== undefined) {
+              point[target.side === "left" ? "leftNudge" : "rightNudge"] = change.nudge;
+            }
+            if (change.isInterpolation || change.hasHandleOffsets) {
+              if (target.side === "left") {
+                point.leftHandleInOffsetX = change.handleInOffsetX;
+                point.leftHandleInOffsetY = change.handleInOffsetY;
+                point.leftHandleOutOffsetX = change.handleOutOffsetX;
+                point.leftHandleOutOffsetY = change.handleOutOffsetY;
+                delete point.leftHandleInOffset;
+                delete point.leftHandleOutOffset;
+              } else {
+                point.rightHandleInOffsetX = change.handleInOffsetX;
+                point.rightHandleInOffsetY = change.handleInOffsetY;
+                point.rightHandleOutOffsetX = change.handleOutOffsetX;
+                point.rightHandleOutOffsetY = change.handleOutOffsetY;
+                delete point.rightHandleInOffset;
+                delete point.rightHandleOutOffset;
+              }
+            }
+          }
+
+          const pathChange = recordChanges(layer.glyph, (sg) => {
+            regenerateSkeletonContours(sg, working);
+          });
+          const customDataChange = recordChanges(layer, (layerRecord) => {
+            setSkeletonData(layerRecord, JSON.parse(JSON.stringify(working)));
+          });
+          if (pathChange.hasChange) {
+            allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+          }
+          if (customDataChange.hasChange) {
+            allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+          }
+        }
+
+        const combined = new ChangeCollector().concat(...allChanges);
+        accumulatedChanges = accumulatedChanges.concat(combined);
+        await sendIncrementalChange(combined.change, true);
+      }
+
+      await sendIncrementalChange(accumulatedChanges.change);
+      return {
+        changes: accumulatedChanges,
+        undoLabel: translate("action.nudge-selection"),
+        broadcast: true,
       };
-    },
-    after: () => {
-      delete pointerTool.sceneController.sceneModel.initialClickedSkeletonRibPoint;
-    },
-  });
+    });
+  } finally {
+    pointerTool.canvasController.canvas.style.cursor = previousCursor || "default";
+    delete sceneController.sceneModel.initialClickedSkeletonRibPoint;
+  }
+  return makeAdapterResult();
 }
 
 async function runEditableGeneratedPointLikeCanonical(context, mode) {
@@ -2285,6 +3329,438 @@ async function runSkeletonRibPointNudgeCanonical(context) {
   return makeAdapterResult();
 }
 
+async function runMixedSelectionNudgeLegacy({
+  pointerTool,
+  sceneController,
+  event,
+}) {
+  const {
+    skeletonPoint: skeletonPointSelection,
+    point: regularPointSelection,
+    anchor: anchorSelection,
+    guideline: guidelineSelection,
+  } = parseSelection(sceneController.selection);
+
+  if (!skeletonPointSelection?.size) {
+    return false;
+  }
+
+  const hasRegularSelection =
+    (regularPointSelection?.length || 0) > 0 ||
+    (anchorSelection?.length || 0) > 0 ||
+    (guidelineSelection?.length || 0) > 0;
+  if (!hasRegularSelection) {
+    return false;
+  }
+
+  let [dx, dy] = arrowKeyDeltas[event.key];
+  if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
+    dx *= 100;
+    dy *= 100;
+  } else if (event.shiftKey) {
+    dx *= 10;
+    dy *= 10;
+  }
+  const delta = { x: dx, y: dy };
+
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const editLayerName = sceneController.editingLayerNames?.[0];
+    if (!editLayerName || !glyph.layers[editLayerName]) {
+      return;
+    }
+
+    const layer = glyph.layers[editLayerName];
+    const skeletonData = getSkeletonData(layer);
+    if (!skeletonData) {
+      return;
+    }
+
+    const originalSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+    const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+    const behaviorName = getSkeletonBehaviorName(false, event.altKey);
+    const behaviors = createSkeletonPointExecutors(
+      originalSkeletonData,
+      skeletonPointSelection,
+      behaviorName
+    );
+
+    for (const { contourIndex, executor } of behaviors) {
+      const changes = executor.applyDelta(delta);
+      const contour = workingSkeletonData.contours[contourIndex];
+      for (const { pointIndex, x, y } of changes) {
+        contour.points[pointIndex].x = x;
+        contour.points[pointIndex].y = y;
+      }
+    }
+
+    const allChanges = [];
+    const regularRollbackParts = [];
+    const layerInfo = Object.entries(
+      sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+    ).map(([layerName, layerGlyph]) => {
+      const behaviorFactory = new EditBehaviorFactory(
+        layerGlyph,
+        sceneController.selection,
+        pointerTool.scalingEditBehavior
+      );
+      return {
+        layerGlyph,
+        changePath: ["layers", layerName, "glyph"],
+        editBehavior: behaviorFactory.getBehavior(
+          event.altKey ? "alternate" : "default"
+        ),
+      };
+    });
+
+    for (const { layerGlyph, changePath, editBehavior } of layerInfo) {
+      const editChange = editBehavior.makeChangeForDelta(delta);
+      applyChange(layerGlyph, editChange);
+      allChanges.push(consolidateChanges(editChange, changePath));
+      regularRollbackParts.push(
+        consolidateChanges(editBehavior.rollbackChange, changePath)
+      );
+    }
+
+    const staticGlyph = layer.glyph;
+    const pathChange = recordChanges(staticGlyph, (sg) => {
+      regenerateSkeletonContours(sg, workingSkeletonData, { preferInPlace: true });
+    });
+    allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]).change);
+
+    const customDataChange = recordChanges(layer, (l) => {
+      setSkeletonData(l, workingSkeletonData);
+    });
+    allChanges.push(customDataChange.prefixed(["layers", editLayerName]).change);
+
+    const editChange = consolidateChanges(allChanges);
+    await sendIncrementalChange(editChange);
+
+    const rollbackParts = [
+      ...regularRollbackParts,
+      pathChange.prefixed(["layers", editLayerName, "glyph"]).rollbackChange,
+      customDataChange.prefixed(["layers", editLayerName]).rollbackChange,
+    ];
+
+    return {
+      changes: ChangeCollector.fromChanges(
+        editChange,
+        consolidateChanges(rollbackParts)
+      ),
+      undoLabel: translate("action.nudge-selection"),
+      broadcast: true,
+    };
+  });
+
+  return makeAdapterResult();
+}
+
+async function runMixedSelectionDragCanonical({
+  pointerTool,
+  sceneController,
+  eventStream,
+  initialEvent,
+  effectiveSkeletonPointSelection,
+}) {
+  const hasSkeletonSelection = effectiveSkeletonPointSelection?.size > 0;
+
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const initialPoint = sceneController.localPoint(initialEvent);
+    const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
+    let behaviorName = getBehaviorName(initialEvent);
+    const initialClickedPointIndex = sceneController.sceneModel.initialClickedPointIndex;
+    let equalizeHandleInfo = null;
+    if (positionedGlyph && initialClickedPointIndex !== undefined) {
+      const candidate = findEqualizeHandleForPath(
+        positionedGlyph,
+        initialPoint,
+        sceneController.mouseClickMargin
+      );
+      if (candidate && candidate.pointIndex === initialClickedPointIndex) {
+        equalizeHandleInfo = candidate;
+      }
+    }
+
+    const layerInfo = Object.entries(
+      sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+    ).map(([layerName, layerGlyph]) => {
+      const behaviorFactory = new EditBehaviorFactory(
+        layerGlyph,
+        sceneController.selection,
+        pointerTool.scalingEditBehavior
+      );
+      return {
+        layerName,
+        layerGlyph,
+        changePath: ["layers", layerName, "glyph"],
+        connectDetector: sceneController.getPathConnectDetector(layerGlyph.path),
+        shouldConnect: false,
+        behaviorFactory,
+        editBehavior: behaviorFactory.getBehavior(behaviorName),
+      };
+    });
+
+    assert(layerInfo.length >= 1, "runMixedSelectionDragCanonical: no layer to edit");
+    layerInfo[0].isPrimaryLayer = true;
+    let equalizeUsed = false;
+    const equalizeRollbackByLayer = new Map();
+    if (equalizeHandleInfo) {
+      for (const layer of layerInfo) {
+        const draggedPoint = layer.layerGlyph.path.getPoint(equalizeHandleInfo.pointIndex);
+        const oppositePoint = layer.layerGlyph.path.getPoint(equalizeHandleInfo.oppositeIndex);
+        if (draggedPoint || oppositePoint) {
+          equalizeRollbackByLayer.set(layer.layerName, {
+            draggedPoint: draggedPoint
+              ? {
+                  x: draggedPoint.x,
+                  y: draggedPoint.y,
+                }
+              : null,
+            oppositePoint: oppositePoint
+              ? {
+                  x: oppositePoint.x,
+                  y: oppositePoint.y,
+                }
+              : null,
+          });
+        }
+      }
+    }
+
+    let skeletonEditState = null;
+    if (hasSkeletonSelection) {
+      const editLayerName = sceneController.editingLayerNames?.[0];
+      const layer = editLayerName ? glyph.layers[editLayerName] : null;
+      const skeletonData = getSkeletonData(layer);
+      if (skeletonData) {
+        skeletonEditState = {
+          editLayerName,
+          layer,
+          originalSkeletonData: JSON.parse(JSON.stringify(skeletonData)),
+          workingSkeletonData: JSON.parse(JSON.stringify(skeletonData)),
+          behaviors: createSkeletonPointExecutors(
+            JSON.parse(JSON.stringify(skeletonData)),
+            effectiveSkeletonPointSelection,
+            getSkeletonBehaviorName(initialEvent.shiftKey, initialEvent.altKey)
+          ),
+          lastBehaviorName: getSkeletonBehaviorName(initialEvent.shiftKey, initialEvent.altKey),
+        };
+      }
+    }
+
+    let editChange;
+    for await (const inputEvent of eventStream) {
+      const newEditBehaviorName = getBehaviorName(inputEvent);
+      if (behaviorName !== newEditBehaviorName) {
+        behaviorName = newEditBehaviorName;
+        const rollbackChanges = [];
+        for (const layer of layerInfo) {
+          applyChange(layer.layerGlyph, layer.editBehavior.rollbackChange);
+          rollbackChanges.push(
+            consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
+          );
+          layer.editBehavior = layer.behaviorFactory.getBehavior(behaviorName);
+        }
+        await sendIncrementalChange(consolidateChanges(rollbackChanges));
+      }
+
+      if (skeletonEditState) {
+        const newSkeletonBehaviorName = getSkeletonBehaviorName(
+          inputEvent.shiftKey,
+          inputEvent.altKey
+        );
+        if (newSkeletonBehaviorName !== skeletonEditState.lastBehaviorName) {
+          skeletonEditState.lastBehaviorName = newSkeletonBehaviorName;
+          skeletonEditState.behaviors = createSkeletonPointExecutors(
+            skeletonEditState.originalSkeletonData,
+            effectiveSkeletonPointSelection,
+            newSkeletonBehaviorName
+          );
+        }
+      }
+
+      const currentPoint = sceneController.localPoint(inputEvent);
+      const roundFunc = makeRoundFunc(inputEvent);
+      const delta = {
+        x: currentPoint.x - initialPoint.x,
+        y: currentPoint.y - initialPoint.y,
+      };
+      const deepEditChanges = [];
+
+      for (const layer of layerInfo) {
+        const layerEditChange = layer.editBehavior.makeChangeForDelta(delta);
+        applyChange(layer.layerGlyph, layerEditChange);
+        deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
+        layer.shouldConnect = layer.connectDetector.shouldConnect(layer.isPrimaryLayer);
+      }
+
+      if (pointerTool.equalizeMode && equalizeHandleInfo && positionedGlyph) {
+        const { pointIndex, smoothIndex, oppositeIndex } = equalizeHandleInfo;
+        const currentGlyphPoint = {
+          x: currentPoint.x - positionedGlyph.x,
+          y: currentPoint.y - positionedGlyph.y,
+        };
+        for (const layer of layerInfo) {
+          const path = layer.layerGlyph.path;
+          const smoothPt = path.getPoint(smoothIndex);
+          if (!smoothPt) {
+            continue;
+          }
+          let newDragVec = {
+            x: currentGlyphPoint.x - smoothPt.x,
+            y: currentGlyphPoint.y - smoothPt.y,
+          };
+          if (inputEvent.shiftKey) {
+            newDragVec = constrainHorVerDiag(newDragVec);
+          }
+          const newDragLen = Math.hypot(newDragVec.x, newDragVec.y);
+          if (newDragLen < 1) {
+            continue;
+          }
+          const newDragPos = {
+            x: Math.round(smoothPt.x + newDragVec.x),
+            y: Math.round(smoothPt.y + newDragVec.y),
+          };
+          const newOppPos = {
+            x: Math.round(smoothPt.x - newDragVec.x),
+            y: Math.round(smoothPt.y - newDragVec.y),
+          };
+          const equalizeChanges = [
+            { f: "=xy", a: [pointIndex, newDragPos.x, newDragPos.y] },
+            { f: "=xy", a: [oppositeIndex, newOppPos.x, newOppPos.y] },
+          ];
+          for (const change of equalizeChanges) {
+            applyChange(layer.layerGlyph.path, change);
+          }
+          deepEditChanges.push(consolidateChanges(equalizeChanges, layer.changePath));
+          equalizeUsed = true;
+        }
+      }
+
+      if (skeletonEditState) {
+        const {
+          originalSkeletonData,
+          workingSkeletonData,
+          behaviors,
+          layer,
+          editLayerName,
+        } = skeletonEditState;
+
+        for (let ci = 0; ci < originalSkeletonData.contours.length; ci++) {
+          const origContour = originalSkeletonData.contours[ci];
+          const workContour = workingSkeletonData.contours[ci];
+          for (let pi = 0; pi < origContour.points.length; pi++) {
+            workContour.points[pi].x = origContour.points[pi].x;
+            workContour.points[pi].y = origContour.points[pi].y;
+          }
+        }
+
+        const appliedFixedRib =
+          pointerTool.fixedRibMode || pointerTool.fixedRibCompressMode
+            ? applyFixedRibDragToSkeletonData(
+                originalSkeletonData,
+                workingSkeletonData,
+                effectiveSkeletonPointSelection,
+                resolveClickedSkeletonPoint(pointerTool, effectiveSkeletonPointSelection),
+                delta,
+                roundFunc,
+                {
+                  anchorToDragSide: pointerTool.fixedRibCompressMode,
+                  scaleControlPoints: FIXED_RIB_SCALE_CONTROL_POINTS,
+                }
+              )
+            : false;
+
+        if (!appliedFixedRib) {
+          for (const { contourIndex, executor } of behaviors) {
+            const changes = executor.applyDelta(delta, roundFunc);
+            const contour = workingSkeletonData.contours[contourIndex];
+            for (const { pointIndex, x, y } of changes) {
+              contour.points[pointIndex].x = x;
+              contour.points[pointIndex].y = y;
+            }
+          }
+        }
+
+        const skeletonChanges = recordChanges(layer.glyph, (sg) => {
+          regenerateSkeletonContours(sg, workingSkeletonData, { preferInPlace: true });
+        });
+        const skeletonDataChanges = recordChanges(layer, (layerRecord) => {
+          setSkeletonData(layerRecord, JSON.parse(JSON.stringify(workingSkeletonData)));
+        });
+        if (skeletonChanges.hasChange) {
+          deepEditChanges.push(
+            skeletonChanges.prefixed(["layers", editLayerName, "glyph"]).change
+          );
+        }
+        if (skeletonDataChanges.hasChange) {
+          deepEditChanges.push(skeletonDataChanges.prefixed(["layers", editLayerName]).change);
+        }
+      }
+
+      editChange = consolidateChanges(deepEditChanges);
+      await sendIncrementalChange(editChange, true);
+    }
+
+    const rollbackChanges = [];
+    const connectChanges = [];
+    for (const layer of layerInfo) {
+      rollbackChanges.push(
+        consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
+      );
+      if (equalizeUsed && equalizeHandleInfo) {
+        const { pointIndex, oppositeIndex } = equalizeHandleInfo;
+        const rollbackPoints = equalizeRollbackByLayer.get(layer.layerName);
+        if (rollbackPoints?.draggedPoint) {
+          rollbackChanges.push(
+            consolidateChanges(
+              [{ f: "=xy", a: [pointIndex, rollbackPoints.draggedPoint.x, rollbackPoints.draggedPoint.y] }],
+              layer.changePath
+            )
+          );
+        }
+        if (rollbackPoints?.oppositePoint) {
+          rollbackChanges.push(
+            consolidateChanges(
+              [{ f: "=xy", a: [oppositeIndex, rollbackPoints.oppositePoint.x, rollbackPoints.oppositePoint.y] }],
+              layer.changePath
+            )
+          );
+        }
+      }
+
+      if (layer.shouldConnect) {
+        const connectChange = recordChanges(layer.layerGlyph, (layerGlyph) => {
+          connectContours(
+            layerGlyph.path,
+            sceneController.selection,
+            sceneController.getPathConnectDetector(layer.layerGlyph.path)
+          );
+        });
+        if (connectChange.hasChange) {
+          editChange = consolidateChanges(editChange, connectChange.prefixed(layer.changePath).change);
+          rollbackChanges.push(connectChange.prefixed(layer.changePath).rollbackChange);
+          connectChanges.push(connectChange.prefixed(layer.changePath));
+        }
+      }
+    }
+
+    if (connectChanges.length) {
+      await sendIncrementalChange(consolidateChanges(connectChanges.map((change) => change.change)));
+    }
+
+    return {
+      undoLabel:
+        connectChanges.length > 0
+          ? translate("edit-tools-pointer.undo.drag-selection-and-connect-contours")
+          : translate("edit-tools-pointer.undo.drag-selection"),
+      changes: ChangeCollector.fromChanges(editChange, consolidateChanges(rollbackChanges)),
+      broadcast: true,
+    };
+  });
+
+  return makeAdapterResult();
+}
+
 export const canonicalDragAdapters = {
   regularPoint: async (context) => runRegularPointLikeCanonical(context, "drag"),
   anchor: async (context) => runRegularPointLikeCanonical(context, "drag"),
@@ -2314,25 +3790,11 @@ export const legacyDragAdapters = {
   component: async (context) => runLegacyComponentDragAdapter(context),
   componentOrigin: async (context) => runLegacyComponentDragAdapter(context),
   componentTCenter: async (context) => runLegacyComponentDragAdapter(context),
-  mixedSelection: async ({
-    pointerTool,
-    eventStream,
-    initialEvent,
-    effectiveSkeletonPointSelection,
-  }) => {
-    const handled = await pointerTool._handleDragMixedSelection(
-      eventStream,
-      initialEvent,
-      effectiveSkeletonPointSelection
-    );
-    if (handled === false) {
-      return false;
-    }
-    return makeAdapterResult();
-  },
+  mixedSelection: async (context) => runMixedSelectionDragCanonical(context),
   tunniPoint: async (context) => runTunniDragLegacy(context),
   skeletonTunniPoint: async (context) => runSkeletonTunniDragLegacy(context),
 };
 
 export const legacyNudgeAdapters = {
+  mixedSelection: async (context) => runMixedSelectionNudgeLegacy(context),
 };

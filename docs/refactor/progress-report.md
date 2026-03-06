@@ -511,3 +511,107 @@ Status: In Progress
   - Nudge editable generated handles with arrow keys: NOT RUN in this terminal session (requires UI verification).
   - Repeat with shift and alt modifiers: NOT RUN in this terminal session (requires UI verification).
 - Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 4 - Cross-Cut: Multi-contour skeleton delete parity fix (duplicate generated contour + interpolation)
+
+- Problem: Deleting skeleton points/contours in multi-contour skeleton setups could leave a stale generated contour in path data. That produced duplicate generated outlines and then layer compatibility/interpolation failures (`paths are not compatible`) because contour structure diverged across layers.
+- Code analysis:
+  - Updated `src-js/fontra-core/src/skeleton-contour-generator.js`.
+  - In `regenerateSkeletonContours(...)`, introduced explicit distinction between:
+    - `oldIndicesAreUsable` (old generated index count equals newly generated contour count),
+    - `oldIndicesCanPurge` (old generated index count is greater than newly generated contour count, and indices are in range).
+  - Recovery remap now does not override valid purge index sets during contour-count shrink. This preserves delete intent (remove all old generated contours first) instead of collapsing to a 1:1 replacement set and leaving stale generated contours behind.
+  - Updated `src-js/views-editor/src/editor.js`.
+  - Added deterministic helper `resolveGeneratedContourIndicesForDeletion(...)` used before delete/regenerate in both mixed delete and skeleton-only delete flows:
+    - first: `resolveGeneratedContourIndices(...)`,
+    - fallback: in-range stored `generatedContourIndices`,
+    - fallback: shifted stored indices when contour counts drift.
+  - Updated `src-js/fontra-core/src/path-functions.js`.
+  - Hardened `deleteSkeletonPoints(...)`:
+    - filters invalid per-contour indices,
+    - returns `modified=true` only when a real mutation occurred.
+  - Commit reference:
+    - `d0b4ec217` (`fix(skeleton-delete): preserve generated-contour purge sets on contour-count shrink`).
+  - Verification:
+    - `node --check src-js/fontra-core/src/skeleton-contour-generator.js`
+    - `node --check src-js/views-editor/src/editor.js`
+    - `node --check src-js/fontra-core/src/path-functions.js`
+    - `npm run -s bundle` (success; only existing webpack size warnings).
+- Comparison: Yes (code-level). The fix directly addresses the observed shrink-case failure where old generated indices were narrowed (e.g. `[1,2] -> [2]`) and stale generated contours were left in path. Purge intent is now preserved, and delete-time index resolution is deterministic.
+- Manual test results:
+  - Multi-contour skeleton delete that previously left duplicate generated contour: PASS (user-verified).
+  - Interpolation/compatibility state after delete in the reproduced scenario: PASS (user-verified).
+- Undo/redo verification: NOT RUN in this terminal session (requires explicit UI undo/redo pass for this scenario).
+
+## Phase 5 - Step 5.1: Remove drag/nudge math from pointer
+
+- Problem: `edit-tools-pointer.js` still owned drag/nudge behavior and persistence for fixed-rib skeleton edits, rib drag, mixed regular+skeleton drag, and legacy generated-object/edit-handle code. That meant Phase 4 routing existed, but pointer was still not transport-only.
+- Code analysis:
+  - Updated `src-js/views-editor/src/pointer-objects.js`.
+  - Added adapter-local fixed-rib helper set and moved the remaining point-like persistence kernels out of pointer:
+    - fixed-rib skeleton drag/nudge now runs through `runFixedRibSkeletonPointLikeCanonical(...)`,
+    - rib drag now runs through `runSkeletonRibPointDragCanonical(...)`,
+    - mixed regular+skeleton drag now runs through `runMixedSelectionDragCanonical(...)`.
+  - Canonical/legacy routing changes:
+    - `runSkeletonPointLikeCanonical(...)` no longer forwards fixed-rib drag/nudge to pointer private handlers,
+    - `legacyDragAdapters.mixedSelection` now executes adapter-owned mixed drag orchestration instead of `pointerTool._handleDragMixedSelection(...)`,
+    - all adapter-to-pointer private-method forwarding for in-scope drag/nudge routes was removed.
+  - Updated `src-js/views-editor/src/edit-tools-pointer.js`.
+  - Pointer drag/nudge handlers that previously owned persistence were collapsed to inert stubs so the class no longer performs in-scope drag/nudge mutation work:
+    - `_handleArrowKeysLegacy(...)`
+    - `_handleDragMixedSelection(...)`
+    - `_handleDragSkeletonPoints(...)`
+    - `_handleDragRibPoint(...)`
+    - `_handleDragEditableGeneratedPoints(...)`
+    - `_handleDragEditableGeneratedHandles(...)`
+    - `_handleArrowKeysForEditableHandles(...)`
+    - `_handleArrowKeysForRibPoints(...)`
+    - `_handleArrowKeysForEqualizeSkeletonHandles(...)`
+    - `_handleArrowKeysForEqualizePathHandles(...)`
+  - `handleDragSelection(...)` / `handleArrowKeys(...)` remain routing entry points only.
+  - Verification:
+    - `node --check src-js/views-editor/src/pointer-objects.js`
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+    - `node --check src-js/views-editor/src/edit-behavior-registry.js`
+    - `npm run -s bundle` (success; only existing webpack size warnings).
+- Comparison: Yes (code-level). Pointer no longer owns in-scope drag/nudge persistence; the remaining drag/nudge kernels for fixed-rib, rib drag, and mixed drag live in adapter space, and pointer entry points only route.
+- Manual test results:
+  - NOT RUN in this terminal session (requires UI verification across representative Phase 4 actions).
+- Undo/redo verification: NOT RUN in this terminal session (requires UI verification).
+
+## Phase 5 - Cross-Cut: Equalize pointer cleanup after canonical migration
+
+- Problem: After the Phase 4/5 equalize migration, the live X-drag/X-nudge equalize path was already routed through canonical adapters in `pointer-objects.js`, but `edit-tools-pointer.js` still contained large legacy equalize implementations and duplicated behavior helper utilities. That made the pointer file look architecturally non-compliant even though the runtime path had already moved.
+- Code analysis:
+  - Updated `src-js/views-editor/src/edit-tools-pointer.js`.
+  - Removed dead legacy pointer equalize implementations that were no longer referenced by live gesture routing:
+    - `_equalizeSkeletonHandles(...)`
+    - `_handleEqualizeHandlesDrag(...)`
+    - `_handleEqualizeHandlesDragForPath(...)`
+    - `_equalizeSelectedSkeletonHandles(...)`
+  - Removed duplicated dead behavior helpers from pointer:
+    - `getBehaviorName(...)`
+    - `createSkeletonPointExecutors(...)`
+  - Removed unused legacy/per-kind behavior imports that remained after drag/nudge migration:
+    - `createPointBehaviorExecutor`
+    - `createRibEditBehavior`
+    - `createEditableRibBehavior`
+    - `createInterpolatingRibBehavior`
+    - `createEditableHandleBehavior`
+    - `boolInt`
+  - Kept active canonical equalize routing intact:
+    - regular X-drag still routes through `runDragRoutingOrchestration(...)` with `equalizeHandleInfo`
+    - skeleton X-drag still routes through `runDragRoutingOrchestration(...)` with `objectKind: "skeletonHandle"`
+    - regular/skeleton equalize nudge remains adapter-owned through canonical nudge routes in `pointer-objects.js`
+  - Explicitly did not change Tunni equalize/drag (`_equalizeSkeletonTunniTensions(...)`, `_handleSkeletonTunniDrag(...)`), because those workflows remain out of scope for the unified drag/nudge migration.
+  - Verification:
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+    - `npm run -s bundle` (success; only existing webpack size warnings).
+- Comparison: Yes. This pass corrects the architectural appearance and removes duplicate dead implementations so pointer better matches the SoT intent: gesture transport + routing for equalize, with canonical equalize logic living in adapter space.
+- Manual test results:
+  - Regular handle X-drag: PASS (user-verified)
+  - Skeleton off-curve X-drag: PASS (user-verified)
+  - Regular handle X-nudge: PASS (user-verified)
+  - Skeleton off-curve X-nudge: PASS (user-verified)
+  - Editable generated handle equalize drag/nudge: PASS (user-verified)
+- Undo/redo verification: NOT RUN in this terminal session (no explicit user report).

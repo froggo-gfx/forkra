@@ -102,7 +102,7 @@ export const OBJECT_KINDS = {
   },
   mixedSelection: {
     selectionKey: null,
-    supports: ["drag"],
+    supports: ["drag", "nudge"],
     persistent: false,
     nonSelection: true,
   },
@@ -324,6 +324,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonRibPoint: "CA",
     editableGeneratedPoint: "CA",
     editableGeneratedHandle: "CA",
+    mixedSelection: "CL",
   },
   R11: {
     regularPoint: "CA",
@@ -334,6 +335,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonRibPoint: "CA",
     editableGeneratedPoint: "CA",
     editableGeneratedHandle: "CA",
+    mixedSelection: "CL",
   },
   R13: {
     regularPoint: "CA",
@@ -404,6 +406,7 @@ export const NUDGE_ROUTING_MAP = {
     skeletonRibPoint: "CA",
     editableGeneratedPoint: "CA",
     editableGeneratedHandle: "CA",
+    mixedSelection: "CL",
   },
 };
 
