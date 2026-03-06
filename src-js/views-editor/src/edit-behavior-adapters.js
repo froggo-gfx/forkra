@@ -39,7 +39,7 @@ import {
 
 // Adapter contract for drag/nudge routing:
 // - When handled, adapters return `{ forward, rollback }`.
-// - During migration, wrappers may return `{ forward: null, rollback: null }`.
+// - Some handled adapters still use placeholder `{ forward: null, rollback: null }` payloads.
 // - Unhandled routes return `false` so composer can continue fallback logic.
 export const ADAPTER_CONTRACT = Object.freeze({
   handledResultShape: "{ forward, rollback }",

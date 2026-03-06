@@ -10,7 +10,7 @@ import {
   canonicalNudgeAdapters,
   legacyDragAdapters,
   legacyNudgeAdapters,
-} from "./pointer-objects.js";
+} from "./edit-behavior-adapters.js";
 
 export async function runPointLikeInputKernel({
   mode,

@@ -1,5 +1,5 @@
 // Adapter contract reference:
-// See `src-js/views-editor/src/pointer-objects.js` (`ADAPTER_CONTRACT`).
+// See `src-js/views-editor/src/edit-behavior-adapters.js` (`ADAPTER_CONTRACT`).
 // Registry stays declarative and does not define adapter execution semantics.
 
 // Object registry (declarative only; no parsing logic).

@@ -19,26 +19,187 @@ import {
 } from "@fontra/core/utils.js";
 import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
 import * as vector from "@fontra/core/vector.js";
-import {
-  ANY,
-  NIL,
-  OFF,
-  SEL,
-  SHA,
-  SMO,
-  UNS,
-  buildPointMatchTree,
-  findPointMatch,
-} from "./edit-behavior-support.js";
 
 export { ANY, NIL, OFF, SEL, SHA, SMO, UNS };
+
+// Or-able constants for rule definitions.
+const NIL = 1 << 0; // Does not exist
+const SEL = 1 << 1; // Selected
+const UNS = 1 << 2; // Unselected
+const SHA = 1 << 3; // Sharp On-Curve
+const SMO = 1 << 4; // Smooth On-Curve
+const OFF = 1 << 5; // Off-Curve
+const ANY = SHA | SMO | OFF;
+
+const SHARP_SELECTED = "SHARP_SELECTED";
+const SHARP_UNSELECTED = "SHARP_UNSELECTED";
+const SMOOTH_SELECTED = "SMOOTH_SELECTED";
+const SMOOTH_UNSELECTED = "SMOOTH_UNSELECTED";
+const OFFCURVE_SELECTED = "OFFCURVE_SELECTED";
+const OFFCURVE_UNSELECTED = "OFFCURVE_UNSELECTED";
+const DOESNT_EXIST = "DOESNT_EXIST";
+
+const POINT_TYPES = [
+  // usage: POINT_TYPES[smooth][oncurve][selected]
+  [
+    [OFFCURVE_UNSELECTED, OFFCURVE_SELECTED],
+    [SHARP_UNSELECTED, SHARP_SELECTED],
+  ],
+  [
+    [OFFCURVE_UNSELECTED, OFFCURVE_SELECTED],
+    [SMOOTH_UNSELECTED, SMOOTH_SELECTED],
+  ],
+];
+
+function buildPointMatchTree(rules) {
+  const matchTree = {};
+  let ruleIndex = 0;
+  for (const rule of rules) {
+    if (rule.length !== 8) {
+      throw new Error("assert -- invalid rule");
+    }
+    const matchPoints = rule.slice(0, 6);
+    matchPoints.push(ANY | NIL);
+    const actionForward = {
+      constrain: rule[6],
+      action: rule[7],
+      direction: 1,
+      ruleIndex,
+    };
+    const actionBackward = {
+      ...actionForward,
+      direction: -1,
+    };
+    populatePointMatchTree(matchTree, Array.from(reversed(matchPoints)), actionBackward);
+    populatePointMatchTree(matchTree, matchPoints, actionForward);
+    ruleIndex++;
+  }
+  return matchTree;
+}
+
+function populatePointMatchTree(tree, matchPoints, action) {
+  const matchPoint = matchPoints[0];
+  const remainingMatchPoints = matchPoints.slice(1);
+  const isLeafNode = !remainingMatchPoints.length;
+  for (const pointType of convertPointType(matchPoint)) {
+    if (isLeafNode) {
+      tree[pointType] = action;
+    } else {
+      let branch = tree[pointType];
+      if (!branch) {
+        branch = {};
+        tree[pointType] = branch;
+      }
+      populatePointMatchTree(branch, remainingMatchPoints, action);
+    }
+  }
+}
+
+function convertPointType(matchPoint) {
+  if (matchPoint === (ANY | NIL)) {
+    return ["*"];
+  }
+  const sel = matchPoint & SEL;
+  const unsel = matchPoint & UNS;
+  const sharp = matchPoint & SHA;
+  const smooth = matchPoint & SMO;
+  const offcurve = matchPoint & OFF;
+  const doesntExist = matchPoint & NIL;
+
+  if (sel && unsel) {
+    throw new Error("assert -- can't match matchPoint that is selected and unselected");
+  }
+  if (!(sharp || smooth || offcurve)) {
+    throw new Error("assert -- matchPoint must be at least sharp, smooth or off-curve");
+  }
+
+  const pointTypes = [];
+  if (doesntExist) {
+    pointTypes.push(DOESNT_EXIST);
+  }
+  if (sharp) {
+    if (!unsel) {
+      pointTypes.push(SHARP_SELECTED);
+    }
+    if (!sel) {
+      pointTypes.push(SHARP_UNSELECTED);
+    }
+  }
+  if (smooth) {
+    if (!unsel) {
+      pointTypes.push(SMOOTH_SELECTED);
+    }
+    if (!sel) {
+      pointTypes.push(SMOOTH_UNSELECTED);
+    }
+  }
+  if (offcurve) {
+    if (!unsel) {
+      pointTypes.push(OFFCURVE_SELECTED);
+    }
+    if (!sel) {
+      pointTypes.push(OFFCURVE_UNSELECTED);
+    }
+  }
+  return pointTypes;
+}
+
+function findPointMatch(matchTree, pointIndex, contourPoints, numPoints, isClosed) {
+  const neighborIndices = [];
+  for (let neighborOffset = -3; neighborOffset < 4; neighborOffset++) {
+    let neighborIndex = pointIndex + neighborOffset;
+    if (isClosed) {
+      neighborIndex = ((neighborIndex % numPoints) + numPoints) % numPoints;
+    }
+    neighborIndices.push(neighborIndex);
+  }
+  const match = findPointMatchInTree(matchTree, neighborIndices, contourPoints);
+  return [match, neighborIndices];
+}
+
+function findPointMatchInTree(matchTree, neighborIndices, contourPoints) {
+  const neighborIndex = neighborIndices[0];
+  const point = contourPoints[neighborIndex];
+  let pointType;
+  if (point === undefined) {
+    pointType = DOESNT_EXIST;
+  } else {
+    const smooth = point.smooth ? 1 : 0;
+    const oncurve = point.type ? 0 : 1;
+    const selected = point.selected ? 1 : 0;
+    pointType = POINT_TYPES[smooth][oncurve][selected];
+  }
+  const branchSpecific = matchTree[pointType];
+  const branchWildcard = matchTree["*"];
+  const remainingNeighborIndices = neighborIndices.slice(1);
+  if (!remainingNeighborIndices.length) {
+    return branchSpecific || branchWildcard;
+  }
+  let matchSpecific;
+  let matchWildcard;
+  if (branchSpecific) {
+    matchSpecific = findPointMatchInTree(
+      branchSpecific,
+      remainingNeighborIndices,
+      contourPoints
+    );
+  }
+  if (branchWildcard) {
+    matchWildcard = findPointMatchInTree(
+      branchWildcard,
+      remainingNeighborIndices,
+      contourPoints
+    );
+  }
+  return matchSpecific || matchWildcard;
+}
 
 //// grid
 let magneticSnapEnabled = false;
 export function toggleMagneticSnap() {
-      magneticSnapEnabled = !magneticSnapEnabled;
-      console.log("Magnetic snap", magneticSnapEnabled ? "ON" : "OFF");
-    }
+  magneticSnapEnabled = !magneticSnapEnabled;
+  console.log("Magnetic snap", magneticSnapEnabled ? "ON" : "OFF");
+}
 
 function roundWithSnapRules(value, event = null, isArrowKey = false) {
   const coarseUnit = window.coarseGridSpacing || 1;
