@@ -1129,89 +1129,81 @@ Expected result:
 
 ---
 
-## Phase 2: Move Shared Drag/Nudge Session Kernels Out Of Composer
+## Phase 2: Move Kernel Ownership To Adapters And Simplify It
 
 ### Broad Problem
 
-The shared input/session kernels currently live in composer, but adapters depend on them.
+The shared point-like kernels currently live in composer, but adapters depend on them.
 
 That is backwards.
 
-Composer should orchestrate routing.
-Shared drag/nudge kernels should live in the adapter layer we already have, not inside composer.
+But the problem is not only ownership.
 
-Phase 2 will fix that dependency direction.
+The current kernel API is also too generalized:
+
+- one helper tries to cover both drag-stream input and one-shot nudge input
+- the session helper forwards a large callback surface
+- composer injects both kernels into adapter context as if they were runtime data
+- some routes use both kernels, some use only the input kernel, and some do not fit the kernel at all
+
+So Phase 2 must do more than relocate code.
 
 The goal of this phase is simple:
 
-- composer should stop owning reusable drag/nudge kernel code
-- the adapter layer should own the shared point-like kernels directly
-- routing context should stop carrying kernel functions around as baggage
+- move kernel ownership into the adapters layer
+- keep the two-helper model
+- simplify both helpers while moving them
+- remove composer-to-adapter kernel injection entirely
+- make valid input-only consumers explicit instead of pretending every route uses the same execution model
 
-### Step 2.1: Write down the exact current dependency direction and every place it appears
+Important constraint for this phase:
+
+- do not create a new kernel file
+- keep the helpers in `src-js/views-editor/src/edit-behavior-adapters.js` for now
+- if Phase 3 later splits the adapters file, the helpers can move with that split
+
+### Step 2.1: Write down the real current kernel shape and the real consumer categories
 
 #### Problem Aspect
 
-Before moving code, we need one exact list of:
+Before moving anything, we need to describe the kernel honestly.
 
-- where the kernels live now
-- where composer passes them into adapters
-- where adapters expect them in `context`
+Right now the code reads as if there is one clean shared execution model, but that is not what the adapters actually do.
 
-If we skip this inventory, the extraction can look finished while hidden call sites still depend on the old injection path.
-
-This step fixes that risk first.
+If we skip this reframing, the implementation will preserve fake symmetry.
 
 #### Proposed Solution (Plain Language)
 
-Document the current dependency direction in the plan and in the fine-grained progress report.
+Document the real situation in the plan and progress report:
 
-Make the current pattern explicit:
+1. `runPointLikeInputKernel(...)` is input normalization
+2. `runPointLikeSessionKernel(...)` is edit-session lifecycle wrapping
+3. some routes are full `session + input` consumers
+4. some routes are valid `input-only` consumers
+5. some routes should stay outside the kernel for now
 
-1. composer defines the kernels
-2. composer passes the kernels into adapter context
-3. adapters assert the kernels exist in that context
+Explicitly name `input-only` use as allowed, not as refactor failure.
 
-Do not change behavior in this step.
-
-Just make the problem concrete and complete.
+That gives the implementation a truthful target.
 
 #### Code Evidence
 
-Current kernel ownership:
+Current kernel definitions:
 
 - `src-js/views-editor/src/edit-behavior-composer.js`
 
-Current exported kernels:
+Current full-pair consumers:
 
-```js
-export async function runPointLikeInputKernel(...) { ... }
-export async function runPointLikeSessionKernel(...) { ... }
-```
+- regular point-like orchestration
+- skeleton point orchestration
+- skeleton handle orchestration
+- editable-generated point orchestration
+- editable-generated handle orchestration
 
-Current composer injection pattern:
+Current input-only consumers:
 
-```js
-const adapterResult = await adapter({
-  ..._context,
-  runPointLikeInputKernel,
-  runPointLikeSessionKernel,
-});
-```
-
-Current adapter dependency pattern:
-
-```js
-const {
-  runPointLikeInputKernel,
-  runPointLikeSessionKernel,
-} = context;
-
-assert(
-  typeof runPointLikeInputKernel === "function",
-  "missing runPointLikeInputKernel"
-);
-```
+- regular equalize nudge
+- skeleton rib nudge
 
 #### Files To Touch
 
@@ -1225,7 +1217,7 @@ This is a documentation-only step, but still do a quick sanity pass:
 1. Drag a regular point.
 2. Drag a skeleton point.
 3. Nudge a regular point.
-4. Nudge an editable generated handle.
+4. Nudge a rib point.
 5. Undo and redo one of the above.
 
 Expected result:
@@ -1235,36 +1227,33 @@ Expected result:
 
 ---
 
-### Step 2.2: Move the shared kernels into the adapters file without changing behavior
+### Step 2.2: Move the two kernel helpers into the adapters layer without creating a new file
 
 #### Problem Aspect
 
-The main technical problem is ownership.
+The first concrete problem is still ownership.
 
-Right now the kernels are physically defined in composer, so even if their logic is generic, their location says they belong to composer.
+As long as the helpers are defined in composer, the code says they belong to orchestration even though the real consumers are adapter-side.
 
-That is the wrong message and the wrong dependency shape.
-
-In our current structure, the cleanest place to move them is the adapter layer we already have.
-
-This step fixes only that ownership problem.
+That keeps the dependency direction wrong.
 
 #### Proposed Solution (Plain Language)
 
-Move these reusable helpers out of composer and into the adapters file:
+Move these helpers out of composer and into `src-js/views-editor/src/edit-behavior-adapters.js`:
 
-- `runPointLikeInputKernel`
-- `runPointLikeSessionKernel`
+- `runPointLikeInputKernel(...)`
+- `runPointLikeSessionKernel(...)`
 
-Do not rewrite the logic yet.
-Do not simplify arguments yet.
-Do not change adapter behavior yet.
+Keep the exported names the same in this step.
 
-This step should be a pure relocation.
+Do not redesign composer routing here.
+Do not add a new kernel module.
+
+This step is about changing ownership first.
 
 #### Proposed Solution (Code Sketch)
 
-Composer should import the kernels from the adapters file:
+After the move, composer should import the helpers from the adapters layer instead of defining them:
 
 ```js
 import {
@@ -1273,16 +1262,9 @@ import {
 } from "./edit-behavior-adapters.js";
 ```
 
-If Phase 0 has not renamed the file yet, the temporary path is:
-
-```js
-} from "./pointer-objects.js";
-```
-
 #### Files To Touch
 
-- `src-js/views-editor/src/pointer-objects.js`
-  - or, if Phase 0 is already complete, `src-js/views-editor/src/edit-behavior-adapters.js`
+- `src-js/views-editor/src/edit-behavior-adapters.js`
 - `src-js/views-editor/src/edit-behavior-composer.js`
 - `docs/refactor/progress-report.md`
 
@@ -1305,36 +1287,115 @@ Expected result:
 
 ---
 
-### Step 2.3: Stop passing kernel functions through composer context
+### Step 2.3: Simplify the input kernel while moving it, but keep the two-helper model
 
 #### Problem Aspect
 
-Even after Step 2.2, the dependency is still backwards if composer keeps injecting the kernels into adapter context.
+The input kernel has a real job, but its readable surface is still too broad.
 
-That would mean the code moved files, but the runtime relationship stayed awkward.
+One function currently covers:
 
-This step fixes that exact leftover dependency.
+- drag stream processing
+- drag behavior-name changes
+- drag point mapping
+- one-shot nudge delta calculation
+
+That is more mode branching than the main helper should expose.
 
 #### Proposed Solution (Plain Language)
 
-Remove kernel injection from composer routing calls.
+Keep `runPointLikeInputKernel(...)` as the public adapter-owned helper, but simplify its internals during the move.
 
-Composer should call adapters with routing context only.
+Target shape:
 
-That means:
+- drag logic lives in one private local path
+- nudge logic lives in one private local path
+- the exported helper is only a thin dispatcher
 
-- keep object-kind routing and modifier resolution in composer
-- stop passing `runPointLikeInputKernel` through `_context`
-- stop passing `runPointLikeSessionKernel` through `_context`
+Do not rename every caller in this phase.
+Do not collapse everything into one giant new helper.
 
-After this step, adapters must stop expecting these functions from composer.
+This keeps the two-helper model while making the input helper easier to read.
 
 #### Proposed Solution (Code Sketch)
 
-Current pattern to remove:
+Expected direction:
 
 ```js
-const adapterResult = await adapter({
+function runPointLikeDragInput(...) { ... }
+function runPointLikeNudgeInput(...) { ... }
+
+export async function runPointLikeInputKernel(options) {
+  return options.mode === "drag"
+    ? runPointLikeDragInput(options)
+    : runPointLikeNudgeInput(options);
+}
+```
+
+#### Files To Touch
+
+- `src-js/views-editor/src/edit-behavior-adapters.js`
+- `docs/refactor/progress-report.md`
+
+#### Manual Tests
+
+Focus on behavior that proves the input helper still works:
+
+1. Drag a regular point and change modifiers during drag.
+2. Drag a skeleton point and change modifiers during drag.
+3. Nudge a regular point with normal arrow keys.
+4. Nudge a regular point with `Shift`.
+5. Nudge a regular point with `Shift + Ctrl` or `Shift + Cmd`.
+6. Nudge a rib point.
+7. Undo and redo one drag and one nudge.
+
+Expected result:
+
+- drag behavior switching still works
+- nudge delta scaling still works
+- no user-visible behavior drift
+
+---
+
+### Step 2.4: Simplify the session kernel and remove composer-to-adapter kernel injection
+
+#### Problem Aspect
+
+The session kernel is useful, but right now it is carrying extra ceremony:
+
+- composer passes both kernels through adapter context
+- adapters assert they exist
+- the session kernel accepts an injected input-kernel override even though the normal path is always the same local helper
+
+That is complexity without real domain value.
+
+#### Proposed Solution (Plain Language)
+
+Do two things together:
+
+1. remove kernel injection from composer
+2. simplify `runPointLikeSessionKernel(...)` while it becomes adapter-owned
+
+Concrete target:
+
+- composer should call adapters with routing context only
+- adapters should call the local kernel helpers directly
+- `runPointLikeSessionKernel(...)` should stop accepting `runPointLikeInputKernel: inputKernel = ...`
+- the session kernel should keep only the extension points that are actually useful:
+  - `withEditSession`
+  - `onSessionStart`
+  - `onBehaviorChanged`
+  - `onInput`
+  - `onSessionEnd`
+
+This keeps the helper thin instead of preserving it as a callback trampoline.
+
+#### Proposed Solution (Code Sketch)
+
+Current pattern to remove from composer:
+
+```js
+const handled = await adapter({
   ..._context,
   runPointLikeInputKernel,
   runPointLikeSessionKernel,
@@ -1344,132 +1405,84 @@ const adapterResult = await adapter({
 Target pattern:
 
 ```js
-const adapterResult = await adapter(_context);
+const handled = await adapter(_context);
 ```
 
-Do the same for nudge routing.
+Current session-kernel pattern to simplify:
+
+```js
+runPointLikeSessionKernel({
+  runPointLikeInputKernel: inputKernel = runPointLikeInputKernel,
+  ...
+});
+```
+
+Target direction:
+
+```js
+runPointLikeSessionKernel({
+  ...
+});
+```
+
+with the session helper calling the local input helper directly.
 
 #### Files To Touch
 
 - `src-js/views-editor/src/edit-behavior-composer.js`
+- `src-js/views-editor/src/edit-behavior-adapters.js`
 - `docs/refactor/progress-report.md`
 
 #### Manual Tests
 
-Test routes from multiple adapter families:
+Test routes from multiple consumer categories:
 
 1. Drag regular point.
 2. Drag skeleton off-curve point.
-3. Drag rib point.
-4. Drag editable generated handle.
-5. Nudge regular point.
-6. Nudge skeleton point.
-7. Nudge rib point.
-8. Nudge editable generated point.
-9. Undo and redo one drag and one nudge.
+3. Drag editable generated handle.
+4. Nudge regular point.
+5. Nudge skeleton point.
+6. Nudge rib point.
+7. Nudge editable generated point.
+8. Mixed selection drag.
+9. Mixed selection nudge.
+10. Undo and redo one drag and one nudge.
 
 Expected result:
 
 - no route fails because kernels are no longer passed in context
-- behavior remains the same
+- full-session consumers still work
+- input-only consumers still work
 
 ---
 
-### Step 2.4: Update adapter code to use the locally owned kernels directly
+### Step 2.5: Finalize the kernel boundary and make the remaining exceptions explicit
 
 #### Problem Aspect
 
-Once composer stops injecting the kernels, adapter code must stop reading them from `context`.
+After the move, the code can still lie in two ways:
 
-Right now many adapter functions still do this:
+1. it can still look like composer owns the helpers
+2. it can still imply that every adapter route should use the kernels in the same way
 
-- destructure the kernels from `context`
-- assert that composer passed them in
-
-That is now dead coupling.
-
-This step removes that coupling.
+We need the final boundary to be obvious.
 
 #### Proposed Solution (Plain Language)
 
-In adapter code:
+Do one cleanup pass after the implementation:
 
-- use the kernels directly from the same adapter module
-- remove `context` destructuring for those kernel functions
-- remove â€œmissing kernelâ€ assertions that only existed because of composer injection
+- make sure the kernel section in the adapters file imports only what generic kernel logic actually needs
+- make sure composer no longer exports or injects the helpers
+- make sure full-session consumers call the local helpers directly
+- make sure input-only consumers are left readable and explicit
+- add a short note that these helpers are adapter-owned shared point-like infrastructure, not composer logic
 
-Keep all object-kind-specific logic unchanged.
+Also add a small verification checklist to the fine-grained progress entry:
 
-This step is about dependency cleanup, not behavior rewrite.
-
-#### Proposed Solution (Code Sketch)
-
-Remove patterns like:
-
-```js
-const { runPointLikeInputKernel, runPointLikeSessionKernel } = context;
-```
-
-And remove assertions like:
-
-```js
-assert(typeof runPointLikeInputKernel === "function");
-```
-
-#### Files To Touch
-
-- `src-js/views-editor/src/pointer-objects.js`
-  - or, if Phase 0 is already complete, `src-js/views-editor/src/edit-behavior-adapters.js`
-- `docs/refactor/progress-report.md`
-
-#### Manual Tests
-
-This step needs a wide pass because many adapter families touch the kernels:
-
-1. Drag regular point.
-2. Drag anchor.
-3. Drag guideline.
-4. Drag skeleton point.
-5. Drag skeleton equalize handle.
-6. Drag editable generated point.
-7. Drag editable generated handle.
-8. Nudge regular point.
-9. Nudge skeleton point.
-10. Nudge editable generated point.
-11. Nudge editable generated handle.
-12. Undo and redo one drag and one nudge.
-
-Expected result:
-
-- all adapter families still work
-- no adapter crashes because of missing kernel functions in context
-
----
-
-### Step 2.5: Make the adapter-owned kernel section obviously separate from composer routing
-
-#### Problem Aspect
-
-After extraction, the code can still be confusing if the moved kernel code still looks half-owned by composer.
-
-We need the final module boundary to be obvious to the next person who reads it.
-
-This step fixes the last ambiguity in this phase.
-
-#### Proposed Solution (Plain Language)
-
-Do one cleanup pass after the extraction:
-
-- make sure the adapter-owned kernel section imports only what generic kernel logic actually needs
-- make sure composer imports the kernels instead of defining them
-- make sure adapter functions call the kernels locally instead of receiving them from context
-- add a short comment explaining that this kernel section is shared point-like session infrastructure owned by the adapter layer, not composer logic
-
-Also add a verification checklist to the fine-grained progress entry:
-
-- composer no longer exports the kernels
-- adapters no longer receive kernel functions through context
-- the moved kernel section does not depend on routing maps or adapter maps
+- composer no longer defines the kernels
+- composer no longer injects them into adapter context
+- adapters no longer assert kernel presence from `context`
+- input-only consumers remain explicit
 
 #### Code Evidence
 
@@ -1478,20 +1491,20 @@ Verification commands for the end of Phase 2:
 ```bash
 rg -n "export async function runPointLikeInputKernel|export async function runPointLikeSessionKernel" src-js/views-editor/src
 rg -n "runPointLikeInputKernel,|runPointLikeSessionKernel," src-js/views-editor/src/edit-behavior-composer.js
-rg -n "const \\{[^}]*runPointLikeInputKernel|const \\{[^}]*runPointLikeSessionKernel" src-js/views-editor/src/pointer-objects.js
+rg -n "const \\{[^}]*runPointLikeInputKernel|const \\{[^}]*runPointLikeSessionKernel" src-js/views-editor/src/edit-behavior-adapters.js
+rg -n "runRegularEqualizeNudgeCanonical|runSkeletonRibPointNudgeCanonical" src-js/views-editor/src/edit-behavior-adapters.js
 ```
 
 Expected direction after cleanup:
 
-- the export definitions live in the adapter file only
-- composer no longer injects kernels into adapter context
-- adapters no longer pull kernels out of `context`
+- the kernel definitions live in the adapters layer only
+- composer is routing-only again
+- the code no longer pretends the kernels are the universal execution model for all routes
 
 #### Files To Touch
 
 - `src-js/views-editor/src/edit-behavior-composer.js`
-- `src-js/views-editor/src/pointer-objects.js`
-  - or, if Phase 0 is already complete, `src-js/views-editor/src/edit-behavior-adapters.js`
+- `src-js/views-editor/src/edit-behavior-adapters.js`
 - `docs/refactor/progress-report.md`
 
 #### Manual Tests
@@ -1500,78 +1513,82 @@ Final Phase 2 manual check:
 
 1. Drag regular point.
 2. Drag skeleton point.
-3. Drag rib point.
-4. Drag editable generated point.
-5. Drag editable generated handle.
-6. Nudge regular point.
-7. Nudge skeleton point.
+3. Drag editable generated point.
+4. Drag editable generated handle.
+5. Nudge regular point.
+6. Nudge skeleton point.
+7. Nudge rib point.
 8. Nudge editable generated handle.
 9. Mixed selection drag.
-10. Undo and redo one drag and one nudge.
+10. Mixed selection nudge.
+11. Undo and redo one drag and one nudge.
 
 Expected result:
 
 - no behavior drift
 - dependency direction is cleaner in code
 - composer is simpler and more obviously orchestration-only
+- the remaining kernel exceptions are explicit instead of accidental
 
 ---
 
-## Phase 3: Split The Adapters File Into Smaller Modules With Clear Ownership
+## Phase 3: Reorganize The Adapters File In Place Without Creating New Files
 
 ### Broad Problem
 
-The adapters file is too large and mixes too many jobs.
+`src-js/views-editor/src/edit-behavior-adapters.js` is still too large and mixes too many jobs.
 
 That makes cleanup risky and optimization harder than it needs to be.
 
 It is hard to answer simple questions like these:
 
-- where do regular point adapters live
-- where do skeleton-only helpers live
-- where do editable-generated helpers live
-- where do legacy-only routes live
-- which helpers are shared adapter infrastructure and which helpers belong to one object family
+- where do shared adapter helpers stop and regular-point logic begin
+- where does skeleton-owned code begin and end
+- where does editable-generated code begin and end
+- where do mixed-selection and legacy routes live
+- which helpers are truly shared and which ones only look shared because the file grew without structure
 
 That confusion is not just cosmetic.
 
-It means one file change can accidentally affect unrelated object kinds.
+It means one edit can accidentally touch unrelated object families because the file does not present clear internal ownership.
 
-This phase will split the adapters layer into smaller pieces with clearer ownership.
+This phase fixes that without adding files.
 
-Important constraint for this phase:
+Hard constraint for this phase:
 
-- do not create files just because the architecture diagram looks cleaner
-- create the smallest number of files that gives each major adapter family a clear home
-- keep one obvious public entry file for composer imports and routing maps
+- do not create new adapter files
+- use the existing structure only
+- improve ownership by reordering, regrouping, renaming, and tightening helper boundaries inside `src-js/views-editor/src/edit-behavior-adapters.js`
+- allow small pure-code cleanup only when it removes obvious local repetition or fixes obviously wrong helper placement inside the same file
+- do not use Phase 3 to perform broader orchestration deduplication or math extraction that belongs in Phase 5
 
 Expected direction:
 
-- Phase 0 should first rename `src-js/views-editor/src/pointer-objects.js` to `src-js/views-editor/src/edit-behavior-adapters.js`
-- this phase should then split that renamed adapters file carefully
-- if one proposed split does not create a real ownership boundary, do not create that file
+- Phase 0 already renamed `src-js/views-editor/src/pointer-objects.js` to `src-js/views-editor/src/edit-behavior-adapters.js`
+- this phase keeps working inside that renamed file
+- the goal is a clearer in-file layout, not a file split
 
 ### Step 3.1: Map the current adapters file into real ownership blocks before moving code
 
 #### Problem Aspect
 
-Right now the file looks like one long stream of helpers and adapter entrypoints.
+Right now the file still reads like one long stream of helpers and adapter entrypoints.
 
-Before splitting it, we need one clear map of what is actually inside it.
+Before reorganizing it, we need one clear map of what is actually inside it today.
 
-If we skip this, the split will be based on guesswork.
+If we skip this, the cleanup will still be based on guesswork.
 
-That creates bad files like:
+That leads to fake structure, such as:
 
-- one file for â€œmiscâ€
-- one file for â€œshared stuffâ€
-- one file that is still too big but with a new name
+- a “shared” section that still hides family-specific logic
+- a “misc” section that proves nothing was actually understood
+- a reordering pass that only moves code around without improving ownership
 
-This step fixes that by identifying the real module boundaries first.
+This step fixes that by identifying the real ownership blocks first.
 
 #### Proposed Solution (Plain Language)
 
-Read through the adapters file and label each function as one of these kinds:
+Read through `src-js/views-editor/src/edit-behavior-adapters.js` and label each function as one of these kinds:
 
 - shared adapter infrastructure
 - regular point-like adapter logic
@@ -1582,26 +1599,61 @@ Read through the adapters file and label each function as one of these kinds:
 
 Do not move code yet.
 
-Do not invent new files yet.
+Do not invent new files.
 
-The goal is only to produce a concrete ownership map so later extraction steps stay honest.
+The goal is only to produce a concrete ownership map so later in-file cleanup stays honest.
 
 This step must also answer one practical question:
 
-- which file splits are necessary
-- which file splits are only tidy-looking but not useful
+- which ownership blocks need clearer in-file separation
+- which proposed file splits were only tidy-looking and should be rejected
+- which small pure-code cleanups belong in Phase 3 because they improve locality without widening the abstraction surface
 
 #### Code Evidence
 
-Current evidence inside the adapters file:
+Current evidence inside `src-js/views-editor/src/edit-behavior-adapters.js`:
 
-- `src-js/views-editor/src/pointer-objects.js`
-  - adapter contract and generic helpers near the top
-  - regular point-like orchestration around `runRegularPointLikeOrchestration(...)`
-  - skeleton-specific orchestration and fixed-rib logic around `createSkeletonPointExecutors(...)`, `applyFixedRibDragToSkeletonData(...)`, `runSkeletonPointLikeCanonical(...)`, `runSkeletonHandlePointLikeCanonical(...)`
-  - editable-generated logic around `runEditableGeneratedPointLikeCanonical(...)` and `runEditableGeneratedHandleLikeCanonical(...)`
-  - mixed / legacy routes around `runMixedSelectionNudgeLegacy(...)`, `runMixedSelectionDragCanonical(...)`, `runTunniDragLegacy(...)`
-  - adapter maps at the end:
+- shared adapter infrastructure near the top
+  - adapter/composer contract note
+  - point-like kernels: `runPointLikeDragInput(...)`, `runPointLikeNudgeInput(...)`, `runPointLikeInputKernel(...)`, `runPointLikeSessionKernel(...)`
+  - generic helpers like `getBehaviorName(...)`, `filterSelectionByPrefixes(...)`, `filterSelection(...)`
+- editable-generated support helpers currently live high in the file even though they are family-specific
+  - `readEditableHandleEqualizeState(...)`
+  - `applyEditableHandleEqualizedLength(...)`
+  - `collectEditableGeneratedPointsFromPointSelection(...)`
+  - `collectEditableGeneratedHandlesFromPointSelection(...)`
+- skeleton and mixed skeleton-backed helpers are interleaved in the middle
+  - `createSkeletonBackedMixedEditState(...)`
+  - `updateSkeletonBackedMixedBehaviors(...)`
+  - `applySkeletonBackedMixedDelta(...)`
+  - `createSkeletonPointExecutors(...)`
+  - `applyFixedRibDragToSkeletonData(...)`
+  - `createSkeletonLayersData(...)`
+  - `makeSkeletonLayerPersistenceChanges(...)`
+- regular point-like routes begin later
+  - `runRegularPointLikeOrchestration(...)`
+  - `runRegularPointLikeAdapter(...)`
+  - `runRegularEqualizeNudgeCanonical(...)`
+  - `runRegularPointLikeCanonical(...)`
+- skeleton-specific routes follow
+  - `runSkeletonPointLikeOrchestration(...)`
+  - `runSkeletonPointLikeCanonical(...)`
+  - `runFixedRibSkeletonPointLikeCanonical(...)`
+  - `runSkeletonHandlePointLikeCanonical(...)`
+  - `runSkeletonRibPointDragCanonical(...)`
+  - `runSkeletonRibPointNudgeCanonical(...)`
+- editable-generated routes are grouped later
+  - `runEditableGeneratedPointLikeCanonical(...)`
+  - `runEditableGeneratedHandleLikeCanonical(...)`
+  - `runEditableGeneratedPointDragCanonical(...)`
+  - `runEditableGeneratedHandleDragCanonical(...)`
+  - `runEditableGeneratedNudgeCanonical(...)`
+- mixed-selection / legacy routes live near the bottom
+  - `runTunniDragLegacy(...)`
+  - `runSkeletonTunniDragLegacy(...)`
+  - `runMixedSelectionNudgeLegacy(...)`
+  - `runMixedSelectionDragCanonical(...)`
+- public adapter maps stay at the end:
 
 ```js
 export const canonicalDragAdapters = { ... };
@@ -1610,7 +1662,21 @@ export const legacyDragAdapters = { ... };
 export const legacyNudgeAdapters = { ... };
 ```
 
-This step should turn that raw layout into an explicit ownership list.
+This step should turn that raw layout into one explicit ownership list and one explicit rejection:
+
+- do not split this into new files
+
+It should also record the code-level cleanup candidates that are in scope now:
+
+- family-specific helpers that are currently parked in the wrong section
+- tiny repeated boilerplate that can be replaced by one local helper inside the same file
+- repeated cursor/session wrapper setup when the replacement stays local and obvious
+
+It should explicitly reject the bigger Phase 5 work from this phase:
+
+- broad orchestration deduplication across object families
+- moving math into core/shared code
+- redesigning route semantics while cleaning layout
 
 #### Files To Touch
 
@@ -1631,42 +1697,27 @@ This is an inventory-only step, but still do a quick sanity pass:
 Expected result:
 
 - no behavior change
-- the ownership map is concrete enough to guide the extraction steps
+- the ownership map is concrete enough to guide the in-file cleanup steps
 
 ---
 
-### Step 3.2: Split out shared adapter infrastructure that is reused by multiple adapter families
+### Step 3.2: Pull truly shared adapter infrastructure into one explicit in-file section
 
 #### Problem Aspect
 
-Some code in the adapters file does not belong to one object family.
+Some code in the adapters file is truly shared across families.
 
-It is shared adapter infrastructure.
+Some code only looks shared because it ended up near the top during the refactor.
 
-Examples:
+If we do not separate those two cases, the file will keep lying about ownership.
 
-- adapter result helpers
-- behavior-name helpers
-- selection filters
-- shared point-like kernels moved in Phase 2
-- generic persistence / orchestration helpers used by more than one family
-
-If we do not split this shared layer first, later family-specific files will either:
-
-- duplicate the same helpers
-- or import each other in awkward circles
-
-This step isolates the genuinely shared part first.
+It will also keep a few bad local code patterns alive, such as tiny repeated wrappers and helpers that are clearly parked in the wrong section.
 
 #### Proposed Solution (Plain Language)
 
-Create one small shared adapter helper module for code that is reused across multiple adapter families.
+Create one explicit shared-infrastructure section near the top of `src-js/views-editor/src/edit-behavior-adapters.js`.
 
-Keep this module narrow.
-
-It must not become a new junk drawer.
-
-Only move code into it when all of these are true:
+Only keep helpers there when all of these are true:
 
 - the helper is used by more than one adapter family
 - the helper is not really skeleton-only
@@ -1675,50 +1726,25 @@ Only move code into it when all of these are true:
 
 Good candidates:
 
-- result helpers
+- point-like kernels from Phase 2
 - behavior-name helpers
-- selection filtering helpers
-- point-like kernel helpers from Phase 2
+- generic selection filters
+- tiny local wrappers that remove repeated `sceneController.editGlyph(...)` boilerplate if they stay obviously local
+- tiny local wrappers that remove repeated cursor save/set/restore boilerplate if they stay obviously local
 
 Bad candidates:
 
 - fixed-rib logic
-- editable handle equalize math that only editable-generated routes use
+- editable-generated equalize helpers
 - mixed-selection route logic
-
-#### Proposed Solution (Code Sketch)
-
-Possible target file:
-
-```js
-// src-js/views-editor/src/edit-behavior-adapter-shared.js
-export function makeHandledAdapterResult(...) { ... }
-export function makeUnhandledAdapterResult(...) { ... }
-export function getBehaviorName(event) { ... }
-export function filterSelectionByPrefixes(selection, prefixes) { ... }
-export async function runPointLikeInputKernel(...) { ... }
-export async function runPointLikeSessionKernel(...) { ... }
-```
-
-Then the public adapters file keeps ownership of the routing maps:
-
-```js
-import {
-  runPointLikeInputKernel,
-  runPointLikeSessionKernel,
-} from "./edit-behavior-adapter-shared.js";
-```
+- broad “universal” helpers that only rename existing complexity
 
 #### Files To Touch
 
 - `src-js/views-editor/src/edit-behavior-adapters.js`
-  - or, before the Phase 0 rename lands, `src-js/views-editor/src/pointer-objects.js`
-- one new small shared adapter helper file if the inventory from Step 3.1 proves it is necessary
 - `docs/refactor/progress-report.md`
 
 #### Manual Tests
-
-Test routes that rely on shared adapter infrastructure:
 
 1. Drag a regular point.
 2. Drag a skeleton point.
@@ -1731,12 +1757,12 @@ Test routes that rely on shared adapter infrastructure:
 Expected result:
 
 - behavior is unchanged
-- no circular import problems
-- shared helpers now have one obvious home
+- the truly shared helpers now have one obvious in-file home
+- tiny repeated boilerplate is reduced only where the improvement is obvious and local
 
 ---
 
-### Step 3.3: Split out the skeleton-specific adapter code into its own module
+### Step 3.3: Group skeleton-owned adapter code into one contiguous in-file block
 
 #### Problem Aspect
 
@@ -1746,73 +1772,50 @@ It has its own concepts:
 
 - skeleton data layers
 - on-curve vs off-curve skeleton editing
-- fixed rib behavior
+- fixed-rib behavior
 - skeleton equalize behavior
 - regeneration and persistence of skeleton contours
 
-This is a real ownership boundary.
+This is a real ownership boundary, but right now the file does not present it cleanly.
 
-Keeping all of that inside the same file as regular-point and editable-generated routes makes the file harder to reason about.
-
-This step isolates the skeleton-specific part.
+Some of the skeleton-adjacent pure code may also be worth tidying locally in this phase if it improves readability without becoming a new abstraction exercise.
 
 #### Proposed Solution (Plain Language)
 
-Create one skeleton adapter module and move only skeleton-owned code into it.
+Create one skeleton-owned section inside `src-js/views-editor/src/edit-behavior-adapters.js` and move only skeleton-owned code into it.
 
-That module may include:
+That section may include:
 
 - skeleton helper functions
 - skeleton drag/nudge canonical entrypoints
-- skeleton rib routes if they are tightly coupled to skeleton data editing
+- rib routes if they are tightly coupled to skeleton data editing
 
 Before moving any helper, ask:
 
 - is this helper really skeleton-specific
-- or is it pure math that belongs in core later under Phase 5
+- or is it pure math that belongs in Phase 5 instead
 
-If the helper is skeleton-specific editor orchestration, keep it in the skeleton adapter module.
+If the helper is skeleton-specific editor orchestration, keep it in the skeleton section.
 
-If it is pure skeleton math, note it for Phase 5 instead of baking more math into the editor split.
+If it is pure skeleton math, note it for Phase 5 instead of hiding math-placement problems inside a reordering pass.
 
-#### Code Evidence
+Allowed small code cleanup in this step:
 
-Strong skeleton-owned candidates in the current adapters file:
+- regrouping skeleton-owned helpers so read order matches execution flow
+- introducing one tiny local helper if it removes exact repeated skeleton-specific boilerplate in this file
 
-```js
-function createSkeletonPointExecutors(...) { ... }
-function applyFixedRibDragToSkeletonData(...) { ... }
-function createSkeletonLayersData(...) { ... }
-function makeSkeletonLayerPersistenceChanges(...) { ... }
-async function runSkeletonPointLikeCanonical(...) { ... }
-async function runFixedRibSkeletonPointLikeCanonical(...) { ... }
-async function runSkeletonHandlePointLikeCanonical(...) { ... }
-async function runSkeletonRibPointDragCanonical(...) { ... }
-async function runSkeletonRibPointNudgeCanonical(...) { ... }
-```
+Disallowed drift in this step:
 
-Related imports already show the skeleton boundary clearly:
-
-```js
-import {
-  getSkeletonData,
-  regenerateSkeletonContours,
-  setSkeletonData,
-  calculateNormalAtSkeletonPoint,
-  getPointHalfWidth,
-} from "@fontra/core/skeleton-contour-generator.js";
-```
+- extracting core math
+- redesigning skeleton session flow
+- building generic helpers that pretend skeleton and non-skeleton code are more alike than they are
 
 #### Files To Touch
 
 - `src-js/views-editor/src/edit-behavior-adapters.js`
-  - or, before the Phase 0 rename lands, `src-js/views-editor/src/pointer-objects.js`
-- one new skeleton adapter module
 - `docs/refactor/progress-report.md`
 
 #### Manual Tests
-
-This step needs a skeleton-heavy parity pass:
 
 1. Drag a skeleton on-curve point.
 2. Drag a skeleton off-curve point.
@@ -1827,11 +1830,11 @@ Expected result:
 
 - no behavior drift in skeleton editing
 - no broken skeleton regeneration or persistence
-- skeleton-only code now has one obvious home
+- skeleton-owned code now has one obvious in-file home
 
 ---
 
-### Step 3.4: Split out editable-generated adapter code into its own module
+### Step 3.4: Group editable-generated adapter code into one contiguous in-file block
 
 #### Problem Aspect
 
@@ -1846,13 +1849,13 @@ They have their own concepts:
 
 This is not the same problem space as regular point-like editing.
 
-This step isolates that family so it stops sharing a giant file with unrelated adapter logic.
+Some editable-generated helpers are also currently parked far away from the routes that use them, which is a locality problem as well as an ownership problem.
 
 #### Proposed Solution (Plain Language)
 
-Create one editable-generated adapter module and move only editable-generated-owned code into it.
+Create one editable-generated-owned section inside `src-js/views-editor/src/edit-behavior-adapters.js` and move only editable-generated-owned code into it.
 
-That module may include:
+That section may include:
 
 - generated-point selection collectors
 - generated-handle equalize helpers
@@ -1865,34 +1868,24 @@ Do not move skeleton-only logic here.
 
 The goal is simple:
 
-- all editable-generated route logic should be readable in one place
+- all editable-generated route logic should be readable in one place inside the existing file
 
-#### Code Evidence
+Allowed small code cleanup in this step:
 
-Strong editable-generated-owned candidates in the current adapters file:
+- moving family-specific helpers closer to the routes that use them
+- introducing one tiny local helper when it removes exact repeated editable-generated boilerplate without widening abstraction
 
-```js
-function readEditableHandleEqualizeState(...) { ... }
-function applyEditableHandleEqualizedLength(...) { ... }
-function collectEditableGeneratedPointsFromPointSelection(...) { ... }
-function collectEditableGeneratedHandlesFromPointSelection(...) { ... }
-async function runEditableGeneratedPointLikeCanonical(...) { ... }
-async function runEditableGeneratedHandleLikeCanonical(...) { ... }
-async function runEditableGeneratedPointDragCanonical(...) { ... }
-async function runEditableGeneratedHandleDragCanonical(...) { ... }
-async function runEditableGeneratedNudgeCanonical(...) { ... }
-```
+Disallowed drift in this step:
+
+- trying to fully deduplicate generated and skeleton orchestration here
+- moving generated/skeleton math across module boundaries
 
 #### Files To Touch
 
 - `src-js/views-editor/src/edit-behavior-adapters.js`
-  - or, before the Phase 0 rename lands, `src-js/views-editor/src/pointer-objects.js`
-- one new editable-generated adapter module
 - `docs/refactor/progress-report.md`
 
 #### Manual Tests
-
-This step needs a generated-editing parity pass:
 
 1. Drag an editable generated point.
 2. Drag an editable generated handle.
@@ -1905,75 +1898,48 @@ Expected result:
 
 - no behavior drift in editable-generated editing
 - generated handle equalize behavior still works
-- editable-generated code now has one obvious home
+- editable-generated code now has one obvious in-file home
 
 ---
 
-### Step 3.5: Leave the public adapters file as a small entry module and verify the final split
+### Step 3.5: Finalize the in-file layout and verify the new ownership map
 
 #### Problem Aspect
 
-After splitting shared, skeleton, and editable-generated code, there is still a risk that the public adapters file becomes messy in a different way:
+After regrouping shared, skeleton, and editable-generated code in place, there is still a risk that the file becomes messy in a different way:
 
-- too many exports
-- unclear imports
-- adapter maps mixed with private logic again
-- legacy and mixed-selection routes scattered without a clear home
+- sections exist but are not clearly labeled
+- mixed-selection / legacy routes are still scattered
+- public adapter maps are harder to read
+- the new order still does not help future cleanup
 
-We need one final pass so the adapters layer ends with one obvious public entry file instead of several half-public files.
+We need one final pass so the file ends with one readable internal layout instead of one giant undifferentiated dump.
 
 #### Proposed Solution (Plain Language)
 
-Turn the public adapters file into a small entry module.
+Turn `src-js/views-editor/src/edit-behavior-adapters.js` into one readable file with obvious internal sections.
 
-Its job should be narrow:
+Its final layout should make these groups easy to find:
 
-- import family-specific adapter entrypoints
-- expose the canonical and legacy adapter maps
-- keep only the smallest amount of glue code needed to assemble those maps
+- shared adapter infrastructure
+- regular point-like routes
+- skeleton-owned routes and helpers
+- editable-generated routes and helpers
+- mixed-selection / legacy routes
+- public adapter maps
 
-At the end of this step:
+Mixed-selection / legacy routes should stay in the same file, in one clearly labeled section.
 
-- composer should import one public adapters file
-- the public adapters file should read like a routing surface, not like a 3,000-line implementation dump
-- mixed-selection / legacy routes should either stay in the public file because they are small, or move to one clearly named legacy/mixed module if that is actually simpler
+If one proposed section boundary does not help readability, collapse it instead of preserving fake structure.
 
-This step is also where we decide whether any proposed file is still unnecessary.
+This final pass should also answer one last code-quality question:
 
-If one extracted file ended up tiny and not clearly owned, merge it back instead of keeping a bad split.
-
-#### Proposed Solution (Code Sketch)
-
-Target shape:
-
-```js
-// src-js/views-editor/src/edit-behavior-adapters.js
-import { runRegularPointLikeCanonical, ... } from "./edit-behavior-adapters-regular.js";
-import { runSkeletonPointLikeCanonical, ... } from "./edit-behavior-adapters-skeleton.js";
-import { runEditableGeneratedPointDragCanonical, ... } from "./edit-behavior-adapters-generated.js";
-import { runMixedSelectionDragCanonical, ... } from "./edit-behavior-adapters-legacy.js";
-
-export const canonicalDragAdapters = { ... };
-export const canonicalNudgeAdapters = { ... };
-export const legacyDragAdapters = { ... };
-export const legacyNudgeAdapters = { ... };
-```
-
-The important result is not the exact filenames.
-
-The important result is:
-
-- one public entry file
-- family-owned implementation files
-- no giant mixed dump file
+- did we remove the obvious local repetition and wrong helper placement that belonged to Phase 3
+- or did we only reshuffle code without making the file easier to work in
 
 #### Files To Touch
 
 - `src-js/views-editor/src/edit-behavior-adapters.js`
-  - or, before the Phase 0 rename lands, `src-js/views-editor/src/pointer-objects.js`
-- extracted adapter family modules created earlier in this phase
-- `src-js/views-editor/src/edit-behavior-composer.js`
-  - only if import paths change because of the rename/split
 - `docs/refactor/progress-report.md`
 
 #### Manual Tests
@@ -2001,7 +1967,8 @@ Expected result:
 - no behavior drift
 - composer still imports one stable adapters entrypoint
 - adapter ownership is easier to read in code
-- the number of new files is justified by real boundaries, not aesthetics
+- no new files were created for Phase 3
+- the file has better locality and less obvious local boilerplate, without stealing Phase 5 work
 
 ---
 

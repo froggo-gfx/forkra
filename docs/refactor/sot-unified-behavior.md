@@ -105,9 +105,10 @@ The broad architecture is in place, but the micro-architecture still has 7 activ
 3. Shared drag/nudge kernels live in the wrong module.
    - Composer currently owns shared input/session helpers that adapters depend on.
    - That dependency direction is backwards.
+   - The current kernel API also carries extra generality and composer-injection ceremony that should be removed while moving ownership.
 
 4. The adapters module is too large.
-   - `src-js/views-editor/src/pointer-objects.js` mixes too many responsibilities.
+   - `src-js/views-editor/src/edit-behavior-adapters.js` mixes too many responsibilities.
    - This makes cleanup and optimization harder than necessary.
 
 5. Canonical vs legacy boundaries are not named honestly enough.
@@ -128,7 +129,7 @@ These are the kinds of changes this SoT allows:
 
 - clarify contracts
 - move shared helpers to a better module
-- split oversized files
+- reorganize oversized files in place when possible
 - rename modules/functions/maps so names match reality
 - extract duplicated orchestration helpers
 - extract pure math into core/shared code when appropriate
@@ -178,18 +179,25 @@ Disallowed regression:
 
 ### `src-js/views-editor/src/edit-behavior-adapters.js`
 
-This is still the adapter layer today, but it is expected to shrink and split.
+This is still the adapter layer today, and current cleanup should stay inside this file unless a future step proves a new file is truly necessary.
 
 Allowed work here:
 
 - translation from shared behavior output to object-specific canonical data
 - persistence for adapter-owned routes
 - boolean handled/unhandled returns for composer
-- temporary local helper extraction while the file is being split
+- reordering, regrouping, and relabeling internal sections so ownership is clearer
+- small local helper cleanup when it removes obvious repetition or fixes obviously wrong helper placement inside the same file
 
 Expected future direction:
 
-- smaller adapter modules by concern
+- one cleaner in-file layout with explicit sections for shared infrastructure, regular routes, skeleton-owned routes, editable-generated routes, mixed/legacy routes, and public adapter maps
+
+Disallowed drift here:
+
+- creating new adapter files just because the code would look tidier on paper
+- broad orchestration deduplication that belongs in Phase 5
+- math extraction to core/shared code during Phase 3
 
 ### `src-js/views-editor/src/edit-behavior.js`
 
@@ -256,8 +264,8 @@ This cleanup/optimization stage is complete only when all of these are true:
 
 - adapter/composer routing contract is reduced to truthful boolean handled/unhandled
 - mixed point-like selections, including editable-generated combinations, route and undo correctly
-- shared drag/nudge kernels live in the adapter layer, not in composer
-- the adapter layer is split into smaller modules with clearer ownership
+- shared drag/nudge kernels live in the adapter layer, not in composer, and the kernel API is simplified to the useful adapter-owned surface
+- the adapter layer has a clearer in-file ownership layout without unnecessary new files
 - naming reflects reality for canonical vs legacy paths
 - duplicated point-like orchestration is reduced
 - pure math is moved to core/shared code where appropriate, and only where appropriate
