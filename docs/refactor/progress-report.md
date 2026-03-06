@@ -1,7 +1,7 @@
 # Cleanup and Optimization Progress Report
 
 Date: 2026-03-06
-Status: Phase 1 completed; Phase 1.5 not started; later phases not started
+Status: Phase 1 completed; Phase 1.5 completed; later phases not started
 Source of truth: `docs/refactor/plan-post-refactor-cleanup-optimization.md`
 
 ## How To Use This File
@@ -93,3 +93,43 @@ Use this exact structure for every step:
 - Comparison: Yes. The verification checklist now matches the boolean-only contract and the current code passes it.
 - Manual test results: Not run in UI during this code pass. Automated verification passed via `Select-String` cleanup checks, `node --check` on the touched JS files, and `npm run -s bundle` with the same existing webpack size warnings.
 - Undo/redo verification: Not run manually in UI during this code pass.
+
+### Phase 1.5 - Step 1.5.1: Inventory the current mixed-selection routing and write down the exact gaps
+
+- Problem: Mixed point-like selection was assumed to be broadly unified, but manual testing exposed that editable-generated combinations do not move together with regular or skeleton selections. Before changing routing, the real gap had to be written down exactly.
+- Code analysis: The drag path in `src-js/views-editor/src/edit-tools-pointer.js` still short-circuits to `editableGeneratedPoint` and `editableGeneratedHandle` before `mixedSelection` is considered when there is no skeleton selection. The nudge path in the same file only treats `regular + skeleton` as mixed and otherwise falls through to pure editable-generated routes. On the adapter side, `src-js/views-editor/src/edit-behavior-adapters.js` routes `mixedSelection` to `runMixedSelectionDragCanonical(...)` and `runMixedSelectionNudgeLegacy(...)`, but those functions currently implement regular-path plus skeleton behavior only and do not natively include editable-generated points or editable-generated handles.
+- Comparison: Yes. The inventory shows one structural gap instead of three unrelated bugs. `regular + skeleton` has a real mixed route today, while any combination involving editable-generated content is either intercepted too early or sent to a mixed adapter that does not know how to move that content.
+- Manual test results: Reproduced from UI testing: editable-generated off-curve plus regular point moved only the editable-generated point; editable-generated off-curve plus skeleton on-curve moved only the skeleton point; editable-generated off-curve plus regular off-curve again moved only the editable-generated point. This step was documentation only; no code behavior changed yet.
+- Undo/redo verification: Not run for this inventory step because no code changed.
+
+### Phase 1.5 - Step 1.5.2: Create one explicit mixed point-like classifier in pointer for drag and nudge
+
+- Problem: Pointer had separate hand-written routing branches for drag and nudge, and both encoded mixed selection too narrowly. That made editable-generated content a side case instead of a first-class input family.
+- Code analysis: In `src-js/views-editor/src/edit-tools-pointer.js`, I added `_classifyPointLikeSelection(...)` so drag and nudge both derive `objectKind`, editable-generated point/handle subsets, and mixed/skeleton/rib flags from one shared classifier. `handleArrowKeys()` and `handleDragSelection()` now both use that helper. Component routing was intentionally left on its previous branch so this step only changed point-like selection routing.
+- Comparison: Yes. Pointer no longer decides mixed point-like routing through two separate piles of special cases. The shared classifier now owns that decision, and the same editable-generated subsets are forwarded into routing for both drag and nudge.
+- Manual test results: Not run in UI during this code pass. Automated verification passed via `node --check src-js/views-editor/src/edit-tools-pointer.js` and `npm run -s bundle`.
+- Undo/redo verification: Not run manually in UI during this code pass.
+
+### Phase 1.5 - Step 1.5.3: Expand mixed drag handling so editable-generated content participates natively
+
+- Problem: Even with pointer-side mixed classification fixed, drag would still be wrong if the mixed adapter only knew about regular and skeleton content. Editable-generated points and handles had to join the same drag session without being flattened into regular behavior.
+- Code analysis: In `src-js/views-editor/src/edit-behavior-adapters.js`, I added shared mixed-edit helpers to build one skeleton-backed working state for skeleton points, editable-generated points, and editable-generated handles together. `runMixedSelectionDragCanonical(...)` now filters generated point indices out of the regular selection before constructing `EditBehaviorFactory`, skips regular equalize handling for generated points, and applies regular edits plus skeleton-backed generated edits in the same drag loop. The mixed drag route now receives `editablePoints` and `editableHandles` from pointer and uses them natively instead of dropping them.
+- Comparison: Yes. Mixed drag is no longer limited to regular plus skeleton. Editable-generated content now has an explicit path inside the mixed drag adapter, and plain-regular edits no longer steal generated points by treating them as normal path points.
+- Manual test results: Not run in UI during this code pass. Automated verification passed via `node --check src-js/views-editor/src/edit-behavior-adapters.js`, `node --check src-js/views-editor/src/edit-tools-pointer.js`, and `npm run -s bundle`.
+- Undo/redo verification: Not run manually in UI during this code pass.
+
+### Phase 1.5 - Step 1.5.4: Expand mixed nudge handling with the same native-mix rule
+
+- Problem: Drag and nudge could not keep different meanings for mixed selection. If only drag was fixed, editable-generated mixed selections would still be routed inconsistently and remain unreliable for keyboard editing.
+- Code analysis: `runMixedSelectionNudgeLegacy(...)` in `src-js/views-editor/src/edit-behavior-adapters.js` now mirrors the drag-side structure. It resolves editable-generated points and handles, filters them out of the plain regular selection, applies regular nudge behavior only to the remaining plain-regular selection, and applies skeleton-backed generated/skeleton changes through the same shared mixed-edit helper. The pointer-side temporary safety gates were then removed from `src-js/views-editor/src/edit-tools-pointer.js`, so mixed editable-generated selections now route into `mixedSelection` instead of being forced back into pure handlers.
+- Comparison: Yes. Drag and nudge now share the same mixed point-like selection model, and editable-generated content is no longer routed as an exception once mixed selection is detected.
+- Manual test results: Not run in UI during this code pass. Automated verification passed via `node --check src-js/views-editor/src/edit-behavior-adapters.js`, `node --check src-js/views-editor/src/edit-tools-pointer.js`, `node --check src-js/views-editor/src/edit-behavior-composer.js`, and `npm run -s bundle` with the same existing webpack size warnings.
+- Undo/redo verification: Not run manually in UI during this code pass.
+
+### Phase 1.5 - Step 1.5.5: Run the full mixed-selection matrix and record Phase 1.5 before moving to Phase 2
+
+- Problem: The mixed-selection refactor was not trustworthy until the editable-generated combinations were checked in the UI instead of only compiling and bundling cleanly.
+- Code analysis: The code side for Phase 1.5 was already in place across `src-js/views-editor/src/edit-tools-pointer.js` and `src-js/views-editor/src/edit-behavior-adapters.js`. This closing step was about confirming that the widened mixed-selection classifier and the new mixed adapter execution paths behave correctly in the editor.
+- Comparison: Yes. The reported broken combinations now behave as intended, and the mixed-selection pipeline is aligned with the `native mix` decision from the plan.
+- Manual test results: Passed. The mixed-selection matrix was checked in the editor and everything passes, including the originally broken editable-generated combinations with regular points, regular off-curves, and skeleton on-curves.
+- Undo/redo verification: Passed. Undo and redo also pass for the mixed-selection behavior after the Phase 1.5 changes.

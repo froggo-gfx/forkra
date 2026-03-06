@@ -1171,48 +1171,24 @@ export class PointerTool extends BaseTool {
       guideline: guidelineSelection,
     } = parseSelection(sceneController.selection);
 
-    const hasSkeletonPoints = skeletonPointSelection?.size > 0;
-    const hasRibPoints = ribPointSelection?.size > 0;
-    const hasRegularPoints = regularPointSelection?.length > 0;
-    const hasAnchors = anchorSelection?.length > 0;
-    const hasGuidelines = guidelineSelection?.length > 0;
-    const editableGeneratedPoints = hasRegularPoints
-      ? this._getEditableGeneratedPointsFromSelection(regularPointSelection)
-      : [];
-    const editableGeneratedHandles = hasRegularPoints
-      ? this._getEditableGeneratedHandlesFromSelection(regularPointSelection)
-      : [];
-    const hasMixedRegularSkeletonNudge =
-      hasSkeletonPoints &&
-      (hasRegularPoints || hasAnchors || hasGuidelines) &&
-      !this.equalizeMode &&
-      !this.fixedRibMode &&
-      !this.fixedRibCompressMode;
-
-    let objectKind = "regularPoint";
-    if (hasMixedRegularSkeletonNudge) {
-      objectKind = "mixedSelection";
-    } else if (hasSkeletonPoints) {
-      objectKind = this.equalizeMode ? "skeletonHandle" : "skeletonPoint";
-    } else if (hasRibPoints) {
-      objectKind = "skeletonRibPoint";
-    } else if (editableGeneratedHandles.length > 0) {
-      objectKind = "editableGeneratedHandle";
-    } else if (editableGeneratedPoints.length > 0) {
-      objectKind = "editableGeneratedPoint";
-    } else if (hasAnchors) {
-      objectKind = "anchor";
-    } else if (hasGuidelines) {
-      objectKind = "guideline";
-    }
+    const pointLikeSelection = this._classifyPointLikeSelection({
+      pointSelection: regularPointSelection,
+      anchorSelection,
+      guidelineSelection,
+      skeletonPointSelection,
+      ribPointSelection,
+      allowMixedWithSkeleton:
+        !this.equalizeMode && !this.fixedRibMode && !this.fixedRibCompressMode,
+      skeletonObjectKind: this.equalizeMode ? "skeletonHandle" : "skeletonPoint",
+    });
 
     return runNudgeRoutingOrchestration({
       pointerTool: this,
       sceneController,
       event,
-      objectKind,
-      editablePoints: editableGeneratedPoints,
-      editableHandles: editableGeneratedHandles,
+      objectKind: pointLikeSelection.objectKind,
+      editablePoints: pointLikeSelection.editableGeneratedPoints,
+      editableHandles: pointLikeSelection.editableGeneratedHandles,
     });
   }
 
@@ -2403,6 +2379,13 @@ export class PointerTool extends BaseTool {
       );
     }
 
+    const pointLikeSelection = this._classifyPointLikeSelection({
+      pointSelection,
+      anchorSelection,
+      guidelineSelection,
+      skeletonPointSelection: effectiveSkeletonPointSelection,
+    });
+
     const hasSkeletonSelection = effectiveSkeletonPointSelection?.size > 0;
     const hasRegularSelection =
       pointSelection?.length > 0 ||
@@ -2429,37 +2412,39 @@ export class PointerTool extends BaseTool {
       regularObjectKind = "guideline";
     }
 
-    // Check if any selected points are editable generated points
-    // If so, redirect to dedicated handler
-    if (pointSelection?.length > 0) {
-      const editableGenerated = this._getEditableGeneratedPointsFromSelection(pointSelection);
-      if (editableGenerated.length > 0 && !hasSkeletonSelection) {
+    if (
+      !componentSelection?.length &&
+      !componentOriginSelection?.length &&
+      !componentTCenterSelection?.length &&
+      pointLikeSelection.hasPointLikeSelection
+    ) {
+      let objectKind = pointLikeSelection.objectKind;
+
+      if (objectKind === "skeletonPoint") {
         await runDragRoutingOrchestration({
           pointerTool: this,
           sceneController,
           eventStream,
           initialEvent,
-          objectKind: "editableGeneratedPoint",
-          editablePoints: editableGenerated,
+          objectKind,
+          overrideSelection: effectiveSkeletonPointSelection,
         });
         this.sceneController.sceneModel.showTransformSelection = true;
         return;
       }
 
-      // Check if any selected points are editable generated handles
-      const editableHandles = this._getEditableGeneratedHandlesFromSelection(pointSelection);
-      if (editableHandles.length > 0 && !hasSkeletonSelection) {
-        await runDragRoutingOrchestration({
-          pointerTool: this,
-          sceneController,
-          eventStream,
-          initialEvent,
-          objectKind: "editableGeneratedHandle",
-          editableHandles,
-        });
-        this.sceneController.sceneModel.showTransformSelection = true;
-        return;
-      }
+      await runDragRoutingOrchestration({
+        pointerTool: this,
+        sceneController,
+        eventStream,
+        initialEvent,
+        objectKind,
+        effectiveSkeletonPointSelection,
+        editablePoints: pointLikeSelection.editableGeneratedPoints,
+        editableHandles: pointLikeSelection.editableGeneratedHandles,
+      });
+      this.sceneController.sceneModel.showTransformSelection = true;
+      return;
     }
 
     // If only skeleton selection, use dedicated handler
@@ -2683,6 +2668,91 @@ export class PointerTool extends BaseTool {
     }
 
     return result;
+  }
+
+  _classifyPointLikeSelection({
+    pointSelection,
+    anchorSelection,
+    guidelineSelection,
+    skeletonPointSelection,
+    ribPointSelection,
+    allowMixedWithSkeleton = true,
+    skeletonObjectKind = "skeletonPoint",
+  }) {
+    const editableGeneratedPoints = pointSelection?.length
+      ? this._getEditableGeneratedPointsFromSelection(pointSelection)
+      : [];
+    const editableGeneratedHandles = pointSelection?.length
+      ? this._getEditableGeneratedHandlesFromSelection(pointSelection)
+      : [];
+    const editablePointIndices = new Set(
+      editableGeneratedPoints.map(({ pointIndex }) => pointIndex)
+    );
+    const editableHandleIndices = new Set(
+      editableGeneratedHandles.map(({ pointIndex }) => pointIndex)
+    );
+    const plainRegularPoints =
+      pointSelection?.filter(
+        (pointIndex) =>
+          !editablePointIndices.has(pointIndex) && !editableHandleIndices.has(pointIndex)
+      ) || [];
+    const hasRegularPoints = plainRegularPoints.length > 0;
+    const hasAnchors = (anchorSelection?.length || 0) > 0;
+    const hasGuidelines = (guidelineSelection?.length || 0) > 0;
+    const hasSkeletonSelection = (skeletonPointSelection?.size || 0) > 0;
+    const hasRibSelection = (ribPointSelection?.size || 0) > 0;
+    const hasRegularLikeSelection = hasRegularPoints || hasAnchors || hasGuidelines;
+
+    let regularObjectKind = "regularPoint";
+    if (!hasRegularPoints && hasAnchors) {
+      regularObjectKind = "anchor";
+    } else if (!hasRegularPoints && !hasAnchors && hasGuidelines) {
+      regularObjectKind = "guideline";
+    }
+
+    const nonSkeletonFamilyCount = [
+      hasRegularLikeSelection,
+      editableGeneratedPoints.length > 0,
+      editableGeneratedHandles.length > 0,
+    ].filter(Boolean).length;
+    const isMixedPointLike = allowMixedWithSkeleton
+      ? nonSkeletonFamilyCount + (hasSkeletonSelection ? 1 : 0) > 1
+      : nonSkeletonFamilyCount > 1;
+
+    let objectKind = "regularPoint";
+    if (hasRibSelection) {
+      objectKind = "skeletonRibPoint";
+    } else if (!allowMixedWithSkeleton && hasSkeletonSelection) {
+      objectKind = skeletonObjectKind;
+    } else if (isMixedPointLike) {
+      objectKind = "mixedSelection";
+    } else if (hasSkeletonSelection) {
+      objectKind = skeletonObjectKind;
+    } else if (editableGeneratedHandles.length > 0) {
+      objectKind = "editableGeneratedHandle";
+    } else if (editableGeneratedPoints.length > 0) {
+      objectKind = "editableGeneratedPoint";
+    } else if (hasRegularLikeSelection) {
+      objectKind = regularObjectKind;
+    }
+
+    return {
+      objectKind,
+      regularObjectKind,
+      plainRegularPoints,
+      editableGeneratedPoints,
+      editableGeneratedHandles,
+      hasPointLikeSelection:
+        hasRegularLikeSelection ||
+        hasSkeletonSelection ||
+        hasRibSelection ||
+        editableGeneratedPoints.length > 0 ||
+        editableGeneratedHandles.length > 0,
+      hasRegularLikeSelection,
+      hasSkeletonSelection,
+      hasRibSelection,
+      isMixedPointLike,
+    };
   }
 
   _selectedRibTargetsBelongToSingleSegment(targets, skeletonData) {

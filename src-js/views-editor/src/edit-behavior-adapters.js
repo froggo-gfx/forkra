@@ -63,6 +63,19 @@ function filterSelectionByPrefixes(selection, prefixes) {
   return filtered;
 }
 
+function filterSelection(selection, predicate) {
+  if (!selection?.size || typeof predicate !== "function") {
+    return selection;
+  }
+  const filtered = new Set();
+  for (const key of selection) {
+    if (predicate(key)) {
+      filtered.add(key);
+    }
+  }
+  return filtered;
+}
+
 function getEditableHandleOffsetKeys(side, handleType) {
   const offset1DKey =
     side === "left"
@@ -275,6 +288,398 @@ function collectEditableGeneratedHandlesFromPointSelection({
     result.push({ pointIndex, ...handleInfo });
   }
   return result;
+}
+
+function collectEditableGeneratedPointIndices(editablePoints = [], editableHandles = []) {
+  const pointIndices = new Set();
+  for (const { pointIndex } of editablePoints) {
+    pointIndices.add(pointIndex);
+  }
+  for (const { pointIndex } of editableHandles) {
+    pointIndices.add(pointIndex);
+  }
+  return pointIndices;
+}
+
+function excludePointIndicesFromSelection(selection, excludedPointIndices) {
+  if (!selection?.size || !excludedPointIndices?.size) {
+    return selection;
+  }
+  return filterSelection(selection, (key) => {
+    const [type, indexText] = key.split("/");
+    if (type !== "point") {
+      return true;
+    }
+    return !excludedPointIndices.has(parseInt(indexText, 10));
+  });
+}
+
+function cloneSkeletonData(skeletonData) {
+  return JSON.parse(JSON.stringify(skeletonData));
+}
+
+function createSkeletonBackedMixedEditState({
+  glyph,
+  sceneController,
+  pointerTool,
+  effectiveSkeletonPointSelection,
+  editablePoints = [],
+  editableHandles = [],
+  skeletonBehaviorName,
+  useInterpolation,
+}) {
+  const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
+  const generatedPath = positionedGlyph?.glyph?.path;
+  const primaryEditLayerName = sceneController.editingLayerNames?.[0];
+  const layersData = {};
+
+  for (const editLayerName of sceneController.editingLayerNames || []) {
+    const layer = glyph.layers[editLayerName];
+    const skeletonData = getSkeletonData(layer);
+    if (!skeletonData) {
+      continue;
+    }
+
+    const original = cloneSkeletonData(skeletonData);
+    const data = {
+      editLayerName,
+      layer,
+      original,
+      working: cloneSkeletonData(skeletonData),
+      skeletonBehaviors:
+        effectiveSkeletonPointSelection?.size && editLayerName === primaryEditLayerName
+          ? createSkeletonPointExecutors(
+              original,
+              effectiveSkeletonPointSelection,
+              skeletonBehaviorName
+            )
+          : [],
+      pointBehaviors: [],
+      handleBehaviors: [],
+    };
+
+    for (const editablePoint of editablePoints) {
+      const contour = original.contours?.[editablePoint.skeletonContourIndex];
+      const skeletonPoint = contour?.points?.[editablePoint.skeletonPointIndex];
+      if (!contour || !skeletonPoint || skeletonPoint.type) {
+        continue;
+      }
+      const normal = calculateNormalAtSkeletonPoint(
+        contour,
+        editablePoint.skeletonPointIndex
+      );
+      if (!normal) {
+        continue;
+      }
+      const ribHit = {
+        contourIndex: editablePoint.skeletonContourIndex,
+        pointIndex: editablePoint.skeletonPointIndex,
+        side: editablePoint.side,
+        normal,
+        onCurvePoint: { x: skeletonPoint.x, y: skeletonPoint.y },
+      };
+
+      let behavior;
+      if (useInterpolation && generatedPath) {
+        const interpolationAxis = buildRibInterpolationAxisFromPath(
+          generatedPath,
+          editablePoint.pointIndex
+        );
+        behavior = interpolationAxis
+          ? createInterpolatingRibBehavior(original, ribHit, interpolationAxis)
+          : createEditableRibBehavior(original, ribHit);
+      } else {
+        behavior = createEditableRibBehavior(original, ribHit);
+      }
+      data.pointBehaviors.push({ behavior, editablePoint });
+    }
+
+    const layerPath = layer?.glyph?.path;
+    for (const editableHandle of editableHandles) {
+      const contour = original.contours?.[editableHandle.skeletonContourIndex];
+      if (!contour) {
+        continue;
+      }
+      const skeletonHandleDir = getSkeletonHandleDirectionForPoint(
+        contour,
+        editableHandle.skeletonPointIndex,
+        editableHandle.handleType
+      );
+      if (!skeletonHandleDir) {
+        continue;
+      }
+
+      let equalizeState = null;
+      if (layerPath) {
+        const equalizeInfo = getEqualizeHandleInfoForPointIndex(
+          layerPath,
+          editableHandle.pointIndex
+        );
+        if (equalizeInfo) {
+          const anchorPos = layerPath.getPoint(equalizeInfo.smoothIndex);
+          const draggedPos = layerPath.getPoint(equalizeInfo.pointIndex);
+          const oppositePos = layerPath.getPoint(equalizeInfo.oppositeIndex);
+          const oppositeHandleType =
+            editableHandle.handleType === "in" ? "out" : "in";
+          const oppositeHandleDir = getSkeletonHandleDirectionForPoint(
+            contour,
+            editableHandle.skeletonPointIndex,
+            oppositeHandleType
+          );
+          if (anchorPos && draggedPos && oppositePos && oppositeHandleDir) {
+            const point = contour.points?.[editableHandle.skeletonPointIndex];
+            if (!point) {
+              continue;
+            }
+            const detachedKey =
+              editableHandle.side === "left"
+                ? "leftHandleDetached"
+                : "rightHandleDetached";
+            const detachedMode = !!point?.[detachedKey];
+            const draggedState = readEditableHandleEqualizeState({
+              point,
+              side: editableHandle.side,
+              handleType: editableHandle.handleType,
+              anchorPos,
+              currentHandlePos: draggedPos,
+              skeletonHandleDir,
+              detachedMode,
+            });
+            const oppositeState = readEditableHandleEqualizeState({
+              point,
+              side: editableHandle.side,
+              handleType: oppositeHandleType,
+              anchorPos,
+              currentHandlePos: oppositePos,
+              skeletonHandleDir: oppositeHandleDir,
+              detachedMode,
+            });
+            equalizeState = { anchorPos, draggedState, oppositeState };
+          }
+        }
+      }
+
+      data.handleBehaviors.push({
+        behavior: createEditableHandleBehavior(original, editableHandle, skeletonHandleDir),
+        editableHandle,
+        skeletonHandleDir,
+        equalizeState,
+      });
+    }
+
+    layersData[editLayerName] = data;
+  }
+
+  return {
+    primaryEditLayerName,
+    layersData,
+    latestRollbackChanges: [],
+    lastSkeletonBehaviorName: skeletonBehaviorName,
+  };
+}
+
+function updateSkeletonBackedMixedBehaviors(
+  editState,
+  effectiveSkeletonPointSelection,
+  skeletonBehaviorName
+) {
+  if (!effectiveSkeletonPointSelection?.size) {
+    return;
+  }
+  const primaryLayerData = editState.layersData?.[editState.primaryEditLayerName];
+  if (!primaryLayerData) {
+    return;
+  }
+  primaryLayerData.skeletonBehaviors = createSkeletonPointExecutors(
+    primaryLayerData.original,
+    effectiveSkeletonPointSelection,
+    skeletonBehaviorName
+  );
+  editState.lastSkeletonBehaviorName = skeletonBehaviorName;
+}
+
+function applySkeletonBackedMixedDelta({
+  editState,
+  pointerTool,
+  effectiveSkeletonPointSelection,
+  clickedSkeletonPoint,
+  delta,
+  roundFunc,
+  preferInPlace,
+  constrainMode = null,
+}) {
+  const allChanges = [];
+  const rollbackChanges = [];
+  let equalizeUsed = false;
+
+  for (const data of Object.values(editState.layersData)) {
+    const { editLayerName, layer, original, pointBehaviors, handleBehaviors } = data;
+    const working = cloneSkeletonData(original);
+    data.working = working;
+
+    if (data.skeletonBehaviors?.length) {
+      const appliedFixedRib =
+        pointerTool.fixedRibMode || pointerTool.fixedRibCompressMode
+          ? applyFixedRibDragToSkeletonData(
+              original,
+              working,
+              effectiveSkeletonPointSelection,
+              clickedSkeletonPoint,
+              delta,
+              roundFunc,
+              {
+                anchorToDragSide: pointerTool.fixedRibCompressMode,
+                scaleControlPoints: FIXED_RIB_SCALE_CONTROL_POINTS,
+              }
+            )
+          : false;
+
+      if (!appliedFixedRib) {
+        for (const { contourIndex, executor } of data.skeletonBehaviors) {
+          const changes = executor.applyDelta(delta, roundFunc);
+          const contour = working.contours?.[contourIndex];
+          if (!contour) {
+            continue;
+          }
+          for (const { pointIndex, x, y } of changes) {
+            contour.points[pointIndex].x = x;
+            contour.points[pointIndex].y = y;
+          }
+        }
+      }
+    }
+
+    for (const { behavior, editablePoint } of pointBehaviors) {
+      const contour = working.contours?.[editablePoint.skeletonContourIndex];
+      const point = contour?.points?.[editablePoint.skeletonPointIndex];
+      const baseContour = original.contours?.[editablePoint.skeletonContourIndex];
+      const basePoint = baseContour?.points?.[editablePoint.skeletonPointIndex];
+      if (!contour || !point || !baseContour || !basePoint || point.type || basePoint.type) {
+        continue;
+      }
+
+      const change = behavior.applyDelta(delta, constrainMode, roundFunc);
+      const defaultWidth = baseContour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+      const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
+      const linked = isWidthLinked(basePoint);
+      applyLinkedWidthDelta(
+        point,
+        basePoint,
+        defaultWidth,
+        editablePoint.side,
+        deltaWidth,
+        linked,
+        roundFunc
+      );
+
+      if (editablePoint.side === "left") {
+        point.leftNudge = change.nudge;
+      } else {
+        point.rightNudge = change.nudge;
+      }
+
+      if (change.isInterpolation || change.hasHandleOffsets) {
+        if (editablePoint.side === "left") {
+          point.leftHandleInOffsetX = change.handleInOffsetX;
+          point.leftHandleInOffsetY = change.handleInOffsetY;
+          point.leftHandleOutOffsetX = change.handleOutOffsetX;
+          point.leftHandleOutOffsetY = change.handleOutOffsetY;
+          delete point.leftHandleInOffset;
+          delete point.leftHandleOutOffset;
+        } else {
+          point.rightHandleInOffsetX = change.handleInOffsetX;
+          point.rightHandleInOffsetY = change.handleInOffsetY;
+          point.rightHandleOutOffsetX = change.handleOutOffsetX;
+          point.rightHandleOutOffsetY = change.handleOutOffsetY;
+          delete point.rightHandleInOffset;
+          delete point.rightHandleOutOffset;
+        }
+      }
+    }
+
+    for (const { behavior, editableHandle, skeletonHandleDir, equalizeState } of handleBehaviors) {
+      const contour = working.contours?.[editableHandle.skeletonContourIndex];
+      const point = contour?.points?.[editableHandle.skeletonPointIndex];
+      const baseContour = original.contours?.[editableHandle.skeletonContourIndex];
+      const basePoint = baseContour?.points?.[editableHandle.skeletonPointIndex];
+      if (!point || !basePoint) {
+        continue;
+      }
+
+      if (pointerTool.equalizeMode && equalizeState) {
+        const projectedDelta =
+          delta.x * equalizeState.draggedState.direction.x +
+          delta.y * equalizeState.draggedState.direction.y;
+        const targetLength = Math.max(
+          0,
+          equalizeState.draggedState.originalLength + projectedDelta
+        );
+        applyEditableHandleEqualizedLength({
+          point,
+          state: equalizeState.draggedState,
+          targetLength,
+          anchorPos: equalizeState.anchorPos,
+          roundFunc,
+        });
+        applyEditableHandleEqualizedLength({
+          point,
+          state: equalizeState.oppositeState,
+          targetLength,
+          anchorPos: equalizeState.anchorPos,
+          roundFunc,
+        });
+        equalizeUsed = true;
+        continue;
+      }
+
+      const change = behavior.applyDelta(delta, roundFunc);
+      const detachedKey =
+        editableHandle.side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+      const { offset1DKey, offsetXKey, offsetYKey } = getEditableHandleOffsetKeys(
+        editableHandle.side,
+        editableHandle.handleType
+      );
+
+      if (point[detachedKey]) {
+        const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
+        const baseOffsetX = basePoint[offsetXKey] || 0;
+        const baseOffsetY = basePoint[offsetYKey] || 0;
+        point[offsetXKey] = baseOffsetX + roundFunc(skeletonHandleDir.x * projectedDelta);
+        point[offsetYKey] = baseOffsetY + roundFunc(skeletonHandleDir.y * projectedDelta);
+      } else {
+        delete point[offsetXKey];
+        delete point[offsetYKey];
+        point[offset1DKey] = change.offset;
+      }
+    }
+
+    const pathChange = recordChanges(layer.glyph, (sg) => {
+      regenerateSkeletonContours(
+        sg,
+        working,
+        preferInPlace ? { preferInPlace: true } : undefined
+      );
+    });
+    const customDataChange = recordChanges(layer, (layerRecord) => {
+      setSkeletonData(layerRecord, cloneSkeletonData(working));
+    });
+    if (pathChange.hasChange) {
+      const prefixed = pathChange.prefixed(["layers", editLayerName, "glyph"]);
+      allChanges.push(prefixed);
+      rollbackChanges.push(prefixed.rollbackChange);
+    }
+    if (customDataChange.hasChange) {
+      const prefixed = customDataChange.prefixed(["layers", editLayerName]);
+      allChanges.push(prefixed);
+      rollbackChanges.push(prefixed.rollbackChange);
+    }
+  }
+
+  editState.latestRollbackChanges = rollbackChanges;
+  return {
+    combinedChanges: allChanges.length ? new ChangeCollector().concat(...allChanges) : null,
+    equalizeUsed,
+  };
 }
 
 function collectSelectedRibPointTargets(skeletonData, ribPointSelection) {
@@ -3324,23 +3729,50 @@ async function runMixedSelectionNudgeLegacy({
   pointerTool,
   sceneController,
   event,
+  editablePoints,
+  editableHandles,
 }) {
   const {
     skeletonPoint: skeletonPointSelection,
+    point: pointSelection,
+  } = parseSelection(sceneController.selection);
+
+  const resolvedEditableHandles =
+    editableHandles ||
+    collectEditableGeneratedHandlesFromPointSelection({
+      sceneController,
+      pointerTool,
+      pointSelection,
+    });
+  const resolvedEditablePoints =
+    editablePoints ||
+    collectEditableGeneratedPointsFromPointSelection({
+      sceneController,
+      pointerTool,
+      pointSelection,
+    });
+  const editableGeneratedPointIndices = collectEditableGeneratedPointIndices(
+    resolvedEditablePoints,
+    resolvedEditableHandles
+  );
+  const regularSelection = excludePointIndicesFromSelection(
+    getRegularPointLikeSelection(sceneController),
+    editableGeneratedPointIndices
+  );
+  const {
     point: regularPointSelection,
     anchor: anchorSelection,
     guideline: guidelineSelection,
-  } = parseSelection(sceneController.selection);
+  } = parseSelection(regularSelection);
 
-  if (!skeletonPointSelection?.size) {
-    return false;
-  }
-
+  const hasSkeletonSelection = skeletonPointSelection?.size > 0;
   const hasRegularSelection =
     (regularPointSelection?.length || 0) > 0 ||
     (anchorSelection?.length || 0) > 0 ||
     (guidelineSelection?.length || 0) > 0;
-  if (!hasRegularSelection) {
+  const hasEditableGeneratedSelection =
+    resolvedEditablePoints.length > 0 || resolvedEditableHandles.length > 0;
+  if (!hasSkeletonSelection && !hasRegularSelection && !hasEditableGeneratedSelection) {
     return false;
   }
 
@@ -3355,81 +3787,70 @@ async function runMixedSelectionNudgeLegacy({
   const delta = { x: dx, y: dy };
 
   await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-    const editLayerName = sceneController.editingLayerNames?.[0];
-    if (!editLayerName || !glyph.layers[editLayerName]) {
-      return;
-    }
-
-    const layer = glyph.layers[editLayerName];
-    const skeletonData = getSkeletonData(layer);
-    if (!skeletonData) {
-      return;
-    }
-
-    const originalSkeletonData = JSON.parse(JSON.stringify(skeletonData));
-    const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
-    const behaviorName = getSkeletonBehaviorName(false, event.altKey);
-    const behaviors = createSkeletonPointExecutors(
-      originalSkeletonData,
-      skeletonPointSelection,
-      behaviorName
+    const skeletonBackedState = createSkeletonBackedMixedEditState({
+      glyph,
+      sceneController,
+      pointerTool,
+      effectiveSkeletonPointSelection: skeletonPointSelection,
+      editablePoints: resolvedEditablePoints,
+      editableHandles: resolvedEditableHandles,
+      skeletonBehaviorName: getSkeletonBehaviorName(false, event.altKey),
+      useInterpolation: event.altKey,
+    });
+    const clickedSkeletonPoint = resolveClickedSkeletonPoint(
+      pointerTool,
+      skeletonPointSelection
     );
-
-    for (const { contourIndex, executor } of behaviors) {
-      const changes = executor.applyDelta(delta);
-      const contour = workingSkeletonData.contours[contourIndex];
-      for (const { pointIndex, x, y } of changes) {
-        contour.points[pointIndex].x = x;
-        contour.points[pointIndex].y = y;
-      }
-    }
 
     const allChanges = [];
     const regularRollbackParts = [];
-    const layerInfo = Object.entries(
-      sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
-    ).map(([layerName, layerGlyph]) => {
-      const behaviorFactory = new EditBehaviorFactory(
-        layerGlyph,
-        sceneController.selection,
-        pointerTool.scalingEditBehavior
-      );
-      return {
-        layerGlyph,
-        changePath: ["layers", layerName, "glyph"],
-        editBehavior: behaviorFactory.getBehavior(
-          event.altKey ? "alternate" : "default"
-        ),
-      };
-    });
+    if (hasRegularSelection) {
+      const layerInfo = Object.entries(
+        sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+      ).map(([layerName, layerGlyph]) => {
+        const behaviorFactory = new EditBehaviorFactory(
+          layerGlyph,
+          regularSelection,
+          pointerTool.scalingEditBehavior
+        );
+        return {
+          layerGlyph,
+          changePath: ["layers", layerName, "glyph"],
+          editBehavior: behaviorFactory.getBehavior(
+            event.altKey ? "alternate" : "default"
+          ),
+        };
+      });
 
-    for (const { layerGlyph, changePath, editBehavior } of layerInfo) {
-      const editChange = editBehavior.makeChangeForDelta(delta);
-      applyChange(layerGlyph, editChange);
-      allChanges.push(consolidateChanges(editChange, changePath));
-      regularRollbackParts.push(
-        consolidateChanges(editBehavior.rollbackChange, changePath)
-      );
+      for (const { layerGlyph, changePath, editBehavior } of layerInfo) {
+        const editChange = editBehavior.makeChangeForDelta(delta);
+        applyChange(layerGlyph, editChange);
+        allChanges.push(consolidateChanges(editChange, changePath));
+        regularRollbackParts.push(
+          consolidateChanges(editBehavior.rollbackChange, changePath)
+        );
+      }
     }
 
-    const staticGlyph = layer.glyph;
-    const pathChange = recordChanges(staticGlyph, (sg) => {
-      regenerateSkeletonContours(sg, workingSkeletonData, { preferInPlace: true });
+    const skeletonBackedChanges = applySkeletonBackedMixedDelta({
+      editState: skeletonBackedState,
+      pointerTool,
+      effectiveSkeletonPointSelection: skeletonPointSelection,
+      clickedSkeletonPoint,
+      delta,
+      roundFunc: Math.round,
+      preferInPlace: hasSkeletonSelection,
     });
-    allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]).change);
-
-    const customDataChange = recordChanges(layer, (l) => {
-      setSkeletonData(l, workingSkeletonData);
-    });
-    allChanges.push(customDataChange.prefixed(["layers", editLayerName]).change);
+    if (skeletonBackedChanges.combinedChanges) {
+      allChanges.push(skeletonBackedChanges.combinedChanges.change);
+    }
 
     const editChange = consolidateChanges(allChanges);
     await sendIncrementalChange(editChange);
 
     const rollbackParts = [
       ...regularRollbackParts,
-      pathChange.prefixed(["layers", editLayerName, "glyph"]).rollbackChange,
-      customDataChange.prefixed(["layers", editLayerName]).rollbackChange,
+      ...(skeletonBackedState.latestRollbackChanges || []),
     ];
 
     return {
@@ -3451,16 +3872,56 @@ async function runMixedSelectionDragCanonical({
   eventStream,
   initialEvent,
   effectiveSkeletonPointSelection,
+  editablePoints,
+  editableHandles,
 }) {
+  const { point: pointSelection } = parseSelection(sceneController.selection);
+  const resolvedEditableHandles =
+    editableHandles ||
+    collectEditableGeneratedHandlesFromPointSelection({
+      sceneController,
+      pointerTool,
+      pointSelection,
+    });
+  const resolvedEditablePoints =
+    editablePoints ||
+    collectEditableGeneratedPointsFromPointSelection({
+      sceneController,
+      pointerTool,
+      pointSelection,
+    });
+  const editableGeneratedPointIndices = collectEditableGeneratedPointIndices(
+    resolvedEditablePoints,
+    resolvedEditableHandles
+  );
+  const regularSelection = excludePointIndicesFromSelection(
+    getRegularPointLikeSelection(sceneController),
+    editableGeneratedPointIndices
+  );
+  const hasRegularSelection = regularSelection?.size > 0;
   const hasSkeletonSelection = effectiveSkeletonPointSelection?.size > 0;
+  const hasEditableGeneratedSelection =
+    resolvedEditablePoints.length > 0 || resolvedEditableHandles.length > 0;
+  if (!hasRegularSelection && !hasSkeletonSelection && !hasEditableGeneratedSelection) {
+    return false;
+  }
 
   await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
     const initialPoint = sceneController.localPoint(initialEvent);
     const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
     let behaviorName = getBehaviorName(initialEvent);
     const initialClickedPointIndex = sceneController.sceneModel.initialClickedPointIndex;
+    const clickedSkeletonPoint = resolveClickedSkeletonPoint(
+      pointerTool,
+      effectiveSkeletonPointSelection
+    );
     let equalizeHandleInfo = null;
-    if (positionedGlyph && initialClickedPointIndex !== undefined) {
+    if (
+      hasRegularSelection &&
+      positionedGlyph &&
+      initialClickedPointIndex !== undefined &&
+      !editableGeneratedPointIndices.has(initialClickedPointIndex)
+    ) {
       const candidate = findEqualizeHandleForPath(
         positionedGlyph,
         initialPoint,
@@ -3471,27 +3932,27 @@ async function runMixedSelectionDragCanonical({
       }
     }
 
-    const layerInfo = Object.entries(
-      sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
-    ).map(([layerName, layerGlyph]) => {
-      const behaviorFactory = new EditBehaviorFactory(
-        layerGlyph,
-        sceneController.selection,
-        pointerTool.scalingEditBehavior
-      );
-      return {
-        layerName,
-        layerGlyph,
-        changePath: ["layers", layerName, "glyph"],
-        connectDetector: sceneController.getPathConnectDetector(layerGlyph.path),
-        shouldConnect: false,
-        behaviorFactory,
-        editBehavior: behaviorFactory.getBehavior(behaviorName),
-      };
-    });
-
-    assert(layerInfo.length >= 1, "runMixedSelectionDragCanonical: no layer to edit");
-    layerInfo[0].isPrimaryLayer = true;
+    const layerInfo = hasRegularSelection
+      ? Object.entries(sceneController.getEditingLayerFromGlyphLayers(glyph.layers)).map(
+          ([layerName, layerGlyph], index) => {
+            const behaviorFactory = new EditBehaviorFactory(
+              layerGlyph,
+              regularSelection,
+              pointerTool.scalingEditBehavior
+            );
+            return {
+              layerName,
+              layerGlyph,
+              changePath: ["layers", layerName, "glyph"],
+              connectDetector: sceneController.getPathConnectDetector(layerGlyph.path),
+              shouldConnect: false,
+              behaviorFactory,
+              editBehavior: behaviorFactory.getBehavior(behaviorName),
+              isPrimaryLayer: index === 0,
+            };
+          }
+        )
+      : [];
     let equalizeUsed = false;
     const equalizeRollbackByLayer = new Map();
     if (equalizeHandleInfo) {
@@ -3517,26 +3978,16 @@ async function runMixedSelectionDragCanonical({
       }
     }
 
-    let skeletonEditState = null;
-    if (hasSkeletonSelection) {
-      const editLayerName = sceneController.editingLayerNames?.[0];
-      const layer = editLayerName ? glyph.layers[editLayerName] : null;
-      const skeletonData = getSkeletonData(layer);
-      if (skeletonData) {
-        skeletonEditState = {
-          editLayerName,
-          layer,
-          originalSkeletonData: JSON.parse(JSON.stringify(skeletonData)),
-          workingSkeletonData: JSON.parse(JSON.stringify(skeletonData)),
-          behaviors: createSkeletonPointExecutors(
-            JSON.parse(JSON.stringify(skeletonData)),
-            effectiveSkeletonPointSelection,
-            getSkeletonBehaviorName(initialEvent.shiftKey, initialEvent.altKey)
-          ),
-          lastBehaviorName: getSkeletonBehaviorName(initialEvent.shiftKey, initialEvent.altKey),
-        };
-      }
-    }
+    const skeletonBackedState = createSkeletonBackedMixedEditState({
+      glyph,
+      sceneController,
+      pointerTool,
+      effectiveSkeletonPointSelection,
+      editablePoints: resolvedEditablePoints,
+      editableHandles: resolvedEditableHandles,
+      skeletonBehaviorName: getSkeletonBehaviorName(initialEvent.shiftKey, initialEvent.altKey),
+      useInterpolation: initialEvent.altKey,
+    });
 
     let editChange;
     for await (const inputEvent of eventStream) {
@@ -3554,15 +4005,14 @@ async function runMixedSelectionDragCanonical({
         await sendIncrementalChange(consolidateChanges(rollbackChanges));
       }
 
-      if (skeletonEditState) {
+      if (hasSkeletonSelection) {
         const newSkeletonBehaviorName = getSkeletonBehaviorName(
           inputEvent.shiftKey,
           inputEvent.altKey
         );
-        if (newSkeletonBehaviorName !== skeletonEditState.lastBehaviorName) {
-          skeletonEditState.lastBehaviorName = newSkeletonBehaviorName;
-          skeletonEditState.behaviors = createSkeletonPointExecutors(
-            skeletonEditState.originalSkeletonData,
+        if (newSkeletonBehaviorName !== skeletonBackedState.lastSkeletonBehaviorName) {
+          updateSkeletonBackedMixedBehaviors(
+            skeletonBackedState,
             effectiveSkeletonPointSelection,
             newSkeletonBehaviorName
           );
@@ -3627,65 +4077,21 @@ async function runMixedSelectionDragCanonical({
         }
       }
 
-      if (skeletonEditState) {
-        const {
-          originalSkeletonData,
-          workingSkeletonData,
-          behaviors,
-          layer,
-          editLayerName,
-        } = skeletonEditState;
-
-        for (let ci = 0; ci < originalSkeletonData.contours.length; ci++) {
-          const origContour = originalSkeletonData.contours[ci];
-          const workContour = workingSkeletonData.contours[ci];
-          for (let pi = 0; pi < origContour.points.length; pi++) {
-            workContour.points[pi].x = origContour.points[pi].x;
-            workContour.points[pi].y = origContour.points[pi].y;
-          }
-        }
-
-        const appliedFixedRib =
-          pointerTool.fixedRibMode || pointerTool.fixedRibCompressMode
-            ? applyFixedRibDragToSkeletonData(
-                originalSkeletonData,
-                workingSkeletonData,
-                effectiveSkeletonPointSelection,
-                resolveClickedSkeletonPoint(pointerTool, effectiveSkeletonPointSelection),
-                delta,
-                roundFunc,
-                {
-                  anchorToDragSide: pointerTool.fixedRibCompressMode,
-                  scaleControlPoints: FIXED_RIB_SCALE_CONTROL_POINTS,
-                }
-              )
-            : false;
-
-        if (!appliedFixedRib) {
-          for (const { contourIndex, executor } of behaviors) {
-            const changes = executor.applyDelta(delta, roundFunc);
-            const contour = workingSkeletonData.contours[contourIndex];
-            for (const { pointIndex, x, y } of changes) {
-              contour.points[pointIndex].x = x;
-              contour.points[pointIndex].y = y;
-            }
-          }
-        }
-
-        const skeletonChanges = recordChanges(layer.glyph, (sg) => {
-          regenerateSkeletonContours(sg, workingSkeletonData, { preferInPlace: true });
-        });
-        const skeletonDataChanges = recordChanges(layer, (layerRecord) => {
-          setSkeletonData(layerRecord, JSON.parse(JSON.stringify(workingSkeletonData)));
-        });
-        if (skeletonChanges.hasChange) {
-          deepEditChanges.push(
-            skeletonChanges.prefixed(["layers", editLayerName, "glyph"]).change
-          );
-        }
-        if (skeletonDataChanges.hasChange) {
-          deepEditChanges.push(skeletonDataChanges.prefixed(["layers", editLayerName]).change);
-        }
+      const skeletonBackedChanges = applySkeletonBackedMixedDelta({
+        editState: skeletonBackedState,
+        pointerTool,
+        effectiveSkeletonPointSelection,
+        clickedSkeletonPoint,
+        delta,
+        roundFunc,
+        preferInPlace: hasSkeletonSelection,
+        constrainMode: pointerTool.tangentRibMode ? "tangent" : null,
+      });
+      if (skeletonBackedChanges.combinedChanges) {
+        deepEditChanges.push(skeletonBackedChanges.combinedChanges.change);
+      }
+      if (skeletonBackedChanges.equalizeUsed) {
+        equalizeUsed = true;
       }
 
       editChange = consolidateChanges(deepEditChanges);
@@ -3723,7 +4129,7 @@ async function runMixedSelectionDragCanonical({
         const connectChange = recordChanges(layer.layerGlyph, (layerGlyph) => {
           connectContours(
             layerGlyph.path,
-            sceneController.selection,
+            regularSelection,
             sceneController.getPathConnectDetector(layer.layerGlyph.path)
           );
         });
@@ -3734,6 +4140,7 @@ async function runMixedSelectionDragCanonical({
         }
       }
     }
+    rollbackChanges.push(...(skeletonBackedState.latestRollbackChanges || []));
 
     if (connectChanges.length) {
       await sendIncrementalChange(consolidateChanges(connectChanges.map((change) => change.change)));
