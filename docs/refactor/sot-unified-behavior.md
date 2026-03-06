@@ -89,7 +89,7 @@ These rules stay in force:
 
 ## 4. Current Problem Areas
 
-The broad architecture is in place, but the micro-architecture still has 5 active problems:
+The broad architecture is in place, but the micro-architecture still has 6 active problems:
 
 1. The adapter contract is weak.
    - The code says adapters return meaningful `{ forward, rollback }` data.
@@ -112,6 +112,10 @@ The broad architecture is in place, but the micro-architecture still has 5 activ
    - Similar setup/persist flows appear across object kinds.
    - Some pure skeleton math may belong in core/shared code instead of editor files.
 
+6. The registry representation is too indirect.
+   - Routing is encoded through row ids and short codes instead of readable preset names.
+   - The registry stays worth keeping, but the current representation is too expensive for humans.
+
 ## 5. Allowed Kinds Of Change
 
 These are the kinds of changes this SoT allows:
@@ -122,6 +126,7 @@ These are the kinds of changes this SoT allows:
 - rename modules/functions/maps so names match reality
 - extract duplicated orchestration helpers
 - extract pure math into core/shared code when appropriate
+- rework registry representation while keeping routing separate from behavior and adapters
 - add better verification/reporting for small cleanup steps
 
 These are not the kinds of changes this SoT is asking for:
@@ -186,6 +191,25 @@ Allowed work here:
 
 - shared behavior helpers
 - shared geometry helpers used by multiple adapter families
+- merging the contents of `edit-behavior-support.js` back in so the rule-engine internals live in one file
+
+### `src-js/views-editor/src/edit-behavior-support.js`
+
+This is currently a temporary spillover file, not a separate subsystem.
+
+Decisive direction:
+
+- move its contents into `src-js/views-editor/src/edit-behavior.js`
+- remove this file after the merge
+
+Allowed work here:
+
+- move matcher constants and helper functions into `edit-behavior.js`
+- delete the file once imports are updated
+
+Disallowed regression:
+
+- preserving it as a vague long-term `support` bucket
 
 ### `src-js/fontra-core/src/skeleton-contour-generator.js`
 
@@ -223,11 +247,12 @@ Hard rule:
 This cleanup/optimization stage is complete only when all of these are true:
 
 - adapter contracts are truthful and enforced in a meaningful way
-- shared drag/nudge kernels live in a neutral module, not in composer
+- shared drag/nudge kernels live in the adapter layer, not in composer
 - the adapter layer is split into smaller modules with clearer ownership
 - naming reflects reality for canonical vs legacy paths
 - duplicated point-like orchestration is reduced
 - pure math is moved to core/shared code where appropriate, and only where appropriate
+- registry routing is readable without row-id/code indirection
 - no broad behavior regressions are introduced
 - each fine-grained step has manual test coverage recorded in `docs/refactor/progress-report.md`
 

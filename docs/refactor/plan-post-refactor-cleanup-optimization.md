@@ -64,6 +64,7 @@ It is not a docs sweep.
 Primary target files:
 
 - `src-js/views-editor/src/edit-behavior.js`
+- `src-js/views-editor/src/edit-behavior-support.js`
 - `src-js/views-editor/src/edit-behavior-composer.js`
 - `src-js/views-editor/src/edit-behavior-registry.js`
 - `src-js/views-editor/src/pointer-objects.js`
@@ -114,6 +115,7 @@ It should not perform the broad rename yet.
 Files to inspect for naming drift:
 
 - `src-js/views-editor/src/pointer-objects.js`
+- `src-js/views-editor/src/edit-behavior-support.js`
 - `src-js/views-editor/src/edit-behavior-composer.js`
 - `src-js/views-editor/src/edit-tools-pointer.js`
 
@@ -184,6 +186,7 @@ This is a preparation step only.
 Target files:
 
 - `src-js/views-editor/src/edit-behavior.js`
+- `src-js/views-editor/src/edit-behavior-support.js`
 - `src-js/views-editor/src/edit-behavior-composer.js`
 - `src-js/views-editor/src/edit-behavior-registry.js`
 - `src-js/views-editor/src/pointer-objects.js`
@@ -231,6 +234,90 @@ Expected result:
 
 - no behavior change
 - code is easier to read before Phase 1 starts
+
+---
+
+### Step P0.3: Merge `edit-behavior-support.js` into `edit-behavior.js` before deeper cleanup starts
+
+#### Problem Aspect
+
+`src-js/views-editor/src/edit-behavior-support.js` is a live helper file, but it is not a real boundary.
+
+Right now it looks like an internal spillover module for `edit-behavior.js`, not a real subsystem.
+
+That is a risk for the rest of the plan:
+
+- later cleanup work may preserve an unnecessary file split
+- later readers may think there is a separate “support” subsystem when there is not
+- Phase 0 can accidentally beautify around the wrong boundary instead of fixing it first
+
+This step fixes that false boundary before deeper optimization work starts.
+
+#### Proposed Solution (Plain Language)
+
+- merge it back into `edit-behavior.js`
+- remove `edit-behavior-support.js` after the merge
+- keep the matcher constants and helper functions close to the rule engine that uses them
+
+This is a decisive cleanup step, not an open-ended review.
+
+Why this is the chosen direction:
+
+- `edit-behavior.js` is the only real consumer today
+- the file contents are internal rule-engine support, not a reusable subsystem
+- the `support` name is vague and actively misleading
+- keeping the split does not buy us a useful architectural boundary
+
+#### Code Evidence
+
+Current codebase evidence:
+
+- `src-js/views-editor/src/edit-behavior.js` imports:
+
+```js
+import {
+  ANY,
+  OFF,
+  SEL,
+  SMO,
+  buildPointMatchTree,
+  findPointMatch,
+} from "./edit-behavior-support.js";
+```
+
+- `src-js/views-editor/src/edit-behavior-support.js` currently owns:
+
+```js
+export const ANY = ...
+export function buildPointMatchTree(rules) { ... }
+export function findPointMatch(...) { ... }
+```
+
+That is not shared infrastructure.
+
+That is `edit-behavior.js` implementation detail living in the wrong file.
+
+#### Files To Touch
+
+- `src-js/views-editor/src/edit-behavior.js`
+- `src-js/views-editor/src/edit-behavior-support.js`
+- `docs/refactor/progress-report.md`
+
+#### Manual Tests
+
+This step needs a focused behavior-engine parity pass:
+
+1. Drag a regular point.
+2. Drag a smooth on-curve point with handles.
+3. Drag an off-curve point.
+4. Use a constrain-style drag path if available.
+5. Undo and redo one of the above.
+
+Expected result:
+
+- no behavior drift
+- `edit-behavior.js` locality improves
+- `edit-behavior-support.js` disappears because its contents now live in `edit-behavior.js`
 
 ---
 
@@ -2469,8 +2556,8 @@ Before changing the representation, we need one exact map of how routing works t
 Right now the logic is spread across several small parts:
 
 - object-kind metadata
-- modifier-to-preset resolution
 - row-id selection helpers
+- an unused preset helper that does not currently drive routing
 - drag and nudge routing maps
 - composer lookup logic
 
@@ -2503,6 +2590,7 @@ Current registry/composer chain:
 - `src-js/views-editor/src/edit-behavior-registry.js`
 
 ```js
+export function resolveBehaviorPreset(_objectKind, action, modifiers) { ... }
 export function getDragRowId(modifiers) { ... }
 export function getNudgeRowId(modifiers) { ... }
 export const DRAG_ROUTING_MAP = { ... }
@@ -2521,6 +2609,11 @@ const adapter =
 ```
 
 This step should turn that indirect chain into a plain-language routing description.
+
+It must also answer one extra question:
+
+- should `resolveBehaviorPreset(...)` become the real preset resolver for Phase 6
+- or should it be removed because it is currently dead scaffolding
 
 #### Files To Touch
 
@@ -2664,6 +2757,13 @@ Good examples:
 The exact preset names should reflect actual behavior, not keyboard details alone.
 
 Keep one place that resolves modifiers into a named preset.
+
+Prefer reusing and reshaping the existing `resolveBehaviorPreset(...)` helper if it can become the real preset resolver cleanly.
+
+Do not leave both systems alive at once:
+
+- old row-id helpers
+- and a second parallel preset resolver
 
 Then map that preset directly to object-kind routes.
 
