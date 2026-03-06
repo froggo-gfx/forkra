@@ -5,6 +5,15 @@ Status: Cleanup chapter complete; Phase 6 optional
 
 ## Intro (Context for New Sessions)
 
+This cleanup chapter is complete, but the refactor itself is still ongoing.
+
+The next chapter has two active lanes that are still poorly organized:
+
+- Q-measure
+- Tunni
+
+That is the next scope to plan properly.
+
 The broad unified-behavior refactor is done.
 
 That work is no longer the active problem.
@@ -36,7 +45,7 @@ This SoT exists to prevent a new kind of scope drift:
 - `docs/refactor/sot-unified-behavior.md`
 - `docs/refactor/plan-post-refactor-cleanup-optimization.md`
 - `docs/refactor/progress-report-broad.md`
-- `docs/refactor/progress-report.md`
+- `docs/refactor/progress-report-beautify.md`
 - `docs/refactor/target-architecture.md`
 
 Optional support docs when needed:
@@ -251,12 +260,12 @@ Progress is split into two files on purpose:
 
 - `docs/refactor/progress-report-broad.md`
   - completed broad architectural milestones
-- `docs/refactor/progress-report.md`
+- `docs/refactor/progress-report-beautify.md`
   - fine-grained cleanup/optimization work from the new plan
 
 Hard rule:
 
-- a cleanup step from the new plan is not complete until it is written to `docs/refactor/progress-report.md`
+- a cleanup step from the new plan is not complete until it is written to `docs/refactor/progress-report-beautify.md`
 
 ## 8. Acceptance Criteria For The Current Stage
 
@@ -271,7 +280,7 @@ This cleanup/optimization stage is complete only when all of these are true:
 - duplicated skeleton-backed layer lifecycle is reduced
 - pure math is moved to existing better homes only where appropriate, and only where appropriate
 - no broad behavior regressions are introduced
-- each fine-grained step has manual test coverage recorded in `docs/refactor/progress-report.md`
+- each fine-grained step has manual test coverage recorded in `docs/refactor/progress-report-beautify.md`
 
 Registry readability remains a valid optional follow-up, but it is no longer required to close this cleanup chapter.
 
