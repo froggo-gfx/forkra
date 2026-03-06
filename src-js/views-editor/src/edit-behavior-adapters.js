@@ -37,22 +37,13 @@ import {
   calculateSkeletonTrueTunniPoint,
 } from "./skeleton-tunni-calculations.js";
 
-// Adapter contract for drag/nudge routing:
-// - When handled, adapters return `{ forward, rollback }`.
-// - Some handled adapters still use placeholder `{ forward: null, rollback: null }` payloads.
-// - Unhandled routes return `false` so composer can continue fallback logic.
-export const ADAPTER_CONTRACT = Object.freeze({
-  handledResultShape: "{ forward, rollback }",
-  unhandledResult: "false",
-  persistenceOwner: "adapter",
-});
+// Adapter/composer contract:
+// - adapters return `true` when they handled the route
+// - adapters return `false` when the route is not applicable or cannot run
+// - real undo/redo data stays inside adapter-owned edit sessions
 
 const DEFAULT_SKELETON_WIDTH = 80;
 const FIXED_RIB_SCALE_CONTROL_POINTS = true;
-
-function makeAdapterResult(forward = null, rollback = null) {
-  return { forward, rollback };
-}
 
 function getBehaviorName(event) {
   const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
@@ -1443,7 +1434,7 @@ async function runRegularPointLikeAdapter({
     runPointLikeSessionKernel,
     equalizeHandleInfo,
   });
-  return makeAdapterResult();
+  return true;
 }
 
 async function runTunniDragLegacy({ pointerTool, eventStream, initialEvent }) {
@@ -1451,7 +1442,7 @@ async function runTunniDragLegacy({ pointerTool, eventStream, initialEvent }) {
   if (handled === false) {
     return false;
   }
-  return makeAdapterResult();
+  return true;
 }
 
 async function runSkeletonTunniDragLegacy({
@@ -1468,7 +1459,7 @@ async function runSkeletonTunniDragLegacy({
   if (handled === false) {
     return false;
   }
-  return makeAdapterResult();
+  return true;
 }
 
 function getRegularPointLikeSelection(sceneController) {
@@ -1573,7 +1564,7 @@ async function runRegularPointLikeCanonical(context, mode) {
       runPointLikeInputKernel,
     });
     if (handled) {
-      return makeAdapterResult();
+      return true;
     }
   }
 
@@ -1994,7 +1985,7 @@ async function runSkeletonPointLikeCanonical(context, mode) {
     runPointLikeInputKernel,
     runPointLikeSessionKernel,
   });
-  return makeAdapterResult();
+  return true;
 }
 
 function resolveClickedSkeletonPoint(pointerTool, selectedSkeletonPoints) {
@@ -2027,7 +2018,7 @@ async function runFixedRibSkeletonPointLikeCanonical({
     selectedSkeletonPoints
   );
   if (!clickedSkeletonPoint) {
-    return makeAdapterResult();
+    return false;
   }
 
   await runPointLikeSessionKernel({
@@ -2120,7 +2111,7 @@ async function runFixedRibSkeletonPointLikeCanonical({
       };
     },
   });
-  return makeAdapterResult();
+  return true;
 }
 
 function getSelectedOffCurveSkeletonPoints({
@@ -2183,11 +2174,11 @@ async function runSkeletonHandlePointLikeCanonical(context, mode) {
     const contour = skeletonData?.contours?.[contourIdx];
     const clickedPoint = contour?.points?.[pointIdx];
     if (!contour || clickedPoint?.type !== "cubic") {
-      return makeAdapterResult();
+      return false;
     }
     const equalizeInfo = resolveEqualizePairForContourPoint(contour, pointIdx);
     if (!equalizeInfo) {
-      return makeAdapterResult();
+      return false;
     }
 
     await runSkeletonPointLikeOrchestration({
@@ -2204,7 +2195,7 @@ async function runSkeletonHandlePointLikeCanonical(context, mode) {
       smoothIndex: equalizeInfo.smoothIndex,
       oppositeIndex: equalizeInfo.oppositeIndex,
     });
-    return makeAdapterResult();
+    return true;
   }
 
   const selectedSkeletonPoints = parseSelection(sceneController.selection).skeletonPoint;
@@ -2229,7 +2220,7 @@ async function runSkeletonHandlePointLikeCanonical(context, mode) {
     runPointLikeSessionKernel,
     offCurvePoints,
   });
-  return makeAdapterResult();
+  return true;
 }
 
 async function runLegacyComponentDragAdapter(context) {
@@ -2254,7 +2245,7 @@ async function runSkeletonRibPointDragCanonical(context) {
   assert(ribHit, "runSkeletonRibPointDragCanonical: missing ribHit");
   const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
   if (!positionedGlyph) {
-    return makeAdapterResult();
+    return false;
   }
 
   const localPoint = sceneController.localPoint(initialEvent);
@@ -2269,7 +2260,7 @@ async function runSkeletonRibPointDragCanonical(context) {
     : null;
   const referenceSkeletonData = getSkeletonData(referenceLayer);
   if (!referenceSkeletonData?.contours?.length) {
-    return makeAdapterResult();
+    return false;
   }
 
   const defaultRibKey = `${ribHit.contourIndex}/${ribHit.pointIndex}/${ribHit.side}`;
@@ -2332,7 +2323,7 @@ async function runSkeletonRibPointDragCanonical(context) {
 
   const targetPoints = [...targetPointsMap.values()];
   if (!targetPoints.length) {
-    return makeAdapterResult();
+    return false;
   }
 
   const hasSkeletonSelection = preSelectedSkeletonPoints?.size > 0;
@@ -2348,7 +2339,7 @@ async function runSkeletonRibPointDragCanonical(context) {
     referenceSkeletonData
   );
   if (!hasSkeletonSelection && !allTargetsEditable && !belongsToSingleSegment) {
-    return makeAdapterResult();
+    return false;
   }
 
   const previousCursor = pointerTool.canvasController.canvas.style.cursor;
@@ -2555,7 +2546,7 @@ async function runSkeletonRibPointDragCanonical(context) {
     pointerTool.canvasController.canvas.style.cursor = previousCursor || "default";
     delete sceneController.sceneModel.initialClickedSkeletonRibPoint;
   }
-  return makeAdapterResult();
+  return true;
 }
 
 async function runEditableGeneratedPointLikeCanonical(context, mode) {
@@ -2596,7 +2587,7 @@ async function runEditableGeneratedPointLikeCanonical(context, mode) {
       pointSelection: parseSelection(sceneController.selection).point,
     });
   if (!positionedGlyph || !resolvedEditablePoints?.length) {
-    return makeAdapterResult();
+    return false;
   }
 
   const useInterpolation = isDrag ? initialEvent.altKey : event.altKey;
@@ -2793,7 +2784,7 @@ async function runEditableGeneratedPointLikeCanonical(context, mode) {
       pointerTool.canvasController.canvas.style.cursor = previousCursor || "default";
     }
   }
-  return makeAdapterResult();
+  return true;
 }
 
 async function runEditableGeneratedHandleLikeCanonical(context, mode) {
@@ -2834,7 +2825,7 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
       pointSelection: parseSelection(sceneController.selection).point,
     });
   if (!positionedGlyph || !resolvedEditableHandles?.length) {
-    return makeAdapterResult();
+    return false;
   }
 
   const previousCursor = pointerTool.canvasController.canvas.style.cursor;
@@ -3072,7 +3063,7 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
       pointerTool.canvasController.canvas.style.cursor = previousCursor || "default";
     }
   }
-  return makeAdapterResult();
+  return true;
 }
 
 async function runEditableGeneratedPointDragCanonical(context) {
@@ -3149,7 +3140,7 @@ async function runSkeletonRibPointNudgeCanonical(context) {
     : null;
   const referenceSkeletonData = getSkeletonData(referenceLayer);
   if (!referenceSkeletonData?.contours?.length) {
-    return makeAdapterResult();
+    return false;
   }
 
   const ribTargets = collectSelectedRibPointTargets(
@@ -3157,7 +3148,7 @@ async function runSkeletonRibPointNudgeCanonical(context) {
     ribPointSelection
   );
   if (!ribTargets.length) {
-    return makeAdapterResult();
+    return false;
   }
 
   const allTargetsEditable = ribTargets.every((target) => target.isEditable);
@@ -3166,7 +3157,7 @@ async function runSkeletonRibPointNudgeCanonical(context) {
     referenceSkeletonData
   );
   if (!allTargetsEditable && !belongsToSingleSegment) {
-    return makeAdapterResult();
+    return false;
   }
 
   const constrainMode = pointerTool.tangentRibMode ? "tangent" : null;
@@ -3326,7 +3317,7 @@ async function runSkeletonRibPointNudgeCanonical(context) {
       });
     },
   });
-  return makeAdapterResult();
+  return true;
 }
 
 async function runMixedSelectionNudgeLegacy({
@@ -3451,7 +3442,7 @@ async function runMixedSelectionNudgeLegacy({
     };
   });
 
-  return makeAdapterResult();
+  return true;
 }
 
 async function runMixedSelectionDragCanonical({
@@ -3758,7 +3749,7 @@ async function runMixedSelectionDragCanonical({
     };
   });
 
-  return makeAdapterResult();
+  return true;
 }
 
 export const canonicalDragAdapters = {

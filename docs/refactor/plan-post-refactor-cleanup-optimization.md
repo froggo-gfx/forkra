@@ -321,7 +321,7 @@ Expected result:
 
 ---
 
-## Phase 1: Make the Adapter Contract Real and Useful
+## Phase 1: Make the Adapter Handling Contract Honest and Minimal
 
 ### Broad Problem
 
@@ -332,6 +332,7 @@ The current situation is confusing:
 - the composer checks that the adapter returned an object with `forward` and `rollback`
 - many adapters return placeholder `{ forward: null, rollback: null }`
 - the composer does not actually use those values for anything important
+- the real undo/redo data already lives inside adapter-owned edit sessions, not in the adapter return value
 
 This is dangerous for cleanup and optimization work because the code looks stricter than it really is.
 
@@ -339,9 +340,9 @@ We need to fix this first.
 
 The goal of this phase is simple:
 
-- make the adapter result shape honest
-- make the composer rely on it in a real way
-- remove placeholder return values that only exist to satisfy a shape check
+- remove the fake payload contract
+- make composer rely only on handled/unhandled
+- make every adapter return `true` or `false` on purpose
 
 ### Step 1.1: Write down the exact mismatch between the promised contract and the real contract
 
@@ -369,7 +370,7 @@ Just make the mismatch explicit.
 
 Current evidence:
 
-- `src-js/views-editor/src/pointer-objects.js`
+- `src-js/views-editor/src/edit-behavior-adapters.js`
 - `src-js/views-editor/src/edit-behavior-composer.js`
 
 Current code shape:
@@ -405,12 +406,13 @@ What this step should add in comments / plan text:
 // - handled adapters return a shape-checked object
 // - many handled adapters still return placeholder null payloads
 // - composer currently uses the result as a handled/unhandled signal only
+// - the returned payload is not a real data channel today
 ```
 
 #### Files To Touch
 
 - `docs/refactor/plan-post-refactor-cleanup-optimization.md`
-- `src-js/views-editor/src/pointer-objects.js`
+- `src-js/views-editor/src/edit-behavior-adapters.js`
 - `src-js/views-editor/src/edit-behavior-composer.js`
 - `docs/refactor/progress-report.md`
 
@@ -431,7 +433,7 @@ Expected result:
 
 ---
 
-### Step 1.2: Replace the fake â€œshape-onlyâ€ adapter result with a truthful handled result type
+### Step 1.2: Remove the fake payload contract and reduce adapter returns to boolean handled/unhandled
 
 #### Problem Aspect
 
@@ -445,54 +447,41 @@ That is the core lie in the current contract.
 
 It says â€œthis adapter has meaningful change payloadsâ€, but the payloads are empty.
 
-This step fixes that single issue.
+The deeper problem is bigger than empty payloads:
+
+- composer does not consume the payload
+- adapters already keep their real undo/redo data internally
+- the returned object is just ceremony
+
+This step removes that ceremony.
 
 #### Proposed Solution (Plain Language)
 
-Introduce a small explicit adapter result helper API.
+Delete the fake payload contract.
 
-The API must say what happened in plain terms:
+The adapter return value should answer only one real question:
 
-- handled
-- unhandled
-- optional change payload
+- did this adapter handle the route?
 
-Do not use `null` placeholders just to satisfy a shape check.
-
-Example target shape:
+Target contract:
 
 ```js
-return { handled: true, changes: null };
-return { handled: true, changes: { forward, rollback } };
-return { handled: false };
+return true;
+return false;
 ```
 
-If we want to preserve the existing `{ forward, rollback }` wording, that is okay, but then it must be nested under a truthful top-level result:
+Do not replace the current fake object with a new wrapper object.
 
-```js
-return {
-  handled: true,
-  changeSet: { forward, rollback },
-};
-```
+Do not introduce `handled`, `changeSet`, or similar helper shapes unless a real consumer appears later.
 
-The important part is this:
-
-- `handled` must become the real contract
-- `forward` / `rollback` must stop pretending to be always meaningful
+Keep the contract minimal.
 
 #### Proposed Solution (Code Sketch)
 
-In `src-js/views-editor/src/pointer-objects.js`:
+In `src-js/views-editor/src/edit-behavior-adapters.js`:
 
 ```js
-function makeHandledAdapterResult(changeSet = null) {
-  return { handled: true, changeSet };
-}
-
-function makeUnhandledAdapterResult() {
-  return { handled: false };
-}
+// remove makeAdapterResult(...)
 ```
 
 Replace this:
@@ -504,14 +493,13 @@ return makeAdapterResult();
 With one of these:
 
 ```js
-return makeHandledAdapterResult();
-return makeHandledAdapterResult({ forward, rollback });
-return makeUnhandledAdapterResult();
+return true;
+return false;
 ```
 
 #### Files To Touch
 
-- `src-js/views-editor/src/pointer-objects.js`
+- `src-js/views-editor/src/edit-behavior-adapters.js`
 - `src-js/views-editor/src/edit-behavior-composer.js`
 - `docs/refactor/progress-report.md`
 
@@ -531,11 +519,11 @@ Run these by hand after the step:
 Expected result:
 
 - everything still behaves the same
-- no adapter route crashes because of the new result shape
+- no adapter route crashes because of the simpler return contract
 
 ---
 
-### Step 1.3: Make composer consume the adapter result in a real, explicit way
+### Step 1.3: Simplify composer so it accepts only boolean adapter results
 
 #### Problem Aspect
 
@@ -553,18 +541,19 @@ This step fixes that exact ambiguity.
 
 #### Proposed Solution (Plain Language)
 
-Change composer so it reads the explicit `handled` field and acts on it directly.
+Change composer so it accepts only boolean adapter returns.
 
-Composer should stop inferring meaning from object shape.
+Composer should stop checking for fake payload fields.
 
 Composer should do this instead:
 
 ```js
-if (!adapterResult.handled) return false;
+const handled = await adapter(...);
+if (!handled) return false;
 return true;
 ```
 
-If change payloads are present, composer may validate them, log them, or forward them later, but that must be secondary.
+If the project ever grows a real payload consumer later, that can be introduced later for a real reason.
 
 The main contract must be:
 
@@ -575,29 +564,19 @@ The main contract must be:
 In `src-js/views-editor/src/edit-behavior-composer.js`:
 
 ```js
-const adapterResult = await adapter(context);
-assert(adapterResult && typeof adapterResult.handled === "boolean");
-
-if (!adapterResult.handled) {
+const handled = await adapter(context);
+assert(typeof handled === "boolean");
+if (!handled) {
   return false;
 }
 
 return true;
 ```
 
-Optional strict validation:
-
-```js
-if (adapterResult.changeSet) {
-  assert("forward" in adapterResult.changeSet);
-  assert("rollback" in adapterResult.changeSet);
-}
-```
-
 #### Files To Touch
 
 - `src-js/views-editor/src/edit-behavior-composer.js`
-- `src-js/views-editor/src/pointer-objects.js`
+- `src-js/views-editor/src/edit-behavior-adapters.js`
 - `docs/refactor/progress-report.md`
 
 #### Manual Tests
@@ -617,11 +596,11 @@ Expected result:
 
 - all routes still resolve correctly
 - routes that should be unhandled still fall through correctly
-- no false positives from shape-only checks
+- no fake shape checks remain in composer
 
 ---
 
-### Step 1.4: Remove the last placeholder adapter returns and make every adapter choose handled or unhandled on purpose
+### Step 1.4: Remove the last placeholder adapter returns and make every adapter choose true or false on purpose
 
 #### Problem Aspect
 
@@ -645,7 +624,7 @@ Do a full pass over:
 
 For every adapter function:
 
-- replace passive default returns with explicit handled/unhandled returns
+- replace passive default returns with explicit boolean returns
 - make early exits truthful
 - remove any helper that encourages fake success by default
 
@@ -653,7 +632,7 @@ For every adapter function:
 
 Adapter map locations:
 
-- `src-js/views-editor/src/pointer-objects.js`
+- `src-js/views-editor/src/edit-behavior-adapters.js`
 
 Example current pattern to remove:
 
@@ -667,19 +646,19 @@ Example target pattern:
 
 ```js
 if (!selection?.size) {
-  return makeUnhandledAdapterResult();
+  return false;
 }
 ```
 
 Or, if the adapter truly consumed the route intentionally:
 
 ```js
-return makeHandledAdapterResult();
+return true;
 ```
 
 #### Files To Touch
 
-- `src-js/views-editor/src/pointer-objects.js`
+- `src-js/views-editor/src/edit-behavior-adapters.js`
 - `docs/refactor/progress-report.md`
 
 #### Manual Tests
@@ -710,7 +689,7 @@ Expected result:
 
 ---
 
-### Step 1.5: Add a simple verification checklist for the now-real contract
+### Step 1.5: Add a simple verification checklist for the new boolean-only contract
 
 #### Problem Aspect
 
@@ -725,8 +704,8 @@ Add a lightweight verification checklist to the plan and progress report.
 The checklist must be easy to run by hand:
 
 - grep for old helper names
-- grep for placeholder null contract returns
-- verify composer checks `handled`
+- grep for placeholder contract returns
+- verify composer checks boolean handled/unhandled only
 
 #### Code Evidence
 
@@ -735,7 +714,8 @@ Useful verification commands after this phase:
 ```bash
 rg -n "makeAdapterResult\\(" src-js/views-editor/src
 rg -n "forward:\\s*null|rollback:\\s*null" src-js/views-editor/src
-rg -n "handled" src-js/views-editor/src/pointer-objects.js src-js/views-editor/src/edit-behavior-composer.js
+rg -n "\"forward\" in adapterResult|\"rollback\" in adapterResult|\\{ forward, rollback \\} or false" src-js/views-editor/src
+rg -n "return true;|return false;" src-js/views-editor/src/edit-behavior-adapters.js src-js/views-editor/src/edit-behavior-composer.js
 ```
 
 #### Files To Touch
@@ -759,6 +739,393 @@ Expected result:
 - no behavior change
 - no route crashes
 - contract is easier to inspect in code
+
+---
+
+## Phase 1.5: Fix Mixed Point-Like Selection Routing Before Further Cleanup
+
+### Broad Problem
+
+The boolean-only adapter cleanup removed fake ceremony, but it also forced a closer look at what the routing actually does.
+
+That exposed a separate correctness problem:
+
+- mixed selection is only truly implemented for `regular + skeleton`
+- editable-generated selections still get special-cased too early
+- some mixed routes do not know how to move all selected families together
+
+This is not a naming problem and not a registry redesign problem.
+
+It is a correctness problem in the current drag/nudge pipeline.
+
+The goal of this phase is simple:
+
+- define mixed point-like selection in one clear way
+- stop pure editable-generated routes from stealing mixed selections
+- make mixed drag/nudge move all selected in-scope point-like families together
+- verify undo/redo and fallthrough behavior for the full mixed-selection matrix
+
+Chosen behavior for this phase:
+
+- `native mix`
+  - each selected family keeps its own real behavior semantics inside one mixed action
+  - do not flatten everything into regular-point behavior
+  - do not block mixed editing just because editable-generated content is present
+
+### Step 1.5.1: Inventory the current mixed-selection routing and write down the exact gaps
+
+#### Problem Aspect
+
+Right now the bug is easy to describe from the UI, but the code path is split across pointer classification and adapter execution.
+
+If we skip the inventory, we risk patching only one visible combination while leaving the deeper routing gap in place.
+
+This step makes the current failure pattern explicit first.
+
+#### Proposed Solution (Plain Language)
+
+Document the current mixed-selection path for both drag and nudge.
+
+Write down:
+
+1. where pointer decides a selection is `mixedSelection`
+2. where pointer still short-circuits into pure editable-generated routes
+3. which mixed adapters currently know only about regular and skeleton content
+
+Do not change behavior in this step.
+
+The purpose is to leave one clear record of the real gap before the code moves.
+
+#### Code Evidence
+
+Current pointer routing evidence:
+
+- `src-js/views-editor/src/edit-tools-pointer.js`
+
+Current mixed adapter evidence:
+
+- `src-js/views-editor/src/edit-behavior-adapters.js`
+
+Current failure shape to document:
+
+```js
+if (hasEditableGeneratedHandles) {
+  return "editableGeneratedHandle";
+}
+
+if (hasEditableGeneratedPoints) {
+  return "editableGeneratedPoint";
+}
+
+if (hasRegularSelection && hasSkeletonSelection) {
+  return "mixedSelection";
+}
+```
+
+Current mixed adapter scope to document:
+
+```js
+async function runMixedSelectionDragCanonical(context) {
+  // regular + skeleton logic exists here today
+  // editable-generated content is not handled natively here yet
+}
+```
+
+#### Files To Touch
+
+- `docs/refactor/plan-post-refactor-cleanup-optimization.md`
+- `docs/refactor/progress-report.md`
+
+#### Manual Tests
+
+This is a documentation-only step, but confirm the current gap is reproducible:
+
+1. Drag editable-generated off-curve plus regular point.
+2. Drag editable-generated off-curve plus skeleton on-curve.
+3. Drag editable-generated off-curve plus regular off-curve.
+4. Nudge one mixed selection that includes editable-generated content.
+
+Expected result:
+
+- the current failure pattern is confirmed and written down exactly
+- no code changes yet
+
+---
+
+### Step 1.5.2: Create one explicit mixed point-like classifier in pointer for drag and nudge
+
+#### Problem Aspect
+
+Pointer currently decides mixed selection through hand-written special cases.
+
+That is why editable-generated routes can steal mixed selections before `mixedSelection` is even considered.
+
+This step fixes the classification layer first.
+
+#### Proposed Solution (Plain Language)
+
+Create one shared selection-classification step in `src-js/views-editor/src/edit-tools-pointer.js`.
+
+That classifier should answer, in one place:
+
+- does the selection contain regular path points, anchors, or guidelines
+- does it contain skeleton points or skeleton handles
+- does it contain rib points
+- does it contain editable-generated points
+- does it contain editable-generated handles
+
+Then derive the route with one clear rule:
+
+- one family only -> use the existing pure route
+- two or more in-scope point-like families -> use `mixedSelection`
+
+Use the same classifier for both drag and nudge.
+
+Do not keep separate hand-written rules for the two actions.
+
+#### Code Evidence
+
+Target direction:
+
+```js
+const selectionKinds = classifyPointLikeSelection(...);
+
+if (selectionKinds.isMixedPointLike) {
+  return "mixedSelection";
+}
+
+if (selectionKinds.hasEditableGeneratedHandles) {
+  return "editableGeneratedHandle";
+}
+```
+
+File to change:
+
+- `src-js/views-editor/src/edit-tools-pointer.js`
+
+#### Files To Touch
+
+- `src-js/views-editor/src/edit-tools-pointer.js`
+- `docs/refactor/progress-report.md`
+
+#### Manual Tests
+
+Run both drag and nudge checks:
+
+1. Pure regular selection.
+2. Pure skeleton selection.
+3. Pure editable-generated point selection.
+4. Pure editable-generated handle selection.
+5. Regular + skeleton mixed selection.
+6. Editable-generated + regular mixed selection.
+7. Editable-generated + skeleton mixed selection.
+8. Editable-generated point + editable-generated handle mixed selection.
+
+Expected result:
+
+- pure selections still route to pure handlers
+- any real mixed point-like selection routes to `mixedSelection`
+- editable-generated routes no longer steal mixed selections
+
+---
+
+### Step 1.5.3: Expand mixed drag handling so editable-generated content participates natively
+
+#### Problem Aspect
+
+Even if pointer classifies the selection correctly, mixed drag is still incomplete unless the adapter can move every selected family together.
+
+Right now the mixed drag adapter is centered on regular and skeleton behavior only.
+
+This step fixes the drag execution side.
+
+#### Proposed Solution (Plain Language)
+
+Extend the mixed drag adapter so it can include:
+
+- regular path points, anchors, and guidelines
+- skeleton points and skeleton handles
+- editable-generated points
+- editable-generated handles
+
+Use each family's native behavior logic inside the mixed route.
+
+Important rule:
+
+- one user drag action should still produce one combined edit session and one combined undo step
+
+Do not fake mixed support by moving only one family and ignoring the others.
+
+If helper extraction is needed, keep it inside the adapters layer and make it obviously shared by pure and mixed editable-generated routes.
+
+#### Code Evidence
+
+Current target area:
+
+- `src-js/views-editor/src/edit-behavior-adapters.js`
+
+Current mixed drag entry point:
+
+```js
+async function runMixedSelectionDragCanonical(context) {
+  // extend this so editable-generated points/handles can join the same drag
+}
+```
+
+#### Files To Touch
+
+- `src-js/views-editor/src/edit-behavior-adapters.js`
+- `docs/refactor/progress-report.md`
+
+#### Manual Tests
+
+Run drag checks:
+
+1. Editable-generated point + regular point.
+2. Editable-generated handle + regular off-curve.
+3. Editable-generated point + skeleton on-curve.
+4. Editable-generated handle + skeleton on-curve.
+5. Editable-generated point + regular point + skeleton point.
+6. Existing regular + skeleton mixed drag.
+
+Expected result:
+
+- all selected families move together
+- regular behavior stays regular
+- skeleton behavior stays skeleton
+- editable-generated behavior stays editable-generated
+- one drag creates one undoable change
+
+---
+
+### Step 1.5.4: Expand mixed nudge handling with the same native-mix rule
+
+#### Problem Aspect
+
+Drag and nudge must not disagree about what mixed selection means.
+
+If we fix only drag, the system stays conceptually broken and the next cleanup phase will build on inconsistent behavior.
+
+This step fixes the nudge side to match the drag side.
+
+#### Proposed Solution (Plain Language)
+
+Extend mixed nudge handling so it follows the same rule as mixed drag:
+
+- each selected family keeps its own native nudge semantics
+- one arrow-key action applies all participating families together
+- if no selected family can actually move, return `false` cleanly
+
+Do not redesign the registry in this step.
+
+Keep using the existing `mixedSelection` route kind.
+
+#### Code Evidence
+
+Current target area:
+
+- `src-js/views-editor/src/edit-behavior-adapters.js`
+
+Current mixed nudge entry point:
+
+```js
+async function runMixedSelectionNudgeLegacy(context) {
+  // extend this so editable-generated points/handles can join the same nudge
+}
+```
+
+#### Files To Touch
+
+- `src-js/views-editor/src/edit-behavior-adapters.js`
+- `docs/refactor/progress-report.md`
+
+#### Manual Tests
+
+Run nudge checks:
+
+1. Editable-generated point + regular point.
+2. Editable-generated handle + regular off-curve.
+3. Editable-generated point + skeleton on-curve.
+4. Editable-generated handle + skeleton on-curve.
+5. Editable-generated point + editable-generated handle.
+6. Existing regular + skeleton mixed nudge.
+
+Expected result:
+
+- all selected families nudge together
+- unsupported selections fail cleanly
+- no partial movement of only one family
+
+---
+
+### Step 1.5.5: Run the full mixed-selection matrix and record Phase 1.5 before moving to Phase 2
+
+#### Problem Aspect
+
+This phase is a correctness gate.
+
+If we move on without a full mixed-selection matrix, later cleanup work will rest on behavior we do not actually trust.
+
+This step closes the phase properly.
+
+#### Proposed Solution (Plain Language)
+
+Run the mixed-selection matrix by hand and record it in the fine-grained progress report.
+
+The checklist must cover:
+
+- pure selections still working
+- mixed selections with editable-generated content
+- drag and nudge parity
+- undo/redo parity
+- clean fallthrough when no family can actually move
+
+Only after that should Phase 2 begin.
+
+#### Code Evidence
+
+Useful verification commands after this phase:
+
+```bash
+rg -n "mixedSelection" src-js/views-editor/src/edit-tools-pointer.js src-js/views-editor/src/edit-behavior-adapters.js
+rg -n "editableGeneratedPoint|editableGeneratedHandle" src-js/views-editor/src/edit-tools-pointer.js src-js/views-editor/src/edit-behavior-adapters.js
+```
+
+#### Files To Touch
+
+- `docs/refactor/progress-report.md`
+
+#### Manual Tests
+
+Run this full matrix:
+
+1. Pure regular drag.
+2. Pure regular nudge.
+3. Pure skeleton drag.
+4. Pure skeleton nudge.
+5. Pure editable-generated point drag.
+6. Pure editable-generated handle nudge.
+7. Regular + skeleton drag.
+8. Regular + skeleton nudge.
+9. Editable-generated point + regular point drag.
+10. Editable-generated point + regular point nudge.
+11. Editable-generated handle + regular off-curve drag.
+12. Editable-generated handle + regular off-curve nudge.
+13. Editable-generated point + skeleton on-curve drag.
+14. Editable-generated point + skeleton on-curve nudge.
+15. Editable-generated handle + skeleton on-curve drag.
+16. Editable-generated handle + skeleton on-curve nudge.
+17. Editable-generated point + editable-generated handle drag.
+18. Editable-generated point + editable-generated handle nudge.
+19. Editable-generated point + regular point + skeleton point drag.
+20. Undo and redo one drag and one nudge from the mixed cases above.
+
+Expected result:
+
+- mixed selections behave consistently across drag and nudge
+- all selected families participate together
+- one action creates one undo step
+- undo and redo restore the whole mixed action
 
 ---
 

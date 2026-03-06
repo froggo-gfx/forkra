@@ -211,20 +211,20 @@ export async function runDragRoutingOrchestration(_context) {
       : legacyDragAdapters[objectKind];
   assert(adapter, `runDragRoutingOrchestration: missing adapter for ${objectKind}`);
 
-  const adapterResult = await adapter({
+  const handled = await adapter({
     ..._context,
     runPointLikeInputKernel,
     runPointLikeSessionKernel,
   });
 
-  if (adapterResult === false) {
-    return false;
-  }
+  // Truthful current state:
+  // - adapters return `true` when they handled the route
+  // - adapters return `false` when the route is not applicable or cannot run
   assert(
-    adapterResult && "forward" in adapterResult && "rollback" in adapterResult,
-    `runDragRoutingOrchestration: adapter ${objectKind} must return { forward, rollback } or false`
+    typeof handled === "boolean",
+    `runDragRoutingOrchestration: adapter ${objectKind} must return boolean handled/unhandled`
   );
-  return true;
+  return handled;
 }
 
 /**
@@ -272,20 +272,21 @@ export async function runNudgeRoutingOrchestration(_context) {
       : legacyNudgeAdapters[objectKind];
   assert(adapter, `runNudgeRoutingOrchestration: missing adapter for ${objectKind}`);
 
-  const adapterResult = await adapter({
+  const handled = await adapter({
     ..._context,
     runNudgeOrchestration,
     runPointLikeInputKernel,
     runPointLikeSessionKernel,
   });
-  if (adapterResult === false) {
-    return false;
-  }
+
+  // Truthful current state:
+  // - adapters return `true` when they handled the route
+  // - adapters return `false` when the route is not applicable or cannot run
   assert(
-    adapterResult && "forward" in adapterResult && "rollback" in adapterResult,
-    `runNudgeRoutingOrchestration: adapter ${objectKind} must return { forward, rollback } or false`
+    typeof handled === "boolean",
+    `runNudgeRoutingOrchestration: adapter ${objectKind} must return boolean handled/unhandled`
   );
-  return true;
+  return handled;
 }
 
 /**

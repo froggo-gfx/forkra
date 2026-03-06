@@ -89,30 +89,36 @@ These rules stay in force:
 
 ## 4. Current Problem Areas
 
-The broad architecture is in place, but the micro-architecture still has 6 active problems:
+The broad architecture is in place, but the micro-architecture still has 7 active problems:
 
 1. The adapter contract is weak.
    - The code says adapters return meaningful `{ forward, rollback }` data.
    - In practice, many routes still return placeholder shapes.
    - Composer mainly uses the result as a handled/unhandled signal.
+   - The real undo/redo data already lives inside adapter-owned edit sessions.
 
-2. Shared drag/nudge kernels live in the wrong module.
+2. Mixed point-like selection routing is incomplete.
+   - `mixedSelection` is currently trustworthy mainly for `regular + skeleton`.
+   - Editable-generated content can still be routed too early into pure handlers.
+   - Mixed drag/nudge must treat editable-generated content as a first-class participant, not a side case.
+
+3. Shared drag/nudge kernels live in the wrong module.
    - Composer currently owns shared input/session helpers that adapters depend on.
    - That dependency direction is backwards.
 
-3. The adapters module is too large.
+4. The adapters module is too large.
    - `src-js/views-editor/src/pointer-objects.js` mixes too many responsibilities.
    - This makes cleanup and optimization harder than necessary.
 
-4. Canonical vs legacy boundaries are not named honestly enough.
+5. Canonical vs legacy boundaries are not named honestly enough.
    - Some code is still labeled `legacy` even when it now runs canonical behavior.
    - That makes the code harder to read and reason about.
 
-5. Too much point-like orchestration and math is duplicated.
+6. Too much point-like orchestration and math is duplicated.
    - Similar setup/persist flows appear across object kinds.
    - Some pure skeleton math may belong in core/shared code instead of editor files.
 
-6. The registry representation is too indirect.
+7. The registry representation is too indirect.
    - Routing is encoded through row ids and short codes instead of readable preset names.
    - The registry stays worth keeping, but the current representation is too expensive for humans.
 
@@ -127,6 +133,7 @@ These are the kinds of changes this SoT allows:
 - extract duplicated orchestration helpers
 - extract pure math into core/shared code when appropriate
 - rework registry representation while keeping routing separate from behavior and adapters
+- fix mixed point-like selection classification/execution gaps without redesigning the pipeline
 - add better verification/reporting for small cleanup steps
 
 These are not the kinds of changes this SoT is asking for:
@@ -169,7 +176,7 @@ Disallowed regression:
 - persistence ownership
 - object-kind-specific behavior implementation
 
-### `src-js/views-editor/src/pointer-objects.js`
+### `src-js/views-editor/src/edit-behavior-adapters.js`
 
 This is still the adapter layer today, but it is expected to shrink and split.
 
@@ -177,6 +184,7 @@ Allowed work here:
 
 - translation from shared behavior output to object-specific canonical data
 - persistence for adapter-owned routes
+- boolean handled/unhandled returns for composer
 - temporary local helper extraction while the file is being split
 
 Expected future direction:
@@ -246,7 +254,8 @@ Hard rule:
 
 This cleanup/optimization stage is complete only when all of these are true:
 
-- adapter contracts are truthful and enforced in a meaningful way
+- adapter/composer routing contract is reduced to truthful boolean handled/unhandled
+- mixed point-like selections, including editable-generated combinations, route and undo correctly
 - shared drag/nudge kernels live in the adapter layer, not in composer
 - the adapter layer is split into smaller modules with clearer ownership
 - naming reflects reality for canonical vs legacy paths
