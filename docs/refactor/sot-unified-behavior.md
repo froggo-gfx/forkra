@@ -267,8 +267,9 @@ This cleanup/optimization stage is complete only when all of these are true:
 - shared drag/nudge kernels live in the adapter layer, not in composer, and the kernel API is simplified to the useful adapter-owned surface
 - the adapter layer has a clearer in-file ownership layout without unnecessary new files
 - naming reflects reality for canonical vs legacy paths
-- duplicated point-like orchestration is reduced
-- pure math is moved to core/shared code where appropriate, and only where appropriate
+- duplicated session-entry scaffolding is reduced
+- duplicated skeleton-backed layer lifecycle is reduced
+- pure math is moved to existing better homes only where appropriate, and only where appropriate
 - registry routing is readable without row-id/code indirection
 - no broad behavior regressions are introduced
 - each fine-grained step has manual test coverage recorded in `docs/refactor/progress-report.md`
@@ -280,5 +281,5 @@ When in doubt:
 1. Prefer smaller cleanup steps over large rewrites.
 2. Preserve behavior first.
 3. Improve naming and boundaries before attempting low-level optimization.
-4. Extract pure math only when the boundary is truly clean.
+4. Extract pure math only when the boundary is truly clean, and prefer existing homes before inventing new ones.
 5. Record each finished step in the fine-grained progress report.

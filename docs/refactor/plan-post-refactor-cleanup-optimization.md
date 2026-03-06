@@ -2412,11 +2412,11 @@ Expected result:
 
 ---
 
-## Phase 5: Remove Duplicated Point-Like Orchestration And Move Pure Math To Core Or Shared Code
+## Phase 5: Reduce Duplicated Session Shells, Deduplicate Skeleton-Backed Layer Workflows, And Move Only Truly Pure Math
 
 ### Broad Problem
 
-The adapters layer still contains too much repeated setup, persistence, and point-like orchestration logic.
+The adapters layer still contains too much repeated setup, skeleton-backed working-state lifecycle, persistence, and point-like orchestration logic.
 
 Also, some skeleton-related math may belong in core or a small shared helper module instead of editor UI code.
 
@@ -2425,7 +2425,7 @@ This matters for two different reasons:
 - repeated orchestration makes cleanup risky because the same fix has to be repeated in multiple route families
 - pure math hidden inside editor files is harder to test, harder to reuse, and harder to optimize safely
 
-These two problems are related, but they are not the same.
+These problems are related, but they are not the same.
 
 This phase must keep them separate on purpose.
 
@@ -2433,7 +2433,10 @@ Rule for this phase:
 
 - if code is editor-only orchestration, keep it in the editor layer
 - if code is pure skeleton math, explicitly check whether it belongs in `src-js/fontra-core/src/skeleton-contour-generator.js`
-- if code is pure math but not skeleton-contour-generator math, consider one small shared math/helper module only if there is a real reuse case
+- if code is pure math but not skeleton-contour-generator math, prefer existing homes first
+  - especially `src-js/fontra-core/src/vector.js`
+  - and `src-js/views-editor/src/skeleton-tunni-calculations.js`
+- do not create a new shared math/helper module unless there is a proven reuse case and no existing home fits
 - do not move UI state, event handling, or edit-session logic into core
 
 Candidate places to review during this phase:
@@ -2446,7 +2449,8 @@ Candidate places to review during this phase:
 
 The goal of this phase is simple:
 
-- remove repeated point-like orchestration where one shared editor-side path is enough
+- remove repeated session-entry scaffolding where one shared editor-side path is enough
+- remove repeated skeleton-backed layer lifecycle where one shared editor-side path is enough
 - identify math that is truly pure and move it out of editor implementation code when that move is actually justified
 
 ### Step 5.1: Write down the repeated orchestration pattern before extracting anything
@@ -2467,17 +2471,25 @@ This step fixes that risk first.
 
 #### Proposed Solution (Plain Language)
 
-Create one concrete comparison list for the main point-like route families:
+Create one concrete comparison list for the main route families and duplication buckets:
 
 - regular point-like orchestration
 - skeleton point-like orchestration
 - editable-generated point-like orchestration
 - editable-generated handle-like orchestration
+- mixed skeleton-backed orchestration where it shares the same layer lifecycle
+
+For each route family, classify duplication into three buckets:
+
+- session-entry scaffolding
+- skeleton-backed working-state / regenerate / persist lifecycle
+- pure math or geometry helpers
 
 For each family, list:
 
 - what session setup it repeats
 - what input/session kernel usage it repeats
+- what skeleton-backed layer lifecycle it repeats
 - what persistence pattern it repeats
 - what parts are truly family-specific and must stay separate
 
@@ -2487,12 +2499,17 @@ Do not move math yet.
 
 The goal is only to separate true duplication from necessary specialization.
 
+Important constraint:
+
+- do not assume that all point-like families should share one universal helper
+- the inventory must prove which duplication bucket is real before extraction starts
+
 #### Code Evidence
 
 Current repeated orchestration anchors:
 
 ```js
-async function runRegularPointLikeOrchestration(...) { ... }
+async function runRegularPointLikeCanonical(...) { ... }
 async function runSkeletonPointLikeOrchestration(...) { ... }
 async function runEditableGeneratedPointLikeCanonical(...) { ... }
 async function runEditableGeneratedHandleLikeCanonical(...) { ... }
@@ -2532,7 +2549,7 @@ Expected result:
 
 #### Problem Aspect
 
-After the inventory, some orchestration will still be repeated for no good reason.
+After the inventory, some session-entry scaffolding will still be repeated for no good reason.
 
 That repeated code is expensive:
 
@@ -2540,11 +2557,11 @@ That repeated code is expensive:
 - optimization work becomes slower because there is no single place to improve
 - later refactors are more likely to drift behavior between object families
 
-This step fixes only the editor-side duplication that is genuinely shared.
+This step fixes only the editor-side duplication that is genuinely shared at the session shell level.
 
 #### Proposed Solution (Plain Language)
 
-Extract one shared editor-side orchestration helper for the parts that are actually common across point-like routes.
+Extract one shared editor-side session-shell helper for the parts that are actually common across point-like routes.
 
 That shared helper may own things like:
 
@@ -2560,6 +2577,7 @@ Keep family-specific logic as callbacks or small family-owned hooks.
 Good shared target:
 
 - a helper that reduces duplication while still reading clearly for regular, skeleton, and editable-generated routes
+- a helper that does not try to own skeleton-backed regeneration/persist policy by itself
 
 Bad shared target:
 
@@ -2606,8 +2624,6 @@ The important part is that the shared helper removes duplication without flatten
 #### Files To Touch
 
 - `src-js/views-editor/src/edit-behavior-adapters.js`
-  - or, before the Phase 0 rename lands, `src-js/views-editor/src/pointer-objects.js`
-- extracted adapter helper files if Phase 3 already split the adapters layer
 - `docs/refactor/progress-report.md`
 
 #### Manual Tests
@@ -2635,11 +2651,11 @@ Expected result:
 
 ---
 
-### Step 5.3: Extract repeated skeleton persistence and regeneration patterns without moving them to core
+### Step 5.3: Extract repeated skeleton-backed layer lifecycle patterns without moving them to core
 
 #### Problem Aspect
 
-Skeleton routes repeat a lot of persistence boilerplate:
+Skeleton-backed routes repeat a lot of working-state and persistence boilerplate:
 
 - read skeleton data
 - clone or reset working data
@@ -2649,19 +2665,26 @@ Skeleton routes repeat a lot of persistence boilerplate:
 
 This repetition is not pure math.
 
-It is editor-side persistence and orchestration.
+It is editor-side skeleton-backed layer lifecycle.
 
 That means it should be cleaned up, but it should not be pushed into core just because it is skeleton-related.
 
 #### Proposed Solution (Plain Language)
 
-Extract the repeated skeleton persistence pattern into shared editor-side helpers.
+Extract the repeated skeleton-backed layer lifecycle into shared editor-side helpers.
 
 Good candidates:
 
 - working contour reset helpers
 - layer persistence helpers
-- shared regeneration-and-persist blocks used by more than one skeleton route family
+- shared regeneration-and-persist blocks used by more than one skeleton-backed route family
+
+This step must explicitly review these families together:
+
+- skeleton point / handle routes
+- fixed-rib skeleton routes
+- editable-generated point / handle routes
+- mixed-selection routes that mutate skeleton-backed working data
 
 Keep these helpers in the editor/adapters layer because they depend on editor edit sessions and layer persistence structure.
 
@@ -2682,16 +2705,16 @@ Current repeated usage sites include multiple regeneration/persist blocks around
 
 - `runSkeletonPointLikeCanonical(...)`
 - `runSkeletonHandlePointLikeCanonical(...)`
+- `runFixedRibSkeletonPointLikeCanonical(...)`
 - `runEditableGeneratedPointLikeCanonical(...)`
 - `runEditableGeneratedHandleLikeCanonical(...)`
 - `runSkeletonRibPointNudgeCanonical(...)`
-- `runMixedSelectionDragCanonical(...)`
+- `runMixedSelectionDrag(...)`
+- `runMixedSelectionNudge(...)`
 
 #### Files To Touch
 
 - `src-js/views-editor/src/edit-behavior-adapters.js`
-  - or, before the Phase 0 rename lands, `src-js/views-editor/src/pointer-objects.js`
-- extracted skeleton-owned adapter/helper modules if Phase 3 already split them
 - `docs/refactor/progress-report.md`
 
 #### Manual Tests
@@ -2710,7 +2733,7 @@ This step needs a skeleton-focused parity pass:
 Expected result:
 
 - no behavior drift
-- skeleton persistence logic is less duplicated
+- skeleton-backed layer lifecycle is less duplicated
 - core code does not gain editor transaction responsibilities
 
 ---
@@ -2721,7 +2744,7 @@ Expected result:
 
 The adapters file currently contains a cluster of pure math and geometry helpers near the top.
 
-Some of them may belong in core or a shared math helper.
+Some of them may belong in core or an existing shared math home.
 
 Some of them may only look pure, but are actually coupled to editor-side route assumptions.
 
@@ -2734,7 +2757,8 @@ This step separates those cases carefully.
 Review each math helper and classify it as one of these:
 
 - pure skeleton math that belongs in `src-js/fontra-core/src/skeleton-contour-generator.js`
-- pure math that is reusable but not specifically skeleton-contour-generator logic
+- pure math that belongs in an existing shared home such as `src-js/fontra-core/src/vector.js`
+- pure geometry that may belong in `src-js/views-editor/src/skeleton-tunni-calculations.js` before it belongs in core
 - adapter-local math that should stay in the adapters layer because it is tightly tied to route behavior
 
 Candidate helpers to review first:
@@ -2749,9 +2773,12 @@ function applyFixedRibDragToSkeletonData(...) { ... }
 
 Decision rules:
 
-- `normalizeVectorSafe` and `rotateVector` are generic math candidates, but only move them if an existing shared math home is sensible
-- `calculateHandleTensionsForSegment` and `computeHandleLengthsFromTensions` look like skeleton-geometry helpers and may belong with other skeleton contour math if they are not editor-route-specific
-- `applyFixedRibDragToSkeletonData` sounds mathematical, but it also encodes edit intent and route behavior, so it may still belong in editor-side skeleton adapter code
+- `normalizeVectorSafe` and `rotateVector` are generic math candidates, but should only move if an existing home is clearly better than staying local
+- `calculateHandleTensionsForSegment` and `computeHandleLengthsFromTensions` should be compared against existing Tunni/skeleton geometry first
+  - especially `src-js/views-editor/src/skeleton-tunni-calculations.js`
+  - and related tension logic in `src-js/fontra-core/src/skeleton-contour-generator.js`
+- `computeHandleLengthsFromTensions` is the strongest move candidate
+- `applyFixedRibDragToSkeletonData` sounds mathematical, but it also encodes edit intent and route behavior, so it should stay editor-side unless proved otherwise
 
 If a helper is pure and belongs in core, move it with narrow scope.
 
@@ -2803,8 +2830,8 @@ Run one final review and verification pass.
 
 Check these things explicitly:
 
-- the main point-like route families share editor-side orchestration where it is genuinely common
-- skeleton persistence helpers are shared inside the editor layer rather than copied across routes
+- the main route families share editor-side session scaffolding where it is genuinely common
+- skeleton-backed layer lifecycle helpers are shared inside the editor layer rather than copied across routes
 - pure math moved only when its new home is clearly better
 - `skeleton-contour-generator.js` did not become an editor behavior dumping ground
 - any new shared helper file has a real reason to exist
@@ -2816,8 +2843,8 @@ Add grep-based checks to the progress entry for this step.
 Useful verification commands after Phase 5:
 
 ```bash
-rg -n "runRegularPointLikeOrchestration|runSkeletonPointLikeOrchestration|runEditableGeneratedPointLikeCanonical|runEditableGeneratedHandleLikeCanonical" src-js/views-editor/src
-rg -n "regenerateSkeletonContours\(|setSkeletonData\(" src-js/views-editor/src
+rg -n "runRegularPointLikeCanonical|runSkeletonPointLikeOrchestration|runEditableGeneratedPointLikeCanonical|runEditableGeneratedHandleLikeCanonical|runMixedSelectionDrag|runMixedSelectionNudge" src-js/views-editor/src
+rg -n "regenerateSkeletonContours\(|setSkeletonData\(|makeSkeletonLayerPersistenceChanges|createSkeletonLayersData" src-js/views-editor/src
 rg -n "normalizeVectorSafe|rotateVector|calculateHandleTensionsForSegment|computeHandleLengthsFromTensions|applyFixedRibDragToSkeletonData" src-js/views-editor/src src-js/fontra-core/src
 ```
 
