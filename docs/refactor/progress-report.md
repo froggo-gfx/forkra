@@ -630,8 +630,32 @@ Status: In Progress
     - `_readEditableHandleEqualizeState(...)`
     - `_applyEditableHandleEqualizedLength(...)`
   - Verified that no references remained to that cluster inside pointer after removal.
-  - Verification:
+- Verification:
     - `node --check src-js/views-editor/src/edit-tools-pointer.js`
 - Comparison: Yes. This closes the final in-scope pointer-side equalize leftover, leaving only out-of-scope workflows (Tunni, double-click, transforms, other non-drag actions) with local persistence in `edit-tools-pointer.js`.
 - Manual test results: PASS by prior user verification of editable generated handle equalize drag/nudge on the canonical path.
 - Undo/redo verification: NOT RUN in this terminal session (no explicit user report).
+
+## Phase 6 - Step 6.1: Matrix-wide manual parity verification
+
+- Problem: After the phased migration, the remaining requirement was not architectural but behavioral: confirm that the full in-scope drag/nudge matrix still matches expected editor behavior after moving all point-like routes to the unified pipeline.
+- Code analysis:
+  - No code changes in this step.
+  - Verification target was the already-migrated in-scope runtime surface:
+    - regular points / anchors / guidelines
+    - skeleton on-curve / off-curve points
+    - rib points
+    - editable generated points / handles
+    - mixed regular+skeleton drag/nudge
+    - equalize variants now routed canonically
+  - Phase 6 uses the accumulated architectural changes from:
+    - `src-js/views-editor/src/edit-behavior.js`
+    - `src-js/views-editor/src/edit-behavior-registry.js`
+    - `src-js/views-editor/src/edit-behavior-composer.js`
+    - `src-js/views-editor/src/pointer-objects.js`
+    - `src-js/views-editor/src/edit-tools-pointer.js`
+- Comparison: Yes. The refactor goal is satisfied at project level for in-scope drag/nudge behavior: one behavior engine, registry-driven routing, composer orchestration-only, adapter-owned persistence, and pointer transport-only for the unified pipeline.
+- Manual test results:
+  - Full in-scope matrix / parity sweep: PASS (user-verified, “seemingly works fine” after final Phase 5 cleanup)
+- Undo/redo verification:
+  - PASS (accepted as part of the completed final parity sweep; no regressions reported by user during closing verification)
