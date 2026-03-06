@@ -1,4 +1,4 @@
-import { arrowKeyDeltas, assert } from "@fontra/core/utils.js";
+import { assert } from "@fontra/core/utils.js";
 import {
   DRAG_ROUTING_MAP,
   getDragRowId,
@@ -12,147 +12,10 @@ import {
   legacyNudgeAdapters,
 } from "./edit-behavior-adapters.js";
 
-export async function runPointLikeInputKernel({
-  mode,
-  eventStream,
-  initialEvent,
-  event,
-  getBehaviorNameForEvent,
-  getPointForEvent,
-  onBehaviorChanged,
-  onInput,
-}) {
-  assert(mode === "drag" || mode === "nudge", "runPointLikeInputKernel: invalid mode");
-  assert(typeof onInput === "function", "runPointLikeInputKernel: missing onInput");
-
-  if (mode === "drag") {
-    assert(eventStream, "runPointLikeInputKernel(drag): missing eventStream");
-    assert(initialEvent, "runPointLikeInputKernel(drag): missing initialEvent");
-    assert(
-      typeof getBehaviorNameForEvent === "function",
-      "runPointLikeInputKernel(drag): missing getBehaviorNameForEvent"
-    );
-    assert(
-      typeof getPointForEvent === "function",
-      "runPointLikeInputKernel(drag): missing getPointForEvent"
-    );
-
-    const initialPoint = getPointForEvent(initialEvent);
-    let behaviorName = getBehaviorNameForEvent(initialEvent);
-
-    for await (const dragEvent of eventStream) {
-      const nextBehaviorName = getBehaviorNameForEvent(dragEvent);
-      if (nextBehaviorName !== behaviorName) {
-        behaviorName = nextBehaviorName;
-        if (onBehaviorChanged) {
-          await onBehaviorChanged({ behaviorName, event: dragEvent, initialPoint });
-        }
-      }
-      const currentPoint = getPointForEvent(dragEvent);
-      const delta = {
-        x: currentPoint.x - initialPoint.x,
-        y: currentPoint.y - initialPoint.y,
-      };
-      await onInput({
-        mode,
-        event: dragEvent,
-        behaviorName,
-        initialPoint,
-        currentPoint,
-        delta,
-      });
-    }
-    return;
-  }
-
-  assert(event, "runPointLikeInputKernel(nudge): missing event");
-  let [dx, dy] = arrowKeyDeltas[event.key] || [0, 0];
-  if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
-    dx *= 100;
-    dy *= 100;
-  } else if (event.shiftKey) {
-    dx *= 10;
-    dy *= 10;
-  }
-  const delta = { x: dx, y: dy };
-  await onInput({
-    mode,
-    event,
-    behaviorName:
-      typeof getBehaviorNameForEvent === "function"
-        ? getBehaviorNameForEvent(event)
-        : undefined,
-    delta,
-  });
-}
-
-export async function runPointLikeSessionKernel({
-  mode,
-  runPointLikeInputKernel: inputKernel = runPointLikeInputKernel,
-  withEditSession,
-  eventStream,
-  initialEvent,
-  event,
-  getBehaviorNameForEvent,
-  getPointForEvent,
-  onSessionStart,
-  onBehaviorChanged,
-  onInput,
-  onSessionEnd,
-}) {
-  assert(mode === "drag" || mode === "nudge", "runPointLikeSessionKernel: invalid mode");
-  assert(
-    typeof withEditSession === "function",
-    "runPointLikeSessionKernel: missing withEditSession"
-  );
-  assert(typeof onInput === "function", "runPointLikeSessionKernel: missing onInput");
-  assert(
-    typeof inputKernel === "function",
-    "runPointLikeSessionKernel: missing runPointLikeInputKernel"
-  );
-
-  return withEditSession(async (sendIncrementalChange, glyph) => {
-    const sessionState = onSessionStart
-      ? (await onSessionStart({ mode, sendIncrementalChange, glyph })) || {}
-      : {};
-
-    await inputKernel({
-      mode,
-      eventStream,
-      initialEvent,
-      event,
-      getBehaviorNameForEvent,
-      getPointForEvent,
-      onBehaviorChanged: onBehaviorChanged
-        ? async (payload) => {
-            await onBehaviorChanged({
-              ...payload,
-              mode,
-              sessionState,
-              sendIncrementalChange,
-              glyph,
-            });
-          }
-        : undefined,
-      onInput: async (payload) => {
-        await onInput({
-          ...payload,
-          mode,
-          sessionState,
-          sendIncrementalChange,
-          glyph,
-        });
-      },
-    });
-
-    if (onSessionEnd) {
-      return onSessionEnd({ mode, sessionState, sendIncrementalChange, glyph });
-    }
-  });
-}
-
 /**
  * Route drag edits through the registry routing map and adapters.
+ * Composer owns routing/orchestration only; adapter-side execution helpers live
+ * in `edit-behavior-adapters.js`.
  * Required context fields:
  * - pointerTool
  * - sceneController
@@ -211,11 +74,7 @@ export async function runDragRoutingOrchestration(_context) {
       : legacyDragAdapters[objectKind];
   assert(adapter, `runDragRoutingOrchestration: missing adapter for ${objectKind}`);
 
-  const handled = await adapter({
-    ..._context,
-    runPointLikeInputKernel,
-    runPointLikeSessionKernel,
-  });
+  const handled = await adapter(_context);
 
   // Truthful current state:
   // - adapters return `true` when they handled the route
@@ -229,6 +88,8 @@ export async function runDragRoutingOrchestration(_context) {
 
 /**
  * Orchestrate nudge edits through routing map + adapters.
+ * Composer owns routing/orchestration only; adapter-side execution helpers live
+ * in `edit-behavior-adapters.js`.
  * Required context fields:
  * - pointerTool
  * - sceneController
@@ -275,8 +136,6 @@ export async function runNudgeRoutingOrchestration(_context) {
   const handled = await adapter({
     ..._context,
     runNudgeOrchestration,
-    runPointLikeInputKernel,
-    runPointLikeSessionKernel,
   });
 
   // Truthful current state:

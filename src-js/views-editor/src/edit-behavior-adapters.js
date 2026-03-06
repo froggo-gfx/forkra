@@ -41,6 +41,154 @@ import {
 // - adapters return `true` when they handled the route
 // - adapters return `false` when the route is not applicable or cannot run
 // - real undo/redo data stays inside adapter-owned edit sessions
+//
+// Shared point-like kernels live here because they are adapter-side infrastructure:
+// - `runPointLikeInputKernel(...)` normalizes drag and nudge input
+// - `runPointLikeSessionKernel(...)` wraps edit-session lifecycle
+// Full session consumers use both helpers; valid input-only consumers call the
+// input kernel directly without pretending every route shares one execution model.
+
+async function runPointLikeDragInput({
+  mode,
+  eventStream,
+  initialEvent,
+  getBehaviorNameForEvent,
+  getPointForEvent,
+  onBehaviorChanged,
+  onInput,
+}) {
+  assert(mode === "drag", "runPointLikeDragInput: invalid mode");
+  assert(eventStream, "runPointLikeDragInput: missing eventStream");
+  assert(initialEvent, "runPointLikeDragInput: missing initialEvent");
+  assert(
+    typeof getBehaviorNameForEvent === "function",
+    "runPointLikeDragInput: missing getBehaviorNameForEvent"
+  );
+  assert(
+    typeof getPointForEvent === "function",
+    "runPointLikeDragInput: missing getPointForEvent"
+  );
+
+  const initialPoint = getPointForEvent(initialEvent);
+  let behaviorName = getBehaviorNameForEvent(initialEvent);
+
+  for await (const dragEvent of eventStream) {
+    const nextBehaviorName = getBehaviorNameForEvent(dragEvent);
+    if (nextBehaviorName !== behaviorName) {
+      behaviorName = nextBehaviorName;
+      if (onBehaviorChanged) {
+        await onBehaviorChanged({ behaviorName, event: dragEvent, initialPoint });
+      }
+    }
+    const currentPoint = getPointForEvent(dragEvent);
+    const delta = {
+      x: currentPoint.x - initialPoint.x,
+      y: currentPoint.y - initialPoint.y,
+    };
+    await onInput({
+      mode,
+      event: dragEvent,
+      behaviorName,
+      initialPoint,
+      currentPoint,
+      delta,
+    });
+  }
+}
+
+async function runPointLikeNudgeInput({ mode, event, getBehaviorNameForEvent, onInput }) {
+  assert(mode === "nudge", "runPointLikeNudgeInput: invalid mode");
+  assert(event, "runPointLikeNudgeInput: missing event");
+  let [dx, dy] = arrowKeyDeltas[event.key] || [0, 0];
+  if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
+    dx *= 100;
+    dy *= 100;
+  } else if (event.shiftKey) {
+    dx *= 10;
+    dy *= 10;
+  }
+  const delta = { x: dx, y: dy };
+  await onInput({
+    mode,
+    event,
+    behaviorName:
+      typeof getBehaviorNameForEvent === "function"
+        ? getBehaviorNameForEvent(event)
+        : undefined,
+    delta,
+  });
+}
+
+export async function runPointLikeInputKernel(options) {
+  const { mode, onInput } = options;
+  assert(mode === "drag" || mode === "nudge", "runPointLikeInputKernel: invalid mode");
+  assert(typeof onInput === "function", "runPointLikeInputKernel: missing onInput");
+
+  if (mode === "drag") {
+    return runPointLikeDragInput(options);
+  }
+  return runPointLikeNudgeInput(options);
+}
+
+export async function runPointLikeSessionKernel({
+  mode,
+  withEditSession,
+  eventStream,
+  initialEvent,
+  event,
+  getBehaviorNameForEvent,
+  getPointForEvent,
+  onSessionStart,
+  onBehaviorChanged,
+  onInput,
+  onSessionEnd,
+}) {
+  assert(mode === "drag" || mode === "nudge", "runPointLikeSessionKernel: invalid mode");
+  assert(
+    typeof withEditSession === "function",
+    "runPointLikeSessionKernel: missing withEditSession"
+  );
+  assert(typeof onInput === "function", "runPointLikeSessionKernel: missing onInput");
+
+  return withEditSession(async (sendIncrementalChange, glyph) => {
+    const sessionState = onSessionStart
+      ? (await onSessionStart({ mode, sendIncrementalChange, glyph })) || {}
+      : {};
+
+    await runPointLikeInputKernel({
+      mode,
+      eventStream,
+      initialEvent,
+      event,
+      getBehaviorNameForEvent,
+      getPointForEvent,
+      onBehaviorChanged: onBehaviorChanged
+        ? async (payload) => {
+            await onBehaviorChanged({
+              ...payload,
+              mode,
+              sessionState,
+              sendIncrementalChange,
+              glyph,
+            });
+          }
+        : undefined,
+      onInput: async (payload) => {
+        await onInput({
+          ...payload,
+          mode,
+          sessionState,
+          sendIncrementalChange,
+          glyph,
+        });
+      },
+    });
+
+    if (onSessionEnd) {
+      return onSessionEnd({ mode, sessionState, sendIncrementalChange, glyph });
+    }
+  });
+}
 
 const DEFAULT_SKELETON_WIDTH = 80;
 const FIXED_RIB_SCALE_CONTROL_POINTS = true;
@@ -1548,20 +1696,10 @@ async function runRegularPointLikeOrchestration({
   eventStream,
   initialEvent,
   event,
-  runPointLikeInputKernel,
-  runPointLikeSessionKernel,
   equalizeHandleInfo: equalizeHandleInfoOverride,
 }) {
   assert(sceneController, "runRegularPointLikeOrchestration: missing sceneController");
   assert(pointerTool, "runRegularPointLikeOrchestration: missing pointerTool");
-  assert(
-    typeof runPointLikeInputKernel === "function",
-    "runRegularPointLikeOrchestration: missing runPointLikeInputKernel"
-  );
-  assert(
-    typeof runPointLikeSessionKernel === "function",
-    "runRegularPointLikeOrchestration: missing runPointLikeSessionKernel"
-  );
 
   const isDrag = mode === "drag";
   assert(isDrag || mode === "nudge", "runRegularPointLikeOrchestration: invalid mode");
@@ -1589,7 +1727,6 @@ async function runRegularPointLikeOrchestration({
 
   return runPointLikeSessionKernel({
     mode,
-    runPointLikeInputKernel,
     withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
     eventStream,
     initialEvent,
@@ -1822,8 +1959,6 @@ async function runRegularPointLikeAdapter({
   eventStream,
   initialEvent,
   event,
-  runPointLikeInputKernel,
-  runPointLikeSessionKernel,
 }) {
   const sceneController = pointerTool.sceneController;
   const effectiveSelection = selection || sceneController.selection;
@@ -1835,8 +1970,6 @@ async function runRegularPointLikeAdapter({
     eventStream,
     initialEvent,
     event,
-    runPointLikeInputKernel,
-    runPointLikeSessionKernel,
     equalizeHandleInfo,
   });
   return true;
@@ -1879,14 +2012,9 @@ async function runRegularEqualizeNudgeCanonical({
   sceneController,
   event,
   regularSelection,
-  runPointLikeInputKernel,
 }) {
   assert(sceneController, "runRegularEqualizeNudgeCanonical: missing sceneController");
   assert(event, "runRegularEqualizeNudgeCanonical: missing event");
-  assert(
-    typeof runPointLikeInputKernel === "function",
-    "runRegularEqualizeNudgeCanonical: missing runPointLikeInputKernel"
-  );
 
   const { point: regularPointSelection } = parseSelection(regularSelection);
   if (!regularPointSelection?.length) {
@@ -1947,7 +2075,6 @@ async function runRegularPointLikeCanonical(context, mode) {
     pointerTool,
     objectKind,
     event,
-    runPointLikeInputKernel,
     selectionOverride,
     equalizeHandleInfo,
   } = context;
@@ -1966,7 +2093,6 @@ async function runRegularPointLikeCanonical(context, mode) {
       sceneController,
       event,
       regularSelection,
-      runPointLikeInputKernel,
     });
     if (handled) {
       return true;
@@ -2029,8 +2155,6 @@ async function runSkeletonPointLikeOrchestration({
   eventStream,
   initialEvent,
   event,
-  runPointLikeInputKernel,
-  runPointLikeSessionKernel,
   contourIndex,
   pointIndex,
   smoothIndex,
@@ -2039,14 +2163,6 @@ async function runSkeletonPointLikeOrchestration({
 }) {
   assert(sceneController, "runSkeletonPointLikeOrchestration: missing sceneController");
   assert(pointerTool, "runSkeletonPointLikeOrchestration: missing pointerTool");
-  assert(
-    typeof runPointLikeInputKernel === "function",
-    "runSkeletonPointLikeOrchestration: missing runPointLikeInputKernel"
-  );
-  assert(
-    typeof runPointLikeSessionKernel === "function",
-    "runSkeletonPointLikeOrchestration: missing runPointLikeSessionKernel"
-  );
   const isDrag = mode === "drag";
   const isNudge = mode === "nudge";
   assert(isDrag || isNudge, "runSkeletonPointLikeOrchestration: invalid mode");
@@ -2073,7 +2189,6 @@ async function runSkeletonPointLikeOrchestration({
   }) => {
     await runPointLikeSessionKernel({
       mode,
-      runPointLikeInputKernel,
       withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
       eventStream,
       initialEvent,
@@ -2349,20 +2464,10 @@ async function runSkeletonPointLikeCanonical(context, mode) {
     sceneController,
     objectKind,
     overrideSelection,
-    runPointLikeInputKernel,
-    runPointLikeSessionKernel,
   } = context;
   assert(pointerTool, "runSkeletonPointLikeCanonical: missing pointerTool");
   assert(sceneController, "runSkeletonPointLikeCanonical: missing sceneController");
   assert(objectKind, "runSkeletonPointLikeCanonical: missing objectKind");
-  assert(
-    typeof runPointLikeInputKernel === "function",
-    "runSkeletonPointLikeCanonical: missing runPointLikeInputKernel"
-  );
-  assert(
-    typeof runPointLikeSessionKernel === "function",
-    "runSkeletonPointLikeCanonical: missing runPointLikeSessionKernel"
-  );
 
   const selectedSkeletonPoints =
     overrideSelection || parseSelection(sceneController.selection).skeletonPoint;
@@ -2387,8 +2492,6 @@ async function runSkeletonPointLikeCanonical(context, mode) {
     eventStream: context.eventStream,
     initialEvent: context.initialEvent,
     event: context.event,
-    runPointLikeInputKernel,
-    runPointLikeSessionKernel,
   });
   return true;
 }
@@ -2415,8 +2518,6 @@ async function runFixedRibSkeletonPointLikeCanonical({
   eventStream,
   initialEvent,
   event,
-  runPointLikeInputKernel,
-  runPointLikeSessionKernel,
 }) {
   const clickedSkeletonPoint = resolveClickedSkeletonPoint(
     pointerTool,
@@ -2428,7 +2529,6 @@ async function runFixedRibSkeletonPointLikeCanonical({
 
   await runPointLikeSessionKernel({
     mode,
-    runPointLikeInputKernel,
     withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
     eventStream,
     initialEvent,
@@ -2555,20 +2655,10 @@ async function runSkeletonHandlePointLikeCanonical(context, mode) {
     sceneController,
     pointerTool,
     objectKind,
-    runPointLikeInputKernel,
-    runPointLikeSessionKernel,
   } = context;
   assert(sceneController, "runSkeletonHandlePointLikeCanonical: missing sceneController");
   assert(pointerTool, "runSkeletonHandlePointLikeCanonical: missing pointerTool");
   assert(objectKind, "runSkeletonHandlePointLikeCanonical: missing objectKind");
-  assert(
-    typeof runPointLikeInputKernel === "function",
-    "runSkeletonHandlePointLikeCanonical: missing runPointLikeInputKernel"
-  );
-  assert(
-    typeof runPointLikeSessionKernel === "function",
-    "runSkeletonHandlePointLikeCanonical: missing runPointLikeSessionKernel"
-  );
 
   if (mode === "drag") {
     assert(
@@ -2593,8 +2683,6 @@ async function runSkeletonHandlePointLikeCanonical(context, mode) {
       pointerTool,
       eventStream: context.eventStream,
       initialEvent: context.initialEvent,
-      runPointLikeInputKernel,
-      runPointLikeSessionKernel,
       contourIndex: contourIdx,
       pointIndex: pointIdx,
       smoothIndex: equalizeInfo.smoothIndex,
@@ -2621,8 +2709,6 @@ async function runSkeletonHandlePointLikeCanonical(context, mode) {
     sceneController,
     pointerTool,
     event: context.event,
-    runPointLikeInputKernel,
-    runPointLikeSessionKernel,
     offCurvePoints,
   });
   return true;
@@ -2963,19 +3049,9 @@ async function runEditableGeneratedPointLikeCanonical(context, mode) {
     initialEvent,
     event,
     editablePoints,
-    runPointLikeInputKernel,
-    runPointLikeSessionKernel,
   } = context;
   assert(pointerTool, "runEditableGeneratedPointLikeCanonical: missing pointerTool");
   assert(sceneController, "runEditableGeneratedPointLikeCanonical: missing sceneController");
-  assert(
-    typeof runPointLikeInputKernel === "function",
-    "runEditableGeneratedPointLikeCanonical: missing runPointLikeInputKernel"
-  );
-  assert(
-    typeof runPointLikeSessionKernel === "function",
-    "runEditableGeneratedPointLikeCanonical: missing runPointLikeSessionKernel"
-  );
   if (isDrag) {
     assert(eventStream, "runEditableGeneratedPointLikeCanonical: missing eventStream");
     assert(initialEvent, "runEditableGeneratedPointLikeCanonical: missing initialEvent");
@@ -3018,7 +3094,6 @@ async function runEditableGeneratedPointLikeCanonical(context, mode) {
   try {
     await runPointLikeSessionKernel({
       mode,
-      runPointLikeInputKernel,
       withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
       eventStream,
       initialEvent,
@@ -3201,19 +3276,9 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
     initialEvent,
     event,
     editableHandles,
-    runPointLikeInputKernel,
-    runPointLikeSessionKernel,
   } = context;
   assert(pointerTool, "runEditableGeneratedHandleLikeCanonical: missing pointerTool");
   assert(sceneController, "runEditableGeneratedHandleLikeCanonical: missing sceneController");
-  assert(
-    typeof runPointLikeInputKernel === "function",
-    "runEditableGeneratedHandleLikeCanonical: missing runPointLikeInputKernel"
-  );
-  assert(
-    typeof runPointLikeSessionKernel === "function",
-    "runEditableGeneratedHandleLikeCanonical: missing runPointLikeSessionKernel"
-  );
   if (isDrag) {
     assert(eventStream, "runEditableGeneratedHandleLikeCanonical: missing eventStream");
     assert(initialEvent, "runEditableGeneratedHandleLikeCanonical: missing initialEvent");
@@ -3241,7 +3306,6 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
   try {
     await runPointLikeSessionKernel({
       mode,
-      runPointLikeInputKernel,
       withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
       eventStream,
       initialEvent,
@@ -3522,14 +3586,10 @@ async function runEditableGeneratedNudgeCanonical(context) {
 }
 
 async function runSkeletonRibPointNudgeCanonical(context) {
-  const { pointerTool, sceneController, event, runPointLikeInputKernel } = context;
+  const { pointerTool, sceneController, event } = context;
   assert(pointerTool, "runSkeletonRibPointNudgeCanonical: missing pointerTool");
   assert(sceneController, "runSkeletonRibPointNudgeCanonical: missing sceneController");
   assert(event, "runSkeletonRibPointNudgeCanonical: missing event");
-  assert(
-    typeof runPointLikeInputKernel === "function",
-    "runSkeletonRibPointNudgeCanonical: missing runPointLikeInputKernel"
-  );
 
   const { skeletonRibPoint: ribPointSelection } = parseSelection(
     sceneController.selection

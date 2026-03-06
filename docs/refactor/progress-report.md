@@ -1,7 +1,7 @@
 # Cleanup and Optimization Progress Report
 
 Date: 2026-03-06
-Status: Phase 1 completed; Phase 1.5 completed; later phases not started
+Status: Phase 1 completed; Phase 1.5 completed; Phase 2 completed; later phases not started
 Source of truth: `docs/refactor/plan-post-refactor-cleanup-optimization.md`
 
 ## How To Use This File
@@ -133,3 +133,43 @@ Use this exact structure for every step:
 - Comparison: Yes. The reported broken combinations now behave as intended, and the mixed-selection pipeline is aligned with the `native mix` decision from the plan.
 - Manual test results: Passed. The mixed-selection matrix was checked in the editor and everything passes, including the originally broken editable-generated combinations with regular points, regular off-curves, and skeleton on-curves.
 - Undo/redo verification: Passed. Undo and redo also pass for the mixed-selection behavior after the Phase 1.5 changes.
+
+### Phase 2 - Step 2.1: Write down the real current kernel shape and the real consumer categories
+
+- Problem: The old Phase 2 framing treated the kernels as a single clean shared execution model that only needed to be moved out of composer. The actual codebase is messier than that: there are two helpers with different responsibilities, some routes use both, some use only one, and some do not fit the kernel at all.
+- Code analysis: `src-js/views-editor/src/edit-behavior-composer.js` currently defines `runPointLikeInputKernel(...)` and `runPointLikeSessionKernel(...)`. The input kernel normalizes drag or nudge input, while the session kernel wraps `sceneController.editGlyph(...)` and threads `sessionState`, `glyph`, and `sendIncrementalChange` through callbacks. In `src-js/views-editor/src/edit-behavior-adapters.js`, the full pair is used by regular point-like orchestration, skeleton point orchestration, skeleton handle orchestration, editable-generated point orchestration, and editable-generated handle orchestration. Input-only use remains in regular equalize nudge and skeleton rib nudge. Mixed routes and legacy/Tunni routes do not use the kernel pair as their main execution model.
+- Comparison: Yes. The plan now describes the real split: `input normalization` and `session lifecycle` are separate concerns, `input-only` consumers are valid, and Phase 2 needs move-plus-simplification instead of pure relocation.
+- Manual test results: Not run in UI during this documentation step. No runtime code changed.
+- Undo/redo verification: Not run during this documentation step because no runtime code changed.
+
+### Phase 2 - Step 2.2: Move the two kernel helpers into the adapters layer without creating a new file
+
+- Problem: The kernels were still physically defined in `src-js/views-editor/src/edit-behavior-composer.js`, which kept the dependency direction backwards even though the real consumers live on the adapter side.
+- Code analysis: I moved `runPointLikeInputKernel(...)` and `runPointLikeSessionKernel(...)` into `src-js/views-editor/src/edit-behavior-adapters.js` with their behavior intact. `src-js/views-editor/src/edit-behavior-composer.js` now imports those helpers from the adapters layer instead of defining them locally. This step did not simplify the kernel API yet and did not remove composer injection yet; it only changed ownership.
+- Comparison: Yes. The helper bodies are now adapter-owned, but their runtime behavior is intentionally unchanged at this stage. Composer still routes exactly the same way after importing the moved helpers.
+- Manual test results: Not run in UI during this code pass. Automated verification passed via `node --check src-js/views-editor/src/edit-behavior-adapters.js`, `node --check src-js/views-editor/src/edit-behavior-composer.js`, and `npm run -s bundle` with the same existing webpack size warnings.
+- Undo/redo verification: Not run manually in UI during this code pass.
+
+### Phase 2 - Step 2.3: Simplify the input kernel while moving it, but keep the two-helper model
+
+- Problem: Even after the ownership move, `runPointLikeInputKernel(...)` still read as one large mode-switched function that mixed drag-stream processing and one-shot nudge processing into the same readable surface.
+- Code analysis: In `src-js/views-editor/src/edit-behavior-adapters.js`, I split the helper into two private paths: `runPointLikeDragInput(...)` and `runPointLikeNudgeInput(...)`. The public `runPointLikeInputKernel(...)` now acts as a thin dispatcher that validates the shared contract and forwards to the mode-specific helper. The public helper name and call sites were kept unchanged.
+- Comparison: Yes. The input kernel now has a simpler readable structure without changing how drag deltas, behavior-name changes, or nudge delta scaling work.
+- Manual test results: Not run in UI during this code pass. Automated verification passed via `node --check src-js/views-editor/src/edit-behavior-adapters.js`, `node --check src-js/views-editor/src/edit-behavior-composer.js`, and `npm run -s bundle` with the same existing webpack size warnings.
+- Undo/redo verification: Not run manually in UI during this code pass.
+
+### Phase 2 - Step 2.4: Simplify the session kernel and remove composer-to-adapter kernel injection
+
+- Problem: After Steps 2.2 and 2.3, composer still injected kernel helpers into adapter context, and adapter routes still destructured and asserted those helpers as if they were external dependencies. That kept unnecessary ceremony in the call chain even though the kernels were already adapter-owned.
+- Code analysis: In `src-js/views-editor/src/edit-behavior-composer.js`, drag and nudge routing now call adapters without passing `runPointLikeInputKernel(...)` or `runPointLikeSessionKernel(...)` through context. In `src-js/views-editor/src/edit-behavior-adapters.js`, `runPointLikeSessionKernel(...)` no longer accepts an injected input-kernel override and calls the local adapter-owned `runPointLikeInputKernel(...)` directly. Regular point-like, skeleton point/handle, fixed-rib skeleton point, editable-generated point/handle, regular equalize nudge, and skeleton rib nudge routes were updated to stop destructuring or asserting kernel helpers from context. Input-only consumers still call the local input kernel directly, while full-session consumers still use the session kernel.
+- Comparison: Yes. Kernel ownership is now reflected in the call graph instead of only in file placement. Composer routes and calls adapters; adapters own the kernel utilities and use them locally.
+- Manual test results: Not run in UI during this code pass. Automated verification passed via `node --check src-js/views-editor/src/edit-behavior-adapters.js`, `node --check src-js/views-editor/src/edit-behavior-composer.js`, `rg -n "runPointLikeInputKernel|runPointLikeSessionKernel" src-js/views-editor/src`, and `npm run -s bundle` with the same existing webpack size warnings.
+- Undo/redo verification: Not run manually in UI during this code pass.
+
+### Phase 2 - Step 2.5: Finalize the kernel boundary and make the remaining exceptions explicit
+
+- Problem: Even after the ownership and simplification work, the code could still be misleading if the boundary was only implicit. The final step needed to make it obvious that composer is routing-only, that the kernels are adapter-owned shared infrastructure, and that `input-only` consumers are allowed exceptions instead of unfinished refactor leftovers.
+- Code analysis: I added short ownership notes in `src-js/views-editor/src/edit-behavior-adapters.js` and `src-js/views-editor/src/edit-behavior-composer.js` so the file roles are explicit where the kernels and routing entrypoints are defined. I also ran the Phase 2 verification sweep from the plan: the kernel exports exist only in the adapters layer, composer no longer defines or injects them, adapters no longer destructure kernel helpers from `context`, and the two intentional `input-only` consumers remain explicit (`runRegularEqualizeNudgeCanonical(...)` and `runSkeletonRibPointNudgeCanonical(...)`).
+- Comparison: Yes. Phase 2 now ends with a readable boundary, not just moved code. Composer is routing/orchestration-only again, the adapters layer owns the shared point-like kernels, and the code no longer pretends every route uses the same execution model.
+- Manual test results: Not rerun manually during this boundary/documentation pass. Automated verification passed via `node --check src-js/views-editor/src/edit-behavior-adapters.js`, `node --check src-js/views-editor/src/edit-behavior-composer.js`, `rg -n "export async function runPointLikeInputKernel|export async function runPointLikeSessionKernel" src-js/views-editor/src`, `rg -n "runPointLikeInputKernel,|runPointLikeSessionKernel," src-js/views-editor/src/edit-behavior-composer.js`, `rg -n "const \\{[^}]*runPointLikeInputKernel|const \\{[^}]*runPointLikeSessionKernel" src-js/views-editor/src/edit-behavior-adapters.js`, and `npm run -s bundle` with the same existing webpack size warnings.
+- Undo/redo verification: Not rerun manually during this boundary/documentation pass.
