@@ -129,6 +129,57 @@ export function calculateSkeletonTrueTunniPoint(segment) {
   return intersect(startPoint, cp1, endPoint, cp2);
 }
 
+export function calculateHandleTensionsForSegment(segment) {
+  if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
+    return null;
+  }
+
+  const { startPoint, endPoint, controlPoints } = segment;
+  const [cp1, cp2] = controlPoints;
+  const tensionPoint =
+    calculateSkeletonTrueTunniPoint(segment) || calculateSkeletonTunniPoint(segment);
+  if (!tensionPoint) {
+    return null;
+  }
+
+  const distStart = distance(startPoint, tensionPoint);
+  const distEnd = distance(endPoint, tensionPoint);
+  const lenStart = distance(startPoint, cp1);
+  const lenEnd = distance(endPoint, cp2);
+  const tensionStart = distStart > 1e-6 ? lenStart / distStart : null;
+  const tensionEnd = distEnd > 1e-6 ? lenEnd / distEnd : null;
+  return { tensionStart, tensionEnd, lenStart, lenEnd };
+}
+
+export function computeHandleLengthsFromTensions(
+  startPoint,
+  startDir,
+  endPoint,
+  endDir,
+  tensionStart,
+  tensionEnd
+) {
+  const line1End = addVectors(startPoint, normalizeVector(startDir));
+  const line2End = addVectors(endPoint, normalizeVector(endDir));
+  const intersection = intersect(startPoint, line1End, endPoint, line2End);
+
+  let distStartToTunni;
+  let distEndToTunni;
+  if (intersection && Number.isFinite(intersection.t1) && Number.isFinite(intersection.t2)) {
+    distStartToTunni = Math.abs(intersection.t1);
+    distEndToTunni = Math.abs(intersection.t2);
+  } else {
+    const fallbackDistance = distance(startPoint, endPoint) / 2;
+    distStartToTunni = fallbackDistance;
+    distEndToTunni = fallbackDistance;
+  }
+
+  return {
+    startLen: Number.isFinite(tensionStart) ? tensionStart * distStartToTunni : null,
+    endLen: Number.isFinite(tensionEnd) ? tensionEnd * distEndToTunni : null,
+  };
+}
+
 /**
  * Calculate new control point positions when dragging the Tunni Point (midpoint).
  * The control points move along their original directions to maintain curve shape.

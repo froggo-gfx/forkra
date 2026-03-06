@@ -1,7 +1,7 @@
 # Single Source of Truth: Post-Refactor Cleanup and Optimization
 
 Date: 2026-03-06
-Status: Draft
+Status: Cleanup chapter complete; Phase 6 optional
 
 ## Intro (Context for New Sessions)
 
@@ -119,7 +119,7 @@ The broad architecture is in place, but the micro-architecture still has 7 activ
    - Similar setup/persist flows appear across object kinds.
    - Some pure skeleton math may belong in core/shared code instead of editor files.
 
-7. The registry representation is too indirect.
+7. Optional follow-up: the registry representation is still too indirect.
    - Routing is encoded through row ids and short codes instead of readable preset names.
    - The registry stays worth keeping, but the current representation is too expensive for humans.
 
@@ -133,7 +133,7 @@ These are the kinds of changes this SoT allows:
 - rename modules/functions/maps so names match reality
 - extract duplicated orchestration helpers
 - extract pure math into core/shared code when appropriate
-- rework registry representation while keeping routing separate from behavior and adapters
+- optionally rework registry representation while keeping routing separate from behavior and adapters
 - fix mixed point-like selection classification/execution gaps without redesigning the pipeline
 - add better verification/reporting for small cleanup steps
 
@@ -270,9 +270,10 @@ This cleanup/optimization stage is complete only when all of these are true:
 - duplicated session-entry scaffolding is reduced
 - duplicated skeleton-backed layer lifecycle is reduced
 - pure math is moved to existing better homes only where appropriate, and only where appropriate
-- registry routing is readable without row-id/code indirection
 - no broad behavior regressions are introduced
 - each fine-grained step has manual test coverage recorded in `docs/refactor/progress-report.md`
+
+Registry readability remains a valid optional follow-up, but it is no longer required to close this cleanup chapter.
 
 ## 9. Working Rule For Future Sessions
 

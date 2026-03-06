@@ -34,7 +34,8 @@ import {
 } from "./edit-behavior.js";
 import {
   buildSegmentsFromSkeletonPoints,
-  calculateSkeletonTrueTunniPoint,
+  calculateHandleTensionsForSegment,
+  computeHandleLengthsFromTensions,
 } from "./skeleton-tunni-calculations.js";
 
 // Adapter/composer contract:
@@ -197,6 +198,16 @@ const FIXED_RIB_SCALE_CONTROL_POINTS = true;
 
 function runGlyphEditSession(sceneController, sessionFn) {
   return sceneController.editGlyph(sessionFn);
+}
+
+function getPositionedGlyphPointForEvent(sceneController, positionedGlyph) {
+  return (nextEvent) => {
+    const localPoint = sceneController.localPoint(nextEvent);
+    return {
+      x: localPoint.x - positionedGlyph.x,
+      y: localPoint.y - positionedGlyph.y,
+    };
+  };
 }
 
 async function withPointerCursor(pointerTool, activeCursor, callback) {
@@ -842,26 +853,15 @@ function applySkeletonBackedMixedDelta({
       }
     }
 
-    const pathChange = recordChanges(layer.glyph, (sg) => {
-      regenerateSkeletonContours(
-        sg,
-        working,
-        preferInPlace ? { preferInPlace: true } : undefined
-      );
+    const persistenceChanges = collectSkeletonLayerPersistenceChanges({
+      layer,
+      working,
+      editLayerName,
+      regenerateOptions: preferInPlace ? { preferInPlace: true } : undefined,
+      cloneOnPersist: true,
     });
-    const customDataChange = recordChanges(layer, (layerRecord) => {
-      setSkeletonData(layerRecord, cloneSkeletonData(working));
-    });
-    if (pathChange.hasChange) {
-      const prefixed = pathChange.prefixed(["layers", editLayerName, "glyph"]);
-      allChanges.push(prefixed);
-      rollbackChanges.push(prefixed.rollbackChange);
-    }
-    if (customDataChange.hasChange) {
-      const prefixed = customDataChange.prefixed(["layers", editLayerName]);
-      allChanges.push(prefixed);
-      rollbackChanges.push(prefixed.rollbackChange);
-    }
+    allChanges.push(...persistenceChanges);
+    rollbackChanges.push(...persistenceChanges.map((change) => change.rollbackChange));
   }
 
   editState.latestRollbackChanges = rollbackChanges;
@@ -1123,63 +1123,6 @@ function normalizeVectorSafe(vec, epsilon = 1e-6) {
   return { x: vec.x / len, y: vec.y / len };
 }
 
-function rotateVector(vec, cos, sin) {
-  return {
-    x: vec.x * cos - vec.y * sin,
-    y: vec.x * sin + vec.y * cos,
-  };
-}
-
-function calculateHandleTensionsForSegment(segment) {
-  if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
-    return null;
-  }
-  const [cp1, cp2] = segment.controlPoints;
-  const start = segment.startPoint;
-  const end = segment.endPoint;
-  const trueTunni = calculateSkeletonTrueTunniPoint(segment);
-  const tensionPoint = trueTunni || {
-    x: (cp1.x + cp2.x) / 2,
-    y: (cp1.y + cp2.y) / 2,
-  };
-  const distStart = Math.hypot(tensionPoint.x - start.x, tensionPoint.y - start.y);
-  const distEnd = Math.hypot(tensionPoint.x - end.x, tensionPoint.y - end.y);
-  const lenStart = Math.hypot(cp1.x - start.x, cp1.y - start.y);
-  const lenEnd = Math.hypot(cp2.x - end.x, cp2.y - end.y);
-  const tensionStart = distStart > 1e-6 ? lenStart / distStart : null;
-  const tensionEnd = distEnd > 1e-6 ? lenEnd / distEnd : null;
-  return { tensionStart, tensionEnd, lenStart, lenEnd };
-}
-
-function computeHandleLengthsFromTensions(
-  startPoint,
-  startDir,
-  endPoint,
-  endDir,
-  tensionStart,
-  tensionEnd
-) {
-  const line1End = { x: startPoint.x + startDir.x, y: startPoint.y + startDir.y };
-  const line2End = { x: endPoint.x + endDir.x, y: endPoint.y + endDir.y };
-  const intersection = vector.intersect(startPoint, line1End, endPoint, line2End);
-  let distStartToTunni = null;
-  let distEndToTunni = null;
-  if (intersection && Number.isFinite(intersection.t1) && Number.isFinite(intersection.t2)) {
-    distStartToTunni = Math.abs(intersection.t1);
-    distEndToTunni = Math.abs(intersection.t2);
-  } else {
-    const distTotal = vector.distance(startPoint, endPoint);
-    distStartToTunni = distTotal / 2;
-    distEndToTunni = distTotal / 2;
-  }
-
-  const startLen = Number.isFinite(tensionStart)
-    ? tensionStart * distStartToTunni
-    : null;
-  const endLen = Number.isFinite(tensionEnd) ? tensionEnd * distEndToTunni : null;
-  return { startLen, endLen };
-}
-
 function applyFixedRibDragToSkeletonData(
   originalSkeletonData,
   workingSkeletonData,
@@ -1369,7 +1312,7 @@ function applyFixedRibDragToSkeletonData(
               handleAnchorByIndex.set(cpIdx, anchorIdx);
             }
             const rel = { x: origCp.x - anchorPoint.x, y: origCp.y - anchorPoint.y };
-            const rotated = useTransform ? rotateVector(rel, cos, sin) : rel;
+            const rotated = useTransform ? vector.rotateVector(rel, cos, sin) : rel;
             const dir = normalizeVectorSafe(rotated);
             if (dir) {
               baseHandleDirections.set(cpIdx, dir);
@@ -1729,6 +1672,11 @@ function makeSkeletonLayerPersistenceChanges({
   const prefixedCustomData = customDataChange.prefixed(["layers", editLayerName]);
 
   return { prefixedPath, prefixedCustomData };
+}
+
+function collectSkeletonLayerPersistenceChanges(options) {
+  const { prefixedPath, prefixedCustomData } = makeSkeletonLayerPersistenceChanges(options);
+  return [prefixedPath, prefixedCustomData].filter((change) => change.hasChange);
 }
 
 async function runRegularPointLikeOrchestration({
@@ -2242,13 +2190,7 @@ async function runSkeletonPointLikeOrchestration({
       event,
       getBehaviorNameForEvent: isDrag ? getBehaviorNameForEvent : undefined,
       getPointForEvent: isDrag
-        ? (nextEvent) => {
-            const localPoint = sceneController.localPoint(nextEvent);
-            return {
-              x: localPoint.x - positionedGlyph.x,
-              y: localPoint.y - positionedGlyph.y,
-            };
-          }
+        ? getPositionedGlyphPointForEvent(sceneController, positionedGlyph)
         : undefined,
       onSessionStart: ({ glyph }) => {
         const layersData = createLayersData(glyph);
@@ -2291,14 +2233,15 @@ async function runSkeletonPointLikeOrchestration({
           if (!changed) {
             continue;
           }
-          const { prefixedPath, prefixedCustomData } = makeSkeletonLayerPersistenceChanges({
-            layer: data.layer,
-            working: data.working,
-            editLayerName,
-            regenerateOptions,
-            cloneOnPersist,
-          });
-          allChanges.push(prefixedPath, prefixedCustomData);
+          allChanges.push(
+            ...collectSkeletonLayerPersistenceChanges({
+              layer: data.layer,
+              working: data.working,
+              editLayerName,
+              regenerateOptions,
+              cloneOnPersist,
+            })
+          );
         }
         if (!allChanges.length) {
           return;
@@ -2583,14 +2526,10 @@ async function runFixedRibSkeletonPointLikeCanonical({
     getBehaviorNameForEvent: mode === "drag" ? () => "default" : undefined,
     getPointForEvent:
       mode === "drag"
-        ? (nextEvent) => {
-            const positionedGlyph = pointerTool.sceneModel.getSelectedPositionedGlyph();
-            const localPoint = sceneController.localPoint(nextEvent);
-            return {
-              x: localPoint.x - positionedGlyph.x,
-              y: localPoint.y - positionedGlyph.y,
-            };
-          }
+        ? getPositionedGlyphPointForEvent(
+            sceneController,
+            pointerTool.sceneModel.getSelectedPositionedGlyph()
+          )
         : undefined,
     onSessionStart: ({ glyph }) => {
       const layersData = createSkeletonLayersData({
@@ -2627,18 +2566,15 @@ async function runFixedRibSkeletonPointLikeCanonical({
           continue;
         }
 
-        const pathChange = recordChanges(data.layer.glyph, (sg) => {
-          regenerateSkeletonContours(sg, data.working, { preferInPlace: true });
-        });
-        const customDataChange = recordChanges(data.layer, (layer) => {
-          setSkeletonData(layer, cloneSkeletonData(data.working));
-        });
-        if (pathChange.hasChange) {
-          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-        }
-        if (customDataChange.hasChange) {
-          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-        }
+        allChanges.push(
+          ...collectSkeletonLayerPersistenceChanges({
+            layer: data.layer,
+            working: data.working,
+            editLayerName,
+            regenerateOptions: { preferInPlace: true },
+            cloneOnPersist: true,
+          })
+        );
       }
 
       if (!allChanges.length) {
@@ -3054,18 +2990,14 @@ async function runSkeletonRibPointDragCanonical(context) {
             }
           }
 
-          const pathChange = recordChanges(layer.glyph, (sg) => {
-            regenerateSkeletonContours(sg, working);
-          });
-          const customDataChange = recordChanges(layer, (layerRecord) => {
-            setSkeletonData(layerRecord, cloneSkeletonData(working));
-          });
-          if (pathChange.hasChange) {
-            allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-          }
-          if (customDataChange.hasChange) {
-            allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-          }
+          allChanges.push(
+            ...collectSkeletonLayerPersistenceChanges({
+              layer,
+              working,
+              editLayerName,
+              cloneOnPersist: true,
+            })
+          );
         }
 
         const combined = new ChangeCollector().concat(...allChanges);
@@ -3144,13 +3076,7 @@ async function runEditableGeneratedPointLikeCanonical(context, mode) {
       event,
       getBehaviorNameForEvent: isDrag ? () => "editable-generated-point" : undefined,
       getPointForEvent: isDrag
-        ? (nextEvent) => {
-            const localPoint = sceneController.localPoint(nextEvent);
-            return {
-              x: localPoint.x - positionedGlyph.x,
-              y: localPoint.y - positionedGlyph.y,
-            };
-          }
+        ? getPositionedGlyphPointForEvent(sceneController, positionedGlyph)
         : undefined,
       onSessionStart: ({ glyph }) => {
         const layersData = createEditableGeneratedLayersData(
@@ -3258,18 +3184,14 @@ async function runEditableGeneratedPointLikeCanonical(context, mode) {
             }
           }
 
-          const pathChange = recordChanges(layer.glyph, (sg) => {
-            regenerateSkeletonContours(sg, working);
-          });
-          const customDataChange = recordChanges(layer, (l) => {
-            setSkeletonData(l, cloneSkeletonData(working));
-          });
-          if (pathChange.hasChange) {
-            allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-          }
-          if (customDataChange.hasChange) {
-            allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-          }
+          allChanges.push(
+            ...collectSkeletonLayerPersistenceChanges({
+              layer,
+              working,
+              editLayerName,
+              cloneOnPersist: true,
+            })
+          );
         }
 
         if (!allChanges.length) {
@@ -3342,13 +3264,7 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
       event,
       getBehaviorNameForEvent: isDrag ? () => "editable-generated-handle" : undefined,
       getPointForEvent: isDrag
-        ? (nextEvent) => {
-            const localPoint = sceneController.localPoint(nextEvent);
-            return {
-              x: localPoint.x - positionedGlyph.x,
-              y: localPoint.y - positionedGlyph.y,
-            };
-          }
+        ? getPositionedGlyphPointForEvent(sceneController, positionedGlyph)
         : undefined,
       onSessionStart: ({ glyph }) => {
         const layersData = createEditableGeneratedLayersData(
@@ -3506,18 +3422,14 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
             }
           }
 
-          const pathChange = recordChanges(layer.glyph, (sg) => {
-            regenerateSkeletonContours(sg, working);
-          });
-          const customDataChange = recordChanges(layer, (l) => {
-            setSkeletonData(l, cloneSkeletonData(working));
-          });
-          if (pathChange.hasChange) {
-            allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-          }
-          if (customDataChange.hasChange) {
-            allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-          }
+          allChanges.push(
+            ...collectSkeletonLayerPersistenceChanges({
+              layer,
+              working,
+              editLayerName,
+              cloneOnPersist: true,
+            })
+          );
         }
 
         if (!allChanges.length) {
@@ -3774,18 +3686,13 @@ async function runSkeletonRibPointNudgeCanonical(context) {
             );
           }
 
-          const pathChange = recordChanges(layer.glyph, (sg) => {
-            regenerateSkeletonContours(sg, workingSkeletonData);
-          });
-          const customDataChange = recordChanges(layer, (l) => {
-            setSkeletonData(l, workingSkeletonData);
-          });
-          if (pathChange.hasChange) {
-            allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-          }
-          if (customDataChange.hasChange) {
-            allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-          }
+          allChanges.push(
+            ...collectSkeletonLayerPersistenceChanges({
+              layer,
+              working: workingSkeletonData,
+              editLayerName,
+            })
+          );
         }
 
         if (!allChanges.length) {

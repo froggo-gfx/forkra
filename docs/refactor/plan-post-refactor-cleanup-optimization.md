@@ -1,7 +1,7 @@
 ﻿# Post-Refactor Cleanup and Optimization Plan
 
 Date: 2026-03-06
-Status: Plan populated and ready for execution
+Status: Phases 0-5 completed; Phase 6 optional and not started
 Source of truth: `docs/refactor/sot-unified-behavior.md`
 
 ## Summary
@@ -17,10 +17,10 @@ The work is split into these phases:
 0. Code beautify and naming normalization sweep.
 1. Make the adapter contract real and useful.
 2. Move shared drag/nudge session kernels out of composer.
-3. Split the adapters file into smaller modules with clear ownership.
+3. Clean up adapter ownership and local boilerplate inside the existing adapters file.
 4. Clean up canonical vs legacy naming and routing boundaries.
-5. Remove duplicated point-like orchestration and move pure math to core/shared code where appropriate.
-6. Rework the registry representation so routing is easier for humans to understand and maintain.
+5. Reduce duplicated session shells, deduplicate skeleton-backed layer workflows, and move only truly pure math.
+6. Optional: rework the registry representation so routing is easier for humans to understand and maintain.
 
 ## Reporting Rule For This Plan
 
@@ -2882,9 +2882,11 @@ Expected result:
 - pure math placement is easier to justify and easier to test
 
 ---
-## Phase 6: Rework The Registry Representation
+## Phase 6: Optional Registry Representation Rework
 
 ### Broad Problem
+
+This phase is optional.
 
 The registry exists for a real reason, but the current representation is too indirect and too hard to read.
 

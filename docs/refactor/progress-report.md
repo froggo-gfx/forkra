@@ -1,7 +1,7 @@
 # Cleanup and Optimization Progress Report
 
 Date: 2026-03-06
-Status: Phase 1 completed; Phase 1.5 completed; Phase 2 completed; Phase 3 completed; Phase 4 completed; later phases not started
+Status: Phase 1 completed; Phase 1.5 completed; Phase 2 completed; Phase 3 completed; Phase 4 completed; Phase 5 completed; Phase 6 optional and not started
 Source of truth: `docs/refactor/plan-post-refactor-cleanup-optimization.md`
 
 ## How To Use This File
@@ -253,3 +253,43 @@ Use this exact structure for every step:
 - Comparison: Yes. The public route surface is materially easier to trust now because the code stops calling the same route family canonical in one place and legacy in another.
 - Manual test results: Not run in UI during this code pass. Automated verification passed via `node --check src-js/views-editor/src/edit-behavior-adapters.js`, `node --check src-js/views-editor/src/edit-behavior-composer.js`, `node --check src-js/views-editor/src/edit-behavior-registry.js`, `rg -n "legacy.*MixedSelection|MixedSelection.*legacy|legacyAliasFor|legacyDragAdapters|legacyNudgeAdapters" src-js/views-editor/src`, and `npm run -s bundle` with the same existing webpack size warnings.
 - Undo/redo verification: Not run manually in UI during this code pass.
+
+### Phase 5 - Step 5.1: Write down the real duplication buckets before extracting anything
+
+- Problem: The original Phase 5 wording was still too vague and risked pushing the code toward one fake universal helper. The live code has three different duplication buckets, not one.
+- Code analysis: The inventory pass split the problem into: `session-entry scaffolding`, `skeleton-backed layer lifecycle`, and `pure math placement`. In `src-js/views-editor/src/edit-behavior-adapters.js`, the broad `runPointLikeSessionKernel(...)` shell repeats across skeleton-backed routes, but the regular route has materially different rollback/connect behavior and should not be forced into the same abstraction. The biggest real duplication lives in the repeated skeleton-backed regenerate/persist loops across skeleton, fixed-rib, generated, rib, and mixed routes.
+- Comparison: Yes. Phase 5 now targets the real cleanup surface instead of pretending all point-like routes want one giant helper.
+- Manual test results: Not run in UI during this inventory/scope correction step. No runtime behavior changed yet.
+- Undo/redo verification: Not run during this inventory/scope correction step because no runtime behavior changed yet.
+
+### Phase 5 - Step 5.2: Extract only the shared session-entry scaffolding that is actually common
+
+- Problem: Several skeleton-backed routes repeated the same glyph-relative `getPointForEvent(...)` session-shell closure even though they already shared the same drag-input model. That duplication was small, but real, and it cluttered the route shells without adding clarity.
+- Code analysis: In `src-js/views-editor/src/edit-behavior-adapters.js`, I added `getPositionedGlyphPointForEvent(...)` and switched the skeleton point orchestration, fixed-rib skeleton route, editable-generated point route, and editable-generated handle route to use it instead of repeating the same glyph-relative coordinate closure inline. I did not try to force the regular point-like route into the same shell because its rollback/connect semantics are still meaningfully different.
+- Comparison: Yes. Session-entry duplication went down, but the cleanup stayed narrow and did not invent a universal point-like wrapper.
+- Manual test results: Not run in UI during this code pass. Automated verification was run after the full Phase 5 patch set.
+- Undo/redo verification: Not run manually in UI during this code pass.
+
+### Phase 5 - Step 5.3: Extract repeated skeleton-backed layer lifecycle patterns without moving them to core
+
+- Problem: Multiple skeleton-backed routes still reimplemented the same `recordChanges -> regenerateSkeletonContours -> setSkeletonData` lifecycle even though the file already had a shared persistence helper. That duplication made clone/persist policy harder to trust.
+- Code analysis: In `src-js/views-editor/src/edit-behavior-adapters.js`, I added `collectSkeletonLayerPersistenceChanges(...)` on top of the existing `makeSkeletonLayerPersistenceChanges(...)` helper and then switched the live skeleton-backed routes to use it. The helper now covers the mixed skeleton-backed delta path, skeleton point orchestration, fixed-rib skeleton drag/nudge, skeleton rib drag, editable-generated point drag/nudge, editable-generated handle drag/nudge, and skeleton rib nudge. This keeps the lifecycle editor-side while removing duplicated regenerate/persist loops from the route bodies.
+- Comparison: Yes. The biggest Phase 5 duplication bucket is now centralized in the adapters layer instead of being copied route-by-route.
+- Manual test results: Not run in UI during this code pass. Automated verification was run after the full Phase 5 patch set.
+- Undo/redo verification: Not run manually in UI during this code pass.
+
+### Phase 5 - Step 5.4: Move only the pure math/helpers that clearly belong in better existing homes
+
+- Problem: The Tunni/tension geometry helpers and rotation helper were duplicated across active editor files, but not all mathematically named helpers were safe to move. The phase needed a narrow move, not a broad math dump into core.
+- Code analysis: I moved `calculateHandleTensionsForSegment(...)` and `computeHandleLengthsFromTensions(...)` out of both `src-js/views-editor/src/edit-behavior-adapters.js` and `src-js/views-editor/src/edit-tools-pointer.js` into the existing editor-side Tunni geometry home, `src-js/views-editor/src/skeleton-tunni-calculations.js`. I also moved `rotateVector(...)` into the existing core vector home, `src-js/fontra-core/src/vector.js`, and updated both adapters and pointer to use `vector.rotateVector(...)`. I intentionally left `normalizeVectorSafe(...)` and `applyFixedRibDragToSkeletonData(...)` in place because their contracts remain route-local/editor-owned.
+- Comparison: Yes. The moved helpers now live in existing better homes, and the phase did not invent any new shared math file.
+- Manual test results: Not run in UI during this code pass. Automated verification was run after the full Phase 5 patch set.
+- Undo/redo verification: Not run manually in UI during this code pass.
+
+### Phase 5 - Step 5.5: Verify that duplication went down and that math moved only where it belongs
+
+- Problem: After the Phase 5 cleanup, the remaining risk was either leaving live duplication behind or moving too much route-specific logic out of the editor layer.
+- Code analysis: I ran the Phase 5 verification sweep across `src-js/views-editor/src/edit-behavior-adapters.js`, `src-js/views-editor/src/edit-tools-pointer.js`, `src-js/views-editor/src/skeleton-tunni-calculations.js`, and `src-js/fontra-core/src/vector.js`. The duplicated live `rotateVector(...)`, `calculateHandleTensionsForSegment(...)`, and `computeHandleLengthsFromTensions(...)` definitions are gone from adapters and pointer. The skeleton-backed routes now share `collectSkeletonLayerPersistenceChanges(...)` instead of open-coding the regenerate/persist loop. `applyFixedRibDragToSkeletonData(...)` and `normalizeVectorSafe(...)` remain editor-local, which keeps edit intent and contract-specific behavior out of core.
+- Comparison: Yes. Duplication is down in the highest-value buckets, and the only math move was into existing homes that already matched the helper domain.
+- Manual test results: Passed. Manual testing confirmed that regular, skeleton, fixed-rib, rib, editable-generated, and Tunni-related routes still behave correctly after the shared persistence cleanup and math/helper moves.
+- Undo/redo verification: Passed. Undo and redo also behave correctly for the Phase 5 routes after the cleanup.

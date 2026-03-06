@@ -59,6 +59,8 @@ import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import {
   skeletonTunniHitTest,
   buildSegmentsFromSkeletonPoints,
+  calculateHandleTensionsForSegment,
+  computeHandleLengthsFromTensions,
   calculateSkeletonControlPointsFromTunniDelta,
   calculateSkeletonOnCurveFromTunni,
   calculateSkeletonEqualizedControlPoints,
@@ -264,65 +266,6 @@ function normalizeVectorSafe(vec, epsilon = 1e-6) {
   return { x: vec.x / len, y: vec.y / len };
 }
 
-function rotateVector(vec, cos, sin) {
-  return {
-    x: vec.x * cos - vec.y * sin,
-    y: vec.x * sin + vec.y * cos,
-  };
-}
-
-function calculateHandleTensionsForSegment(segment) {
-  if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
-    return null;
-  }
-  const [cp1, cp2] = segment.controlPoints;
-  const start = segment.startPoint;
-  const end = segment.endPoint;
-  const trueTunni = calculateSkeletonTrueTunniPoint(segment);
-  const tensionPoint = trueTunni || {
-    x: (cp1.x + cp2.x) / 2,
-    y: (cp1.y + cp2.y) / 2,
-  };
-  const distStart = Math.hypot(tensionPoint.x - start.x, tensionPoint.y - start.y);
-  const distEnd = Math.hypot(tensionPoint.x - end.x, tensionPoint.y - end.y);
-  const lenStart = Math.hypot(cp1.x - start.x, cp1.y - start.y);
-  const lenEnd = Math.hypot(cp2.x - end.x, cp2.y - end.y);
-  const tensionStart = distStart > 1e-6 ? lenStart / distStart : null;
-  const tensionEnd = distEnd > 1e-6 ? lenEnd / distEnd : null;
-  return { tensionStart, tensionEnd, lenStart, lenEnd };
-}
-
-function computeHandleLengthsFromTensions(
-  startPoint,
-  startDir,
-  endPoint,
-  endDir,
-  tensionStart,
-  tensionEnd
-) {
-  const line1End = { x: startPoint.x + startDir.x, y: startPoint.y + startDir.y };
-  const line2End = { x: endPoint.x + endDir.x, y: endPoint.y + endDir.y };
-  const intersection = vector.intersect(startPoint, line1End, endPoint, line2End);
-  let distStartToTunni = null;
-  let distEndToTunni = null;
-  if (intersection && Number.isFinite(intersection.t1) && Number.isFinite(intersection.t2)) {
-    distStartToTunni = Math.abs(intersection.t1);
-    distEndToTunni = Math.abs(intersection.t2);
-  } else {
-    const distTotal = vector.distance(startPoint, endPoint);
-    distStartToTunni = distTotal / 2;
-    distEndToTunni = distTotal / 2;
-  }
-
-  const startLen = Number.isFinite(tensionStart)
-    ? tensionStart * distStartToTunni
-    : null;
-  const endLen = Number.isFinite(tensionEnd)
-    ? tensionEnd * distEndToTunni
-    : null;
-  return { startLen, endLen };
-}
-
 function applyFixedRibDragToSkeletonData(
   originalSkeletonData,
   workingSkeletonData,
@@ -511,7 +454,7 @@ function applyFixedRibDragToSkeletonData(
               x: origCp.x - anchorPoint.x,
               y: origCp.y - anchorPoint.y,
             };
-            const rotated = useTransform ? rotateVector(rel, cos, sin) : rel;
+            const rotated = useTransform ? vector.rotateVector(rel, cos, sin) : rel;
             const dir = normalizeVectorSafe(rotated);
             if (dir) {
               baseHandleDirections.set(cpIdx, dir);
