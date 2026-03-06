@@ -1,128 +1,242 @@
-# Single Source of Truth: Unified Behavior Pipeline
+# Single Source of Truth: Post-Refactor Cleanup and Optimization
 
-Date: 2026-03-04
-Status: Draft (authoritative once approved)
+Date: 2026-03-06
+Status: Draft
 
 ## Intro (Context for New Sessions)
-We previously attempted a multi‑phase refactor and ended up with scope drift: individual steps did not actually
-advance the unified‑behavior goal. This SoT exists to prevent that. All work now must align to the unified behavior
-goal, and every step must be justified against this document and the plan.
 
-What we are doing now:
-- Stop treating “domain separation” as the goal. Unified behavior is the goal; domain separation is the method.
-- Use the plan to define granular steps with manual UI tests and explicit verification.
-- Require progress‑report style reasoning per step (problem → code analysis → comparison → tests).
+The broad unified-behavior refactor is done.
 
-Files to read at the start of any session:
-- `docs/refactor/sot-unified-behavior.md` (this file, authoritative intent and architecture)
-- `docs/refactor/plan-domain-separation.md` (granular steps and testing requirements)
-- `docs/refactor/action-object-matrix.md` (parity contract and manual test matrix)
-- `docs/refactor/object-kind-inventory.md` (object kinds and current logic locations)
-- `docs/refactor/target-architecture.md` (target file responsibilities and flows)
+That work is no longer the active problem.
 
-## 1. Intent (Primary Goal)
-Unify all editable object kinds under a single behavior set so the same behavior rules apply everywhere.
+We already achieved the big architectural goal:
 
-Domain separation is the method, not the goal. We separate responsibilities only to make unified behavior
-possible, testable, and maintainable.
+- one behavior pipeline for in-scope point-like drag/nudge edits
+- pointer is transport-only for in-scope drag/nudge
+- composer is orchestration-only for routing
+- adapters own translation and persistence
 
-### What "Unified Behavior" means
-- One behavior engine for all point-like edits.
-- No parallel behavior systems by object kind.
-- Object-specific differences live in adapters as translation and persistence rules.
+That broad work is recorded in:
 
-### Why
-- Consistency across regular, skeleton, rib, and editable-generated edits.
-- Reduced duplication and drift.
-- Easier parity with mainline and with future features.
+- `docs/refactor/progress-report-broad.md`
 
-### Non-negotiables
-- One behavior engine. Any point-like movement uses it.
-- Pointer is transport only for drag and nudge.
-- Composer is orchestration only.
-- Adapters own translation and persistence.
-- Registry is the single map for capabilities and routing.
+What we are doing now is different.
 
-## 2. Intended Pipeline (Runtime Flow)
-1. Pointer hit-tests and produces a selection.
-2. Pointer determines the object kind and routes to composer.
-3. Composer resolves modifiers and routes through the registry routing map.
-4. Behavior engine computes point changes from delta.
-5. Adapter translates behavior output into canonical data changes.
-6. Adapter persists changes and returns { forward, rollback }.
-7. Pointer commits returned changes (undo/redo).
+We are not trying to re-decide the architecture.
+We are cleaning it up so the code is easier to trust, easier to change, and easier to optimize without breaking behavior.
 
-## 3. Intended Architecture (Responsibilities)
+This SoT exists to prevent a new kind of scope drift:
 
-### Behavior Engine (math only)
-File: `src-js/views-editor/src/edit-behavior.js`
-- Computes point changes from delta.
-- No knowledge of storage, layers, skeleton data, or regeneration.
-- Single engine for regular points, skeleton on-curve and off-curve points, ribs, and editable-generated points.
+- do not reopen the finished broad refactor unless a real bug forces it
+- do not confuse cleanup with behavior redesign
+- do not optimize by making boundaries less clear
 
-### Registry (declarative routing)
-File: `src-js/views-editor/src/edit-behavior-registry.js`
-- Object catalog and capabilities.
-- Modifier-to-row mapping.
-- Drag/nudge routing maps.
-- No persistence or behavior math.
+## Files To Read At The Start Of Any Session
 
-### Composer (orchestration only)
-File: `src-js/views-editor/src/edit-behavior-composer.js`
-- Orchestrates drag/nudge and calls adapters.
-- Does not apply or record persistence directly.
-- Does not branch on object kind outside the routing map.
+- `docs/refactor/sot-unified-behavior.md`
+- `docs/refactor/plan-post-refactor-cleanup-optimization.md`
+- `docs/refactor/progress-report-broad.md`
+- `docs/refactor/progress-report.md`
+- `docs/refactor/target-architecture.md`
 
-### Adapters (translation + persistence)
-File: `src-js/views-editor/src/pointer-objects.js`
-- Translate {x,y} behavior output into object-specific canonical changes.
-- Persist canonical data (including skeleton regeneration when required).
-- Return { forward, rollback } change objects.
-- Must not call pointer drag/nudge handlers.
+Optional support docs when needed:
 
-### Pointer (transport only for drag/nudge)
-File: `src-js/views-editor/src/edit-tools-pointer.js`
-- Hit-test, selection, cursor/hover, routing.
-- No behavior math or persistence for drag/nudge.
-- For drag/nudge, only calls composer routing entry points.
+- `docs/refactor/action-object-matrix.md`
+- `docs/refactor/object-kind-inventory.md`
 
-## 4. Scope
-In scope for unified behavior:
-- Drag and nudge for regular points, anchors, guidelines.
-- Drag and nudge for skeleton on-curve and off-curve points.
-- Drag and nudge for rib points.
-- Drag and nudge for editable generated points and handles.
+## 1. Current Intent (Primary Goal)
 
-Out of scope (explicitly deferred):
-- Tunni-specific drag workflows.
-- Non-drag actions like double-click, rect select, transform panel, component tools.
+The primary goal is now:
 
-## 5. Plan (Broad Phases)
+Improve the code quality of the finished unified-behavior pipeline without changing its intended behavior.
 
-### Phase A: Baseline + Contracts
-- Action/object matrix and inventory are the parity contract.
-- Registry and routing maps are defined.
-- Adapter contract is explicit.
+In plain language:
 
-### Phase B: Uniform Routing
-- Drag and nudge routed through composer using registry maps.
-- No behavior changes.
+- keep the broad architecture
+- make the fine details honest
+- reduce duplication
+- improve module boundaries
+- move pure math to the right place when safe
+- prepare the codebase for real optimization work
 
-### Phase C: Real Adapters (Unify Behavior)
-- Remove custom per-kind behavior classes.
-- Use the single behavior engine for all point-like edits.
-- Adapters perform translation and persistence.
+## 2. What Is Already Considered Finished
 
-### Phase D: Pointer Transport-Only
-- Remove drag/nudge math and persistence from pointer.
-- Pointer only routes and commits adapter results.
+These broad statements are considered true unless a bug proves otherwise:
 
-### Phase E: Parity Verification
-- Full matrix run, undo/redo verified for all in-scope kinds.
+- in-scope point-like drag/nudge behavior is unified under one routing pipeline
+- pointer is no longer the owner of in-scope drag/nudge persistence
+- composer is no longer the owner of drag/nudge persistence
+- adapters are the owner of translation and persistence for in-scope drag/nudge
+- parity for the broad refactor was accepted and recorded
 
-## 6. Acceptance Criteria (Project-Level)
-- No parallel behavior engines.
-- Pointer contains no drag/nudge persistence or math.
-- Adapters perform translation + persistence for all in-scope kinds.
-- Composer does not persist.
-- Full baseline matrix passes with identical behavior.
+This means:
+
+- do not write a new plan that repeats the old broad migration
+- do not put new fine-grained cleanup work into `progress-report-broad.md`
+
+## 3. Non-Negotiables For The Current Cleanup Phase
+
+These rules stay in force:
+
+- Do not reintroduce pointer-owned drag/nudge persistence for in-scope object kinds.
+- Do not reintroduce parallel behavior engines for in-scope point-like edits.
+- Do not move object-kind routing logic back into pointer by accident.
+- Do not optimize by hiding responsibilities.
+- Do not move editor-only orchestration into core code.
+- Do move pure math or pure skeleton computation out of UI-heavy files when that move is safe and improves boundaries.
+- Every cleanup step must preserve user-visible behavior unless the step is explicitly a bug fix.
+- Every cleanup step must be manually testable.
+
+## 4. Current Problem Areas
+
+The broad architecture is in place, but the micro-architecture still has 5 active problems:
+
+1. The adapter contract is weak.
+   - The code says adapters return meaningful `{ forward, rollback }` data.
+   - In practice, many routes still return placeholder shapes.
+   - Composer mainly uses the result as a handled/unhandled signal.
+
+2. Shared drag/nudge kernels live in the wrong module.
+   - Composer currently owns shared input/session helpers that adapters depend on.
+   - That dependency direction is backwards.
+
+3. The adapters module is too large.
+   - `src-js/views-editor/src/pointer-objects.js` mixes too many responsibilities.
+   - This makes cleanup and optimization harder than necessary.
+
+4. Canonical vs legacy boundaries are not named honestly enough.
+   - Some code is still labeled `legacy` even when it now runs canonical behavior.
+   - That makes the code harder to read and reason about.
+
+5. Too much point-like orchestration and math is duplicated.
+   - Similar setup/persist flows appear across object kinds.
+   - Some pure skeleton math may belong in core/shared code instead of editor files.
+
+## 5. Allowed Kinds Of Change
+
+These are the kinds of changes this SoT allows:
+
+- clarify contracts
+- move shared helpers to a better module
+- split oversized files
+- rename modules/functions/maps so names match reality
+- extract duplicated orchestration helpers
+- extract pure math into core/shared code when appropriate
+- add better verification/reporting for small cleanup steps
+
+These are not the kinds of changes this SoT is asking for:
+
+- new user-facing editing behaviors
+- new object kinds
+- new workflow design for Tunni or other deferred tools
+- silent parity changes justified as optimization
+
+## 6. Boundary Rules By File
+
+### `src-js/views-editor/src/edit-tools-pointer.js`
+
+Pointer is still the transport/routing layer for in-scope drag/nudge.
+
+Allowed work here:
+
+- hit testing
+- selection analysis
+- routing context construction
+- hover/cursor state
+- out-of-scope tool workflows
+
+Disallowed regression:
+
+- reintroducing in-scope drag/nudge persistence or behavior math
+
+### `src-js/views-editor/src/edit-behavior-composer.js`
+
+Composer is still orchestration-only.
+
+Allowed work here:
+
+- routing
+- adapter dispatch
+- shared orchestration that truly belongs above adapters
+
+Disallowed regression:
+
+- persistence ownership
+- object-kind-specific behavior implementation
+
+### `src-js/views-editor/src/pointer-objects.js`
+
+This is still the adapter layer today, but it is expected to shrink and split.
+
+Allowed work here:
+
+- translation from shared behavior output to object-specific canonical data
+- persistence for adapter-owned routes
+- temporary local helper extraction while the file is being split
+
+Expected future direction:
+
+- smaller adapter modules by concern
+
+### `src-js/views-editor/src/edit-behavior.js`
+
+This remains the shared behavior/math area for editor-side point-like behavior.
+
+Allowed work here:
+
+- shared behavior helpers
+- shared geometry helpers used by multiple adapter families
+
+### `src-js/fontra-core/src/skeleton-contour-generator.js`
+
+This is a core candidate for pure skeleton computation.
+
+When reviewing code, ask:
+
+- Is this pure skeleton math?
+- Does it avoid editor UI state?
+- Does it operate on canonical skeleton data cleanly?
+
+If yes, it may belong here or in a nearby core/shared module instead of inside editor adapter code.
+
+If no, keep it out of core.
+
+## 7. Plan And Reporting Rules
+
+The active plan is:
+
+- `docs/refactor/plan-post-refactor-cleanup-optimization.md`
+
+Progress is split into two files on purpose:
+
+- `docs/refactor/progress-report-broad.md`
+  - completed broad architectural milestones
+- `docs/refactor/progress-report.md`
+  - fine-grained cleanup/optimization work from the new plan
+
+Hard rule:
+
+- a cleanup step from the new plan is not complete until it is written to `docs/refactor/progress-report.md`
+
+## 8. Acceptance Criteria For The Current Stage
+
+This cleanup/optimization stage is complete only when all of these are true:
+
+- adapter contracts are truthful and enforced in a meaningful way
+- shared drag/nudge kernels live in a neutral module, not in composer
+- the adapter layer is split into smaller modules with clearer ownership
+- naming reflects reality for canonical vs legacy paths
+- duplicated point-like orchestration is reduced
+- pure math is moved to core/shared code where appropriate, and only where appropriate
+- no broad behavior regressions are introduced
+- each fine-grained step has manual test coverage recorded in `docs/refactor/progress-report.md`
+
+## 9. Working Rule For Future Sessions
+
+When in doubt:
+
+1. Prefer smaller cleanup steps over large rewrites.
+2. Preserve behavior first.
+3. Improve naming and boundaries before attempting low-level optimization.
+4. Extract pure math only when the boundary is truly clean.
+5. Record each finished step in the fine-grained progress report.

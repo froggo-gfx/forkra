@@ -42,9 +42,7 @@ import * as vector from "@fontra/core/vector.js";
 import {
   EditBehaviorFactory,
   applyLinkedWidthDelta,
-  buildRibInterpolationAxisFromPath,
   constrainHorVerDiag,
-  findRibInterpolationAxisFromSkeletonPath,
   findEqualizeHandleForPath,
   getEqualizeHandleInfoForPointIndex,
   isWidthLinked,
@@ -1216,10 +1214,6 @@ export class PointerTool extends BaseTool {
       editablePoints: editableGeneratedPoints,
       editableHandles: editableGeneratedHandles,
     });
-  }
-
-  async _handleArrowKeysLegacy(event) {
-    return false;
   }
 
   setCursorForRotationHandle(handleName) {
@@ -2639,49 +2633,6 @@ export class PointerTool extends BaseTool {
     return result;
   }
 
-  async _handleDragMixedSelection(eventStream, initialEvent, effectiveSkeletonPointSelection) {
-    return false;
-  }
-
-  /**
-   * Handle dragging skeleton points with the Pointer Tool.
-   * Uses the shared point behavior executor system.
-   * @param {AsyncIterable} eventStream - Event stream for drag
-   * @param {Event} initialEvent - Initial mouse event
-   * @param {Set} [overrideSelection] - Optional selection to use instead of parsing from sceneController
-   */
-  async _handleDragSkeletonPoints(eventStream, initialEvent, overrideSelection) {
-    return false;
-  }
-
-  /**
-   * Handle dragging a rib point (width control point).
-   * Constrains movement to the normal direction and updates point width.
-   */
-  async _handleDragRibPoint(eventStream, initialEvent, ribHit, selectedRibSides, selectedSkeletonPoints) {
-    return false;
-  }
-
-  /**
-   * Find interpolation axis for a rib point by computing its expected generated position
-   * and inspecting adjacent points in the generated contour.
-   * @param {Object} path - The generated glyph path
-   * @param {Object} skeletonPoint - The skeleton point {x, y, ...}
-   * @param {Object} normal - The normal vector at this point
-   * @param {Object} contour - The skeleton contour
-   * @param {string} side - "left" or "right"
-   * @returns {Object|null} Axis data for InterpolatingRibBehavior
-   */
-  _findHandlesForRibPointFromSkeleton(path, skeletonPoint, normal, contour, side) {
-    return findRibInterpolationAxisFromSkeletonPath(
-      path,
-      skeletonPoint,
-      normal,
-      contour,
-      side
-    );
-  }
-
   /**
    * Check if selected points are editable generated rib points (from skeleton).
    * @param {Array} pointSelection - Array of point indices
@@ -2734,97 +2685,6 @@ export class PointerTool extends BaseTool {
     return result;
   }
 
-  /**
-   * Find interpolation axis for a rib point in the generated path.
-   * @param {Object} path - The generated path
-   * @param {number} ribPointIndex - Index of the rib point in the path
-   * @returns {Object|null} Axis data for InterpolatingRibBehavior
-   */
-  _findAdjacentHandlesForRibPoint(path, ribPointIndex) {
-    return this._buildRibInterpolationAxis(path, ribPointIndex);
-  }
-
-  /**
-   * Handle dragging editable generated points (from skeleton contours).
-   * Updates skeleton data (nudge, width) based on point movement.
-   * When Alt is held, the rib point slides along interpolation axis:
-   * handle-handle, or segment-handle for single-handle smooth cases.
-   */
-  async _handleDragEditableGeneratedPoints(eventStream, initialEvent, editablePoints) {
-    return false;
-  }
-
-  /**
-   * Handle dragging editable generated handles (from skeleton contours).
-   * Updates skeleton data (handle offsets) based on handle movement.
-   */
-  async _handleDragEditableGeneratedHandles(eventStream, initialEvent, editableHandles) {
-    return false;
-  }
-
-  /**
-   * Handle arrow key movement for editable generated handles.
-   * Movement is constrained to the skeleton handle direction (tangent).
-   */
-  async _handleArrowKeysForEditableHandles(event, editableHandles) {
-    return false;
-  }
-
-  /**
-   * Get information about selected rib points for arrow key processing.
-   * @param {Set} ribPointSelection - Set of "contourIdx/pointIdx/side" strings
-   * @returns {Array} Array of rib point info objects
-   */
-  _getSelectedRibPointInfo(ribPointSelection) {
-    const result = [];
-    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
-    if (!positionedGlyph) return result;
-
-    const editLayerName = this.sceneController.editingLayerNames?.[0];
-    if (!editLayerName) return result;
-
-    const varGlyph = positionedGlyph.varGlyph;
-    if (!varGlyph?.glyph?.layers?.[editLayerName]) return result;
-
-    const layer = varGlyph.glyph.layers[editLayerName];
-    const skeletonData = getSkeletonData(layer);
-    if (!skeletonData?.contours?.length) return result;
-
-    for (const key of ribPointSelection) {
-      const parts = key.split("/");
-      if (parts.length !== 3) continue;
-
-      const contourIndex = parseInt(parts[0]);
-      const pointIndex = parseInt(parts[1]);
-      const side = parts[2]; // "left" or "right"
-
-      const contour = skeletonData.contours[contourIndex];
-      if (!contour || pointIndex >= contour.points.length) continue;
-
-      const point = contour.points[pointIndex];
-      if (point.type) continue; // Skip off-curve points
-
-      const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
-      const editableKey = side === "left" ? "leftEditable" : "rightEditable";
-      const isEditable = point[editableKey] === true;
-
-      // Calculate normal at this point
-      const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
-
-      result.push({
-        contourIndex,
-        pointIndex,
-        side,
-        point,
-        normal,
-        isEditable,
-        defaultWidth,
-      });
-    }
-
-    return result;
-  }
-
   _selectedRibTargetsBelongToSingleSegment(targets, skeletonData) {
     if (!targets?.length) {
       return false;
@@ -2860,15 +2720,6 @@ export class PointerTool extends BaseTool {
         return true;
       }
     }
-    return false;
-  }
-
-  /**
-   * Handle arrow key movement for rib points.
-   * For non-editable ribs: changes width only.
-   * For editable ribs: changes nudge and width (per linked state).
-   */
-  async _handleArrowKeysForRibPoints(event, ribPointSelection) {
     return false;
   }
 
@@ -3117,14 +2968,6 @@ export class PointerTool extends BaseTool {
         broadcast: true,
       };
     });
-  }
-
-  async _handleArrowKeysForEqualizeSkeletonHandles(delta, skeletonPointSelection) {
-    return false;
-  }
-
-  async _handleArrowKeysForEqualizePathHandles(delta, pointSelection) {
-    return false;
   }
 
   /**
