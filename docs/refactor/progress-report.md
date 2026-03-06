@@ -1,7 +1,7 @@
 # Cleanup and Optimization Progress Report
 
 Date: 2026-03-06
-Status: Phase 1 completed; Phase 1.5 completed; Phase 2 completed; Phase 3 completed; later phases not started
+Status: Phase 1 completed; Phase 1.5 completed; Phase 2 completed; Phase 3 completed; Phase 4 completed; later phases not started
 Source of truth: `docs/refactor/plan-post-refactor-cleanup-optimization.md`
 
 ## How To Use This File
@@ -213,3 +213,43 @@ Use this exact structure for every step:
 - Comparison: Yes. Phase 3 now ends with one readable adapters file whose internal ownership is explicit in the file itself, rather than a giant undifferentiated implementation dump.
 - Manual test results: Not rerun manually during this final layout pass. Automated verification passed via `node --check src-js/views-editor/src/edit-behavior-adapters.js`, `rg -n "Shared adapter infrastructure|Editable-generated helper block|Mixed skeleton-backed helper block|Regular point-like routes|Skeleton-owned helper block|Skeleton-owned routes|Editable-generated routes|Mixed-selection and legacy routes|Public adapter maps|export const canonicalDragAdapters|export const canonicalNudgeAdapters|export const legacyDragAdapters|export const legacyNudgeAdapters" src-js/views-editor/src/edit-behavior-adapters.js`, and `npm run -s bundle` with the same existing webpack size warnings.
 - Undo/redo verification: Not rerun manually during this final layout pass.
+
+### Phase 4 - Step 4.1: Write down the exact places where the current legacy/canonical words are lying
+
+- Problem: Phase 4 only works if the dishonest names are listed concretely instead of being treated as vague cleanup taste. The biggest risk here was renaming some surfaces while leaving others to tell a contradictory story.
+- Code analysis: The focused audit showed three concrete naming lies. In `src-js/views-editor/src/edit-behavior-adapters.js`, `legacyDragAdapters.mixedSelection` pointed to `runMixedSelectionDragCanonical(...)`, which made one route simultaneously legacy and canonical by name. The same file also grouped active mixed-selection routes under the section label `Mixed-selection and legacy routes`, which blurred active mixed behavior together with true fallback routes like component and Tunni. In `src-js/views-editor/src/edit-behavior-registry.js`, `skeletonHandle` still carried `legacyAliasFor: "skeleton off-curve point"` and the top object-kind comment still called it a legacy alias even though it is a first-class in-scope object kind.
+- Comparison: Yes. The audit reduced Phase 4 to a small truthful model: canonical routes stay canonical, mixed-selection becomes its own active route family, and only real fallback routes keep legacy wording.
+- Manual test results: Not run in UI during this inventory step. No code behavior changed yet.
+- Undo/redo verification: Not run during this inventory step because no code behavior changed yet.
+
+### Phase 4 - Step 4.2: Define truthful naming rules for canonical, legacy, fallback, and transitional routes
+
+- Problem: The old vocabulary overloaded `legacy` so badly that it could mean canonical mixed behavior, out-of-scope fallback behavior, or just historical migration residue depending on the file.
+- Code analysis: The Phase 4 pass now uses one explicit rule set. `canonical` remains the current unified path for in-scope object kinds. `mixedSelection` is treated as its own active route family instead of being smuggled through the legacy bucket. `fallback` is used for supported non-canonical routes such as component and Tunni behavior. In `src-js/views-editor/src/edit-behavior-registry.js`, the routing-map comments now state the current meaning of `CA`, `CL`, and `NA` directly so the file no longer implies that `CL` is synonymous with true legacy behavior.
+- Comparison: Yes. The words now describe current intent instead of migration history: canonical means unified, mixed means mixed, and fallback means intentionally non-canonical supported behavior.
+- Manual test results: Not run in UI during this terminology-definition step. Code behavior was not meant to change.
+- Undo/redo verification: Not run during this terminology-definition step because code behavior was not meant to change.
+
+### Phase 4 - Step 4.3: Rename adapter entrypoints and adapter maps so route names match actual behavior
+
+- Problem: The adapter entry surface was still the loudest place where names lied. A reader hit the adapter maps first and immediately saw `legacyDragAdapters.mixedSelection -> runMixedSelectionDragCanonical(...)`, which made the entire layer look untrustworthy.
+- Code analysis: In `src-js/views-editor/src/edit-behavior-adapters.js`, I renamed `runMixedSelectionDragCanonical(...)` to `runMixedSelectionDrag(...)` and `runMixedSelectionNudgeLegacy(...)` to `runMixedSelectionNudge(...)` so the active mixed-selection entrypoints stop carrying contradictory labels. I then split the exports so mixed selection has its own truthful maps, `mixedSelectionDragAdapters` and `mixedSelectionNudgeAdapters`, while true fallback drag routes now live in `fallbackDragAdapters`. I also renamed the fallback route entrypoints to match that category: `runLegacyComponentDragAdapter(...)` -> `runFallbackComponentDrag(...)`, `runTunniDragLegacy(...)` -> `runFallbackTunniDrag(...)`, and `runSkeletonTunniDragLegacy(...)` -> `runFallbackSkeletonTunniDrag(...)`. In `src-js/views-editor/src/edit-behavior-composer.js`, routing now resolves `mixedSelection` through its dedicated map and other `CL` drag routes through the fallback map.
+- Comparison: Yes. The adapter surface now says what it does: canonical routes are canonical, mixed-selection routes are mixed-selection routes, and only true supported fallback routes still carry fallback wording.
+- Manual test results: Not run in UI during this code pass. Automated verification was run after the full Phase 4 patch set.
+- Undo/redo verification: Not run manually in UI during this code pass.
+
+### Phase 4 - Step 4.4: Clean up object-kind names and registry notes that still describe old terminology
+
+- Problem: Even after the adapter rename pass, the registry would still keep old migration language alive if `skeletonHandle` continued to be described as a legacy alias and if the routing map comments kept the route codes opaque.
+- Code analysis: In `src-js/views-editor/src/edit-behavior-registry.js`, I removed `legacyAliasFor` from `skeletonHandle` and rewrote the top in-scope object-kind comment so `skeletonHandle` is listed simply as an active in-scope kind. I also added an explicit routing-code note above the drag and nudge maps that says what `CA`, `CL`, and `NA` mean today, including the fact that `mixedSelection` uses the supported non-canonical bucket without being a legacy fallback route.
+- Comparison: Yes. Registry wording now explains current behavior instead of preserving stale migration framing.
+- Manual test results: Not run in UI during this code pass. Automated verification was run after the full Phase 4 patch set.
+- Undo/redo verification: Not run manually in UI during this code pass.
+
+### Phase 4 - Step 4.5: Verify that canonical, legacy, fallback, and transitional boundaries are now honest in code
+
+- Problem: The rename pass would still fail if adapters, composer, and registry ended up using different categories for the same route family.
+- Code analysis: I ran the Phase 4 consistency sweep across `src-js/views-editor/src/edit-behavior-adapters.js`, `src-js/views-editor/src/edit-behavior-composer.js`, and `src-js/views-editor/src/edit-behavior-registry.js`. The adapter surface no longer exports `legacy*` maps for mixed selection, composer no longer routes mixed selection through a legacy-named adapter bucket, and the registry comments explicitly describe `CL` as the current non-canonical bucket instead of an automatic synonym for legacy behavior. The remaining legacy-like behavior is now confined to true fallback drag routes.
+- Comparison: Yes. The public route surface is materially easier to trust now because the code stops calling the same route family canonical in one place and legacy in another.
+- Manual test results: Not run in UI during this code pass. Automated verification passed via `node --check src-js/views-editor/src/edit-behavior-adapters.js`, `node --check src-js/views-editor/src/edit-behavior-composer.js`, `node --check src-js/views-editor/src/edit-behavior-registry.js`, `rg -n "legacy.*MixedSelection|MixedSelection.*legacy|legacyAliasFor|legacyDragAdapters|legacyNudgeAdapters" src-js/views-editor/src`, and `npm run -s bundle` with the same existing webpack size warnings.
+- Undo/redo verification: Not run manually in UI during this code pass.

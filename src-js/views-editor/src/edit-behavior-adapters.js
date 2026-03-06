@@ -2020,7 +2020,7 @@ async function runRegularPointLikeAdapter({
   return true;
 }
 
-async function runTunniDragLegacy({ pointerTool, eventStream, initialEvent }) {
+async function runFallbackTunniDrag({ pointerTool, eventStream, initialEvent }) {
   const handled = await pointerTool._handleTunniPointDrag(eventStream, initialEvent);
   if (handled === false) {
     return false;
@@ -2028,7 +2028,7 @@ async function runTunniDragLegacy({ pointerTool, eventStream, initialEvent }) {
   return true;
 }
 
-async function runSkeletonTunniDragLegacy({
+async function runFallbackSkeletonTunniDrag({
   pointerTool,
   eventStream,
   initialEvent,
@@ -2761,7 +2761,7 @@ async function runSkeletonHandlePointLikeCanonical(context, mode) {
   return true;
 }
 
-async function runLegacyComponentDragAdapter(context) {
+async function runFallbackComponentDrag(context) {
   return runRegularPointLikeAdapter({
     ...context,
     mode: "drag",
@@ -3806,9 +3806,9 @@ async function runSkeletonRibPointNudgeCanonical(context) {
   return true;
 }
 
-// Mixed-selection and legacy routes
+// Mixed-selection routes
 
-async function runMixedSelectionNudgeLegacy({
+async function runMixedSelectionNudge({
   pointerTool,
   sceneController,
   event,
@@ -3949,7 +3949,7 @@ async function runMixedSelectionNudgeLegacy({
   return true;
 }
 
-async function runMixedSelectionDragCanonical({
+async function runMixedSelectionDrag({
   pointerTool,
   sceneController,
   eventStream,
@@ -4269,15 +4269,19 @@ export const canonicalNudgeAdapters = {
     runEditableGeneratedNudgeCanonical(context),
 };
 
-export const legacyDragAdapters = {
-  component: async (context) => runLegacyComponentDragAdapter(context),
-  componentOrigin: async (context) => runLegacyComponentDragAdapter(context),
-  componentTCenter: async (context) => runLegacyComponentDragAdapter(context),
-  mixedSelection: async (context) => runMixedSelectionDragCanonical(context),
-  tunniPoint: async (context) => runTunniDragLegacy(context),
-  skeletonTunniPoint: async (context) => runSkeletonTunniDragLegacy(context),
+export const mixedSelectionDragAdapters = {
+  mixedSelection: async (context) => runMixedSelectionDrag(context),
 };
 
-export const legacyNudgeAdapters = {
-  mixedSelection: async (context) => runMixedSelectionNudgeLegacy(context),
+export const mixedSelectionNudgeAdapters = {
+  mixedSelection: async (context) => runMixedSelectionNudge(context),
+};
+
+// Legacy fallback routes stay outside the unified canonical path on purpose.
+export const fallbackDragAdapters = {
+  component: async (context) => runFallbackComponentDrag(context),
+  componentOrigin: async (context) => runFallbackComponentDrag(context),
+  componentTCenter: async (context) => runFallbackComponentDrag(context),
+  tunniPoint: async (context) => runFallbackTunniDrag(context),
+  skeletonTunniPoint: async (context) => runFallbackSkeletonTunniDrag(context),
 };

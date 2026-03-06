@@ -8,9 +8,34 @@ import {
 import {
   canonicalDragAdapters,
   canonicalNudgeAdapters,
-  legacyDragAdapters,
-  legacyNudgeAdapters,
+  fallbackDragAdapters,
+  mixedSelectionDragAdapters,
+  mixedSelectionNudgeAdapters,
 } from "./edit-behavior-adapters.js";
+
+function supportsRouting(value) {
+  return value === "CL" || value === "CA";
+}
+
+function getDragAdapterForRouting(routing, objectKind) {
+  if (routing === "CA") {
+    return canonicalDragAdapters[objectKind];
+  }
+  if (objectKind === "mixedSelection") {
+    return mixedSelectionDragAdapters[objectKind];
+  }
+  return fallbackDragAdapters[objectKind];
+}
+
+function getNudgeAdapterForRouting(routing, objectKind) {
+  if (routing === "CA") {
+    return canonicalNudgeAdapters[objectKind];
+  }
+  if (objectKind === "mixedSelection") {
+    return mixedSelectionNudgeAdapters[objectKind];
+  }
+  return undefined;
+}
 
 /**
  * Route drag edits through the registry routing map and adapters.
@@ -60,7 +85,6 @@ export async function runDragRoutingOrchestration(_context) {
     altKey: modifiers.altKey,
   });
   let routing = DRAG_ROUTING_MAP?.[rowId]?.[objectKind] || "NA";
-  const supportsRouting = (value) => value === "CL" || value === "CA";
   if (!supportsRouting(routing) && rowId !== baseRowId) {
     routing = DRAG_ROUTING_MAP?.[baseRowId]?.[objectKind] || "NA";
   }
@@ -68,10 +92,7 @@ export async function runDragRoutingOrchestration(_context) {
     return false;
   }
 
-  const adapter =
-    routing === "CA"
-      ? canonicalDragAdapters[objectKind]
-      : legacyDragAdapters[objectKind];
+  const adapter = getDragAdapterForRouting(routing, objectKind);
   assert(adapter, `runDragRoutingOrchestration: missing adapter for ${objectKind}`);
 
   const handled = await adapter(_context);
@@ -119,7 +140,6 @@ export async function runNudgeRoutingOrchestration(_context) {
     altKey: modifiers.altKey,
   });
   let routing = NUDGE_ROUTING_MAP?.[rowId]?.[objectKind] || "NA";
-  const supportsRouting = (value) => value === "CL" || value === "CA";
   if (!supportsRouting(routing) && rowId !== baseRowId) {
     routing = NUDGE_ROUTING_MAP?.[baseRowId]?.[objectKind] || "NA";
   }
@@ -127,10 +147,7 @@ export async function runNudgeRoutingOrchestration(_context) {
     return false;
   }
 
-  const adapter =
-    routing === "CA"
-      ? canonicalNudgeAdapters[objectKind]
-      : legacyNudgeAdapters[objectKind];
+  const adapter = getNudgeAdapterForRouting(routing, objectKind);
   assert(adapter, `runNudgeRoutingOrchestration: missing adapter for ${objectKind}`);
 
   const handled = await adapter({

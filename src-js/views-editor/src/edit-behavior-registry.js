@@ -6,8 +6,7 @@
 // selectionKey must match parseSelection() key names for selection-based kinds.
 // Use selectionKey: null for non-selection object kinds (e.g., Tunni points).
 // In-scope unified-behavior kinds: regularPoint, anchor, guideline, skeletonPoint,
-// skeletonHandle (legacy off-curve alias), skeletonRibPoint, editableGeneratedPoint,
-// editableGeneratedHandle.
+// skeletonHandle, skeletonRibPoint, editableGeneratedPoint, editableGeneratedHandle.
 export const OBJECT_KINDS = {
   regularPoint: {
     selectionKey: "point",
@@ -56,7 +55,6 @@ export const OBJECT_KINDS = {
     supports: ["drag", "nudge"],
     persistent: true,
     inScope: true,
-    legacyAliasFor: "skeleton off-curve point",
   },
   skeletonSegment: {
     selectionKey: "skeletonSegment",
@@ -165,7 +163,14 @@ export function resolveBehaviorPreset(_objectKind, action, modifiers) {
   return result;
 }
 
-// Drag routing map (Phase 3.3): rowId + objectKind -> routing value.
+// Current routing codes until Phase 6 rewrites the registry representation:
+// - CA: canonical unified route
+// - CL: supported non-canonical route bucket
+//   - mixedSelection uses its dedicated mixed-selection route family here
+//   - component/Tunni routes use fallback legacy behavior here
+// - NA: no route
+//
+// Drag routing map: rowId + objectKind -> CA | CL | NA.
 export const DRAG_ROUTING_MAP = {
   R1: {
     regularPoint: "CA",
@@ -313,7 +318,7 @@ export const DRAG_ROUTING_MAP = {
   },
 };
 
-// Nudge routing map (Phase 4.3): rowId + objectKind -> routing value.
+// Nudge routing map: rowId + objectKind -> CA | CL | NA.
 export const NUDGE_ROUTING_MAP = {
   R10: {
     regularPoint: "CA",
