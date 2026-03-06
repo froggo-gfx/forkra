@@ -615,3 +615,23 @@ Status: In Progress
   - Skeleton off-curve X-nudge: PASS (user-verified)
   - Editable generated handle equalize drag/nudge: PASS (user-verified)
 - Undo/redo verification: NOT RUN in this terminal session (no explicit user report).
+
+## Phase 5 - Cross-Cut: Remove final dead in-scope equalize leftover from pointer
+
+- Problem: `edit-tools-pointer.js` still contained one dead in-scope equalize implementation for editable generated handles, along with its private helper cluster. It was no longer referenced by live routing, but it still violated the transport-only intent at file level because the code performed adapter-style persistence inside pointer.
+- Code analysis:
+  - Updated `src-js/views-editor/src/edit-tools-pointer.js`.
+  - Removed the unused editable-generated-handle equalize drag method:
+    - `_handleEqualizeEditableHandleDrag(...)`
+  - Removed the helper methods used only by that dead path:
+    - `_getSkeletonHandleDirForPoint(...)`
+    - `_getEditableHandleOffsetKeys(...)`
+    - `_normalizeDirection(...)`
+    - `_readEditableHandleEqualizeState(...)`
+    - `_applyEditableHandleEqualizedLength(...)`
+  - Verified that no references remained to that cluster inside pointer after removal.
+  - Verification:
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+- Comparison: Yes. This closes the final in-scope pointer-side equalize leftover, leaving only out-of-scope workflows (Tunni, double-click, transforms, other non-drag actions) with local persistence in `edit-tools-pointer.js`.
+- Manual test results: PASS by prior user verification of editable generated handle equalize drag/nudge on the canonical path.
+- Undo/redo verification: NOT RUN in this terminal session (no explicit user report).
