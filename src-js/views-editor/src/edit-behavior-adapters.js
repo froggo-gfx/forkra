@@ -48,6 +48,8 @@ import {
 // Full session consumers use both helpers; valid input-only consumers call the
 // input kernel directly without pretending every route shares one execution model.
 
+// Shared adapter infrastructure
+
 async function runPointLikeDragInput({
   mode,
   eventStream,
@@ -193,6 +195,20 @@ export async function runPointLikeSessionKernel({
 const DEFAULT_SKELETON_WIDTH = 80;
 const FIXED_RIB_SCALE_CONTROL_POINTS = true;
 
+function runGlyphEditSession(sceneController, sessionFn) {
+  return sceneController.editGlyph(sessionFn);
+}
+
+async function withPointerCursor(pointerTool, activeCursor, callback) {
+  const previousCursor = pointerTool.canvasController.canvas.style.cursor;
+  pointerTool.canvasController.canvas.style.cursor = activeCursor;
+  try {
+    return await callback();
+  } finally {
+    pointerTool.canvasController.canvas.style.cursor = previousCursor || "default";
+  }
+}
+
 function getBehaviorName(event) {
   const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
   return behaviorNames[(event.shiftKey ? 1 : 0) + (event.altKey ? 2 : 0)];
@@ -223,6 +239,9 @@ function filterSelection(selection, predicate) {
   }
   return filtered;
 }
+
+// Editable-generated helper block
+// Handle/equalize helpers
 
 function getEditableHandleOffsetKeys(side, handleType) {
   const offset1DKey =
@@ -386,6 +405,8 @@ function applyEditableHandleEqualizedLength({
   point[state.keys.offset1DKey] = roundFunc(relX * state.skeletonDir.x + relY * state.skeletonDir.y);
 }
 
+// Selection/working-state helpers
+
 function collectEditableGeneratedPointsFromPointSelection({
   sceneController,
   pointerTool,
@@ -462,9 +483,29 @@ function excludePointIndicesFromSelection(selection, excludedPointIndices) {
   });
 }
 
+function createEditableGeneratedLayersData(glyph, editingLayerNames) {
+  const layersData = {};
+  for (const editLayerName of editingLayerNames || []) {
+    const layer = glyph.layers[editLayerName];
+    const skeletonData = getSkeletonData(layer);
+    if (!skeletonData) {
+      continue;
+    }
+    layersData[editLayerName] = {
+      layer,
+      original: cloneSkeletonData(skeletonData),
+      working: cloneSkeletonData(skeletonData),
+      behaviors: [],
+    };
+  }
+  return layersData;
+}
+
 function cloneSkeletonData(skeletonData) {
   return JSON.parse(JSON.stringify(skeletonData));
 }
+
+// Mixed skeleton-backed helper block
 
 function createSkeletonBackedMixedEditState({
   glyph,
@@ -903,6 +944,8 @@ function selectedRibTargetsBelongToSingleSegment(targets, skeletonData) {
   }
   return false;
 }
+
+// Skeleton-owned helper block
 
 function createSkeletonPointExecutors(
   skeletonData,
@@ -1637,8 +1680,8 @@ function createSkeletonLayersData({
     }
     layersData[editLayerName] = {
       layer,
-      original: JSON.parse(JSON.stringify(skeletonData)),
-      working: JSON.parse(JSON.stringify(skeletonData)),
+      original: cloneSkeletonData(skeletonData),
+      working: cloneSkeletonData(skeletonData),
     };
   }
   return layersData;
@@ -1680,7 +1723,7 @@ function makeSkeletonLayerPersistenceChanges({
   const customDataChange = recordChanges(layer, (l) => {
     setSkeletonData(
       l,
-      cloneOnPersist ? JSON.parse(JSON.stringify(working)) : working
+      cloneOnPersist ? cloneSkeletonData(working) : working
     );
   });
   const prefixedCustomData = customDataChange.prefixed(["layers", editLayerName]);
@@ -1727,7 +1770,7 @@ async function runRegularPointLikeOrchestration({
 
   return runPointLikeSessionKernel({
     mode,
-    withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
+    withEditSession: (sessionFn) => runGlyphEditSession(sceneController, sessionFn),
     eventStream,
     initialEvent,
     event,
@@ -1951,6 +1994,8 @@ async function runRegularPointLikeOrchestration({
   });
 }
 
+// Regular point-like routes
+
 async function runRegularPointLikeAdapter({
   mode,
   pointerTool,
@@ -2107,6 +2152,8 @@ async function runRegularPointLikeCanonical(context, mode) {
   });
 }
 
+// Skeleton-owned routes
+
 function applySkeletonEqualizeToContour({
   mode,
   contour,
@@ -2189,7 +2236,7 @@ async function runSkeletonPointLikeOrchestration({
   }) => {
     await runPointLikeSessionKernel({
       mode,
-      withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
+      withEditSession: (sessionFn) => runGlyphEditSession(sceneController, sessionFn),
       eventStream,
       initialEvent,
       event,
@@ -2529,7 +2576,7 @@ async function runFixedRibSkeletonPointLikeCanonical({
 
   await runPointLikeSessionKernel({
     mode,
-    withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
+    withEditSession: (sessionFn) => runGlyphEditSession(sceneController, sessionFn),
     eventStream,
     initialEvent,
     event,
@@ -2584,7 +2631,7 @@ async function runFixedRibSkeletonPointLikeCanonical({
           regenerateSkeletonContours(sg, data.working, { preferInPlace: true });
         });
         const customDataChange = recordChanges(data.layer, (layer) => {
-          setSkeletonData(layer, JSON.parse(JSON.stringify(data.working)));
+          setSkeletonData(layer, cloneSkeletonData(data.working));
         });
         if (pathChange.hasChange) {
           allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
@@ -2847,8 +2894,8 @@ async function runSkeletonRibPointDragCanonical(context) {
         }
         layersData[editLayerName] = {
           layer,
-          original: JSON.parse(JSON.stringify(skeletonData)),
-          working: JSON.parse(JSON.stringify(skeletonData)),
+          original: cloneSkeletonData(skeletonData),
+          working: cloneSkeletonData(skeletonData),
           ribBehaviors: [],
         };
       }
@@ -3011,7 +3058,7 @@ async function runSkeletonRibPointDragCanonical(context) {
             regenerateSkeletonContours(sg, working);
           });
           const customDataChange = recordChanges(layer, (layerRecord) => {
-            setSkeletonData(layerRecord, JSON.parse(JSON.stringify(working)));
+            setSkeletonData(layerRecord, cloneSkeletonData(working));
           });
           if (pathChange.hasChange) {
             allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
@@ -3039,6 +3086,8 @@ async function runSkeletonRibPointDragCanonical(context) {
   }
   return true;
 }
+
+// Editable-generated routes
 
 async function runEditableGeneratedPointLikeCanonical(context, mode) {
   const isDrag = mode === "drag";
@@ -3086,15 +3135,10 @@ async function runEditableGeneratedPointLikeCanonical(context, mode) {
         interpolationAxis: null,
       }));
 
-  const previousCursor = pointerTool.canvasController.canvas.style.cursor;
-  if (isDrag) {
-    pointerTool.canvasController.canvas.style.cursor = "pointer";
-  }
-
-  try {
-    await runPointLikeSessionKernel({
+  const runGeneratedPointSession = () =>
+    runPointLikeSessionKernel({
       mode,
-      withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
+      withEditSession: (sessionFn) => runGlyphEditSession(sceneController, sessionFn),
       eventStream,
       initialEvent,
       event,
@@ -3109,20 +3153,10 @@ async function runEditableGeneratedPointLikeCanonical(context, mode) {
           }
         : undefined,
       onSessionStart: ({ glyph }) => {
-        const layersData = {};
-        for (const editLayerName of sceneController.editingLayerNames || []) {
-          const layer = glyph.layers[editLayerName];
-          const skeletonData = getSkeletonData(layer);
-          if (!skeletonData) {
-            continue;
-          }
-          layersData[editLayerName] = {
-            layer,
-            original: JSON.parse(JSON.stringify(skeletonData)),
-            working: JSON.parse(JSON.stringify(skeletonData)),
-            behaviors: [],
-          };
-        }
+        const layersData = createEditableGeneratedLayersData(
+          glyph,
+          sceneController.editingLayerNames
+        );
 
         for (const data of Object.values(layersData)) {
           for (const editablePoint of editablePointsWithInterpolation) {
@@ -3228,7 +3262,7 @@ async function runEditableGeneratedPointLikeCanonical(context, mode) {
             regenerateSkeletonContours(sg, working);
           });
           const customDataChange = recordChanges(layer, (l) => {
-            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
+            setSkeletonData(l, cloneSkeletonData(working));
           });
           if (pathChange.hasChange) {
             allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
@@ -3259,10 +3293,11 @@ async function runEditableGeneratedPointLikeCanonical(context, mode) {
         };
       },
     });
-  } finally {
-    if (isDrag) {
-      pointerTool.canvasController.canvas.style.cursor = previousCursor || "default";
-    }
+
+  if (isDrag) {
+    await withPointerCursor(pointerTool, "pointer", runGeneratedPointSession);
+  } else {
+    await runGeneratedPointSession();
   }
   return true;
 }
@@ -3298,15 +3333,10 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
     return false;
   }
 
-  const previousCursor = pointerTool.canvasController.canvas.style.cursor;
-  if (isDrag) {
-    pointerTool.canvasController.canvas.style.cursor = "pointer";
-  }
-
-  try {
-    await runPointLikeSessionKernel({
+  const runGeneratedHandleSession = () =>
+    runPointLikeSessionKernel({
       mode,
-      withEditSession: (sessionFn) => sceneController.editGlyph(sessionFn),
+      withEditSession: (sessionFn) => runGlyphEditSession(sceneController, sessionFn),
       eventStream,
       initialEvent,
       event,
@@ -3321,20 +3351,10 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
           }
         : undefined,
       onSessionStart: ({ glyph }) => {
-        const layersData = {};
-        for (const editLayerName of sceneController.editingLayerNames || []) {
-          const layer = glyph.layers[editLayerName];
-          const skeletonData = getSkeletonData(layer);
-          if (!skeletonData) {
-            continue;
-          }
-          layersData[editLayerName] = {
-            layer,
-            original: JSON.parse(JSON.stringify(skeletonData)),
-            working: JSON.parse(JSON.stringify(skeletonData)),
-            behaviors: [],
-          };
-        }
+        const layersData = createEditableGeneratedLayersData(
+          glyph,
+          sceneController.editingLayerNames
+        );
 
         for (const data of Object.values(layersData)) {
           const layerPath = data.layer?.glyph?.path;
@@ -3490,7 +3510,7 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
             regenerateSkeletonContours(sg, working);
           });
           const customDataChange = recordChanges(layer, (l) => {
-            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
+            setSkeletonData(l, cloneSkeletonData(working));
           });
           if (pathChange.hasChange) {
             allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
@@ -3527,10 +3547,11 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
         };
       },
     });
-  } finally {
-    if (isDrag) {
-      pointerTool.canvasController.canvas.style.cursor = previousCursor || "default";
-    }
+
+  if (isDrag) {
+    await withPointerCursor(pointerTool, "pointer", runGeneratedHandleSession);
+  } else {
+    await runGeneratedHandleSession();
   }
   return true;
 }
@@ -3784,6 +3805,8 @@ async function runSkeletonRibPointNudgeCanonical(context) {
   });
   return true;
 }
+
+// Mixed-selection and legacy routes
 
 async function runMixedSelectionNudgeLegacy({
   pointerTool,
@@ -4218,6 +4241,8 @@ async function runMixedSelectionDragCanonical({
 
   return true;
 }
+
+// Public adapter maps
 
 export const canonicalDragAdapters = {
   regularPoint: async (context) => runRegularPointLikeCanonical(context, "drag"),
