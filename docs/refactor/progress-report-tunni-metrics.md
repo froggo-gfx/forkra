@@ -13,7 +13,7 @@ Status: In Progress
     - broad unified behavior is already complete and recorded in `docs/refactor/progress-report-broad.md`
     - beautify/cleanup work is already complete and recorded in `docs/refactor/progress-report-beautify.md`
     - `registry -> composer -> adapters` is already the accepted routing shape
-    - `tunniPoint` and `skeletonTunniPoint` already exist as supported fallback drag object kinds
+    - `tunniPoint` and `skeletonTunniPoint` already exist as supported specialized drag object kinds
     - Q-measure remains a pointer/scene-model hover+mode workflow, not part of the unified point-like drag/nudge pipeline
   - Created `docs/refactor/progress-report-tunni-metrics.md` as the dedicated report target for this chapter, following the plan's required reporting rule.
 - Comparison: Yes. The plan now states the branch-specific architectural reality explicitly, instead of assuming the old branch model. This narrows the chapter to ownership cleanup, shared math extraction, and state honesty.

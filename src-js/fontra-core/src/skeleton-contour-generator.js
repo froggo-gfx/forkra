@@ -2095,16 +2095,18 @@ function lockNearZeroHandleDirection(
   preferMinimalOnFlip = false
 ) {
   const ref = normalizeDirectionOrFallback(referenceDirection, { x: 1, y: 0 });
-  const minimalGridStep = getMinimumGridStepFromDirection(ref);
-  const minimalGridLength = minimalGridStep.length;
   const vec = {
     x: handlePoint.x - anchor.x,
     y: handlePoint.y - anchor.y,
   };
   const length = Math.hypot(vec.x, vec.y);
-  const along = vec.x * ref.x + vec.y * ref.y;
-  const preventedFlip = along < 0;
-  const projectedLength = Math.abs(along);
+  const candidateDir = length > 1e-9 ? { x: vec.x / length, y: vec.y / length } : ref;
+  const directionDot = candidateDir.x * ref.x + candidateDir.y * ref.y;
+  const preventedFlip = directionDot < 0;
+  const lockedDirection = preventedFlip ? ref : candidateDir;
+  const minimalGridStep = getMinimumGridStepFromDirection(lockedDirection);
+  const minimalGridLength = minimalGridStep.length;
+  const projectedLength = Math.abs(vec.x * lockedDirection.x + vec.y * lockedDirection.y);
   const nearZeroLocked = projectedLength < NEAR_ZERO_HANDLE_THRESHOLD;
   const forcedNonZero = projectedLength < minimalGridLength;
   const forcedMinimal = forcedNonZero || (preferMinimalOnFlip && preventedFlip);
@@ -2125,8 +2127,8 @@ function lockNearZeroHandleDirection(
       finalLength = maxLength;
     }
     point = {
-      x: anchor.x + ref.x * finalLength,
-      y: anchor.y + ref.y * finalLength,
+      x: anchor.x + lockedDirection.x * finalLength,
+      y: anchor.y + lockedDirection.y * finalLength,
     };
   }
 
@@ -2145,7 +2147,7 @@ function lockNearZeroHandleDirection(
       minimalGridStepX: minimalGridStep.x,
       minimalGridStepY: minimalGridStep.y,
       minimalGridLength,
-      referenceDot: length > 1e-9 ? along / length : 1,
+      referenceDot: directionDot,
     },
   };
 }
