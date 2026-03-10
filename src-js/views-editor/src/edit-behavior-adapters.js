@@ -10,6 +10,13 @@ import {
   calculateNormalAtSkeletonPoint,
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
+import {
+  snapToGrid,
+  calculateTunniPoint,
+  calculateTrueTunniPoint,
+  calculateEqualizedControlPoints,
+  areDistancesEqualized,
+} from "@fontra/core/tunni-calculations.js";
 import { arrowKeyDeltas, assert, parseSelection } from "@fontra/core/utils.js";
 import {
   computeEqualizedHandlePositions,
@@ -32,12 +39,6 @@ import {
   makeRoundFunc,
   resolveEqualizePairForContourPoint,
 } from "./edit-behavior.js";
-import {
-  buildSegmentsFromSkeletonPoints,
-  calculateHandleTensionsForSegment,
-  computeHandleLengthsFromTensions,
-} from "./skeleton-tunni-calculations.js";
-
 // Adapter/composer contract:
 // - adapters return `true` when they handled the route
 // - adapters return `false` when the route is not applicable or cannot run
@@ -249,6 +250,626 @@ function filterSelection(selection, predicate) {
     }
   }
   return filtered;
+}
+
+function segmentToSegmentPoints(segment) {
+  if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
+    return null;
+  }
+  const { startPoint, endPoint, controlPoints } = segment;
+  return [startPoint, controlPoints[0], controlPoints[1], endPoint];
+}
+
+function makeSegmentFromSegmentPoints(segmentPoints) {
+  if (!segmentPoints || segmentPoints.length !== 4) {
+    return null;
+  }
+  const [startPoint, controlPoint1, controlPoint2, endPoint] = segmentPoints;
+  return {
+    startPoint,
+    endPoint,
+    controlPoints: [controlPoint1, controlPoint2],
+  };
+}
+
+export function buildSegmentsFromSkeletonPoints(points, isClosed) {
+  const segments = [];
+  const numPoints = points.length;
+  if (numPoints < 2) {
+    return segments;
+  }
+
+  const onCurveIndices = [];
+  for (let i = 0; i < numPoints; i++) {
+    if (!points[i].type) {
+      onCurveIndices.push(i);
+    }
+  }
+  if (onCurveIndices.length < 2) {
+    return segments;
+  }
+
+  for (let i = 0; i < onCurveIndices.length; i++) {
+    const startIdx = onCurveIndices[i];
+    const isLast = i === onCurveIndices.length - 1;
+    if (!isClosed && isLast) {
+      continue;
+    }
+    const endIdx = isLast ? onCurveIndices[0] : onCurveIndices[i + 1];
+    const startPoint = points[startIdx];
+    const endPoint = points[endIdx];
+    const controlPoints = [];
+    const controlIndices = [];
+
+    if (isLast) {
+      for (let j = startIdx + 1; j < numPoints; j++) {
+        if (points[j].type) {
+          controlPoints.push(points[j]);
+          controlIndices.push(j);
+        }
+      }
+      for (let j = 0; j < endIdx; j++) {
+        if (points[j].type) {
+          controlPoints.push(points[j]);
+          controlIndices.push(j);
+        }
+      }
+    } else {
+      for (let j = startIdx + 1; j < endIdx; j++) {
+        if (points[j].type) {
+          controlPoints.push(points[j]);
+          controlIndices.push(j);
+        }
+      }
+    }
+
+    segments.push({
+      startPoint,
+      endPoint,
+      controlPoints,
+      startIndex: startIdx,
+      endIndex: endIdx,
+      controlIndices,
+      segmentIndex: i,
+    });
+  }
+
+  return segments;
+}
+
+export function calculateSkeletonTunniPoint(segment) {
+  const segmentPoints = segmentToSegmentPoints(segment);
+  return segmentPoints ? calculateTunniPoint(segmentPoints) : null;
+}
+
+export function calculateSkeletonTrueTunniPoint(segment) {
+  const segmentPoints = segmentToSegmentPoints(segment);
+  return segmentPoints ? calculateTrueTunniPoint(segmentPoints) : null;
+}
+
+export function calculateHandleTensionsForSegment(segment) {
+  if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
+    return null;
+  }
+
+  const { startPoint, endPoint, controlPoints } = segment;
+  const [cp1, cp2] = controlPoints;
+  const tensionPoint =
+    calculateSkeletonTrueTunniPoint(segment) || calculateSkeletonTunniPoint(segment);
+  if (!tensionPoint) {
+    return null;
+  }
+
+  const distStart = vector.distance(startPoint, tensionPoint);
+  const distEnd = vector.distance(endPoint, tensionPoint);
+  const lenStart = vector.distance(startPoint, cp1);
+  const lenEnd = vector.distance(endPoint, cp2);
+  const tensionStart = distStart > 1e-6 ? lenStart / distStart : null;
+  const tensionEnd = distEnd > 1e-6 ? lenEnd / distEnd : null;
+  return { tensionStart, tensionEnd, lenStart, lenEnd };
+}
+
+export function computeHandleLengthsFromTensions(
+  startPoint,
+  startDir,
+  endPoint,
+  endDir,
+  tensionStart,
+  tensionEnd
+) {
+  const line1End = vector.addVectors(startPoint, vector.normalizeVector(startDir));
+  const line2End = vector.addVectors(endPoint, vector.normalizeVector(endDir));
+  const intersection = vector.intersect(startPoint, line1End, endPoint, line2End);
+
+  let distStartToTunni;
+  let distEndToTunni;
+  if (intersection && Number.isFinite(intersection.t1) && Number.isFinite(intersection.t2)) {
+    distStartToTunni = Math.abs(intersection.t1);
+    distEndToTunni = Math.abs(intersection.t2);
+  } else {
+    const fallbackDistance = vector.distance(startPoint, endPoint) / 2;
+    distStartToTunni = fallbackDistance;
+    distEndToTunni = fallbackDistance;
+  }
+
+  return {
+    startLen: Number.isFinite(tensionStart) ? tensionStart * distStartToTunni : null,
+    endLen: Number.isFinite(tensionEnd) ? tensionEnd * distEndToTunni : null,
+  };
+}
+
+export function calculateSkeletonControlPointsFromTunniDelta(
+  delta,
+  segment,
+  preserveTensions = true
+) {
+  if (!segment.controlPoints || segment.controlPoints.length !== 2) {
+    return null;
+  }
+
+  const { startPoint, endPoint, controlPoints } = segment;
+  const [cp1, cp2] = controlPoints;
+  const dir1 = vector.normalizeVector(vector.subVectors(cp1, startPoint));
+  const dir2 = vector.normalizeVector(vector.subVectors(cp2, endPoint));
+  const fortyFiveVec = vector.normalizeVector(vector.addVectors(dir1, dir2));
+  const projection = delta.x * fortyFiveVec.x + delta.y * fortyFiveVec.y;
+
+  if (preserveTensions) {
+    const trueTunni = calculateSkeletonTrueTunniPoint(segment);
+    if (trueTunni) {
+      const distToTunni1 = vector.distance(startPoint, trueTunni);
+      const distToTunni2 = vector.distance(endPoint, trueTunni);
+      if (distToTunni1 > 0 && distToTunni2 > 0) {
+        const totalDist = distToTunni1 + distToTunni2;
+        const k = (2 * projection) / totalDist;
+        const move1 = k * distToTunni1;
+        const move2 = k * distToTunni2;
+        return [
+          { x: cp1.x + dir1.x * move1, y: cp1.y + dir1.y * move1 },
+          { x: cp2.x + dir2.x * move2, y: cp2.y + dir2.y * move2 },
+        ];
+      }
+    }
+    return [
+      { x: cp1.x + dir1.x * projection, y: cp1.y + dir1.y * projection },
+      { x: cp2.x + dir2.x * projection, y: cp2.y + dir2.y * projection },
+    ];
+  }
+
+  const projection1 = delta.x * dir1.x + delta.y * dir1.y;
+  const projection2 = delta.x * dir2.x + delta.y * dir2.y;
+  return [
+    { x: cp1.x + dir1.x * projection1, y: cp1.y + dir1.y * projection1 },
+    { x: cp2.x + dir2.x * projection2, y: cp2.y + dir2.y * projection2 },
+  ];
+}
+
+export function calculateSkeletonOnCurveFromTunni(
+  newTrueTunniPoint,
+  segment,
+  equalizeDistances = true
+) {
+  if (!segment.controlPoints || segment.controlPoints.length !== 2) {
+    return null;
+  }
+
+  const { startPoint, endPoint, controlPoints } = segment;
+  const [cp1, cp2] = controlPoints;
+  const origTrueTunni = vector.intersect(startPoint, cp1, endPoint, cp2);
+  if (!origTrueTunni) {
+    return null;
+  }
+
+  const dir1 = vector.normalizeVector(vector.subVectors(cp1, startPoint));
+  const dir2 = vector.normalizeVector(vector.subVectors(cp2, endPoint));
+  const delta = vector.subVectors(newTrueTunniPoint, origTrueTunni);
+  const projection1 = delta.x * dir1.x + delta.y * dir1.y;
+  const projection2 = delta.x * dir2.x + delta.y * dir2.y;
+  const finalProjection1 = equalizeDistances ? (projection1 + projection2) / 2 : projection1;
+  const finalProjection2 = equalizeDistances ? (projection1 + projection2) / 2 : projection2;
+
+  return {
+    newStartPoint: {
+      x: startPoint.x + dir1.x * finalProjection1,
+      y: startPoint.y + dir1.y * finalProjection1,
+    },
+    newEndPoint: {
+      x: endPoint.x + dir2.x * finalProjection2,
+      y: endPoint.y + dir2.y * finalProjection2,
+    },
+  };
+}
+
+export function skeletonTunniHitTest(point, size, skeletonData, options = {}) {
+  if (!skeletonData?.contours) {
+    return null;
+  }
+
+  const { midpointOnly = false } = options;
+  for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
+    const contour = skeletonData.contours[contourIndex];
+    const segments = buildSegmentsFromSkeletonPoints(contour.points, contour.isClosed);
+    for (const segment of segments) {
+      if (segment.controlPoints.length !== 2) {
+        continue;
+      }
+      if (!midpointOnly) {
+        const trueTunniPt = calculateSkeletonTrueTunniPoint(segment);
+        if (trueTunniPt && vector.distance(point, trueTunniPt) <= size) {
+          return {
+            type: "true-tunni",
+            contourIndex,
+            segmentIndex: segment.segmentIndex,
+            segment,
+            tunniPoint: trueTunniPt,
+          };
+        }
+      }
+      const tunniPt = calculateSkeletonTunniPoint(segment);
+      if (tunniPt && vector.distance(point, tunniPt) <= size) {
+        return {
+          type: "tunni",
+          contourIndex,
+          segmentIndex: segment.segmentIndex,
+          segment,
+          tunniPoint: tunniPt,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+export function calculateSkeletonEqualizedControlPoints(segment) {
+  const segmentPoints = segmentToSegmentPoints(segment);
+  return segmentPoints ? calculateEqualizedControlPoints(segmentPoints) : null;
+}
+
+export function areSkeletonTensionsEqualized(segment, tolerance = 0.01) {
+  if (!segment.controlPoints || segment.controlPoints.length !== 2) {
+    return true;
+  }
+
+  const { startPoint, endPoint, controlPoints } = segment;
+  const [cp1, cp2] = controlPoints;
+  const trueTunni = calculateSkeletonTrueTunniPoint(segment);
+  if (!trueTunni) {
+    return true;
+  }
+
+  const distStartToTunni = vector.distance(startPoint, trueTunni);
+  const distEndToTunni = vector.distance(endPoint, trueTunni);
+  if (distStartToTunni <= 0 || distEndToTunni <= 0) {
+    return true;
+  }
+
+  const tension1 = vector.distance(startPoint, cp1) / distStartToTunni;
+  const tension2 = vector.distance(endPoint, cp2) / distEndToTunni;
+  return Math.abs(tension1 - tension2) < tolerance;
+}
+
+function getSkeletonGeneratedContourIndexSet(positionedGlyph, editLayerName) {
+  const layerName = editLayerName || positionedGlyph?.glyph?.layerName;
+  const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[layerName];
+  const indices = getSkeletonData(layer)?.generatedContourIndices || [];
+  return new Set(indices);
+}
+
+export function tunniLayerHitTest(point, size, positionedGlyph, options = {}) {
+  if (!positionedGlyph?.glyph?.path) {
+    return null;
+  }
+
+  const path = positionedGlyph.glyph.path;
+  const generatedContourIndices = getSkeletonGeneratedContourIndexSet(
+    positionedGlyph,
+    options.editLayerName
+  );
+
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
+    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
+      if (segment.points.length !== 4) {
+        continue;
+      }
+      const pointTypes = segment.parentPointIndices.map((index) => path.pointTypes[index]);
+      if (pointTypes[1] !== 2 || pointTypes[2] !== 2) {
+        continue;
+      }
+
+      const trueTunniPoint = calculateTrueTunniPoint(segment.points);
+      const visualTunniPoint = calculateTunniPoint(segment.points);
+
+      if (trueTunniPoint && vector.distance(point, trueTunniPoint) <= size) {
+        return {
+          tunniPoint: trueTunniPoint,
+          segment,
+          segmentPoints: segment.points,
+          contourIndex,
+          hitType: "true-tunni-point",
+        };
+      }
+
+      if (visualTunniPoint && vector.distance(point, visualTunniPoint) <= size) {
+        return {
+          tunniPoint: visualTunniPoint,
+          segment,
+          segmentPoints: segment.points,
+          contourIndex,
+          hitType: "tunni-point",
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+async function equalizeThenQuantizeSegmentControlPoints(
+  segment,
+  segmentPoints,
+  sceneController
+) {
+  const equalizedControlPoints = calculateEqualizedControlPoints(segmentPoints);
+  const quantizedControlPoints = [
+    snapToGrid(equalizedControlPoints[0]),
+    snapToGrid(equalizedControlPoints[1]),
+  ];
+
+  await sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+    let changed = false;
+    for (const layerGlyph of Object.values(layerGlyphs)) {
+      const path = layerGlyph.path;
+      if (!path || !segment?.parentPointIndices) {
+        continue;
+      }
+
+      const controlPoint1Index = segment.parentPointIndices[1];
+      const controlPoint2Index = segment.parentPointIndices[2];
+      if (controlPoint1Index === undefined || controlPoint2Index === undefined) {
+        continue;
+      }
+
+      const cp1 = path.getPoint(controlPoint1Index);
+      const cp2 = path.getPoint(controlPoint2Index);
+      if (!cp1 || !cp2) {
+        continue;
+      }
+
+      const q1 = quantizedControlPoints[0];
+      const q2 = quantizedControlPoints[1];
+
+      if (cp1.x !== q1.x || cp1.y !== q1.y) {
+        path.setPointPosition(controlPoint1Index, q1.x, q1.y);
+        changed = true;
+      }
+      if (cp2.x !== q2.x || cp2.y !== q2.y) {
+        path.setPointPosition(controlPoint2Index, q2.x, q2.y);
+        changed = true;
+      }
+    }
+
+    return changed ? "Equalize and Quantize Tunni Control Points" : undefined;
+  });
+}
+
+function handleTunniPointMouseDown(initialEvent, sceneController, visualizationLayerSettings) {
+  if (
+    !visualizationLayerSettings.model["fontra.tunni.combined"] &&
+    !visualizationLayerSettings.model["fontra.tunni.actual.points"]
+  ) {
+    return null;
+  }
+
+  const point = sceneController.localPoint(initialEvent);
+  const size = sceneController.mouseClickMargin;
+  const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+  if (!positionedGlyph) {
+    return null;
+  }
+
+  const glyphPoint = {
+    x: point.x - positionedGlyph.x,
+    y: point.y - positionedGlyph.y,
+  };
+  const hit = tunniLayerHitTest(glyphPoint, size, positionedGlyph, {
+    editLayerName: sceneController.sceneModel?.sceneSettings?.editLayerName,
+  });
+  if (!hit) {
+    return null;
+  }
+
+  const [initialOnPoint1, initialOffPoint1, initialOffPoint2, initialOnPoint2] = hit.segmentPoints.map(
+    (segmentPoint) => ({ ...segmentPoint })
+  );
+  const initialVector1 = {
+    x: initialOffPoint1.x - initialOnPoint1.x,
+    y: initialOffPoint1.y - initialOnPoint1.y,
+  };
+  const initialVector2 = {
+    x: initialOffPoint2.x - initialOnPoint2.x,
+    y: initialOffPoint2.y - initialOnPoint2.y,
+  };
+  const length1 = Math.hypot(initialVector1.x, initialVector1.y);
+  const length2 = Math.hypot(initialVector2.x, initialVector2.y);
+  const unitVector1 =
+    length1 > 0 ? { x: initialVector1.x / length1, y: initialVector1.y / length1 } : { x: 1, y: 0 };
+  const unitVector2 =
+    length2 > 0 ? { x: initialVector2.x / length2, y: initialVector2.y / length2 } : { x: 1, y: 0 };
+
+  const fortyFiveVector = {
+    x: (unitVector1.x + unitVector2.x) / 2,
+    y: (unitVector1.y + unitVector2.y) / 2,
+  };
+  const fortyFiveLength = Math.hypot(fortyFiveVector.x, fortyFiveVector.y);
+  if (fortyFiveLength > 0) {
+    fortyFiveVector.x /= fortyFiveLength;
+    fortyFiveVector.y /= fortyFiveLength;
+  }
+
+  const path = positionedGlyph.glyph.path;
+  const controlPoint1Index = hit.segment.parentPointIndices[1];
+  const controlPoint2Index = hit.segment.parentPointIndices[2];
+  const originalControlPoints =
+    controlPoint1Index !== undefined && controlPoint2Index !== undefined
+      ? {
+          controlPoint1Index,
+          controlPoint2Index,
+          originalControlPoint1: { ...path.getPoint(controlPoint1Index) },
+          originalControlPoint2: { ...path.getPoint(controlPoint2Index) },
+        }
+      : null;
+
+  return {
+    initialMousePosition: glyphPoint,
+    initialOnPoint1,
+    initialOffPoint1,
+    initialOffPoint2,
+    initialOnPoint2,
+    initialVector1,
+    initialVector2,
+    unitVector1,
+    unitVector2,
+    fortyFiveVector,
+    selectedSegment: hit.segment,
+    originalSegmentPoints: [...hit.segmentPoints],
+    originalControlPoints,
+    tunniPointHit: hit,
+  };
+}
+
+function calculateTunniPointDragChanges(event, initialState, sceneController, gridSnapEnabled = false) {
+  if (
+    !initialState?.initialMousePosition ||
+    !initialState?.initialOffPoint1 ||
+    !initialState?.initialOffPoint2 ||
+    !initialState?.selectedSegment ||
+    !initialState?.originalSegmentPoints
+  ) {
+    return null;
+  }
+
+  const point = sceneController.localPoint(event);
+  const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+  if (!positionedGlyph) {
+    return null;
+  }
+  const glyphPoint = {
+    x: point.x - positionedGlyph.x,
+    y: point.y - positionedGlyph.y,
+  };
+  const mouseDelta = {
+    x: glyphPoint.x - initialState.initialMousePosition.x,
+    y: glyphPoint.y - initialState.initialMousePosition.y,
+  };
+
+  const segment = makeSegmentFromSegmentPoints(initialState.originalSegmentPoints);
+  const newControlPoints = calculateSkeletonControlPointsFromTunniDelta(
+    mouseDelta,
+    segment,
+    !event.altKey
+  );
+  if (!newControlPoints) {
+    return null;
+  }
+
+  let [newControlPoint1, newControlPoint2] = newControlPoints;
+
+  if (gridSnapEnabled) {
+    newControlPoint1 = snapToGrid(newControlPoint1);
+    newControlPoint2 = snapToGrid(newControlPoint2);
+  }
+
+  return {
+    controlPoint1Index: initialState.selectedSegment.parentPointIndices[1],
+    controlPoint2Index: initialState.selectedSegment.parentPointIndices[2],
+    newControlPoint1,
+    newControlPoint2,
+  };
+}
+
+function handleTrueTunniPointMouseDown(initialEvent, sceneController, visualizationLayerSettings) {
+  const initialState = handleTunniPointMouseDown(
+    initialEvent,
+    sceneController,
+    visualizationLayerSettings
+  );
+  if (!initialState?.tunniPointHit || initialState.tunniPointHit.hitType !== "true-tunni-point") {
+    return null;
+  }
+  return {
+    ...initialState,
+    hitType: "true-tunni-point",
+  };
+}
+
+function calculateTrueTunniPointDragChanges(
+  event,
+  initialState,
+  sceneController,
+  gridSnapEnabled = false
+) {
+  if (
+    !initialState?.initialMousePosition ||
+    !initialState?.initialOnPoint1 ||
+    !initialState?.initialOnPoint2 ||
+    !initialState?.selectedSegment ||
+    !initialState?.originalSegmentPoints
+  ) {
+    return null;
+  }
+
+  const point = sceneController.localPoint(event);
+  const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+  if (!positionedGlyph) {
+    return null;
+  }
+  const glyphPoint = {
+    x: point.x - positionedGlyph.x,
+    y: point.y - positionedGlyph.y,
+  };
+  const mouseDelta = {
+    x: glyphPoint.x - initialState.initialMousePosition.x,
+    y: glyphPoint.y - initialState.initialMousePosition.y,
+  };
+
+  const segment = makeSegmentFromSegmentPoints(initialState.originalSegmentPoints);
+  const originalTrueTunniPoint = calculateTrueTunniPoint(initialState.originalSegmentPoints);
+  if (!segment || !originalTrueTunniPoint) {
+    return null;
+  }
+  const result = calculateSkeletonOnCurveFromTunni(
+    {
+      x: originalTrueTunniPoint.x + mouseDelta.x,
+      y: originalTrueTunniPoint.y + mouseDelta.y,
+    },
+    segment,
+    !event.altKey
+  );
+  if (!result) {
+    return null;
+  }
+
+  let newOnPoint1 = result.newStartPoint;
+  let newOnPoint2 = result.newEndPoint;
+  if (gridSnapEnabled) {
+    newOnPoint1 = snapToGrid(newOnPoint1);
+    newOnPoint2 = snapToGrid(newOnPoint2);
+  }
+
+  return {
+    onPoint1Index: initialState.selectedSegment.parentPointIndices[0],
+    onPoint2Index: initialState.selectedSegment.parentPointIndices[3],
+    newOnPoint1,
+    newOnPoint2,
+    controlPoint1Index: initialState.originalControlPoints.controlPoint1Index,
+    controlPoint2Index: initialState.originalControlPoints.controlPoint2Index,
+    newControlPoint1: initialState.initialOffPoint1,
+    newControlPoint2: initialState.initialOffPoint2,
+  };
 }
 
 // Editable-generated helper block
@@ -1969,10 +2590,210 @@ async function runRegularPointLikeAdapter({
 }
 
 async function runFallbackTunniDrag({ pointerTool, eventStream, initialEvent }) {
-  const handled = await pointerTool._handleTunniPointDrag(eventStream, initialEvent);
-  if (handled === false) {
+  const sceneController = pointerTool.sceneController;
+  const isTunniCombinedLayerActive =
+    pointerTool.editor.visualizationLayersSettings.model["fontra.tunni.combined"];
+  const isTunniActualLayerActive =
+    pointerTool.editor.visualizationLayersSettings.model["fontra.tunni.actual.points"];
+  let tunniInitialState = null;
+  let isTrueTunniPoint = false;
+
+  if (isTunniCombinedLayerActive || isTunniActualLayerActive) {
+    if (isTunniActualLayerActive) {
+      tunniInitialState = handleTrueTunniPointMouseDown(
+        initialEvent,
+        sceneController,
+        pointerTool.editor.visualizationLayersSettings
+      );
+      if (tunniInitialState) {
+        isTrueTunniPoint = true;
+      }
+    }
+    if (!tunniInitialState && isTunniCombinedLayerActive) {
+      tunniInitialState = handleTunniPointMouseDown(
+        initialEvent,
+        sceneController,
+        pointerTool.editor.visualizationLayersSettings
+      );
+    }
+  }
+
+  if (!tunniInitialState) {
     return false;
   }
+
+  if (!isTrueTunniPoint && initialEvent.ctrlKey && initialEvent.shiftKey) {
+    await equalizeThenQuantizeSegmentControlPoints(
+      tunniInitialState.tunniPointHit.segment,
+      tunniInitialState.originalSegmentPoints,
+      sceneController
+    );
+    return true;
+  }
+
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    let finalChanges = null;
+    const layerInfo = Object.entries(
+      sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+    ).map(([layerName, layerGlyph]) => ({
+      layerName,
+      layerGlyph,
+      changePath: ["layers", layerName, "glyph"],
+    }));
+
+    assert(layerInfo.length >= 1, "no layer to edit");
+
+    let originalOnPoint1;
+    let originalOnPoint2;
+    if (isTrueTunniPoint) {
+      originalOnPoint1 = {
+        ...layerInfo[0].layerGlyph.path.getPoint(
+          tunniInitialState.selectedSegment.parentPointIndices[0]
+        ),
+      };
+      originalOnPoint2 = {
+        ...layerInfo[0].layerGlyph.path.getPoint(
+          tunniInitialState.selectedSegment.parentPointIndices[3]
+        ),
+      };
+    } else {
+      originalOnPoint1 = {
+        ...layerInfo[0].layerGlyph.path.getPoint(
+          tunniInitialState.originalControlPoints.controlPoint1Index
+        ),
+      };
+      originalOnPoint2 = {
+        ...layerInfo[0].layerGlyph.path.getPoint(
+          tunniInitialState.originalControlPoints.controlPoint2Index
+        ),
+      };
+    }
+
+    for await (const event of eventStream) {
+      if (event.type === "mouseup") {
+        break;
+      }
+      if (event.type !== "mousemove") {
+        continue;
+      }
+
+      const dragChanges = isTrueTunniPoint
+        ? calculateTrueTunniPointDragChanges(
+            event,
+            tunniInitialState,
+            sceneController,
+            sceneController.sceneSettings?.gridSnapEnabled
+          )
+        : calculateTunniPointDragChanges(
+            event,
+            tunniInitialState,
+            sceneController,
+            sceneController.sceneSettings?.gridSnapEnabled
+          );
+
+      if (!dragChanges) {
+        continue;
+      }
+
+      finalChanges = dragChanges;
+      const deepEditChanges = [];
+      for (const layer of layerInfo) {
+        const tempChanges = isTrueTunniPoint
+          ? [
+              { f: "=xy", a: [dragChanges.onPoint1Index, dragChanges.newOnPoint1.x, dragChanges.newOnPoint1.y] },
+              { f: "=xy", a: [dragChanges.onPoint2Index, dragChanges.newOnPoint2.x, dragChanges.newOnPoint2.y] },
+              { f: "=xy", a: [dragChanges.controlPoint1Index, dragChanges.newControlPoint1.x, dragChanges.newControlPoint1.y] },
+              { f: "=xy", a: [dragChanges.controlPoint2Index, dragChanges.newControlPoint2.x, dragChanges.newControlPoint2.y] },
+            ]
+          : [
+              { f: "=xy", a: [dragChanges.controlPoint1Index, dragChanges.newControlPoint1.x, dragChanges.newControlPoint1.y] },
+              { f: "=xy", a: [dragChanges.controlPoint2Index, dragChanges.newControlPoint2.x, dragChanges.newControlPoint2.y] },
+            ];
+
+        for (const tempChange of tempChanges) {
+          applyChange(layer.layerGlyph.path, tempChange);
+        }
+        deepEditChanges.push(consolidateChanges(tempChanges, [...layer.changePath, "path"]));
+      }
+
+      await sendIncrementalChange(consolidateChanges(deepEditChanges), true);
+    }
+
+    if (!finalChanges) {
+      return;
+    }
+
+    const finalLayerChanges = [];
+    const rollbackChanges = [];
+    for (const layer of layerInfo) {
+      let finalChangesForLayer;
+      let rollbackChangesForLayer;
+      if (isTrueTunniPoint) {
+        finalChangesForLayer = [
+          { f: "=xy", a: [finalChanges.onPoint1Index, finalChanges.newOnPoint1.x, finalChanges.newOnPoint1.y] },
+          { f: "=xy", a: [finalChanges.onPoint2Index, finalChanges.newOnPoint2.x, finalChanges.newOnPoint2.y] },
+          { f: "=xy", a: [finalChanges.controlPoint1Index, finalChanges.newControlPoint1.x, finalChanges.newControlPoint1.y] },
+          { f: "=xy", a: [finalChanges.controlPoint2Index, finalChanges.newControlPoint2.x, finalChanges.newControlPoint2.y] },
+        ];
+        rollbackChangesForLayer = [
+          { f: "=xy", a: [finalChanges.onPoint1Index, originalOnPoint1.x, originalOnPoint1.y] },
+          { f: "=xy", a: [finalChanges.onPoint2Index, originalOnPoint2.x, originalOnPoint2.y] },
+          {
+            f: "=xy",
+            a: [
+              finalChanges.controlPoint1Index,
+              tunniInitialState.originalControlPoints.originalControlPoint1.x,
+              tunniInitialState.originalControlPoints.originalControlPoint1.y,
+            ],
+          },
+          {
+            f: "=xy",
+            a: [
+              finalChanges.controlPoint2Index,
+              tunniInitialState.originalControlPoints.originalControlPoint2.x,
+              tunniInitialState.originalControlPoints.originalControlPoint2.y,
+            ],
+          },
+        ];
+      } else {
+        finalChangesForLayer = [
+          { f: "=xy", a: [finalChanges.controlPoint1Index, finalChanges.newControlPoint1.x, finalChanges.newControlPoint1.y] },
+          { f: "=xy", a: [finalChanges.controlPoint2Index, finalChanges.newControlPoint2.x, finalChanges.newControlPoint2.y] },
+        ];
+        rollbackChangesForLayer = [
+          {
+            f: "=xy",
+            a: [
+              tunniInitialState.originalControlPoints.controlPoint1Index,
+              tunniInitialState.originalControlPoints.originalControlPoint1.x,
+              tunniInitialState.originalControlPoints.originalControlPoint1.y,
+            ],
+          },
+          {
+            f: "=xy",
+            a: [
+              tunniInitialState.originalControlPoints.controlPoint2Index,
+              tunniInitialState.originalControlPoints.originalControlPoint2.x,
+              tunniInitialState.originalControlPoints.originalControlPoint2.y,
+            ],
+          },
+        ];
+      }
+
+      finalLayerChanges.push(consolidateChanges(finalChangesForLayer, [...layer.changePath, "path"]));
+      rollbackChanges.push(consolidateChanges(rollbackChangesForLayer, [...layer.changePath, "path"]));
+    }
+
+    return {
+      changes: ChangeCollector.fromChanges(
+        consolidateChanges(finalLayerChanges),
+        consolidateChanges(rollbackChanges)
+      ),
+      undoLabel: isTrueTunniPoint ? "Move On-Curve Points via Tunni" : "Move Tunni Points",
+      broadcast: true,
+    };
+  });
+
   return true;
 }
 

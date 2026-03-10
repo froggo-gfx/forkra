@@ -13,6 +13,11 @@ Important scope rule:
 - they must not bypass the pipeline by reintroducing pointer-owned execution
 - do not describe Tunni as a "fallback" architecture; it is a specialized routed domain
 
+Execution rule:
+- architecture gates close before behavior changes start
+- a gate is not closed while a disallowed owner, disallowed file, or adapter -> pointer bounce-back still exists
+- completion must be verified mechanically against explicit conditions, not inferred from most of the work being done
+
 ---
 
 ## Part 1: Desired File Structure

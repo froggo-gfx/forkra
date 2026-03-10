@@ -17,7 +17,7 @@ import {
   buildSegmentsFromSkeletonPoints,
   calculateSkeletonTunniPoint,
   calculateSkeletonTrueTunniPoint,
-} from "./skeleton-tunni-calculations.js";
+} from "./edit-behavior-adapters.js";
 
 const DEFAULT_SKELETON_WIDTH = 80;
 

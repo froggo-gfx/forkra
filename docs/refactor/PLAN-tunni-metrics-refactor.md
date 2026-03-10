@@ -83,6 +83,34 @@ Required entry format for `docs/refactor/progress-report-tunni-metrics.md`:
 
 ---
 
+## Execution Rule For This Plan
+
+This chapter follows hard gates.
+
+Rule:
+
+- do not start the next architecture step until the current one is mechanically complete
+- do not switch from architecture cleanup to behavior changes until the current architecture gate is closed
+- if a disallowed owner, disallowed file, or bounce-back path is still live, the step is incomplete
+- report incompleteness explicitly; do not describe it as "remaining cleanup" after moving on
+
+Mechanical completion means the step has explicit verification conditions and those conditions are checked.
+
+Typical gate checks for this chapter:
+
+- no pointer-owned Tunni execution methods for the route being migrated
+- no standalone Tunni sidecar file outside the approved target architecture
+- no adapter delegation back into pointer for Tunni execution
+- one allowed shared Tunni math owner, not parallel implementations
+
+Working consequence:
+
+- architecture first
+- behavior unification second
+- progress reporting only after the gate is actually closed
+
+---
+
 ## Phase 0: Lock Scope, Reporting, And Baseline Before Touching Ownership
 
 ### Broad Problem
