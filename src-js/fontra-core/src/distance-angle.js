@@ -4,6 +4,13 @@
 // Import necessary functions from vector.js for the new functions
 import { intersect, distance, addVectors, subVectors, normalizeVector } from "./vector.js";
 import { getSkeletonData } from "./skeleton-contour-generator.js";
+import {
+  calculateTunniPoint,
+  calculateTrueTunniPoint,
+  calculateEqualizedControlPoints,
+  calculateControlHandleDistance,
+  areDistancesEqualized,
+} from "./tunni-calculations.js";
 
 // Color constants for distance-angle visualization
 export const DISTANCE_ANGLE_COLOR = "rgba(0, 153, 255, 0.75)"; // Similar to Glyphs plugin color
@@ -108,6 +115,13 @@ export function calculateManhattanDistance(point1, point2) {
   const dx = Math.abs(point2.x - point1.x);
   const dy = Math.abs(point2.y - point1.y);
   return dx + dy;
+}
+
+export function calculateProjectedDistanceComponents(point1, point2) {
+  return {
+    dx: Math.abs(point2.x - point1.x),
+    dy: Math.abs(point2.y - point1.y),
+  };
 }
 
 // Calculate the dimensions needed for the info badge
@@ -965,145 +979,40 @@ function parseSelection(selection) {
   }
   return result;
 }
-// Additional tension calculation functions that need to be imported from tunni-calculations.js
 
-/**
- * Calculate the true intersection-based Tunni point where rays from on-curve points intersect
- * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
- * @returns {Object|null} The intersection point or null if lines are parallel
- */
-export function calculateTrueTunniPoint(segmentPoints) {
-  // segmentPoints should be an array of 4 points: [start, control1, control2, end]
-  if (segmentPoints.length !== 4) {
-    throw new Error("Segment must have exactly 4 points");
+export function calculateHandleMeasure(segmentPoints, hoveredHandleSide) {
+  if (!segmentPoints || segmentPoints.length !== 4) {
+    return null;
   }
-  
-  const [p1, p2, p3, p4] = segmentPoints;
-  
-  // Calculate unit vectors for the original directions
-  const dir1 = normalizeVector(subVectors(p2, p1));
-  const dir2 = normalizeVector(subVectors(p3, p4));
-  
-  // Calculate the intersection point of the lines along the fixed directions
-  // This represents where the lines would intersect if extended infinitely
-  const line1Start = p1;
-  const line1End = addVectors(p1, dir1);
-  const line2Start = p4;
-  const line2End = addVectors(p4, dir2);
-  
-  // Calculate intersection of the lines along the fixed directions
-  const intersection = intersect(line1Start, line1End, line2Start, line2End);
-  
-  return intersection;
-}
+  if (hoveredHandleSide !== "start" && hoveredHandleSide !== "end") {
+    return null;
+  }
 
-/**
- * Calculate new control points with equalized tensions using arithmetic mean
- * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
- * @returns {Array} Array of 2 new control points
- */
-export function calculateEqualizedControlPoints(segmentPoints) {
-  const [p1, p2, p3, p4] = segmentPoints;
-  
-  const pt = calculateTrueTunniPoint(segmentPoints); // <- true Tunni point
-  if (!pt) return [p2, p3];
+  const [onStart, offStart, offEnd, onEnd] = segmentPoints;
+  const anchorPoint = hoveredHandleSide === "start" ? onStart : onEnd;
+  const handlePoint = hoveredHandleSide === "start" ? offStart : offEnd;
+  const oppositeAnchor = hoveredHandleSide === "start" ? onEnd : onStart;
+  const oppositeHandle = hoveredHandleSide === "start" ? offEnd : offStart;
+  const { distance, angle } = calculateDistanceAndAngle(anchorPoint, handlePoint);
+  const tension = calculateTension(
+    handlePoint,
+    anchorPoint,
+    oppositeHandle,
+    oppositeAnchor
+  );
 
-  const dist1ToPt = distance(p1, pt);
-  const dist4ToPt = distance(p4, pt);
-  if (dist1ToPt <= 0 || dist4ToPt <= 0) return [p2, p3];
-
-  // current tensions
-  const t1 = distance(p1, p2) / dist1ToPt;
-  const t2 = distance(p4, p3) / dist4ToPt;
-
-  const targetTension = (t1 + t2) / 2;
-
-  // directions are fixed
-  const dir1 = normalizeVector(subVectors(p2, p1));
-  const dir2 = normalizeVector(subVectors(p3, p4));
-
-  // new distances to hit equal tension
-  const newDist1 = targetTension * dist1ToPt;
-  const newDist2 = targetTension * dist4ToPt;
-
-  const newP2 = {
-    x: p1.x + newDist1 * dir1.x,
-    y: p1.y + newDist1 * dir1.y
+  return {
+    distance,
+    angle,
+    tension: Number.isFinite(tension) ? tension : null,
   };
-
-  const newP3 = {
-    x: p4.x + newDist2 * dir2.x,
-    y: p4.y + newDist2 * dir2.y
-  };
-  
-  return [newP2, newP3];
 }
-
-/**
- * Calculate the Euclidean distance between the two control points of a cubic segment
- * @param {Array} segmentPoints - Array of 4 points representing a cubic segment: [start, control1, control2, end]
- * @returns {number} The Euclidean distance between the two control points
- */
-export function calculateControlHandleDistance(segmentPoints) {
-  // Validate that the segment is cubic (4 points)
-  if (!Array.isArray(segmentPoints) || segmentPoints.length !== 4) {
-    throw new Error("Segment must be an array of exactly 4 points");
-  }
-  
-  // Extract the control points (indices 1 and 2)
-  const controlPoint1 = segmentPoints[1];
-  const controlPoint2 = segmentPoints[2];
-  
-  // Validate that control points exist and have x,y coordinates
-  if (!controlPoint1 || !controlPoint2 ||
-      typeof controlPoint1.x !== 'number' || typeof controlPoint1.y !== 'number' ||
-      typeof controlPoint2.x !== 'number' || typeof controlPoint2.y !== 'number') {
-    throw new Error("Control points must have valid x and y coordinates");
-  }
-  
-  // Calculate and return the Euclidean distance between the control points
-  return distance(controlPoint1, controlPoint2);
-}
-
-/**
- * Check if the distances of control points in a segment are already equalized
- * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
- * @returns {boolean} - True if distances are already equalized, false otherwise
- */
-export function areDistancesEqualized(segmentPoints) {
-  const [p1, p2, p3, p4] = segmentPoints;
-  
-  // Calculate distances from on-curve points to off-curve points
-  const dist1 = distance(p1, p2);
-  const dist2 = distance(p4, p3);
-  
-  // Check if distances are equal within a small tolerance
-  const tolerance = 0.01; // Small tolerance for floating point comparison
-  return Math.abs(dist1 - dist2) < tolerance;
-}
-
-/**
- * Calculate a Tunni point (midpoint between the two control points)
- * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
- * @returns {Object} The Tunni point (midpoint between control points)
- */
-export function calculateTunniPointz(segmentPoints) {
-  // segmentPoints should be an array of 4 points: [start, control1, control2, end]
-  if (segmentPoints.length !== 4) {
-    throw new Error("Segment must have exactly 4 points");
-  }
-  
-  const [p1, p2, p3, p4] = segmentPoints;
-  
-  // Calculate a point along the line segment between the two control points (p2 and p3)
-  // This is the midpoint by default, but can be adjusted as needed
-  const tunniPoint = {
-    x: (p2.x + p3.x) / 2,
-    y: (p2.y + p3.y) / 2
-  };
-  
-  return tunniPoint;
-}
+export {
+  calculateTrueTunniPoint,
+  calculateEqualizedControlPoints,
+  calculateControlHandleDistance,
+  areDistancesEqualized,
+};
 
 // Helper functions needed for drawTunniHandleDistance
 // Note: This function is already exported elsewhere, so we'll remove this duplicate
@@ -1174,7 +1083,7 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
             const p4 = segment.points[3];  // on-curve end point
             
             // Calculate Tunni point for visualization (keep midpoint)
-            const visualPt = calculateTunniPointz(segment.points);
+            const visualPt = calculateTunniPoint(segment.points);
 
             // Calculate true Tunni point for tension calculations
             const truePt = calculateTrueTunniPoint(segment.points);

@@ -33,6 +33,8 @@ import { VarPackedPath } from "@fontra/core/var-path.js";
 import {
   unitVectorFromTo,
   calculateDistanceAndAngle,
+  calculateProjectedDistanceComponents,
+  calculateHandleMeasure,
   calculateBadgeDimensions,
   calculateBadgePosition,
   formatDistanceAndAngle,
@@ -43,7 +45,6 @@ import {
   calculateTension,
   calculateOffCurveAngle,
   formatDistanceTensionAngle,
-  calculateTunniPointz,
   calculateControlHandleDistance,
   drawTunniLabels,
   DISTANCE_ANGLE_COLOR,
@@ -2321,12 +2322,14 @@ registerVisualizationLayerDefinition({
     if (measureHoverHandle) {
       const { p1, p2, type } = measureHoverHandle;
       const segmentColor = type === "skeleton" ? parameters.skeletonColor : parameters.pathColor;
-      const dx = p1.x - p2.x;
-      const dy = p1.y - p2.y;
-      const dist = Math.hypot(dx, dy);
-      let angle = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
-      if (angle > 90) angle = 180 - angle;
-      const tension = calculateHandleMeasureTension(measureHoverHandle);
+      const tensionContext = measureHoverHandle.tensionContext;
+      const handleMeasure = calculateHandleMeasure(
+        tensionContext?.segmentPoints,
+        tensionContext?.hoveredHandleSide
+      );
+      const dist = handleMeasure?.distance ?? calculateDistanceAndAngle(p2, p1).distance;
+      const angle = handleMeasure?.angle ?? calculateDistanceAndAngle(p2, p1).angle;
+      const tension = handleMeasure?.tension ?? null;
       const tensionText = tension == null ? "n/a" : tension.toFixed(2);
       const label = `${dist.toFixed(1)}\n${tensionText}\n${angle.toFixed(1)}\u00B0`;
       drawMeasureGuideLine(context, p2, p1, segmentColor, parameters);
@@ -2345,17 +2348,12 @@ registerVisualizationLayerDefinition({
 
       if (measureShowDirect) {
         // Alt+Q: direct distance line + angle
-        const dx = p2.x - p1.x;
-        const dy = p2.y - p1.y;
-        const dist = Math.hypot(dx, dy);
-        let angle = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
-        if (angle > 90) angle = 180 - angle;
+        const { distance: dist, angle } = calculateDistanceAndAngle(p1, p2);
         const label = `${dist.toFixed(1)}  ${angle.toFixed(1)}\u00B0`;
         drawMeasureLine(context, p1, p2, label, segmentColor, parameters);
       } else {
         // Q: projected distances (dx, dy)
-        const dx = Math.abs(p2.x - p1.x);
-        const dy = Math.abs(p2.y - p1.y);
+        const { dx, dy } = calculateProjectedDistanceComponents(p1, p2);
 
         // Determine corner point based on segment orientation
         const cornerPoint = { x: p2.x, y: p1.y };
@@ -2439,43 +2437,6 @@ function drawMeasureGuideLine(context, p1, p2, color, parameters) {
   context.setLineDash(parameters.dashPattern);
   strokeLine(context, p1.x, p1.y, p2.x, p2.y);
   context.setLineDash([]);
-}
-
-function calculateHandleMeasureTension(measureHoverHandle) {
-  const tensionContext = measureHoverHandle?.tensionContext;
-  const segment = tensionContext?.segmentPoints;
-  const side = tensionContext?.hoveredHandleSide;
-  if (!segment || segment.length !== 4) {
-    return null;
-  }
-  if (side !== "start" && side !== "end") {
-    return null;
-  }
-  const [onStart, offStart, offEnd, onEnd] = segment;
-  const trueTunniPoint = calculateTrueTunniPoint(segment);
-  const fallbackMidpoint = {
-    x: (offStart.x + offEnd.x) / 2,
-    y: (offStart.y + offEnd.y) / 2,
-  };
-  const tensionPoint = trueTunniPoint || fallbackMidpoint;
-  const anchorPoint = side === "start" ? onStart : onEnd;
-  const handlePoint = side === "start" ? offStart : offEnd;
-  const denominator = Math.hypot(
-    tensionPoint.x - anchorPoint.x,
-    tensionPoint.y - anchorPoint.y
-  );
-  if (denominator <= 1e-9) {
-    return null;
-  }
-  const numerator = Math.hypot(
-    handlePoint.x - anchorPoint.x,
-    handlePoint.y - anchorPoint.y
-  );
-  if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) {
-    return null;
-  }
-  const tension = numerator / denominator;
-  return Number.isFinite(tension) ? tension : null;
 }
 
 

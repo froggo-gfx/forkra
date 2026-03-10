@@ -124,6 +124,25 @@ Write down one explicit statement of current reality before any code move:
 
 This step is documentation only.
 
+#### Explicit Scope Lock Statement
+
+Current branch reality for this chapter:
+
+- the broad unified-behavior refactor is already complete and recorded in `docs/refactor/progress-report-broad.md`
+- the cleanup/optimization chapter is already complete and recorded in `docs/refactor/progress-report-beautify.md`
+- registry -> composer -> adapters is already the accepted routing shape for this branch
+- regular and skeleton Tunni already exist on that routing surface as supported fallback drag object kinds
+- Tunni still has honest remaining problems, but those problems are about execution ownership, geometry duplication, and editor/core boundaries
+- Q-measure still belongs to the pointer/scene-model hover+mode surface, not to the unified point-like drag/nudge pipeline
+- this chapter must not reopen the finished broad migration or invent a new canonical point-like route family for Q-measure
+
+Old-plan assumptions that are explicitly rejected for this branch:
+
+- "Tunni still needs fresh routing architecture"
+- "pointer decomposition is the main unfinished goal"
+- "Q-measure should be pulled into composer/adapters just because those modules now exist"
+- "this chapter should continue the broad drag/nudge migration"
+
 #### Code Evidence
 
 Current branch evidence to cite:
@@ -191,6 +210,21 @@ Write these as non-negotiable constraints for the whole chapter:
 
 Allow wrappers and translation layers to differ, but do not allow duplicated core math implementations.
 
+#### Hard Requirements Locked For All Later Steps
+
+The following constraints are mandatory for the rest of this chapter:
+
+1. Regular Tunni math and skeleton Tunni math must converge to one shared geometry implementation file.
+2. Q-measure math and distance-angle math must converge to one shared implementation file.
+3. Editor-facing wrappers may remain separate when selection shape, drawing, or interaction flow differs.
+4. Wrapper separation is not allowed to preserve duplicated formulas or duplicated geometry ownership.
+5. No later step is complete if it only moves code around while leaving the duplicate math implementations alive.
+
+Practical reading rule for all later phases:
+
+- if a step improves ownership but leaves two live math implementations for the same domain, that step is incomplete
+- if a step changes wrappers but keeps one domain-level math source of truth, that is acceptable
+
 #### Code Evidence
 
 Current split that must be collapsed:
@@ -248,6 +282,24 @@ Pick one file target per shared-math domain and lock it:
 
 Wrappers can stay in separate editor/core modules, but math implementation must be unique per domain.
 
+#### Locked Single-File Targets
+
+For this chapter, the single-file targets are:
+
+- Tunni shared geometry target: `src-js/fontra-core/src/tunni-calculations.js`
+- Measure shared geometry target: `src-js/fontra-core/src/distance-angle.js`
+
+Why these targets are locked now:
+
+- both domains need one honest existing owner before interaction ownership starts moving
+- both targets reduce file split instead of adding another delegation layer
+- neither target claims editor interaction ownership, scene access, or visualization ownership
+
+Compatibility rule during migration:
+
+- wrapper files may temporarily delegate into these existing targets while call sites are being moved
+- the temporary compatibility phase ends when the old duplicate implementations are removed
+
 #### Code Evidence
 
 Current split to collapse:
@@ -277,7 +329,7 @@ Expected result:
 
 ---
 
-### Step 1.2: Create one shared Tunni geometry file and move shared regular+skeleton math there
+### Step 1.2: Converge shared regular+skeleton Tunni math into the existing core owner
 
 #### Problem Aspect
 
@@ -287,13 +339,13 @@ The current code has multiple Tunni geometry sources:
 - `skeleton-tunni-calculations.js` (skeleton)
 - `distance-angle.js` (leftovers)
 
-That makes every later cleanup step harder because no file is the honest source of truth.
+That makes every later cleanup step harder because no existing file is the honest source of truth.
 
 #### Proposed Solution (Plain Language)
 
-Create one shared Tunni geometry file (recommended: `src-js/fontra-core/src/tunni-geometry.js`).
+Use the existing core Tunni owner, `src-js/fontra-core/src/tunni-calculations.js`, as the single shared math home.
 
-Move shared regular+skeleton geometry there.
+Move shared regular+skeleton geometry into that file and make other touched files delegate to it where needed.
 
 Do not move:
 
@@ -312,7 +364,7 @@ Do not leave two math implementations for the same formulas after this phase.
 Target direction:
 
 ```js
-// src-js/fontra-core/src/tunni-geometry.js (shared by regular + skeleton)
+// src-js/fontra-core/src/tunni-calculations.js (shared by regular + skeleton math)
 export function calculateMidpointTunni(segmentPoints) {}
 export function calculateTrueTunniPoint(segmentPoints) {}
 export function calculateControlPointsFromTunni(...) {}
@@ -322,15 +374,8 @@ export function calculateControlHandleDistance(...) {}
 export function areControlHandleDistancesEqualized(...) {}
 ```
 
-Bad legacy naming to remove during this phase:
-
-```js
-calculateTunniPointz(...)
-```
-
 #### Files To Touch
 
-- `src-js/fontra-core/src/tunni-geometry.js`
 - `src-js/fontra-core/src/tunni-calculations.js`
 - `src-js/views-editor/src/skeleton-tunni-calculations.js`
 - `src-js/fontra-core/src/distance-angle.js`
@@ -353,7 +398,7 @@ Expected result:
 
 ---
 
-### Step 1.3: Create one shared measure-geometry file and route both Q-measure and distance-angle math through it
+### Step 1.3: Converge shared measure math into one existing owner and route both Q-measure and distance-angle through it
 
 #### Problem Aspect
 
@@ -361,7 +406,7 @@ Even if Tunni is unified, measure math can still drift if Q-measure and distance
 
 #### Proposed Solution (Plain Language)
 
-Create one shared measure-geometry file (for example `src-js/fontra-core/src/measure-geometry.js`) and route both Q-measure and distance-angle math through it.
+Use one existing shared owner for measure math and route both Q-measure and distance-angle math through it.
 
 Do not leave multiple measure-math implementations alive after this phase.
 
@@ -376,7 +421,6 @@ Current duplicate pressure in measure domain:
 #### Files To Touch
 
 - `src-js/fontra-core/src/distance-angle.js`
-- one shared measure-geometry file
 - Q-measure math call sites in editor-side code
 - `docs/refactor/progress-report-tunni-metrics.md`
 
@@ -1271,16 +1315,13 @@ Expected result:
 
 After all ownership moves, temporary names and stale aliases can still leave the code harder to trust than it should be.
 
-The worst visible example in this touch zone is `calculateTunniPointz`.
+One closeout check is that temporary or misleading names introduced in this touch zone are gone.
 
 #### Proposed Solution (Plain Language)
 
 Run one final naming and closeout sweep over the touched Tunni/Q files.
 
-Remove:
-
-- `calculateTunniPointz`
-- any touched temporary compatibility names that no longer have a reason to exist
+Remove any touched temporary compatibility names that no longer have a reason to exist.
 
 Then run the full chapter manual matrix.
 
@@ -1289,7 +1330,6 @@ Then run the full chapter manual matrix.
 Useful closeout checks:
 
 ```bash
-rg -n "calculateTunniPointz" src-js docs
 rg -n "_handleTunniPointDrag|_handleSkeletonTunniDrag|_equalizeSkeletonTunniTensions" src-js/views-editor/src
 rg -n "setTimeout\\(|allCheckboxes\\[0\\]|allCheckboxes\\[1\\]|allCheckboxes\\[2\\]" src-js/views-editor/src/panel-transformation.js
 ```

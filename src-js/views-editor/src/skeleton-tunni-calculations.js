@@ -12,8 +12,20 @@ import {
   addVectors,
   subVectors,
   normalizeVector,
-  mulVectorScalar,
 } from "@fontra/core/vector.js";
+import {
+  calculateTunniPoint,
+  calculateTrueTunniPoint,
+  calculateEqualizedControlPoints,
+} from "@fontra/core/tunni-calculations.js";
+
+function segmentToSegmentPoints(segment) {
+  if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
+    return null;
+  }
+  const { startPoint, endPoint, controlPoints } = segment;
+  return [startPoint, controlPoints[0], controlPoints[1], endPoint];
+}
 
 /**
  * Build segments from skeleton contour points.
@@ -100,15 +112,8 @@ export function buildSegmentsFromSkeletonPoints(points, isClosed) {
  * @returns {Object|null} Tunni point {x, y} or null if not a cubic segment
  */
 export function calculateSkeletonTunniPoint(segment) {
-  if (!segment.controlPoints || segment.controlPoints.length !== 2) {
-    return null;
-  }
-
-  const [cp1, cp2] = segment.controlPoints;
-  return {
-    x: (cp1.x + cp2.x) / 2,
-    y: (cp1.y + cp2.y) / 2,
-  };
+  const segmentPoints = segmentToSegmentPoints(segment);
+  return segmentPoints ? calculateTunniPoint(segmentPoints) : null;
 }
 
 /**
@@ -118,15 +123,8 @@ export function calculateSkeletonTunniPoint(segment) {
  * @returns {Object|null} True Tunni point {x, y} or null if lines are parallel
  */
 export function calculateSkeletonTrueTunniPoint(segment) {
-  if (!segment.controlPoints || segment.controlPoints.length !== 2) {
-    return null;
-  }
-
-  const { startPoint, endPoint, controlPoints } = segment;
-  const [cp1, cp2] = controlPoints;
-
-  // Lines: startPoint->cp1 and endPoint->cp2
-  return intersect(startPoint, cp1, endPoint, cp2);
+  const segmentPoints = segmentToSegmentPoints(segment);
+  return segmentPoints ? calculateTrueTunniPoint(segmentPoints) : null;
 }
 
 export function calculateHandleTensionsForSegment(segment) {
@@ -395,51 +393,8 @@ export function skeletonTunniHitTest(point, size, skeletonData, options = {}) {
  * @returns {Array|null} [newCp1, newCp2] with equalized tensions
  */
 export function calculateSkeletonEqualizedControlPoints(segment) {
-  if (!segment.controlPoints || segment.controlPoints.length !== 2) {
-    return null;
-  }
-
-  const { startPoint, endPoint, controlPoints } = segment;
-  const [cp1, cp2] = controlPoints;
-
-  const trueTunni = calculateSkeletonTrueTunniPoint(segment);
-  if (!trueTunni) {
-    return [cp1, cp2]; // Lines parallel, return original
-  }
-
-  const distStartToTunni = distance(startPoint, trueTunni);
-  const distEndToTunni = distance(endPoint, trueTunni);
-
-  if (distStartToTunni <= 0 || distEndToTunni <= 0) {
-    return [cp1, cp2];
-  }
-
-  // Calculate current tensions
-  const tension1 = distance(startPoint, cp1) / distStartToTunni;
-  const tension2 = distance(endPoint, cp2) / distEndToTunni;
-
-  // Target tension is average
-  const targetTension = (tension1 + tension2) / 2;
-
-  // Calculate directions
-  const dir1 = normalizeVector(subVectors(cp1, startPoint));
-  const dir2 = normalizeVector(subVectors(cp2, endPoint));
-
-  // New distances
-  const newDist1 = targetTension * distStartToTunni;
-  const newDist2 = targetTension * distEndToTunni;
-
-  const newCp1 = {
-    x: startPoint.x + dir1.x * newDist1,
-    y: startPoint.y + dir1.y * newDist1,
-  };
-
-  const newCp2 = {
-    x: endPoint.x + dir2.x * newDist2,
-    y: endPoint.y + dir2.y * newDist2,
-  };
-
-  return [newCp1, newCp2];
+  const segmentPoints = segmentToSegmentPoints(segment);
+  return segmentPoints ? calculateEqualizedControlPoints(segmentPoints) : null;
 }
 
 /**
