@@ -1390,85 +1390,6 @@ function stripNonInterpolatablesAndSortAnchors(glyph) {
   );
 }
 
-function summarizePathForInterpolation(path) {
-  if (!path) {
-    return { numContours: 0, numPoints: 0, contours: [] };
-  }
-  const contours = [];
-  let contourStart = 0;
-  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
-    const contourInfo = path.contourInfo[contourIndex];
-    const contourEnd = contourInfo.endPoint;
-    let onCurve = 0;
-    let offCurveQuad = 0;
-    let offCurveCubic = 0;
-    let offCurveOther = 0;
-    for (let pointIndex = contourStart; pointIndex <= contourEnd; pointIndex++) {
-      const pointType = path.pointTypes[pointIndex] & VarPackedPath.POINT_TYPE_MASK;
-      if (pointType === VarPackedPath.ON_CURVE) {
-        onCurve++;
-      } else if (pointType === VarPackedPath.OFF_CURVE_QUAD) {
-        offCurveQuad++;
-      } else if (pointType === VarPackedPath.OFF_CURVE_CUBIC) {
-        offCurveCubic++;
-      } else {
-        offCurveOther++;
-      }
-    }
-    contours.push({
-      contourIndex,
-      isClosed: !!contourInfo.isClosed,
-      points: contourEnd - contourStart + 1,
-      onCurve,
-      offCurveQuad,
-      offCurveCubic,
-      offCurveOther,
-    });
-    contourStart = contourEnd + 1;
-  }
-  return {
-    numContours: path.numContours,
-    numPoints: path.numPoints,
-    contours,
-  };
-}
-
-function summarizeGlyphForInterpolation(glyph) {
-  return {
-    path: summarizePathForInterpolation(glyph?.path),
-    components: (glyph?.components || []).map((component) => component.name || "<unnamed>"),
-    anchors: (glyph?.anchors || [])
-      .map((anchor) => anchor.name || "<unnamed>")
-      .sort(compare),
-  };
-}
-
-function logInterpolationCompatibilityFailure(
-  context,
-  referenceLayerName,
-  targetLayerName,
-  errorMessage,
-  referenceGlyph,
-  targetGlyph,
-  { cachedReciprocal = false } = {}
-) {
-  const payload = {
-    glyphName: context?.glyphName || null,
-    referenceLayerName,
-    targetLayerName,
-    cachedReciprocal,
-    errorMessage,
-    referenceSummary: summarizeGlyphForInterpolation(referenceGlyph),
-    targetSummary: summarizeGlyphForInterpolation(targetGlyph),
-  };
-  console.error("[interpolation-debug] layer compatibility failure", payload);
-  try {
-    console.error("[interpolation-debug-json]", JSON.stringify(payload));
-  } catch (error) {
-    console.error("[interpolation-debug-json] <stringify-failed>", String(error));
-  }
-}
-
 function checkInterpolationCompatibility(
   referenceLayerName,
   layerGlyphs,
@@ -1484,32 +1405,13 @@ function checkInterpolationCompatibility(
     if (layerName in previousErrors) {
       const error = previousErrors[layerName][referenceLayerName];
       if (error) {
-        errors[layerName] = error;
-        logInterpolationCompatibilityFailure(
-          context,
-          referenceLayerName,
-          layerName,
-          error,
-          referenceGlyph,
-          glyph,
-          { cachedReciprocal: true }
-        );
-      }
+        errors[layerName] = error;      }
     } else {
       try {
         const _ = addItemwise(referenceGlyph, glyph);
       } catch (error) {
         const errorMessage = error?.message || String(error);
-        errors[layerName] = errorMessage;
-        logInterpolationCompatibilityFailure(
-          context,
-          referenceLayerName,
-          layerName,
-          errorMessage,
-          referenceGlyph,
-          glyph
-        );
-      }
+        errors[layerName] = errorMessage;      }
     }
   }
   return errors;
@@ -1558,3 +1460,4 @@ export function roundComponentOrigins(components) {
     );
   });
 }
+
