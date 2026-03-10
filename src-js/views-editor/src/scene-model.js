@@ -1931,6 +1931,12 @@ export class SceneModel {
   }
 }
 
+export function getGeneratedContourIndexSet(positionedGlyph, editLayerName) {
+  const layerName = editLayerName || positionedGlyph?.glyph?.layerName;
+  const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[layerName];
+  const indices = getSkeletonData(layer)?.generatedContourIndices || [];
+  return new Set(indices);
+}
 function getUsedGlyphNames(fontController, positionedLines) {
   const usedGlyphNames = new Set();
   for (const line of positionedLines) {
@@ -1968,3 +1974,4 @@ function sorted(v) {
   v.sort((a, b) => a - b);
   return v;
 }
+

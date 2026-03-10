@@ -205,3 +205,51 @@ Status: In Progress
 - Manual test results: NOT RUN in this terminal session.
 - Undo/redo verification: NOT RUN (hover/state workflow).
 
+
+## Phase 6 - Step 6.2: Move Tunni label drawing out of distance-angle.js and leave that file measure-focused
+
+- Problem: `src-js/fontra-core/src/distance-angle.js` still owned Tunni label drawing and generated-contour filtering, which are editor visualization responsibilities.
+- Code analysis:
+  - Moved `drawTunniLabels(...)` into `src-js/views-editor/src/visualization-layer-definitions.js`.
+  - Removed `drawTunniLabels(...)` and `getSkeletonGeneratedContourIndexSet(...)` from `src-js/fontra-core/src/distance-angle.js`.
+  - Removed Tunni-only imports from `src-js/fontra-core/src/distance-angle.js` and kept it measure-focused.
+  - Updated `src-js/views-editor/src/visualization-layer-definitions.js` imports so Tunni geometry helpers come from `@fontra/core/tunni-calculations.js`.
+  - Verification:
+    - `node --check src-js/views-editor/src/visualization-layer-definitions.js`
+    - `node --check src-js/fontra-core/src/distance-angle.js`
+    - `rg -n "drawTunniLabels|getSkeletonGeneratedContourIndexSet" src-js/fontra-core/src/distance-angle.js -S`
+- Comparison: Yes. Tunni label drawing now lives in the editor visualization file and core no longer owns Tunni label rendering.
+- Manual test results: NOT RUN in this terminal session (Tunni label overlay parity still required).
+- Undo/redo verification: NOT RUN in this terminal session.
+
+## Phase 7 - Step 7.1: Introduce one editor-side helper for generated-contour exclusion
+
+- Problem: Generated-contour exclusion logic was duplicated in multiple editor files, risking drift between draw and hit-test behavior.
+- Code analysis:
+  - Added a shared helper in `src-js/views-editor/src/scene-model.js`:
+    - `getGeneratedContourIndexSet(positionedGlyph, editLayerName)`
+  - Replaced local generated-contour helpers in:
+    - `src-js/views-editor/src/edit-behavior-adapters.js`
+    - `src-js/views-editor/src/visualization-layer-definitions.js`
+  - Both Tunni hit test and Tunni/measure drawing now use the same helper.
+  - Verification:
+    - `rg -n "getGeneratedContourIndexSet" src-js/views-editor/src/edit-behavior-adapters.js src-js/views-editor/src/visualization-layer-definitions.js src-js/views-editor/src/scene-model.js -S`
+- Comparison: Yes. Generated-contour exclusion now uses one shared helper across the Tunni and measure surfaces.
+- Manual test results: NOT RUN in this terminal session.
+- Undo/redo verification: NOT RUN in this terminal session.
+
+## Phase 6 - Step 6.2 Follow-up: Optimize local Tunni label rendering implementation
+
+- Problem: After moving Tunni label rendering into editor visualization, the block was still a pasted transitional copy with duplicate logic, per-off-curve rescans, and stale core duplication.
+- Code analysis:
+  - Refactored `drawTunniLabels(...)` in `src-js/views-editor/src/visualization-layer-definitions.js` into local helpers for cubic-handle collection, text formatting, multiline drawing, and cubic-segment label rendering.
+  - Precomputed cubic control-point membership once per draw call and removed the per-off-curve contour rescan.
+  - Replaced duplicated label text assembly with one formatter path and removed the mojibake angle label.
+  - Removed the stale core-side `drawTunniLabels(...)` copy from `src-js/fontra-core/src/tunni-calculations.js`.
+  - Verification:
+    - `node --check src-js/views-editor/src/visualization-layer-definitions.js`
+    - `node --check src-js/fontra-core/src/tunni-calculations.js`
+    - `rg -n "function drawTunniLabels" src-js -S`
+- Comparison: Yes. The function stays in the right file, but is now smaller, single-owned, and avoids repeated full rescans.
+- Manual test results: NOT RUN in this terminal session.
+- Undo/redo verification: NOT RUN in this terminal session.

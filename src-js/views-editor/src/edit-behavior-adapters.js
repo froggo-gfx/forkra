@@ -39,6 +39,7 @@ import {
   makeRoundFunc,
   resolveEqualizePairForContourPoint,
 } from "./edit-behavior.js";
+import { getGeneratedContourIndexSet } from "./scene-model.js";
 // Adapter/composer contract:
 // - adapters return `true` when they handled the route
 // - adapters return `false` when the route is not applicable or cannot run
@@ -549,20 +550,13 @@ export function areSkeletonTensionsEqualized(segment, tolerance = 0.01) {
   return Math.abs(tension1 - tension2) < tolerance;
 }
 
-function getSkeletonGeneratedContourIndexSet(positionedGlyph, editLayerName) {
-  const layerName = editLayerName || positionedGlyph?.glyph?.layerName;
-  const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[layerName];
-  const indices = getSkeletonData(layer)?.generatedContourIndices || [];
-  return new Set(indices);
-}
-
 export function tunniLayerHitTest(point, size, positionedGlyph, options = {}) {
   if (!positionedGlyph?.glyph?.path) {
     return null;
   }
 
   const path = positionedGlyph.glyph.path;
-  const generatedContourIndices = getSkeletonGeneratedContourIndexSet(
+  const generatedContourIndices = getGeneratedContourIndexSet(
     positionedGlyph,
     options.editLayerName
   );
@@ -1215,8 +1209,7 @@ function createSkeletonBackedMixedEditState({
       data.pointBehaviors.push({ behavior, editablePoint });
     }
 
-    const layerPath = layer?.glyph?.path;
-    for (const editableHandle of editableHandles) {
+        for (const editableHandle of editableHandles) {
       const contour = original.contours?.[editableHandle.skeletonContourIndex];
       if (!contour) {
         continue;
@@ -1229,62 +1222,10 @@ function createSkeletonBackedMixedEditState({
       if (!skeletonHandleDir) {
         continue;
       }
-
-      let equalizeState = null;
-      if (layerPath) {
-        const equalizeInfo = getEqualizeHandleInfoForPointIndex(
-          layerPath,
-          editableHandle.pointIndex
-        );
-        if (equalizeInfo) {
-          const anchorPos = layerPath.getPoint(equalizeInfo.smoothIndex);
-          const draggedPos = layerPath.getPoint(equalizeInfo.pointIndex);
-          const oppositePos = layerPath.getPoint(equalizeInfo.oppositeIndex);
-          const oppositeHandleType =
-            editableHandle.handleType === "in" ? "out" : "in";
-          const oppositeHandleDir = getSkeletonHandleDirectionForPoint(
-            contour,
-            editableHandle.skeletonPointIndex,
-            oppositeHandleType
-          );
-          if (anchorPos && draggedPos && oppositePos && oppositeHandleDir) {
-            const point = contour.points?.[editableHandle.skeletonPointIndex];
-            if (!point) {
-              continue;
-            }
-            const detachedKey =
-              editableHandle.side === "left"
-                ? "leftHandleDetached"
-                : "rightHandleDetached";
-            const detachedMode = !!point?.[detachedKey];
-            const draggedState = readEditableHandleEqualizeState({
-              point,
-              side: editableHandle.side,
-              handleType: editableHandle.handleType,
-              anchorPos,
-              currentHandlePos: draggedPos,
-              skeletonHandleDir,
-              detachedMode,
-            });
-            const oppositeState = readEditableHandleEqualizeState({
-              point,
-              side: editableHandle.side,
-              handleType: oppositeHandleType,
-              anchorPos,
-              currentHandlePos: oppositePos,
-              skeletonHandleDir: oppositeHandleDir,
-              detachedMode,
-            });
-            equalizeState = { anchorPos, draggedState, oppositeState };
-          }
-        }
-      }
-
       data.handleBehaviors.push({
         behavior: createEditableHandleBehavior(original, editableHandle, skeletonHandleDir),
         editableHandle,
-        skeletonHandleDir,
-        equalizeState,
+        skeletonHandleDir
       });
     }
 
@@ -1418,38 +1359,12 @@ function applySkeletonBackedMixedDelta({
       }
     }
 
-    for (const { behavior, editableHandle, skeletonHandleDir, equalizeState } of handleBehaviors) {
+    for (const { behavior, editableHandle, skeletonHandleDir } of handleBehaviors) {
       const contour = working.contours?.[editableHandle.skeletonContourIndex];
       const point = contour?.points?.[editableHandle.skeletonPointIndex];
       const baseContour = original.contours?.[editableHandle.skeletonContourIndex];
       const basePoint = baseContour?.points?.[editableHandle.skeletonPointIndex];
       if (!point || !basePoint) {
-        continue;
-      }
-
-      if (pointerTool.equalizeMode && equalizeState) {
-        const projectedDelta =
-          delta.x * equalizeState.draggedState.direction.x +
-          delta.y * equalizeState.draggedState.direction.y;
-        const targetLength = Math.max(
-          0,
-          equalizeState.draggedState.originalLength + projectedDelta
-        );
-        applyEditableHandleEqualizedLength({
-          point,
-          state: equalizeState.draggedState,
-          targetLength,
-          anchorPos: equalizeState.anchorPos,
-          roundFunc,
-        });
-        applyEditableHandleEqualizedLength({
-          point,
-          state: equalizeState.oppositeState,
-          targetLength,
-          anchorPos: equalizeState.anchorPos,
-          roundFunc,
-        });
-        equalizeUsed = true;
         continue;
       }
 
@@ -2951,7 +2866,7 @@ async function runSpecializedSkeletonTunniDrag({
 
       for (const [editLayerName, layerData] of Object.entries(layersData)) {
         const { layer, original, working } = layerData;
-        resetSkeletonWorkingDataToOriginal({ original, working, contourIndex });
+        resetWorkingContoursFromOriginal(original, working, contourIndex);
         const contour = original.contours?.[contourIndex];
         const workingContour = working.contours?.[contourIndex];
         if (!contour || !workingContour) {
@@ -4309,7 +4224,6 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
         );
 
         for (const data of Object.values(layersData)) {
-          const layerPath = data.layer?.glyph?.path;
           for (const editableHandle of resolvedEditableHandles) {
             const contour = data.original.contours?.[editableHandle.skeletonContourIndex];
             if (!contour) {
@@ -4323,55 +4237,6 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
             if (!skeletonHandleDir) {
               continue;
             }
-            let equalizeState = null;
-            if (layerPath) {
-              const equalizeInfo = getEqualizeHandleInfoForPointIndex(
-                layerPath,
-                editableHandle.pointIndex
-              );
-              if (equalizeInfo) {
-                const anchorPos = layerPath.getPoint(equalizeInfo.smoothIndex);
-                const draggedPos = layerPath.getPoint(equalizeInfo.pointIndex);
-                const oppositePos = layerPath.getPoint(equalizeInfo.oppositeIndex);
-                const oppositeHandleType =
-                  editableHandle.handleType === "in" ? "out" : "in";
-                const oppositeHandleDir = getSkeletonHandleDirectionForPoint(
-                  contour,
-                  editableHandle.skeletonPointIndex,
-                  oppositeHandleType
-                );
-                if (anchorPos && draggedPos && oppositePos && oppositeHandleDir) {
-                  const point = contour.points?.[editableHandle.skeletonPointIndex];
-                  if (!point) {
-                    continue;
-                  }
-                  const detachedKey =
-                    editableHandle.side === "left"
-                      ? "leftHandleDetached"
-                      : "rightHandleDetached";
-                  const detachedMode = !!point?.[detachedKey];
-                  const draggedState = readEditableHandleEqualizeState({
-                    point,
-                    side: editableHandle.side,
-                    handleType: editableHandle.handleType,
-                    anchorPos,
-                    currentHandlePos: draggedPos,
-                    skeletonHandleDir,
-                    detachedMode,
-                  });
-                  const oppositeState = readEditableHandleEqualizeState({
-                    point,
-                    side: editableHandle.side,
-                    handleType: oppositeHandleType,
-                    anchorPos,
-                    currentHandlePos: oppositePos,
-                    skeletonHandleDir: oppositeHandleDir,
-                    detachedMode,
-                  });
-                  equalizeState = { anchorPos, draggedState, oppositeState };
-                }
-              }
-            }
             data.behaviors.push({
               behavior: createEditableHandleBehavior(
                 data.original,
@@ -4379,8 +4244,7 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
                 skeletonHandleDir
               ),
               editableHandle,
-              skeletonHandleDir,
-              equalizeState,
+              skeletonHandleDir
             });
           }
         }
@@ -4402,38 +4266,12 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
         for (const [editLayerName, data] of Object.entries(sessionState.layersData)) {
           const { layer, original, working, behaviors } = data;
 
-          for (const { behavior, editableHandle, skeletonHandleDir, equalizeState } of behaviors) {
+          for (const { behavior, editableHandle, skeletonHandleDir } of behaviors) {
             const contour = working.contours?.[editableHandle.skeletonContourIndex];
             const point = contour?.points?.[editableHandle.skeletonPointIndex];
             const baseContour = original.contours?.[editableHandle.skeletonContourIndex];
             const basePoint = baseContour?.points?.[editableHandle.skeletonPointIndex];
             if (!point || !basePoint) {
-              continue;
-            }
-
-            if (pointerTool.equalizeMode && equalizeState) {
-              const projectedDelta =
-                delta.x * equalizeState.draggedState.direction.x +
-                delta.y * equalizeState.draggedState.direction.y;
-              const targetLength = Math.max(
-                0,
-                equalizeState.draggedState.originalLength + projectedDelta
-              );
-              applyEditableHandleEqualizedLength({
-                point,
-                state: equalizeState.draggedState,
-                targetLength,
-                anchorPos: equalizeState.anchorPos,
-                roundFunc,
-              });
-              applyEditableHandleEqualizedLength({
-                point,
-                state: equalizeState.oppositeState,
-                targetLength,
-                anchorPos: equalizeState.anchorPos,
-                roundFunc,
-              });
-              sessionState.equalizeUsed = true;
               continue;
             }
 
@@ -4484,13 +4322,7 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
         }
         return {
           changes: sessionState.accumulatedChanges,
-          undoLabel: isDrag
-            ? sessionState.equalizeUsed
-              ? "Equalize editable rib handles"
-              : "Edit generated handle"
-            : sessionState.equalizeUsed
-              ? "Nudge handles (equalize)"
-              : "Nudge generated handle",
+          undoLabel: isDrag ? "Edit generated handle" : "Nudge generated handle",
           broadcast: true,
         };
       },

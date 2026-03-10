@@ -19,8 +19,11 @@ import {
   unionIndexSets,
   withSavedState,
 } from "@fontra/core/utils.js";
-import { subVectors } from "@fontra/core/vector.js";
-import { calculateTunniPoint, calculateTrueTunniPoint } from "@fontra/core/tunni-calculations.js";
+import { subVectors, distance } from "@fontra/core/vector.js";
+import {
+  calculateTunniPoint,
+  calculateTrueTunniPoint,
+} from "@fontra/core/tunni-calculations.js";
 import {
   calculateCurvatureForSegment,
   calculateCurvatureForQuadraticSegment,
@@ -44,9 +47,6 @@ import {
   drawOffCurveDistanceVisualization,
   calculateTension,
   calculateOffCurveAngle,
-  formatDistanceTensionAngle,
-  calculateControlHandleDistance,
-  drawTunniLabels,
   DISTANCE_ANGLE_COLOR,
   DISTANCE_ANGLE_BADGE_COLOR,
   DISTANCE_ANGLE_TEXT_COLOR,
@@ -60,6 +60,7 @@ import {
   OFFCURVE_DISTANCE_BADGE_RADIUS,
   OFFCURVE_DISTANCE_FONT_SIZE
 } from "@fontra/core/distance-angle.js";
+import { getGeneratedContourIndexSet } from "./scene-model.js";
 
 export const visualizationLayerDefinitions = [];
 const DEFAULT_SKELETON_WIDTH = 80;
@@ -2687,13 +2688,235 @@ function getTextVerticalCenter(context, text) {
   return (metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
 }
 
-function getSkeletonGeneratedContourIndexSet(positionedGlyph, model) {
-  const layerName = model?.sceneSettings?.editLayerName || positionedGlyph?.glyph?.layerName;
-  const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[layerName];
-  const indices = getSkeletonData(layer)?.generatedContourIndices || [];
-  return new Set(indices);
+const TUNNI_LABEL_FONT_SIZE = 6;
+const TUNNI_LABEL_LINE_HEIGHT = 6;
+const TUNNI_CUBIC_LABEL_OFFSET_X = 14;
+const TUNNI_OFFCURVE_LABEL_OFFSET_X = 8;
+const TUNNI_LABEL_PRIMARY_COLOR = "rgba(4, 28, 44, 1)";
+const TUNNI_LABEL_SECONDARY_COLOR = "rgba(44, 28, 44, 1)";
+
+function collectCubicControlPointIndices(path, generatedContourIndices) {
+  const cubicControlPointIndices = new Set();
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
+    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
+      if (segment.points.length !== 4) {
+        continue;
+      }
+      const pointTypes = segment.parentPointIndices.map((index) => path.pointTypes[index]);
+      if (pointTypes[1] !== 2 || pointTypes[2] !== 2) {
+        continue;
+      }
+      cubicControlPointIndices.add(segment.parentPointIndices[1]);
+      cubicControlPointIndices.add(segment.parentPointIndices[2]);
+    }
+  }
+  return cubicControlPointIndices;
 }
 
+function formatTunniLabelText({
+  distanceValue,
+  tensionValue = null,
+  angleValue,
+  showDistance,
+  showTension,
+  showAngle,
+}) {
+  const parts = [];
+  if (showDistance) {
+    parts.push(distanceValue.toFixed(1));
+  }
+  if (showTension && tensionValue !== null) {
+    parts.push(tensionValue.toFixed(2));
+  }
+  if (showAngle) {
+    parts.push(`${angleValue.toFixed(1)}\u00B0`);
+  }
+  return parts.join("\n");
+}
+
+function drawTunniMultiLineLabel(context, text, badgePosition, color) {
+  const badgeDimensions = calculateBadgeDimensions(text, TUNNI_LABEL_FONT_SIZE);
+  const lines = text.split("\n");
+  const totalHeight = lines.length * TUNNI_LABEL_LINE_HEIGHT;
+  const startY =
+    -(badgePosition.y + badgeDimensions.height / 2) -
+    totalHeight / 2 +
+    TUNNI_LABEL_LINE_HEIGHT / 2;
+
+  context.save();
+  context.fillStyle = color;
+  context.font = `${TUNNI_LABEL_FONT_SIZE}px fontra-ui-regular, sans-serif`;
+  context.textAlign = "left";
+  context.textBaseline = "middle";
+  context.scale(1, -1);
+
+  for (let i = 0; i < lines.length; i++) {
+    context.fillText(lines[i], badgePosition.x, startY + i * TUNNI_LABEL_LINE_HEIGHT);
+  }
+
+  context.restore();
+}
+
+function drawTunniSegmentLabels(context, segmentPoints, showOptions) {
+  const [p1, p2, p3, p4] = segmentPoints;
+  const visualTunniPoint = calculateTunniPoint(segmentPoints);
+  const trueTunniPoint = calculateTrueTunniPoint(segmentPoints);
+  const tensionPoint = trueTunniPoint || visualTunniPoint;
+
+  if (!tensionPoint) {
+    return;
+  }
+
+  const text1 = formatTunniLabelText({
+    distanceValue: distance(p1, p2),
+    tensionValue: distance(p1, p2) / distance(p1, tensionPoint),
+    angleValue: calculateOffCurveAngle(p2, p1),
+    ...showOptions,
+  });
+  const text2 = formatTunniLabelText({
+    distanceValue: distance(p4, p3),
+    tensionValue: distance(p4, p3) / distance(p4, tensionPoint),
+    angleValue: calculateOffCurveAngle(p3, p4),
+    ...showOptions,
+  });
+
+  const unitVector1 = unitVectorFromTo(p1, p2);
+  const unitVector2 = unitVectorFromTo(p4, p3);
+  const badgeDimensions1 = calculateBadgeDimensions(text1, TUNNI_LABEL_FONT_SIZE);
+  const badgeDimensions2 = calculateBadgeDimensions(text2, TUNNI_LABEL_FONT_SIZE);
+
+  const badgePosition1 = calculateBadgePosition(
+    { x: p2.x + TUNNI_CUBIC_LABEL_OFFSET_X, y: p2.y },
+    { x: -unitVector1.y, y: unitVector1.x },
+    badgeDimensions1.width,
+    badgeDimensions1.height
+  );
+  const badgePosition2 = calculateBadgePosition(
+    { x: p3.x + TUNNI_CUBIC_LABEL_OFFSET_X, y: p3.y },
+    { x: -unitVector2.y, y: unitVector2.x },
+    badgeDimensions2.width,
+    badgeDimensions2.height
+  );
+
+  drawTunniMultiLineLabel(context, text1, badgePosition1, TUNNI_LABEL_PRIMARY_COLOR);
+  drawTunniMultiLineLabel(context, text2, badgePosition2, TUNNI_LABEL_SECONDARY_COLOR);
+}
+
+function drawTunniLabels(context, positionedGlyph, _parameters, model) {
+  const path = positionedGlyph.glyph.path;
+  const generatedContourIndices = getGeneratedContourIndexSet(
+    positionedGlyph,
+    model?.sceneSettings?.editLayerName
+  );
+  const cubicControlPointIndices = collectCubicControlPointIndices(
+    path,
+    generatedContourIndices
+  );
+  const showOptions = {
+    showDistance: model.sceneSettings?.showTunniDistance ?? true,
+    showTension: model.sceneSettings?.showTunniTension ?? true,
+    showAngle: model.sceneSettings?.showTunniAngle ?? true,
+  };
+
+  context.save();
+
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
+    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
+      if (segment.points.length !== 4) {
+        continue;
+      }
+      const pointTypes = segment.parentPointIndices.map((index) => path.pointTypes[index]);
+      if (pointTypes[1] !== 2 || pointTypes[2] !== 2) {
+        continue;
+      }
+      try {
+        drawTunniSegmentLabels(context, segment.points, showOptions);
+      } catch (error) {
+        // Skip segments where tension calculation fails.
+      }
+    }
+  }
+
+  for (let pointIndex = 0; pointIndex < path.numPoints; pointIndex++) {
+    const pointType = path.pointTypes[pointIndex];
+    if (pointType === 0 || cubicControlPointIndices.has(pointIndex)) {
+      continue;
+    }
+
+    const offCurvePoint = path.getPoint(pointIndex);
+    const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
+
+    const contourInfo = path.contourInfo[contourIndex];
+    const startPoint =
+      contourIndex === 0 ? 0 : path.contourInfo[contourIndex - 1].endPoint + 1;
+    const endPoint = contourInfo.endPoint;
+    const numPoints = endPoint - startPoint + 1;
+
+    let prevPointIndex;
+    let nextPointIndex;
+    if (contourInfo.isClosed) {
+      prevPointIndex = startPoint + ((contourPointIndex - 1 + numPoints) % numPoints);
+      nextPointIndex = startPoint + ((contourPointIndex + 1) % numPoints);
+    } else {
+      prevPointIndex = contourPointIndex > 0 ? pointIndex - 1 : -1;
+      nextPointIndex = contourPointIndex < numPoints - 1 ? pointIndex + 1 : -1;
+    }
+
+    const prevPoint = prevPointIndex >= 0 ? path.getPoint(prevPointIndex) : null;
+    const nextPoint = nextPointIndex >= 0 ? path.getPoint(nextPointIndex) : null;
+    const prevPointType = prevPointIndex >= 0 ? path.pointTypes[prevPointIndex] : -1;
+    const nextPointType = nextPointIndex >= 0 ? path.pointTypes[nextPointIndex] : -1;
+
+    let onCurvePoint = null;
+    if (prevPoint && prevPointType === 0) {
+      onCurvePoint = prevPoint;
+    } else if (nextPoint && nextPointType === 0) {
+      onCurvePoint = nextPoint;
+    }
+
+    if (!onCurvePoint) {
+      continue;
+    }
+
+    try {
+      const text = formatTunniLabelText({
+        distanceValue: distance(onCurvePoint, offCurvePoint),
+        angleValue: calculateOffCurveAngle(offCurvePoint, onCurvePoint),
+        showDistance: showOptions.showDistance,
+        showTension: false,
+        showAngle: showOptions.showAngle,
+      });
+      const unitVectorOff = unitVectorFromTo(onCurvePoint, offCurvePoint);
+      const badgeDimensionsOff = calculateBadgeDimensions(text, TUNNI_LABEL_FONT_SIZE);
+      const badgePositionOff = calculateBadgePosition(
+        { x: offCurvePoint.x + TUNNI_OFFCURVE_LABEL_OFFSET_X, y: offCurvePoint.y },
+        { x: -unitVectorOff.y, y: unitVectorOff.x },
+        badgeDimensionsOff.width,
+        badgeDimensionsOff.height
+      );
+
+      drawTunniMultiLineLabel(
+        context,
+        text,
+        badgePositionOff,
+        TUNNI_LABEL_SECONDARY_COLOR
+      );
+    } catch (error) {
+      // Skip if calculation fails.
+    }
+  }
+
+  context.restore();
+}
 registerVisualizationLayerDefinition({
   identifier: "fontra.coarse.grid",
   name: "Coarse Grid",
@@ -2762,7 +2985,7 @@ registerVisualizationLayerDefinition({
 
 function drawTunniCombined(context, positionedGlyph, parameters, model, controller) {
   const path = positionedGlyph.glyph.path;
-  const generatedContourIndices = getSkeletonGeneratedContourIndexSet(positionedGlyph, model);
+  const generatedContourIndices = getGeneratedContourIndexSet(positionedGlyph, model?.sceneSettings?.editLayerName);
   
   // Draw the Tunni lines
   context.strokeStyle = parameters.tunniLineColor;
@@ -2863,7 +3086,7 @@ registerVisualizationLayerDefinition({
 
 function drawActualTunniPoints(context, positionedGlyph, parameters, model, controller) {
   const path = positionedGlyph.glyph.path;
-  const generatedContourIndices = getSkeletonGeneratedContourIndexSet(positionedGlyph, model);
+  const generatedContourIndices = getGeneratedContourIndexSet(positionedGlyph, model?.sceneSettings?.editLayerName);
   
   context.fillStyle = parameters.tunniPointColor;
   
@@ -2943,3 +3166,14 @@ registerVisualizationLayerDefinition({
   colorsDarkMode: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
   draw: drawTunniLabels,
 });
+
+
+
+
+
+
+
+
+
+
+
