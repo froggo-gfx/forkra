@@ -61,12 +61,9 @@ import {
   buildSegmentsFromSkeletonPoints,
   calculateHandleTensionsForSegment,
   computeHandleLengthsFromTensions,
-  calculateSkeletonControlPointsFromTunniDelta,
-  calculateSkeletonOnCurveFromTunni,
-  calculateSkeletonEqualizedControlPoints,
-  areSkeletonTensionsEqualized,
   calculateSkeletonTunniPoint,
   calculateSkeletonTrueTunniPoint,
+  equalizeSkeletonTunniTensions,
 } from "./edit-behavior-adapters.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
@@ -118,6 +115,35 @@ function eventMatchesActionBaseKey(actionIdentifier, event) {
   if (!shortCuts?.length) return false;
   const baseKey = getBaseKeyFromKeyEvent(event);
   return shortCuts.some((shortCut) => shortCut?.baseKey === baseKey);
+}
+
+function resolveMeasureHoverTarget({
+  findRibPoint,
+  findHandle,
+  findSegment,
+  getSelectionPoints,
+}) {
+  const ribPoint = findRibPoint?.();
+  if (ribPoint) {
+    return { kind: "ribPoint", payload: ribPoint };
+  }
+
+  const handle = findHandle?.();
+  if (handle) {
+    return { kind: "handle", payload: handle };
+  }
+
+  const segment = findSegment?.();
+  if (segment) {
+    return { kind: "segment", payload: segment };
+  }
+
+  const selectionPoints = getSelectionPoints?.();
+  if (selectionPoints) {
+    return { kind: "points", payload: selectionPoints };
+  }
+
+  return null;
 }
 
 function findPrevOnCurveIndex(points, startIndex, isClosed) {
@@ -769,9 +795,11 @@ export class PointerTool extends BaseTool {
       ) {
         if (!this.measureMode) {
           this.measureMode = true;
-          this.sceneModel.measureMode = true;
-          this.sceneModel.measureShowDirect =
-            eventMatchesActionShortCut(REALTIME_MEASURE_DIRECT_ACTION, event) || event.altKey;
+          this.sceneModel.setMeasureActive(true, {
+            showDirect:
+              eventMatchesActionShortCut(REALTIME_MEASURE_DIRECT_ACTION, event) ||
+              event.altKey,
+          });
           this._boundKeyUp = (e) => this._handleMeasureKeyUp(e);
           window.addEventListener("keyup", this._boundKeyUp);
           if (!this._boundMeasureAltKeyDown) {
@@ -826,31 +854,27 @@ export class PointerTool extends BaseTool {
         eventMatchesActionBaseKey(REALTIME_MEASURE_DIRECT_ACTION, event)
       ) {
         this.measureMode = false;
-        this.sceneModel.measureMode = false;
-        this.sceneModel.measureHoverSegment = null;
-        this.sceneModel.measureHoverRibPoint = null;
-        this.sceneModel.measureHoverPoints = null;
-      this.sceneModel.measureHoverHandle = null;
-      if (this._boundKeyUp) {
-        window.removeEventListener("keyup", this._boundKeyUp);
-        this._boundKeyUp = null;
+        this.sceneModel.resetMeasureState();
+        if (this._boundKeyUp) {
+          window.removeEventListener("keyup", this._boundKeyUp);
+          this._boundKeyUp = null;
+        }
+        if (this._boundMeasureAltKeyDown) {
+          window.removeEventListener("keydown", this._boundMeasureAltKeyDown);
+          this._boundMeasureAltKeyDown = null;
+        }
+        if (this._boundMeasureAltKeyUp) {
+          window.removeEventListener("keyup", this._boundMeasureAltKeyUp);
+          this._boundMeasureAltKeyUp = null;
+        }
+        this.canvasController.requestUpdate();
       }
-      if (this._boundMeasureAltKeyDown) {
-        window.removeEventListener("keydown", this._boundMeasureAltKeyDown);
-        this._boundMeasureAltKeyDown = null;
-      }
-      if (this._boundMeasureAltKeyUp) {
-        window.removeEventListener("keyup", this._boundMeasureAltKeyUp);
-        this._boundMeasureAltKeyUp = null;
-      }
-      this.canvasController.requestUpdate();
-    }
     }
 
     _handleMeasureAltKeyDown(event) {
       if (!this.measureMode) return;
       if (event.key === "Alt" || event.altKey) {
-        this.sceneModel.measureShowDirect = true;
+        this.sceneModel.setMeasureShowDirect(true);
         this.canvasController.requestUpdate();
       }
     }
@@ -858,7 +882,7 @@ export class PointerTool extends BaseTool {
     _handleMeasureAltKeyUp(event) {
       if (!this.measureMode) return;
       if (event.key === "Alt" || !event.altKey) {
-        this.sceneModel.measureShowDirect = false;
+        this.sceneModel.setMeasureShowDirect(false);
         this.canvasController.requestUpdate();
       }
     }
@@ -910,56 +934,19 @@ export class PointerTool extends BaseTool {
 
     // Q-mode: find rib point or segment under cursor for measurement
     if (this.measureMode) {
-      this.sceneModel.measureShowDirect = event.altKey;
-
-      // Check for rib point first (has priority over segments)
-      const ribPointHit = this._findRibPointForMeasure(point, size);
-      if (ribPointHit) {
-        if (!this._ribPointsEqual(ribPointHit, this.sceneModel.measureHoverRibPoint)) {
-          this.sceneModel.measureHoverRibPoint = ribPointHit;
-          this.sceneModel.measureHoverSegment = null;
-          this.sceneModel.measureHoverPoints = null;
-          this.sceneModel.measureHoverHandle = null;
-          this.canvasController.requestUpdate();
-        }
-        return;
-      }
-
-      // No rib point - check for control point (off-curve)
-      this.sceneModel.measureHoverRibPoint = null;
-      const handleHit = this._findControlPointForMeasure(point, size);
-      if (!this._measurePointsEqual(handleHit, this.sceneModel.measureHoverHandle)) {
-        this.sceneModel.measureHoverHandle = handleHit;
-        if (handleHit) {
-          this.sceneModel.measureHoverSegment = null;
-          this.sceneModel.measureHoverPoints = null;
-          this.canvasController.requestUpdate();
-          return;
-        }
-      } else if (handleHit) {
-        return;
-      }
-
-      // No rib point - check for segment
-      this.sceneModel.measureHoverRibPoint = null;
-      const segmentHit = this._findSegmentForMeasure(point, size);
-      if (
-        !this._segmentsEqual(segmentHit, this.sceneModel.measureHoverSegment)
-      ) {
-        this.sceneModel.measureHoverSegment = segmentHit;
-        this.sceneModel.measureHoverPoints = null;
-        this.sceneModel.measureHoverHandle = null;
-        this.canvasController.requestUpdate();
-      }
-      if (segmentHit) {
-        return;
-      }
-
-      // No segment under cursor - use selection (two points) if available
-      const selectionPoints = this._getMeasurePointsFromSelection();
-      if (!this._measurePointsEqual(selectionPoints, this.sceneModel.measureHoverPoints)) {
-        this.sceneModel.measureHoverPoints = selectionPoints;
-        this.sceneModel.measureHoverHandle = null;
+      this.sceneModel.setMeasureShowDirect(event.altKey);
+      const nextMeasureTarget = resolveMeasureHoverTarget({
+        findRibPoint: () => this._findRibPointForMeasure(point, size),
+        findHandle: () => this._findControlPointForMeasure(point, size),
+        findSegment: () => this._findSegmentForMeasure(point, size),
+        getSelectionPoints: () => this._getMeasurePointsFromSelection(),
+      });
+      const currentMeasureTarget = this.sceneModel.getMeasureHoverTarget();
+      if (!this._measureHoverTargetsEqual(nextMeasureTarget, currentMeasureTarget)) {
+        this.sceneModel.setMeasureHoverTarget(
+          nextMeasureTarget?.kind ?? null,
+          nextMeasureTarget?.payload ?? null
+        );
         this.canvasController.requestUpdate();
       }
       return; // Don't do normal hover in measure mode
@@ -1398,7 +1385,10 @@ export class PointerTool extends BaseTool {
             midpointOnly: true,
           });
           if (tunniHit) {
-            await this._equalizeSkeletonTunniTensions(tunniHit);
+            await equalizeSkeletonTunniTensions({
+              sceneController,
+              tunniHit,
+            });
             initialEvent.preventDefault();
             eventStream.done();
             return;
@@ -2374,253 +2364,6 @@ export class PointerTool extends BaseTool {
       }
     }
     return false;
-  }
-
-  /**
-   * Handle dragging a skeleton Tunni point.
-   * - Tunni Point (midpoint): changes curve tension by moving control points
-   * - True Tunni Point (intersection): moves on-curve points along projection lines
-   */
-  async _handleSkeletonTunniDrag(eventStream, initialEvent, tunniHit) {
-    const sceneController = this.sceneController;
-    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
-
-    if (!positionedGlyph) return;
-
-    // Get initial point in glyph coordinates
-    const localPoint = sceneController.localPoint(initialEvent);
-    const startGlyphPoint = {
-      x: localPoint.x - positionedGlyph.x,
-      y: localPoint.y - positionedGlyph.y,
-    };
-
-    const { type, contourIndex, segment } = tunniHit;
-    const isTrueTunni = type === "true-tunni";
-
-    // Store original segment data for calculations
-    const originalSegment = {
-      startPoint: { ...segment.startPoint },
-      endPoint: { ...segment.endPoint },
-      controlPoints: segment.controlPoints.map((p) => ({ ...p })),
-      startIndex: segment.startIndex,
-      endIndex: segment.endIndex,
-      controlIndices: segment.controlIndices,
-    };
-
-    // Calculate original Tunni point position
-    const origTunniPoint = isTrueTunni
-      ? calculateSkeletonTrueTunniPoint(originalSegment)
-      : calculateSkeletonTunniPoint(originalSegment);
-
-    if (!origTunniPoint) return;
-
-    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      // Setup data for ALL editable layers (multi-source editing support)
-      const layersData = {};
-      for (const editLayerName of sceneController.editingLayerNames) {
-        const layer = glyph.layers[editLayerName];
-        if (!getSkeletonData(layer)) continue;
-
-        const skeletonData = getSkeletonData(layer);
-        layersData[editLayerName] = {
-          layer,
-          original: JSON.parse(JSON.stringify(skeletonData)),
-          working: JSON.parse(JSON.stringify(skeletonData)),
-        };
-      }
-
-      if (Object.keys(layersData).length === 0) return;
-      
-
-      let accumulatedChanges = new ChangeCollector();
-
-      // Drag loop
-      for await (const event of eventStream) {
-        const roundFunc = makeRoundFunc(event);
-        const currentLocalPoint = sceneController.localPoint(event);
-        const currentGlyphPoint = {
-          x: currentLocalPoint.x - positionedGlyph.x,
-          y: currentLocalPoint.y - positionedGlyph.y,
-        };
-
-        // Calculate new Tunni point position
-        const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
-        const newTunniPoint = {
-          x: origTunniPoint.x + delta.x,
-          y: origTunniPoint.y + delta.y,
-        };
-
-        // Alt key disables equalized distances
-        const equalizeDistances = !event.altKey;
-
-        const allChanges = [];
-
-        // Apply changes to ALL editable layers
-        for (const [editLayerName, data] of Object.entries(layersData)) {
-          const { layer, original, working } = data;
-
-          // Reset working data to original
-          const origContour = original.contours[contourIndex];
-          const workContour = working.contours[contourIndex];
-          for (let pi = 0; pi < origContour.points.length; pi++) {
-            workContour.points[pi].x = origContour.points[pi].x;
-            workContour.points[pi].y = origContour.points[pi].y;
-          }
-
-          // Build segment from original data (for this layer)
-          const layerOriginalSegment = {
-            startPoint: { ...origContour.points[segment.startIndex] },
-            endPoint: { ...origContour.points[segment.endIndex] },
-            controlPoints: segment.controlIndices.map((i) => ({
-              ...origContour.points[i],
-            })),
-            startIndex: segment.startIndex,
-            endIndex: segment.endIndex,
-            controlIndices: segment.controlIndices,
-          };
-
-          if (isTrueTunni) {
-            // True Tunni: move on-curve points
-            const result = calculateSkeletonOnCurveFromTunni(
-              newTunniPoint,
-              layerOriginalSegment,
-              equalizeDistances
-            );
-
-            if (result) {
-              workContour.points[segment.startIndex].x = roundFunc(
-                result.newStartPoint.x
-              );
-              workContour.points[segment.startIndex].y = roundFunc(
-                result.newStartPoint.y
-              );
-              workContour.points[segment.endIndex].x = roundFunc(
-                result.newEndPoint.x
-              );
-              workContour.points[segment.endIndex].y = roundFunc(
-                result.newEndPoint.y
-              );
-            }
-          } else {
-            // Midpoint Tunni: move control points
-            const newCps = calculateSkeletonControlPointsFromTunniDelta(
-              delta,
-              layerOriginalSegment,
-              equalizeDistances
-            );
-
-            if (newCps) {
-              const [cp1Idx, cp2Idx] = segment.controlIndices;
-              workContour.points[cp1Idx].x = roundFunc(newCps[0].x);
-              workContour.points[cp1Idx].y = roundFunc(newCps[0].y);
-              workContour.points[cp2Idx].x = roundFunc(newCps[1].x);
-              workContour.points[cp2Idx].y = roundFunc(newCps[1].y);
-            }
-          }
-
-          // Record changes for this layer
-          // 1. FIRST: Generate outline contours
-          const staticGlyph = layer.glyph;
-          const pathChange = recordChanges(staticGlyph, (sg) => {
-            regenerateSkeletonContours(sg, working);
-          });
-          allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-          // 2. THEN: Save skeletonData to customData
-          const customDataChange = recordChanges(layer, (l) => {
-            setSkeletonData(l, JSON.parse(JSON.stringify(working)));
-          });
-          allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-        }
-
-        const combinedChange = new ChangeCollector().concat(...allChanges);
-        accumulatedChanges = accumulatedChanges.concat(combinedChange);
-        await sendIncrementalChange(combinedChange.change, true);
-      }
-
-      // Final send without "may drop" flag
-      await sendIncrementalChange(accumulatedChanges.change);
-
-      return {
-        changes: accumulatedChanges,
-        undoLabel: isTrueTunni
-          ? "Move Skeleton On-Curve Points (Tunni)"
-          : "Move Skeleton Control Points (Tunni)",
-        broadcast: true,
-      };
-    });
-  }
-
-  /**
-   * Equalize tensions on a skeleton Tunni point (Ctrl+Shift+click).
-   * Makes both control points have the same tension relative to the true Tunni point.
-   */
-  async _equalizeSkeletonTunniTensions(tunniHit) {
-    const sceneController = this.sceneController;
-    const { contourIndex, segment } = tunniHit;
-
-    // Check if already equalized
-    if (areSkeletonTensionsEqualized(segment)) {
-      return; // Already equalized, nothing to do
-    }
-
-    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const allChanges = [];
-
-      // Apply changes to ALL editable layers
-      for (const editLayerName of sceneController.editingLayerNames) {
-        const layer = glyph.layers[editLayerName];
-        if (!getSkeletonData(layer)) continue;
-
-        const skeletonData = getSkeletonData(layer);
-        const working = JSON.parse(JSON.stringify(skeletonData));
-        const contour = working.contours[contourIndex];
-
-        // Build segment from this layer's data
-        const layerSegment = {
-          startPoint: { ...contour.points[segment.startIndex] },
-          endPoint: { ...contour.points[segment.endIndex] },
-          controlPoints: segment.controlIndices.map((i) => ({
-            ...contour.points[i],
-          })),
-          startIndex: segment.startIndex,
-          endIndex: segment.endIndex,
-          controlIndices: segment.controlIndices,
-        };
-
-        // Calculate equalized control points
-        const newCps = calculateSkeletonEqualizedControlPoints(layerSegment);
-        if (newCps) {
-          const [cp1Idx, cp2Idx] = segment.controlIndices;
-          contour.points[cp1Idx].x = Math.round(newCps[0].x);
-          contour.points[cp1Idx].y = Math.round(newCps[0].y);
-          contour.points[cp2Idx].x = Math.round(newCps[1].x);
-          contour.points[cp2Idx].y = Math.round(newCps[1].y);
-        }
-
-        // Regenerate outline
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          regenerateSkeletonContours(sg, working);
-        });
-        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-        // Update customData
-        const customDataChange = recordChanges(layer, (l) => {
-          setSkeletonData(l, working);
-        });
-        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-      }
-
-      const combinedChange = new ChangeCollector().concat(...allChanges);
-      await sendIncrementalChange(combinedChange.change);
-
-      return {
-        changes: combinedChange,
-        undoLabel: "Equalize Skeleton Tunni Tensions",
-        broadcast: true,
-      };
-    });
   }
 
   /**
@@ -3834,6 +3577,24 @@ export class PointerTool extends BaseTool {
     );
   }
 
+  _measureHoverTargetsEqual(targetA, targetB) {
+    if (targetA === targetB) return true;
+    if (!targetA || !targetB) return false;
+    if (targetA.kind !== targetB.kind) return false;
+
+    switch (targetA.kind) {
+      case "ribPoint":
+        return this._ribPointsEqual(targetA.payload, targetB.payload);
+      case "handle":
+      case "points":
+        return this._measurePointsEqual(targetA.payload, targetB.payload);
+      case "segment":
+        return this._segmentsEqual(targetA.payload, targetB.payload);
+      default:
+        return false;
+    }
+  }
+
   get scalingEditBehavior() {
     return false;
   }
@@ -3850,11 +3611,7 @@ export class PointerTool extends BaseTool {
     // Clean up measure mode if active
     if (this.measureMode) {
       this.measureMode = false;
-      this.sceneModel.measureMode = false;
-      this.sceneModel.measureHoverSegment = null;
-      this.sceneModel.measureHoverRibPoint = null;
-      this.sceneModel.measureHoverPoints = null;
-      this.sceneModel.measureHoverHandle = null;
+      this.sceneModel.resetMeasureState();
       if (this._boundKeyUp) {
         window.removeEventListener("keyup", this._boundKeyUp);
         this._boundKeyUp = null;

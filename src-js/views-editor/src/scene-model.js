@@ -106,6 +106,70 @@ export class SceneModel {
     );
   }
 
+  clearMeasureHover() {
+    this.measureHoverSegment = null;
+    this.measureHoverRibPoint = null;
+    this.measureHoverPoints = null;
+    this.measureHoverHandle = null;
+  }
+
+  setMeasureActive(active, options = {}) {
+    this.measureMode = !!active;
+    if (!this.measureMode) {
+      this.measureShowDirect = false;
+      this.clearMeasureHover();
+      return;
+    }
+    this.measureShowDirect = !!options.showDirect;
+  }
+
+  setMeasureShowDirect(showDirect) {
+    this.measureShowDirect = !!showDirect;
+  }
+
+  setMeasureHoverTarget(kind, payload = null) {
+    this.clearMeasureHover();
+    switch (kind) {
+      case "ribPoint":
+        this.measureHoverRibPoint = payload;
+        break;
+      case "handle":
+        this.measureHoverHandle = payload;
+        break;
+      case "segment":
+        this.measureHoverSegment = payload;
+        break;
+      case "points":
+        this.measureHoverPoints = payload;
+        break;
+      case null:
+      case undefined:
+        break;
+      default:
+        throw new Error(`Unknown measure hover target kind: ${kind}`);
+    }
+  }
+
+  getMeasureHoverTarget() {
+    if (this.measureHoverRibPoint) {
+      return { kind: "ribPoint", payload: this.measureHoverRibPoint };
+    }
+    if (this.measureHoverHandle) {
+      return { kind: "handle", payload: this.measureHoverHandle };
+    }
+    if (this.measureHoverSegment) {
+      return { kind: "segment", payload: this.measureHoverSegment };
+    }
+    if (this.measureHoverPoints) {
+      return { kind: "points", payload: this.measureHoverPoints };
+    }
+    return null;
+  }
+
+  resetMeasureState() {
+    this.setMeasureActive(false);
+  }
+
   get glyphLines() {
     return this.sceneSettings.glyphLines;
   }

@@ -17,6 +17,9 @@ Execution rule:
 - architecture gates close before behavior changes start
 - a gate is not closed while a disallowed owner, disallowed file, or adapter -> pointer bounce-back still exists
 - completion must be verified mechanically against explicit conditions, not inferred from most of the work being done
+- before editing, declare the target files and keep the step inside those existing files
+- do not create new files for this chapter
+- helper extraction does not justify a new file by itself
 
 ---
 
@@ -100,7 +103,7 @@ Must not:
 - call `pointerTool._handle*` execution methods
 - parse selection strings
 - do modifier mapping
-- create new sidecar adapter files for Tunni
+- create new sidecar files for Tunni or measure helpers
 
 ### Shared Tunni Code
 
@@ -302,3 +305,5 @@ Data flow:
 
 Tunni-specific rule:
 `Mouse -> Pointer hit test/route -> Composer dispatch -> Adapter-owned Tunni session -> Path or skeleton persistence`
+
+

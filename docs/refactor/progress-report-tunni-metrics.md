@@ -117,19 +117,91 @@ Status: In Progress
 
 ## Phase 2 - Step 2.1: Move regular-Tunni interaction helpers out of core and into editor code
 
-- Problem: `src-js/fontra-core/src/tunni-calculations.js` still owned editor-coupled regular-Tunni helpers (hit testing, drag session state, and edit transaction wrappers). That violated the boundary goal for this phase: core should keep pure geometry, while editor-side code should own interaction/session behavior.
+- Problem: Regular Tunni interaction/session helpers were still in core or in a disallowed sidecar module, which violates the established editor ownership boundary.
 - Code analysis:
-  - The first implementation of this step moved regular-Tunni interaction/session helpers into a new file, `src-js/views-editor/src/tunni-regular-interaction.js`.
-  - That move removed editor session code from core, but it does not match the established architecture for this branch.
-  - The current target architecture is now locked explicitly in `docs/refactor/target-architecture.md`:
-    - shared Tunni geometry stays in `src-js/fontra-core/src/tunni-calculations.js`
-    - pointer owns Tunni hit testing, cursor state, and route selection only
-    - fallback Tunni execution must live in `src-js/views-editor/src/edit-behavior-adapters.js`
-    - `src-js/views-editor/src/tunni-regular-interaction.js` is not part of the target state
-  - This means Phase 2 - Step 2.1 is only partially complete:
-    - boundary cleanup out of core: yes
-    - compliance with existing adapter-layer architecture: no, not yet
-- Comparison: Partial only. The core/editor boundary improved, but the resulting file boundary is not accepted as the target architecture because it introduced a new regular-Tunni sidecar module instead of keeping Tunni fallback execution inside the existing adapter layer.
+  - Moved regular Tunni session/drag logic into `src-js/views-editor/src/edit-behavior-adapters.js`.
+  - Kept Tunni hit testing and routing in `src-js/views-editor/src/edit-tools-pointer.js`.
+  - Deleted the sidecar file `src-js/views-editor/src/tunni-regular-interaction.js`.
+  - Removed pointer-owned regular Tunni execution (`_handleTunniPointDrag`) and kept pointer as transport only.
+  - Updated Tunni helper imports so the adapter owns execution, and pointer only consumes helper exports.
+  - Verification:
+    - `node --check src-js/views-editor/src/edit-behavior-adapters.js`
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+    - `rg -n "_handleTunniPointDrag|tunni-regular-interaction" src-js/views-editor/src -S`
+- Comparison: Yes. Editor interaction ownership moved out of core without creating new files, and the execution now lives in the adapter layer, consistent with the target architecture.
+- Manual test results: NOT RUN in this terminal session (regular midpoint/true-Tunni drag parity still required).
+- Undo/redo verification: NOT RUN in this terminal session.
+
+## Phase 2 - Step 2.2: Make the specialized Tunni adapter own regular-Tunni execution
+
+- Problem: The specialized Tunni adapter path existed but still delegated into pointer private methods, which is an architectural bounce-back.
+- Code analysis:
+  - Adapter-owned regular Tunni execution now runs inside `src-js/views-editor/src/edit-behavior-adapters.js`.
+  - Removed adapter bounce-back to pointer for regular Tunni execution.
+  - Verification:
+    - `rg -n "runFallbackTunniDrag\(|_handleTunniPointDrag" src-js/views-editor/src/edit-behavior-adapters.js src-js/views-editor/src/edit-tools-pointer.js -S`
+- Comparison: Yes. Regular Tunni now runs in the specialized adapter without calling pointer private execution.
 - Manual test results: NOT RUN in this terminal session.
 - Undo/redo verification: NOT RUN in this terminal session.
+
+## Phase 3 - Step 3.1: Remove skeleton Tunni execution ownership from pointer private methods
+
+- Problem: Skeleton Tunni still executed inside pointer private methods and adapters were delegating back into pointer.
+- Code analysis:
+  - Moved skeleton Tunni execution session into `src-js/views-editor/src/edit-behavior-adapters.js`.
+  - Moved skeleton Tunni equalize action into `src-js/views-editor/src/edit-behavior-adapters.js` and exported it for pointer use.
+  - Removed pointer-owned `_handleSkeletonTunniDrag` and `_equalizeSkeletonTunniTensions`.
+  - Removed adapter bounce-back into pointer for skeleton Tunni execution.
+  - Verification:
+    - `node --check src-js/views-editor/src/edit-behavior-adapters.js`
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+    - `rg -n "_handleSkeletonTunniDrag|_equalizeSkeletonTunniTensions|runFallbackSkeletonTunniDrag" src-js/views-editor/src -S`
+- Comparison: Yes. Skeleton Tunni execution ownership is now adapter-owned and pointer is transport-only.
+- Manual test results: NOT RUN in this terminal session (skeleton midpoint/true-Tunni drag parity still required).
+- Undo/redo verification: NOT RUN in this terminal session.
+
+## Phase 3 - Step 3.2: Reuse shared skeleton-backed persistence helpers
+
+- Problem: Skeleton Tunni persistence was open-coded and duplicated the same regenerate/save lifecycle that already exists in adapter helpers.
+- Code analysis:
+  - Updated skeleton Tunni execution and equalize paths to use `collectSkeletonLayerPersistenceChanges(...)` and `cloneSkeletonData(...)` from `src-js/views-editor/src/edit-behavior-adapters.js`.
+  - Removed repeated regenerate/save boilerplate from the pointer-owned code (now deleted).
+  - Verification:
+    - `rg -n "collectSkeletonLayerPersistenceChanges\(|cloneSkeletonData\(" src-js/views-editor/src/edit-behavior-adapters.js -S`
+- Comparison: Yes. Skeleton Tunni persistence now reuses shared adapter helpers instead of open-coded duplication.
+- Manual test results: NOT RUN in this terminal session.
+- Undo/redo verification: NOT RUN in this terminal session.
+
+## Phase 4 - Step 4.2: Replace scattered measure field writes with one SceneModel-owned API
+
+- Problem: Pointer was directly mutating multiple `sceneModel.measure*` fields, which made state ownership unclear and reset behavior easy to break.
+- Code analysis:
+  - Added a measure-state API in `src-js/views-editor/src/scene-model.js`:
+    - `setMeasureActive(...)`
+    - `setMeasureShowDirect(...)`
+    - `setMeasureHoverTarget(...)`
+    - `getMeasureHoverTarget(...)`
+    - `resetMeasureState()`
+  - Replaced direct field writes in `src-js/views-editor/src/edit-tools-pointer.js` with the SceneModel API.
+  - Verification:
+    - `node --check src-js/views-editor/src/scene-model.js`
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+    - `rg -n "sceneModel\.measureMode|sceneModel\.measureShowDirect|sceneModel\.measureHover" src-js/views-editor/src/edit-tools-pointer.js -S`
+- Comparison: Yes. Measure state is now owned by SceneModel with a single explicit API, and pointer only drives lifecycle/hover transport.
+- Manual test results: NOT RUN in this terminal session (Q hover/Alt/Q lifecycle still required).
+- Undo/redo verification: NOT RUN (hover/state workflow).
+
+## Phase 5 - Step 5.2: Extract one measure hover resolver helper and make pointer use it
+
+- Problem: Pointer interleaved hover target resolution with state writes, making priority rules harder to verify.
+- Code analysis:
+  - Inlined a dedicated `resolveMeasureHoverTarget(...)` helper in `src-js/views-editor/src/edit-tools-pointer.js` (no new files).
+  - Added `_measureHoverTargetsEqual(...)` to compare hover targets by kind and payload.
+  - Pointer now resolves the hover target via the helper and then pushes it into the SceneModel measure API.
+  - Verification:
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+    - `rg -n "resolveMeasureHoverTarget|_measureHoverTargetsEqual|setMeasureHoverTarget\(" src-js/views-editor/src/edit-tools-pointer.js -S`
+- Comparison: Partial. The helper is in place and used, but the plan’s Step 5.1 documentation of hover priority is not yet recorded, so this step is not closed until Step 5.1 is documented.
+- Manual test results: NOT RUN in this terminal session.
+- Undo/redo verification: NOT RUN (hover/state workflow).
 

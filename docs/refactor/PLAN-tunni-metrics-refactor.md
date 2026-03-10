@@ -93,6 +93,14 @@ Rule:
 - do not switch from architecture cleanup to behavior changes until the current architecture gate is closed
 - if a disallowed owner, disallowed file, or bounce-back path is still live, the step is incomplete
 - report incompleteness explicitly; do not describe it as "remaining cleanup" after moving on
+- before editing, name the target files and confirm the step fits inside those existing files
+- do not create new files for this chapter
+
+For this chapter, the default file rule is:
+
+- use existing files
+- if a helper seems to want its own file, fold it into an allowed existing file instead
+- "cleaner as a new module" is not a valid reason to create a file
 
 Mechanical completion means the step has explicit verification conditions and those conditions are checked.
 
@@ -102,12 +110,14 @@ Typical gate checks for this chapter:
 - no standalone Tunni sidecar file outside the approved target architecture
 - no adapter delegation back into pointer for Tunni execution
 - one allowed shared Tunni math owner, not parallel implementations
+- no new files were introduced
 
 Working consequence:
 
 - architecture first
 - behavior unification second
 - progress reporting only after the gate is actually closed
+- target files declared before editing
 
 ---
 
@@ -1008,7 +1018,7 @@ export function resolveMeasureHoverTarget(...) {
 
 #### Files To Touch
 
-- one new editor-side measure helper module
+- existing measure-related files only; do not add a helper module
 - `src-js/views-editor/src/edit-tools-pointer.js`
 - `src-js/views-editor/src/scene-model.js`
 - `docs/refactor/progress-report-tunni-metrics.md`
@@ -1057,14 +1067,14 @@ The problem is that domain-specific registration and draw logic are still living
 
 Keep the common registry helpers where they are.
 
-Move domain-specific registrations into clearer files if that improves ownership:
+Keep domain-specific registrations in the existing visualization files for this chapter:
 
-- Tunni registration/draw helpers together
-- measure/Q overlay registration/draw helpers together
+- keep Tunni registration/draw helpers in the existing visualization files
+- keep measure/Q overlay registration/draw helpers in the existing visualization files
 
-Do not split the file just because "smaller files are nicer".
+Do not split the file in this chapter.
 
-Split only when the new file boundary is honest.
+If ownership is unclear, reorganize inside the existing file instead.
 
 #### Code Evidence
 
@@ -1086,7 +1096,7 @@ identifier: "fontra.tunni.labels"
 #### Files To Touch
 
 - `src-js/views-editor/src/visualization-layer-definitions.js`
-- one or more new visualization-layer domain files if needed
+- existing visualization-layer files only unless the architecture doc is updated first
 - `docs/refactor/progress-report-tunni-metrics.md`
 
 #### Manual Tests
@@ -1150,7 +1160,7 @@ in:
 #### Files To Touch
 
 - `src-js/fontra-core/src/distance-angle.js`
-- one editor-side Tunni visualization file
+- existing editor-side visualization files only
 - `docs/refactor/progress-report-tunni-metrics.md`
 
 #### Manual Tests
@@ -1212,7 +1222,7 @@ export function getGeneratedContourIndexSet(positionedGlyph, sceneSettings) { ..
 
 #### Files To Touch
 
-- one new editor-side generated-contour helper module
+- existing editor-side files only; do not add a generated-contour helper module
 - touched Tunni/measure modules that currently open-code this logic
 - `docs/refactor/progress-report-tunni-metrics.md`
 
@@ -1437,4 +1447,7 @@ When two approaches are possible, choose the one that follows these rules:
 3. Prefer adapter-owned specialized execution over pointer private execution.
 4. Prefer one explicit state API over scattered mutable fields.
 5. Prefer small verified steps over a single large rewrite.
+
+
+
 

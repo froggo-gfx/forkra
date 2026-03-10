@@ -2797,20 +2797,235 @@ async function runFallbackTunniDrag({ pointerTool, eventStream, initialEvent }) 
   return true;
 }
 
-async function runFallbackSkeletonTunniDrag({
-  pointerTool,
+function buildSkeletonTunniSegment(contour, segment) {
+  if (!contour?.points || !segment) {
+    return null;
+  }
+  return {
+    startPoint: { ...contour.points[segment.startIndex] },
+    endPoint: { ...contour.points[segment.endIndex] },
+    controlPoints: segment.controlIndices.map((index) => ({ ...contour.points[index] })),
+    startIndex: segment.startIndex,
+    endIndex: segment.endIndex,
+    controlIndices: segment.controlIndices,
+  };
+}
+
+export async function equalizeSkeletonTunniTensions({ sceneController, tunniHit }) {
+  assert(sceneController, "equalizeSkeletonTunniTensions: missing sceneController");
+  assert(tunniHit, "equalizeSkeletonTunniTensions: missing tunniHit");
+
+  const { contourIndex, segment } = tunniHit;
+  if (areSkeletonTensionsEqualized(segment)) {
+    return true;
+  }
+
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const allChanges = [];
+
+    for (const editLayerName of sceneController.editingLayerNames) {
+      const layer = glyph.layers[editLayerName];
+      const skeletonData = getSkeletonData(layer);
+      if (!skeletonData) {
+        continue;
+      }
+
+      const working = cloneSkeletonData(skeletonData);
+      const contour = working.contours?.[contourIndex];
+      if (!contour) {
+        continue;
+      }
+
+      const layerSegment = buildSkeletonTunniSegment(contour, segment);
+      const newControlPoints = calculateSkeletonEqualizedControlPoints(layerSegment);
+      if (!newControlPoints) {
+        continue;
+      }
+
+      const [cp1Index, cp2Index] = segment.controlIndices;
+      contour.points[cp1Index].x = Math.round(newControlPoints[0].x);
+      contour.points[cp1Index].y = Math.round(newControlPoints[0].y);
+      contour.points[cp2Index].x = Math.round(newControlPoints[1].x);
+      contour.points[cp2Index].y = Math.round(newControlPoints[1].y);
+
+      allChanges.push(
+        ...collectSkeletonLayerPersistenceChanges({
+          layer,
+          working,
+          editLayerName,
+          cloneOnPersist: true,
+        })
+      );
+    }
+
+    if (!allChanges.length) {
+      return;
+    }
+
+    const combinedChange = new ChangeCollector().concat(...allChanges);
+    await sendIncrementalChange(combinedChange.change);
+
+    return {
+      changes: combinedChange,
+      undoLabel: "Equalize Skeleton Tunni Tensions",
+      broadcast: true,
+    };
+  });
+
+  return true;
+}
+
+async function runSpecializedSkeletonTunniDrag({
+  sceneController,
   eventStream,
   initialEvent,
   tunniHit,
 }) {
-  const handled = await pointerTool._handleSkeletonTunniDrag(
-    eventStream,
-    initialEvent,
-    tunniHit
-  );
-  if (handled === false) {
+  assert(sceneController, "runSpecializedSkeletonTunniDrag: missing sceneController");
+  assert(eventStream, "runSpecializedSkeletonTunniDrag: missing eventStream");
+  assert(initialEvent, "runSpecializedSkeletonTunniDrag: missing initialEvent");
+  assert(tunniHit, "runSpecializedSkeletonTunniDrag: missing tunniHit");
+
+  const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+  if (!positionedGlyph) {
     return false;
   }
+
+  const localPoint = sceneController.localPoint(initialEvent);
+  const startGlyphPoint = {
+    x: localPoint.x - positionedGlyph.x,
+    y: localPoint.y - positionedGlyph.y,
+  };
+  const { type, contourIndex, segment } = tunniHit;
+  const isTrueTunni = type === "true-tunni";
+  const originalSegment = {
+    startPoint: { ...segment.startPoint },
+    endPoint: { ...segment.endPoint },
+    controlPoints: segment.controlPoints.map((point) => ({ ...point })),
+    startIndex: segment.startIndex,
+    endIndex: segment.endIndex,
+    controlIndices: segment.controlIndices,
+  };
+  const originalTunniPoint = isTrueTunni
+    ? calculateSkeletonTrueTunniPoint(originalSegment)
+    : calculateSkeletonTunniPoint(originalSegment);
+  if (!originalTunniPoint) {
+    return false;
+  }
+
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const layersData = {};
+    for (const editLayerName of sceneController.editingLayerNames) {
+      const layer = glyph.layers[editLayerName];
+      const skeletonData = getSkeletonData(layer);
+      if (!skeletonData) {
+        continue;
+      }
+      layersData[editLayerName] = {
+        layer,
+        original: cloneSkeletonData(skeletonData),
+        working: cloneSkeletonData(skeletonData),
+      };
+    }
+
+    if (!Object.keys(layersData).length) {
+      return;
+    }
+
+    let accumulatedChanges = new ChangeCollector();
+
+    for await (const event of eventStream) {
+      const roundFunc = makeRoundFunc(event);
+      const currentLocalPoint = sceneController.localPoint(event);
+      const currentGlyphPoint = {
+        x: currentLocalPoint.x - positionedGlyph.x,
+        y: currentLocalPoint.y - positionedGlyph.y,
+      };
+      const delta = vector.subVectors(currentGlyphPoint, startGlyphPoint);
+      const nextTunniPoint = {
+        x: originalTunniPoint.x + delta.x,
+        y: originalTunniPoint.y + delta.y,
+      };
+      const preserveEqualizedDistances = !event.altKey;
+      const allChanges = [];
+
+      for (const [editLayerName, layerData] of Object.entries(layersData)) {
+        const { layer, original, working } = layerData;
+        resetSkeletonWorkingDataToOriginal({ original, working, contourIndex });
+        const contour = original.contours?.[contourIndex];
+        const workingContour = working.contours?.[contourIndex];
+        if (!contour || !workingContour) {
+          continue;
+        }
+
+        const layerSegment = buildSkeletonTunniSegment(contour, segment);
+        if (!layerSegment) {
+          continue;
+        }
+
+        if (isTrueTunni) {
+          const result = calculateSkeletonOnCurveFromTunni(
+            nextTunniPoint,
+            layerSegment,
+            preserveEqualizedDistances
+          );
+          if (!result) {
+            continue;
+          }
+          workingContour.points[segment.startIndex].x = roundFunc(result.newStartPoint.x);
+          workingContour.points[segment.startIndex].y = roundFunc(result.newStartPoint.y);
+          workingContour.points[segment.endIndex].x = roundFunc(result.newEndPoint.x);
+          workingContour.points[segment.endIndex].y = roundFunc(result.newEndPoint.y);
+        } else {
+          const newControlPoints = calculateSkeletonControlPointsFromTunniDelta(
+            delta,
+            layerSegment,
+            preserveEqualizedDistances
+          );
+          if (!newControlPoints) {
+            continue;
+          }
+          const [cp1Index, cp2Index] = segment.controlIndices;
+          workingContour.points[cp1Index].x = roundFunc(newControlPoints[0].x);
+          workingContour.points[cp1Index].y = roundFunc(newControlPoints[0].y);
+          workingContour.points[cp2Index].x = roundFunc(newControlPoints[1].x);
+          workingContour.points[cp2Index].y = roundFunc(newControlPoints[1].y);
+        }
+
+        allChanges.push(
+          ...collectSkeletonLayerPersistenceChanges({
+            layer,
+            working,
+            editLayerName,
+            cloneOnPersist: true,
+          })
+        );
+      }
+
+      if (!allChanges.length) {
+        continue;
+      }
+
+      const combinedChange = new ChangeCollector().concat(...allChanges);
+      accumulatedChanges = accumulatedChanges.concat(combinedChange);
+      await sendIncrementalChange(combinedChange.change, true);
+    }
+
+    if (!accumulatedChanges.hasChange) {
+      return;
+    }
+
+    await sendIncrementalChange(accumulatedChanges.change);
+
+    return {
+      changes: accumulatedChanges,
+      undoLabel: isTrueTunni
+        ? "Move Skeleton On-Curve Points (Tunni)"
+        : "Move Skeleton Control Points (Tunni)",
+      broadcast: true,
+    };
+  });
+
   return true;
 }
 
@@ -5011,5 +5226,5 @@ export const fallbackDragAdapters = {
   componentOrigin: async (context) => runFallbackComponentDrag(context),
   componentTCenter: async (context) => runFallbackComponentDrag(context),
   tunniPoint: async (context) => runFallbackTunniDrag(context),
-  skeletonTunniPoint: async (context) => runFallbackSkeletonTunniDrag(context),
+  skeletonTunniPoint: async (context) => runSpecializedSkeletonTunniDrag(context),
 };
