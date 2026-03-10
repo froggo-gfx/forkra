@@ -1131,6 +1131,138 @@ function cloneSkeletonData(skeletonData) {
   return JSON.parse(JSON.stringify(skeletonData));
 }
 
+function applySmoothToggleToSkeletonData({
+  skeletonData,
+  skeletonPointSelection,
+  newSmooth,
+}) {
+  for (const selKey of skeletonPointSelection) {
+    const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+    const contour = skeletonData.contours?.[contourIdx];
+    if (!contour) continue;
+
+    const point = contour.points?.[pointIdx];
+    if (!point || point.type === "cubic" || point.type === "quad") continue;
+
+    const points = contour.points;
+    const numPoints = points.length;
+    const isClosed = contour.isClosed;
+
+    if (!isClosed) {
+      let firstOnCurve = -1;
+      let lastOnCurve = -1;
+      for (let i = 0; i < numPoints; i++) {
+        if (!points[i].type) {
+          if (firstOnCurve === -1) firstOnCurve = i;
+          lastOnCurve = i;
+        }
+      }
+      if (pointIdx === firstOnCurve || pointIdx === lastOnCurve) continue;
+    }
+
+    const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
+    const nextIdx = (pointIdx + 1) % numPoints;
+    const hasPrevHandle = points[prevIdx]?.type === "cubic" || points[prevIdx]?.type === "quad";
+    const hasNextHandle = points[nextIdx]?.type === "cubic" || points[nextIdx]?.type === "quad";
+
+    if (!hasPrevHandle && !hasNextHandle) continue;
+
+    point.smooth = newSmooth;
+    if (!newSmooth) {
+      continue;
+    }
+
+    if (hasPrevHandle && hasNextHandle) {
+      const prevPoint = points[prevIdx];
+      const nextPoint = points[nextIdx];
+      const prevDx = prevPoint.x - point.x;
+      const prevDy = prevPoint.y - point.y;
+      const nextDx = nextPoint.x - point.x;
+      const nextDy = nextPoint.y - point.y;
+      const prevDist = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
+      const nextDist = Math.sqrt(nextDx * nextDx + nextDy * nextDy);
+
+      if (prevDist > 0 && nextDist > 0) {
+        const avgDx = nextDx / nextDist - prevDx / prevDist;
+        const avgDy = nextDy / nextDist - prevDy / prevDist;
+        const avgLen = Math.sqrt(avgDx * avgDx + avgDy * avgDy);
+
+        if (avgLen > 0) {
+          const dirX = avgDx / avgLen;
+          const dirY = avgDy / avgLen;
+          prevPoint.x = point.x - dirX * prevDist;
+          prevPoint.y = point.y - dirY * prevDist;
+          nextPoint.x = point.x + dirX * nextDist;
+          nextPoint.y = point.y + dirY * nextDist;
+        }
+      }
+    } else {
+      const handleIdx = hasPrevHandle ? prevIdx : nextIdx;
+      const handlePoint = points[handleIdx];
+      const otherSideIdx = hasPrevHandle ? nextIdx : prevIdx;
+      let lineEndIdx = otherSideIdx;
+
+      while (points[lineEndIdx]?.type) {
+        lineEndIdx = hasPrevHandle
+          ? (lineEndIdx + 1) % numPoints
+          : (lineEndIdx - 1 + numPoints) % numPoints;
+        if (lineEndIdx === pointIdx) break;
+      }
+
+      const lineEnd = points[lineEndIdx];
+      if (lineEnd && !lineEnd.type) {
+        const lineDx = lineEnd.x - point.x;
+        const lineDy = lineEnd.y - point.y;
+        const lineLen = Math.sqrt(lineDx * lineDx + lineDy * lineDy);
+
+        if (lineLen > 0) {
+          const lineDirX = lineDx / lineLen;
+          const lineDirY = lineDy / lineLen;
+          const handleDx = handlePoint.x - point.x;
+          const handleDy = handlePoint.y - point.y;
+          const handleDist = Math.sqrt(handleDx * handleDx + handleDy * handleDy);
+
+          if (handleDist > 0) {
+            handlePoint.x = point.x - lineDirX * handleDist;
+            handlePoint.y = point.y - lineDirY * handleDist;
+          }
+        }
+      }
+    }
+  }
+}
+
+function transformSelectedSkeletonPoints(skeletonData, skeletonPointSelection, transform) {
+  const pointsToTransform = new Set();
+
+  for (const selKey of skeletonPointSelection) {
+    const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+    const contour = skeletonData.contours?.[contourIdx];
+    if (!contour) continue;
+
+    const numPoints = contour.points.length;
+    pointsToTransform.add(`${contourIdx}/${pointIdx}`);
+
+    const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
+    const nextIdx = (pointIdx + 1) % numPoints;
+    if (contour.points[prevIdx]?.type === "cubic") {
+      pointsToTransform.add(`${contourIdx}/${prevIdx}`);
+    }
+    if (contour.points[nextIdx]?.type === "cubic") {
+      pointsToTransform.add(`${contourIdx}/${nextIdx}`);
+    }
+  }
+
+  for (const key of pointsToTransform) {
+    const [contourIdx, pointIdx] = key.split("/").map(Number);
+    const point = skeletonData.contours?.[contourIdx]?.points?.[pointIdx];
+    if (!point) continue;
+    const [newX, newY] = transform.transformPoint(point.x, point.y);
+    point.x = newX;
+    point.y = newY;
+  }
+}
+
 // Mixed skeleton-backed helper block
 
 function createSkeletonBackedMixedEditState({
@@ -2215,6 +2347,89 @@ function collectSkeletonLayerPersistenceChanges(options) {
   return [prefixedPath, prefixedCustomData].filter((change) => change.hasChange);
 }
 
+export async function runSkeletonSmoothTogglePersistence({
+  sceneController,
+  skeletonPointSelection,
+  newSmooth,
+  undoLabel,
+}) {
+  assert(sceneController, "runSkeletonSmoothTogglePersistence: missing sceneController");
+  assert(
+    skeletonPointSelection?.size,
+    "runSkeletonSmoothTogglePersistence: missing skeletonPointSelection"
+  );
+
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const allChanges = [];
+
+    for (const editLayerName of sceneController.editingLayerNames || []) {
+      const layer = glyph.layers[editLayerName];
+      const skeletonData = getSkeletonData(layer);
+      if (!skeletonData) {
+        continue;
+      }
+
+      const working = cloneSkeletonData(skeletonData);
+      applySmoothToggleToSkeletonData({
+        skeletonData: working,
+        skeletonPointSelection,
+        newSmooth,
+      });
+      allChanges.push(
+        ...collectSkeletonLayerPersistenceChanges({
+          layer,
+          working,
+          editLayerName,
+          cloneOnPersist: true,
+        })
+      );
+    }
+
+    if (!allChanges.length) {
+      return;
+    }
+
+    const combinedChange = new ChangeCollector().concat(...allChanges);
+    await sendIncrementalChange(combinedChange.change);
+
+    return {
+      changes: combinedChange,
+      undoLabel,
+    };
+  });
+
+  return true;
+}
+
+export function makeSkeletonSelectionTransformPersistenceChanges({
+  layer,
+  originalSkeletonData,
+  skeletonPointSelection,
+  transform,
+  editLayerName,
+}) {
+  assert(layer, "makeSkeletonSelectionTransformPersistenceChanges: missing layer");
+  assert(
+    originalSkeletonData,
+    "makeSkeletonSelectionTransformPersistenceChanges: missing originalSkeletonData"
+  );
+  assert(
+    skeletonPointSelection?.size,
+    "makeSkeletonSelectionTransformPersistenceChanges: missing skeletonPointSelection"
+  );
+  assert(transform, "makeSkeletonSelectionTransformPersistenceChanges: missing transform");
+  assert(editLayerName, "makeSkeletonSelectionTransformPersistenceChanges: missing editLayerName");
+
+  const working = cloneSkeletonData(originalSkeletonData);
+  transformSelectedSkeletonPoints(working, skeletonPointSelection, transform);
+  return collectSkeletonLayerPersistenceChanges({
+    layer,
+    working,
+    editLayerName,
+    cloneOnPersist: true,
+  });
+}
+
 async function runRegularPointLikeOrchestration({
   mode,
   sceneController,
@@ -2795,11 +3010,16 @@ async function runSpecializedSkeletonTunniDrag({
   eventStream,
   initialEvent,
   tunniHit,
+  tunniAction = "drag",
 }) {
   assert(sceneController, "runSpecializedSkeletonTunniDrag: missing sceneController");
   assert(eventStream, "runSpecializedSkeletonTunniDrag: missing eventStream");
   assert(initialEvent, "runSpecializedSkeletonTunniDrag: missing initialEvent");
   assert(tunniHit, "runSpecializedSkeletonTunniDrag: missing tunniHit");
+
+  if (tunniAction === "equalize") {
+    return equalizeSkeletonTunniTensions({ sceneController, tunniHit });
+  }
 
   const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
   if (!positionedGlyph) {

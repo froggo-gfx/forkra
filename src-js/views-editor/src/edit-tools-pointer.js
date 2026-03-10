@@ -8,8 +8,6 @@ import { translate } from "@fontra/core/localization.js";
 import { connectContours, toggleSmooth } from "@fontra/core/path-functions.js";
 import {
   getSkeletonData,
-  regenerateSkeletonContours,
-  setSkeletonData,
   calculateNormalAtSkeletonPoint,
   getPointHalfWidth,
 } from "@fontra/core/skeleton-contour-generator.js";
@@ -63,7 +61,8 @@ import {
   computeHandleLengthsFromTensions,
   calculateSkeletonTunniPoint,
   calculateSkeletonTrueTunniPoint,
-  equalizeSkeletonTunniTensions,
+  makeSkeletonSelectionTransformPersistenceChanges,
+  runSkeletonSmoothTogglePersistence,
 } from "./edit-behavior-adapters.js";
 import { getSkeletonDataFromGlyph } from "./skeleton-visualization-layers.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
@@ -993,10 +992,11 @@ export class PointerTool extends BaseTool {
     // Q-mode: find rib point or segment under cursor for measurement
     if (this.measureMode) {
       this.sceneModel.setMeasureShowDirect(event.altKey);
+      const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
       const nextMeasureTarget = resolveMeasureHoverTarget({
         findRibPoint: () => this._findRibPointForMeasure(point, size),
-        findHandle: () => this._findControlPointForMeasure(point, size),
-        findSegment: () => this._findSegmentForMeasure(point, size),
+        findHandle: () => this._findControlPointForMeasure(point, size, positionedGlyph),
+        findSegment: () => this._findSegmentForMeasure(point, size, positionedGlyph),
         getSelectionPoints: () => this._getMeasurePointsFromSelection(),
       });
       const currentMeasureTarget = this.sceneModel.getMeasureHoverTarget();
@@ -1438,18 +1438,25 @@ export class PointerTool extends BaseTool {
         };
         const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
         if (skeletonData) {
-          // Use larger hit margin and search only midpoint Tunni for equalize
           const tunniHit = skeletonTunniHitTest(glyphPoint, size * 2, skeletonData, {
             midpointOnly: true,
           });
           if (tunniHit) {
-            await equalizeSkeletonTunniTensions({
+            const handled = await runDragRoutingOrchestration({
+              pointerTool: this,
               sceneController,
+              eventStream,
+              initialEvent,
+              objectKind: "skeletonTunniPoint",
+              forceRowId: "R1",
               tunniHit,
+              tunniAction: "equalize",
             });
-            initialEvent.preventDefault();
-            eventStream.done();
-            return;
+            if (handled) {
+              initialEvent.preventDefault();
+              eventStream.done();
+              return;
+            }
           }
         }
       }
@@ -1709,202 +1716,59 @@ export class PointerTool extends BaseTool {
    */
   async _handleSkeletonPointsDoubleClick(skeletonPointSelection) {
     const sceneController = this.sceneController;
+    const editLayerName = sceneController.editingLayerNames?.[0];
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const layer = editLayerName
+      ? positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName]
+      : null;
+    const skeletonData = layer ? getSkeletonData(layer) : null;
+    if (!skeletonData) {
+      return;
+    }
 
-    await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      // Setup data for ALL editable layers (multi-source editing support)
-      const layersData = {};
-      for (const editLayerName of sceneController.editingLayerNames) {
-        const layer = glyph.layers[editLayerName];
-        if (!getSkeletonData(layer)) continue;
+    let newSmooth = null;
+    for (const selKey of skeletonPointSelection) {
+      const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+      const contour = skeletonData.contours?.[contourIdx];
+      if (!contour) continue;
 
-        layersData[editLayerName] = {
-          layer,
-          skeletonData: JSON.parse(JSON.stringify(getSkeletonData(layer))),
-        };
-      }
+      const point = contour.points?.[pointIdx];
+      if (!point || point.type === "cubic" || point.type === "quad") continue;
 
-      if (Object.keys(layersData).length === 0) return;
-
-      // Determine new smooth value from first layer (all layers should have same structure)
-      const firstLayerData = Object.values(layersData)[0];
-      let newSmooth = null;
-
-      // Find newSmooth value from first layer
-      for (const selKey of skeletonPointSelection) {
-        const [contourIdx, pointIdx] = selKey.split("/").map(Number);
-        const contour = firstLayerData.skeletonData.contours?.[contourIdx];
-        if (!contour) continue;
-
-        const point = contour.points?.[pointIdx];
-        if (!point || point.type === "cubic" || point.type === "quad") continue;
-
-        const points = contour.points;
-        const numPoints = points.length;
-        const isClosed = contour.isClosed;
-
-        // Check if this is an endpoint of an open contour
-        if (!isClosed) {
-          let firstOnCurve = -1;
-          let lastOnCurve = -1;
-          for (let i = 0; i < numPoints; i++) {
-            if (!points[i].type) {
-              if (firstOnCurve === -1) firstOnCurve = i;
-              lastOnCurve = i;
-            }
-          }
-          if (pointIdx === firstOnCurve || pointIdx === lastOnCurve) continue;
-        }
-
-        const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
-        const nextIdx = (pointIdx + 1) % numPoints;
-        const hasPrevHandle = points[prevIdx]?.type === "cubic" || points[prevIdx]?.type === "quad";
-        const hasNextHandle = points[nextIdx]?.type === "cubic" || points[nextIdx]?.type === "quad";
-
-        if (!hasPrevHandle && !hasNextHandle) continue;
-
-        newSmooth = !point.smooth;
-        break;
-      }
-
-      if (newSmooth === null) return; // No valid on-curve points selected
-
-      // Helper to apply smooth toggle to skeleton data
-      const applySmoothToggle = (skeletonData) => {
-        for (const selKey of skeletonPointSelection) {
-          const [contourIdx, pointIdx] = selKey.split("/").map(Number);
-          const contour = skeletonData.contours?.[contourIdx];
-          if (!contour) continue;
-
-          const point = contour.points?.[pointIdx];
-          if (!point || point.type === "cubic" || point.type === "quad") continue;
-
-          const points = contour.points;
-          const numPoints = points.length;
-          const isClosed = contour.isClosed;
-
-          if (!isClosed) {
-            let firstOnCurve = -1;
-            let lastOnCurve = -1;
-            for (let i = 0; i < numPoints; i++) {
-              if (!points[i].type) {
-                if (firstOnCurve === -1) firstOnCurve = i;
-                lastOnCurve = i;
-              }
-            }
-            if (pointIdx === firstOnCurve || pointIdx === lastOnCurve) continue;
-          }
-
-          const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
-          const nextIdx = (pointIdx + 1) % numPoints;
-          const hasPrevHandle = points[prevIdx]?.type === "cubic" || points[prevIdx]?.type === "quad";
-          const hasNextHandle = points[nextIdx]?.type === "cubic" || points[nextIdx]?.type === "quad";
-
-          if (!hasPrevHandle && !hasNextHandle) continue;
-
-          // Keep point.cornerRoundness intact so toggling smooth on/off does not
-          // destroy user-defined corner rounding values.
-          point.smooth = newSmooth;
-
-          // If switching to smooth, align handle(s) to be collinear
-          if (newSmooth) {
-            if (hasPrevHandle && hasNextHandle) {
-              const prevPoint = points[prevIdx];
-              const nextPoint = points[nextIdx];
-
-              const prevDx = prevPoint.x - point.x;
-              const prevDy = prevPoint.y - point.y;
-              const nextDx = nextPoint.x - point.x;
-              const nextDy = nextPoint.y - point.y;
-
-              const prevDist = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
-              const nextDist = Math.sqrt(nextDx * nextDx + nextDy * nextDy);
-
-              if (prevDist > 0 && nextDist > 0) {
-                const avgDx = nextDx / nextDist - prevDx / prevDist;
-                const avgDy = nextDy / nextDist - prevDy / prevDist;
-                const avgLen = Math.sqrt(avgDx * avgDx + avgDy * avgDy);
-
-                if (avgLen > 0) {
-                  const dirX = avgDx / avgLen;
-                  const dirY = avgDy / avgLen;
-
-                  prevPoint.x = point.x - dirX * prevDist;
-                  prevPoint.y = point.y - dirY * prevDist;
-                  nextPoint.x = point.x + dirX * nextDist;
-                  nextPoint.y = point.y + dirY * nextDist;
-                }
-              }
-            } else if (hasPrevHandle || hasNextHandle) {
-              const handleIdx = hasPrevHandle ? prevIdx : nextIdx;
-              const handlePoint = points[handleIdx];
-
-              const otherSideIdx = hasPrevHandle ? nextIdx : prevIdx;
-              let lineEndIdx = otherSideIdx;
-
-              while (points[lineEndIdx]?.type) {
-                lineEndIdx = hasPrevHandle
-                  ? (lineEndIdx + 1) % numPoints
-                  : (lineEndIdx - 1 + numPoints) % numPoints;
-                if (lineEndIdx === pointIdx) break;
-              }
-
-              const lineEnd = points[lineEndIdx];
-              if (lineEnd && !lineEnd.type) {
-                const lineDx = lineEnd.x - point.x;
-                const lineDy = lineEnd.y - point.y;
-                const lineLen = Math.sqrt(lineDx * lineDx + lineDy * lineDy);
-
-                if (lineLen > 0) {
-                  const lineDirX = lineDx / lineLen;
-                  const lineDirY = lineDy / lineLen;
-
-                  const handleDx = handlePoint.x - point.x;
-                  const handleDy = handlePoint.y - point.y;
-                  const handleDist = Math.sqrt(handleDx * handleDx + handleDy * handleDy);
-
-                  if (handleDist > 0) {
-                    handlePoint.x = point.x - lineDirX * handleDist;
-                    handlePoint.y = point.y - lineDirY * handleDist;
-                  }
-                }
-              }
-            }
+      const points = contour.points;
+      const numPoints = points.length;
+      const isClosed = contour.isClosed;
+      if (!isClosed) {
+        let firstOnCurve = -1;
+        let lastOnCurve = -1;
+        for (let i = 0; i < numPoints; i++) {
+          if (!points[i].type) {
+            if (firstOnCurve === -1) firstOnCurve = i;
+            lastOnCurve = i;
           }
         }
-      };
-      const regenerateOutline = (staticGlyph, skelData) => {
-        regenerateSkeletonContours(staticGlyph, skelData);
-      };
-
-      const allChanges = [];
-
-      // Apply changes to ALL editable layers
-      for (const [editLayerName, data] of Object.entries(layersData)) {
-        const { layer, skeletonData } = data;
-
-        // Apply the smooth toggle to this layer's skeleton data
-        applySmoothToggle(skeletonData);
-
-        // Record changes for this layer
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          regenerateSkeletonContours(sg, skeletonData);
-        });
-        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-        const customDataChange = recordChanges(layer, (l) => {
-          setSkeletonData(l, skeletonData);
-        });
-        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+        if (pointIdx === firstOnCurve || pointIdx === lastOnCurve) continue;
       }
 
-      const combinedChange = new ChangeCollector().concat(...allChanges);
-      await sendIncrementalChange(combinedChange.change);
+      const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
+      const nextIdx = (pointIdx + 1) % numPoints;
+      const hasPrevHandle = points[prevIdx]?.type === "cubic" || points[prevIdx]?.type === "quad";
+      const hasNextHandle = points[nextIdx]?.type === "cubic" || points[nextIdx]?.type === "quad";
+      if (!hasPrevHandle && !hasNextHandle) continue;
 
-      return {
-        changes: combinedChange,
-        undoLabel: translate("edit-tools-pointer.undo.toggle-smooth"),
-      };
+      newSmooth = !point.smooth;
+      break;
+    }
+
+    if (newSmooth === null) {
+      return;
+    }
+
+    await runSkeletonSmoothTogglePersistence({
+      sceneController,
+      skeletonPointSelection,
+      newSmooth,
+      undoLabel: translate("edit-tools-pointer.undo.toggle-smooth"),
     });
   }
 
@@ -2454,8 +2318,6 @@ export class PointerTool extends BaseTool {
       const originalSkeletonData = getSkeletonData(layer);
       if (!originalSkeletonData) return;
 
-      const layerGlyph = layer.glyph;
-
       // Calculate bounds and pin point
       const bounds = getSkeletonSelectionBounds(selection, originalSkeletonData);
       if (!bounds) return;
@@ -2521,28 +2383,13 @@ export class PointerTool extends BaseTool {
           .transform(transformation)
           .translate(-usePinPoint.x, -usePinPoint.y);
 
-        // Deep clone original skeleton data and apply transform
-        const workingSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
-        transformSkeletonPoints(workingSkeletonData, skeletonPointSelection, pinnedTransformation);
-
-        // Regenerate outline
-        const regenerateOutline = (staticGlyph, skelData) => {
-          regenerateSkeletonContours(staticGlyph, skelData);
-        };
-
-        // Record changes
-        const changes = [];
-
-        const pathChange = recordChanges(layerGlyph, (sg) => {
-          regenerateSkeletonContours(sg, workingSkeletonData);
+        const changes = makeSkeletonSelectionTransformPersistenceChanges({
+          layer,
+          originalSkeletonData,
+          skeletonPointSelection,
+          transform: pinnedTransformation,
+          editLayerName,
         });
-        changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-        const customDataChange = recordChanges(layer, (l) => {
-          setSkeletonData(l, workingSkeletonData);
-        });
-        changes.push(customDataChange.prefixed(["layers", editLayerName]));
-
         const combinedChange = new ChangeCollector().concat(...changes);
         accumulatedChanges = accumulatedChanges.concat(combinedChange);
         await sendIncrementalChange(combinedChange.change, true);
@@ -3096,8 +2943,7 @@ export class PointerTool extends BaseTool {
    * - tensionContext stores canonical cubic segment data for stable tension
    *   calculation: { segmentPoints: [p1,p2,p3,p4], hoveredHandleSide }.
    */
-  _findControlPointForMeasure(point, size) {
-    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+  _findControlPointForMeasure(point, size, positionedGlyph = this.sceneModel.getSelectedPositionedGlyph()) {
     if (!positionedGlyph?.glyph?.path) {
       return null;
     }
@@ -3107,7 +2953,6 @@ export class PointerTool extends BaseTool {
       y: point.y - positionedGlyph.y,
     };
 
-    // Check skeleton control points first
     const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
     if (skeletonData?.contours?.length) {
       for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
@@ -3122,7 +2967,7 @@ export class PointerTool extends BaseTool {
         };
         for (let pointIdx = 0; pointIdx < points.length; pointIdx++) {
           const sp = points[pointIdx];
-          if (!sp?.type) continue; // only off-curve
+          if (!sp?.type) continue;
           const dist = vector.distance(glyphPoint, sp);
           if (dist > size) continue;
 
@@ -3141,20 +2986,30 @@ export class PointerTool extends BaseTool {
       }
     }
 
-    // Check regular path control points (including generated handles)
     const path = positionedGlyph.glyph.path;
-    const pointIndex = path.pointIndexNearPoint(glyphPoint, size);
-    if (pointIndex === undefined) return null;
+    const candidatePointIndices = [];
+    const searchRect = centeredRect(glyphPoint.x, glyphPoint.y, size);
+    for (const hit of path.iterPointsInRect(searchRect)) {
+      const pointType = path.pointTypes[hit.pointIndex];
+      const isOnCurve = (pointType & 0x03) === 0;
+      if (isOnCurve) {
+        continue;
+      }
+      candidatePointIndices.push(hit.pointIndex);
+    }
 
-    const pointType = path.pointTypes[pointIndex];
-    const isOnCurve = (pointType & 0x03) === 0;
-    if (isOnCurve) return null;
+    const pointIndex = path.pointIndexNearPointFromPointIndices(
+      glyphPoint,
+      size,
+      candidatePointIndices
+    );
+    if (pointIndex === undefined) return null;
 
     const [contourIndex, contourPointIndex] = path.getContourAndPointIndex(pointIndex);
     const contourInfo = path.contourInfo[contourIndex];
     const numContourPoints = path.getNumPointsOfContour(contourIndex);
     const contourStart = pointIndex - contourPointIndex;
-    const contourEnd = contourStart + numContourPoints; // exclusive
+    const contourEnd = contourStart + numContourPoints;
 
     const getPrevIdx = (idx) => {
       if (idx > contourStart) {
@@ -3195,7 +3050,6 @@ export class PointerTool extends BaseTool {
       type: "path",
     };
   }
-
   _buildPathTensionContext(path, contourIndex, hoveredPointIndex) {
     for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
       if (!segment?.points || segment.points.length !== 4) {
@@ -3376,8 +3230,7 @@ export class PointerTool extends BaseTool {
    * Find segment under cursor for measure mode.
    * Returns { p1, p2, type } where p1 and p2 are on-curve endpoints.
    */
-  _findSegmentForMeasure(point, size) {
-    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+  _findSegmentForMeasure(point, size, positionedGlyph = this.sceneModel.getSelectedPositionedGlyph()) {
     if (!positionedGlyph?.glyph?.path) {
       return null;
     }
@@ -3390,7 +3243,6 @@ export class PointerTool extends BaseTool {
     const path = positionedGlyph.glyph.path;
     const margin = size * 1.5;
 
-    // Check skeleton segments FIRST (they should have priority over generated contours)
     const skeletonSegmentHit = this._findSkeletonSegmentNear(
       positionedGlyph,
       glyphPoint,
@@ -3400,7 +3252,6 @@ export class PointerTool extends BaseTool {
       return skeletonSegmentHit;
     }
 
-    // Check path segments
     const segmentHit = this._findPathSegmentNear(path, glyphPoint, margin);
     if (segmentHit) {
       return segmentHit;
@@ -3420,8 +3271,6 @@ export class PointerTool extends BaseTool {
       const info = contourInfo[contourIdx];
       const startPoint = contourIdx === 0 ? 0 : contourInfo[contourIdx - 1].endPoint + 1;
       const endPoint = info.endPoint;
-
-      // Find on-curve points in this contour
       const onCurveIndices = [];
       for (let i = startPoint; i <= endPoint; i++) {
         const pt = path.getPoint(i);
@@ -3430,18 +3279,13 @@ export class PointerTool extends BaseTool {
         }
       }
 
-      // Check each segment
       for (let i = 0; i < onCurveIndices.length; i++) {
         const idx1 = onCurveIndices[i];
         const idx2 = onCurveIndices[(i + 1) % onCurveIndices.length];
-
-        // Skip closing segment if contour is open
         if (!info.isClosed && i === onCurveIndices.length - 1) continue;
 
         const p1 = path.getPoint(idx1);
         const p2 = path.getPoint(idx2);
-
-        // Collect control points between on-curve points
         const controlPoints = [];
         let j = idx1 + 1;
         const limit = idx2 > idx1 ? idx2 : endPoint + 1 + idx2 - startPoint;
@@ -3454,7 +3298,6 @@ export class PointerTool extends BaseTool {
           j++;
         }
 
-        // Check distance to curve (sampled if has control points)
         const dist = this._distanceToCurve(point, p1, p2, controlPoints);
         if (dist <= margin) {
           return { p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, type: "path" };
@@ -3855,47 +3698,6 @@ function getSelectionType(selection) {
   if (hasSkeleton) return "skeleton";
   if (hasRegular) return "regular";
   return "none";
-}
-
-/**
- * Transform selected skeleton points (and their handles) by applying a transformation matrix.
- */
-function transformSkeletonPoints(skeletonData, skeletonPointSelection, transform) {
-  // Collect all points to transform (on-curves + their handles)
-  const pointsToTransform = new Set();
-
-  for (const selKey of skeletonPointSelection) {
-    const [contourIdx, pointIdx] = selKey.split("/").map(Number);
-    const contour = skeletonData.contours[contourIdx];
-    if (!contour) continue;
-
-    const numPoints = contour.points.length;
-
-    // Add the on-curve point
-    pointsToTransform.add(`${contourIdx}/${pointIdx}`);
-
-    // Add adjacent handles
-    const prevIdx = (pointIdx - 1 + numPoints) % numPoints;
-    const nextIdx = (pointIdx + 1) % numPoints;
-
-    if (contour.points[prevIdx]?.type === "cubic") {
-      pointsToTransform.add(`${contourIdx}/${prevIdx}`);
-    }
-    if (contour.points[nextIdx]?.type === "cubic") {
-      pointsToTransform.add(`${contourIdx}/${nextIdx}`);
-    }
-  }
-
-  // Transform all collected points
-  for (const key of pointsToTransform) {
-    const [contourIdx, pointIdx] = key.split("/").map(Number);
-    const point = skeletonData.contours[contourIdx]?.points[pointIdx];
-    if (point) {
-      const [newX, newY] = transform.transformPoint(point.x, point.y);
-      point.x = newX;
-      point.y = newY;
-    }
-  }
 }
 
 /**

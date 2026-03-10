@@ -280,7 +280,7 @@ These are mandatory for the Tunni refactor target state:
 2. Do not call it fallback in docs or planning; call it a specialized routed domain.
 3. Keep one shared Tunni file: `src-js/fontra-core/src/tunni-calculations.js`.
 4. Do not keep `src-js/views-editor/src/skeleton-tunni-calculations.js` as a Tunni owner in the target state.
-5. Move specialized Tunni execution into `src-js/views-editor/src/edit-behavior-adapters.js`.
+5. Move specialized Tunni execution, including drag and equalize actions, into `src-js/views-editor/src/edit-behavior-adapters.js`.
 6. Keep Tunni hit testing and route selection in `src-js/views-editor/src/edit-tools-pointer.js`.
 7. Remove `_handleTunniPointDrag` and `_handleSkeletonTunniDrag` as execution owners from pointer.
 8. Visualization files draw; they do not execute edits.
@@ -304,6 +304,5 @@ Data flow:
 `Mouse -> Pointer -> Composer -> Adapter -> Storage`
 
 Tunni-specific rule:
-`Mouse -> Pointer hit test/route -> Composer dispatch -> Adapter-owned Tunni session -> Path or skeleton persistence`
-
+`Mouse -> Pointer hit test/route -> Composer dispatch -> Adapter-owned Tunni drag/equalize execution -> Path or skeleton persistence`
 

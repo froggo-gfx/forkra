@@ -231,10 +231,10 @@ Status: In Progress
   - Replaced local generated-contour helpers in:
     - `src-js/views-editor/src/edit-behavior-adapters.js`
     - `src-js/views-editor/src/visualization-layer-definitions.js`
-  - Both Tunni hit test and Tunni/measure drawing now use the same helper.
+  - Both Tunni hit test and visualization draw paths now use the same helper.
   - Verification:
     - `rg -n "getGeneratedContourIndexSet" src-js/views-editor/src/edit-behavior-adapters.js src-js/views-editor/src/visualization-layer-definitions.js src-js/views-editor/src/scene-model.js -S`
-- Comparison: Yes. Generated-contour exclusion now uses one shared helper across the Tunni and measure surfaces.
+- Comparison: Yes. Generated-contour exclusion now uses one shared helper across the Tunni hit-test and visualization surfaces.
 - Manual test results: NOT RUN in this terminal session.
 - Undo/redo verification: NOT RUN in this terminal session.
 
@@ -372,4 +372,24 @@ Status: In Progress
     - `rg` closeout grep checks on touched files
 - Comparison: Yes. Temporary naming in the touched routing surface is cleaned up and closeout greps pass.
 - Manual test results: NOT RUN in this terminal session (full closeout matrix still required).
+- Undo/redo verification: NOT RUN in this terminal session.
+
+## Phase 8 - Step 8.4: Close remaining pointer ownership gaps after chapter closeout review
+
+- Problem: The code review after the Phase 8 closeout found residual architecture mismatches that kept the chapter from fully matching its own target state: pointer still called skeleton Tunni equalize directly, and pointer still directly persisted skeleton data in the remaining smooth-toggle and skeleton-bounds-transform flows.
+- Code analysis:
+  - Updated `src-js/views-editor/src/edit-behavior-adapters.js`:
+    - added `tunniAction` handling to the specialized `skeletonTunniPoint` adapter so the same specialized route now owns both drag and equalize execution
+    - added adapter-owned skeleton persistence helpers for smooth-toggle and skeleton selection transform changes
+  - Updated `src-js/views-editor/src/edit-tools-pointer.js`:
+    - replaced the direct Ctrl+Shift skeleton Tunni equalize call with `runDragRoutingOrchestration(...)` on `objectKind: "skeletonTunniPoint"` plus `tunniAction: "equalize"`
+    - moved skeleton smooth-toggle transaction ownership to the adapter helper
+    - moved skeleton bounds-transform persistence block to the adapter helper and removed direct pointer calls to `regenerateSkeletonContours(...)` / `setSkeletonData(...)`
+  - Updated `docs/refactor/target-architecture.md` to make specialized Tunni adapter ownership explicitly include equalize actions.
+  - Verification:
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+    - `node --check src-js/views-editor/src/edit-behavior-adapters.js`
+    - `rg -n "equalizeSkeletonTunniTensions\(|regenerateSkeletonContours\(|setSkeletonData\(" src-js/views-editor/src/edit-tools-pointer.js`
+- Comparison: Yes. Pointer is now back inside the intended ownership boundary for the reviewed Tunni/skeleton paths: hit-test, route selection, hover/cursor transport, and measure lifecycle stay in pointer; specialized Tunni execution and remaining skeleton persistence mechanics live in the adapter layer.
+- Manual test results: NOT RUN in this terminal session (skeleton Tunni equalize, skeleton smooth-toggle, and skeleton bounds-transform parity still require UI verification).
 - Undo/redo verification: NOT RUN in this terminal session.
