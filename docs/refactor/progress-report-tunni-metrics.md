@@ -114,3 +114,22 @@ Status: In Progress
 - Comparison: Yes. The Q overlay no longer owns its own measure formulas for these cases; it now uses the existing `distance-angle.js` owner for shared measure math.
 - Manual test results: NOT RUN in this terminal session (UI verification still required for Q projected mode, Alt+Q direct mode, and handle hover tension display).
 - Undo/redo verification: NOT RUN in this terminal session (measure overlay is hover/state driven; no explicit UI verification was run here).
+
+## Phase 2 - Step 2.1: Move regular-Tunni interaction helpers out of core and into editor code
+
+- Problem: `src-js/fontra-core/src/tunni-calculations.js` still owned editor-coupled regular-Tunni helpers (hit testing, drag session state, and edit transaction wrappers). That violated the boundary goal for this phase: core should keep pure geometry, while editor-side code should own interaction/session behavior.
+- Code analysis:
+  - The first implementation of this step moved regular-Tunni interaction/session helpers into a new file, `src-js/views-editor/src/tunni-regular-interaction.js`.
+  - That move removed editor session code from core, but it does not match the established architecture for this branch.
+  - The current target architecture is now locked explicitly in `docs/refactor/target-architecture.md`:
+    - shared Tunni geometry stays in `src-js/fontra-core/src/tunni-calculations.js`
+    - pointer owns Tunni hit testing, cursor state, and route selection only
+    - fallback Tunni execution must live in `src-js/views-editor/src/edit-behavior-adapters.js`
+    - `src-js/views-editor/src/tunni-regular-interaction.js` is not part of the target state
+  - This means Phase 2 - Step 2.1 is only partially complete:
+    - boundary cleanup out of core: yes
+    - compliance with existing adapter-layer architecture: no, not yet
+- Comparison: Partial only. The core/editor boundary improved, but the resulting file boundary is not accepted as the target architecture because it introduced a new regular-Tunni sidecar module instead of keeping Tunni fallback execution inside the existing adapter layer.
+- Manual test results: NOT RUN in this terminal session.
+- Undo/redo verification: NOT RUN in this terminal session.
+

@@ -35,7 +35,7 @@ That old plan was written for another branch where pointer still owned much more
 This branch is different:
 
 - registry/composer/adapters are already the accepted routing shape
-- Tunni already exists in the routing surface as fallback drag object kinds
+- Tunni already exists in the routing surface as specialized routed drag kinds
 - equalize drag/nudge for in-scope point-like routes is already migrated
 - Q-measure is still an out-of-scope hover/mode workflow, not part of the unified point-like drag/nudge pipeline
 
@@ -117,7 +117,7 @@ The biggest risks are:
 Write down one explicit statement of current reality before any code move:
 
 - the broad unified-behavior refactor is already done
-- Tunni is currently routed as fallback drag object kinds
+- Tunni is currently routed as specialized routed drag kinds
 - Q-measure is still an out-of-scope hover/mode workflow
 - this chapter is about ownership cleanup, pure-math separation, and state honesty
   - not about inventing a new point-like pipeline
@@ -131,7 +131,7 @@ Current branch reality for this chapter:
 - the broad unified-behavior refactor is already complete and recorded in `docs/refactor/progress-report-broad.md`
 - the cleanup/optimization chapter is already complete and recorded in `docs/refactor/progress-report-beautify.md`
 - registry -> composer -> adapters is already the accepted routing shape for this branch
-- regular and skeleton Tunni already exist on that routing surface as supported fallback drag object kinds
+- regular and skeleton Tunni already exist on that routing surface as supported specialized routed drag kinds
 - Tunni still has honest remaining problems, but those problems are about execution ownership, geometry duplication, and editor/core boundaries
 - Q-measure still belongs to the pointer/scene-model hover+mode surface, not to the unified point-like drag/nudge pipeline
 - this chapter must not reopen the finished broad migration or invent a new canonical point-like route family for Q-measure
@@ -157,7 +157,7 @@ Current branch evidence to cite:
 Important current-shape evidence:
 
 ```js
-// registry: Tunni exists as fallback drag object kinds
+// registry: Tunni exists as specialized routed drag kinds
 tunniPoint: { selectionKey: null, supports: ["drag"] }
 skeletonTunniPoint: { selectionKey: null, supports: ["drag"] }
 ```
@@ -168,7 +168,8 @@ const adapter = getDragAdapterForRouting(routing, objectKind);
 ```
 
 ```js
-// adapters: fallback Tunni routes still bounce back into pointer private methods
+// current code still names these fallback routes, but architecturally
+// they are specialized routed Tunni paths and should not bounce back into pointer
 tunniPoint: async (context) => runFallbackTunniDrag(context)
 skeletonTunniPoint: async (context) => runFallbackSkeletonTunniDrag(context)
 ```
@@ -216,9 +217,10 @@ The following constraints are mandatory for the rest of this chapter:
 
 1. Regular Tunni math and skeleton Tunni math must converge to one shared geometry implementation file.
 2. Q-measure math and distance-angle math must converge to one shared implementation file.
-3. Editor-facing wrappers may remain separate when selection shape, drawing, or interaction flow differs.
-4. Wrapper separation is not allowed to preserve duplicated formulas or duplicated geometry ownership.
-5. No later step is complete if it only moves code around while leaving the duplicate math implementations alive.
+3. `src-js/views-editor/src/skeleton-tunni-calculations.js` must not remain as a second Tunni owner in the target state.
+4. Skeleton-specific Tunni execution glue belongs in existing pointer-related files, not in a separate Tunni file.
+5. Wrapper separation is not allowed to preserve duplicated formulas or duplicated geometry ownership.
+6. No later step is complete if it only moves code around while leaving the duplicate math implementations alive.
 
 Practical reading rule for all later phases:
 
@@ -289,6 +291,12 @@ For this chapter, the single-file targets are:
 - Tunni shared geometry target: `src-js/fontra-core/src/tunni-calculations.js`
 - Measure shared geometry target: `src-js/fontra-core/src/distance-angle.js`
 
+Locked Tunni file rule:
+
+- there is one shared Tunni file
+- `src-js/views-editor/src/skeleton-tunni-calculations.js` is not an allowed target-state owner for Tunni logic
+- skeleton-specific execution glue must be absorbed into existing pointer-related files
+
 Why these targets are locked now:
 
 - both domains need one honest existing owner before interaction ownership starts moving
@@ -329,11 +337,11 @@ Expected result:
 
 ---
 
-### Step 1.2: Converge shared regular+skeleton Tunni math into the existing core owner
+### Step 1.2: Converge all shared Tunni code into one file and remove the second Tunni owner
 
 #### Problem Aspect
 
-The current code has multiple Tunni geometry sources:
+The current code has multiple Tunni sources:
 
 - `tunni-calculations.js` (regular)
 - `skeleton-tunni-calculations.js` (skeleton)
@@ -343,9 +351,16 @@ That makes every later cleanup step harder because no existing file is the hones
 
 #### Proposed Solution (Plain Language)
 
-Use the existing core Tunni owner, `src-js/fontra-core/src/tunni-calculations.js`, as the single shared math home.
+Use the existing core Tunni owner, `src-js/fontra-core/src/tunni-calculations.js`, as the single shared Tunni home.
 
-Move shared regular+skeleton geometry into that file and make other touched files delegate to it where needed.
+Move all shareable regular+skeleton Tunni code into that file.
+
+Do not preserve `src-js/views-editor/src/skeleton-tunni-calculations.js` as a second Tunni owner.
+
+If skeleton-specific execution glue is still needed after consolidation, move it into existing pointer-related files:
+
+- `src-js/views-editor/src/edit-tools-pointer.js`
+- `src-js/views-editor/src/edit-behavior-adapters.js`
 
 Do not move:
 
@@ -355,16 +370,16 @@ Do not move:
 - editor transactions
 - canvas drawing
 
-Keep wrappers only if the migration needs a short compatibility phase.
+Keep only a short compatibility phase while imports are being moved.
 
-Do not leave two math implementations for the same formulas after this phase.
+This step is not complete until `src-js/views-editor/src/skeleton-tunni-calculations.js` stops being a Tunni owner.
 
 #### Code Evidence
 
 Target direction:
 
 ```js
-// src-js/fontra-core/src/tunni-calculations.js (shared by regular + skeleton math)
+// src-js/fontra-core/src/tunni-calculations.js (single shared Tunni owner)
 export function calculateMidpointTunni(segmentPoints) {}
 export function calculateTrueTunniPoint(segmentPoints) {}
 export function calculateControlPointsFromTunni(...) {}
@@ -377,8 +392,8 @@ export function areControlHandleDistancesEqualized(...) {}
 #### Files To Touch
 
 - `src-js/fontra-core/src/tunni-calculations.js`
-- `src-js/views-editor/src/skeleton-tunni-calculations.js`
 - `src-js/fontra-core/src/distance-angle.js`
+- touched pointer/adapters files that absorb the remaining skeleton-specific glue
 - `docs/refactor/progress-report-tunni-metrics.md`
 
 #### Manual Tests
@@ -394,7 +409,8 @@ Run a regular-Tunni parity pass:
 Expected result:
 
 - no UI behavior drift
-- one shared Tunni geometry implementation now exists for both regular and skeleton workflows
+- one shared Tunni implementation now exists for both regular and skeleton workflows
+- there is no second Tunni owner file left in the target state
 
 ---
 
@@ -448,7 +464,7 @@ Regular Tunni now already uses the branch's routing shape on paper:
 
 - pointer routes drag through composer
 - registry exposes `tunniPoint`
-- adapters expose a fallback route
+- adapters expose a specialized routed Tunni path
 
 But the actual execution boundary is still dishonest:
 
@@ -471,12 +487,12 @@ Move editor-coupled regular-Tunni helpers out of `src-js/fontra-core/src/tunni-c
 
 Keep only pure geometry in core.
 
-Editor-side owners can be:
+Editor-side owners must stay inside the existing editor architecture:
 
-- a dedicated regular-Tunni helper module
-- or adapter-local helper blocks if that is cleaner for the current code
+- adapter-local helper blocks inside `src-js/views-editor/src/edit-behavior-adapters.js`
+- pointer-owned hit-test and route-selection helpers inside `src-js/views-editor/src/edit-tools-pointer.js`
 
-Either is acceptable.
+Do not create a standalone regular-Tunni interaction module.
 
 What is not acceptable is leaving editor session/hit-test code in core just because it already exists there.
 
@@ -498,7 +514,7 @@ equalizeThenQuantizeSegmentControlPoints(...)
 #### Files To Touch
 
 - `src-js/fontra-core/src/tunni-calculations.js`
-- one editor-side helper/module in `src-js/views-editor/src`
+- `src-js/views-editor/src/edit-behavior-adapters.js` (adapter-local helper block)
 - `docs/refactor/progress-report-tunni-metrics.md`
 
 #### Manual Tests
@@ -518,11 +534,11 @@ Expected result:
 
 ---
 
-### Step 2.2: Make the fallback adapter own regular-Tunni execution instead of bouncing back into pointer private methods
+### Step 2.2: Make the specialized Tunni adapter own regular-Tunni execution instead of bouncing back into pointer private methods
 
 #### Problem Aspect
 
-Right now the fallback adapter exists, but it is not honest.
+Right now the specialized Tunni adapter path exists, but it is not honest.
 
 It still delegates to pointer private methods.
 
@@ -533,12 +549,12 @@ That defeats the point of having the routing/adapters surface in the first place
 Keep the current route shape:
 
 - pointer hit-tests and routes
-- composer resolves the fallback route
-- fallback adapter executes the route
+- composer resolves the specialized Tunni route
+- specialized adapter executes the route
 
 Change only the execution ownership.
 
-The fallback adapter should call editor-side regular-Tunni helpers it owns or imports directly.
+The specialized Tunni adapter should call adapter-local regular-Tunni helpers that live in `src-js/views-editor/src/edit-behavior-adapters.js` or existing pointer-owned hit-test helpers in `src-js/views-editor/src/edit-tools-pointer.js`.
 
 It should not call:
 
@@ -548,7 +564,7 @@ pointerTool._handleTunniPointDrag(...)
 
 #### Code Evidence
 
-Current dishonest shape:
+Current dishonest shape in the current code:
 
 ```js
 async function runFallbackTunniDrag({ pointerTool, eventStream, initialEvent }) {
@@ -561,20 +577,20 @@ Target direction:
 
 ```js
 async function runFallbackTunniDrag(context) {
-  return runRegularTunniFallbackSession(context);
+  return runRegularTunniSpecializedSession(context);
 }
 ```
 
 #### Files To Touch
 
 - `src-js/views-editor/src/edit-behavior-adapters.js`
-- one editor-side regular-Tunni helper/module if needed
+- adapter-local regular-Tunni helper blocks inside `src-js/views-editor/src/edit-behavior-adapters.js` if needed
 - `src-js/views-editor/src/edit-tools-pointer.js`
 - `docs/refactor/progress-report-tunni-metrics.md`
 
 #### Manual Tests
 
-Run a fallback-route parity pass:
+Run a specialized-route parity pass:
 
 1. Drag a midpoint regular Tunni point.
 2. Drag a true Tunni point.
@@ -585,7 +601,7 @@ Run a fallback-route parity pass:
 Expected result:
 
 - same behavior
-- fallback adapter now owns the execution boundary honestly
+- the specialized Tunni adapter now owns the execution boundary honestly
 
 ---
 
@@ -593,16 +609,14 @@ Expected result:
 
 ### Broad Problem
 
-Skeleton Tunni is in a slightly better state than regular Tunni:
-
-- its geometry already lives in `src-js/views-editor/src/skeleton-tunni-calculations.js`
+After Phase 1, skeleton Tunni should no longer have its own Tunni file.
 
 But the live execution boundary is still pointer-owned:
 
 - `_handleSkeletonTunniDrag(...)`
 - `_equalizeSkeletonTunniTensions(...)`
 
-And the fallback adapter for `skeletonTunniPoint` still delegates back into those pointer private methods.
+And the current specialized Tunni adapter path for `skeletonTunniPoint` still delegates back into those pointer private methods.
 
 ### Step 3.1: Separate skeleton-Tunni execution ownership from pointer without redesigning the workflow
 
@@ -616,16 +630,16 @@ The goal is:
 
 - preserve behavior
 - move execution ownership out of pointer private methods
-- keep the existing fallback route shape
+- keep the existing specialized routed shape
 
 #### Proposed Solution (Plain Language)
 
-Move skeleton-Tunni execution into adapter-owned or adapter-imported editor-side helpers.
+Move skeleton-Tunni execution into adapter-owned helpers inside `src-js/views-editor/src/edit-behavior-adapters.js`.
 
 Keep:
 
 - pointer-owned hit testing and routing
-- existing `skeletonTunniPoint` fallback route
+- existing `skeletonTunniPoint` specialized routed entry
 
 Remove:
 
@@ -640,7 +654,7 @@ async _handleSkeletonTunniDrag(eventStream, initialEvent, tunniHit) { ... }
 async _equalizeSkeletonTunniTensions(tunniHit) { ... }
 ```
 
-Current dishonest fallback adapter:
+Current dishonest adapter path in the current code:
 
 ```js
 async function runFallbackSkeletonTunniDrag({ pointerTool, ... }) {
@@ -651,7 +665,6 @@ async function runFallbackSkeletonTunniDrag({ pointerTool, ... }) {
 #### Files To Touch
 
 - `src-js/views-editor/src/edit-behavior-adapters.js`
-- one editor-side skeleton-Tunni helper/module if needed
 - `src-js/views-editor/src/edit-tools-pointer.js`
 - `docs/refactor/progress-report-tunni-metrics.md`
 
@@ -1376,8 +1389,8 @@ This chapter is complete only when all of these are true:
 - shared measure geometry exists as one implementation for Q-measure + distance-angle
 - `distance-angle.js` no longer duplicates Tunni geometry
 - `distance-angle.js` no longer draws Tunni labels
-- regular Tunni fallback no longer executes through pointer private methods
-- skeleton Tunni fallback no longer executes through pointer private methods
+- regular Tunni specialized routed execution no longer goes through pointer private methods
+- skeleton Tunni specialized routed execution no longer goes through pointer private methods
 - skeleton-Tunni persistence no longer open-codes obviously shared skeleton-backed lifecycle work
 - SceneModel owns one coherent measure state API
 - Q hover target resolution is one explicit helper with stable priority
@@ -1393,6 +1406,7 @@ When two approaches are possible, choose the one that follows these rules:
 
 1. Prefer ownership fixes over file shuffling.
 2. Prefer pure-math extraction over moving editor interaction code into core.
-3. Prefer adapter-owned fallback execution over pointer private execution.
+3. Prefer adapter-owned specialized execution over pointer private execution.
 4. Prefer one explicit state API over scattered mutable fields.
 5. Prefer small verified steps over a single large rewrite.
+

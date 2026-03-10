@@ -77,7 +77,6 @@ import {
   strokeRoundNode,
   strokeSquareNode,
 } from "./visualization-layer-definitions.js";
-// Import Tunni functions for integration with pointer tool
 import {
   handleTunniPointMouseDown,
   handleTunniPointMouseDrag,
@@ -88,7 +87,7 @@ import {
   handleTrueTunniPointMouseDrag,
   handleTrueTunniPointMouseUp,
   calculateTrueTunniPointDragChanges,
-} from "@fontra/core/tunni-calculations.js";
+} from "./tunni-regular-interaction.js";
 
 const transformHandleMargin = 6;
 const transformHandleSize = 8;
