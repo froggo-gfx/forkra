@@ -5052,11 +5052,12 @@ export const mixedSelectionNudgeAdapters = {
   mixedSelection: async (context) => runMixedSelectionNudge(context),
 };
 
-// Legacy fallback routes stay outside the unified canonical path on purpose.
-export const fallbackDragAdapters = {
+// Specialized routed drag adapters stay outside the unified canonical path on purpose.
+export const specializedDragAdapters = {
   component: async (context) => runFallbackComponentDrag(context),
   componentOrigin: async (context) => runFallbackComponentDrag(context),
   componentTCenter: async (context) => runFallbackComponentDrag(context),
   tunniPoint: async (context) => runFallbackTunniDrag(context),
   skeletonTunniPoint: async (context) => runSpecializedSkeletonTunniDrag(context),
 };
+

@@ -350,3 +350,26 @@ Status: In Progress
 - Comparison: Yes. Ctrl policy is now explicit and narrowly scoped; unrelated ctrl-modified mousedown paths are no longer globally relaxed.
 - Manual test results: NOT RUN in this terminal session (Ctrl+Shift Tunni + unrelated Ctrl mouse-down pass still required).
 - Undo/redo verification: NOT RUN in this terminal session.
+
+## Phase 8 - Step 8.3: Final naming cleanup + chapter closeout sweep
+
+- Problem: Temporary naming and stale grep targets in the touched Tunni/Q files made the architecture harder to audit, even after behavior fixes.
+- Code analysis:
+  - Updated `src-js/views-editor/src/edit-behavior-adapters.js`:
+    - renamed `fallbackDragAdapters` -> `specializedDragAdapters`
+    - updated section comment to reflect specialized routed ownership
+  - Updated `src-js/views-editor/src/edit-behavior-composer.js`:
+    - switched import/use from `fallbackDragAdapters` to `specializedDragAdapters`
+  - Updated `src-js/views-editor/src/edit-behavior-registry.js`:
+    - replaced stale wording "fallback legacy behavior" with "specialized routed behavior"
+  - Ran closeout mechanical checks from the step:
+    - no pointer-owned Tunni execution methods remain (`_handleTunniPointDrag`, `_handleSkeletonTunniDrag`, `_equalizeSkeletonTunniTensions`)
+    - no brittle checkbox index pattern remains in panel-transformation (`allCheckboxes[0..2]`)
+  - Verification:
+    - `node --check src-js/views-editor/src/edit-behavior-adapters.js`
+    - `node --check src-js/views-editor/src/edit-behavior-composer.js`
+    - `node --check src-js/views-editor/src/edit-behavior-registry.js`
+    - `rg` closeout grep checks on touched files
+- Comparison: Yes. Temporary naming in the touched routing surface is cleaned up and closeout greps pass.
+- Manual test results: NOT RUN in this terminal session (full closeout matrix still required).
+- Undo/redo verification: NOT RUN in this terminal session.

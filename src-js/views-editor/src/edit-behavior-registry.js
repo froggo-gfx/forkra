@@ -167,7 +167,7 @@ export function resolveBehaviorPreset(_objectKind, action, modifiers) {
 // - CA: canonical unified route
 // - CL: supported non-canonical route bucket
 //   - mixedSelection uses its dedicated mixed-selection route family here
-//   - component/Tunni routes use fallback legacy behavior here
+//   - component/Tunni routes use specialized routed behavior here
 // - NA: no route
 //
 // Drag routing map: rowId + objectKind -> CA | CL | NA.
@@ -453,3 +453,4 @@ export function getNudgeRowId(modifiers) {
   if (shiftKey) return "R11";
   return "R10";
 }
+

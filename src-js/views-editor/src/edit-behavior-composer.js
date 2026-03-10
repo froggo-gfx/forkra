@@ -8,7 +8,7 @@ import {
 import {
   canonicalDragAdapters,
   canonicalNudgeAdapters,
-  fallbackDragAdapters,
+  specializedDragAdapters,
   mixedSelectionDragAdapters,
   mixedSelectionNudgeAdapters,
 } from "./edit-behavior-adapters.js";
@@ -24,7 +24,7 @@ function getDragAdapterForRouting(routing, objectKind) {
   if (objectKind === "mixedSelection") {
     return mixedSelectionDragAdapters[objectKind];
   }
-  return fallbackDragAdapters[objectKind];
+  return specializedDragAdapters[objectKind];
 }
 
 function getNudgeAdapterForRouting(routing, objectKind) {
@@ -178,3 +178,4 @@ export async function runNudgeOrchestration(_context) {
   assert(event, "runNudgeOrchestration: missing event");
   return sceneController.handleArrowKeys(event);
 }
+
