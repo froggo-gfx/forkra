@@ -2694,6 +2694,7 @@ const TUNNI_CUBIC_LABEL_OFFSET_X = 14;
 const TUNNI_OFFCURVE_LABEL_OFFSET_X = 8;
 const TUNNI_LABEL_PRIMARY_COLOR = "rgba(4, 28, 44, 1)";
 const TUNNI_LABEL_SECONDARY_COLOR = "rgba(44, 28, 44, 1)";
+// Tunni visualization domain helpers (labels + points/lines drawing).
 
 function collectCubicControlPointIndices(path, generatedContourIndices) {
   const cubicControlPointIndices = new Set();
@@ -2960,6 +2961,7 @@ registerVisualizationLayerDefinition({
   },
 });
 
+// Tunni visualization domain registrations
 registerVisualizationLayerDefinition({
   identifier: "fontra.tunni.combined",
   name: "TUNNI Lines and Points",
@@ -2985,11 +2987,14 @@ registerVisualizationLayerDefinition({
 
 function drawTunniCombined(context, positionedGlyph, parameters, model, controller) {
   const path = positionedGlyph.glyph.path;
-  const generatedContourIndices = getGeneratedContourIndexSet(positionedGlyph, model?.sceneSettings?.editLayerName);
+  const generatedContourIndices = getGeneratedContourIndexSet(
+    positionedGlyph,
+    model?.sceneSettings?.editLayerName
+  );
   
   // Draw the Tunni lines
   context.strokeStyle = parameters.tunniLineColor;
- context.lineWidth = parameters.strokeWidth;
+  context.lineWidth = parameters.strokeWidth;
   context.setLineDash(parameters.dashPattern);
   
   // Iterate through all contours
@@ -3086,7 +3091,10 @@ registerVisualizationLayerDefinition({
 
 function drawActualTunniPoints(context, positionedGlyph, parameters, model, controller) {
   const path = positionedGlyph.glyph.path;
-  const generatedContourIndices = getGeneratedContourIndexSet(positionedGlyph, model?.sceneSettings?.editLayerName);
+  const generatedContourIndices = getGeneratedContourIndexSet(
+    positionedGlyph,
+    model?.sceneSettings?.editLayerName
+  );
   
   context.fillStyle = parameters.tunniPointColor;
   
@@ -3123,6 +3131,22 @@ function drawActualTunniPoints(context, positionedGlyph, parameters, model, cont
 }
 
 registerVisualizationLayerDefinition({
+  identifier: "fontra.tunni.labels",
+  name: "Tunni Labels",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: {
+    strokeWidth: 1,
+  },
+  colors: { strokeColor: "rgba(44, 28, 44, 1)", badgeColor: "#FF00FF", textColor: "white" },
+  colorsDarkMode: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
+  draw: drawTunniLabels,
+});
+
+// Measure visualization domain registrations
+registerVisualizationLayerDefinition({
   identifier: "fontra.distance-angle",
   name: "Distance & Angle",
   selectionFunc: glyphSelector("editing"),
@@ -3151,29 +3175,3 @@ registerVisualizationLayerDefinition({
   colorsDarkMode: { strokeColor: "rgba(0, 153, 255, 0.75)" },
   draw: drawManhattanDistanceVisualization,
 });
-
-registerVisualizationLayerDefinition({
-  identifier: "fontra.tunni.labels",
-  name: "Tunni Labels",
-  selectionFunc: glyphSelector("editing"),
-  userSwitchable: true,
-  defaultOn: true,
-  zIndex: 500,
-  screenParameters: {
-    strokeWidth: 1,
-  },
-  colors: { strokeColor: "rgba(44, 28, 44, 1)", badgeColor: "#FF00FF", textColor: "white" },
-  colorsDarkMode: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
-  draw: drawTunniLabels,
-});
-
-
-
-
-
-
-
-
-
-
-

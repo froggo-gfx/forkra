@@ -201,7 +201,7 @@ Status: In Progress
   - Verification:
     - `node --check src-js/views-editor/src/edit-tools-pointer.js`
     - `rg -n "resolveMeasureHoverTarget|_measureHoverTargetsEqual|setMeasureHoverTarget\(" src-js/views-editor/src/edit-tools-pointer.js -S`
-- Comparison: Partial. The helper is in place and used, but the plan’s Step 5.1 documentation of hover priority is not yet recorded, so this step is not closed until Step 5.1 is documented.
+- Comparison: Yes. The helper is in place and used, and Step 5.1 hover-priority documentation is now recorded.
 - Manual test results: NOT RUN in this terminal session.
 - Undo/redo verification: NOT RUN (hover/state workflow).
 
@@ -253,3 +253,58 @@ Status: In Progress
 - Comparison: Yes. The function stays in the right file, but is now smaller, single-owned, and avoids repeated full rescans.
 - Manual test results: NOT RUN in this terminal session.
 - Undo/redo verification: NOT RUN in this terminal session.
+
+## Phase 6 - Step 6.1: Finish visualization ownership split cleanup in `visualization-layer-definitions.js`
+
+- Problem: Domain registrations in `src-js/views-editor/src/visualization-layer-definitions.js` were still visually mixed, so ownership boundaries were harder to audit and easy to regress.
+- Code analysis:
+  - Updated `src-js/views-editor/src/visualization-layer-definitions.js` in place (no new files).
+  - Added explicit section markers:
+    - `// Tunni visualization domain helpers (labels + points/lines drawing).`
+    - `// Tunni visualization domain registrations`
+    - `// Measure visualization domain registrations`
+  - Kept all Tunni registrations grouped together at the tail (`fontra.tunni.combined`, `fontra.tunni.actual.points`, `fontra.tunni.labels`).
+  - Kept measure registrations grouped after Tunni (`fontra.distance-angle`, `fontra.manhattan-distance`).
+  - Kept generated-contour exclusion calls wired through `getGeneratedContourIndexSet(...)` with `model?.sceneSettings?.editLayerName` in Tunni draw paths.
+  - Verification:
+    - `node --check src-js/views-editor/src/visualization-layer-definitions.js`
+- Comparison: Yes. Ownership organization is now explicit by domain inside the existing file and matches the no-new-files rule.
+- Manual test results: NOT RUN in this terminal session (visual toggle/z-order parity still required).
+- Undo/redo verification: NOT RUN in this terminal session (visualization-only organization step).
+
+## Phase 4 - Step 4.1: Define/record the Q-measure ownership + reset policy explicitly (doc gate)
+
+- Problem: The plan required an explicit ownership/reset policy for measure mode, but it had not yet been recorded as a closed gate with code alignment checks.
+- Code analysis:
+  - Confirmed and recorded the ownership contract:
+    - `SceneModel` is the measure state owner.
+    - Pointer mutates measure state only through SceneModel API (`setMeasureActive`, `setMeasureShowDirect`, `setMeasureHoverTarget`, `resetMeasureState`).
+  - Confirmed and aligned reset-path behavior in `src-js/views-editor/src/edit-tools-pointer.js`:
+    - unified teardown via `_endMeasureMode()`
+    - `Q` key-up -> `_endMeasureMode()`
+    - tool deactivate -> `_endMeasureMode()`
+    - window blur hard-exit -> `_endMeasureMode()`
+    - Alt key-up in measure mode clears direct flag and transient hover target
+  - Verification:
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+- Comparison: Yes. The policy is now explicit and the code path uses one coherent teardown owner flow.
+- Manual test results: NOT RUN in this terminal session (Q/Alt/blur/tool-switch lifecycle pass still required).
+- Undo/redo verification: NOT RUN (hover/mode-state workflow).
+
+## Phase 5 - Step 5.1: Document the exact hover-priority contract before/with resolver closure
+
+- Problem: Step 5.2 helper extraction existed, but closure required explicit documentation of priority and target shape in the chapter reporting gate.
+- Code analysis:
+  - Recorded the hover-priority contract in chapter artifacts and aligned it with resolver behavior in `src-js/views-editor/src/edit-tools-pointer.js`:
+    1. rib point
+    2. off-curve handle
+    3. segment
+    4. selected-point pair
+  - Confirmed pointer uses one resolver (`resolveMeasureHoverTarget(...)`) and one target state sink (`sceneModel.setMeasureHoverTarget(...)`).
+  - Verification:
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+    - `rg -n "resolveMeasureHoverTarget|_measureHoverTargetsEqual|setMeasureHoverTarget\(" src-js/views-editor/src/edit-tools-pointer.js -S`
+- Comparison: Yes. The hover-priority contract is now explicitly documented and matches live resolver behavior.
+- Manual test results: NOT RUN in this terminal session (hover-priority overlap scenarios still required).
+- Undo/redo verification: NOT RUN (hover/state workflow).
+

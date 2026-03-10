@@ -771,6 +771,7 @@ export class PointerTool extends BaseTool {
   _boundKeyUp = null;
   _boundMeasureAltKeyDown = null;
   _boundMeasureAltKeyUp = null;
+  _boundMeasureWindowBlur = null;
 
   // Equalize handles mode (X-key) properties
     equalizeMode = false;
@@ -810,6 +811,10 @@ export class PointerTool extends BaseTool {
             this._boundMeasureAltKeyUp = (e) => this._handleMeasureAltKeyUp(e);
             window.addEventListener("keyup", this._boundMeasureAltKeyUp);
           }
+          if (!this._boundMeasureWindowBlur) {
+            this._boundMeasureWindowBlur = () => this._handleMeasureWindowBlur();
+            window.addEventListener("blur", this._boundMeasureWindowBlur);
+          }
           this.canvasController.requestUpdate();
         }
         return;
@@ -847,27 +852,12 @@ export class PointerTool extends BaseTool {
         return;
       }
     }
-
     _handleMeasureKeyUp(event) {
       if (
         eventMatchesActionBaseKey(REALTIME_MEASURE_ACTION, event) ||
         eventMatchesActionBaseKey(REALTIME_MEASURE_DIRECT_ACTION, event)
       ) {
-        this.measureMode = false;
-        this.sceneModel.resetMeasureState();
-        if (this._boundKeyUp) {
-          window.removeEventListener("keyup", this._boundKeyUp);
-          this._boundKeyUp = null;
-        }
-        if (this._boundMeasureAltKeyDown) {
-          window.removeEventListener("keydown", this._boundMeasureAltKeyDown);
-          this._boundMeasureAltKeyDown = null;
-        }
-        if (this._boundMeasureAltKeyUp) {
-          window.removeEventListener("keyup", this._boundMeasureAltKeyUp);
-          this._boundMeasureAltKeyUp = null;
-        }
-        this.canvasController.requestUpdate();
+        this._endMeasureMode();
       }
     }
 
@@ -883,8 +873,41 @@ export class PointerTool extends BaseTool {
       if (!this.measureMode) return;
       if (event.key === "Alt" || !event.altKey) {
         this.sceneModel.setMeasureShowDirect(false);
+        this.sceneModel.setMeasureHoverTarget(null, null);
         this.canvasController.requestUpdate();
       }
+    }
+
+    _handleMeasureWindowBlur() {
+      if (!this.measureMode) {
+        return;
+      }
+      this._endMeasureMode();
+    }
+
+    _endMeasureMode() {
+      if (!this.measureMode) {
+        return;
+      }
+      this.measureMode = false;
+      this.sceneModel.resetMeasureState();
+      if (this._boundKeyUp) {
+        window.removeEventListener("keyup", this._boundKeyUp);
+        this._boundKeyUp = null;
+      }
+      if (this._boundMeasureAltKeyDown) {
+        window.removeEventListener("keydown", this._boundMeasureAltKeyDown);
+        this._boundMeasureAltKeyDown = null;
+      }
+      if (this._boundMeasureAltKeyUp) {
+        window.removeEventListener("keyup", this._boundMeasureAltKeyUp);
+        this._boundMeasureAltKeyUp = null;
+      }
+      if (this._boundMeasureWindowBlur) {
+        window.removeEventListener("blur", this._boundMeasureWindowBlur);
+        this._boundMeasureWindowBlur = null;
+      }
+      this.canvasController.requestUpdate();
     }
 
     _handleEqualizeKeyUp(event) {
@@ -3608,23 +3631,7 @@ export class PointerTool extends BaseTool {
   deactivate() {
     super.deactivate();
     this.sceneController.sceneModel.showTransformSelection = false;
-    // Clean up measure mode if active
-    if (this.measureMode) {
-      this.measureMode = false;
-      this.sceneModel.resetMeasureState();
-      if (this._boundKeyUp) {
-        window.removeEventListener("keyup", this._boundKeyUp);
-        this._boundKeyUp = null;
-      }
-      if (this._boundMeasureAltKeyDown) {
-        window.removeEventListener("keydown", this._boundMeasureAltKeyDown);
-        this._boundMeasureAltKeyDown = null;
-      }
-      if (this._boundMeasureAltKeyUp) {
-        window.removeEventListener("keyup", this._boundMeasureAltKeyUp);
-        this._boundMeasureAltKeyUp = null;
-      }
-    }
+    this._endMeasureMode();
     this.canvasController.requestUpdate();
   }
 }
