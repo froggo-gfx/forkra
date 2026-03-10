@@ -6,6 +6,8 @@ export class MouseTracker {
   constructor(options) {
     this._dragFunc = options.drag;
     this._hoverFunc = options.hover;
+    this._allowCtrlModifiedMouseDown =
+      options.allowCtrlModifiedMouseDown || (() => false);
     this._eventStream = undefined;
     this._lastMouseDownEvent = undefined;
     this._getTapCount = getTapCounter();
@@ -36,9 +38,12 @@ export class MouseTracker {
   }
 
   handleMouseDown(event) {
-    if (event.button === 2 /* || event.ctrlKey */) {
+    if (event.button === 2) {
       // We're not handling contextual menus
-      // Note: ctrlKey check removed to allow Ctrl+Shift+click for Tunni equalize
+      return;
+    }
+    if (event.ctrlKey && !this._allowCtrlModifiedMouseDown(event)) {
+      // Block ctrl-modified mouse down by default. Tool-specific routes may opt in.
       return;
     }
     if (

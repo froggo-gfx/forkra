@@ -123,15 +123,28 @@ export default class TransformationPanel extends Panel {
       showSkeletonHandleAngle: true,
     };
 
-    // Initialize scene settings with default values
-    this.sceneController.sceneSettingsController.setItem("showTunniDistance", true);
-    this.sceneController.sceneSettingsController.setItem("showTunniTension", true);
-    this.sceneController.sceneSettingsController.setItem("showTunniAngle", true);
-
-    // Initialize scene settings for skeleton handle labels
-    this.sceneController.sceneSettingsController.setItem("showSkeletonHandleDistance", true);
-    this.sceneController.sceneSettingsController.setItem("showSkeletonHandleTension", true);
-    this.sceneController.sceneSettingsController.setItem("showSkeletonHandleAngle", true);
+    // Initialize toggle params from existing scene settings when available.
+    // Only write defaults for missing keys, so reopening/recreating the panel
+    // does not reset user choices.
+    const sceneSettings = this.sceneController.sceneSettingsController.model;
+    const toggleKeys = [
+      "showTunniDistance",
+      "showTunniTension",
+      "showTunniAngle",
+      "showSkeletonHandleDistance",
+      "showSkeletonHandleTension",
+      "showSkeletonHandleAngle",
+    ];
+    for (const key of toggleKeys) {
+      if (sceneSettings?.[key] !== undefined) {
+        this.transformParameters[key] = !!sceneSettings[key];
+      } else {
+        this.sceneController.sceneSettingsController.setItem(
+          key,
+          this.transformParameters[key]
+        );
+      }
+    }
 
     this.registerActions();
 
@@ -838,47 +851,32 @@ export default class TransformationPanel extends Panel {
         });
       }
     };
+    distanceCheckbox.addEventListener("change", (event) => {
+      this.transformParameters.showTunniDistance = event.target.checked;
+      this.sceneController.sceneSettingsController.setItem(
+        "showTunniDistance",
+        event.target.checked
+      );
+      this.sceneController.canvasController.requestUpdate();
+    });
 
-    // Add event listeners to the checkboxes to update the form values properly
-    setTimeout(() => {
-      // Use querySelector to find the checkboxes by their position in the form
-      const allCheckboxes = this.infoForm.contentElement.querySelectorAll('input[type="checkbox"]');
+    tensionCheckbox.addEventListener("change", (event) => {
+      this.transformParameters.showTunniTension = event.target.checked;
+      this.sceneController.sceneSettingsController.setItem(
+        "showTunniTension",
+        event.target.checked
+      );
+      this.sceneController.canvasController.requestUpdate();
+    });
 
-      // Find the specific Tunni checkboxes by looking at the form structure
-      // The checkboxes are added in sequence: Distance, Tension, Angle
-      if (allCheckboxes.length >= 3) {
-        const distanceCheckbox = allCheckboxes[0];
-        const tensionCheckbox = allCheckboxes[1];
-        const angleCheckbox = allCheckboxes[2];
-
-        // Set initial checked states
-        distanceCheckbox.checked = this.transformParameters.showTunniDistance ?? true;
-        tensionCheckbox.checked = this.transformParameters.showTunniTension ?? true;
-        angleCheckbox.checked = this.transformParameters.showTunniAngle ?? true;
-
-        // Add event listeners to each checkbox
-        distanceCheckbox.addEventListener("change", (event) => {
-          this.transformParameters.showTunniDistance = event.target.checked;
-          this.sceneController.sceneSettingsController.setItem("showTunniDistance", event.target.checked);
-          // Force a redraw of the visualization
-          this.sceneController.canvasController.requestUpdate();
-        });
-
-        tensionCheckbox.addEventListener("change", (event) => {
-          this.transformParameters.showTunniTension = event.target.checked;
-          this.sceneController.sceneSettingsController.setItem("showTunniTension", event.target.checked);
-          // Force a redraw of the visualization
-          this.sceneController.canvasController.requestUpdate();
-        });
-
-        angleCheckbox.addEventListener("change", (event) => {
-          this.transformParameters.showTunniAngle = event.target.checked;
-          this.sceneController.sceneSettingsController.setItem("showTunniAngle", event.target.checked);
-          // Force a redraw of the visualization
-          this.sceneController.canvasController.requestUpdate();
-        });
-      }
-    }, 0);
+    angleCheckbox.addEventListener("change", (event) => {
+      this.transformParameters.showTunniAngle = event.target.checked;
+      this.sceneController.sceneSettingsController.setItem(
+        "showTunniAngle",
+        event.target.checked
+      );
+      this.sceneController.canvasController.requestUpdate();
+    });
 
     // Add event listeners for skeleton handle label checkboxes
     skeletonDistanceCheckbox.addEventListener("change", (event) => {

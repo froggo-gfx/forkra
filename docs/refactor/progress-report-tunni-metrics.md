@@ -308,3 +308,45 @@ Status: In Progress
 - Manual test results: NOT RUN in this terminal session (hover-priority overlap scenarios still required).
 - Undo/redo verification: NOT RUN (hover/state workflow).
 
+
+## Phase 8 - Step 8.1: Replace brittle Tunni checkbox binding in `panel-transformation.js`
+
+- Problem: Tunni checkbox wiring used a deferred `setTimeout(...)` + positional lookup (`allCheckboxes[0..2]`), which was brittle and could desync if form structure changed.
+- Code analysis:
+  - Updated `src-js/views-editor/src/panel-transformation.js` in place.
+  - Removed the index-based binding block (`setTimeout`, `querySelectorAll`, positional checkbox assumptions).
+  - Bound Tunni checkbox listeners directly to deterministic checkbox elements created for each field:
+    - `distanceCheckbox` -> `showTunniDistance`
+    - `tensionCheckbox` -> `showTunniTension`
+    - `angleCheckbox` -> `showTunniAngle`
+  - Kept scene settings updates and redraw trigger behavior unchanged.
+  - Verification:
+    - `node --check src-js/views-editor/src/panel-transformation.js`
+    - `rg -n "setTimeout\(|allCheckboxes\[" src-js/views-editor/src/panel-transformation.js`
+- Comparison: Yes. Binding is now key-bound and deterministic; no index-order coupling remains.
+- Manual test results: NOT RUN in this terminal session (checkbox toggle/reopen pass still required).
+- Undo/redo verification: NOT RUN in this terminal session (UI toggle settings path).
+
+## Phase 8 - Step 8.2: Replace broad MouseTracker Ctrl workaround with explicit allow-policy
+
+- Problem: `MouseTracker` had a broad relaxed Ctrl handling (commented-out guard removal) that affected all tools instead of only the intended Tunni Ctrl+Shift case.
+- Code analysis:
+  - Updated `src-js/fontra-core/src/mouse-tracker.js`:
+    - added `allowCtrlModifiedMouseDown` option hook
+    - restored default-safe behavior: ctrl-modified mousedown is blocked unless explicitly allowed
+  - Updated `src-js/views-editor/src/scene-controller.js`:
+    - wired `MouseTracker` allow hook to selected tool capability:
+      - `allowCtrlModifiedMouseDown: (event) => this.selectedTool?.allowCtrlModifiedMouseDown?.(event) === true`
+  - Updated `src-js/views-editor/src/edit-tools-pointer.js`:
+    - added `allowCtrlModifiedMouseDown(event)` policy method
+    - allows only Ctrl+Shift mousedown on midpoint Tunni targets:
+      - regular midpoint hit (`tunniLayerHitTest(...).hitType === "tunni-point"`)
+      - skeleton midpoint hit (`skeletonTunniHitTest(..., { midpointOnly: true }).type === "tunni"`)
+    - all other ctrl-modified mousedown stays blocked by default
+  - Verification:
+    - `node --check src-js/fontra-core/src/mouse-tracker.js`
+    - `node --check src-js/views-editor/src/scene-controller.js`
+    - `node --check src-js/views-editor/src/edit-tools-pointer.js`
+- Comparison: Yes. Ctrl policy is now explicit and narrowly scoped; unrelated ctrl-modified mousedown paths are no longer globally relaxed.
+- Manual test results: NOT RUN in this terminal session (Ctrl+Shift Tunni + unrelated Ctrl mouse-down pass still required).
+- Undo/redo verification: NOT RUN in this terminal session.

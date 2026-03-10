@@ -950,6 +950,41 @@ export class PointerTool extends BaseTool {
       }
     }
 
+  allowCtrlModifiedMouseDown(event) {
+    if (!event?.ctrlKey || !event.shiftKey) {
+      return false;
+    }
+
+    const sceneController = this.sceneController;
+    const point = sceneController.localPoint(event);
+    const size = sceneController.mouseClickMargin;
+    const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) {
+      return false;
+    }
+
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+
+    const regularTunniHit = tunniLayerHitTest(glyphPoint, size, positionedGlyph, {
+      editLayerName: this.sceneModel.sceneSettings?.editLayerName,
+    });
+    if (regularTunniHit?.hitType === "tunni-point") {
+      return true;
+    }
+
+    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
+    if (!skeletonData) {
+      return false;
+    }
+
+    const skeletonTunniHit = skeletonTunniHitTest(glyphPoint, size * 2, skeletonData, {
+      midpointOnly: true,
+    });
+    return skeletonTunniHit?.type === "tunni";
+  }
   handleHover(event) {
     const sceneController = this.sceneController;
     const point = sceneController.localPoint(event);

@@ -606,6 +606,8 @@ export class SceneController {
       drag: async (eventStream, initialEvent) =>
         await this.handleDrag(eventStream, initialEvent),
       hover: (event) => this.handleHover(event),
+      allowCtrlModifiedMouseDown: (event) =>
+        this.selectedTool?.allowCtrlModifiedMouseDown?.(event) === true,
       element: this.canvasController.canvas,
     });
     this._eventElement = document.createElement("div");
