@@ -7,10 +7,13 @@ import {
   hasChange,
 } from "@fontra/core/changes.js";
 import {
+  characterLinesFromString,
+  stringFromCharacterLines,
+} from "@fontra/core/character-lines.js";
+import {
   decomposeComponents,
   roundComponentOrigins,
 } from "@fontra/core/glyph-controller.js";
-import { glyphLinesFromText, textFromGlyphLines } from "@fontra/core/glyph-lines.js";
 import { translate, translatePlural } from "@fontra/core/localization.js";
 import { MouseTracker } from "@fontra/core/mouse-tracker.js";
 import { ObservableController } from "@fontra/core/observable-object.js";
@@ -31,6 +34,7 @@ import {
   lenientIsEqualSet,
   union,
 } from "@fontra/core/set-ops.js";
+import { ShaperController } from "@fontra/core/shaper-controller.js";
 import {
   arrowKeyDeltas,
   assert,
@@ -48,7 +52,7 @@ import { VarPackedPath, packContour } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
 import { dialog, message } from "@fontra/web-components/modal-dialog.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
-import { SceneModel, getSelectedGlyphName } from "./scene-model.js";
+import { SceneModel } from "./scene-model.js";
 
 export class SceneController {
   constructor(
@@ -82,6 +86,8 @@ export class SceneController {
     this._currentGlyphChangeListeners = [];
     this.contextMenuState = {};
 
+    this.shaperController = new ShaperController(fontController);
+
     this.setupChangeListeners();
     this.setupSettingsListeners();
     this.setupEventHandling();
@@ -92,9 +98,8 @@ export class SceneController {
     this.sceneSettingsController = new ObservableController({
       text: "",
       align: "center",
-      applyKerning: true,
       editLayerName: null,
-      glyphLines: [],
+      characterLines: [],
       fontLocationUser: {},
       fontLocationSource: {},
       fontLocationSourceMapped: {},
@@ -113,33 +118,45 @@ export class SceneController {
       backgroundImagesAreLocked: true,
       backgroundLayers: {},
       editingLayers: {},
+      featureSettings: {},
+      textShaping: true,
+      textDirection: null,
+      textScript: null,
+      textLanguage: null,
+      shaper: null,
+      shaperInfo: null,
+      dumbShaperInfo: null,
     });
     this.sceneSettings = this.sceneSettingsController.model;
 
-    // Set up the mutual relationship between text and glyphLines
+    this.fontController.ensureInitialized.then(() => {
+      this.updateShaperInfo();
+    });
+
+    // Set up the mutual relationship between text and characterLines
     this.sceneSettingsController.addKeyListener("text", async (event) => {
       if (event.senderInfo?.senderID === this) {
         return;
       }
       await this.fontController.ensureInitialized;
-      const glyphLines = glyphLinesFromText(
+      const characterLines = characterLinesFromString(
         event.newValue,
         this.fontController.characterMap,
         this.fontController.glyphMap,
         this.sceneSettings.substituteGlyphName
       );
-      this.sceneSettingsController.setItem("glyphLines", glyphLines, {
+      this.sceneSettingsController.setItem("characterLines", characterLines, {
         senderID: this,
       });
     });
 
     this.sceneSettingsController.addKeyListener(
-      "glyphLines",
+      "characterLines",
       (event) => {
         if (event.senderInfo?.senderID === this) {
           return;
         }
-        const text = textFromGlyphLines(event.newValue);
+        const text = stringFromCharacterLines(event.newValue);
         this.sceneSettingsController.setItem("text", text, { senderID: this });
       },
       true
@@ -245,12 +262,9 @@ export class SceneController {
 
     // Set up convenience property "selectedGlyphName"
     this.sceneSettingsController.addKeyListener(
-      ["selectedGlyph", "glyphLines"],
+      ["selectedGlyph", "positionedLines"],
       (event) => {
-        this.sceneSettings.selectedGlyphName = getSelectedGlyphName(
-          this.sceneSettings.selectedGlyph,
-          this.sceneSettings.glyphLines
-        );
+        this.sceneSettings.selectedGlyphName = this.getSelectedGlyphName();
         if (this.sceneSettings.selectedGlyphName) {
           this.sceneSettings.substituteGlyphName = this.sceneSettings.selectedGlyphName;
         }
@@ -315,6 +329,27 @@ export class SceneController {
         this.canvasController.requestUpdate();
       }
     );
+
+    // Switch shapers on toggling applyTextShaping
+    this.sceneSettingsController.addKeyListener("applyTextShaping", (event) =>
+      this.updateShaper()
+    );
+  }
+
+  updateShaperInfo() {
+    this.sceneSettingsController.model.shaperInfo =
+      this.shaperController.getShaper(true);
+    this.sceneSettingsController.model.dumbShaperInfo =
+      this.shaperController.getShaper(false);
+    this.updateShaper();
+  }
+
+  async updateShaper() {
+    const { shaper } = await (this.sceneSettings.applyTextShaping
+      ? this.sceneSettings.shaperInfo
+      : this.sceneSettings.dumbShaperInfo);
+
+    this.sceneSettings.shaper = shaper;
   }
 
   async setLocationFromSourceIndex(sourceIndex) {
@@ -352,7 +387,7 @@ export class SceneController {
 
   setupChangeListeners() {
     this.fontController.addChangeListener({ glyphMap: null }, () => {
-      this.sceneModel.updateGlyphLinesCharacterMapping();
+      this.updateShaperInfo();
 
       const selectedGlyph = this.sceneSettings.selectedGlyph;
       if (
@@ -375,6 +410,14 @@ export class SceneController {
       },
       true
     );
+
+    this.fontController.addChangeListener({ features: null, glyphInfos: null }, () => {
+      this.updateShaperInfo();
+    });
+
+    this.shaperController.addInvalidateShaperListener(() => {
+      this.updateShaperInfo();
+    });
   }
 
   setupSettingsListeners() {
@@ -391,7 +434,7 @@ export class SceneController {
     );
 
     this.sceneSettingsController.addKeyListener(
-      "applyKerning",
+      "featureSettings",
       (event) => {
         this.scrollAdjustBehavior = "pin-glyph-center";
       },
@@ -534,6 +577,7 @@ export class SceneController {
 
   _adjustScrollPosition() {
     let originXDelta = 0;
+    let originYDelta = 0;
 
     const glyphPosition = positionedGlyphPosition(
       this.sceneModel.getSelectedPositionedGlyph()
@@ -553,19 +597,29 @@ export class SceneController {
         this._previousGlyphPosition.x + this._previousGlyphPosition.xAdvance / 2;
       const glyphCenter = glyphPosition.x + glyphPosition.xAdvance / 2;
       originXDelta = glyphCenter - previousGlyphCenter;
+      originYDelta = glyphPosition.y - this._previousGlyphPosition.y;
+    } else if (
+      typeof this.scrollAdjustBehavior == "string" &&
+      this.scrollAdjustBehavior.startsWith("pin-glyph-origin") &&
+      this._previousGlyphPosition &&
+      glyphPosition
+    ) {
+      originXDelta = glyphPosition.x - this._previousGlyphPosition.x;
+      originYDelta = glyphPosition.y - this._previousGlyphPosition.y;
     } else if (this.scrollAdjustBehavior?.behavior === "tool-pin-point") {
       originXDelta = this.scrollAdjustBehavior.getPinPointDelta();
     }
 
-    if (originXDelta) {
+    if (originXDelta || originYDelta) {
       this.sceneSettings.viewBox = offsetRect(
         this.sceneSettings.viewBox,
         originXDelta,
-        0
+        originYDelta
       );
     }
 
-    this.scrollAdjustBehavior = null;
+    this.scrollAdjustBehavior =
+      this.scrollAdjustBehavior === "pin-glyph-origin" ? "pin-glyph-origin" : null;
     this._previousTextExtents = [minX, maxX];
     this._previousGlyphPosition = glyphPosition;
   }
@@ -607,7 +661,7 @@ export class SceneController {
 
   _updateSubstituteGlyph() {
     if (
-      !this.sceneSettings.glyphLines.some((line) =>
+      !this.sceneSettings.characterLines.some((line) =>
         line.some((glyphInfo) => glyphInfo.isPlaceholder)
       )
     ) {
@@ -615,13 +669,13 @@ export class SceneController {
       return;
     }
 
-    const glyphLines = glyphLinesFromText(
+    const characterLines = characterLinesFromString(
       this.sceneSettings.text,
       this.fontController.characterMap,
       this.fontController.glyphMap,
       this.sceneSettings.substituteGlyphName
     );
-    this.sceneSettingsController.setItem("glyphLines", glyphLines, {
+    this.sceneSettingsController.setItem("characterLines", characterLines, {
       senderID: this,
     });
   }
@@ -754,6 +808,8 @@ export class SceneController {
         broadcast: true,
       };
     });
+
+    this.scrollAdjustBehavior = "pin-glyph-origin-once";
   }
 
   addEventListener(eventName, handler, options) {
@@ -868,7 +924,7 @@ export class SceneController {
     if (event && event.x !== undefined) {
       this._currentLocalPoint = this.canvasController.localPoint(event);
     }
-    return this._currentLocalPoint || { x: 0, y: 0 };
+    return this._currentLocalPoint || { x: Infinity, y: Infinity };
   }
 
   selectedGlyphPoint(event) {
@@ -1116,7 +1172,7 @@ export class SceneController {
       return;
     }
     if (!glyphName) {
-      glyphName = this.sceneModel.getSelectedGlyphName();
+      glyphName = this.getSelectedGlyphName();
     }
     const varGlyph = await this.fontController.getGlyph(glyphName);
     const baseChangePath = ["glyphs", glyphName];
@@ -1277,7 +1333,7 @@ export class SceneController {
     if (undoInfo !== undefined) {
       this.selection = undoInfo.undoSelection;
       if (undoInfo.fontLocation) {
-        this.scrollAdjustBehavior = "pin-glyph-center";
+        this.scrollAdjustBehavior = "pin-glyph-origin-once";
         // Pass a copy of the location to ensure the listeners are called even
         // if the location didn't change: its dependents may vary depending on
         // the glyph data (eg. a source being there or not)
@@ -1681,7 +1737,11 @@ function positionedGlyphPosition(positionedGlyph) {
   if (!positionedGlyph) {
     return undefined;
   }
-  return { x: positionedGlyph.x, xAdvance: positionedGlyph.glyph.xAdvance };
+  return {
+    x: positionedGlyph.x,
+    y: positionedGlyph.y,
+    xAdvance: positionedGlyph.glyph.xAdvance,
+  };
 }
 
 export function equalGlyphSelection(glyphSelectionA, glyphSelectionB) {

@@ -1,5 +1,55 @@
 # Changelog for Fontra
 
+## 2026-03-?? [version 2026.3.2]
+
+### New features
+
+- [translations] Added a full Traditional Chinese set of translation strings, contributed by 湖远星（Lake桑）. They also filled some gaps in the Simplified Chinese strings. [PR 2479](https://github.com/fontra/fontra/pull/2479)
+- [fontra-pak] Add a sample text field to the launcher window. If this is empty, launch into the font overview, but if it is not, launch into the editor with the text. [fontra-pak PR 228](https://github.com/fontra/fontra-pak/pull/228)
+
+### Fixes
+
+- Don't draw incorrect placeholder strings for empty unencoded glyphs [PR 2486](https://github.com/fontra/fontra/pull/2486)
+- [fontra-pak] Reinstate support for macOS 11, which was accidentally dropped by unnecessarily upgrading the PyQt6 dependency. [fontra-pak PR 229](https://github.com/fontra/fontra-pak/pull/229)
+- [opentype] Use the previous working shaper font if compilation fails during editing of OpenType features. This avoids jarring text breackage during feature editing. [Issue 2469](https://github.com/fontra/fontra/issues/2469), [PR 2480](https://github.com/fontra/fontra/pull/2480)
+
+## 2026-03-06 [version 2026.3.1]
+
+- Fix editing kerning and sidebearings, making the glyph list metrics update correctly when using these tools. [PR 2468](https://github.com/fontra/fontra/pull/2468)
+
+## 2026-03-06 [version 2026.3.0]
+
+- [OpenType] Initial support for OpenType features has landed! This requires a longer explanation, but in short:
+  - Fontra will now apply text shaping and OpenType features. The user interface for this lives in the text entry panel.
+  - Fontra now uses HarfBuzz for text shaping and OpenType features, via [harfbuzzjs](https://github.com/harfbuzz/harfbuzzjs). Khaled Hosny contributed many improvements to `harfbuzzjs` to make this possible.
+  - For `.otf` and `.ttf` fonts, Fontra will use the actual OpenType features from the fonts.
+  - For source files (`.designspace`, `.ufo`, `.glyphs`, `.fontra`), it will compile a so called "shaper font" on the fly, using the brand new [build-shaper-font](https://github.com/fontra/build-shaper-font) functionality, written by Khaled Hosny, using parts of the `fontc` code base written in Rust. This runs in the browser using Web Assembly. It is amazing.
+  - Some glyph positioning features are emulated on the fly using data in the font: `curs`, `kern`, `mark` and `mkmk`. This uses live kerning data and glyph anchors and allows the user to make edit and immediately see the effects in the rendered text.
+  - The OpenType feature code editor was improved to do live error checking and reporting (also using the `build-shaper-font` functionality). You can have two windows or tabs side-by-side, and see changes in the feature code being reflected in the glyph editor virtually instantaneously.
+  - There is a new right sidebar panel called "Input characters and output glyphs" that contains two lists:
+    - The input characters, and a little bit of unicode information for each character
+    - The output glyphs, showing the glyph name, advance width, positioning offsets and character cluster index for each glyph.
+  - There are still some open issues, and things may still be a little rough around the edges. See [Issue 2381](https://github.com/fontra/fontra/issues/2381) for past and ongoing work.
+- [designspace/ufo] Fix editing the style name for single-UFO projects, by making sure to write the `fontSource.name` property to the `styleName` UFO font info property. [PR 2464](https://github.com/fontra/fontra/pull/2464)
+- [fontra-workflow] Add `propagate-anchors` filter, that tries to match `glyphsLib` behavior. [Issue 2453](https://github.com/fontra/fontra/issues/2453), [PR 2457](https://github.com/fontra/fontra/pull/2457)
+- [fontra-pak] When exporting `.ttf` or `.otf`, apply the `propagate-anchors` filter. This allows us to export .glyphs files more correctly. [fontra-pak PR 226](https://github.com/fontra/fontra-pak/pull/226)
+- [designspace/ufo] Fix writing of guidelines that have angles outside of the 0..360 range. [PR 2454](https://github.com/fontra/fontra/pull/2454)
+- [glyph sets] Remove Black Foundry glyph sets, they are unmaintained. [PR 2446](https://github.com/fontra/fontra/pull/2446)
+- [kerning emulation] Ignore mark glyphs when emulating kerning. [Issue 2443](https://github.com/fontra/fontra/issues/2443), [PR 2444](https://github.com/fontra/fontra/pull/2444)
+- Improve font source interpolation when custom data isn't interpolatable. [PR 2445](https://github.com/fontra/fontra/pull/2445)
+- [glyph sets] Add JustFont jf 7000 Chinese/Taiwanese character sets. Suggested by user MidnightOwl123. [PR 2428](https://github.com/fontra/fontra/pull/2428)
+- [fontra-glyphs] Fixed a bug where writing OpenType features caused internal data problems, making Fontra unable to read glyphs afterwards. [fontra-glyphs PR 125](https://github.com/fontra/fontra-glyphs/pull/125)
+- Fixed bug that made Fontra unable to show a glyph if the feature code was invalid. [Issue 2423](https://github.com/fontra/fontra/issues/2423), [PR 2424](https://github.com/fontra/fontra/pull/2424)
+- [fontra-glyphs] Add support for right-to-left kerning. [fontra-glyphs PR 124](https://github.com/fontra/fontra-glyphs/pull/124)
+- [selection info / dimensions field] When a single off-curve point is selected, show the dimensions of the handle instead of (0, 0). Suggested by Aleksandra Samuļenkova. [PR 2418](https://github.com/fontra/fontra/pull/2418)
+- [designspace/ufo] Fix reading and writing of right-to-left kerning. [PR 2416](https://github.com/fontra/fontra/pull/2416), [PR 2417](https://github.com/fontra/fontra/pull/2417)
+- Fix a bug in anchor sorting, so inconsistently ordered anchors can now really be interpolated. This fixes a bug in the previous attempt to fix this. [PR 2415](https://github.com/fontra/fontra/pull/2415)
+- [fontra-glyphs] When reading OpenType features, expand include statements and Glyphs-specific dynamic feature syntax into traditional feature syntax. [fontra-glyphs PR 123](https://github.com/fontra/fontra-glyphs/pull/123)
+- [fontra-glyphs] Accept invalid OpenType feature code, as this is inevitable when editing, given Fontra's autosave nature. [fontra-glyphs PR 122](https://github.com/fontra/fontra-glyphs/pull/122)
+- Ignore component custom data when interpolating. This fixes interpolation for .glyphs files that have inconsistent component align settings. [PR 2409](https://github.com/fontra/fontra/pull/2409)
+- Make the topic list of the application settings and font info views foldable. [PR 2408](https://github.com/fontra/fontra/pull/2408)
+- Fix minor layout bug in glyph sets UI. [Commit b292d8ee](https://github.com/fontra/fontra/commit/b292d8ee980438a4152da8d3af1b8fb5408f2f75)
+
 ## 2026-02-03 [version 2026.2.0]
 
 - [ufo] Fix creating a single-UFO project. [PR 2405](https://github.com/fontra/fontra/pull/2405)
