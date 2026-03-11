@@ -1,4 +1,3 @@
-import { Bezier } from "bezier-js";
 import { consolidateChanges } from "@fontra/core/changes.js";
 import { polygonIsConvex } from "@fontra/core/convex-hull.js";
 import {
@@ -1716,23 +1715,41 @@ function normalizeVectorSafe(vec, epsilon = 1e-6) {
   return { x: vec.x / len, y: vec.y / len };
 }
 
+function resolveSingleControlAnchorIndex(segment, points) {
+  const controlIndex = segment.controlIndices[0];
+  const controlPoint = points[controlIndex];
+  const startPoint = points[segment.startIndex];
+  const endPoint = points[segment.endIndex];
+  if (!controlPoint || !startPoint || !endPoint) {
+    return segment.startIndex;
+  }
+
+  if (!!startPoint.smooth !== !!endPoint.smooth) {
+    return startPoint.smooth ? segment.startIndex : segment.endIndex;
+  }
+
+  const startDistance = vector.distance(controlPoint, startPoint);
+  const endDistance = vector.distance(controlPoint, endPoint);
+  return startDistance <= endDistance ? segment.startIndex : segment.endIndex;
+}
+
 function calculateHandleTensionsForRegularSegment(segment) {
   if (!segment?.controlPoints || segment.controlPoints.length !== 2) {
     return null;
   }
 
   const [cp1, cp2] = segment.controlPoints;
-  const startDir = normalizeVectorSafe(vector.subVectors(cp1, segment.startPoint));
-  const endDir = normalizeVectorSafe(vector.subVectors(cp2, segment.endPoint));
-  const tensionPoint =
-    startDir && endDir
-      ? vector.intersect(
-          segment.startPoint,
-          vector.addVectors(segment.startPoint, startDir),
-          segment.endPoint,
-          vector.addVectors(segment.endPoint, endDir)
-        )
-      : null;
+  const dir1 = normalizeVectorSafe(vector.subVectors(cp1, segment.startPoint));
+  const dir2 = normalizeVectorSafe(vector.subVectors(cp2, segment.endPoint));
+  if (!dir1 || !dir2) {
+    return null;
+  }
+  const tensionPoint = vector.intersect(
+    segment.startPoint,
+    vector.addVectors(segment.startPoint, dir1),
+    segment.endPoint,
+    vector.addVectors(segment.endPoint, dir2)
+  );
   if (!tensionPoint) {
     return null;
   }
@@ -1741,9 +1758,12 @@ function calculateHandleTensionsForRegularSegment(segment) {
   const distEnd = vector.distance(segment.endPoint, tensionPoint);
   const lenStart = vector.distance(segment.startPoint, cp1);
   const lenEnd = vector.distance(segment.endPoint, cp2);
-  const tensionStart = distStart > 1e-6 ? lenStart / distStart : null;
-  const tensionEnd = distEnd > 1e-6 ? lenEnd / distEnd : null;
-  return { tensionStart, tensionEnd, lenStart, lenEnd };
+  return {
+    tensionStart: distStart > 1e-6 ? lenStart / distStart : null,
+    tensionEnd: distEnd > 1e-6 ? lenEnd / distEnd : null,
+    lenStart,
+    lenEnd,
+  };
 }
 
 function computeRegularHandleLengthsFromTensions(
@@ -1775,104 +1795,221 @@ function computeRegularHandleLengthsFromTensions(
   };
 }
 
-function resolveSingleControlAnchorIndex(segment, originalPath) {
-  const controlIndex = segment.controlIndices[0];
-  const controlPoint = originalPath.getPoint(controlIndex);
-  const startPoint = originalPath.getPoint(segment.startIndex);
-  const endPoint = originalPath.getPoint(segment.endIndex);
-  if (!controlPoint || !startPoint || !endPoint) {
-    return segment.startIndex;
-  }
-
-  if (!!startPoint.smooth !== !!endPoint.smooth) {
-    return startPoint.smooth ? segment.startIndex : segment.endIndex;
-  }
-
-  const startDistance = vector.distance(controlPoint, startPoint);
-  const endDistance = vector.distance(controlPoint, endPoint);
-  return startDistance <= endDistance ? segment.startIndex : segment.endIndex;
-}
-
-function getRegularContourSegments(path, contourIndex) {
+function buildContourSegmentsFromPoints(points, isClosed) {
   const segments = [];
-  for (const segment of path.iterContourSegmentPointIndices(contourIndex)) {
-    const pointIndices = [...segment.pointIndices];
-    if (pointIndices.length < 2) {
+  const numPoints = points.length;
+  if (numPoints < 2) {
+    return segments;
+  }
+
+  const onCurveIndices = [];
+  for (let i = 0; i < numPoints; i++) {
+    if (!points[i].type) {
+      onCurveIndices.push(i);
+    }
+  }
+  if (onCurveIndices.length < 2) {
+    return segments;
+  }
+
+  for (let i = 0; i < onCurveIndices.length; i++) {
+    const startIdx = onCurveIndices[i];
+    const isLast = i === onCurveIndices.length - 1;
+    if (!isClosed && isLast) {
       continue;
     }
+    const endIdx = isLast ? onCurveIndices[0] : onCurveIndices[i + 1];
+    const controlPoints = [];
+    const controlIndices = [];
+
+    if (isLast) {
+      for (let j = startIdx + 1; j < numPoints; j++) {
+        if (points[j].type) {
+          controlPoints.push(points[j]);
+          controlIndices.push(j);
+        }
+      }
+      for (let j = 0; j < endIdx; j++) {
+        if (points[j].type) {
+          controlPoints.push(points[j]);
+          controlIndices.push(j);
+        }
+      }
+    } else {
+      for (let j = startIdx + 1; j < endIdx; j++) {
+        if (points[j].type) {
+          controlPoints.push(points[j]);
+          controlIndices.push(j);
+        }
+      }
+    }
+
     segments.push({
-      type: segment.type,
-      pointIndices,
-      startIndex: pointIndices[0],
-      endIndex: pointIndices.at(-1),
-      controlIndices: pointIndices.slice(1, -1),
+      startPoint: points[startIdx],
+      endPoint: points[endIdx],
+      controlPoints,
+      startIndex: startIdx,
+      endIndex: endIdx,
+      controlIndices,
+      segmentIndex: i,
     });
   }
+
   return segments;
 }
 
-function getRegularAnchorIncidentTangents(path, pointIndex) {
-  const [contourIndex] = path.getContourAndPointIndex(pointIndex);
-  let incoming = null;
-  let outgoing = null;
-
-  for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
-    const points = segment.points;
-    if (!points?.length) {
-      continue;
-    }
-    const pointIndices = segment.parentPointIndices || segment.pointIndices || [];
-    const startIndex = pointIndices[0];
-    const endIndex = pointIndices.at(-1);
-    let tangent = null;
-
-    if (points.length === 2) {
-      tangent = normalizeVectorSafe({
-        x: points[1].x - points[0].x,
-        y: points[1].y - points[0].y,
-      });
-    } else if (points.length >= 3) {
-      const bezier = new Bezier(points);
-      tangent = normalizeVectorSafe(bezier.derivative(startIndex === pointIndex ? 0 : 1));
-    }
-    if (!tangent) {
-      continue;
-    }
-    if (startIndex === pointIndex) {
-      outgoing = tangent;
-    }
-    if (endIndex === pointIndex) {
-      incoming = tangent;
-    }
+function calculateNormalAtRegularContourPoint(contour, pointIndex) {
+  const points = contour?.points;
+  const isClosed = !!contour?.isClosed;
+  if (!points?.length) {
+    return null;
   }
-
-  return { incoming, outgoing };
-}
-
-export function calculateNormalAtRegularPoint(path, pointIndex) {
-  const pointType = path.pointTypes[pointIndex] & VarPackedPath.POINT_TYPE_MASK;
-  if (pointType !== VarPackedPath.ON_CURVE) {
+  const point = points[pointIndex];
+  if (!point || point.type) {
     return null;
   }
 
-  const { incoming, outgoing } = getRegularAnchorIncidentTangents(path, pointIndex);
-  const tangent =
-    (incoming && outgoing
-      ? normalizeVectorSafe({
-          x: incoming.x + outgoing.x,
-          y: incoming.y + outgoing.y,
-        }) ||
-        outgoing ||
-        incoming
-      : outgoing || incoming) || null;
+  const numPoints = points.length;
+  const prevIdx = pointIndex > 0 ? pointIndex - 1 : isClosed ? numPoints - 1 : undefined;
+  const nextIdx = pointIndex < numPoints - 1 ? pointIndex + 1 : isClosed ? 0 : undefined;
+  const prevPoint = prevIdx !== undefined ? points[prevIdx] : null;
+  const nextPoint = nextIdx !== undefined ? points[nextIdx] : null;
+  const prevIsHandle = !!prevPoint?.type;
+  const nextIsHandle = !!nextPoint?.type;
 
-  if (!tangent) {
+  if (prevIsHandle && nextIsHandle) {
+    const tangent =
+      normalizeVectorSafe(vector.subVectors(nextPoint, prevPoint)) ||
+      normalizeVectorSafe(vector.subVectors(nextPoint, point)) ||
+      normalizeVectorSafe(vector.subVectors(point, prevPoint));
+    return tangent ? normalizeVectorSafe(vector.rotateVector90CW(tangent)) : null;
+  }
+  if (nextIsHandle) {
+    const tangent = normalizeVectorSafe(vector.subVectors(nextPoint, point));
+    return tangent ? normalizeVectorSafe(vector.rotateVector90CW(tangent)) : null;
+  }
+  if (prevIsHandle) {
+    const tangent = normalizeVectorSafe(vector.subVectors(point, prevPoint));
+    return tangent ? normalizeVectorSafe(vector.rotateVector90CW(tangent)) : null;
+  }
+
+  const incoming = prevPoint ? normalizeVectorSafe(vector.subVectors(point, prevPoint)) : null;
+  const outgoing = nextPoint ? normalizeVectorSafe(vector.subVectors(nextPoint, point)) : null;
+  if (!incoming && !outgoing) {
     return null;
   }
-  return normalizeVectorSafe(vector.rotateVector90CW(tangent));
+  if (!incoming) {
+    return normalizeVectorSafe(vector.rotateVector90CW(outgoing));
+  }
+  if (!outgoing) {
+    return normalizeVectorSafe(vector.rotateVector90CW(incoming));
+  }
+
+  const dot = incoming.x * outgoing.x + incoming.y * outgoing.y;
+  const cross = incoming.x * outgoing.y - incoming.y * outgoing.x;
+  const angle = Math.atan2(cross, dot);
+  const halfAngle = angle / 2;
+  const cosH = Math.cos(halfAngle);
+  const sinH = Math.sin(halfAngle);
+  const bisector = {
+    x: incoming.x * cosH - incoming.y * sinH,
+    y: incoming.x * sinH + incoming.y * cosH,
+  };
+  return normalizeVectorSafe({ x: bisector.y, y: -bisector.x });
 }
 
-function collectPathCoordinateChanges(originalPath, workingPath, roundFunc) {
+function findPrevOnCurveIndexInContour(points, startIndex, isClosed) {
+  for (let i = startIndex - 1; i >= 0; i--) {
+    if (!points[i]?.type) {
+      return i;
+    }
+  }
+  if (!isClosed) {
+    return null;
+  }
+  for (let i = points.length - 1; i > startIndex; i--) {
+    if (!points[i]?.type) {
+      return i;
+    }
+  }
+  return null;
+}
+
+function findNextOnCurveIndexInContour(points, startIndex, isClosed) {
+  for (let i = startIndex + 1; i < points.length; i++) {
+    if (!points[i]?.type) {
+      return i;
+    }
+  }
+  if (!isClosed) {
+    return null;
+  }
+  for (let i = 0; i < startIndex; i++) {
+    if (!points[i]?.type) {
+      return i;
+    }
+  }
+  return null;
+}
+
+function getAttachedHandleIndices(points, anchorIndex, isClosed) {
+  const prevIndex = anchorIndex > 0 ? anchorIndex - 1 : isClosed ? points.length - 1 : null;
+  const nextIndex = anchorIndex < points.length - 1 ? anchorIndex + 1 : isClosed ? 0 : null;
+  return {
+    prevHandleIndex: prevIndex !== null && points[prevIndex]?.type ? prevIndex : null,
+    nextHandleIndex: nextIndex !== null && points[nextIndex]?.type ? nextIndex : null,
+  };
+}
+
+function calculateSmoothTangentForMovedAnchor(points, workPoints, anchorIndex, isClosed) {
+  const { prevHandleIndex, nextHandleIndex } = getAttachedHandleIndices(
+    points,
+    anchorIndex,
+    isClosed
+  );
+  if (prevHandleIndex === null && nextHandleIndex === null) {
+    return null;
+  }
+
+  const workAnchor = workPoints[anchorIndex];
+  const prevOnCurveIndex = findPrevOnCurveIndexInContour(points, anchorIndex, isClosed);
+  const nextOnCurveIndex = findNextOnCurveIndexInContour(points, anchorIndex, isClosed);
+  const prevOnCurve =
+    prevOnCurveIndex !== null && prevOnCurveIndex !== anchorIndex
+      ? workPoints[prevOnCurveIndex]
+      : null;
+  const nextOnCurve =
+    nextOnCurveIndex !== null && nextOnCurveIndex !== anchorIndex
+      ? workPoints[nextOnCurveIndex]
+      : null;
+
+  if (prevHandleIndex !== null && nextHandleIndex !== null) {
+    return (
+      (prevOnCurve &&
+        nextOnCurve &&
+        normalizeVectorSafe(vector.subVectors(nextOnCurve, prevOnCurve))) ||
+      (nextOnCurve && normalizeVectorSafe(vector.subVectors(nextOnCurve, workAnchor))) ||
+      (prevOnCurve && normalizeVectorSafe(vector.subVectors(workAnchor, prevOnCurve))) ||
+      normalizeVectorSafe(vector.subVectors(points[nextHandleIndex], points[prevHandleIndex])) ||
+      normalizeVectorSafe(vector.subVectors(points[nextHandleIndex], points[anchorIndex])) ||
+      normalizeVectorSafe(vector.subVectors(points[anchorIndex], points[prevHandleIndex]))
+    );
+  }
+
+  if (nextHandleIndex !== null) {
+    return (
+      (nextOnCurve && normalizeVectorSafe(vector.subVectors(nextOnCurve, workAnchor))) ||
+      normalizeVectorSafe(vector.subVectors(points[nextHandleIndex], points[anchorIndex]))
+    );
+  }
+
+  return (
+    (prevOnCurve && normalizeVectorSafe(vector.subVectors(workAnchor, prevOnCurve))) ||
+    normalizeVectorSafe(vector.subVectors(points[anchorIndex], points[prevHandleIndex]))
+  );
+}
+
+function collectPathCoordinateChanges(originalPath, workingPath, roundFunc = Math.round) {
   const changes = [];
   for (let pointIndex = 0; pointIndex < originalPath.numPoints; pointIndex++) {
     const originalPoint = originalPath.getPoint(pointIndex);
@@ -1902,7 +2039,13 @@ export function applyRegularNormalDragToPathData(
     return [];
   }
 
-  const clickedNormal = calculateNormalAtRegularPoint(originalPath, clickedPointIndex);
+  const [clickedContourIndex, clickedContourPointIndex] =
+    originalPath.getContourAndPointIndex(clickedPointIndex);
+  const clickedContour = originalPath.getUnpackedContour(clickedContourIndex);
+  const clickedNormal = calculateNormalAtRegularContourPoint(
+    clickedContour,
+    clickedContourPointIndex
+  );
   if (!clickedNormal) {
     return [];
   }
@@ -1912,125 +2055,108 @@ export function applyRegularNormalDragToPathData(
     return [];
   }
 
-  const preserveHandleTension = options.preserveHandleTension !== false;
-  const selectedSet = new Set(selectedPointIndices);
-  const affectedContours = new Set();
-  let movedAnchorCount = 0;
-
+  const selectedByContour = new Map();
   for (const pointIndex of selectedPointIndices) {
-    const pointType = originalPath.pointTypes[pointIndex] & VarPackedPath.POINT_TYPE_MASK;
-    if (pointType !== VarPackedPath.ON_CURVE) {
-      continue;
+    const [contourIndex, contourPointIndex] = originalPath.getContourAndPointIndex(pointIndex);
+    if (!selectedByContour.has(contourIndex)) {
+      selectedByContour.set(contourIndex, new Set());
     }
-    const normal = calculateNormalAtRegularPoint(originalPath, pointIndex);
-    if (!normal) {
-      continue;
-    }
-    const originalPoint = originalPath.getPoint(pointIndex);
-    workingPath.setPoint(pointIndex, {
-      ...workingPath.getPoint(pointIndex),
-      x: roundFunc(originalPoint.x + normal.x * sharedOffset),
-      y: roundFunc(originalPoint.y + normal.y * sharedOffset),
-    });
-    affectedContours.add(originalPath.getContourIndex(pointIndex));
-    movedAnchorCount++;
+    selectedByContour.get(contourIndex).add(contourPointIndex);
   }
 
-  if (!movedAnchorCount) {
-    return [];
-  }
+  for (const [contourIndex, pointSet] of selectedByContour) {
+    const originalContour = originalPath.getUnpackedContour(contourIndex);
+    const workingContour = workingPath.getUnpackedContour(contourIndex);
+    const points = originalContour.points;
+    const workPoints = workingContour.points;
+    const isClosed = !!originalContour.isClosed;
+    const onCurveDeltas = new Map();
 
-  for (const contourIndex of affectedContours) {
-    for (const segment of getRegularContourSegments(originalPath, contourIndex)) {
-      if (!selectedSet.has(segment.startIndex) && !selectedSet.has(segment.endIndex)) {
+    for (const pointIndex of pointSet) {
+      const point = points[pointIndex];
+      if (!point || point.type) {
+        continue;
+      }
+      const normal = calculateNormalAtRegularContourPoint(originalContour, pointIndex);
+      if (!normal) {
+        continue;
+      }
+      onCurveDeltas.set(pointIndex, { dx: normal.x * sharedOffset, dy: normal.y * sharedOffset });
+    }
+
+    if (!onCurveDeltas.size) {
+      continue;
+    }
+
+    for (let pointIndex = 0; pointIndex < points.length; pointIndex++) {
+      const point = points[pointIndex];
+      const workPoint = workPoints[pointIndex];
+      const delta = onCurveDeltas.get(pointIndex);
+      if (!point || !workPoint || point.type || !delta) {
+        continue;
+      }
+      workPoint.x = roundFunc(point.x + delta.dx);
+      workPoint.y = roundFunc(point.y + delta.dy);
+    }
+
+    for (let i = 0; i < points.length; i++) {
+      const point = points[i];
+      const workPoint = workPoints[i];
+      if (!point || !workPoint || point.type) {
         continue;
       }
 
-      const origStart = originalPath.getPoint(segment.startIndex);
-      const origEnd = originalPath.getPoint(segment.endIndex);
-      const newStart = workingPath.getPoint(segment.startIndex);
-      const newEnd = workingPath.getPoint(segment.endIndex);
-      const origSegmentLength = Math.hypot(origEnd.x - origStart.x, origEnd.y - origStart.y);
-      const newSegmentLength = Math.hypot(newEnd.x - newStart.x, newEnd.y - newStart.y);
-      const scale = origSegmentLength > 1e-6 ? newSegmentLength / origSegmentLength : 1;
-
-      if (segment.controlIndices.length === 2) {
-        const cpStartIndex = segment.controlIndices[0];
-        const cpEndIndex = segment.controlIndices[1];
-        const origCpStart = originalPath.getPoint(cpStartIndex);
-        const origCpEnd = originalPath.getPoint(cpEndIndex);
-        const startDir =
-          normalizeVectorSafe(vector.subVectors(origCpStart, origStart)) ||
-          normalizeVectorSafe(vector.subVectors(origEnd, origStart)) || { x: 1, y: 0 };
-        const endDir =
-          normalizeVectorSafe(vector.subVectors(origCpEnd, origEnd)) ||
-          normalizeVectorSafe(vector.subVectors(origStart, origEnd)) || {
-            x: -startDir.x,
-            y: -startDir.y,
-          };
-        const tensionInfo = preserveHandleTension
-          ? calculateHandleTensionsForRegularSegment({
-              startPoint: origStart,
-              endPoint: origEnd,
-              controlPoints: [origCpStart, origCpEnd],
-            })
-          : null;
-        const { startLen, endLen } = computeRegularHandleLengthsFromTensions(
-          newStart,
-          startDir,
-          newEnd,
-          endDir,
-          tensionInfo?.tensionStart ?? null,
-          tensionInfo?.tensionEnd ?? null
-        );
-        const origStartLen = Math.hypot(origCpStart.x - origStart.x, origCpStart.y - origStart.y);
-        const origEndLen = Math.hypot(origCpEnd.x - origEnd.x, origCpEnd.y - origEnd.y);
-        const finalStartLen = Number.isFinite(startLen) ? startLen : origStartLen * scale;
-        const finalEndLen = Number.isFinite(endLen) ? endLen : origEndLen * scale;
-
-        workingPath.setPoint(cpStartIndex, {
-          ...workingPath.getPoint(cpStartIndex),
-          x: roundFunc(newStart.x + startDir.x * finalStartLen),
-          y: roundFunc(newStart.y + startDir.y * finalStartLen),
-        });
-        workingPath.setPoint(cpEndIndex, {
-          ...workingPath.getPoint(cpEndIndex),
-          x: roundFunc(newEnd.x + endDir.x * finalEndLen),
-          y: roundFunc(newEnd.y + endDir.y * finalEndLen),
-        });
+      const delta = onCurveDeltas.get(i);
+      if (!delta) {
         continue;
       }
 
-      for (let i = 0; i < segment.controlIndices.length; i++) {
-        const controlIndex = segment.controlIndices[i];
-        const origControl = originalPath.getPoint(controlIndex);
-        const anchorIndex =
-          segment.controlIndices.length === 1
-            ? resolveSingleControlAnchorIndex(segment, originalPath)
-            : i < Math.ceil(segment.controlIndices.length / 2)
-              ? segment.startIndex
-              : segment.endIndex;
-        const attachToStart = anchorIndex === segment.startIndex;
-        const oppositeAnchor = attachToStart ? origEnd : origStart;
-        const origAnchor = originalPath.getPoint(anchorIndex);
-        const newAnchor = workingPath.getPoint(anchorIndex);
-        const direction =
-          normalizeVectorSafe(vector.subVectors(origControl, origAnchor)) ||
-          normalizeVectorSafe(vector.subVectors(oppositeAnchor, origAnchor));
-        if (!direction) {
-          continue;
+      const { prevHandleIndex, nextHandleIndex } = getAttachedHandleIndices(points, i, isClosed);
+      if (prevHandleIndex === null && nextHandleIndex === null) {
+        continue;
+      }
+
+      const shouldPreserveSmoothAxis = point.smooth && !point.skipColinear;
+      if (!shouldPreserveSmoothAxis) {
+        if (prevHandleIndex !== null) {
+          workPoints[prevHandleIndex].x = roundFunc(points[prevHandleIndex].x + delta.dx);
+          workPoints[prevHandleIndex].y = roundFunc(points[prevHandleIndex].y + delta.dy);
         }
-        const originalLength = Math.hypot(
-          origControl.x - origAnchor.x,
-          origControl.y - origAnchor.y
-        );
-        workingPath.setPoint(controlIndex, {
-          ...workingPath.getPoint(controlIndex),
-          x: roundFunc(newAnchor.x + direction.x * originalLength * scale),
-          y: roundFunc(newAnchor.y + direction.y * originalLength * scale),
-        });
+        if (nextHandleIndex !== null) {
+          workPoints[nextHandleIndex].x = roundFunc(points[nextHandleIndex].x + delta.dx);
+          workPoints[nextHandleIndex].y = roundFunc(points[nextHandleIndex].y + delta.dy);
+        }
+        continue;
+      }
+
+      const tangent = calculateSmoothTangentForMovedAnchor(points, workPoints, i, isClosed);
+      if (!tangent) {
+        if (prevHandleIndex !== null) {
+          workPoints[prevHandleIndex].x = roundFunc(points[prevHandleIndex].x + delta.dx);
+          workPoints[prevHandleIndex].y = roundFunc(points[prevHandleIndex].y + delta.dy);
+        }
+        if (nextHandleIndex !== null) {
+          workPoints[nextHandleIndex].x = roundFunc(points[nextHandleIndex].x + delta.dx);
+          workPoints[nextHandleIndex].y = roundFunc(points[nextHandleIndex].y + delta.dy);
+        }
+        continue;
+      }
+
+      if (prevHandleIndex !== null) {
+        const prevHandle = points[prevHandleIndex];
+        const prevLength = Math.hypot(prevHandle.x - point.x, prevHandle.y - point.y);
+        workPoints[prevHandleIndex].x = roundFunc(workPoint.x - tangent.x * prevLength);
+        workPoints[prevHandleIndex].y = roundFunc(workPoint.y - tangent.y * prevLength);
+      }
+      if (nextHandleIndex !== null) {
+        const nextHandle = points[nextHandleIndex];
+        const nextLength = Math.hypot(nextHandle.x - point.x, nextHandle.y - point.y);
+        workPoints[nextHandleIndex].x = roundFunc(workPoint.x + tangent.x * nextLength);
+        workPoints[nextHandleIndex].y = roundFunc(workPoint.y + tangent.y * nextLength);
       }
     }
+
+    workingPath.setUnpackedContour(contourIndex, workingContour);
   }
 
   return collectPathCoordinateChanges(originalPath, workingPath, roundFunc);

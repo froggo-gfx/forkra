@@ -21,7 +21,9 @@ That means:
 2. regular-contour `S` / `D` drag must not be modeled as a fake "fixed rib" mode with no rib
 3. regular-contour `S` / `D` drag may reuse only reconstruction principles from skeleton code, not the fixed-rib feature contract itself
 
-The shipping implementation should adapt the existing regular drag/scaling path and reuse only the handle-reconstruction principles from the skeleton implementation.
+The shipping implementation should not be built inside the existing generic regular drag/scaling executor.
+
+Instead, it should be implemented as a separate regular contour path-rebuild helper, invoked from the regular canonical adapter, while reusing only the handle-reconstruction principles from the skeleton implementation.
 
 ---
 
@@ -39,6 +41,7 @@ Mandatory constraints:
 6. Do not create new source files for this chapter.
 7. Before implementation, declare the target source files and keep the work inside them.
 8. Do not repurpose skeleton fixed-rib routing rows or semantics as the regular-contour implementation surface.
+9. Do not force this feature into the generic regular point rule/action executor if that executor cannot express the shared-scalar path rebuild directly.
 
 Target source-file ownership for this feature:
 
@@ -137,8 +140,9 @@ Conclusion: do not ship offset + refit in v1.
 ### 3.2 Existing code we should build on
 There are already two strong implementation anchors in the codebase:
 
-1. Regular drag orchestration and segment scaling in `src-js/views-editor/src/edit-behavior-adapters.js` and `src-js/views-editor/src/edit-behavior.js`.
+1. Regular drag orchestration in `src-js/views-editor/src/edit-behavior-adapters.js`.
 2. Skeleton fixed-rib control-point reconstruction in `applyFixedRibDragToSkeletonData(...)`.
+3. Existing regular contour point behavior and projective segment scaling in `createPointBehaviorExecutor(...)`, as a reference for what already exists and what this feature is not.
 
 Those already solve most of the hard problems we need:
 
@@ -154,6 +158,30 @@ Conclusion:
 1. the regular version should be implemented as a new regular-contour drag path
 2. it may borrow handle-reconstruction strategy from the skeleton implementation
 3. it must not reuse the fixed-rib feature contract, fixed-rib route identity, or fixed-rib expand/compress semantics
+4. it must not be expressed as an extension of the existing generic regular point rule/action table
+
+### 3.3 Rejected implementation path
+The first attempted implementation path was rejected and removed.
+
+Rejected approach:
+
+1. hooking the feature into the regular canonical drag path by adding a half-separate math branch without first grounding it in the real contour model
+2. trying to infer normals from simplified neighbor geometry
+3. relying on ad-hoc smooth tangent overrides without a proven contour rebuild model
+4. mixing full-path session rewriting and per-change persistence in an unstable way
+
+Reason for rejection:
+
+1. regular angled-point normals were incorrect
+2. smooth collinearity was not preserved reliably
+3. the live drag path could desynchronize points and contours
+4. the resulting branch was not trustworthy enough to keep in the tree
+
+Current status:
+
+1. the failed branch has been removed from `edit-behavior.js`
+2. the failed branch has been removed from `edit-behavior-adapters.js`
+3. the codebase is back on the stable regular-drag baseline before the next implementation pass
 
 ---
 
@@ -167,7 +195,7 @@ Add the feature through the canonical routing surface, not as pointer-owned logi
 Target behavior:
 
 1. Existing regular drag remains unchanged when neither `S` nor `D` is active.
-2. If the current modifier state corresponds to regular S/D drag, the canonical `regularPoint` route must resolve to a regular normal-offset behavior path instead of default regular drag math.
+2. If the current modifier state corresponds to regular S/D drag, the canonical `regularPoint` route must resolve to a separate regular normal-offset path-rebuild branch instead of default regular drag math.
 
 Important:
 
@@ -184,6 +212,8 @@ Ownership by file:
    keep dispatch on the normal canonical route surface.
 3. In `edit-tools-pointer.js`
    continue only to transport mode state and clicked-point context already needed by composer/adapters.
+4. In `edit-behavior-adapters.js`
+   switch the regular canonical drag session into a separate rebuild branch for this mode rather than trying to express it through `EditBehaviorFactory` / `createPointBehaviorExecutor(...)`.
 
 The pointer tool must not:
 
@@ -225,6 +255,7 @@ Non-goals:
 1. no persistence
 2. no layer awareness
 3. no selection parsing inside the helper
+4. no dependency on the generic regular point rule/action executor
 
 Architecture rule:
 
@@ -263,6 +294,12 @@ Important invariant:
 We need a regular-path analog of `calculateNormalAtSkeletonPoint(...)`.
 
 Add a helper for regular contour anchors only, using original contour geometry.
+
+Important clarification:
+
+1. this must be derived from the actual contour geometry model, not from a shortcut neighbor-position approximation
+2. if a point has a reliable handle-defined tangent axis, that axis may be used as the preferred tangent source
+3. if not, use incident segment tangents from real contour geometry
 
 Suggested behavior by case:
 
@@ -369,6 +406,12 @@ Plan for reuse:
 1. move or refactor the tension-preserving cubic reconstruction into shared pure helpers inside `edit-behavior.js` if practical
 2. otherwise duplicate the minimum logic inside existing target files only, but do not create a new sidecar module
 
+Smoothness requirement:
+
+1. smooth collinearity must be preserved by the reconstruction itself
+2. this must use an explicit smooth tangent override model comparable to the skeleton helper's smooth-handle reconstruction pattern
+3. do not assume the existing regular point rule table will preserve smoothness for this mode
+
 Fallback policy:
 
 1. If the cubic tension cannot be computed reliably, scale original handle lengths proportionally from the segment-length change.
@@ -451,6 +494,7 @@ Add pure math helpers:
 4. handle reconstruction preserving direction
 5. tension-preserving cubic handle-length reconstruction
 6. segment ownership helpers for selected/unselected boundaries
+7. explicit smooth tangent reconstruction for affected smooth anchors
 
 ### 6.4 In `edit-behavior-adapters.js`
 Add adapter-owned translation and persistence:
@@ -458,14 +502,16 @@ Add adapter-owned translation and persistence:
 1. gather selected regular on-curve points
 2. resolve clicked point index from routed drag context
 3. call the pure helper from `edit-behavior.js`
-4. write path changes to `layerGlyph.path`
-5. keep rollback/finalization in the adapter layer
+4. rebuild from `originalPath` into a fresh `workingPath` on every drag frame
+5. persist the resulting path state to `layerGlyph.path`
+6. keep rollback/finalization in the adapter layer
 
 Adapters must not:
 
 1. do modifier mapping
 2. parse shortcuts directly
 3. bounce back into pointer-owned execution
+4. accumulate geometry from previously edited live path state for this mode
 
 ### 6.5 In `edit-tools-pointer.js`
 Keep transport only:
@@ -489,6 +535,7 @@ Prefer extracting small pure helpers instead of keeping all geometry in one rout
 3. `rebuildRegularSegmentHandlesPreservingDirection(...)`
 4. `rebuildRegularCubicHandlesPreservingTension(...)`
 5. `applyRegularNormalDragToContour(...)`
+6. `buildSmoothTangentOverridesForRegularContours(...)`
 
 ### 6.7 Reuse from skeleton helper
 If possible, extract shared tension-preserving cubic logic from the skeleton helper so both regular and skeleton paths call one utility.
@@ -568,6 +615,7 @@ Conclusion:
 2. Skeleton `S` / `D` drag behaves exactly as before.
 3. Pointer still only routes; no direct pointer-owned execution is reintroduced.
 4. Regular `S` / `D` drag does not rely on skeleton fixed-rib row selection or fixed-side semantics.
+5. The feature does not reuse the generic regular point rule/action executor as its math owner.
 
 ---
 
@@ -611,6 +659,7 @@ That combination is valid, but it needs careful segment ownership logic.
 6. Keep persistence in adapters, not in `edit-behavior.js`.
 7. Keep the work inside existing target files only.
 8. Keep the regular feature semantically separate from skeleton fixed-rib drag even if some low-level helpers are shared.
+9. Keep the implementation separate from the existing generic regular drag executor if that executor cannot directly model the required rebuild.
 
 ---
 
