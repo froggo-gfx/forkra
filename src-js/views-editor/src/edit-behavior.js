@@ -2100,14 +2100,14 @@ function calculateSmoothTangentForMovedAnchor(points, workPoints, anchorIndex, i
 
   if (prevHandleIndex !== null && nextHandleIndex !== null) {
     return (
+      normalizeVectorSafe(vector.subVectors(points[nextHandleIndex], points[prevHandleIndex])) ||
+      normalizeVectorSafe(vector.subVectors(points[nextHandleIndex], points[anchorIndex])) ||
+      normalizeVectorSafe(vector.subVectors(points[anchorIndex], points[prevHandleIndex])) ||
       (prevOnCurve &&
         nextOnCurve &&
         normalizeVectorSafe(vector.subVectors(nextOnCurve, prevOnCurve))) ||
       (nextOnCurve && normalizeVectorSafe(vector.subVectors(nextOnCurve, workAnchor))) ||
-      (prevOnCurve && normalizeVectorSafe(vector.subVectors(workAnchor, prevOnCurve))) ||
-      normalizeVectorSafe(vector.subVectors(points[nextHandleIndex], points[prevHandleIndex])) ||
-      normalizeVectorSafe(vector.subVectors(points[nextHandleIndex], points[anchorIndex])) ||
-      normalizeVectorSafe(vector.subVectors(points[anchorIndex], points[prevHandleIndex]))
+      (prevOnCurve && normalizeVectorSafe(vector.subVectors(workAnchor, prevOnCurve)))
     );
   }
 
