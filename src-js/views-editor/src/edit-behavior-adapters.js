@@ -1424,6 +1424,8 @@ function applySkeletonBackedMixedDelta({
               {
                 anchorToDragSide: pointerTool.fixedRibCompressMode,
                 scaleControlPoints: FIXED_RIB_SCALE_CONTROL_POINTS,
+                preserveHandleAngles:
+                  pointerTool.fixedRibMode || pointerTool.fixedRibCompressMode,
               }
             )
           : false;
@@ -1843,6 +1845,7 @@ function applyFixedRibDragToSkeletonData(
     const singleSidedDirection = origContour.singleSidedDirection ?? "left";
     const anchorToDragSide = !!options.anchorToDragSide;
     const scaleControlPoints = !!options.scaleControlPoints;
+    const preserveHandleAngles = !!options.preserveHandleAngles;
     const anchorSide = singleSided
       ? singleSidedDirection
       : anchorToDragSide
@@ -1980,7 +1983,12 @@ function applyFixedRibDragToSkeletonData(
               handleAnchorByIndex.set(cpIdx, anchorIdx);
             }
             const rel = { x: origCp.x - anchorPoint.x, y: origCp.y - anchorPoint.y };
-            const rotated = useTransform ? vector.rotateVector(rel, cos, sin) : rel;
+            // In fixed-rib compress mode we preserve each handle's original angle
+            // and only rescale lengths as the contour width changes.
+            const rotated =
+              preserveHandleAngles || !useTransform
+                ? rel
+                : vector.rotateVector(rel, cos, sin);
             const dir = normalizeVectorSafe(rotated);
             if (dir) {
               baseHandleDirections.set(cpIdx, dir);
@@ -2098,8 +2106,17 @@ function applyFixedRibDragToSkeletonData(
             if (!workPoint || !workPrev) {
               continue;
             }
-            const linearVec = { x: workPoint.x - workPrev.x, y: workPoint.y - workPrev.y };
-            const dir = normalizeVectorSafe(linearVec);
+            const dir =
+              preserveHandleAngles
+                ? baseHandleDirections.get(nextIdx) ||
+                  normalizeVectorSafe({
+                    x: nextPoint.x - point.x,
+                    y: nextPoint.y - point.y,
+                  })
+                : normalizeVectorSafe({
+                    x: workPoint.x - workPrev.x,
+                    y: workPoint.y - workPrev.y,
+                  });
             if (!dir) {
               continue;
             }
@@ -2111,15 +2128,29 @@ function applyFixedRibDragToSkeletonData(
             if (!workPoint || !workNext) {
               continue;
             }
-            const linearVec = { x: workNext.x - workPoint.x, y: workNext.y - workPoint.y };
-            const dir = normalizeVectorSafe(linearVec);
+            const dir =
+              preserveHandleAngles
+                ? baseHandleDirections.get(prevIdx) ||
+                  normalizeVectorSafe({
+                    x: prevPoint.x - point.x,
+                    y: prevPoint.y - point.y,
+                  })
+                : normalizeVectorSafe({
+                    x: workNext.x - workPoint.x,
+                    y: workNext.y - workPoint.y,
+                  });
             if (!dir) {
               continue;
             }
-            smoothHandleOverrides.set(prevIdx, {
-              dir: { x: -dir.x, y: -dir.y },
-              anchorIdx: i,
-            });
+            smoothHandleOverrides.set(
+              prevIdx,
+              preserveHandleAngles
+                ? { dir, anchorIdx: i }
+                : {
+                    dir: { x: -dir.x, y: -dir.y },
+                    anchorIdx: i,
+                  }
+            );
           }
         }
 
@@ -3731,6 +3762,8 @@ async function runFixedRibSkeletonPointLikeCanonical({
           {
             anchorToDragSide: pointerTool.fixedRibCompressMode,
             scaleControlPoints: FIXED_RIB_SCALE_CONTROL_POINTS,
+            preserveHandleAngles:
+              pointerTool.fixedRibMode || pointerTool.fixedRibCompressMode,
           }
         );
         if (!appliedFixedRib) {
