@@ -1858,7 +1858,7 @@ function buildContourSegmentsFromPoints(points, isClosed) {
   return segments;
 }
 
-function calculateNormalAtRegularContourPoint(contour, pointIndex) {
+function calculateNormalAtRegularContourPoint(contour, pointIndex, selectedPointSet = null) {
   const points = contour?.points;
   const isClosed = !!contour?.isClosed;
   if (!points?.length) {
@@ -1893,8 +1893,58 @@ function calculateNormalAtRegularContourPoint(contour, pointIndex) {
     return tangent ? normalizeVectorSafe(vector.rotateVector90CW(tangent)) : null;
   }
 
-  const incoming = prevPoint ? normalizeVectorSafe(vector.subVectors(point, prevPoint)) : null;
-  const outgoing = nextPoint ? normalizeVectorSafe(vector.subVectors(nextPoint, point)) : null;
+  if (selectedPointSet) {
+    const selectedLineSegmentNormals = [];
+    const prevOnCurveIndex = findPrevOnCurveIndexInContour(points, pointIndex, isClosed);
+    const nextOnCurveIndex = findNextOnCurveIndexInContour(points, pointIndex, isClosed);
+
+    if (
+      prevOnCurveIndex !== null &&
+      prevOnCurveIndex !== pointIndex &&
+      selectedPointSet.has(prevOnCurveIndex) &&
+      selectedPointSet.has(pointIndex) &&
+      !getSegmentControlIndicesBetween(points, prevOnCurveIndex, pointIndex, isClosed).length
+    ) {
+      const tangent = normalizeVectorSafe(vector.subVectors(point, points[prevOnCurveIndex]));
+      const normal = tangent ? normalizeVectorSafe(vector.rotateVector90CW(tangent)) : null;
+      if (normal) {
+        selectedLineSegmentNormals.push(normal);
+      }
+    }
+
+    if (
+      nextOnCurveIndex !== null &&
+      nextOnCurveIndex !== pointIndex &&
+      selectedPointSet.has(nextOnCurveIndex) &&
+      selectedPointSet.has(pointIndex) &&
+      !getSegmentControlIndicesBetween(points, pointIndex, nextOnCurveIndex, isClosed).length
+    ) {
+      const tangent = normalizeVectorSafe(vector.subVectors(points[nextOnCurveIndex], point));
+      const normal = tangent ? normalizeVectorSafe(vector.rotateVector90CW(tangent)) : null;
+      if (normal) {
+        selectedLineSegmentNormals.push(normal);
+      }
+    }
+
+    if (selectedLineSegmentNormals.length === 1) {
+      return selectedLineSegmentNormals[0];
+    }
+    if (selectedLineSegmentNormals.length === 2) {
+      return (
+        normalizeVectorSafe({
+          x: selectedLineSegmentNormals[0].x + selectedLineSegmentNormals[1].x,
+          y: selectedLineSegmentNormals[0].y + selectedLineSegmentNormals[1].y,
+        }) || selectedLineSegmentNormals[0]
+      );
+    }
+    return null;
+  }
+
+  const { incoming, outgoing } = getIncidentSegmentTangentsAtAnchor(
+    points,
+    pointIndex,
+    isClosed
+  );
   if (!incoming && !outgoing) {
     return null;
   }
@@ -1950,6 +2000,71 @@ function findNextOnCurveIndexInContour(points, startIndex, isClosed) {
     }
   }
   return null;
+}
+
+function getSegmentControlIndicesBetween(points, startIndex, endIndex, isClosed) {
+  const controlIndices = [];
+  if (startIndex === endIndex) {
+    return controlIndices;
+  }
+
+  let index = startIndex;
+  while (true) {
+    index++;
+    if (index >= points.length) {
+      if (!isClosed) {
+        break;
+      }
+      index = 0;
+    }
+    if (index === endIndex) {
+      break;
+    }
+    if (points[index]?.type) {
+      controlIndices.push(index);
+    }
+  }
+  return controlIndices;
+}
+
+function getIncidentSegmentTangentsAtAnchor(points, anchorIndex, isClosed) {
+  const prevOnCurveIndex = findPrevOnCurveIndexInContour(points, anchorIndex, isClosed);
+  const nextOnCurveIndex = findNextOnCurveIndexInContour(points, anchorIndex, isClosed);
+
+  let incoming = null;
+  let outgoing = null;
+
+  if (prevOnCurveIndex !== null && prevOnCurveIndex !== anchorIndex) {
+    const incomingControlIndices = getSegmentControlIndicesBetween(
+      points,
+      prevOnCurveIndex,
+      anchorIndex,
+      isClosed
+    );
+    const tangentSourceIndex =
+      incomingControlIndices.length > 0
+        ? incomingControlIndices[incomingControlIndices.length - 1]
+        : prevOnCurveIndex;
+    incoming = normalizeVectorSafe(
+      vector.subVectors(points[anchorIndex], points[tangentSourceIndex])
+    );
+  }
+
+  if (nextOnCurveIndex !== null && nextOnCurveIndex !== anchorIndex) {
+    const outgoingControlIndices = getSegmentControlIndicesBetween(
+      points,
+      anchorIndex,
+      nextOnCurveIndex,
+      isClosed
+    );
+    const tangentTargetIndex =
+      outgoingControlIndices.length > 0 ? outgoingControlIndices[0] : nextOnCurveIndex;
+    outgoing = normalizeVectorSafe(
+      vector.subVectors(points[tangentTargetIndex], points[anchorIndex])
+    );
+  }
+
+  return { incoming, outgoing };
 }
 
 function getAttachedHandleIndices(points, anchorIndex, isClosed) {
@@ -2069,9 +2184,16 @@ export function applyRegularNormalDragToPathData(
   const [clickedContourIndex, clickedContourPointIndex] =
     originalPath.getContourAndPointIndex(clickedPointIndex);
   const clickedContour = originalPath.getUnpackedContour(clickedContourIndex);
+  const clickedSelectedPointSet = new Set(
+    selectedPointIndices
+      .map((absolutePointIndex) => originalPath.getContourAndPointIndex(absolutePointIndex))
+      .filter(([contourIndex]) => contourIndex === clickedContourIndex)
+      .map(([, contourPointIndex]) => contourPointIndex)
+  );
   const clickedNormal = calculateNormalAtRegularContourPoint(
     clickedContour,
-    clickedContourPointIndex
+    clickedContourPointIndex,
+    clickedSelectedPointSet
   );
   if (!clickedNormal) {
     return [];
@@ -2106,7 +2228,11 @@ export function applyRegularNormalDragToPathData(
       if (!point || point.type) {
         continue;
       }
-      const normal = calculateNormalAtRegularContourPoint(originalContour, pointIndex);
+      const normal = calculateNormalAtRegularContourPoint(
+        originalContour,
+        pointIndex,
+        pointSet
+      );
       if (!normal) {
         continue;
       }
