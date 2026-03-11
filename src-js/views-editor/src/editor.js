@@ -104,6 +104,7 @@ import CharactersGlyphsPanel from "./panel-characters-glyphs.js";
 import DesignspaceNavigationPanel from "./panel-designspace-navigation.js";
 import GlyphNotePanel from "./panel-glyph-note.js";
 import GlyphSearchPanel from "./panel-glyph-search.js";
+import FloatingCapPanel from "./panel-floating-cap.js";
 import ReferenceFontPanel from "./panel-reference-font.js";
 import RelatedGlyphsPanel from "./panel-related-glyphs.js";
 import SelectionInfoPanel from "./panel-selection-info.js";
@@ -386,6 +387,7 @@ export class EditorController extends ViewController {
     this.contextMenuPosition = { x: 0, y: 0 };
 
     this.initSidebars();
+    this.initFloatingPanels();
     this.initTools();
     this.initActions();
     this.initTopBar();
@@ -1312,6 +1314,15 @@ export class EditorController extends ViewController {
       }
     });
     resizeObserver.observe(document.documentElement);
+  }
+
+  initFloatingPanels() {
+    const mainContainer = document.querySelector(".main-container");
+    if (!mainContainer) {
+      return;
+    }
+    this.floatingCapPanel = new FloatingCapPanel(this);
+    mainContainer.appendChild(this.floatingCapPanel);
   }
 
   addSidebar(sidebar) {
