@@ -19,6 +19,7 @@ import {
 } from "@fontra/core/tunni-calculations.js";
 import { arrowKeyDeltas, assert, parseSelection } from "@fontra/core/utils.js";
 import {
+  applyRegularNormalDragToPathData,
   computeEqualizedHandlePositions,
   constrainHorVerDiag,
   EditBehaviorFactory,
@@ -2497,6 +2498,15 @@ async function runRegularPointLikeOrchestration({
   const initialClickedPointIndex = isDrag
     ? pointerTool.sceneController.sceneModel.initialClickedPointIndex
     : undefined;
+  const { point: regularPointSelection } = parseSelection(selection);
+  const useRegularNormalDrag = isDrag
+    ? shouldUseRegularNormalDrag(
+        pointerTool,
+        selection,
+        regularPointSelection,
+        initialClickedPointIndex
+      )
+    : false;
 
   return runPointLikeSessionKernel({
     mode,
@@ -2539,12 +2549,21 @@ async function runRegularPointLikeOrchestration({
           changePath: ["layers", layerName, "glyph"],
           connectDetector: sceneController.getPathConnectDetector(layerGlyph.path),
           shouldConnect: false,
+          originalPath: layerGlyph.path.copy(),
+          lastRegularNormalChanges: [],
           behaviorFactory,
           editBehavior: behaviorFactory.getBehavior(initialBehaviorName),
         };
       });
       assert(layerInfo.length >= 1, "no layer to edit");
       layerInfo[0].isPrimaryLayer = true;
+      const effectiveUseRegularNormalDrag =
+        useRegularNormalDrag &&
+        canRunRegularNormalDragOnPath(
+          layerInfo[0].originalPath,
+          regularPointSelection,
+          initialClickedPointIndex
+        );
 
       const equalizeRollbackByLayer = new Map();
       if (equalizeHandleInfo) {
@@ -2575,11 +2594,15 @@ async function runRegularPointLikeOrchestration({
         equalizeHandleInfo,
         equalizeRollbackByLayer,
         equalizeUsed: false,
+        useRegularNormalDrag: effectiveUseRegularNormalDrag,
         editChange: null,
       };
     },
     onBehaviorChanged: isDrag
       ? async ({ behaviorName, sessionState, sendIncrementalChange }) => {
+          if (sessionState.useRegularNormalDrag) {
+            return;
+          }
           const { layerInfo } = sessionState;
           const rollbackChanges = [];
           for (const layer of layerInfo) {
@@ -2599,12 +2622,35 @@ async function runRegularPointLikeOrchestration({
       sessionState,
       sendIncrementalChange,
     }) => {
-      const { layerInfo, equalizeHandleInfo } = sessionState;
+      const { layerInfo, equalizeHandleInfo, useRegularNormalDrag: useRegularNormalDragMode } =
+        sessionState;
       const deepEditChanges = [];
       for (const layer of layerInfo) {
-        const layerEditChange = layer.editBehavior.makeChangeForDelta(delta);
-        applyChange(layer.layerGlyph, layerEditChange);
-        deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
+        if (useRegularNormalDragMode) {
+          const workingPath = layer.originalPath.copy();
+          const layerEditChange = applyRegularNormalDragToPathData(
+            layer.originalPath,
+            workingPath,
+            regularPointSelection,
+            initialClickedPointIndex,
+            delta,
+            makeRoundFunc(inputEvent),
+            { preserveHandleTension: true }
+          );
+          layer.lastRegularNormalChanges = layerEditChange;
+          if (layerEditChange.length) {
+            for (const change of layerEditChange) {
+              applyChange(layer.layerGlyph.path, change);
+            }
+            deepEditChanges.push(
+              consolidateChanges(layerEditChange, [...layer.changePath, "path"])
+            );
+          }
+        } else {
+          const layerEditChange = layer.editBehavior.makeChangeForDelta(delta);
+          applyChange(layer.layerGlyph, layerEditChange);
+          deepEditChanges.push(consolidateChanges(layerEditChange, layer.changePath));
+        }
         layer.shouldConnect = isDrag
           ? layer.connectDetector.shouldConnect(layer.isPrimaryLayer)
           : layer.connectDetector.shouldConnect();
@@ -2630,7 +2676,12 @@ async function runRegularPointLikeOrchestration({
           }
           deepEditChanges.push(consolidateChanges(equalizeChanges, layer.changePath));
           sessionState.equalizeUsed = true;
-        }
+          }
+      }
+
+      if (!deepEditChanges.length) {
+        sessionState.editChange = null;
+        return;
       }
 
       sessionState.editChange = consolidateChanges(deepEditChanges);
@@ -2642,6 +2693,7 @@ async function runRegularPointLikeOrchestration({
         equalizeHandleInfo,
         equalizeRollbackByLayer,
         equalizeUsed,
+        useRegularNormalDrag: useRegularNormalDragMode,
         editChange,
       } = sessionState;
 
@@ -2649,9 +2701,17 @@ async function runRegularPointLikeOrchestration({
         return;
       }
 
-      const rollbackParts = layerInfo.map((layer) =>
-        consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
-      );
+      const rollbackParts = layerInfo.map((layer) => {
+        if (!useRegularNormalDragMode) {
+          return consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath);
+        }
+        const rollbackChanges = layer.lastRegularNormalChanges.map((change) => {
+          const pointIndex = change.a[0];
+          const originalPoint = layer.originalPath.getPoint(pointIndex);
+          return { f: "=xy", a: [pointIndex, originalPoint.x, originalPoint.y] };
+        });
+        return consolidateChanges(rollbackChanges, [...layer.changePath, "path"]);
+      });
       if (equalizeUsed && equalizeHandleInfo) {
         for (const layer of layerInfo) {
           const rollbackPoints = equalizeRollbackByLayer.get(layer.layerName);
@@ -3201,6 +3261,29 @@ function getRegularPointLikeSelection(sceneController) {
     "anchor/",
     "guideline/",
   ]);
+}
+
+function shouldUseRegularNormalDrag(pointerTool, selection, pointSelection, clickedPointIndex) {
+  if (!(pointerTool.fixedRibMode || pointerTool.fixedRibCompressMode)) {
+    return false;
+  }
+  if (!pointSelection?.length) {
+    return false;
+  }
+  if ((selection?.size || 0) !== pointSelection.length) {
+    return false;
+  }
+  return clickedPointIndex !== undefined && pointSelection.includes(clickedPointIndex);
+}
+
+function canRunRegularNormalDragOnPath(path, pointSelection, clickedPointIndex) {
+  if (!path || !pointSelection?.length || clickedPointIndex === undefined) {
+    return false;
+  }
+  if (path.getPoint(clickedPointIndex)?.type) {
+    return false;
+  }
+  return pointSelection.every((pointIndex) => !path.getPoint(pointIndex)?.type);
 }
 
 async function runRegularEqualizeNudgeCanonical({
