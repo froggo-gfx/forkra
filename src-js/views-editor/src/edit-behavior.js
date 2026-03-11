@@ -2011,6 +2011,31 @@ function calculateSmoothTangentForMovedAnchor(points, workPoints, anchorIndex, i
   );
 }
 
+function calculateSingleHandleTensionForAnchor(points, anchorIndex, handleIndex, isClosed) {
+  const oppositeOnCurveIndex =
+    handleIndex > anchorIndex
+      ? findPrevOnCurveIndexInContour(points, anchorIndex, isClosed)
+      : findNextOnCurveIndexInContour(points, anchorIndex, isClosed);
+  if (oppositeOnCurveIndex === null || oppositeOnCurveIndex === anchorIndex) {
+    return null;
+  }
+  const anchor = points[anchorIndex];
+  const handle = points[handleIndex];
+  const opposite = points[oppositeOnCurveIndex];
+  if (!anchor || !handle || !opposite) {
+    return null;
+  }
+  const handleLength = vector.distance(handle, anchor);
+  const spanLength = vector.distance(opposite, anchor);
+  if (!(spanLength > 1e-6)) {
+    return null;
+  }
+  return {
+    ratio: handleLength / spanLength,
+    oppositeOnCurveIndex,
+  };
+}
+
 function collectPathCoordinateChanges(originalPath, workingPath, roundFunc = Math.round) {
   const changes = [];
   for (let pointIndex = 0; pointIndex < originalPath.numPoints; pointIndex++) {
@@ -2057,6 +2082,8 @@ export function applyRegularNormalDragToPathData(
     return [];
   }
 
+  const preserveHandleTension = options.preserveHandleTension !== false;
+
   const selectedByContour = new Map();
   for (const pointIndex of selectedPointIndices) {
     const [contourIndex, contourPointIndex] = originalPath.getContourAndPointIndex(pointIndex);
@@ -2100,6 +2127,8 @@ export function applyRegularNormalDragToPathData(
       workPoint.x = roundFunc(point.x + delta.dx);
       workPoint.y = roundFunc(point.y + delta.dy);
     }
+
+    const segments = buildContourSegmentsFromPoints(points, isClosed);
 
     for (let i = 0; i < points.length; i++) {
       const point = points[i];
@@ -2146,15 +2175,90 @@ export function applyRegularNormalDragToPathData(
 
       if (prevHandleIndex !== null) {
         const prevHandle = points[prevHandleIndex];
-        const prevLength = Math.hypot(prevHandle.x - point.x, prevHandle.y - point.y);
+        let prevLength = Math.hypot(prevHandle.x - point.x, prevHandle.y - point.y);
+        if (preserveHandleTension) {
+          const tensionInfo = calculateSingleHandleTensionForAnchor(
+            points,
+            i,
+            prevHandleIndex,
+            isClosed
+          );
+          if (tensionInfo) {
+            const newSpan = vector.distance(workPoints[tensionInfo.oppositeOnCurveIndex], workPoint);
+            prevLength = tensionInfo.ratio * newSpan;
+          }
+        }
         workPoints[prevHandleIndex].x = roundFunc(workPoint.x - tangent.x * prevLength);
         workPoints[prevHandleIndex].y = roundFunc(workPoint.y - tangent.y * prevLength);
       }
       if (nextHandleIndex !== null) {
         const nextHandle = points[nextHandleIndex];
-        const nextLength = Math.hypot(nextHandle.x - point.x, nextHandle.y - point.y);
+        let nextLength = Math.hypot(nextHandle.x - point.x, nextHandle.y - point.y);
+        if (preserveHandleTension) {
+          const tensionInfo = calculateSingleHandleTensionForAnchor(
+            points,
+            i,
+            nextHandleIndex,
+            isClosed
+          );
+          if (tensionInfo) {
+            const newSpan = vector.distance(workPoints[tensionInfo.oppositeOnCurveIndex], workPoint);
+            nextLength = tensionInfo.ratio * newSpan;
+          }
+        }
         workPoints[nextHandleIndex].x = roundFunc(workPoint.x + tangent.x * nextLength);
         workPoints[nextHandleIndex].y = roundFunc(workPoint.y + tangent.y * nextLength);
+      }
+    }
+
+    if (preserveHandleTension) {
+      for (const segment of segments) {
+        if (segment.controlIndices.length !== 2) {
+          continue;
+        }
+        const cpStartIdx = segment.controlIndices[0];
+        const cpEndIdx = segment.controlIndices[1];
+        const origStart = points[segment.startIndex];
+        const origEnd = points[segment.endIndex];
+        const newStart = workPoints[segment.startIndex];
+        const newEnd = workPoints[segment.endIndex];
+        const newCpStart = workPoints[cpStartIdx];
+        const newCpEnd = workPoints[cpEndIdx];
+        if (!origStart || !origEnd || !newStart || !newEnd || !newCpStart || !newCpEnd) {
+          continue;
+        }
+
+        const tensionInfo = calculateHandleTensionsForRegularSegment(segment);
+        if (!tensionInfo) {
+          continue;
+        }
+
+        const startDir =
+          normalizeVectorSafe(vector.subVectors(newCpStart, newStart)) ||
+          normalizeVectorSafe(vector.subVectors(newEnd, newStart));
+        const endDir =
+          normalizeVectorSafe(vector.subVectors(newCpEnd, newEnd)) ||
+          normalizeVectorSafe(vector.subVectors(newStart, newEnd));
+        if (!startDir || !endDir) {
+          continue;
+        }
+
+        const { startLen, endLen } = computeRegularHandleLengthsFromTensions(
+          newStart,
+          startDir,
+          newEnd,
+          endDir,
+          tensionInfo.tensionStart,
+          tensionInfo.tensionEnd
+        );
+        if (Number.isFinite(startLen)) {
+          newCpStart.x = roundFunc(newStart.x + startDir.x * startLen);
+          newCpStart.y = roundFunc(newStart.y + startDir.y * startLen);
+        }
+        if (Number.isFinite(endLen)) {
+          newCpEnd.x = roundFunc(newEnd.x + endDir.x * endLen);
+          newCpEnd.y = roundFunc(newEnd.y + endDir.y * endLen);
+        }
       }
     }
 
