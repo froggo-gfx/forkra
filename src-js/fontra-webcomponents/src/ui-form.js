@@ -15,6 +15,7 @@ export class Form extends SimpleElement {
   static styles = `
     :host {
       --label-column-width: 32%;
+      --cap-table-value-width: 4.5em;
     }
 
     .ui-form {
@@ -112,6 +113,31 @@ export class Form extends SimpleElement {
       gap: 0.35rem;
     }
 
+    .ui-form-label.universal-row {
+      overflow: visible;
+    }
+
+    .ui-form-label.edit-name-number input[type="text"],
+    .ui-form-label.edit-name-number-pair input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .ui-form-value.edit-name-number {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .ui-form-value.edit-name-number-pair,
+    .ui-form-value.cap-table {
+      display: grid;
+      align-items: center;
+      justify-content: start;
+      gap: 0.35rem;
+      grid-template-columns: var(--cap-table-value-width) var(--cap-table-value-width) 1.4em;
+    }
+
     .ui-form-value.slider-has-checkbox {
       display: grid;
       gap: 0.25em;
@@ -154,9 +180,11 @@ export class Form extends SimpleElement {
   }
 
   setFieldDescriptions(fieldDescriptions) {
+    const activeState = this._captureActiveFieldState();
     this.contentElement.innerHTML = "";
     this._fieldGetters = {};
     this._fieldSetters = {};
+    this._fieldElements = {};
     this._lastValidFieldValues = {};
     if (!fieldDescriptions) {
       return;
@@ -222,6 +250,60 @@ export class Form extends SimpleElement {
         });
       }
     }
+
+    this._restoreActiveFieldState(activeState);
+  }
+
+  _captureActiveFieldState() {
+    const root = this.shadowRoot ?? this.contentElement?.getRootNode?.();
+    const activeElement =
+      (root && "activeElement" in root ? root.activeElement : null) ||
+      document.activeElement;
+    if (
+      !activeElement ||
+      !this.contentElement ||
+      !this.contentElement.contains(activeElement)
+    ) {
+      return null;
+    }
+    const key = activeElement.dataset?.formKey;
+    if (!key) {
+      return null;
+    }
+    const selectionStart = activeElement.selectionStart;
+    const selectionEnd = activeElement.selectionEnd;
+    return {
+      key,
+      selectionStart:
+        typeof selectionStart === "number" ? selectionStart : null,
+      selectionEnd: typeof selectionEnd === "number" ? selectionEnd : null,
+    };
+  }
+
+  _restoreActiveFieldState(state) {
+    if (!state?.key || !this._fieldElements) {
+      return;
+    }
+    const element = this._fieldElements[state.key];
+    if (!element || typeof element.focus !== "function") {
+      return;
+    }
+    element.focus();
+    if (
+      state.selectionStart !== null &&
+      state.selectionEnd !== null &&
+      typeof element.setSelectionRange === "function"
+    ) {
+      element.setSelectionRange(state.selectionStart, state.selectionEnd);
+    }
+  }
+
+  _registerFieldElement(fieldItem, element) {
+    if (!fieldItem?.key || !element) {
+      return;
+    }
+    element.dataset.formKey = fieldItem.key;
+    this._fieldElements[fieldItem.key] = element;
   }
 
   _addUniversalRow(valueElement, fieldItem, labelElement) {
@@ -267,12 +349,80 @@ export class Form extends SimpleElement {
     };
     this._fieldGetters[fieldItem.key] = () => inputElement.value;
     this._fieldSetters[fieldItem.key] = (value) => (inputElement.value = value);
+    this._registerFieldElement(fieldItem, inputElement);
     valueElement.appendChild(inputElement);
   }
 
   _addEditTextDouble(valueElement, fieldItem) {
     this._addEditText(valueElement, fieldItem.field1);
     this._addEditText(valueElement, fieldItem.field2);
+  }
+
+  _addEditNameNumber(valueElement, fieldItem, labelElement) {
+    const nameField = fieldItem.fieldName;
+    const valueField = fieldItem.fieldValue;
+    if (!nameField || !valueField) {
+      return;
+    }
+
+    if (labelElement) {
+      labelElement.innerText = "";
+      this._addEditText(labelElement, nameField);
+    }
+    this._addEditNumber(valueElement, valueField, valueField.allowEmptyField);
+    if (fieldItem.deleteElement) {
+      valueElement.appendChild(fieldItem.deleteElement);
+    }
+  }
+
+  _addEditNameNumberPair(valueElement, fieldItem, labelElement) {
+    const nameField = fieldItem.fieldName;
+    const valueField1 = fieldItem.fieldValue1;
+    const valueField2 = fieldItem.fieldValue2;
+    if (!nameField || !valueField1 || !valueField2) {
+      return;
+    }
+
+    if (labelElement) {
+      labelElement.innerText = "";
+      this._addEditText(labelElement, nameField);
+    }
+    this._addEditNumber(valueElement, valueField1, valueField1.allowEmptyField);
+    this._addEditNumber(valueElement, valueField2, valueField2.allowEmptyField);
+    if (fieldItem.deleteElement) {
+      valueElement.appendChild(fieldItem.deleteElement);
+    } else {
+      valueElement.appendChild(html.span({}));
+    }
+  }
+
+  _addCapTableHeader(valueElement, fieldItem, labelElement) {
+    if (labelElement) {
+      labelElement.innerText = fieldItem.label ?? "";
+    }
+    valueElement.classList.add("cap-table");
+    valueElement.appendChild(html.span({}, [fieldItem.col1 ?? ""]));
+    valueElement.appendChild(html.span({}, [fieldItem.col2 ?? ""]));
+    valueElement.appendChild(html.span({}));
+  }
+
+  _addCapTableRow(valueElement, fieldItem, labelElement) {
+    const valueField1 = fieldItem.fieldValue1;
+    const valueField2 = fieldItem.fieldValue2;
+    if (!valueField1 || !valueField2) {
+      return;
+    }
+    if (labelElement) {
+      labelElement.innerText = fieldItem.label ?? "";
+    }
+    valueElement.classList.add("cap-table");
+    this._addEditNumber(valueElement, valueField1, valueField1.allowEmptyField);
+    this._addEditNumber(valueElement, valueField2, valueField2.allowEmptyField);
+    if (fieldItem.deleteElement) {
+      valueElement.appendChild(fieldItem.deleteElement);
+    } else {
+      valueElement.appendChild(html.span({}));
+    }
   }
 
   _addEditNumberXY(valueElement, fieldItem) {
@@ -288,12 +438,18 @@ export class Form extends SimpleElement {
     this._lastValidFieldValues[fieldItem.key] = fieldItem.value;
     const inputElement = document.createElement("input");
     inputElement.type = "number";
-    inputElement.value = maybeRound(fieldItem.value, fieldItem.numDigits);
+    // Set value to empty if null/undefined (for placeholder display)
+    inputElement.value =
+      fieldItem.value != null ? maybeRound(fieldItem.value, fieldItem.numDigits) : "";
 
     if (fieldItem["data-tooltip"]) {
       // data-tooltip doesn't work for input number,
       // default title is used
       inputElement.setAttribute("title", fieldItem["data-tooltip"]);
+    }
+
+    if (fieldItem.placeholder) {
+      inputElement.placeholder = fieldItem.placeholder;
     }
 
     if ("minValue" in fieldItem) {
@@ -351,13 +507,16 @@ export class Form extends SimpleElement {
     this._fieldGetters[fieldItem.key] = () => inputElement.value;
     this._fieldSetters[fieldItem.key] = (value) =>
       (inputElement.value = maybeRound(value, fieldItem.numDigits));
+    this._registerFieldElement(fieldItem, inputElement);
     valueElement.appendChild(inputElement);
   }
 
   _addEditNumberExpression(valueElement, fieldItem, allowEmptyField = false) {
     this._lastValidFieldValues[fieldItem.key] = fieldItem.value;
     const inputElement = document.createElement("input");
-    inputElement.value = maybeRoundToString(fieldItem.value, fieldItem.numDigits);
+    inputElement.value =
+      fieldItem.displayValue ??
+      maybeRoundToString(fieldItem.value, fieldItem.numDigits);
 
     if (fieldItem["data-tooltip"]) {
       // data-tooltip doesn't work for input number,
@@ -366,66 +525,83 @@ export class Form extends SimpleElement {
     }
 
     inputElement.disabled = fieldItem.disabled;
-    inputElement.onkeydown = (event) => {
-      const increment = event.shiftKey ? 10 : 1;
-      switch (event.key) {
-        case "ArrowUp": {
-          event.preventDefault();
-          let value = Number(event.target.value) + increment;
-          if (fieldItem.maxValue != undefined) {
-            value = Math.min(value, fieldItem.maxValue);
+      inputElement.onkeydown = (event) => {
+        const increment = event.shiftKey ? 10 : 1;
+        switch (event.key) {
+          case "ArrowUp": {
+            event.preventDefault();
+            const numericValue = Number(event.target.value);
+            if (Number.isNaN(numericValue)) {
+              return;
+            }
+            let value = numericValue + increment;
+            if (fieldItem.maxValue != undefined) {
+              value = Math.min(value, fieldItem.maxValue);
+            }
+            event.target.value = value;
+            this._fieldChanging(fieldItem, value, undefined);
+            break;
           }
-          event.target.value = value;
-          this._fieldChanging(fieldItem, value, undefined);
-          break;
-        }
-        case "ArrowDown": {
-          event.preventDefault();
-          let value = Number(event.target.value) - increment;
-          if (fieldItem.minValue != undefined) {
-            value = Math.max(value, fieldItem.minValue);
+          case "ArrowDown": {
+            event.preventDefault();
+            const numericValue = Number(event.target.value);
+            if (Number.isNaN(numericValue)) {
+              return;
+            }
+            let value = numericValue - increment;
+            if (fieldItem.minValue != undefined) {
+              value = Math.max(value, fieldItem.minValue);
+            }
+            event.target.value = value;
+            this._fieldChanging(fieldItem, value, undefined);
+            break;
           }
-          event.target.value = value;
-          this._fieldChanging(fieldItem, value, undefined);
-          break;
         }
-      }
-    };
+      };
 
     inputElement.oninput = (event) => {
       inputElement.setCustomValidity("");
     };
 
-    inputElement.onchange = async (event) => {
-      let value, valueObject, validitationError;
-      if (allowEmptyField && inputElement.value === "") {
-        value = null;
-      } else {
-        assert(fieldItem.evaluateExpression);
-        value = await fieldItem.evaluateExpression(inputElement.value);
-        if (typeof value !== "number" && typeof value !== "string") {
-          valueObject = value;
-          value = value.value;
-          if (valueObject.error) {
-            validitationError = valueObject.error;
-            value = this._lastValidFieldValues[fieldItem.key];
-            valueObject = undefined;
+      inputElement.onchange = async (event) => {
+        let value, valueObject, validitationError;
+        if (allowEmptyField && inputElement.value === "") {
+          value = null;
+        } else {
+          assert(fieldItem.evaluateExpression);
+          value = await fieldItem.evaluateExpression(inputElement.value);
+          if (typeof value !== "number" && typeof value !== "string") {
+            valueObject = value;
+            value = value.value;
+            if (valueObject.error) {
+              validitationError = valueObject.error;
+              value = this._lastValidFieldValues[fieldItem.key];
+              valueObject = undefined;
+            } else {
+              const displayValue =
+                valueObject.displayValue ||
+                (valueObject.displayName
+                  ? `${valueObject.displayName} (${maybeRoundToString(
+                      value,
+                      fieldItem.numDigits
+                    )})`
+                  : maybeRoundToString(value, fieldItem.numDigits));
+              inputElement.value = displayValue;
+            }
           }
-          inputElement.value = maybeRoundToString(value, fieldItem.numDigits);
-        }
 
-        if (!valueObject) {
-          if (isNaN(value)) {
-            value = this._lastValidFieldValues[fieldItem.key];
-            inputElement.value = maybeRoundToString(value, fieldItem.numDigits);
-          }
-          if (fieldItem.minValue != undefined && value < fieldItem.minValue) {
-            validitationError = "value below minimum";
-          } else if (fieldItem.maxValue != undefined && value > fieldItem.maxValue) {
-            validitationError = "value above minimum";
+          if (!valueObject) {
+            if (isNaN(value)) {
+              value = this._lastValidFieldValues[fieldItem.key];
+              inputElement.value = maybeRoundToString(value, fieldItem.numDigits);
+            }
+            if (fieldItem.minValue != undefined && value < fieldItem.minValue) {
+              validitationError = "value below minimum";
+            } else if (fieldItem.maxValue != undefined && value > fieldItem.maxValue) {
+              validitationError = "value above minimum";
+            }
           }
         }
-      }
 
       inputElement.setCustomValidity(validitationError || "");
 
@@ -445,6 +621,7 @@ export class Form extends SimpleElement {
     this._fieldGetters[fieldItem.key] = () => inputElement.value;
     this._fieldSetters[fieldItem.key] = (value) =>
       (inputElement.value = maybeRoundToString(value, fieldItem.numDigits));
+    this._registerFieldElement(fieldItem, inputElement);
     valueElement.appendChild(inputElement);
   }
 
@@ -497,6 +674,7 @@ export class Form extends SimpleElement {
 
     this._fieldGetters[fieldItem.key] = () => inputElement.value;
     this._fieldSetters[fieldItem.key] = (value) => (inputElement.value = value);
+    this._registerFieldElement(fieldItem, inputElement);
     valueElement.appendChild(
       html.div({ style: "display: flex; gap: 0.15rem;" }, [inputElement, rotaryControl])
     );
@@ -508,6 +686,18 @@ export class Form extends SimpleElement {
     rangeElement.minValue = fieldItem.minValue;
     rangeElement.defaultValue = fieldItem.defaultValue;
     rangeElement.maxValue = fieldItem.maxValue;
+    if (fieldItem.displayValue !== undefined) {
+      rangeElement.displayValue = fieldItem.displayValue;
+    }
+    if (fieldItem.values !== undefined) {
+      rangeElement.values = fieldItem.values;
+    }
+    if (fieldItem.step !== undefined) {
+      rangeElement.step = fieldItem.step;
+    }
+    if (fieldItem.allowInputBeyondRange) {
+      rangeElement.allowInputBeyondRange = true;
+    }
 
     let checkboxElement;
     if (fieldItem.hasCheckBox) {
@@ -529,9 +719,10 @@ export class Form extends SimpleElement {
 
       rangeElement.onChangeCallback = (event) => {
         const value = event.value;
+        const changeMeta = event?.source ? { source: event.source } : undefined;
         if (event.dragBegin) {
           valueStream = new QueueIterator(5, true);
-          this._fieldChanging(fieldItem, value, valueStream);
+          this._fieldChanging(fieldItem, value, valueStream, changeMeta);
         }
 
         if (valueStream) {
@@ -547,7 +738,7 @@ export class Form extends SimpleElement {
             }
           }
         } else {
-          this._fieldChanging(fieldItem, value, undefined);
+          this._fieldChanging(fieldItem, value, undefined, changeMeta);
         }
       };
     }
@@ -631,15 +822,15 @@ export class Form extends SimpleElement {
     this.contentElement.addEventListener(eventName, handler, options);
   }
 
-  _fieldChanging(fieldItem, value, valueStream) {
+  _fieldChanging(fieldItem, value, valueStream, changeMeta) {
     if (valueStream) {
-      this._dispatchEvent("beginChange", { key: fieldItem.key });
+      this._dispatchEvent("beginChange", { key: fieldItem.key, meta: changeMeta });
     } else {
-      this._dispatchEvent("doChange", { key: fieldItem.key, value: value });
+      this._dispatchEvent("doChange", { key: fieldItem.key, value: value, meta: changeMeta });
     }
     const handlerName = "onFieldChange";
     if (this[handlerName] !== undefined) {
-      this[handlerName](fieldItem, value, valueStream);
+      this[handlerName](fieldItem, value, valueStream, changeMeta);
     }
   }
 

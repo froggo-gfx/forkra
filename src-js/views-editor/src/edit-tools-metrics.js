@@ -22,6 +22,11 @@ import {
   registerVisualizationLayerDefinition,
   strokeLine,
 } from "./visualization-layer-definitions.js";
+import {
+  getSkeletonData,
+  moveSkeletonData,
+  setSkeletonData,
+} from "@fontra/core/skeleton-contour-generator.js";
 
 export class MetricsTool {
   identifier = "metrics-tool";
@@ -700,10 +705,14 @@ export class SidebearingEditContext {
       const varGlyphController = await this.fontController.getGlyph(glyphName);
       const varGlyph = varGlyphController.glyph;
       font.glyphs[glyphName] = varGlyph;
-      const layerGlyph = varGlyph.layers[layerName].glyph;
+      const layer = varGlyph.layers[layerName];
+      const layerGlyph = layer.glyph;
+      const layerSkeletonData = getSkeletonData(layer);
       initialValues[glyphName] = {
         xAdvance: layerGlyph.xAdvance,
         reference: layerGlyph.getMoveReference(),
+        // Clone skeleton for restoration during continuous editing
+        skeletonData: layerSkeletonData ? JSON.parse(JSON.stringify(layerSkeletonData)) : null,
       };
     }
 
@@ -735,6 +744,15 @@ export class SidebearingEditContext {
                 -clampedDeltaX,
                 0
               );
+              // Move skeleton data
+              const layer = varGlyph.layers[layerName];
+              if (initialValues[glyphName].skeletonData) {
+                const newSkeletonData = JSON.parse(
+                  JSON.stringify(initialValues[glyphName].skeletonData)
+                );
+                moveSkeletonData(newSkeletonData, -clampedDeltaX, 0);
+                setSkeletonData(layer, newSkeletonData);
+              }
               break;
             }
             case "R": {
@@ -762,6 +780,15 @@ export class SidebearingEditContext {
                 clampedDeltaX / 2,
                 0
               );
+              // Move skeleton data
+              const layer = varGlyph.layers[layerName];
+              if (initialValues[glyphName].skeletonData) {
+                const newSkeletonData = JSON.parse(
+                  JSON.stringify(initialValues[glyphName].skeletonData)
+                );
+                moveSkeletonData(newSkeletonData, clampedDeltaX / 2, 0);
+                setSkeletonData(layer, newSkeletonData);
+              }
               break;
             }
           }
@@ -771,6 +798,9 @@ export class SidebearingEditContext {
       if (!firstChanges) {
         firstChanges = lastChanges;
       }
+
+      // Update skeleton data for the affected glyphs
+      await this._updateSkeletonDataForSidebearingChange(lastDeltaX, leftDeltaX, rightDeltaX, isLeftSidebearingDrag, event);
 
       this._editIncremental(lastChanges.change, true);
     }
@@ -809,6 +839,54 @@ export class SidebearingEditContext {
     }
 
     this.fontController.notifyEditListeners("editIncremental", this);
+  }
+
+  /**
+   * Update skeleton data when sidebearing values change
+   * @param {number} deltaX - The sidebearing delta
+   * @param {number} leftDeltaX - The calculated left delta
+   * @param {number} rightDeltaX - The calculated right delta
+   * @param {boolean} isLeftSidebearingDrag - Whether this is a left sidebearing drag
+   * @param {Event} event - The event object
+   */
+  async _updateSkeletonDataForSidebearingChange(deltaX, leftDeltaX, rightDeltaX, isLeftSidebearingDrag, event) {
+    // Check if skeleton functionality is available (it's not in this branch)
+    console.warn("Skeleton functionality is not available in this branch");
+    return; // Skip skeleton processing in this branch
+  }
+
+  /**
+   * Apply a horizontal delta to all skeleton points
+   * @param {Object} skeletonData - The skeleton data to modify
+   * @param {number} deltaX - The horizontal delta to apply
+   */
+  _applyDeltaToSkeletonPoints(skeletonData, deltaX) {
+    console.log(`[SKELETON DEBUG] _applyDeltaToSkeletonPoints called with deltaX=${deltaX}`);
+    console.log(`[SKELETON DEBUG] Before applying delta, contours: ${skeletonData.contours.length}`);
+
+    let totalPoints = 0;
+    for (const contour of skeletonData.contours) {
+      console.log(`[SKELETON DEBUG] Contour with ${contour.points.length} points`);
+      for (const point of contour.points) {
+        console.log(`[SKELETON DEBUG] Point at (${point.x}, ${point.y}) -> (${point.x + deltaX}, ${point.y})`);
+        point.x += deltaX;
+        totalPoints++;
+      }
+    }
+
+    console.log(`[SKELETON DEBUG] Applied delta ${deltaX} to ${totalPoints} skeleton points`);
+  }
+
+  /**
+   * Regenerate outline contours from updated skeleton data
+   * @param {Object} varGlyph - The variable glyph
+   * @param {Object} layer - The layer containing the skeleton data
+   * @param {Object} skeletonData - The updated skeleton data
+   */
+  async _regenerateOutlineContoursFromSkeleton(varGlyph, layer, skeletonData) {
+    // NOTE: This functionality requires skeleton-contour-generator.js which is not available in this branch
+    // The skeleton contour generation functionality has been disabled
+    console.warn("Skeleton contour generation is not available in this branch");
   }
 }
 

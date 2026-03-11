@@ -7,6 +7,7 @@ import {
 import { translate } from "@fontra/core/localization.js";
 import { insertHandles, insertPoint, scalePoint } from "@fontra/core/path-functions.js";
 import { isEqualSet } from "@fontra/core/set-ops.js";
+import { getSkeletonData } from "@fontra/core/skeleton-contour-generator.js";
 import { modulo, parseSelection } from "@fontra/core/utils.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
@@ -89,8 +90,9 @@ export class PenToolCubic extends BaseTool {
       return {};
     }
     const path = glyphController.instance.path;
+    const generatedContourIndices = this._getGeneratedContourIndexSet();
 
-    const appendInfo = getAppendInfo(path, this.sceneController.selection);
+    const appendInfo = getAppendInfo(path, this.sceneController.selection, generatedContourIndices);
     if (hoveredPointIndex === undefined && appendInfo.createContour) {
       const point = this.sceneController.localPoint(event);
       // The following max() call makes sure that the margin is never
@@ -99,6 +101,9 @@ export class PenToolCubic extends BaseTool {
       // with a max precision of 0.001.
       const size = Math.max(1, this.sceneController.mouseClickMargin);
       const hit = this.sceneModel.pathHitAtPoint(point, size);
+      if (this._isHitOnGeneratedContour(path, hit, generatedContourIndices)) {
+        return {};
+      }
       if (event.altKey && hit.segment?.points?.length === 2) {
         const pt1 = hit.segment.points[0];
         const pt2 = hit.segment.points[1];
@@ -118,6 +123,9 @@ export class PenToolCubic extends BaseTool {
     }
 
     if (hoveredPointIndex === undefined || appendInfo.createContour) {
+      return {};
+    }
+    if (this._isPointInGeneratedContour(path, hoveredPointIndex, generatedContourIndices)) {
       return {};
     }
 
@@ -147,6 +155,42 @@ export class PenToolCubic extends BaseTool {
     return { targetPoint: path.getPoint(hoveredPointIndex) };
   }
 
+  _getGeneratedContourIndexSet() {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+      return new Set();
+    }
+    const editLayerName =
+      this.sceneModel.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+    const layer = positionedGlyph.varGlyph.glyph.layers?.[editLayerName];
+    const indices = getSkeletonData(layer)?.generatedContourIndices || [];
+    return new Set(indices);
+  }
+
+  _isPointInGeneratedContour(path, pointIndex, generatedContourIndices) {
+    if (pointIndex === undefined || !generatedContourIndices?.size) {
+      return false;
+    }
+    const [contourIndex] = path.getContourAndPointIndex(pointIndex);
+    return generatedContourIndices.has(contourIndex);
+  }
+
+  _isHitOnGeneratedContour(path, hit, generatedContourIndices) {
+    if (!hit || !generatedContourIndices?.size) {
+      return false;
+    }
+    const parentPointIndices = hit.segment?.parentPointIndices;
+    if (parentPointIndices?.length) {
+      const [contourIndex] = path.getContourAndPointIndex(parentPointIndices[0]);
+      return generatedContourIndices.has(contourIndex);
+    }
+    if (hit.pointIndex !== undefined) {
+      const [contourIndex] = path.getContourAndPointIndex(hit.pointIndex);
+      return generatedContourIndices.has(contourIndex);
+    }
+    return false;
+  }
+
   async handleDrag(eventStream, initialEvent) {
     if (!this.sceneModel.selectedGlyph?.isEditing) {
       await this.editor.tools["pointer-tool"].handleDrag(eventStream, initialEvent);
@@ -164,6 +208,19 @@ export class PenToolCubic extends BaseTool {
   }
 
   async _handleInsertPoint() {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const path = positionedGlyph?.glyph?.path;
+    if (
+      path &&
+      this._isHitOnGeneratedContour(
+        path,
+        this.sceneModel.pathConnectTargetPoint,
+        this._getGeneratedContourIndexSet()
+      )
+    ) {
+      delete this.sceneModel.pathConnectTargetPoint;
+      return;
+    }
     await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
       const selection = new Set();
       for (const layerGlyph of Object.values(layerGlyphs)) {
@@ -180,6 +237,19 @@ export class PenToolCubic extends BaseTool {
   }
 
   async _handleInsertHandles() {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    const path = positionedGlyph?.glyph?.path;
+    if (
+      path &&
+      this._isHitOnGeneratedContour(
+        path,
+        this.sceneModel.pathInsertHandles?.hit,
+        this._getGeneratedContourIndexSet()
+      )
+    ) {
+      delete this.sceneModel.pathInsertHandles;
+      return;
+    }
     const segmentPointIndices =
       this.sceneModel.pathInsertHandles.hit.segment.pointIndices;
     await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
@@ -190,7 +260,9 @@ export class PenToolCubic extends BaseTool {
           path,
           segmentPointIndices.map((i) => path.getPoint(i)),
           segmentPointIndices[1],
-          this.curveType
+          //// quad handles
+          this.curveType,
+          this.sceneModel.pathInsertHandles.shiftKey
         );
       }
       delete this.sceneModel.pathInsertHandles;
@@ -268,6 +340,94 @@ export class PenToolQuad extends PenToolCubic {
   get curveType() {
     return "quad";
   }
+
+  ////quad handles
+  _getPathConnectTargetPoint(event) {
+    // Requirements:
+    // - we must have an edited glyph at an editable location
+    // - we must be in append/prepend mode for an existing contour
+    // - the hovered point must be eligible to connect to:
+    //   - must be a start or end point of an open contour
+    //   - must not be the currently selected point
+
+    const hoveredPointIndex = getHoveredPointIndex(this.sceneController, event);
+
+    const glyphController = this.sceneModel.getSelectedPositionedGlyph().glyph;
+    if (!glyphController.canEdit) {
+      return {};
+    }
+    const path = glyphController.instance.path;
+    const generatedContourIndices = this._getGeneratedContourIndexSet();
+
+    const appendInfo = getAppendInfo(path, this.sceneController.selection, generatedContourIndices);
+    if (hoveredPointIndex === undefined && appendInfo.createContour) {
+      const point = this.sceneController.localPoint(event);
+      // The following max() call makes sure that the margin is never
+      // less than half a font unit. This works around a visualization
+      // artifact caused by bezier-js: Bezier.project() returns t values
+      // with a max precision of 0.001.
+      const size = Math.max(1, this.sceneController.mouseClickMargin);
+      const hit = this.sceneModel.pathHitAtPoint(point, size);
+      if (this._isHitOnGeneratedContour(path, hit, generatedContourIndices)) {
+        return {};
+      }
+      if (event.altKey && hit.segment?.points?.length === 2) {
+        const pt1 = hit.segment.points[0];
+        const pt2 = hit.segment.points[1];
+        if (event.altKey && event.shiftKey) {
+          // For quadratic curves with alt+shift, create two handles like cubic
+          const handle1 = vector.roundVector(vector.interpolateVectors(pt1, pt2, 1 / 3));
+          const handle2 = vector.roundVector(vector.interpolateVectors(pt1, pt2, 2 / 3));
+          return { insertHandles: { points: [handle1, handle2], hit: hit, shiftKey: event.shiftKey } };
+        } else {
+          // For quadratic curves with alt, create one handle at the midpoint
+          const handle = vector.roundVector(vector.interpolateVectors(pt1, pt2, 0.5));
+          return { insertHandles: { points: [handle], hit: hit, shiftKey: event.shiftKey } };
+        }
+      } else {
+        const targetPoint = { ...hit };
+        if ("x" in targetPoint) {
+          // Don't use vector.roundVector, as there are more properties besides
+          // x and y, and we want to preserve them
+          targetPoint.x = Math.round(targetPoint.x);
+          targetPoint.y = Math.round(targetPoint.y);
+        }
+        return { targetPoint: targetPoint };
+      }
+    }
+
+    if (hoveredPointIndex === undefined || appendInfo.createContour) {
+      return {};
+    }
+    if (this._isPointInGeneratedContour(path, hoveredPointIndex, generatedContourIndices)) {
+      return {};
+    }
+
+    const [contourIndex, contourPointIndex] =
+      path.getContourAndPointIndex(hoveredPointIndex);
+    const contourInfo = path.contourInfo[contourIndex];
+
+    if (
+      appendInfo.contourIndex == contourIndex &&
+      appendInfo.contourPointIndex == contourPointIndex
+    ) {
+      // We're hovering over the source point
+      const point = path.getPoint(hoveredPointIndex);
+      if (!appendInfo.isOnCurve) {
+        return { danglingOffCurve: point };
+      } else {
+        return { canDragOffCurve: point };
+      }
+    }
+
+    if (
+      contourInfo.isClosed ||
+      (contourPointIndex != 0 && hoveredPointIndex != contourInfo.endPoint)
+    ) {
+      return {};
+    }
+    return { targetPoint: path.getPoint(hoveredPointIndex) };
+  }
 }
 
 const AppendModes = {
@@ -276,7 +436,11 @@ const AppendModes = {
 };
 
 function getPenToolBehavior(sceneController, initialEvent, path, curveType) {
-  const appendInfo = getAppendInfo(path, sceneController.selection);
+  const appendInfo = getAppendInfo(
+    path,
+    sceneController.selection,
+    getGeneratedContourIndexSet(sceneController)
+  );
 
   let behaviorFuncs;
 
@@ -637,13 +801,16 @@ function getPointSelectionAbs(pointIndex) {
   return new Set([`point/${pointIndex}`]);
 }
 
-function getAppendInfo(path, selection) {
+function getAppendInfo(path, selection, blockedContourIndices = undefined) {
   if (selection.size === 1) {
     const { point: pointSelection } = parseSelection(selection);
     const pointIndex = pointSelection?.[0];
     if (pointIndex !== undefined && pointIndex < path.numPoints) {
       const [contourIndex, contourPointIndex] =
         path.getContourAndPointIndex(pointIndex);
+      if (blockedContourIndices?.has(contourIndex)) {
+        return getCreateContourAppendInfo(path);
+      }
       const numPointsContour = path.getNumPointsOfContour(contourIndex);
       if (
         !path.contourInfo[contourIndex].isClosed &&
@@ -666,6 +833,10 @@ function getAppendInfo(path, selection) {
       }
     }
   }
+  return getCreateContourAppendInfo(path);
+}
+
+function getCreateContourAppendInfo(path) {
   return {
     contourIndex: path.contourInfo.length,
     contourPointIndex: 0,
@@ -673,6 +844,19 @@ function getAppendInfo(path, selection) {
     isOnCurve: undefined,
     createContour: true,
   };
+}
+
+function getGeneratedContourIndexSet(sceneController) {
+  const sceneModel = sceneController?.sceneModel;
+  const positionedGlyph = sceneModel?.getSelectedPositionedGlyph?.();
+  if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+    return new Set();
+  }
+  const editLayerName =
+    sceneModel?.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+  const layer = positionedGlyph.varGlyph.glyph.layers?.[editLayerName];
+  const indices = getSkeletonData(layer)?.generatedContourIndices || [];
+  return new Set(indices);
 }
 
 function emptyContour() {

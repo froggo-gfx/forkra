@@ -31,6 +31,10 @@
   font-weight: normal;
   line-height: normal;
   text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-sizing: border-box;
   position: absolute;
   display: block;
   border-radius: 4px;

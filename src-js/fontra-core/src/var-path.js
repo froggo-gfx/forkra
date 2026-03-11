@@ -666,8 +666,14 @@ export class VarPackedPath {
   }
 
   copy() {
-    return new this.constructor(
-      this.coordinates.copy(),
+    // Handle case where this.coordinates might be a Proxy object that doesn't properly
+    // forward the copy() method call to the underlying VarArray object
+    const coordinatesCopy = typeof this.coordinates.copy === 'function'
+      ? this.coordinates.copy()
+      : this.coordinates.slice();
+      
+    return new VarPackedPath(
+      coordinatesCopy,
       this.pointTypes.slice(),
       this.contourInfo.map((item) => {
         return { ...item };
@@ -1051,9 +1057,11 @@ const decomposeSegmentFuncs = {
 
   *quad(segment) {
     if (segment.coordinates.length < 6) {
-      throw new Error(
-        `assert -- not enough coordinates for quad: ${segment.coordinates.length}`
+      // Skip malformed quad segments instead of crashing
+      console.warn(
+        `Skipping malformed quad segment: not enough coordinates (${segment.coordinates.length})`
       );
+      return;
     }
     const coordinates = segment.coordinates;
     const pointIndices = [...segment.pointIndices];

@@ -5,13 +5,19 @@ import {
   applyChange,
   consolidateChanges,
 } from "@fontra/core/changes.js";
+import { recordChanges } from "@fontra/core/change-recorder.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import {
   filterPathByPointIndices,
   getSelectionByContour,
 } from "@fontra/core/path-functions.js";
-import { rectCenter, rectSize } from "@fontra/core/rectangle.js";
+import { rectCenter, rectSize, unionRect } from "@fontra/core/rectangle.js";
+import {
+  getSkeletonData,
+  regenerateSkeletonContours,
+  setSkeletonData,
+} from "@fontra/core/skeleton-contour-generator.js";
 import { Transform } from "@fontra/core/transform.js";
 import {
   enumerate,
@@ -24,7 +30,11 @@ import {
 import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
-import { EditBehaviorFactory } from "./edit-behavior.js";
+import {
+  EditBehaviorFactory,
+  createEditableHandleBehavior,
+  createPointBehaviorExecutor,
+} from "./edit-behavior.js";
 import Panel from "./panel.js";
 
 export default class TransformationPanel extends Panel {
@@ -105,7 +115,37 @@ export default class TransformationPanel extends Panel {
       customDistributionSpacing: null,
       dimensionWidth: null,
       dimensionHeight: null,
+      showTunniDistance: true,
+      showTunniTension: true,
+      showTunniAngle: false,
+      showSkeletonHandleDistance: true,
+      showSkeletonHandleTension: true,
+      showSkeletonHandleAngle: true,
     };
+
+    // Initialize toggle params from existing scene settings when available.
+    // Only write defaults for missing keys, so reopening/recreating the panel
+    // does not reset user choices.
+    const sceneSettings = this.sceneController.sceneSettingsController.model;
+    const toggleKeys = [
+      "showTunniDistance",
+      "showTunniTension",
+      "showTunniAngle",
+      "showSkeletonHandleDistance",
+      "showSkeletonHandleTension",
+      "showSkeletonHandleAngle",
+    ];
+    for (const key of toggleKeys) {
+      if (sceneSettings?.[key] !== undefined) {
+        this.transformParameters[key] = !!sceneSettings[key];
+      } else {
+        this.sceneController.sceneSettingsController.setItem(
+          key,
+          this.transformParameters[key]
+        );
+      }
+    }
+
     this.registerActions();
 
     this.sceneController.sceneSettingsController.addKeyListener(
@@ -143,6 +183,18 @@ export default class TransformationPanel extends Panel {
         () => this.moveObjects(moveDescriptor)
       );
     }
+
+    // Register flip actions
+    registerAction(
+      "action.selection-transformation.flip.horizontally",
+      { topic, titleKey: "sidebar.selection-transformation.flip.horizontally" },
+      () => this.transformSelection(() => new Transform().scale(1, -1), "flip horizontally")
+    );
+    registerAction(
+      "action.selection-transformation.flip.vertically",
+      { topic, titleKey: "sidebar.selection-transformation.flip.vertically" },
+      () => this.transformSelection(() => new Transform().scale(-1, 1), "flip vertically")
+    );
 
     const pathActions = [
       ["union", this.pathOperations.unionPath],
@@ -654,10 +706,140 @@ export default class TransformationPanel extends Panel {
       field3: {},
     });
 
+    // Add Tunni labels control section
+    formContents.push({ type: "divider" });
+    formContents.push({
+      type: "header",
+      label: "Tunni Labels",
+    });
+
+    // Create checkbox elements for Tunni labels
+    const distanceCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showTunniDistance ?? true,
+    });
+
+    const tensionCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showTunniTension ?? true,
+    });
+
+    const angleCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showTunniAngle ?? true,
+    });
+
+    // Add three individual checkboxes for distance, tension, and angle using universal-row
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showTunniDistance",
+        auxiliaryElement: distanceCheckbox,
+      },
+      field2: {
+        type: "text",
+        key: "labelDistance",
+        value: "Distance",
+      },
+      field3: {},
+    });
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showTunniTension",
+        auxiliaryElement: tensionCheckbox,
+      },
+      field2: {
+        type: "text",
+        key: "labelTension",
+        value: "Tension",
+      },
+      field3: {},
+    });
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showTunniAngle",
+        auxiliaryElement: angleCheckbox,
+      },
+      field2: {
+        type: "text",
+        key: "labelAngle",
+        value: "Angle",
+      },
+      field3: {},
+    });
+
+    // Skeleton Handle Labels section
+    formContents.push({ type: "divider" });
+    formContents.push({
+      type: "header",
+      label: "Skeleton Handle Labels",
+    });
+
+    // Create checkboxes for skeleton handle label parameters
+    const skeletonDistanceCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showSkeletonHandleDistance ?? true,
+    });
+    const skeletonTensionCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showSkeletonHandleTension ?? true,
+    });
+    const skeletonAngleCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showSkeletonHandleAngle ?? true,
+    });
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showSkeletonHandleDistance",
+        auxiliaryElement: skeletonDistanceCheckbox,
+      },
+      field2: { type: "text", value: "Distance" },
+      field3: {},
+    });
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showSkeletonHandleTension",
+        auxiliaryElement: skeletonTensionCheckbox,
+      },
+      field2: { type: "text", value: "Tension" },
+      field3: {},
+    });
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showSkeletonHandleAngle",
+        auxiliaryElement: skeletonAngleCheckbox,
+      },
+      field2: { type: "text", value: "Angle" },
+      field3: {},
+    });
+
     this.infoForm.setFieldDescriptions(formContents);
 
     this.infoForm.onFieldChange = async (fieldItem, value, valueStream) => {
       this.transformParameters[fieldItem.key] = value;
+
+      // Handle Tunni visibility parameters
+      if (["showTunniDistance", "showTunniTension", "showTunniAngle"].includes(fieldItem.key)) {
+        // Update the scene settings
+        this.sceneController.sceneSettingsController.setItem(fieldItem.key, value);
+      }
+
       if (fieldItem.key === "originXButton" || fieldItem.key === "originYButton") {
         this.transformParameters[fieldItem.key.replace("Button", "")] = value;
 
@@ -669,6 +851,60 @@ export default class TransformationPanel extends Panel {
         });
       }
     };
+    distanceCheckbox.addEventListener("change", (event) => {
+      this.transformParameters.showTunniDistance = event.target.checked;
+      this.sceneController.sceneSettingsController.setItem(
+        "showTunniDistance",
+        event.target.checked
+      );
+      this.sceneController.canvasController.requestUpdate();
+    });
+
+    tensionCheckbox.addEventListener("change", (event) => {
+      this.transformParameters.showTunniTension = event.target.checked;
+      this.sceneController.sceneSettingsController.setItem(
+        "showTunniTension",
+        event.target.checked
+      );
+      this.sceneController.canvasController.requestUpdate();
+    });
+
+    angleCheckbox.addEventListener("change", (event) => {
+      this.transformParameters.showTunniAngle = event.target.checked;
+      this.sceneController.sceneSettingsController.setItem(
+        "showTunniAngle",
+        event.target.checked
+      );
+      this.sceneController.canvasController.requestUpdate();
+    });
+
+    // Add event listeners for skeleton handle label checkboxes
+    skeletonDistanceCheckbox.addEventListener("change", (event) => {
+      this.transformParameters.showSkeletonHandleDistance = event.target.checked;
+      this.sceneController.sceneSettingsController.setItem(
+        "showSkeletonHandleDistance",
+        event.target.checked
+      );
+      this.sceneController.canvasController.requestUpdate();
+    });
+
+    skeletonTensionCheckbox.addEventListener("change", (event) => {
+      this.transformParameters.showSkeletonHandleTension = event.target.checked;
+      this.sceneController.sceneSettingsController.setItem(
+        "showSkeletonHandleTension",
+        event.target.checked
+      );
+      this.sceneController.canvasController.requestUpdate();
+    });
+
+    skeletonAngleCheckbox.addEventListener("change", (event) => {
+      this.transformParameters.showSkeletonHandleAngle = event.target.checked;
+      this.sceneController.sceneSettingsController.setItem(
+        "showSkeletonHandleAngle",
+        event.target.checked
+      );
+      this.sceneController.canvasController.requestUpdate();
+    });
 
     this.updateDimensions();
   }
@@ -803,17 +1039,20 @@ export default class TransformationPanel extends Panel {
       component: componentIndices,
       anchor: anchorIndices,
       backgroundImage: backgroundImageIndices,
+      skeletonPoint: skeletonPointSelection,
     } = parseSelection(this.sceneController.selection);
 
     pointIndices = pointIndices || [];
     componentIndices = componentIndices || [];
     anchorIndices = anchorIndices || [];
     backgroundImageIndices = backgroundImageIndices || [];
+    const hasSkeletonPoints = skeletonPointSelection?.size > 0;
     if (
       !pointIndices.length &&
       !componentIndices.length &&
       !anchorIndices.length &&
-      !backgroundImageIndices.length
+      !backgroundImageIndices.length &&
+      !hasSkeletonPoints
     ) {
       return;
     }
@@ -832,16 +1071,40 @@ export default class TransformationPanel extends Panel {
           this.sceneController.selection,
           this.sceneController.selectedTool.scalingEditBehavior
         );
+
+        // Get bounds for regular selection
+        let selectionBounds = (
+          staticGlyphControllers[layerName] || glyphController
+        ).getSelectionBounds(
+          this.sceneController.selection,
+          this.fontController.getBackgroundImageBoundsFunc
+        );
+
+        // Add skeleton points bounds if present
+        if (hasSkeletonPoints) {
+          const layer = glyph.layers[layerName];
+          const skeletonData = getSkeletonData(layer);
+          if (skeletonData?.contours) {
+            let skeletonBounds = null;
+            for (const selKey of skeletonPointSelection) {
+              const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+              const point = skeletonData.contours[contourIdx]?.points[pointIdx];
+              if (point) {
+                const pointBounds = { xMin: point.x, yMin: point.y, xMax: point.x, yMax: point.y };
+                skeletonBounds = skeletonBounds ? unionRect(skeletonBounds, pointBounds) : pointBounds;
+              }
+            }
+            if (skeletonBounds) {
+              selectionBounds = selectionBounds ? unionRect(selectionBounds, skeletonBounds) : skeletonBounds;
+            }
+          }
+        }
+
         return {
           layerName,
           changePath: ["layers", layerName, "glyph"],
           layerGlyph: layerGlyph,
-          selectionBounds: (
-            staticGlyphControllers[layerName] || glyphController
-          ).getSelectionBounds(
-            this.sceneController.selection,
-            this.fontController.getBackgroundImageBoundsFunc
-          ),
+          selectionBounds,
           editBehavior: behaviorFactory.getTransformBehavior("default"),
         };
       });
@@ -853,6 +1116,7 @@ export default class TransformationPanel extends Panel {
         editBehavior,
         selectionBounds,
         layerGlyph,
+        layerName,
       } of layerInfo) {
         const pinPoint = getPinPoint(
           selectionBounds,
@@ -865,6 +1129,7 @@ export default class TransformationPanel extends Panel {
           .transform(transformationForLayer(selectionBounds))
           .translate(-pinPoint.x, -pinPoint.y);
 
+        // Transform regular points, components, anchors, background images
         const editChange =
           editBehavior.makeChangeForTransformation(pinnedTransformation);
 
@@ -873,6 +1138,50 @@ export default class TransformationPanel extends Panel {
         rollbackChanges.push(
           consolidateChanges(editBehavior.rollbackChange, changePath)
         );
+
+        // Transform skeleton points
+        if (hasSkeletonPoints) {
+          const layer = glyph.layers[layerName];
+          const skeletonData = getSkeletonData(layer);
+          if (skeletonData?.contours) {
+            const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+            // Collect affected contour indices
+            const affectedContours = new Set();
+            for (const selKey of skeletonPointSelection) {
+              const [contourIdx] = selKey.split("/").map(Number);
+              affectedContours.add(contourIdx);
+            }
+
+            // Transform ALL points (on-curve and off-curve) of affected contours
+            for (const contourIdx of affectedContours) {
+              const contour = newSkeletonData.contours[contourIdx];
+              if (contour?.points) {
+                for (const point of contour.points) {
+                  const transformed = pinnedTransformation.transformPointObject(point);
+                  point.x = Math.round(transformed.x);
+                  point.y = Math.round(transformed.y);
+                }
+              }
+            }
+
+            // Regenerate contours
+            const staticGlyph = layer.glyph;
+            const pathChange = recordChanges(staticGlyph, (sg) => {
+              regenerateSkeletonContours(sg, newSkeletonData);
+            });
+
+            // Record custom data change
+            const customDataChange = recordChanges(layer, (l) => {
+              setSkeletonData(l, newSkeletonData);
+            });
+
+            editChanges.push(consolidateChanges(pathChange.change, changePath));
+            editChanges.push(consolidateChanges(customDataChange.change, ["layers", layerName]));
+            rollbackChanges.push(consolidateChanges(pathChange.rollbackChange, changePath));
+            rollbackChanges.push(consolidateChanges(customDataChange.rollbackChange, ["layers", layerName]));
+          }
+        }
       }
 
       let changes = ChangeCollector.fromChanges(
@@ -897,14 +1206,15 @@ export default class TransformationPanel extends Panel {
     this.infoForm.setValue("originYButton", null);
   }
 
-  _splitSelection(layerGlyphController, selection) {
+  _splitSelection(layerGlyphController, selection, pointIndicesOverride = null) {
     let {
-      point: pointIndices,
+      point: parsedPointIndices,
       component: componentIndices,
       anchor: anchorIndices,
       backgroundImage: backgroundImageIndices,
     } = parseSelection(selection);
-    pointIndices = pointIndices || [];
+    const pointIndices =
+      pointIndicesOverride !== null ? pointIndicesOverride : parsedPointIndices || [];
 
     const points = [];
     const contours = [];
@@ -925,6 +1235,13 @@ export default class TransformationPanel extends Panel {
 
     let contourIndex = 0;
     for (const pointIndex of pointIndices) {
+      const pointType = path.pointTypes[pointIndex] & VarPackedPath.POINT_TYPE_MASK;
+      const isOnCurve = pointType === VarPackedPath.ON_CURVE;
+      if (!isOnCurve) {
+        points.push(pointIndex);
+        continue;
+      }
+
       while (path.contourInfo[contourIndex].endPoint < pointIndex) {
         contourIndex++;
       }
@@ -960,8 +1277,40 @@ export default class TransformationPanel extends Panel {
   }
 
   _collectMovableObjects(moveDescriptor, controller) {
+    const parsedSelection = parseSelection(this.sceneController.selection);
+    const selectedPointIndices = parsedSelection.point || [];
+    const sceneModel = this.sceneController.sceneModel;
+    const positionedGlyph = sceneModel.getSelectedPositionedGlyph();
+
+    const regularPointIndices = [];
+    const generatedHandleSelection = [];
+
+    for (const pointIndex of selectedPointIndices) {
+      const handleInfo = positionedGlyph
+        ? sceneModel._getEditableHandleForGeneratedPoint(positionedGlyph, pointIndex)
+        : null;
+      if (handleInfo) {
+        generatedHandleSelection.push({ pointIndex, ...handleInfo });
+        continue;
+      }
+
+      const ribInfo = positionedGlyph
+        ? sceneModel._getEditableRibPointForGeneratedPoint(positionedGlyph, pointIndex, true)
+        : null;
+      if (ribInfo) {
+        // Rib points are intentionally excluded from align/distribute operations.
+        continue;
+      }
+
+      regularPointIndices.push(pointIndex);
+    }
+
     const { points, contours, components, anchors, backgroundImages } =
-      this._splitSelection(controller, this.sceneController.selection);
+      this._splitSelection(
+        controller,
+        this.sceneController.selection,
+        regularPointIndices
+      );
 
     const movableObjects = [];
     for (const pointIndex of points) {
@@ -985,6 +1334,45 @@ export default class TransformationPanel extends Panel {
     for (const backgroundImageIndex of backgroundImages) {
       const individualSelection = new Set([`backgroundImage/${backgroundImageIndex}`]);
       movableObjects.push(new MovableObject(individualSelection));
+    }
+
+    const skeletonPoints = parsedSelection.skeletonPoint;
+    const editLayerName =
+      this.sceneController.sceneSettings?.editLayerName ||
+      positionedGlyph?.glyph?.layerName;
+    const skeletonLayer =
+      editLayerName && positionedGlyph?.varGlyph?.glyph?.layers
+        ? positionedGlyph.varGlyph.glyph.layers[editLayerName]
+        : null;
+    const skeletonData = getSkeletonData(skeletonLayer);
+
+    if (skeletonData?.contours && skeletonPoints?.size) {
+      for (const selKey of skeletonPoints) {
+        const [contourIdx, pointIdx] = selKey.split("/").map(Number);
+        const contour = skeletonData.contours[contourIdx];
+        if (!contour) continue;
+        const point = contour.points[pointIdx];
+        if (!point) continue;
+        movableObjects.push(
+          new SkeletonMovableObject(contourIdx, pointIdx, { x: point.x, y: point.y })
+        );
+      }
+    }
+
+    if (generatedHandleSelection.length) {
+      for (const handleSel of generatedHandleSelection) {
+        const generatedPoint = positionedGlyph?.glyph?.path?.getPoint(handleSel.pointIndex);
+        if (!generatedPoint) continue;
+        movableObjects.push(
+          new SkeletonRibHandleMovableObject(
+            handleSel.skeletonContourIndex,
+            handleSel.skeletonPointIndex,
+            handleSel.side,
+            handleSel.handleType,
+            { x: generatedPoint.x, y: generatedPoint.y }
+          )
+        );
+      }
     }
 
     if (moveDescriptor.compareObjects) {
@@ -1018,9 +1406,11 @@ export default class TransformationPanel extends Panel {
 
       const editChanges = [];
       const rollbackChanges = [];
+
       for (const [layerName, layerGlyph] of Object.entries(editLayerGlyphs)) {
         const changePath = ["layers", layerName, "glyph"];
         const controller = staticGlyphControllers[layerName] || glyphController;
+        const layer = glyph.layers[layerName];
 
         const boundingBoxes = movableObjects.map((obj) =>
           obj.computeBounds(
@@ -1032,15 +1422,86 @@ export default class TransformationPanel extends Panel {
           boundingBoxes,
           this.transformParameters.customDistributionSpacing
         );
+
+        // Separate skeleton-related and regular objects
+        const skeletonPointMoves = [];
+        const skeletonRibHandleMoves = [];
+        const regularMoves = [];
         for (const [delta, movableObject] of zip(deltas, movableObjects)) {
-          const [editChange, rollbackChange] = movableObject.makeChangesForDelta(
+          if (movableObject instanceof SkeletonMovableObject) {
+            skeletonPointMoves.push({ delta, obj: movableObject });
+          } else if (movableObject instanceof SkeletonRibHandleMovableObject) {
+            skeletonRibHandleMoves.push({ delta, obj: movableObject });
+          } else {
+            regularMoves.push({ delta, obj: movableObject });
+          }
+        }
+
+        // Process regular objects normally
+        for (const { delta, obj } of regularMoves) {
+          const [editChange, rollbackChange] = obj.makeChangesForDelta(
             delta,
             layerGlyph,
-            this.sceneController
+            this.sceneController,
+            layerName
           );
+          if (!editChange || Object.keys(editChange).length === 0) {
+            continue;
+          }
           applyChange(layerGlyph, editChange);
-          editChanges.push(consolidateChanges(editChange, changePath));
-          rollbackChanges.push(consolidateChanges(rollbackChange, changePath));
+          editChanges.push(consolidateChanges(editChange, ["layers", layerName, "glyph"]));
+          rollbackChanges.push(consolidateChanges(rollbackChange, ["layers", layerName, "glyph"]));
+        }
+
+        // Process all skeleton-related objects in one batch (single regeneration)
+        if (
+          skeletonPointMoves.length > 0 ||
+          skeletonRibHandleMoves.length > 0
+        ) {
+          const skeletonData = getSkeletonData(layer);
+          if (skeletonData) {
+            // Deep clone skeleton data once
+            const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+            // Apply skeleton point deltas
+            for (const { delta, obj } of skeletonPointMoves) {
+              const contour = newSkeletonData.contours?.[obj.contourIdx];
+              if (!contour) continue;
+              const executor = createPointBehaviorExecutor({
+                points: contour.points,
+                isClosed: contour.isClosed,
+                selectedIndices: [obj.pointIdx],
+                behaviorName: "default",
+              });
+              const changes = executor.applyDelta(delta);
+              for (const { pointIndex, x, y } of changes) {
+                contour.points[pointIndex].x = x;
+                contour.points[pointIndex].y = y;
+              }
+            }
+
+            // Apply editable rib-handle deltas
+            for (const { delta, obj } of skeletonRibHandleMoves) {
+              applySkeletonRibHandleDelta(newSkeletonData, obj, delta);
+            }
+
+            // Regenerate contours ONCE for all skeleton changes
+            const staticGlyph = layer.glyph;
+            const pathChange = recordChanges(staticGlyph, (sg) => {
+              regenerateSkeletonContours(sg, newSkeletonData);
+            });
+
+            // Record custom data change
+            const customDataChange = recordChanges(layer, (l) => {
+              setSkeletonData(l, newSkeletonData);
+            });
+
+            // Add combined skeleton changes
+            editChanges.push(consolidateChanges(pathChange.change, ["layers", layerName, "glyph"]));
+            editChanges.push(consolidateChanges(customDataChange.change, ["layers", layerName]));
+            rollbackChanges.push(consolidateChanges(pathChange.rollbackChange, ["layers", layerName, "glyph"]));
+            rollbackChanges.push(consolidateChanges(customDataChange.rollbackChange, ["layers", layerName]));
+          }
         }
       }
 
@@ -1114,6 +1575,222 @@ class MovableObject {
     const editChange = editBehavior.makeChangeForDelta(delta);
     return [editChange, editBehavior.rollbackChange];
   }
+}
+
+class SkeletonMovableObject {
+  constructor(contourIdx, pointIdx, point) {
+    this.contourIdx = contourIdx;
+    this.pointIdx = pointIdx;
+    this.point = point; // {x, y}
+  }
+
+  computeBounds(staticGlyphController, getBackgroundImageBoundsFunc) {
+    // Return point position as bounds (point-sized bounding box)
+    return {
+      xMin: this.point.x,
+      yMin: this.point.y,
+      xMax: this.point.x,
+      yMax: this.point.y,
+    };
+  }
+
+  makeChangesForDelta(delta, layer, sceneController, layerName) {
+    // layer is the full layer object with glyph and customData
+    const skeletonData = getSkeletonData(layer);
+    if (!skeletonData) {
+      return [{}, {}];
+    }
+
+    const contour = skeletonData.contours?.[this.contourIdx];
+    if (!contour) {
+      return [{}, {}];
+    }
+
+    const point = contour.points?.[this.pointIdx];
+    if (!point) {
+      return [{}, {}];
+    }
+
+    // Deep clone skeleton data to modify
+    const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+
+    const executor = createPointBehaviorExecutor({
+      points: newSkeletonData.contours[this.contourIdx].points,
+      isClosed: newSkeletonData.contours[this.contourIdx].isClosed,
+      selectedIndices: [this.pointIdx],
+      behaviorName: "default",
+    });
+    const changes = executor.applyDelta(delta);
+
+    // Apply changes to the skeleton data
+    const skelContour = newSkeletonData.contours[this.contourIdx];
+    for (const { pointIndex, x, y } of changes) {
+      skelContour.points[pointIndex].x = x;
+      skelContour.points[pointIndex].y = y;
+    }
+
+    // Record path changes on staticGlyph
+    const staticGlyph = layer.glyph;
+    const pathChange = recordChanges(staticGlyph, (sg) => {
+      regenerateSkeletonContours(sg, newSkeletonData);
+    });
+
+    // Record custom data change on layer
+    const customDataChange = recordChanges(layer, (l) => {
+      setSkeletonData(l, newSkeletonData);
+    });
+
+    // Combine changes with proper prefixes
+    const editChange = consolidateChanges([
+      consolidateChanges(pathChange.change, ["glyph"]),
+      customDataChange.change,
+    ]);
+    const rollbackChange = consolidateChanges([
+      consolidateChanges(pathChange.rollbackChange, ["glyph"]),
+      customDataChange.rollbackChange,
+    ]);
+
+    return [editChange, rollbackChange];
+  }
+}
+
+class SkeletonRibHandleMovableObject {
+  constructor(contourIdx, pointIdx, side, handleType, point) {
+    this.contourIdx = contourIdx;
+    this.pointIdx = pointIdx;
+    this.side = side;
+    this.handleType = handleType;
+    this.point = point;
+  }
+
+  computeBounds(staticGlyphController, getBackgroundImageBoundsFunc) {
+    return {
+      xMin: this.point.x,
+      yMin: this.point.y,
+      xMax: this.point.x,
+      yMax: this.point.y,
+    };
+  }
+}
+
+function applySkeletonRibHandleDelta(newSkeletonData, handleObject, delta) {
+  const contour = newSkeletonData?.contours?.[handleObject.contourIdx];
+  const point = contour?.points?.[handleObject.pointIdx];
+  if (!contour || !point || point.type) {
+    return;
+  }
+
+  const skeletonHandleDir = getSkeletonHandleDirectionForPoint(
+    contour,
+    handleObject.pointIdx,
+    handleObject.handleType
+  );
+  if (!skeletonHandleDir) {
+    return;
+  }
+
+  const behavior = createEditableHandleBehavior(
+    newSkeletonData,
+    {
+      skeletonContourIndex: handleObject.contourIdx,
+      skeletonPointIndex: handleObject.pointIdx,
+      side: handleObject.side,
+      handleType: handleObject.handleType,
+    },
+    skeletonHandleDir
+  );
+  const change = behavior.applyDelta(delta);
+  const { offset1DKey, offsetXKey, offsetYKey } = getEditableHandleOffsetKeys(
+    handleObject.side,
+    handleObject.handleType
+  );
+
+  const detachedKey =
+    handleObject.side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+  const isDetached = !!point[detachedKey];
+
+  if (isDetached) {
+    const projectedDelta = delta.x * skeletonHandleDir.x + delta.y * skeletonHandleDir.y;
+    point[offsetXKey] =
+      (point[offsetXKey] || 0) + Math.round(skeletonHandleDir.x * projectedDelta);
+    point[offsetYKey] =
+      (point[offsetYKey] || 0) + Math.round(skeletonHandleDir.y * projectedDelta);
+  } else {
+    delete point[offsetXKey];
+    delete point[offsetYKey];
+    point[offset1DKey] = change.offset;
+  }
+}
+
+function getEditableHandleOffsetKeys(side, handleType) {
+  const offset1DKey =
+    side === "left"
+      ? handleType === "in"
+        ? "leftHandleInOffset"
+        : "leftHandleOutOffset"
+      : handleType === "in"
+        ? "rightHandleInOffset"
+        : "rightHandleOutOffset";
+  const offsetXKey =
+    side === "left"
+      ? handleType === "in"
+        ? "leftHandleInOffsetX"
+        : "leftHandleOutOffsetX"
+      : handleType === "in"
+        ? "rightHandleInOffsetX"
+        : "rightHandleOutOffsetX";
+  const offsetYKey =
+    side === "left"
+      ? handleType === "in"
+        ? "leftHandleInOffsetY"
+        : "leftHandleOutOffsetY"
+      : handleType === "in"
+        ? "rightHandleInOffsetY"
+        : "rightHandleOutOffsetY";
+  return { offset1DKey, offsetXKey, offsetYKey };
+}
+
+function getSkeletonHandleDirectionForPoint(contour, pointIndex, handleType) {
+  const points = contour.points;
+  const numPoints = points.length;
+  const isClosed = contour.isClosed;
+
+  const skeletonPoint = points[pointIndex];
+  if (!skeletonPoint || skeletonPoint.type) return null;
+
+  let controlPoint = null;
+
+  if (handleType === "out") {
+    const nextIdx = (pointIndex + 1) % numPoints;
+    if (isClosed || pointIndex < numPoints - 1) {
+      const nextPt = points[nextIdx];
+      if (nextPt?.type === "cubic") {
+        controlPoint = nextPt;
+      }
+    }
+  } else {
+    const prevIdx = (pointIndex - 1 + numPoints) % numPoints;
+    if (isClosed || pointIndex > 0) {
+      const prevPt = points[prevIdx];
+      if (prevPt?.type === "cubic") {
+        controlPoint = prevPt;
+      }
+    }
+  }
+
+  if (!controlPoint) {
+    return null;
+  }
+
+  const dir = {
+    x: controlPoint.x - skeletonPoint.x,
+    y: controlPoint.y - skeletonPoint.y,
+  };
+  const length = Math.hypot(dir.x, dir.y);
+
+  if (length < 0.001) return null;
+
+  return { x: dir.x / length, y: dir.y / length };
 }
 
 // Define moveDescriptor objects

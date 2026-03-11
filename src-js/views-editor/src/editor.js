@@ -2,12 +2,13 @@ import {
   doPerformAction,
   getActionIdentifierFromKeyEvent,
   registerAction,
+  registerActionInfo,
   registerActionCallbacks,
 } from "@fontra/core/actions.js";
 import { Backend } from "@fontra/core/backend-api.js";
 import { CanvasController } from "@fontra/core/canvas-controller.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
-import { applyChange } from "@fontra/core/changes.js";
+import { ChangeCollector, applyChange } from "@fontra/core/changes.js";
 import { FontController } from "@fontra/core/font-controller.js";
 import { makeFontraMenuBar } from "@fontra/core/fontra-menus.js";
 import { staticGlyphToGLIF } from "@fontra/core/glyph-glif.js";
@@ -17,6 +18,7 @@ import { loaderSpinner } from "@fontra/core/loader-spinner.js";
 import { ObservableController } from "@fontra/core/observable-object.js";
 import {
   deleteSelectedPoints,
+  deleteSkeletonPoints,
   filterPathByPointIndices,
 } from "@fontra/core/path-functions.js";
 import {
@@ -65,6 +67,7 @@ import { MenuItemDivider, showMenu } from "@fontra/web-components/menu-panel.js"
 import { dialog, dialogSetup, message } from "@fontra/web-components/modal-dialog.js";
 import { parsePluginBasePath } from "@fontra/web-components/plugin-manager.js";
 import { CJKDesignFrame } from "./cjk-design-frame.js";
+import "./visualization-layer-letterspacer.js";
 import { HandTool } from "./edit-tools-hand.js";
 import { KnifeTool } from "./edit-tools-knife.js";
 import { MetricsTool } from "./edit-tools-metrics.js";
@@ -72,12 +75,21 @@ import { PenTool } from "./edit-tools-pen.js";
 import { PointerTools } from "./edit-tools-pointer.js";
 import { PowerRulerTool } from "./edit-tools-power-ruler.js";
 import { ShapeTool } from "./edit-tools-shape.js";
+import { SkeletonPenTool } from "./edit-tools-skeleton.js";
+import {
+  generateContoursFromSkeleton,
+  getSkeletonData,
+  regenerateSkeletonContours,
+  resolveGeneratedContourIndices,
+  setSkeletonData,
+} from "@fontra/core/skeleton-contour-generator.js";
 import { SceneController } from "./scene-controller.js";
 import { MIN_SIDEBAR_WIDTH, Sidebar } from "./sidebar.js";
 import {
   allGlyphsCleanVisualizationLayerDefinition,
   visualizationLayerDefinitions,
 } from "./visualization-layer-definitions.js";
+import "./skeleton-visualization-layers.js"; // Register skeleton visualization layers
 import { VisualizationContext, VisualizationLayers } from "./visualization-layers.js";
 
 import { applicationSettingsController } from "@fontra/core/application-settings.js";
@@ -97,12 +109,143 @@ import RelatedGlyphsPanel from "./panel-related-glyphs.js";
 import SelectionInfoPanel from "./panel-selection-info.js";
 import TextEntryPanel from "./panel-text-entry.js";
 import TransformationPanel from "./panel-transformation.js";
+import SkeletonParametersPanel from "./panel-skeleton-parameters.js";
 import Panel from "./panel.js";
 
 const MIN_CANVAS_SPACE = 200;
 
 const PASTE_BEHAVIOR_REPLACE = "replace";
 const PASTE_BEHAVIOR_ADD = "add";
+
+function makeContourSignatureKeyFromPackedContour(contour) {
+  if (!contour) {
+    return "";
+  }
+  const pointTypes = Array.from(contour.pointTypes || []).map(
+    (pointType) => pointType & VarPackedPath.POINT_TYPE_MASK
+  );
+  return `${contour.isClosed ? 1 : 0}|${pointTypes.length}|${pointTypes.join(",")}`;
+}
+
+function collectContourSignatureInfo(path) {
+  const indicesByKey = new Map();
+  const keyByContour = [];
+  const occurrenceByContour = [];
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    const key = makeContourSignatureKeyFromPackedContour(path.getContour(contourIndex));
+    const indices = indicesByKey.get(key) || [];
+    occurrenceByContour[contourIndex] = indices.length;
+    indices.push(contourIndex);
+    indicesByKey.set(key, indices);
+    keyByContour[contourIndex] = key;
+  }
+  return { indicesByKey, keyByContour, occurrenceByContour };
+}
+
+function remapPointSelectionForTargetPath(pointSelection, referencePath, targetPath) {
+  if (
+    !pointSelection?.length ||
+    !referencePath ||
+    !targetPath ||
+    referencePath === targetPath
+  ) {
+    return pointSelection;
+  }
+  const referenceInfo = collectContourSignatureInfo(referencePath);
+  const targetInfo = collectContourSignatureInfo(targetPath);
+  const mappedSelection = [];
+  for (const pointIndex of pointSelection) {
+    if (pointIndex < 0 || pointIndex >= referencePath.numPoints) {
+      continue;
+    }
+    const [refContourIndex, refContourPointIndex] =
+      referencePath.getContourAndPointIndex(pointIndex);
+    const key = referenceInfo.keyByContour[refContourIndex];
+    const occurrence = referenceInfo.occurrenceByContour[refContourIndex];
+    const targetContourCandidates = targetInfo.indicesByKey.get(key);
+    if (!targetContourCandidates || occurrence >= targetContourCandidates.length) {
+      continue;
+    }
+    const targetContourIndex = targetContourCandidates[occurrence];
+    if (refContourPointIndex >= targetPath.getNumPointsOfContour(targetContourIndex)) {
+      continue;
+    }
+    mappedSelection.push(
+      targetPath.getAbsolutePointIndex(targetContourIndex, refContourPointIndex)
+    );
+  }
+  mappedSelection.sort((a, b) => a - b);
+  return [...new Set(mappedSelection)];
+}
+
+function filterPointSelectionByExcludedContours(
+  path,
+  pointSelection,
+  excludedContourIndices
+) {
+  if (!pointSelection?.length || !excludedContourIndices?.size || !path) {
+    return pointSelection;
+  }
+  const filteredSelection = pointSelection.filter((pointIndex) => {
+    if (pointIndex < 0 || pointIndex >= path.numPoints) {
+      return false;
+    }
+    const contourIndex = path.getContourIndex(pointIndex);
+    return !excludedContourIndices.has(contourIndex);
+  });
+  filteredSelection.sort((a, b) => a - b);
+  return [...new Set(filteredSelection)];
+}
+
+function sanitizeContourIndices(indices) {
+  if (!Array.isArray(indices)) {
+    return [];
+  }
+  const sanitized = indices.filter((index) => Number.isInteger(index) && index >= 0);
+  sanitized.sort((a, b) => a - b);
+  return [...new Set(sanitized)];
+}
+
+function shiftContourIndicesIntoPathRange(indices, numContours) {
+  if (!indices.length || !Number.isInteger(numContours) || numContours <= 0) {
+    return [];
+  }
+  const maxIndex = indices[indices.length - 1];
+  const shift = Math.max(0, maxIndex - (numContours - 1));
+  return sanitizeContourIndices(
+    indices
+      .map((index) => index - shift)
+      .filter((index) => index >= 0 && index < numContours)
+  );
+}
+
+function resolveGeneratedContourIndicesForDeletion(path, skeletonData) {
+  if (!path || !skeletonData) {
+    return [];
+  }
+  const generatedContours = generateContoursFromSkeleton(skeletonData);
+  const expectedCount = generatedContours.length;
+  if (!expectedCount) {
+    return [];
+  }
+  const resolvedIndices = resolveGeneratedContourIndices(path, skeletonData);
+  if (resolvedIndices.length === expectedCount) {
+    return resolvedIndices;
+  }
+  const storedIndices = sanitizeContourIndices(skeletonData.generatedContourIndices);
+  const inRangeStoredIndices = storedIndices.filter((index) => index < path.numContours);
+  if (inRangeStoredIndices.length === expectedCount) {
+    return inRangeStoredIndices;
+  }
+  const shiftedStoredIndices = shiftContourIndicesIntoPathRange(
+    storedIndices,
+    path.numContours
+  );
+  if (shiftedStoredIndices.length === expectedCount) {
+    return shiftedStoredIndices;
+  }
+  return inRangeStoredIndices;
+}
 
 export class EditorController extends ViewController {
   constructor(font) {
@@ -179,7 +322,7 @@ export class EditorController extends ViewController {
       ],
       (event) => {
         if (event.senderInfo?.senderID !== this && !event.senderInfo?.adjustViewBox) {
-          this.updateWindowLocation(); // scheduled with delay
+          this.updateWindowLocation?.(); // scheduled with delay
         }
       }
     );
@@ -605,6 +748,58 @@ export class EditorController extends ViewController {
       }
     }
 
+    {
+      const topic = "0055-action-topics.realtime-hotkeys";
+      registerActionInfo(
+        "action.realtime.measure",
+        {
+          topic,
+          titleKey: "shortcuts.realtime.measure",
+          defaultShortCuts: [{ baseKey: "q" }],
+        }
+      );
+      registerActionInfo(
+        "action.realtime.measure-direct",
+        {
+          topic,
+          titleKey: "shortcuts.realtime.measure-direct",
+          defaultShortCuts: [{ baseKey: "q", altKey: true }],
+        }
+      );
+      registerActionInfo(
+        "action.realtime.equalize",
+        {
+          topic,
+          titleKey: "shortcuts.realtime.equalize",
+          defaultShortCuts: [{ baseKey: "x" }],
+        }
+      );
+      registerActionInfo(
+        "action.realtime.rib-tangent",
+        {
+          topic,
+          titleKey: "shortcuts.realtime.rib-tangent",
+          defaultShortCuts: [{ baseKey: "z" }],
+        }
+      );
+        registerActionInfo(
+          "action.realtime.fixed-rib",
+          {
+            topic,
+            titleKey: "shortcuts.realtime.fixed-rib",
+            defaultShortCuts: [{ baseKey: "d" }],
+          }
+        );
+        registerActionInfo(
+          "action.realtime.fixed-rib-compress",
+          {
+            topic,
+            titleKey: "shortcuts.realtime.fixed-rib-compress",
+            defaultShortCuts: [{ baseKey: "s" }],
+          }
+        );
+      }
+
     registerAction(
       "action.canvas.clean-view-and-hand-tool",
       {
@@ -922,6 +1117,7 @@ export class EditorController extends ViewController {
     const editToolClasses = [
       PointerTools,
       PenTool,
+      SkeletonPenTool,
       KnifeTool,
       ShapeTool,
       MetricsTool,
@@ -1086,6 +1282,7 @@ export class EditorController extends ViewController {
     this.addSidebarPanel(new ReferenceFontPanel(this), "left");
     this.addSidebarPanel(new SelectionInfoPanel(this), "right");
     this.addSidebarPanel(new TransformationPanel(this), "right");
+    this.addSidebarPanel(new SkeletonParametersPanel(this), "right");
     this.addSidebarPanel(new GlyphNotePanel(this), "right");
     this.addSidebarPanel(new RelatedGlyphsPanel(this), "right");
     this.addSidebarPanel(new CharactersGlyphsPanel(this), "right");
@@ -1525,14 +1722,15 @@ export class EditorController extends ViewController {
       undefined,
       true
     );
-
     if (copyResult) {
-      const { layerGlyphs, flattenedPath, backgroundImageData } = copyResult;
+      const { layerGlyphs, flattenedPath, backgroundImageData, skeletonDataByLayer } =
+        copyResult;
       await this._writeLayersToClipboard(
         null,
         layerGlyphs,
         flattenedPath,
-        backgroundImageData
+        backgroundImageData,
+        skeletonDataByLayer
       );
     }
   }
@@ -1547,14 +1745,15 @@ export class EditorController extends ViewController {
     }
 
     if (this.sceneSettings.selectedGlyph.isEditing) {
-      const { layerGlyphs, flattenedPath, backgroundImageData } =
+      const { layerGlyphs, flattenedPath, backgroundImageData, skeletonDataByLayer } =
         this._prepareCopyOrCutLayers(undefined, false);
 
       await this._writeLayersToClipboard(
         null,
         layerGlyphs,
         flattenedPath,
-        backgroundImageData
+        backgroundImageData,
+        skeletonDataByLayer
       );
     } else {
       const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
@@ -1575,7 +1774,8 @@ export class EditorController extends ViewController {
     varGlyph,
     layerGlyphs,
     flattenedPath,
-    backgroundImageData
+    backgroundImageData,
+    skeletonDataByLayer
   ) {
     if (!layerGlyphs?.length) {
       // nothing to do
@@ -1606,6 +1806,9 @@ export class EditorController extends ViewController {
       const resolvedImageData = await backgroundImageData;
       if (resolvedImageData && !isObjectEmpty(resolvedImageData)) {
         jsonObject.data.backgroundImageData = resolvedImageData;
+      }
+      if (skeletonDataByLayer && !isObjectEmpty(skeletonDataByLayer)) {
+        jsonObject.data.skeletonDataByLayer = skeletonDataByLayer;
       }
       return JSON.stringify(jsonObject);
     };
@@ -1681,14 +1884,46 @@ export class EditorController extends ViewController {
       }
     }
 
+    // Check if skeleton points are selected
+    const {
+      skeletonPoint: skeletonPointSelection,
+      skeletonSegment: skeletonSegmentSelection,
+    } = parseSelection(this.sceneController.selection);
+    const hasSkeletonSelection =
+      skeletonPointSelection?.size > 0 || skeletonSegmentSelection?.size > 0;
+
+    // Collect skeleton contour indices from selection
+    const selectedSkeletonContours = new Set();
+    if (hasSkeletonSelection) {
+      for (const selKey of skeletonPointSelection || []) {
+        const [contourIdx] = selKey.split("/").map(Number);
+        selectedSkeletonContours.add(contourIdx);
+      }
+      for (const selKey of skeletonSegmentSelection || []) {
+        const [contourIdx] = selKey.split("/").map(Number);
+        selectedSkeletonContours.add(contourIdx);
+      }
+    }
     const layerGlyphs = [];
     let flattenedPath;
     const backgroundImageData = {};
+    const skeletonDataByLayer = {};
 
-    for (const [layerName, layerGlyph] of Object.entries(
+    for (const [layerName, layer] of Object.entries(
       this.sceneController.getEditingLayerFromGlyphLayers(varGlyph.layers)
     )) {
-      const copyResult = this._prepareCopyOrCut(layerGlyph, doCut, !flattenedPath);
+      const layerGlyph = layer.glyph || layer;
+      const fullLayer = varGlyph.layers[layerName];
+      const layerSkeletonData = hasSkeletonSelection ? getSkeletonData(fullLayer) : null;
+      const generatedContourIndices = layerSkeletonData
+        ? resolveGeneratedContourIndices(layerGlyph.path, layerSkeletonData)
+        : [];
+      const copyResult = this._prepareCopyOrCut(layerGlyph, doCut, !flattenedPath, {
+        excludeGeneratedContourIndices:
+          hasSkeletonSelection && generatedContourIndices.length
+            ? new Set(generatedContourIndices)
+            : null,
+      });
       if (!copyResult.instance) {
         return;
       }
@@ -1707,6 +1942,26 @@ export class EditorController extends ViewController {
           backgroundImageData[imageIdentifier] = bgImage.src;
         }
       }
+
+      // Collect skeleton data if skeleton points are selected
+      if (hasSkeletonSelection) {
+        if (layerSkeletonData?.contours?.length) {
+          // Copy only selected contours
+          const copiedContours = [];
+          for (const contourIdx of selectedSkeletonContours) {
+            if (contourIdx < layerSkeletonData.contours.length) {
+              copiedContours.push(
+                JSON.parse(JSON.stringify(layerSkeletonData.contours[contourIdx]))
+              );
+            }
+          }
+          if (copiedContours.length) {
+            skeletonDataByLayer[layerName] = {
+              contours: copiedContours,
+            };
+          }
+        }
+      }
     }
     if (!layerGlyphs.length && !doCut) {
       const { instance, flattenedPath: instancePath } = this._prepareCopyOrCut(
@@ -1720,10 +1975,20 @@ export class EditorController extends ViewController {
       }
       layerGlyphs.push({ glyph: instance });
     }
-    return { layerGlyphs, flattenedPath, backgroundImageData };
+    return {
+      layerGlyphs,
+      flattenedPath,
+      backgroundImageData,
+      skeletonDataByLayer: Object.keys(skeletonDataByLayer).length ? skeletonDataByLayer : undefined,
+    };
   }
 
-  _prepareCopyOrCut(editInstance, doCut = false, wantFlattenedPath = false) {
+  _prepareCopyOrCut(
+    editInstance,
+    doCut = false,
+    wantFlattenedPath = false,
+    { excludeGeneratedContourIndices = null } = {}
+  ) {
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     const glyphController = positionedGlyph?.glyph;
     if (!glyphController) {
@@ -1768,8 +2033,16 @@ export class EditorController extends ViewController {
     let guidelines;
     let backgroundImage;
     const flattenedPathList = wantFlattenedPath ? [] : undefined;
-    if (pointIndices) {
-      path = filterPathByPointIndices(editInstance.path, pointIndices, doCut);
+    const filteredPointIndices =
+      pointIndices && excludeGeneratedContourIndices?.size
+        ? pointIndices.filter((pointIndex) => {
+            const contourIndex = editInstance.path.getContourIndex(pointIndex);
+            return !excludeGeneratedContourIndices.has(contourIndex);
+          })
+        : pointIndices;
+
+    if (filteredPointIndices?.length) {
+      path = filterPathByPointIndices(editInstance.path, filteredPointIndices, doCut);
       flattenedPathList?.push(path);
     }
     if (componentIndices) {
@@ -1834,8 +2107,13 @@ export class EditorController extends ViewController {
       return;
     }
 
-    let { pasteVarGlyph, pasteLayerGlyphs, sourceLocations, backgroundImageData } =
-      await this._unpackClipboard();
+    let {
+      pasteVarGlyph,
+      pasteLayerGlyphs,
+      sourceLocations,
+      backgroundImageData,
+      skeletonDataByLayer,
+    } = await this._unpackClipboard();
     if (!pasteVarGlyph && !pasteLayerGlyphs?.length) {
       await this._pasteClipboardImage();
       return;
@@ -1934,13 +2212,12 @@ export class EditorController extends ViewController {
         pasteLayerGlyphs.map((layerInfo) => layerInfo.glyph),
         backgroundImageData
       );
-
       for (const i of range(pasteLayerGlyphs.length)) {
         pasteLayerGlyphs[i].glyph = adjustedGlyphs[i];
       }
       backgroundImageData = adjustedBackgroundImageData;
 
-      await this._pasteLayerGlyphs(pasteLayerGlyphs);
+      await this._pasteLayerGlyphs(pasteLayerGlyphs, skeletonDataByLayer);
     }
 
     await this.fontController.writeBackgroundImages(backgroundImageData);
@@ -1973,6 +2250,7 @@ export class EditorController extends ViewController {
     let pasteVarGlyph;
     let sourceLocations;
     let backgroundImageData;
+    let skeletonDataByLayer;
 
     if (jsonString) {
       try {
@@ -1986,16 +2264,19 @@ export class EditorController extends ViewController {
             };
           });
           backgroundImageData = clipboardObject.data.backgroundImageData;
+          skeletonDataByLayer = clipboardObject.data.skeletonDataByLayer;
         } else if (clipboardObject.type === "fontra-variable-glyph") {
           pasteVarGlyph = VariableGlyph.fromObject(clipboardObject.data.variableGlyph);
           sourceLocations = clipboardObject.data.sourceLocations;
           backgroundImageData = clipboardObject.data.backgroundImageData;
+          skeletonDataByLayer = clipboardObject.data.skeletonDataByLayer;
         } else if (clipboardObject.type === "fontra-glyph-array") {
           pasteVarGlyph = VariableGlyph.fromObject(
             clipboardObject.data.glyphs[0].variableGlyph
           );
           sourceLocations = clipboardObject.data.sourceLocations;
           backgroundImageData = clipboardObject.data.backgroundImageData;
+          skeletonDataByLayer = clipboardObject.data.skeletonDataByLayer;
         }
       } catch (error) {
         console.log("couldn't paste from JSON:", error.toString());
@@ -2006,7 +2287,13 @@ export class EditorController extends ViewController {
         pasteLayerGlyphs = [{ glyph }];
       }
     }
-    return { pasteVarGlyph, pasteLayerGlyphs, sourceLocations, backgroundImageData };
+    return {
+      pasteVarGlyph,
+      pasteLayerGlyphs,
+      sourceLocations,
+      backgroundImageData,
+      skeletonDataByLayer,
+    };
   }
 
   async _pasteClipboardImage() {
@@ -2076,7 +2363,7 @@ export class EditorController extends ViewController {
     );
   }
 
-  async _pasteLayerGlyphs(pasteLayerGlyphs) {
+  async _pasteLayerGlyphs(pasteLayerGlyphs, skeletonDataByLayer) {
     const defaultPasteGlyph = pasteLayerGlyphs[0].glyph;
     const pasteLayerGlyphsByLayerName = Object.fromEntries(
       pasteLayerGlyphs.map((layer) => [layer.layerName, layer.glyph])
@@ -2087,6 +2374,12 @@ export class EditorController extends ViewController {
         .filter((layer) => layer.location)
         .map((layer) => [locationToString(layer.location), layer.glyph])
     );
+
+    // Get default skeleton data (from first layer that has it)
+    let defaultSkeletonData = null;
+    if (skeletonDataByLayer) {
+      defaultSkeletonData = Object.values(skeletonDataByLayer)[0];
+    }
 
     const varGlyphController =
       await this.sceneModel.getSelectedVariableGlyphController();
@@ -2105,6 +2398,9 @@ export class EditorController extends ViewController {
           glyph.layers
         );
         const firstLayerGlyph = Object.values(editLayerGlyphs)[0];
+        const firstLayer = Object.values(
+          this.sceneController.getEditingLayerFromGlyphLayers(glyph.layers, true)
+        )[0];
 
         const selection = new Set();
         for (const pointIndex of range(defaultPasteGlyph.path.numPoints)) {
@@ -2136,6 +2432,25 @@ export class EditorController extends ViewController {
           selection.add(`guideline/${guidelineIndex}`);
         }
 
+        // Add skeleton point selection if we're pasting skeleton data
+        if (defaultSkeletonData?.contours?.length) {
+          // Get the first editing layer name and access skeleton data directly from glyph.layers
+          const firstEditLayerName = Object.keys(editLayerGlyphs)[0];
+          const existingSkeletonData = getSkeletonData(glyph.layers[firstEditLayerName]);
+          const startContourIndex = existingSkeletonData?.contours?.length || 0;
+
+          for (let ci = 0; ci < defaultSkeletonData.contours.length; ci++) {
+            const contour = defaultSkeletonData.contours[ci];
+            for (let pi = 0; pi < contour.points.length; pi++) {
+              if (!contour.points[pi].type) {
+                // on-curve point
+                const selKey = `skeletonPoint/${startContourIndex + ci}/${pi}`;
+                selection.add(selKey);
+              }
+            }
+          }
+        }
+
         for (const [layerName, layerGlyph] of Object.entries(editLayerGlyphs)) {
           const pasteGlyph =
             pasteLayerGlyphsByLayerName[layerName] ||
@@ -2153,6 +2468,40 @@ export class EditorController extends ViewController {
               selection.add("backgroundImage/0");
             }
           }
+
+          // Paste skeleton data
+          if (skeletonDataByLayer) {
+            const pasteSkeletonData =
+              skeletonDataByLayer[layerName] || defaultSkeletonData;
+            if (pasteSkeletonData?.contours?.length) {
+              const layer = glyph.layers[layerName];
+              if (layer) {
+                if (!layer.customData) {
+                  layer.customData = {};
+                }
+                const existingSkeleton = getSkeletonData(layer);
+                if (existingSkeleton?.contours?.length) {
+                  // Append to existing skeleton
+                  existingSkeleton.contours.push(
+                    ...pasteSkeletonData.contours.map((c) => JSON.parse(JSON.stringify(c)))
+                  );
+                  // Regenerate outline
+                  this._regenerateSkeletonOutline(layer, existingSkeleton, layerGlyph);
+                } else {
+                  // Create new skeleton
+                  const newSkeletonData = {
+                    contours: pasteSkeletonData.contours.map((c) =>
+                      JSON.parse(JSON.stringify(c))
+                    ),
+                    generatedContourIndices: [],
+                  };
+                  setSkeletonData(layer, newSkeletonData);
+                  // Generate outline
+                  this._regenerateSkeletonOutline(layer, newSkeletonData, layerGlyph);
+                }
+              }
+            }
+          }
         }
         this.sceneController.selection = selection;
         return "Paste";
@@ -2160,6 +2509,14 @@ export class EditorController extends ViewController {
       undefined,
       true
     );
+  }
+
+  _regenerateSkeletonOutline(layer, skeletonData, layerGlyph) {
+    // Regeneration mutates generatedContourIndices in the working skeleton object.
+    // Persist it back to layer customData so the first post-paste edit can replace
+    // old generated contours instead of appending duplicates.
+    regenerateSkeletonContours(layerGlyph, skeletonData);
+    setSkeletonData(layer, skeletonData);
   }
 
   getDeleteLabel() {
@@ -2222,52 +2579,240 @@ export class EditorController extends ViewController {
       anchor: anchorSelection,
       guideline: guidelineSelection,
       backgroundImage: backgroundImageSelection,
+      skeletonPoint: skeletonPointSelection,
+      skeletonSegment: skeletonSegmentSelection,
       //fontGuideline: fontGuidelineSelection,
     } = parseSelection(this.sceneController.selection);
-    // TODO: Font Guidelines
-    // if (fontGuidelineSelection) {
-    //   for (const guidelineIndex of reversed(fontGuidelineSelection)) {
-    //     XXX
-    //   }
-    // }
-    await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
-      for (const layerGlyph of Object.values(layerGlyphs)) {
-        if (event.altKey) {
-          // Behave like "cut", but don't put anything on the clipboard
-          this._prepareCopyOrCut(layerGlyph, true, false);
-        } else {
-          if (pointSelection) {
-            deleteSelectedPoints(layerGlyph.path, pointSelection);
-          }
-          if (componentSelection) {
-            for (const componentIndex of reversed(componentSelection)) {
-              layerGlyph.components.splice(componentIndex, 1);
+
+    const hasRegularSelection = pointSelection?.length || componentSelection?.length ||
+      anchorSelection?.length || guidelineSelection?.length || backgroundImageSelection;
+    const hasSkeletonSelection =
+      skeletonPointSelection?.size > 0 || skeletonSegmentSelection?.size > 0;
+
+    if (!hasRegularSelection && !hasSkeletonSelection) {
+      return;
+    }
+
+    // Single editGlyph call for both regular and skeleton deletion
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      // 1. Delete regular selection FIRST (while point indices are still valid)
+      if (hasRegularSelection) {
+        const regularChanges = recordChanges(glyph, (subject) => {
+          // Get layer glyphs through the proxy so modifications are recorded
+          const layerGlyphs = this.sceneController.getEditingLayerFromGlyphLayers(
+            subject.layers
+          );
+          const referenceLayerName =
+            this.sceneController.sceneSettings?.editLayerName || Object.keys(layerGlyphs)[0];
+          const referencePath =
+            (referenceLayerName && layerGlyphs[referenceLayerName]?.path) ||
+            Object.values(layerGlyphs)[0]?.path;
+          const referencePathSnapshot = referencePath?.copy?.() || referencePath;
+          for (const [layerName, layerGlyph] of Object.entries(layerGlyphs)) {
+            if (event.altKey) {
+              const layer = subject.layers[layerName];
+              const skeletonData = hasSkeletonSelection && layer ? getSkeletonData(layer) : null;
+              const generatedContourIndices = skeletonData
+                ? resolveGeneratedContourIndicesForDeletion(layerGlyph.path, skeletonData)
+                : [];
+              this._prepareCopyOrCut(layerGlyph, true, false, {
+                excludeGeneratedContourIndices:
+                  hasSkeletonSelection && generatedContourIndices.length
+                    ? new Set(generatedContourIndices)
+                    : null,
+              });
+            } else {
+              if (pointSelection) {
+                const mappedPointSelection =
+                  layerName === referenceLayerName
+                    ? pointSelection
+                    : remapPointSelectionForTargetPath(
+                        pointSelection,
+                        referencePathSnapshot,
+                        layerGlyph.path
+                      );
+                let effectivePointSelection = mappedPointSelection;
+                if (hasSkeletonSelection) {
+                  const layer = subject.layers[layerName];
+                  const skeletonData = layer ? getSkeletonData(layer) : null;
+                  const generatedContourIndices = skeletonData
+                    ? resolveGeneratedContourIndicesForDeletion(layerGlyph.path, skeletonData)
+                    : [];
+                  if (generatedContourIndices.length) {
+                    effectivePointSelection = filterPointSelectionByExcludedContours(
+                      layerGlyph.path,
+                      mappedPointSelection,
+                      new Set(generatedContourIndices)
+                    );
+                  }
+                }
+                deleteSelectedPoints(layerGlyph.path, effectivePointSelection);
+                const layer = subject.layers[layerName];
+                const skeletonData = layer ? getSkeletonData(layer) : null;
+                if (skeletonData?.contours?.length && !hasSkeletonSelection) {
+                  const workingSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+                  regenerateSkeletonContours(layerGlyph, workingSkeletonData);
+                  setSkeletonData(layer, workingSkeletonData);
+                }
+              }
+              if (componentSelection) {
+                for (const componentIndex of reversed(componentSelection)) {
+                  layerGlyph.components.splice(componentIndex, 1);
+                }
+              }
+              if (anchorSelection) {
+                for (const anchorIndex of reversed(anchorSelection)) {
+                  layerGlyph.anchors.splice(anchorIndex, 1);
+                }
+              }
+              if (guidelineSelection) {
+                for (const guidelineIndex of reversed(guidelineSelection)) {
+                  const guideline = layerGlyph.guidelines[guidelineIndex];
+                  if (guideline.locked) {
+                    continue;
+                  }
+                  layerGlyph.guidelines.splice(guidelineIndex, 1);
+                }
+              }
+              if (backgroundImageSelection) {
+                layerGlyph.backgroundImage = undefined;
+              }
             }
           }
-          if (anchorSelection) {
-            for (const anchorIndex of reversed(anchorSelection)) {
-              layerGlyph.anchors.splice(anchorIndex, 1);
+        });
+        if (regularChanges.hasChange) {
+          allChanges.push(regularChanges);
+        }
+      }
+
+      // 2. Delete skeleton points AFTER regular (skeleton regen shifts path indices)
+      if (hasSkeletonSelection) {
+        for (const editLayerName of this.sceneController.editingLayerNames || []) {
+          const layer = glyph.layers[editLayerName];
+          if (!layer) continue;
+          const storedSkeletonData = getSkeletonData(layer);
+          if (!storedSkeletonData) continue;
+
+          const resolvedGeneratedContourIndices = resolveGeneratedContourIndicesForDeletion(
+            layer.glyph?.path,
+            storedSkeletonData
+          );
+          let skeletonData = JSON.parse(JSON.stringify(storedSkeletonData));
+          skeletonData.generatedContourIndices = resolvedGeneratedContourIndices;
+          const effectiveSkeletonPointSelection = new Set(skeletonPointSelection || []);
+
+          // Support deleting full skeleton contours via selected skeleton segments.
+          if (skeletonSegmentSelection?.size) {
+            const contourIndices = new Set();
+            for (const selKey of skeletonSegmentSelection) {
+              const [contourIdx] = selKey.split("/").map(Number);
+              if (Number.isInteger(contourIdx)) {
+                contourIndices.add(contourIdx);
+              }
             }
-          }
-          if (guidelineSelection) {
-            for (const guidelineIndex of reversed(guidelineSelection)) {
-              const guideline = layerGlyph.guidelines[guidelineIndex];
-              if (guideline.locked) {
-                // don't delete locked guidelines
+            for (const contourIdx of contourIndices) {
+              const contour = skeletonData.contours?.[contourIdx];
+              if (!contour?.points?.length) {
                 continue;
               }
-              layerGlyph.guidelines.splice(guidelineIndex, 1);
+              for (let pointIdx = 0; pointIdx < contour.points.length; pointIdx++) {
+                if (!contour.points[pointIdx].type) {
+                  effectiveSkeletonPointSelection.add(`${contourIdx}/${pointIdx}`);
+                }
+              }
             }
           }
-          if (backgroundImageSelection) {
-            // TODO: don't delete if bg images are locked
-            // (even though we shouldn't be able to select them)
-            layerGlyph.backgroundImage = undefined;
+
+          const modified = deleteSkeletonPoints(
+            skeletonData,
+            effectiveSkeletonPointSelection
+          );
+
+          if (modified) {
+            const staticGlyph = layer.glyph;
+
+            // Regenerate outline contours
+            const pathChange = recordChanges(staticGlyph, (sg) => {
+              regenerateSkeletonContours(sg, skeletonData);
+            });
+            allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+            // Save updated skeletonData
+            const customDataChange = recordChanges(layer, (l) => {
+              setSkeletonData(l, skeletonData);
+            });
+            allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
           }
         }
       }
+
+      if (!allChanges.length) return;
+
+      const combinedChange = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combinedChange.change);
+
       this.sceneController.selection = new Set();
-      return translate("action.delete-selection");
+
+      return {
+        changes: combinedChange,
+        undoLabel: translate("action.delete-selection"),
+        broadcast: true,
+      };
+    });
+  }
+
+  /**
+   * Delete selected skeleton points.
+   */
+  async _deleteSkeletonPoints(skeletonPointSelection) {
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editLayerName = this.sceneController.editingLayerNames?.[0];
+      if (!editLayerName || !glyph.layers[editLayerName]) {
+        return;
+      }
+
+      const layer = glyph.layers[editLayerName];
+      const storedSkeletonData = getSkeletonData(layer);
+      if (!storedSkeletonData) return;
+
+      // Deep clone for manipulation
+      let skeletonData = JSON.parse(JSON.stringify(storedSkeletonData));
+      skeletonData.generatedContourIndices = resolveGeneratedContourIndicesForDeletion(
+        layer.glyph?.path,
+        storedSkeletonData
+      );
+
+      // Delete points with shape preservation (logic in path-functions.js)
+      const modified = deleteSkeletonPoints(skeletonData, skeletonPointSelection);
+      if (!modified) return;
+
+      // Record changes
+      const changes = [];
+
+      // 1. FIRST: Generate outline contours (updates skeletonData.generatedContourIndices)
+      const staticGlyph = layer.glyph;
+      const pathChange = recordChanges(staticGlyph, (sg) => {
+        regenerateSkeletonContours(sg, skeletonData);
+      });
+      changes.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+      // 2. THEN: Save skeletonData to customData (now with updated generatedContourIndices)
+      const customDataChange = recordChanges(layer, (l) => {
+        setSkeletonData(l, skeletonData);
+      });
+      changes.push(customDataChange.prefixed(["layers", editLayerName]));
+
+      const combinedChange = new ChangeCollector().concat(...changes);
+      await sendIncrementalChange(combinedChange.change);
+
+      this.sceneController.selection = new Set();
+
+      return {
+        changes: combinedChange,
+        undoLabel: translate("action.delete-selection"),
+      };
     });
   }
 
@@ -2801,6 +3346,7 @@ export class EditorController extends ViewController {
       component: componentIndices,
       anchor: anchorIndices,
       guideline: guidelineIndices,
+      skeletonPoint: skeletonPointSelection,
       //fontGuideline: fontGuidelineIndices,
     } = parseSelection(this.sceneController.selection);
     pointIndices = pointIndices || [];
@@ -2814,28 +3360,76 @@ export class EditorController extends ViewController {
     let selectGuidelines = false;
 
     const instance = positionedGlyph.glyph.instance;
+
+    // Get skeleton data to identify generated contours
+    const editLayerName =
+      this.sceneController.sceneSettings?.editLayerName ||
+      positionedGlyph.glyph?.layerName;
+    const layer = editLayerName
+      ? positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName]
+      : null;
+    const skeletonData = layer ? getSkeletonData(layer) : null;
+    const generatedContourIndices = new Set(
+      skeletonData ? resolveGeneratedContourIndices(instance.path, skeletonData) : []
+    );
+
+    // Collect skeleton on-curve points
+    const skeletonOnCurvePoints = [];
+    if (skeletonData?.contours?.length) {
+      for (let contourIdx = 0; contourIdx < skeletonData.contours.length; contourIdx++) {
+        const contour = skeletonData.contours[contourIdx];
+        for (let pointIdx = 0; pointIdx < contour.points.length; pointIdx++) {
+          const point = contour.points[pointIdx];
+          if (!point.type) {
+            // on-curve point
+            skeletonOnCurvePoints.push({ contourIdx, pointIdx });
+          }
+        }
+      }
+    }
+
+    const hasSkeletonPoints = skeletonOnCurvePoints.length > 0;
     const hasObjects =
       instance.components.length > 0 || instance.path.pointTypes.length > 0;
     const hasAnchors = instance.anchors.length > 0;
     const hasGuidelines = instance.guidelines.length > 0;
 
+    // Collect on-curve points from non-generated contours only
     const glyphPath = positionedGlyph.glyph.path;
     let onCurvePoints = [];
     for (const [pointIndex, pointType] of enumerate(glyphPath.pointTypes)) {
       if ((pointType & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE) {
-        onCurvePoints.push(pointIndex);
+        // Check if this point belongs to a skeleton-generated contour
+        const contourIndex = glyphPath.getContourIndex(pointIndex);
+        if (!generatedContourIndices.has(contourIndex)) {
+          onCurvePoints.push(pointIndex);
+        }
       }
     }
 
     const allOnCurvePointsSelected = isSuperset(new Set(pointIndices), onCurvePoints);
+
+    // Check if all skeleton on-curve points are selected
+    const allSkeletonPointsSelected =
+      skeletonOnCurvePoints.length > 0 &&
+      skeletonPointSelection?.size >= skeletonOnCurvePoints.length &&
+      skeletonOnCurvePoints.every((p) =>
+        skeletonPointSelection.has(`${p.contourIdx}/${p.pointIdx}`)
+      );
+
+    // Consider objects selected if both regular and skeleton points are selected
+    const objectsFullySelected =
+      (allOnCurvePointsSelected || onCurvePoints.length === 0) &&
+      (allSkeletonPointsSelected || skeletonOnCurvePoints.length === 0) &&
+      componentIndices.length >= instance.components.length;
+
     if (
-      (!allOnCurvePointsSelected ||
-        componentIndices.length < instance.components.length) &&
+      !objectsFullySelected &&
       !anchorIndices.length &&
       !guidelineIndices.length
       //&& !fontGuidelineIndices.length
     ) {
-      if (hasObjects) {
+      if (hasObjects || hasSkeletonPoints) {
         selectObjects = true;
       } else if (hasAnchors) {
         selectAnchors = true;
@@ -2845,8 +3439,7 @@ export class EditorController extends ViewController {
     }
 
     if (
-      allOnCurvePointsSelected &&
-      componentIndices.length == instance.components.length &&
+      objectsFullySelected &&
       !anchorIndices.length &&
       !guidelineIndices.length
       //&& !fontGuidelineIndices.length
@@ -2885,8 +3478,13 @@ export class EditorController extends ViewController {
     let newSelection = new Set();
 
     if (selectObjects) {
+      // Add regular path on-curve points (excluding skeleton-generated contours)
       for (const pointIndex of onCurvePoints) {
         newSelection.add(`point/${pointIndex}`);
+      }
+      // Add skeleton on-curve points
+      for (const { contourIdx, pointIdx } of skeletonOnCurvePoints) {
+        newSelection.add(`skeletonPoint/${contourIdx}/${pointIdx}`);
       }
       for (const componentIndex of range(positionedGlyph.glyph.components.length)) {
         newSelection.add(`component/${componentIndex}`);

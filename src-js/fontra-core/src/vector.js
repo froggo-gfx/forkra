@@ -18,6 +18,13 @@ export function rotateVector90CW(vector) {
   return { x: vector.y, y: -vector.x };
 }
 
+export function rotateVector(vector, cos, sin) {
+  return {
+    x: vector.x * cos - vector.y * sin,
+    y: vector.x * sin + vector.y * cos,
+  };
+}
+
 export function vectorLength(vector) {
   return Math.hypot(vector.x, vector.y);
 }

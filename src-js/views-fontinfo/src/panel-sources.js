@@ -6,6 +6,7 @@ import { recordChanges } from "@fontra/core/change-recorder.js";
 import { joinChanges, wildcard } from "@fontra/core/changes.js";
 import { ensureDenseSource } from "@fontra/core/font-controller.js";
 import { openTypeSettingsFontSourcesLevel } from "@fontra/core/font-info-data.js";
+import { FONTRA_INTERNAL_KEY } from "@fontra/core/fontra-internal-schema.js";
 import { NumberFormatter, OptionalNumberFormatter } from "@fontra/core/formatters.js";
 import * as html from "@fontra/core/html-utils.js";
 import { addStyleSheet } from "@fontra/core/html-utils.js";
@@ -105,6 +106,16 @@ export class SourcesPanel extends BaseInfoPanel {
     this.fontController.addChangeListener(
       { sources: { [wildcard]: { name: null } } },
       (change, isExternalChange) => this._setupSourceNames(),
+      false
+    );
+
+    this.fontController.addChangeListener(
+      { sources: { [wildcard]: { customData: null } } },
+      async (change, isExternalChange) => {
+        if (this.selectedSourceIdentifier) {
+          await this.selectSource(this.selectedSourceIdentifier, true);
+        }
+      },
       false
     );
   }
@@ -553,6 +564,33 @@ addStyleSheet(`
 }
 `);
 
+const JSONLikeFormatter = {
+  toString: (value) => {
+    if (value === undefined || value === null) {
+      return "";
+    }
+    if (typeof value === "object") {
+      try {
+        return JSON.stringify(value);
+      } catch (error) {
+        return String(value);
+      }
+    }
+    return String(value);
+  },
+  fromString: (value) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return { value: "" };
+    }
+    try {
+      return { value: JSON.parse(trimmed) };
+    } catch (error) {
+      return { value };
+    }
+  },
+};
+
 class SourceBox extends HTMLElement {
   constructor(sourcesPanel, fontAxesSourceSpace, sources, sourceIdentifier, isDefault) {
     super();
@@ -564,6 +602,7 @@ class SourceBox extends HTMLElement {
     this.isDefault = isDefault;
     this.controllers = {};
     this.customDataKeys = openTypeSettingsFontSourcesLevel.map((item) => item.key);
+    this.customDataKeySet = new Set(this.customDataKeys);
     this._updateContents();
   }
 
@@ -584,8 +623,43 @@ class SourceBox extends HTMLElement {
         source.lineMetricsHorizontalLayout
       ),
       guidelines: { ...source.guidelines },
-      customData: { ...source.customData },
+      customData: this._getSourceOpenTypeCustomData(source.customData),
+      internalCustomData: this._getSourceInternalCustomData(source.customData),
     };
+  }
+
+  _getSourceOpenTypeCustomData(customData) {
+    const input = customData || {};
+    const openTypeData = {};
+    for (const key of this.customDataKeys) {
+      if (Object.prototype.hasOwnProperty.call(input, key)) {
+        openTypeData[key] = input[key];
+      }
+    }
+    return openTypeData;
+  }
+
+  _getSourceInternalCustomData(customData) {
+    const input = customData || {};
+    const internal = {};
+    if (Object.prototype.hasOwnProperty.call(input, FONTRA_INTERNAL_KEY)) {
+      internal[FONTRA_INTERNAL_KEY] = deepCopyObject(input[FONTRA_INTERNAL_KEY]);
+    }
+    return internal;
+  }
+
+  _getSourceOtherCustomData(customData) {
+    const input = customData || {};
+    const other = {};
+    for (const [key, value] of Object.entries(input)) {
+      if (this.customDataKeySet.has(key)) {
+        continue;
+      }
+      if (key !== FONTRA_INTERNAL_KEY) {
+        other[key] = deepCopyObject(value);
+      }
+    }
+    return other;
   }
 
   checkSourceLocation(axisName, value) {
@@ -746,11 +820,38 @@ class SourceBox extends HTMLElement {
 
     this.controllers.customData.addListener((event) => {
       this.editSource((source) => {
-        source.customData = {};
+        const preservedInternalCustomData = this._getSourceInternalCustomData(
+          source.customData
+        );
+        const preservedOtherCustomData = this._getSourceOtherCustomData(
+          source.customData
+        );
+        source.customData = {
+          ...preservedInternalCustomData,
+          ...preservedOtherCustomData,
+        };
         for (const item of event.newValue) {
           source.customData[item["key"]] = item["value"];
         }
       }, `edit customData`); // TODO: translation
+    });
+
+    this.controllers.internalCustomData.addListener((event) => {
+      this.editSource((source) => {
+        const preservedOpenTypeCustomData = this._getSourceOpenTypeCustomData(
+          source.customData
+        );
+        const preservedOtherCustomData = this._getSourceOtherCustomData(
+          source.customData
+        );
+        source.customData = {
+          ...preservedOpenTypeCustomData,
+          ...preservedOtherCustomData,
+        };
+        for (const item of event.newValue) {
+          source.customData[item["key"]] = item["value"];
+        }
+      }, `edit internal customData`); // TODO: translation
     });
 
     const accordion = new Accordion();
@@ -822,10 +923,32 @@ input {
           ].getDefaultFunction(this.source),
       }));
 
-      const customDataList = new CustomDataList(
+      const openTypeCustomDataList = new CustomDataList(
         this.controllers.customData,
         openTypeSettings
       );
+      const internalCustomDataModel = this.models.internalCustomData;
+      const internalKeys = Object.keys(internalCustomDataModel);
+      const internalCustomDataInfos = [
+        ...new Set([FONTRA_INTERNAL_KEY, ...internalKeys]),
+      ].map((key) => ({
+        key,
+        formatter: JSONLikeFormatter,
+        getDefaultFunction: () =>
+          Object.prototype.hasOwnProperty.call(internalCustomDataModel, key)
+            ? deepCopyObject(internalCustomDataModel[key])
+            : key === FONTRA_INTERNAL_KEY
+              ? {}
+              : "",
+      }));
+      const internalCustomDataList = new CustomDataList(
+        this.controllers.internalCustomData,
+        internalCustomDataInfos
+      );
+      const hasOpenTypeSettings =
+        Object.keys(this.models.customData).length > 0;
+      const hasInternalCustomData =
+        Object.keys(this.models.internalCustomData).length > 0;
       accordionItems.push(
         {
           label: getLabelFromKey("lineMetricsHorizontalLayout"),
@@ -844,8 +967,14 @@ input {
         {
           label: getLabelFromKey("customData"),
           id: "customData",
-          content: customDataList,
-          open: Object.keys(this.source.customData).length > 0,
+          content: openTypeCustomDataList,
+          open: hasOpenTypeSettings,
+        },
+        {
+          label: getLabelFromKey("internalCustomData"),
+          id: "internal-custom-data",
+          content: internalCustomDataList,
+          open: hasInternalCustomData,
         }
       );
     }
@@ -1136,6 +1265,7 @@ function getLabelFromKey(key) {
     lineMetricsHorizontalLayout: translate("sources.labels.line-metrics"),
     guidelines: translate("sidebar.user-settings.guidelines"),
     customData: translate("OpenType settings"), // TODO: translation
+    internalCustomData: translate("Fontra internal settings"), // TODO: translation
   };
   return keyLabelMap[key] || key;
 }

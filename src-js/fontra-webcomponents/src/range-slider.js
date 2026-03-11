@@ -228,6 +228,8 @@ export class RangeSlider extends html.UnlitElement {
     step: {},
     onChangeCallback: { type: Function },
     values: {},
+    displayValue: {},
+    allowInputBeyondRange: { type: Boolean },
   };
 
   constructor() {
@@ -244,9 +246,19 @@ export class RangeSlider extends html.UnlitElement {
     this.onChangeCallback = () => {};
     this.values = [];
     this.disabled = false;
+    this.displayValue = null;
+    this.allowInputBeyondRange = false;
   }
 
   get valueFormatted() {
+    // Derive decimal places from step if it's a number
+    if (this.step !== "any" && typeof this.step === "number") {
+      const stepStr = this.step.toString();
+      const decimalIndex = stepStr.indexOf(".");
+      const decimalPlaces = decimalIndex >= 0 ? stepStr.length - decimalIndex - 1 : 0;
+      return round(this.value, decimalPlaces);
+    }
+    // Fallback to range-based heuristic
     const minMaxRange = this.maxValue - this.minValue;
     const decimalPlaces = minMaxRange < 100 ? 3 : 2;
     return round(this.value, decimalPlaces);
@@ -265,7 +277,13 @@ export class RangeSlider extends html.UnlitElement {
       this.updateIsAtDefault();
     }
     if (this.numberInput) {
-      this.numberInput.value = this.valueFormatted;
+      if (this.displayValue !== null && this.displayValue !== undefined) {
+        this.numberInput.value = "";
+        this.numberInput.placeholder = this.displayValue;
+      } else {
+        this.numberInput.value = this.valueFormatted;
+        this.numberInput.placeholder = "";
+      }
     }
   }
 
@@ -288,6 +306,15 @@ export class RangeSlider extends html.UnlitElement {
 
   getValueFromEventTarget(event) {
     let value = event.target.valueAsNumber;
+    // When allowInputBeyondRange is set and the user typed in the number input,
+    // accept any numeric value without clamping to slider min/max.
+    if (
+      this.allowInputBeyondRange &&
+      event.target === this.numberInput &&
+      !isNaN(value)
+    ) {
+      return value;
+    }
     const isValid = event.target.reportValidity();
     if (isValid && this.isDiscrete()) {
       if (event.target === this.rangeInput) {
@@ -360,10 +387,13 @@ export class RangeSlider extends html.UnlitElement {
     event.preventDefault();
     event.stopImmediatePropagation();
 
-    value = clamp(value, this.minValue, this.maxValue);
+    if (!this.allowInputBeyondRange || event.target === this.rangeInput) {
+      value = clamp(value, this.minValue, this.maxValue);
+    }
 
     if (dispatch) {
-      this.onChangeCallback({ value });
+      const source = event.target === this.numberInput ? "number" : "range";
+      this.onChangeCallback({ value, source });
     }
 
     this.value = value;
@@ -390,6 +420,9 @@ export class RangeSlider extends html.UnlitElement {
       maxValue = this.maxValue;
       value = this.valueFormatted;
     }
+    const hasDisplayValue = this.displayValue !== null && this.displayValue !== undefined;
+    const numberInputValue = hasDisplayValue ? "" : value;
+    const numberInputPlaceholder = hasDisplayValue ? this.displayValue : "";
     const isAtDefault = this.value == this.defaultValue;
     return html.div(
       {
@@ -402,17 +435,17 @@ export class RangeSlider extends html.UnlitElement {
               disabled: this.disabled,
               type: "number",
               class: "slider-numeric-input",
-              value,
+              value: numberInputValue,
+              placeholder: numberInputPlaceholder,
               step: this.step,
               required: "required",
-              min: this.minValue,
-              max: this.maxValue,
+              ...(this.allowInputBeyondRange ? {} : { min: this.minValue, max: this.maxValue }),
               pattern: "[0-9]+",
               onkeydown: (event) => this.onKeyDown(event),
               onchange: (event) => {
                 const value = this.getValueFromEventTarget(event);
                 this.value = value;
-                const callbackEvent = { value };
+                const callbackEvent = { value, source: "number" };
                 if (this.sawMouseDown) {
                   callbackEvent.dragBegin = true;
                 }
@@ -453,6 +486,7 @@ export class RangeSlider extends html.UnlitElement {
                 if (!this.sawChangeEvent) {
                   this.onChangeCallback({
                     value: this.getValueFromEventTarget(event),
+                    source: "range",
                     dragEnd: true,
                   });
                 }
@@ -473,10 +507,15 @@ export class RangeSlider extends html.UnlitElement {
                   this.reset();
                 }
               },
+              ondblclick: (event) => {
+                event.preventDefault();
+                this.reset();
+              },
               onchange: (event) => {
                 if (!this.sawMouseUp) {
                   this.onChangeCallback({
                     value: this.getValueFromEventTarget(event),
+                    source: "range",
                     dragEnd: true,
                   });
                 }
@@ -486,7 +525,7 @@ export class RangeSlider extends html.UnlitElement {
               oninput: (event) => {
                 const value = this.getValueFromEventTarget(event);
                 this.value = value;
-                const callbackEvent = { value, isDragging: true };
+                const callbackEvent = { value, isDragging: true, source: "range" };
                 if (this.sawMouseDown) {
                   callbackEvent.dragBegin = true;
                 }
@@ -511,7 +550,7 @@ export class RangeSlider extends html.UnlitElement {
 
   reset() {
     this.value = this.defaultValue;
-    this.onChangeCallback({ value: this.value });
+    this.onChangeCallback({ value: this.value, source: "reset" });
   }
 }
 

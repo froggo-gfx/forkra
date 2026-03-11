@@ -21,7 +21,65 @@ import {
 import { showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialog } from "@fontra/web-components/modal-dialog.js";
 import { Form } from "@fontra/web-components/ui-form.js";
+import { clearRepresentationCache } from "@fontra/core/representation-cache.js";
+import {
+  getSkeletonData,
+  moveSkeletonData,
+  setSkeletonData,
+} from "@fontra/core/skeleton-contour-generator.js";
+import LetterspacerPanel from "./panel-letterspacer.js";
 import Panel from "./panel.js";
+import {
+  SKELETON_SOURCE_DEFAULT_KEYS,
+  getSourceSkeletonDefaultsValue,
+  setSourceSkeletonDefaultsValues,
+} from "./skeleton-source-defaults.js";
+
+const SKELETON_WIDTH_CAPITAL_BASE_KEY = SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_CAPITAL_BASE;
+const SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY =
+  SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_CAPITAL_HORIZONTAL;
+const SKELETON_WIDTH_CAPITAL_CONTRAST_KEY =
+  SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_CAPITAL_CONTRAST;
+const SKELETON_WIDTH_CAPITAL_DISTRIBUTION_KEY =
+  SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_CAPITAL_DISTRIBUTION;
+const SKELETON_WIDTH_LOWERCASE_BASE_KEY = SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_LOWERCASE_BASE;
+const SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY =
+  SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_LOWERCASE_HORIZONTAL;
+const SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY =
+  SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_LOWERCASE_CONTRAST;
+const SKELETON_WIDTH_LOWERCASE_DISTRIBUTION_KEY =
+  SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_LOWERCASE_DISTRIBUTION;
+
+const SKELETON_CAP_RADIUS_RATIO_KEY = SKELETON_SOURCE_DEFAULT_KEYS.CAP_RADIUS_RATIO;
+const SKELETON_CAP_TENSION_KEY = SKELETON_SOURCE_DEFAULT_KEYS.CAP_TENSION;
+const SKELETON_CAP_ANGLE_KEY = SKELETON_SOURCE_DEFAULT_KEYS.CAP_ANGLE;
+const SKELETON_CAP_DISTANCE_KEY = SKELETON_SOURCE_DEFAULT_KEYS.CAP_DISTANCE;
+const SKELETON_CUSTOM_WIDTHS_UPPERCASE_KEY =
+  SKELETON_SOURCE_DEFAULT_KEYS.CUSTOM_WIDTHS_UPPERCASE;
+const SKELETON_CUSTOM_WIDTHS_LOWERCASE_KEY =
+  SKELETON_SOURCE_DEFAULT_KEYS.CUSTOM_WIDTHS_LOWERCASE;
+const SKELETON_CUSTOM_CAP_SQUARE_KEY = SKELETON_SOURCE_DEFAULT_KEYS.CUSTOM_CAP_SQUARE;
+const SKELETON_CUSTOM_CAP_ROUNDED_KEY = SKELETON_SOURCE_DEFAULT_KEYS.CUSTOM_CAP_ROUNDED;
+const SIDEBEARING_VARIABLES_KEY = "fontra.sidebearingVars";
+
+const DEFAULT_WIDTH_CAPITAL_BASE = 60;
+const DEFAULT_WIDTH_CAPITAL_HORIZONTAL = 50;
+const DEFAULT_WIDTH_CAPITAL_CONTRAST = 40;
+const DEFAULT_WIDTH_LOWERCASE_BASE = 60;
+const DEFAULT_WIDTH_LOWERCASE_HORIZONTAL = 50;
+const DEFAULT_WIDTH_LOWERCASE_CONTRAST = 40;
+const DEFAULT_DISTRIBUTION = 0;
+
+const DEFAULT_CAP_RADIUS_RATIO = 1 / 8;
+const DEFAULT_CAP_TENSION = 0.55;
+const DEFAULT_CAP_ANGLE = 0;
+const DEFAULT_CAP_DISTANCE = 0;
+const CAP_RADIUS_MIN = 1 / 128;
+const CAP_RADIUS_MAX = 1 / 4;
+const CAP_ANGLE_MIN = -85;
+const CAP_ANGLE_MAX = 85;
+const DISTRIBUTION_MIN = -100;
+const DISTRIBUTION_MAX = 100;
 
 export default class SelectionInfoPanel extends Panel {
   identifier = "selection-info";
@@ -31,6 +89,11 @@ export default class SelectionInfoPanel extends Panel {
     super(editorController);
     this.throttledUpdate = throttleCalls((senderID) => this.update(senderID), 100);
     this.sceneController = this.editorController.sceneController;
+    this._customDeleteConfirm = { key: null };
+    this.letterspacerPanel = new LetterspacerPanel(editorController);
+    if (this.letterspacerHost) {
+      this.letterspacerHost.appendChild(this.letterspacerPanel);
+    }
 
     this.sceneController.sceneSettingsController.addKeyListener(
       [
@@ -72,6 +135,7 @@ export default class SelectionInfoPanel extends Panel {
 
   getContentElement() {
     this.infoForm = new Form();
+    this.letterspacerHost = html.div({});
     return html.div(
       {
         class: "panel",
@@ -79,7 +143,12 @@ export default class SelectionInfoPanel extends Panel {
       [
         html.div(
           { class: "panel-section panel-section--flex panel-section--scrollable" },
-          [this.infoForm]
+          [
+            html.div(
+              { style: "display: flex; flex-direction: column; gap: 0.75em;" },
+              [this.infoForm]
+            ),
+          ]
         ),
         html.div(
           { class: "panel-section panel-section--checkbox" },
@@ -91,7 +160,12 @@ export default class SelectionInfoPanel extends Panel {
 
   async toggle(on, focus) {
     if (on) {
-      this.update();
+      // Ensure the Selection Info form is fully rebuilt before nested
+      // Letterspacer panel runs its own visibility-gated update.
+      await this.update();
+    }
+    if (this.letterspacerPanel?.toggle) {
+      await this.letterspacerPanel.toggle(on, focus);
     }
   }
 
@@ -115,7 +189,375 @@ export default class SelectionInfoPanel extends Panel {
     ];
   }
 
+  _getSourceCustomDataValue(key, fallback) {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return fallback;
+    const source = this.fontController.sources[sourceIdentifier];
+    return getSourceSkeletonDefaultsValue(source, key, fallback);
+  }
+
+  async _setSourceCustomDataValue(key, value) {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return;
+
+    const root = { sources: this.fontController.sources };
+    const changes = recordChanges(root, (r) => {
+      setSourceSkeletonDefaultsValues(r.sources[sourceIdentifier], { [key]: value });
+    });
+
+    if (changes.hasChange) {
+      await this.fontController.postChange(
+        changes.change,
+        changes.rollbackChange,
+        "Set skeleton defaults"
+      );
+    }
+  }
+
+  _getSourceCustomWidthList(key) {
+    const list = this._getSourceCustomDataValue(key, []);
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    return list
+      .filter((item) => item && typeof item === "object")
+      .map((item) => {
+        const name = typeof item.name === "string" ? item.name : "";
+        const value = Number(item.value);
+        return {
+          name,
+          value: Number.isFinite(value) ? value : 0,
+        };
+      });
+  }
+
+  async _setSourceCustomWidthList(key, list) {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return;
+
+    const sanitized = (Array.isArray(list) ? list : []).map((item) => {
+      const name = typeof item?.name === "string" ? item.name : String(item?.name ?? "");
+      const value = Number(item?.value);
+      return { name, value: Number.isFinite(value) ? value : 0 };
+    });
+
+    const root = { sources: this.fontController.sources };
+    const changes = recordChanges(root, (r) => {
+      setSourceSkeletonDefaultsValues(r.sources[sourceIdentifier], { [key]: sanitized });
+    });
+
+    if (changes.hasChange) {
+      await this.fontController.postChange(
+        changes.change,
+        changes.rollbackChange,
+        "Set skeleton defaults"
+      );
+    }
+  }
+
+  _getSourceCustomCapSquareList() {
+    const list = this._getSourceCustomDataValue(SKELETON_CUSTOM_CAP_SQUARE_KEY, []);
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    return list
+      .filter((item) => item && typeof item === "object")
+      .map((item) => {
+        const name = typeof item.name === "string" ? item.name : "";
+        const angleRaw =
+          Number.isFinite(Number(item.angle)) ? Number(item.angle) : Number(item.value);
+        const distanceRaw =
+          Number.isFinite(Number(item.distance)) ? Number(item.distance) : 0;
+        return {
+          name,
+          angle: Number.isFinite(angleRaw) ? angleRaw : 0,
+          distance: Number.isFinite(distanceRaw) ? distanceRaw : 0,
+        };
+      });
+  }
+
+  async _setSourceCustomCapSquareList(list) {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return;
+
+    const sanitized = (Array.isArray(list) ? list : []).map((item) => {
+      const name = typeof item?.name === "string" ? item.name : String(item?.name ?? "");
+      const angle = Number(item?.angle);
+      const distance = Number(item?.distance);
+      return {
+        name,
+        angle: Number.isFinite(angle) ? angle : 0,
+        distance: Number.isFinite(distance) ? distance : 0,
+      };
+    });
+
+    const root = { sources: this.fontController.sources };
+    const changes = recordChanges(root, (r) => {
+      setSourceSkeletonDefaultsValues(r.sources[sourceIdentifier], {
+        [SKELETON_CUSTOM_CAP_SQUARE_KEY]: sanitized,
+      });
+    });
+
+    if (changes.hasChange) {
+      await this.fontController.postChange(
+        changes.change,
+        changes.rollbackChange,
+        "Set skeleton defaults"
+      );
+    }
+  }
+
+  _getSourceCustomCapRoundedList() {
+    const list = this._getSourceCustomDataValue(SKELETON_CUSTOM_CAP_ROUNDED_KEY, []);
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    return list
+      .filter((item) => item && typeof item === "object")
+      .map((item) => {
+        const name = typeof item.name === "string" ? item.name : "";
+        let radiusRaw =
+          Number.isFinite(Number(item.radius)) ? Number(item.radius) : Number(item.value);
+        if (!Number.isFinite(radiusRaw)) {
+          radiusRaw = DEFAULT_CAP_RADIUS_RATIO;
+        }
+        let tensionRaw = Number(item.tension);
+        if (!Number.isFinite(tensionRaw)) {
+          tensionRaw = DEFAULT_CAP_TENSION;
+        }
+        if (tensionRaw > 1) {
+          tensionRaw = tensionRaw / 100;
+        }
+        return {
+          name,
+          radius: Number.isFinite(radiusRaw) ? radiusRaw : DEFAULT_CAP_RADIUS_RATIO,
+          tension: Number.isFinite(tensionRaw) ? tensionRaw : DEFAULT_CAP_TENSION,
+        };
+      });
+  }
+
+  async _setSourceCustomCapRoundedList(list) {
+    const sourceIdentifier = this.sceneController.editingLayerNames?.[0];
+    if (!sourceIdentifier) return;
+
+    const sanitized = (Array.isArray(list) ? list : []).map((item) => {
+      const name = typeof item?.name === "string" ? item.name : String(item?.name ?? "");
+      let radius = Number(item?.radius);
+      let tension = Number(item?.tension);
+      if (!Number.isFinite(radius)) {
+        radius = DEFAULT_CAP_RADIUS_RATIO;
+      }
+      if (!Number.isFinite(tension)) {
+        tension = DEFAULT_CAP_TENSION;
+      }
+      if (tension > 1) {
+        tension = tension / 100;
+      }
+      return { name, radius, tension };
+    });
+
+    const root = { sources: this.fontController.sources };
+    const changes = recordChanges(root, (r) => {
+      setSourceSkeletonDefaultsValues(r.sources[sourceIdentifier], {
+        [SKELETON_CUSTOM_CAP_ROUNDED_KEY]: sanitized,
+      });
+    });
+
+    if (changes.hasChange) {
+      await this.fontController.postChange(
+        changes.change,
+        changes.rollbackChange,
+        "Set skeleton defaults"
+      );
+    }
+  }
+
+  _makeDefaultCustomName(existingList) {
+    let maxIndex = 0;
+    for (const item of existingList || []) {
+      const name = typeof item?.name === "string" ? item.name : "";
+      const match = /^Custom\s+(\d+)$/i.exec(name);
+      if (match) {
+        const value = Number.parseInt(match[1], 10);
+        if (Number.isFinite(value)) {
+          maxIndex = Math.max(maxIndex, value);
+        }
+      }
+    }
+    const nextIndex = maxIndex > 0 ? maxIndex + 1 : (existingList?.length || 0) + 1;
+    return `Custom ${nextIndex}`;
+  }
+
+  _clampNumber(value, minValue, maxValue) {
+    if (!Number.isFinite(value)) return minValue;
+    return Math.max(minValue, Math.min(maxValue, value));
+  }
+
+  _applyLeftMargin(layerGlyph, layerGlyphController, value, layer) {
+    clearRepresentationCache(layerGlyphController);
+    const translationX = maybeClampValue(
+      value - layerGlyphController.leftMargin,
+      -layerGlyph.xAdvance,
+      undefined
+    );
+    for (const i of range(0, layerGlyph.path.coordinates.length, 2)) {
+      layerGlyph.path.coordinates[i] += translationX;
+    }
+    for (const compo of layerGlyph.components) {
+      compo.transformation.translateX += translationX;
+    }
+    const skeletonData = getSkeletonData(layer);
+    if (skeletonData) {
+      const newSkeletonData = JSON.parse(JSON.stringify(skeletonData));
+      moveSkeletonData(newSkeletonData, translationX, 0);
+      setSkeletonData(layer, newSkeletonData);
+    }
+    layerGlyph.xAdvance += translationX;
+  }
+
+  _applyRightMargin(layerGlyph, layerGlyphController, value) {
+    clearRepresentationCache(layerGlyphController);
+    const translationX = maybeClampValue(
+      value - layerGlyphController.rightMargin,
+      -layerGlyph.xAdvance,
+      undefined
+    );
+    layerGlyph.xAdvance += translationX;
+  }
+
+  _getPendingSidebearingVariables() {
+    if (!this.infoForm || !this.fontController?.glyphMap) {
+      return {};
+    }
+    const pending = {};
+    if (this.infoForm.hasKey('["leftMargin"]')) {
+      const expression = this.infoForm.getValue('["leftMargin"]');
+      const parsed = parseSidebearingVariableRef(
+        expression,
+        "leftMargin",
+        this.fontController.glyphMap
+      );
+      if (parsed) {
+        pending.left = { glyph: parsed.glyph, side: parsed.side };
+      }
+    }
+    if (this.infoForm.hasKey('["rightMargin"]')) {
+      const expression = this.infoForm.getValue('["rightMargin"]');
+      const parsed = parseSidebearingVariableRef(
+        expression,
+        "rightMargin",
+        this.fontController.glyphMap
+      );
+      if (parsed) {
+        pending.right = { glyph: parsed.glyph, side: parsed.side };
+      }
+    }
+    return pending;
+  }
+
+  async _updateSidebearingVariables(glyphName, varGlyphController) {
+    if (!glyphName || !varGlyphController) {
+      return;
+    }
+    const { locations } = this._getEditingLocations(varGlyphController);
+    const getGlyphFunc = this.fontController.getGlyph.bind(this.fontController);
+    const pendingVars = this._getPendingSidebearingVariables();
+    const updatesByLayer = {};
+    for (const [layerName, location] of Object.entries(locations)) {
+      const layer = varGlyphController.glyph.layers?.[layerName];
+      const vars = { ...(layer?.customData?.[SIDEBEARING_VARIABLES_KEY] || {}) };
+      if (pendingVars.left) {
+        vars.left = { ...(vars.left || {}), ...pendingVars.left };
+      }
+      if (pendingVars.right) {
+        vars.right = { ...(vars.right || {}), ...pendingVars.right };
+      }
+      if (!vars.left && !vars.right) continue;
+      const updates = {};
+      for (const sideKey of ["left", "right"]) {
+        const entry = vars[sideKey];
+        if (!entry?.glyph || !entry.side) {
+          continue;
+        }
+        const metricProperty = entry.side === "left" ? "leftMargin" : "rightMargin";
+        const referencedGlyph = await this.fontController.getGlyph(entry.glyph);
+        if (!referencedGlyph) {
+          continue;
+        }
+        const instanceController = await referencedGlyph.instantiateController(
+          location,
+          layerName,
+          getGlyphFunc
+        );
+        const newValue = instanceController?.[metricProperty];
+        if (newValue == undefined) {
+          continue;
+        }
+        updates[sideKey] = { ...entry, value: newValue };
+      }
+      if (Object.keys(updates).length) {
+        updatesByLayer[layerName] = updates;
+      }
+    }
+    if (!Object.keys(updatesByLayer).length) {
+      return;
+    }
+
+    const layerControllers = {};
+    for (const [layerName, layerGlyph] of Object.entries(
+      this.sceneController.getEditingLayerFromGlyphLayers(
+        varGlyphController.glyph.layers
+      )
+    )) {
+      const layerGlyphController = await this.fontController.getLayerGlyphController(
+        glyphName,
+        layerName,
+        varGlyphController.getSourceIndexForLayerName(layerName)
+      );
+      layerControllers[layerName] = layerGlyphController;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const changes = recordChanges(glyph, (g) => {
+        for (const [layerName, updates] of Object.entries(updatesByLayer)) {
+          const layer = g.layers[layerName];
+          if (!layer) continue;
+          const layerGlyph = layer.glyph;
+          const layerGlyphController = layerControllers[layerName];
+          if (!layerGlyphController) continue;
+          if (updates.left) {
+            this._applyLeftMargin(layerGlyph, layerGlyphController, updates.left.value, layer);
+          }
+          if (updates.right) {
+            this._applyRightMargin(layerGlyph, layerGlyphController, updates.right.value);
+          }
+          const customData = layer.customData || (layer.customData = {});
+          const vars = { ...(customData[SIDEBEARING_VARIABLES_KEY] || {}) };
+          if (updates.left) {
+            vars.left = updates.left;
+          }
+          if (updates.right) {
+            vars.right = updates.right;
+          }
+          customData[SIDEBEARING_VARIABLES_KEY] = vars;
+        }
+      });
+      return {
+        changes: changes,
+        undoLabel: "update sidebearings",
+        broadcast: true,
+      };
+    });
+
+    await this.update();
+  }
+
   async update(senderInfo) {
+    const activeElement = document.activeElement;
+    const isEditingField =
+      activeElement &&
+      this.infoForm?.contentElement &&
+      this.infoForm.contentElement.contains(activeElement);
     if (
       senderInfo?.senderID === this &&
       ((senderInfo?.fieldKeyPath?.length !== 3 &&
@@ -124,6 +566,11 @@ export default class SelectionInfoPanel extends Panel {
         senderInfo?.fieldKeyPath?.[0] === "backgroundImage")
     ) {
       // Don't rebuild, just update the Dimensions field
+      await this.updateDimensions();
+      return;
+    }
+    if (senderInfo?.senderID === this && isEditingField) {
+      // Avoid rebuilding while the user is actively editing a field.
       await this.updateDimensions();
       return;
     }
@@ -149,6 +596,20 @@ export default class SelectionInfoPanel extends Panel {
     const varGlyphController =
       await this.sceneController.sceneModel.getSelectedVariableGlyphController();
     const glyphLocked = !!varGlyphController?.glyph.customData["fontra.glyph.locked"];
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    const editLayer = editLayerName ? varGlyphController?.glyph?.layers?.[editLayerName] : null;
+    const sidebearingVars = editLayer?.customData?.[SIDEBEARING_VARIABLES_KEY];
+    const leftSidebearingDisplay = formatSidebearingVariableDisplay(
+      sidebearingVars?.left,
+      "left",
+      1
+    );
+    const rightSidebearingDisplay = formatSidebearingVariableDisplay(
+      sidebearingVars?.right,
+      "right",
+      1
+    );
+    const hasSidebearingVars = !!sidebearingVars?.left || !!sidebearingVars?.right;
 
     if (
       positionedGlyph?.isUndefined &&
@@ -214,6 +675,7 @@ export default class SelectionInfoPanel extends Panel {
           value: baseCodePointsStr,
         });
       }
+
       if (instance) {
         formContents.push({
           type: "edit-number",
@@ -233,59 +695,62 @@ export default class SelectionInfoPanel extends Panel {
           type: "edit-number-x-y",
           key: '["sidebearings"]',
           label: translate("sidebar.selection-info.sidebearings"),
-          fieldX: {
-            key: '["leftMargin"]',
-            value: glyphController.leftMargin,
-            numDigits: 1,
-            disabled: glyphController.leftMargin == undefined,
-            evaluateExpression: async (expression) =>
-              await this._evaluateMetricsExpression(
-                expression,
-                varGlyphController,
-                "leftMargin"
-              ),
-            getValue: (layerGlyph, layerGlyphController, fieldItem) => {
-              return layerGlyphController.leftMargin;
+            fieldX: {
+              key: '["leftMargin"]',
+              value: glyphController.leftMargin,
+              numDigits: 1,
+              disabled: glyphController.leftMargin == undefined,
+              displayValue: leftSidebearingDisplay || undefined,
+              sidebearingVarSide: "left",
+              evaluateExpression: async (expression) =>
+                await this._evaluateMetricsExpression(
+                  expression,
+                  varGlyphController,
+                  "leftMargin"
+                ),
+              getValue: (layerGlyph, layerGlyphController, fieldItem) => {
+                return layerGlyphController.leftMargin;
+              },
+              setValue: (layerGlyph, layerGlyphController, fieldItem, value, layer) => {
+                this._applyLeftMargin(layerGlyph, layerGlyphController, value, layer);
+              },
             },
-            setValue: (layerGlyph, layerGlyphController, fieldItem, value) => {
-              const translationX = maybeClampValue(
-                value - layerGlyphController.leftMargin,
-                -layerGlyph.xAdvance,
-                undefined
-              );
-              for (const i of range(0, layerGlyph.path.coordinates.length, 2)) {
-                layerGlyph.path.coordinates[i] += translationX;
-              }
-              for (const compo of layerGlyph.components) {
-                compo.transformation.translateX += translationX;
-              }
-              layerGlyph.xAdvance += translationX;
+            fieldY: {
+              key: '["rightMargin"]',
+              value: glyphController.rightMargin,
+              numDigits: 1,
+              evaluateExpression: async (expression) =>
+                await this._evaluateMetricsExpression(
+                  expression,
+                  varGlyphController,
+                  "rightMargin"
+                ),
+              disabled: glyphController.rightMargin == undefined,
+              displayValue: rightSidebearingDisplay || undefined,
+              sidebearingVarSide: "right",
+              getValue: (layerGlyph, layerGlyphController, fieldItem) => {
+                return layerGlyphController.rightMargin;
+              },
+              setValue: (layerGlyph, layerGlyphController, fieldItem, value) => {
+                this._applyRightMargin(layerGlyph, layerGlyphController, value);
+              },
             },
-          },
-          fieldY: {
-            key: '["rightMargin"]',
-            value: glyphController.rightMargin,
-            numDigits: 1,
-            evaluateExpression: async (expression) =>
-              await this._evaluateMetricsExpression(
-                expression,
-                varGlyphController,
-                "rightMargin"
-              ),
-            disabled: glyphController.rightMargin == undefined,
-            getValue: (layerGlyph, layerGlyphController, fieldItem) => {
-              return layerGlyphController.rightMargin;
-            },
-            setValue: (layerGlyph, layerGlyphController, fieldItem, value) => {
-              const translationX = maybeClampValue(
-                value - layerGlyphController.rightMargin,
-                -layerGlyph.xAdvance,
-                undefined
-              );
-              layerGlyph.xAdvance += translationX;
-            },
-          },
-        });
+          });
+          if (hasSidebearingVars) {
+            const updateButton = html.createDomElement("button", {
+              "class": "ui-form-sidebearing-update",
+              "style":
+                "padding: 0.2rem 0.6rem; font-size: 0.85em; cursor: pointer; max-width: 8rem;",
+              "disabled": glyphLocked || this.fontController.readOnly ? "disabled" : undefined,
+              "onclick": async (event) => {
+                await this._updateSidebearingVariables(glyphName, varGlyphController);
+              },
+            }, ["Update"]);
+            formContents.push({
+              type: "single-icon",
+              element: html.div({ class: "ui-form-center" }, [updateButton]),
+            });
+          }
         formContents.push({
           type: "edit-text-double",
           key: '["kern-l-r"]',
@@ -316,6 +781,12 @@ export default class SelectionInfoPanel extends Panel {
         ...this._setupDimensionsInfo(glyphController, pointIndices, componentIndices)
       );
     }
+
+    // Add the letterspacer panel after dimensions and before skeleton defaults
+    formContents.push({
+      type: "single-icon",
+      element: this.letterspacerHost
+    });
 
     for (const index of backgroundImageIndices) {
       assert(index === 0, "only a single bg image is supported");
@@ -378,10 +849,10 @@ export default class SelectionInfoPanel extends Panel {
       );
     }
 
-    for (const index of componentIndices) {
-      if (!instance) {
-        break;
-      }
+      for (const index of componentIndices) {
+        if (!instance) {
+          break;
+        }
       const component = instance.components[index];
       if (!component) {
         // Invalid selection
@@ -418,10 +889,10 @@ export default class SelectionInfoPanel extends Panel {
 
       const baseGlyph = await this.fontController.getGlyph(component.name);
 
-      if (baseGlyph) {
-        const showGlobalAxes =
-          this.sceneController.applicationSettings
-            .alwaysShowGlobalAxesInComponentLocation;
+          if (baseGlyph) {
+            const showGlobalAxes =
+              this.sceneController.applicationSettings
+                .alwaysShowGlobalAxesInComponentLocation;
 
         const fontAxisNames = baseGlyph.continuousFontAxisNames;
         const selectedFontAxisNames = [...fontAxisNames].filter(
@@ -511,17 +982,611 @@ export default class SelectionInfoPanel extends Panel {
               ]
             ),
           });
-          formContents.push(...locationItems);
+            formContents.push(...locationItems);
+          }
         }
       }
-    }
+
+    const canEditSource = !!this.sceneController.editingLayerNames?.[0];
+    const setSourceValue = async (key, value) => {
+      await this._setSourceCustomDataValue(key, value);
+      await this.update();
+    };
+    const addCustomWidthRows = (customKey, keyPrefix) => {
+      const list = this._getSourceCustomWidthList(customKey);
+      const pendingKey = this._customDeleteConfirm?.key;
+      if (pendingKey && pendingKey.startsWith(`${customKey}:`)) {
+        const pendingIndex = Number.parseInt(pendingKey.split(":")[1], 10);
+        if (!Number.isFinite(pendingIndex) || pendingIndex >= list.length) {
+          this._customDeleteConfirm = { key: null };
+        }
+      }
+      list.forEach((item, index) => {
+        const nameKey = `${keyPrefix}-name-${index}`;
+        const valueKey = `${keyPrefix}-value-${index}`;
+        const rowId = `${customKey}:${index}`;
+        const isConfirming = this._customDeleteConfirm?.key === rowId;
+        const deleteButton = html.createDomElement("icon-button", {
+          "class": "skeleton-custom-delete",
+          "src": isConfirming ? "/tabler-icons/x.svg" : "/tabler-icons/trash.svg",
+          "style": "width: 1.1em; height: 1.1em;",
+          "data-tooltip": isConfirming ? "Confirm delete" : "Delete",
+          "data-tooltipposition": "left",
+          "disabled": !canEditSource,
+          "onclick": async () => {
+            if (!canEditSource) {
+              return;
+            }
+            if (this._customDeleteConfirm?.key !== rowId) {
+              this._customDeleteConfirm = { key: rowId };
+              await this.update();
+              return;
+            }
+            const next = this._getSourceCustomWidthList(customKey);
+            if (!next[index]) return;
+            next.splice(index, 1);
+            this._customDeleteConfirm = { key: null };
+            await this._setSourceCustomWidthList(customKey, next);
+            await this.update();
+          },
+        });
+        formContents.push({
+          type: "edit-name-number",
+          fieldName: {
+            type: "edit-text",
+            key: nameKey,
+            value: item.name ?? "",
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomWidthList(customKey);
+              if (!next[index]) return;
+              next[index] = { ...next[index], name: String(rawValue ?? "") };
+              await this._setSourceCustomWidthList(customKey, next);
+              await this.update();
+            },
+          },
+          fieldValue: {
+            type: "edit-number",
+            key: valueKey,
+            value: Number.isFinite(item.value) ? item.value : 0,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomWidthList(customKey);
+              if (!next[index]) return;
+              const numeric = Number(rawValue);
+              next[index] = {
+                ...next[index],
+                value: Number.isFinite(numeric) ? numeric : 0,
+              };
+              await this._setSourceCustomWidthList(customKey, next);
+              await this.update();
+            },
+          },
+          deleteElement: deleteButton,
+        });
+      });
+
+      formContents.push({
+        type: "single-icon",
+        element: html.div(
+          { style: "display: flex; justify-content: flex-start;" },
+          [
+            html.button(
+              {
+                type: "button",
+                style: "padding: 2px 6px; font-size: 11px;",
+                disabled: !canEditSource,
+                onclick: async () => {
+                  this._customDeleteConfirm = { key: null };
+                  const next = this._getSourceCustomWidthList(customKey);
+                  next.push({ name: this._makeDefaultCustomName(next), value: 0 });
+                  await this._setSourceCustomWidthList(customKey, next);
+                  await this.update();
+                },
+              },
+              "Add"
+            ),
+          ]
+        ),
+      });
+    };
+
+    const addCustomCapSquareRows = (keyPrefix) => {
+      const list = this._getSourceCustomCapSquareList();
+      const customKey = SKELETON_CUSTOM_CAP_SQUARE_KEY;
+      const pendingKey = this._customDeleteConfirm?.key;
+      if (pendingKey && pendingKey.startsWith(`${customKey}:`)) {
+        const pendingIndex = Number.parseInt(pendingKey.split(":")[1], 10);
+        if (!Number.isFinite(pendingIndex) || pendingIndex >= list.length) {
+          this._customDeleteConfirm = { key: null };
+        }
+      }
+      list.forEach((item, index) => {
+        const nameKey = `${keyPrefix}-name-${index}`;
+        const angleKey = `${keyPrefix}-angle-${index}`;
+        const distanceKey = `${keyPrefix}-distance-${index}`;
+        const rowId = `${customKey}:${index}`;
+        const isConfirming = this._customDeleteConfirm?.key === rowId;
+        const deleteButton = html.createDomElement("icon-button", {
+          "class": "skeleton-custom-delete",
+          "src": isConfirming ? "/tabler-icons/x.svg" : "/tabler-icons/trash.svg",
+          "style": "width: 1.1em; height: 1.1em;",
+          "data-tooltip": isConfirming ? "Confirm delete" : "Delete",
+          "data-tooltipposition": "left",
+          "disabled": !canEditSource,
+          "onclick": async () => {
+            if (!canEditSource) {
+              return;
+            }
+            if (this._customDeleteConfirm?.key !== rowId) {
+              this._customDeleteConfirm = { key: rowId };
+              await this.update();
+              return;
+            }
+            const next = this._getSourceCustomCapSquareList();
+            if (!next[index]) return;
+            next.splice(index, 1);
+            this._customDeleteConfirm = { key: null };
+            await this._setSourceCustomCapSquareList(next);
+            await this.update();
+          },
+        });
+        formContents.push({
+          type: "edit-name-number-pair",
+          fieldName: {
+            type: "edit-text",
+            key: nameKey,
+            value: item.name ?? "",
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomCapSquareList();
+              if (!next[index]) return;
+              next[index] = { ...next[index], name: String(rawValue ?? "") };
+              await this._setSourceCustomCapSquareList(next);
+              await this.update();
+            },
+          },
+          fieldValue1: {
+            type: "edit-number",
+            key: angleKey,
+            value: Number.isFinite(item.angle) ? item.angle : 0,
+            minValue: CAP_ANGLE_MIN,
+            maxValue: CAP_ANGLE_MAX,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomCapSquareList();
+              if (!next[index]) return;
+              const numeric = this._clampNumber(
+                Number(rawValue),
+                CAP_ANGLE_MIN,
+                CAP_ANGLE_MAX
+              );
+              next[index] = { ...next[index], angle: numeric };
+              await this._setSourceCustomCapSquareList(next);
+              await this.update();
+            },
+          },
+          fieldValue2: {
+            type: "edit-number",
+            key: distanceKey,
+            value: Number.isFinite(item.distance) ? item.distance : 0,
+            minValue: 0,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomCapSquareList();
+              if (!next[index]) return;
+              const numeric = this._clampNumber(Number(rawValue), 0, Number.MAX_SAFE_INTEGER);
+              next[index] = { ...next[index], distance: numeric };
+              await this._setSourceCustomCapSquareList(next);
+              await this.update();
+            },
+          },
+          deleteElement: deleteButton,
+        });
+      });
+
+      formContents.push({
+        type: "single-icon",
+        element: html.div(
+          { style: "display: flex; justify-content: flex-start;" },
+          [
+            html.button(
+              {
+                type: "button",
+                style: "padding: 2px 6px; font-size: 11px;",
+                disabled: !canEditSource,
+                onclick: async () => {
+                  this._customDeleteConfirm = { key: null };
+                  const next = this._getSourceCustomCapSquareList();
+                  next.push({
+                    name: this._makeDefaultCustomName(next),
+                    angle: DEFAULT_CAP_ANGLE,
+                    distance: DEFAULT_CAP_DISTANCE,
+                  });
+                  await this._setSourceCustomCapSquareList(next);
+                  await this.update();
+                },
+              },
+              "Add"
+            ),
+          ]
+        ),
+      });
+    };
+
+    const addCustomCapRoundedRows = (keyPrefix) => {
+      const list = this._getSourceCustomCapRoundedList();
+      const customKey = SKELETON_CUSTOM_CAP_ROUNDED_KEY;
+      const pendingKey = this._customDeleteConfirm?.key;
+      if (pendingKey && pendingKey.startsWith(`${customKey}:`)) {
+        const pendingIndex = Number.parseInt(pendingKey.split(":")[1], 10);
+        if (!Number.isFinite(pendingIndex) || pendingIndex >= list.length) {
+          this._customDeleteConfirm = { key: null };
+        }
+      }
+      list.forEach((item, index) => {
+        const nameKey = `${keyPrefix}-name-${index}`;
+        const radiusKey = `${keyPrefix}-radius-${index}`;
+        const tensionKey = `${keyPrefix}-tension-${index}`;
+        const rowId = `${customKey}:${index}`;
+        const isConfirming = this._customDeleteConfirm?.key === rowId;
+        const deleteButton = html.createDomElement("icon-button", {
+          "class": "skeleton-custom-delete",
+          "src": isConfirming ? "/tabler-icons/x.svg" : "/tabler-icons/trash.svg",
+          "style": "width: 1.1em; height: 1.1em;",
+          "data-tooltip": isConfirming ? "Confirm delete" : "Delete",
+          "data-tooltipposition": "left",
+          "disabled": !canEditSource,
+          "onclick": async () => {
+            if (!canEditSource) {
+              return;
+            }
+            if (this._customDeleteConfirm?.key !== rowId) {
+              this._customDeleteConfirm = { key: rowId };
+              await this.update();
+              return;
+            }
+            const next = this._getSourceCustomCapRoundedList();
+            if (!next[index]) return;
+            next.splice(index, 1);
+            this._customDeleteConfirm = { key: null };
+            await this._setSourceCustomCapRoundedList(next);
+            await this.update();
+          },
+        });
+        formContents.push({
+          type: "edit-name-number-pair",
+          fieldName: {
+            type: "edit-text",
+            key: nameKey,
+            value: item.name ?? "",
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomCapRoundedList();
+              if (!next[index]) return;
+              next[index] = { ...next[index], name: String(rawValue ?? "") };
+              await this._setSourceCustomCapRoundedList(next);
+              await this.update();
+            },
+          },
+          fieldValue1: {
+            type: "edit-number",
+            key: radiusKey,
+            value: Number.isFinite(item.radius) ? item.radius : DEFAULT_CAP_RADIUS_RATIO,
+            numDigits: 4,
+            minValue: CAP_RADIUS_MIN,
+            maxValue: CAP_RADIUS_MAX,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomCapRoundedList();
+              if (!next[index]) return;
+              const numeric = this._clampNumber(
+                Number(rawValue),
+                CAP_RADIUS_MIN,
+                CAP_RADIUS_MAX
+              );
+              next[index] = { ...next[index], radius: numeric };
+              await this._setSourceCustomCapRoundedList(next);
+              await this.update();
+            },
+          },
+          fieldValue2: {
+            type: "edit-number",
+            key: tensionKey,
+            value: Math.round((Number.isFinite(item.tension) ? item.tension : 0) * 100),
+            minValue: 0,
+            maxValue: 100,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              this._customDeleteConfirm = { key: null };
+              const next = this._getSourceCustomCapRoundedList();
+              if (!next[index]) return;
+              const percent = this._clampNumber(Number(rawValue), 0, 100);
+              next[index] = { ...next[index], tension: percent / 100 };
+              await this._setSourceCustomCapRoundedList(next);
+              await this.update();
+            },
+          },
+          deleteElement: deleteButton,
+        });
+      });
+
+      formContents.push({
+        type: "single-icon",
+        element: html.div(
+          { style: "display: flex; justify-content: flex-start;" },
+          [
+            html.button(
+              {
+                type: "button",
+                style: "padding: 2px 6px; font-size: 11px;",
+                disabled: !canEditSource,
+                onclick: async () => {
+                  this._customDeleteConfirm = { key: null };
+                  const next = this._getSourceCustomCapRoundedList();
+                  next.push({
+                    name: this._makeDefaultCustomName(next),
+                    radius: DEFAULT_CAP_RADIUS_RATIO,
+                    tension: DEFAULT_CAP_TENSION,
+                  });
+                  await this._setSourceCustomCapRoundedList(next);
+                  await this.update();
+                },
+              },
+              "Add"
+            ),
+          ]
+        ),
+      });
+    };
+
+    formContents.push({ type: "divider" });
+    formContents.push({
+      type: "header",
+        label: "Skeleton Defaults",
+      });
+
+      formContents.push({
+        type: "header",
+        label: "Widths: Uppercase",
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonCapitalBase",
+        label: "Base",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_CAPITAL_BASE_KEY,
+          DEFAULT_WIDTH_CAPITAL_BASE
+        ),
+        minValue: 1,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), 1, Number.MAX_SAFE_INTEGER);
+          await setSourceValue(SKELETON_WIDTH_CAPITAL_BASE_KEY, value);
+        },
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonCapitalHorizontal",
+        label: "Horizontal",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY,
+          DEFAULT_WIDTH_CAPITAL_HORIZONTAL
+        ),
+        minValue: 1,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), 1, Number.MAX_SAFE_INTEGER);
+          await setSourceValue(SKELETON_WIDTH_CAPITAL_HORIZONTAL_KEY, value);
+        },
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonCapitalContrast",
+        label: "Contrast",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_CAPITAL_CONTRAST_KEY,
+          DEFAULT_WIDTH_CAPITAL_CONTRAST
+        ),
+        minValue: 1,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), 1, Number.MAX_SAFE_INTEGER);
+          await setSourceValue(SKELETON_WIDTH_CAPITAL_CONTRAST_KEY, value);
+        },
+      });
+        addCustomWidthRows(
+          SKELETON_CUSTOM_WIDTHS_UPPERCASE_KEY,
+          "skeletonCustomUppercase"
+        );
+
+        formContents.push({
+          type: "header",
+          label: "Widths: Lowercase",
+        });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonLowercaseBase",
+        label: "Base",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_LOWERCASE_BASE_KEY,
+          DEFAULT_WIDTH_LOWERCASE_BASE
+        ),
+        minValue: 1,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), 1, Number.MAX_SAFE_INTEGER);
+          await setSourceValue(SKELETON_WIDTH_LOWERCASE_BASE_KEY, value);
+        },
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonLowercaseHorizontal",
+        label: "Horizontal",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY,
+          DEFAULT_WIDTH_LOWERCASE_HORIZONTAL
+        ),
+        minValue: 1,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), 1, Number.MAX_SAFE_INTEGER);
+          await setSourceValue(SKELETON_WIDTH_LOWERCASE_HORIZONTAL_KEY, value);
+        },
+      });
+      formContents.push({
+        type: "edit-number",
+        key: "skeletonLowercaseContrast",
+        label: "Contrast",
+        value: this._getSourceCustomDataValue(
+          SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY,
+          DEFAULT_WIDTH_LOWERCASE_CONTRAST
+        ),
+        minValue: 1,
+        disabled: !canEditSource,
+        setValuePlain: async (_fieldItem, rawValue) => {
+          const value = this._clampNumber(Number(rawValue), 1, Number.MAX_SAFE_INTEGER);
+          await setSourceValue(SKELETON_WIDTH_LOWERCASE_CONTRAST_KEY, value);
+        },
+      });
+        addCustomWidthRows(
+          SKELETON_CUSTOM_WIDTHS_LOWERCASE_KEY,
+          "skeletonCustomLowercase"
+        );
+
+        formContents.push({
+          type: "header",
+          label: "Cap Styles: Square",
+        });
+        formContents.push({
+          type: "cap-table-header",
+          label: "",
+          col1: "Angle",
+          col2: "Distance",
+        });
+        formContents.push({
+          type: "cap-table-row",
+          label: "base",
+          fieldValue1: {
+            type: "edit-number",
+            key: "skeletonCapAngle",
+            value: this._getSourceCustomDataValue(
+              SKELETON_CAP_ANGLE_KEY,
+              DEFAULT_CAP_ANGLE
+            ),
+            minValue: CAP_ANGLE_MIN,
+            maxValue: CAP_ANGLE_MAX,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              const value = this._clampNumber(
+                Number(rawValue),
+                CAP_ANGLE_MIN,
+                CAP_ANGLE_MAX
+              );
+              await setSourceValue(SKELETON_CAP_ANGLE_KEY, value);
+            },
+          },
+          fieldValue2: {
+            type: "edit-number",
+            key: "skeletonCapDistance",
+            value: this._getSourceCustomDataValue(
+              SKELETON_CAP_DISTANCE_KEY,
+              DEFAULT_CAP_DISTANCE
+            ),
+            minValue: 0,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              const value = this._clampNumber(Number(rawValue), 0, Number.MAX_SAFE_INTEGER);
+              await setSourceValue(SKELETON_CAP_DISTANCE_KEY, value);
+            },
+          },
+        });
+        addCustomCapSquareRows("skeletonCustomCapSquare");
+
+          formContents.push({
+            type: "header",
+            label: "Cap Styles: Rounded",
+          });
+        formContents.push({
+          type: "cap-table-header",
+          label: "",
+          col1: "Radius",
+          col2: "Tension",
+        });
+        formContents.push({
+          type: "cap-table-row",
+          label: "base",
+          fieldValue1: {
+            type: "edit-number",
+            key: "skeletonCapRadiusRatio",
+            value: this._getSourceCustomDataValue(
+              SKELETON_CAP_RADIUS_RATIO_KEY,
+              DEFAULT_CAP_RADIUS_RATIO
+            ),
+            numDigits: 4,
+            minValue: CAP_RADIUS_MIN,
+            maxValue: CAP_RADIUS_MAX,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              const value = this._clampNumber(
+                Number(rawValue),
+                CAP_RADIUS_MIN,
+                CAP_RADIUS_MAX
+              );
+              await setSourceValue(SKELETON_CAP_RADIUS_RATIO_KEY, value);
+            },
+          },
+          fieldValue2: {
+            type: "edit-number",
+            key: "skeletonCapTension",
+            value: Math.round(
+              this._getSourceCustomDataValue(
+                SKELETON_CAP_TENSION_KEY,
+                DEFAULT_CAP_TENSION
+              ) * 100
+            ),
+            minValue: 0,
+            maxValue: 100,
+            disabled: !canEditSource,
+            setValuePlain: async (_fieldItem, rawValue) => {
+              const percent = this._clampNumber(Number(rawValue), 0, 100);
+              await setSourceValue(SKELETON_CAP_TENSION_KEY, percent / 100);
+            },
+          },
+        });
+        addCustomCapRoundedRows("skeletonCustomCapRounded");
 
     this._formFieldsByKey = {};
     for (const field of formContents) {
       if (field.fieldX) {
         this._formFieldsByKey[field.fieldX.key] = field.fieldX;
         this._formFieldsByKey[field.fieldY.key] = field.fieldY;
-      } else {
+        continue;
+      }
+      if (field.fieldName && field.fieldValue) {
+        this._formFieldsByKey[field.fieldName.key] = field.fieldName;
+        this._formFieldsByKey[field.fieldValue.key] = field.fieldValue;
+        continue;
+      }
+      if (field.fieldName && field.fieldValue1 && field.fieldValue2) {
+        this._formFieldsByKey[field.fieldName.key] = field.fieldName;
+        this._formFieldsByKey[field.fieldValue1.key] = field.fieldValue1;
+        this._formFieldsByKey[field.fieldValue2.key] = field.fieldValue2;
+        continue;
+      }
+      if (field.fieldValue1 && field.fieldValue2) {
+        this._formFieldsByKey[field.fieldValue1.key] = field.fieldValue1;
+        this._formFieldsByKey[field.fieldValue2.key] = field.fieldValue2;
+        continue;
+      }
+      if (field.key) {
         this._formFieldsByKey[field.key] = field;
       }
     }
@@ -800,7 +1865,10 @@ export default class SelectionInfoPanel extends Panel {
     this.infoForm.onFieldChange = async (fieldItem, value, valueStream) => {
       if (fieldItem.setValuePlain) {
         assert(!valueStream, "unexpected valueStream");
-        fieldItem.setValuePlain(fieldItem, value);
+        const result = fieldItem.setValuePlain(fieldItem, value);
+        if (result && typeof result.then === "function") {
+          await result;
+        }
       } else {
         await this._onFieldChangeForGlyph(
           glyphName,
@@ -885,6 +1953,9 @@ export default class SelectionInfoPanel extends Panel {
     if (["xAdvance", "leftMargin", "rightMargin"].includes(changePath[0])) {
       this._updateGlyphMetrics(glyphName, changePath[0]);
     }
+    if (fieldItem.sidebearingVarSide) {
+      await this.update();
+    }
   }
 
   async _updateGlyphMetrics(glyphName, changedKey) {
@@ -908,8 +1979,9 @@ export default class SelectionInfoPanel extends Panel {
       leftMargin: "rightMargin",
       rightMargin: "leftMargin",
     };
-
-    let value = Number(expression);
+    const rawExpression = typeof expression === "string" ? expression : "";
+    const strippedExpression = stripDisplaySuffix(rawExpression);
+    let value = Number(strippedExpression);
     if (!isNaN(value)) {
       return value;
     }
@@ -926,7 +1998,7 @@ export default class SelectionInfoPanel extends Panel {
     );
 
     try {
-      const dummyResult = compute(expression, undefined, namespace);
+      const dummyResult = compute(strippedExpression, undefined, namespace);
     } catch (e) {
       return { error: e.message };
     }
@@ -956,11 +2028,11 @@ export default class SelectionInfoPanel extends Panel {
       }
     }
 
-    return {
+    const result = {
       getValue: (layerName) => {
         try {
           return ensureFiniteNumber(
-            compute(expression, undefined, layerVariables[layerName])
+            compute(strippedExpression, undefined, layerVariables[layerName])
           );
         } catch (e) {
           console.error(e);
@@ -968,9 +2040,21 @@ export default class SelectionInfoPanel extends Panel {
         return 0;
       },
       value: ensureFiniteNumber(
-        compute(expression, undefined, layerVariables[mainLayerName])
+        compute(strippedExpression, undefined, layerVariables[mainLayerName])
       ),
     };
+    if (sidebearingOpposites[metricProperty]) {
+      const parsed = parseSidebearingVariableRef(
+        strippedExpression,
+        metricProperty,
+        this.fontController.glyphMap
+      );
+      if (parsed) {
+        result.variableRef = { glyph: parsed.glyph, side: parsed.side };
+        result.displayName = parsed.displayName;
+      }
+    }
+    return result;
   }
 
   _getEditingLocations(varGlyphController) {
@@ -1088,6 +2172,10 @@ function deleteNestedValue(subject, path) {
 function applyNewValue(glyph, layerInfo, value, fieldItem, absolute) {
   const setFieldValue = fieldItem.setValue || defaultSetFieldValue;
   const deleteFieldValue = fieldItem.deleteValue || defaultDeleteFieldValue;
+  const sidebearingVarSide = fieldItem.sidebearingVarSide;
+  const variableRef =
+    value && typeof value === "object" && value.variableRef ? value.variableRef : null;
+  const hasVariableRef = !!(sidebearingVarSide && variableRef);
 
   const primaryOrgValue = layerInfo[0].orgValue;
   const isNumber = typeof primaryOrgValue === "number";
@@ -1111,8 +2199,35 @@ function applyNewValue(glyph, layerInfo, value, fieldItem, absolute) {
           layers[layerName].glyph,
           layerGlyphController,
           fieldItem,
-          newValue
+          newValue,
+          layers[layerName]
         );
+      }
+      if (sidebearingVarSide) {
+        const layer = layers[layerName];
+        if (!layer) {
+          continue;
+        }
+        const customData = layer.customData || (layer.customData = {});
+        const existingVars = customData[SIDEBEARING_VARIABLES_KEY];
+        if (hasVariableRef) {
+          const layerValue = value?.getValue ? value.getValue(layerName) : value;
+          const vars = { ...(existingVars || {}) };
+          vars[sidebearingVarSide] = {
+            glyph: variableRef.glyph,
+            side: variableRef.side,
+            value: layerValue,
+          };
+          customData[SIDEBEARING_VARIABLES_KEY] = vars;
+        } else if (existingVars?.[sidebearingVarSide]) {
+          const vars = { ...existingVars };
+          delete vars[sidebearingVarSide];
+          if (!vars.left && !vars.right) {
+            delete customData[SIDEBEARING_VARIABLES_KEY];
+          } else {
+            customData[SIDEBEARING_VARIABLES_KEY] = vars;
+          }
+        }
       }
     }
   });
@@ -1126,6 +2241,58 @@ function maybeClampValue(value, min, max) {
     value = Math.min(value, max);
   }
   return value;
+}
+
+function maybeRoundToString(value, digits) {
+  return value == undefined
+    ? ""
+    : digits == undefined
+      ? String(value)
+      : String(round(value, digits));
+}
+
+function stripDisplaySuffix(expression) {
+  if (typeof expression !== "string") return "";
+  const trimmed = expression.trim();
+  const match = trimmed.match(/^(.*?)(?:\s*\(\s*-?\d+(?:\.\d+)?\s*\)\s*)$/);
+  return match ? match[1].trim() : trimmed;
+}
+
+function formatSidebearingVariableDisplay(entry, fieldSide, numDigits) {
+  if (!entry?.glyph) return null;
+  const displayName =
+    entry.side && entry.side !== fieldSide ? `${entry.glyph}!` : entry.glyph;
+  const valueString = Number.isFinite(entry.value)
+    ? maybeRoundToString(entry.value, numDigits)
+    : "";
+  return valueString ? `${displayName} (${valueString})` : displayName;
+}
+
+function parseSidebearingVariableRef(expression, metricProperty, glyphMap) {
+  const opposites = { leftMargin: "rightMargin", rightMargin: "leftMargin" };
+  const opposite = opposites[metricProperty];
+  if (!opposite || !glyphMap) {
+    return null;
+  }
+  const stripped = stripDisplaySuffix(expression);
+  const trimmed = stripped.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const hasBang = trimmed.endsWith("!");
+  const glyphName = hasBang ? trimmed.slice(0, -1) : trimmed;
+  if (!glyphName || glyphMap[glyphName] === undefined) {
+    return null;
+  }
+  if (trimmed !== (hasBang ? glyphName + "!" : glyphName)) {
+    return null;
+  }
+  const metricForRef = hasBang ? opposite : metricProperty;
+  return {
+    glyph: glyphName,
+    side: metricForRef === "leftMargin" ? "left" : "right",
+    displayName: trimmed,
+  };
 }
 
 function makeCodePointsString(codePoints) {
