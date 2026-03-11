@@ -11,7 +11,17 @@ We want to bring the same editing principle used by skeleton S/D drag to regular
 6. Handle angles must stay fixed.
 7. Handle lengths should be recomputed with the same tension-preserving principle used by skeleton fixed-rib drag.
 
-This is not a contour-wide geometric offset tool and not a BezierJS refit feature for v1. The shipping implementation should adapt the existing regular drag/scaling path and the existing skeleton fixed-rib handle-reconstruction logic.
+This is not a contour-wide geometric offset tool and not a BezierJS refit feature for v1.
+
+It is also explicitly not fixed-rib drag for regular contours.
+
+That means:
+
+1. regular-contour `S` / `D` drag must not reuse skeleton fixed-rib routing semantics
+2. regular-contour `S` / `D` drag must not be modeled as a fake "fixed rib" mode with no rib
+3. regular-contour `S` / `D` drag may reuse only reconstruction principles from skeleton code, not the fixed-rib feature contract itself
+
+The shipping implementation should adapt the existing regular drag/scaling path and reuse only the handle-reconstruction principles from the skeleton implementation.
 
 ---
 
@@ -28,6 +38,7 @@ Mandatory constraints:
 5. Keep canonical point-like behavior math in existing files only.
 6. Do not create new source files for this chapter.
 7. Before implementation, declare the target source files and keep the work inside them.
+8. Do not repurpose skeleton fixed-rib routing rows or semantics as the regular-contour implementation surface.
 
 Target source-file ownership for this feature:
 
@@ -63,6 +74,7 @@ For regular contours:
 2. Holding `D` during drag enters the same normal-offset mode.
 3. Both shortcuts are behaviorally identical for regular contours.
 4. Existing distinct `S` / `D` semantics remain unchanged for skeleton editing.
+5. The keys are shared with skeleton editing, but the regular implementation is a separate feature with its own semantics.
 
 ### 2.2 Selection model
 The mode applies only to selected regular on-curve points.
@@ -88,6 +100,7 @@ This means:
 1. Expansion vs compression is not derived from absolute cursor direction.
 2. Other points do not derive their own independent scalars from the mouse delta.
 3. The clicked point determines the scalar sign and magnitude for the whole edit.
+4. This is not a fixed-side or fixed-rib computation in disguised form.
 
 ### 2.4 Boundary rule
 At the boundary against non-selected geometry:
@@ -136,7 +149,11 @@ Those already solve most of the hard problems we need:
 5. handle direction preservation
 6. tension-aware cubic handle length reconstruction
 
-Conclusion: the regular version should be implemented as a new regular-contour drag path that borrows the skeleton handle-reconstruction strategy rather than inventing a second geometry engine.
+Conclusion:
+
+1. the regular version should be implemented as a new regular-contour drag path
+2. it may borrow handle-reconstruction strategy from the skeleton implementation
+3. it must not reuse the fixed-rib feature contract, fixed-rib route identity, or fixed-rib expand/compress semantics
 
 ---
 
@@ -157,6 +174,7 @@ Important:
 1. For regular contours, treat both flags as the same mode.
 2. Do not branch on "compress" vs "expand" semantics.
 3. Use the same canonical route for both shortcut states.
+4. Do not route regular contours through the skeleton fixed-rib rows/behavior and then special-case them downstream.
 
 Ownership by file:
 
@@ -176,7 +194,7 @@ The pointer tool must not:
 ---
 
 ## Step 02. Define a pure helper for regular normal drag
-Create pure behavior-level math in `src-js/views-editor/src/edit-behavior.js`, parallel in spirit to the skeleton fixed-rib helper but regular-path specific.
+Create pure behavior-level math in `src-js/views-editor/src/edit-behavior.js`, informed by the same reconstruction quality goals as the skeleton implementation but regular-path specific.
 
 Suggested name:
 
@@ -309,7 +327,7 @@ Principle:
 2. Use original handle direction vectors as the source of truth.
 3. Recompute only handle lengths.
 
-This should mirror the skeleton fixed-rib fix that preserves handle directions in both single-handle and two-handle cases.
+This should mirror the skeleton handle-preservation principle in both single-handle and two-handle cases, without importing fixed-rib semantics.
 
 For each affected segment:
 
@@ -334,7 +352,7 @@ Affected segment means:
 ## Step 07. Preserve tension when reconstructing cubic handles
 This is a required quality target from the user.
 
-Use the same principle already present in skeleton fixed-rib scaling:
+Use the same principle already present in skeleton handle reconstruction:
 
 1. derive segment tension information from original cubic geometry
 2. when the new segment endpoints are known, compute handle lengths from preserved tension
@@ -344,7 +362,7 @@ Existing reference behavior:
 
 1. `calculateHandleTensionsForSegment(...)`
 2. `computeHandleLengthsFromTensions(...)`
-3. the cubic reconstruction logic in the skeleton fixed-rib helper
+3. the cubic reconstruction logic in the skeleton helper
 
 Plan for reuse:
 
@@ -480,6 +498,7 @@ Avoid:
 1. copying the full skeleton helper wholesale
 2. making regular path depend on skeleton-specific data structures
 3. creating a new helper file just for this feature
+4. treating the regular feature as a variant of fixed-rib drag instead of its own drag mode
 
 ---
 
@@ -548,6 +567,7 @@ Conclusion:
 1. Regular drag without `S` or `D` behaves exactly as before.
 2. Skeleton `S` / `D` drag behaves exactly as before.
 3. Pointer still only routes; no direct pointer-owned execution is reintroduced.
+4. Regular `S` / `D` drag does not rely on skeleton fixed-rib row selection or fixed-side semantics.
 
 ---
 
@@ -590,6 +610,7 @@ That combination is valid, but it needs careful segment ownership logic.
 5. Keep behavior math in `edit-behavior.js`, not in adapters or pointer.
 6. Keep persistence in adapters, not in `edit-behavior.js`.
 7. Keep the work inside existing target files only.
+8. Keep the regular feature semantically separate from skeleton fixed-rib drag even if some low-level helpers are shared.
 
 ---
 
