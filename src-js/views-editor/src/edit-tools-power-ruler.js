@@ -1,5 +1,5 @@
 import { translate } from "@fontra/core/localization.js";
-import { range, round, throttleCalls } from "@fontra/core/utils.js";
+import { enumerate, range, round, throttleCalls } from "@fontra/core/utils.js";
 import * as vector from "@fontra/core/vector.js";
 import { constrainHorVerDiag } from "./edit-behavior.js";
 import { BaseTool } from "./edit-tools-base.js";
@@ -12,6 +12,7 @@ import {
 let thePowerRulerTool; // singleton
 
 const POWER_RULER_IDENTIFIER = "fontra.power.ruler";
+const STATIC_RULER_LINE_OPACITY = 0.4; // Opacity multiplier for static ruler lines
 
 registerVisualizationLayerDefinition({
   identifier: POWER_RULER_IDENTIFIER,
@@ -49,8 +50,10 @@ export class PowerRulerTool extends BaseTool {
     super(editor);
     thePowerRulerTool = this;
     this.fontController = editor.fontController;
+    // New data structure: { [glyphName]: { activeRulerId: string|null, rulers: {...} } }
     this.glyphRulers = {};
     this.active = editor.visualizationLayersSettings.model[POWER_RULER_IDENTIFIER];
+    this._rulerCounter = 0; // For generating unique ruler IDs and names
 
     editor.sceneSettingsController.addKeyListener(
       ["fontLocationSourceMapped", "glyphLocation"],
@@ -74,6 +77,7 @@ export class PowerRulerTool extends BaseTool {
 
     this.sceneController.addCurrentGlyphChangeListener((event) => {
       this.recalc();
+      this.notifyPanelOfRulerChange();
     });
   }
 
@@ -81,64 +85,273 @@ export class PowerRulerTool extends BaseTool {
     return this.sceneSettings.selectedGlyphName;
   }
 
+  getRulerData(glyphName) {
+    // Backward compatibility: migrate old single-ruler format to new format
+    const data = this.glyphRulers[glyphName];
+    if (!data) {
+      return null;
+    }
+    // Check if it's old format (has basePoint directly)
+    if (data.basePoint !== undefined) {
+      // Migrate to new format
+      const rulerId = `ruler-${Date.now()}`;
+      this.glyphRulers[glyphName] = {
+        activeRulerId: rulerId,
+        rulers: {
+          [rulerId]: {
+            ...data,
+            id: rulerId,
+            name: this.generateRulerName(),
+          },
+        },
+      };
+    }
+    return this.glyphRulers[glyphName];
+  }
+
+  generateRulerName() {
+    this._rulerCounter++;
+    return translate("sidebar.power-rulers.ruler-name", this._rulerCounter);
+  }
+
+  getActiveRuler(glyphName) {
+    const data = this.getRulerData(glyphName);
+    if (!data || !data.activeRulerId) {
+      return null;
+    }
+    return data.rulers[data.activeRulerId];
+  }
+
+  setActiveRuler(glyphName, rulerId) {
+    const data = this.getRulerData(glyphName);
+    if (!data) {
+      return;
+    }
+    // Deactivate all rulers
+    for (const ruler of Object.values(data.rulers)) {
+      ruler.isActive = false;
+    }
+    // Activate the specified ruler
+    if (data.rulers[rulerId]) {
+      data.rulers[rulerId].isActive = true;
+      data.activeRulerId = rulerId;
+    }
+    this.notifyPanelOfRulerChange();
+  }
+
+  createRuler(glyphName, basePoint, directionVector) {
+    const glyphController = this.sceneModel._getSelectedStaticGlyphController();
+    if (!glyphController) {
+      return null;
+    }
+
+    const rulerId = `ruler-${Date.now()}-${this._rulerCounter}`;
+    const extraLines = this.computeSideBearingLines(glyphController);
+    const rulerData = this.recalcRulerFromLine(
+      glyphController,
+      basePoint,
+      directionVector,
+      extraLines,
+      true // isActive
+    );
+
+    if (!this.glyphRulers[glyphName]) {
+      this.glyphRulers[glyphName] = { activeRulerId: null, rulers: {} };
+    }
+
+    // Deactivate all existing rulers
+    for (const ruler of Object.values(this.glyphRulers[glyphName].rulers)) {
+      ruler.isActive = false;
+    }
+
+    // Add new ruler as active
+    rulerData.id = rulerId;
+    rulerData.name = this.generateRulerName();
+    rulerData.isActive = true;
+    this.glyphRulers[glyphName].rulers[rulerId] = rulerData;
+    this.glyphRulers[glyphName].activeRulerId = rulerId;
+    this._rulerCounter++;
+
+    this.notifyPanelOfRulerChange();
+    return rulerId;
+  }
+
+  deleteRuler(glyphName, rulerId) {
+    const data = this.getRulerData(glyphName);
+    if (!data || !data.rulers[rulerId]) {
+      return;
+    }
+
+    delete data.rulers[rulerId];
+
+    // If we deleted the active ruler, pick a new active one
+    if (data.activeRulerId === rulerId) {
+      const remainingRulers = Object.keys(data.rulers);
+      if (remainingRulers.length > 0) {
+        data.activeRulerId = remainingRulers[0];
+        data.rulers[remainingRulers[0]].isActive = true;
+      } else {
+        data.activeRulerId = null;
+      }
+    }
+
+    // Clean up empty glyph entry
+    if (Object.keys(data.rulers).length === 0) {
+      delete this.glyphRulers[glyphName];
+    }
+
+    this.notifyPanelOfRulerChange();
+    this.canvasController.requestUpdate();
+  }
+
+  deleteActiveRuler(glyphName) {
+    const data = this.getRulerData(glyphName);
+    if (data && data.activeRulerId) {
+      this.deleteRuler(glyphName, data.activeRulerId);
+    }
+  }
+
+  updateRulerPosition(glyphName, rulerId, basePoint, directionVector) {
+    const glyphController = this.sceneModel._getSelectedStaticGlyphController();
+    if (!glyphController || !this.glyphRulers[glyphName]?.rulers[rulerId]) {
+      return;
+    }
+
+    const extraLines = this.computeSideBearingLines(glyphController);
+    const updatedRuler = this.recalcRulerFromLine(
+      glyphController,
+      basePoint,
+      directionVector,
+      extraLines,
+      false // don't set isActive, preserve existing
+    );
+
+    const oldRuler = this.glyphRulers[glyphName].rulers[rulerId];
+    updatedRuler.id = rulerId;
+    updatedRuler.name = oldRuler.name;
+    updatedRuler.isActive = oldRuler.isActive;
+
+    this.glyphRulers[glyphName].rulers[rulerId] = updatedRuler;
+    this.notifyPanelOfRulerChange();
+  }
+
+  notifyPanelOfRulerChange() {
+    // Notify any listening panels that ruler data changed
+    setTimeout(() => {
+      if (this.editor.powerRulersPanel) {
+        this.editor.powerRulersPanel.update();
+      }
+    }, 0);
+  }
+
   draw(context, positionedGlyph, parameters, model, controller) {
     if (!this.currentGlyphName) {
       return; // Shouldn't happen
     }
-    const rulerData = this.glyphRulers[this.currentGlyphName];
-    if (!rulerData) {
+    const rulerData = this.getRulerData(this.currentGlyphName);
+    if (!rulerData || !Object.keys(rulerData.rulers).length) {
       return;
     }
-    const { intersections, measurePoints } = rulerData;
-    if (intersections?.length < 2) {
-      return;
-    }
-    const p1 = intersections[0];
-    const p2 = intersections.at(-1);
 
-    context.lineWidth = parameters.strokeWidth;
-    context.strokeStyle = parameters.strokeColor;
-    strokeLine(context, p1.x, p1.y, p2.x, p2.y);
-
-    context.fillStyle = parameters.intersectionColor;
-    for (const intersection of intersections) {
-      fillCircle(
-        context,
-        intersection.x,
-        intersection.y,
-        parameters.intersectionRadius
-      );
-    }
-
-    context.font = `bold ${parameters.fontSize}px fontra-ui-regular, sans-serif`;
-    context.textAlign = "center";
-
-    context.scale(1, -1);
-    for (const measurePoint of measurePoints) {
-      if (measurePoint.distance < 0.1) {
+    // Draw all rulers
+    for (const [rulerId, ruler] of Object.entries(rulerData.rulers)) {
+      const { intersections, measurePoints } = ruler;
+      if (intersections?.length < 2) {
         continue;
       }
-      const distance = measurePoint.distance.toString();
-      context.fillStyle = measurePoint.inside
-        ? parameters.insideBlobColor
-        : parameters.outsideBlobColor;
-      const width = context.measureText(distance).width;
-      fillPill(
-        context,
-        measurePoint.x,
-        -measurePoint.y,
-        width + parameters.fontSize,
-        parameters.fontSize * 1.3
-      );
-      context.fillStyle = measurePoint.inside
-        ? parameters.insideTextColor
-        : parameters.outsideTextColor;
-      context.fillText(
-        distance,
-        measurePoint.x,
-        -measurePoint.y + parameters.fontSize * 0.33
-      );
+      const p1 = intersections[0];
+      const p2 = intersections.at(-1);
+
+      const isActive = ruler.isActive || rulerId === rulerData.activeRulerId;
+
+      // Draw ruler line with appropriate opacity
+      context.lineWidth = parameters.strokeWidth;
+      if (isActive) {
+        context.strokeStyle = parameters.strokeColor;
+      } else {
+        // Static ruler: reduce opacity
+        context.strokeStyle = this.applyOpacityToColor(
+          parameters.strokeColor,
+          STATIC_RULER_LINE_OPACITY
+        );
+      }
+      strokeLine(context, p1.x, p1.y, p2.x, p2.y);
+
+      // Draw intersection markers (full opacity for all rulers)
+      context.fillStyle = parameters.intersectionColor;
+      for (const intersection of intersections) {
+        fillCircle(
+          context,
+          intersection.x,
+          intersection.y,
+          parameters.intersectionRadius
+        );
+      }
+
+      // Draw distance labels (full opacity for all rulers)
+      context.font = `bold ${parameters.fontSize}px fontra-ui-regular, sans-serif`;
+      context.textAlign = "center";
+
+      context.scale(1, -1);
+      for (const measurePoint of measurePoints) {
+        if (measurePoint.distance < 0.1) {
+          continue;
+        }
+        const distance = measurePoint.distance.toString();
+        context.fillStyle = measurePoint.inside
+          ? parameters.insideBlobColor
+          : parameters.outsideBlobColor;
+        const width = context.measureText(distance).width;
+        fillPill(
+          context,
+          measurePoint.x,
+          -measurePoint.y,
+          width + parameters.fontSize,
+          parameters.fontSize * 1.3
+        );
+        context.fillStyle = measurePoint.inside
+          ? parameters.insideTextColor
+          : parameters.outsideTextColor;
+        context.fillText(
+          distance,
+          measurePoint.x,
+          -measurePoint.y + parameters.fontSize * 0.33
+        );
+      }
+      context.scale(1, -1); // Restore scale
     }
+  }
+
+  applyOpacityToColor(cssColor, opacity) {
+    // Parse CSS color and apply opacity multiplier
+    // Handles formats: #RGB, #RRGGBB, #RGBA, #RRGGBBAA
+    if (!cssColor.startsWith("#")) {
+      return cssColor;
+    }
+    const hex = cssColor.slice(1);
+    if (hex.length === 3) {
+      // #RGB -> #RRGGBBAA
+      const r = hex[0], g = hex[1], b = hex[2];
+      const alpha = Math.round(255 * opacity).toString(16).padStart(2, '0');
+      return `#${r}${r}${g}${g}${b}${b}${alpha}`;
+    } else if (hex.length === 4) {
+      // #RGBA -> #RRGGBBAA
+      const r = hex[0], g = hex[1], b = hex[2], a = hex[3];
+      const alphaHex = parseInt(a + a, 16);
+      const newAlpha = Math.round(alphaHex * opacity).toString(16).padStart(2, '0');
+      return `#${r}${r}${g}${g}${b}${b}${newAlpha}`;
+    } else if (hex.length === 6) {
+      // #RRGGBB -> #RRGGBBAA
+      const alpha = Math.round(255 * opacity).toString(16).padStart(2, '0');
+      return `#${hex}${alpha}`;
+    } else if (hex.length === 8) {
+      // #RRGGBBAA - modify alpha
+      const rgb = hex.slice(0, 6);
+      const alphaHex = parseInt(hex.slice(6, 8), 16);
+      const newAlpha = Math.round(alphaHex * opacity).toString(16).padStart(2, '0');
+      return `#${rgb}${newAlpha}`;
+    }
+    return cssColor;
   }
 
   glyphChanged(glyphName) {
@@ -153,25 +366,34 @@ export class PowerRulerTool extends BaseTool {
     if (!this.active || !this.currentGlyphName) {
       return;
     }
-    const ruler = this.glyphRulers[this.currentGlyphName];
+    const data = this.getRulerData(this.currentGlyphName);
+    if (!data || !data.activeRulerId) {
+      return;
+    }
+    const ruler = data.rulers[data.activeRulerId];
     if (!ruler) {
       return;
     }
     const glyphController = await this.sceneModel.getSelectedStaticGlyphController();
     const extraLines = this.computeSideBearingLines(glyphController);
 
-    this.glyphRulers[this.currentGlyphName] = this.recalcRulerFromLine(
+    const updatedRuler = this.recalcRulerFromLine(
       glyphController,
       ruler.basePoint,
       ruler.directionVector,
-      extraLines
+      extraLines,
+      true // preserve isActive
     );
+    updatedRuler.id = ruler.id;
+    updatedRuler.name = ruler.name;
+    updatedRuler.isActive = true;
+    data.rulers[data.activeRulerId] = updatedRuler;
+
     this.canvasController.requestUpdate();
   }
 
   recalcRulerFromPoint(glyphController, point, shiftConstrain) {
-    delete this.glyphRulers[this.currentGlyphName];
-
+    // Create a new ruler at the point (replaces any existing active ruler behavior)
     const extraLines = this.computeSideBearingLines(glyphController);
 
     const pathHitTester = glyphController.flattenedPathHitTester;
@@ -187,17 +409,12 @@ export class PowerRulerTool extends BaseTool {
         directionVector = constrainHorVerDiag(directionVector);
       }
 
-      this.glyphRulers[this.currentGlyphName] = this.recalcRulerFromLine(
-        glyphController,
-        point,
-        directionVector,
-        extraLines
-      );
+      this.createRuler(this.currentGlyphName, point, directionVector);
     }
     this.canvasController.requestUpdate();
   }
 
-  recalcRulerFromLine(glyphController, basePoint, directionVector, extraLines) {
+  recalcRulerFromLine(glyphController, basePoint, directionVector, extraLines, preserveActive = false) {
     const pathHitTester = glyphController.flattenedPathHitTester;
 
     const intersections = pathHitTester.rayIntersections(
@@ -224,6 +441,7 @@ export class PowerRulerTool extends BaseTool {
       directionVector,
       intersections,
       measurePoints,
+      isActive: preserveActive,
     };
   }
 
@@ -290,18 +508,44 @@ export class PowerRulerTool extends BaseTool {
     if (!this.currentGlyphName) {
       return;
     }
-    const isDoubleClick = initialEvent.detail == 2;
-    this.editor.visualizationLayersSettings.model[POWER_RULER_IDENTIFIER] =
-      !isDoubleClick;
-    if (isDoubleClick) {
-      return;
-    }
 
     const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
     const point = this.sceneController.localPoint(initialEvent);
     point.x -= positionedGlyph.x;
     point.y -= positionedGlyph.y;
-    this.recalcRulerFromPoint(positionedGlyph.glyph, point, initialEvent.shiftKey);
+
+    // Double-click creates a new ruler
+    if (initialEvent.detail == 2) {
+      // Double-click: create new ruler at this position
+      const glyphController = this.sceneModel._getSelectedStaticGlyphController();
+      if (glyphController) {
+        const extraLines = this.computeSideBearingLines(glyphController);
+        const pathHitTester = glyphController.flattenedPathHitTester;
+        const nearestHit = pathHitTester.findNearest(point, extraLines);
+        
+        if (nearestHit) {
+          const derivative = nearestHit.segment.bezier.derivative(nearestHit.t);
+          let directionVector = vector.normalizeVector({
+            x: -derivative.y,
+            y: derivative.x,
+          });
+
+          if (initialEvent.shiftKey) {
+            directionVector = constrainHorVerDiag(directionVector);
+          }
+
+          this.createRuler(this.currentGlyphName, point, directionVector);
+        }
+      }
+      this.canvasController.requestUpdate();
+      return;
+    }
+
+    // Single click/drag: update existing active ruler position
+    const activeRuler = this.getActiveRuler(this.currentGlyphName);
+    if (!activeRuler) {
+      return;
+    }
 
     let lastPoint = point;
     for await (const event of eventStream) {
@@ -315,16 +559,56 @@ export class PowerRulerTool extends BaseTool {
         point.y -= positionedGlyph.y;
         lastPoint = point;
       }
-      this.recalcRulerFromPoint(positionedGlyph.glyph, point, event.shiftKey);
+
+      // Update active ruler position during drag
+      const glyphController = this.sceneModel._getSelectedStaticGlyphController();
+      if (glyphController) {
+        const extraLines = this.computeSideBearingLines(glyphController);
+        const pathHitTester = glyphController.flattenedPathHitTester;
+        const nearestHit = pathHitTester.findNearest(point, extraLines);
+
+        if (nearestHit) {
+          const derivative = nearestHit.segment.bezier.derivative(nearestHit.t);
+          let directionVector = vector.normalizeVector({
+            x: -derivative.y,
+            y: derivative.x,
+          });
+
+          if (event.shiftKey) {
+            directionVector = constrainHorVerDiag(directionVector);
+          }
+
+          this.updateRulerPosition(
+            this.currentGlyphName,
+            this.getRulerData(this.currentGlyphName).activeRulerId,
+            point,
+            directionVector
+          );
+        }
+      }
     }
   }
 
   handleKeyDown(event) {
     if (event.key === "Backspace" && this.currentGlyphName) {
       event.stopImmediatePropagation();
-      delete this.glyphRulers[this.currentGlyphName];
-      this.canvasController.requestUpdate();
+      this.deleteActiveRuler(this.currentGlyphName);
     }
+  }
+
+  // Helper method for panel to get all rulers for current glyph
+  getAllRulers(glyphName) {
+    const data = this.getRulerData(glyphName);
+    if (!data) {
+      return [];
+    }
+    return Object.values(data.rulers);
+  }
+
+  // Helper method for panel to get active ruler ID
+  getActiveRulerId(glyphName) {
+    const data = this.getRulerData(glyphName);
+    return data?.activeRulerId || null;
   }
 }
 
