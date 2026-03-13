@@ -75,7 +75,8 @@ export class PowerRulerTool extends BaseTool {
       (event) => this.recalc()
     );
 
-    this.sceneController.addCurrentGlyphChangeListener((event) => {
+    this.sceneController.addCurrentGlyphChangeListener(async (event) => {
+      await this.loadRulersFromGlyph(this.currentGlyphName);
       this.recalc();
       this.notifyPanelOfRulerChange();
     });
@@ -109,6 +110,72 @@ export class PowerRulerTool extends BaseTool {
     return this.glyphRulers[glyphName];
   }
 
+  async loadRulersFromGlyph(glyphName) {
+    if (!glyphName) {
+      return;
+    }
+    const varGlyph = await this.sceneController.sceneModel.getSelectedVariableGlyphController();
+    if (!varGlyph) {
+      return;
+    }
+
+    const rulersData = varGlyph.glyph.customData["fontra.glyph.rulers"];
+    if (rulersData) {
+      // Load rulers from file, preserving the structure
+      this.glyphRulers[glyphName] = {
+        activeRulerId: rulersData.activeRulerId || null,
+        rulers: { ...rulersData.rulers },
+      };
+      // Mark active ruler as active
+      if (rulersData.activeRulerId && rulersData.rulers[rulersData.activeRulerId]) {
+        rulersData.rulers[rulersData.activeRulerId].isActive = true;
+      }
+    } else {
+      // No rulers stored for this glyph
+      delete this.glyphRulers[glyphName];
+    }
+  }
+
+  async saveRulersToGlyph(glyphName, changeDescription) {
+    if (!glyphName) {
+      return;
+    }
+
+    const varGlyph = await this.sceneController.sceneModel.getSelectedVariableGlyphController();
+    if (!varGlyph) {
+      return;
+    }
+
+    // Prepare rulers data for storage (without transient isActive flag)
+    const rulersData = this.glyphRulers[glyphName];
+    if (!rulersData || !Object.keys(rulersData.rulers).length) {
+      // No rulers to save, remove from customData if it exists
+      if (varGlyph.glyph.customData["fontra.glyph.rulers"]) {
+        await this.sceneController.editGlyphAndRecordChanges(async (glyph) => {
+          delete glyph.customData["fontra.glyph.rulers"];
+          return changeDescription || "delete power rulers";
+        });
+      }
+      return;
+    }
+
+    // Create a clean copy without isActive flags for storage
+    const storageData = {
+      activeRulerId: rulersData.activeRulerId,
+      rulers: {},
+    };
+
+    for (const [rulerId, ruler] of Object.entries(rulersData.rulers)) {
+      const { isActive, ...rulerWithoutActive } = ruler;
+      storageData.rulers[rulerId] = rulerWithoutActive;
+    }
+
+    await this.sceneController.editGlyphAndRecordChanges(async (glyph) => {
+      glyph.customData["fontra.glyph.rulers"] = storageData;
+      return changeDescription || "edit power rulers";
+    });
+  }
+
   generateRulerName() {
     this._rulerCounter++;
     return translate("sidebar.power-rulers.ruler-name", this._rulerCounter);
@@ -139,7 +206,7 @@ export class PowerRulerTool extends BaseTool {
     this.notifyPanelOfRulerChange();
   }
 
-  createRuler(glyphName, basePoint, directionVector) {
+  async createRuler(glyphName, basePoint, directionVector) {
     const glyphController = this.sceneModel._getSelectedStaticGlyphController();
     if (!glyphController) {
       return null;
@@ -172,11 +239,12 @@ export class PowerRulerTool extends BaseTool {
     this.glyphRulers[glyphName].activeRulerId = rulerId;
     this._rulerCounter++;
 
+    await this.saveRulersToGlyph(glyphName, "add power ruler");
     this.notifyPanelOfRulerChange();
     return rulerId;
   }
 
-  deleteRuler(glyphName, rulerId) {
+  async deleteRuler(glyphName, rulerId) {
     const data = this.getRulerData(glyphName);
     if (!data || !data.rulers[rulerId]) {
       return;
@@ -200,18 +268,19 @@ export class PowerRulerTool extends BaseTool {
       delete this.glyphRulers[glyphName];
     }
 
+    await this.saveRulersToGlyph(glyphName, "delete power ruler");
     this.notifyPanelOfRulerChange();
     this.canvasController.requestUpdate();
   }
 
-  deleteActiveRuler(glyphName) {
+  async deleteActiveRuler(glyphName) {
     const data = this.getRulerData(glyphName);
     if (data && data.activeRulerId) {
-      this.deleteRuler(glyphName, data.activeRulerId);
+      await this.deleteRuler(glyphName, data.activeRulerId);
     }
   }
 
-  updateRulerPosition(glyphName, rulerId, basePoint, directionVector) {
+  async updateRulerPosition(glyphName, rulerId, basePoint, directionVector) {
     const glyphController = this.sceneModel._getSelectedStaticGlyphController();
     if (!glyphController || !this.glyphRulers[glyphName]?.rulers[rulerId]) {
       return;
@@ -232,6 +301,7 @@ export class PowerRulerTool extends BaseTool {
     updatedRuler.isActive = oldRuler.isActive;
 
     this.glyphRulers[glyphName].rulers[rulerId] = updatedRuler;
+    await this.saveRulersToGlyph(glyphName, "edit power ruler");
     this.notifyPanelOfRulerChange();
   }
 
@@ -392,7 +462,7 @@ export class PowerRulerTool extends BaseTool {
     this.canvasController.requestUpdate();
   }
 
-  recalcRulerFromPoint(glyphController, point, shiftConstrain) {
+  async recalcRulerFromPoint(glyphController, point, shiftConstrain) {
     // Create a new ruler at the point (replaces any existing active ruler behavior)
     const extraLines = this.computeSideBearingLines(glyphController);
 
@@ -409,7 +479,7 @@ export class PowerRulerTool extends BaseTool {
         directionVector = constrainHorVerDiag(directionVector);
       }
 
-      this.createRuler(this.currentGlyphName, point, directionVector);
+      await this.createRuler(this.currentGlyphName, point, directionVector);
     }
     this.canvasController.requestUpdate();
   }
@@ -486,7 +556,19 @@ export class PowerRulerTool extends BaseTool {
       this.editor.tools["pointer-tool"].handleHover(event);
       return;
     }
-    this.setCursor();
+    
+    // Check if hovering over a ruler
+    const point = this.sceneController.localPoint(event);
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    point.x -= positionedGlyph.x;
+    point.y -= positionedGlyph.y;
+    
+    if (this.currentGlyphName && this.findRulerAtPoint(this.currentGlyphName, point)) {
+      // Hovering over a ruler - show pointer cursor
+      this.canvasController.canvas.style.cursor = "pointer";
+    } else {
+      this.setCursor();
+    }
   }
 
   setCursor() {
@@ -522,7 +604,7 @@ export class PowerRulerTool extends BaseTool {
         const extraLines = this.computeSideBearingLines(glyphController);
         const pathHitTester = glyphController.flattenedPathHitTester;
         const nearestHit = pathHitTester.findNearest(point, extraLines);
-        
+
         if (nearestHit) {
           const derivative = nearestHit.segment.bezier.derivative(nearestHit.t);
           let directionVector = vector.normalizeVector({
@@ -534,14 +616,21 @@ export class PowerRulerTool extends BaseTool {
             directionVector = constrainHorVerDiag(directionVector);
           }
 
-          this.createRuler(this.currentGlyphName, point, directionVector);
+          await this.createRuler(this.currentGlyphName, point, directionVector);
         }
       }
       this.canvasController.requestUpdate();
       return;
     }
 
-    // Single click/drag: update existing active ruler position
+    // Single click: check if we clicked on a ruler to make it active
+    const clickedRulerId = this.findRulerAtPoint(this.currentGlyphName, point);
+    if (clickedRulerId) {
+      // Make this ruler active
+      await this.setActiveRuler(this.currentGlyphName, clickedRulerId);
+    }
+
+    // Update existing active ruler position
     const activeRuler = this.getActiveRuler(this.currentGlyphName);
     if (!activeRuler) {
       return;
@@ -578,7 +667,7 @@ export class PowerRulerTool extends BaseTool {
             directionVector = constrainHorVerDiag(directionVector);
           }
 
-          this.updateRulerPosition(
+          await this.updateRulerPosition(
             this.currentGlyphName,
             this.getRulerData(this.currentGlyphName).activeRulerId,
             point,
@@ -589,10 +678,10 @@ export class PowerRulerTool extends BaseTool {
     }
   }
 
-  handleKeyDown(event) {
+  async handleKeyDown(event) {
     if (event.key === "Backspace" && this.currentGlyphName) {
       event.stopImmediatePropagation();
-      this.deleteActiveRuler(this.currentGlyphName);
+      await this.deleteActiveRuler(this.currentGlyphName);
     }
   }
 
@@ -609,6 +698,77 @@ export class PowerRulerTool extends BaseTool {
   getActiveRulerId(glyphName) {
     const data = this.getRulerData(glyphName);
     return data?.activeRulerId || null;
+  }
+
+  // Find ruler at point (for hit detection)
+  findRulerAtPoint(glyphName, point, hitRadius = 10) {
+    const data = this.getRulerData(glyphName);
+    if (!data || !data.rulers) {
+      return null;
+    }
+
+    const hitRadiusSquared = hitRadius * hitRadius;
+    
+    for (const [rulerId, ruler] of Object.entries(data.rulers)) {
+      const { intersections } = ruler;
+      if (!intersections || intersections.length < 2) {
+        continue;
+      }
+
+      const p1 = intersections[0];
+      const p2 = intersections.at(-1);
+
+      // Check if point is near the line segment p1-p2
+      const distanceSquared = this.pointToSegmentDistanceSquared(point, p1, p2);
+      if (distanceSquared <= hitRadiusSquared) {
+        return rulerId;
+      }
+    }
+
+    return null;
+  }
+
+  // Calculate squared distance from point to line segment
+  pointToSegmentDistanceSquared(point, p1, p2) {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const lengthSquared = dx * dx + dy * dy;
+
+    if (lengthSquared === 0) {
+      // p1 and p2 are the same point
+      return (point.x - p1.x) ** 2 + (point.y - p1.y) ** 2;
+    }
+
+    // Find the projection parameter t
+    let t = ((point.x - p1.x) * dx + (point.y - p1.y) * dy) / lengthSquared;
+    t = Math.max(0, Math.min(1, t)); // Clamp to segment
+
+    // Find the closest point on the segment
+    const closestX = p1.x + t * dx;
+    const closestY = p1.y + t * dy;
+
+    return (point.x - closestX) ** 2 + (point.y - closestY) ** 2;
+  }
+
+  // Set active ruler
+  async setActiveRuler(glyphName, rulerId) {
+    const data = this.getRulerData(glyphName);
+    if (!data || !data.rulers[rulerId]) {
+      return;
+    }
+
+    // Deactivate current active ruler
+    if (data.activeRulerId && data.rulers[data.activeRulerId]) {
+      data.rulers[data.activeRulerId].isActive = false;
+    }
+
+    // Activate new ruler
+    data.activeRulerId = rulerId;
+    data.rulers[rulerId].isActive = true;
+
+    // Recalculate the active ruler
+    await this.recalc();
+    this.notifyPanelOfRulerChange();
   }
 }
 
