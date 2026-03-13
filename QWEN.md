@@ -208,9 +208,15 @@ fontra-workflow <workflow.yaml>
 
 ## Active Development: Persistent Power Rulers
 
-### Feature Overview
+### Status
 
-**Status**: In Development (as of 2026-03-12)
+**✅ IMPLEMENTED** (as of 2026-03-12)
+
+The Persistent Power Rulers feature is now complete and includes:
+- Multiple rulers per glyph with file-based persistence
+- Click-to-activate static rulers
+- Sidebar panel for ruler management
+- Undo/redo support
 
 The Persistent Power Rulers feature enhances the existing power ruler tool to support:
 - **Multiple rulers per glyph** - Create multiple measurement rulers in a single glyph
@@ -271,18 +277,25 @@ The Persistent Power Rulers feature enhances the existing power ruler tool to su
 
 | File | Status | Purpose |
 |------|--------|---------|
-| `src-js/views-editor/src/edit-tools-power-ruler.js` | Modified | Core ruler logic, multiple rulers, persistence |
-| `src-js/views-editor/src/panel-power-rulers.js` | To Create | Sidebar panel component |
-| `src-js/views-editor/src/editor.js` | To Modify | Register new panel |
-| `src-js/fontra-core/assets/lang/en.js` | To Modify | Localization strings |
+| `src-js/views-editor/src/edit-tools-power-ruler.js` | ✅ Complete | Core ruler logic, persistence, hit detection |
+| `src-js/views-editor/src/panel-power-rulers.js` | ✅ Complete | Sidebar panel component |
+| `src-js/views-editor/src/editor.js` | ✅ Complete | Register new panel |
+| `src-js/fontra-core/assets/lang/en.js` | ✅ Complete | Localization strings |
 
 ### Remaining Work
 
-- [ ] Implement file-based persistence (load/save to glyph.customData)
-- [ ] Create sidebar panel component
-- [ ] Add localization strings
-- [ ] Test undo/redo integration
-- [ ] Test file sharing across machines
+- [ ] Manual testing in browser
+- [ ] Bug fixes if needed
+- [ ] Merge to main branch
+
+### Completed Work
+
+- [x] File-based persistence (glyph.customData)
+- [x] Sidebar panel component
+- [x] Localization strings
+- [x] Ruler hit detection and activation
+- [x] Hover cursor changes
+- [x] Undo/redo integration
 
 ### Key Design Decisions
 
