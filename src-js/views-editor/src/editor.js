@@ -90,6 +90,7 @@ import { ViewController } from "@fontra/core/view-controller.js";
 import DesignspaceNavigationPanel from "./panel-designspace-navigation.js";
 import GlyphNotePanel from "./panel-glyph-note.js";
 import GlyphSearchPanel from "./panel-glyph-search.js";
+import PowerRulersPanel from "./panel-power-rulers.js";
 import ReferenceFontPanel from "./panel-reference-font.js";
 import RelatedGlyphsPanel from "./panel-related-glyphs.js";
 import SelectionInfoPanel from "./panel-selection-info.js";
@@ -928,7 +929,12 @@ export class EditorController extends ViewController {
     ];
 
     for (const editToolClass of editToolClasses) {
-      this.addEditTool(new editToolClass(this));
+      const tool = new editToolClass(this);
+      this.addEditTool(tool);
+      // Store reference to power ruler tool for panel access
+      if (editToolClass === PowerRulerTool) {
+        this.powerRulerTool = tool;
+      }
     }
 
     this.setSelectedTool("pointer-tool");
@@ -1082,6 +1088,7 @@ export class EditorController extends ViewController {
     this.addSidebarPanel(new TransformationPanel(this), "right");
     this.addSidebarPanel(new GlyphNotePanel(this), "right");
     this.addSidebarPanel(new RelatedGlyphsPanel(this), "right");
+    this.addSidebarPanel(new PowerRulersPanel(this), "right");
 
     // Upon reload, the "animating" class may still be set (why?), so remove it
     for (const sidebarContainer of document.querySelectorAll(".sidebar-container")) {

@@ -320,6 +320,12 @@ export const strings = {
   "sidebar.glyph-note.undo.edit": "edit glyph note",
   "sidebar.glyph-search": "Glyph Search",
   "sidebar.glyphs.search": "Search glyphs",
+  "sidebar.power-rulers.add": "Add Ruler",
+  "sidebar.power-rulers.empty":
+    "No rulers yet. Double-click in the canvas to create one.",
+  "sidebar.power-rulers.no-glyph": "Open a glyph to manage rulers",
+  "sidebar.power-rulers.ruler-name": "Ruler %0",
+  "sidebar.power-rulers.title": "Power Rulers",
   "sidebar.reference-font": "Reference Font",
   "sidebar.reference-font.custom-character": "Custom character",
   "sidebar.reference-font.dialog.title":
