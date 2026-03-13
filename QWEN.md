@@ -288,6 +288,33 @@ The Persistent Power Rulers feature enhances the existing power ruler tool to su
 - [ ] Bug fixes if needed
 - [ ] Merge to main branch
 
+### Known Issues & Future Improvements
+
+**⚠️ Issues to Fix Before File Persistence:**
+
+1. **Drag Behavior** - Needs refinement
+   - Current: Ruler follows clicks/drags too eagerly
+   - Desired: Standard draggable pattern (click selects, drag moves, double-click creates)
+   - Impact: Makes reliable double-click creation difficult
+
+2. **Ruler Scope** - Needs architectural decision
+   - Current: Rulers exist on ALL sources/layers (global by default)
+   - Desired: Per-layer scoping with optional "global" property
+   - Impact: Affects file persistence structure
+
+**Storage Structure TBD:**
+```javascript
+// Per layer (default)
+glyph.layers[layerName].customData["fontra.glyph.rulers"]
+
+// Global option
+glyph.customData["fontra.glyph.rulers.global"]
+```
+
+**Action Required:** Resolve these issues before implementing file persistence to avoid breaking changes.
+
+---
+
 ### Completed Work
 
 - [x] File-based persistence (glyph.customData)

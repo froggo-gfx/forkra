@@ -73,3 +73,35 @@ Pending manual testing:
 1. Manual testing in browser
 2. Fix any bugs found during testing
 3. Consider merging to main branch
+
+### Issues & Improvements for Next Session
+
+**1. Ruler Drag Behavior - Needs Fix**
+Current behavior: Ruler follows mouse clicks/drags too eagerly
+Desired behavior: Mirror standard draggable object pattern
+- **Click** → Selects ruler (makes it active)
+- **Click + Drag** → Moves the selected ruler
+- **Double-click** → Creates new ruler (reliable, not conflicted)
+
+Problem: Current implementation makes it hard to reliably create new rulers with double-click because single clicks also try to activate rulers.
+
+**2. Ruler Scope - Source/Layer Specificity**
+Current behavior: Rulers exist on ALL sources and source layers (global by default)
+Desired behavior: Rulers should be scoped properly
+- **Per source layer** (default) - Rulers specific to the current source/layer being edited
+- **Global option** - Optional "global" property to make ruler persist across all layers/sources
+
+This is critical before implementing file persistence - need to decide the correct data structure:
+```javascript
+// Option A: Per layer (default)
+glyph.layers[layerName].customData["fontra.glyph.rulers"]
+
+// Option B: Per source
+glyph.sources[sourceName].customData["fontra.glyph.rulers"]
+
+// Option C: Global + per-layer
+glyph.customData["fontra.glyph.rulers.global"] // global rulers
+glyph.layers[layerName].customData["fontra.glyph.rulers"] // layer-specific
+```
+
+**Action Required:** These issues should be resolved BEFORE implementing file persistence to avoid breaking changes to the storage format.
