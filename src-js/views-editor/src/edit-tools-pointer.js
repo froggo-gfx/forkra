@@ -1096,7 +1096,7 @@ export class PointerTool extends BaseTool {
         };
         const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
         if (skeletonData) {
-          const tunniHit = skeletonTunniHitTest(glyphPoint, size, skeletonData);
+          const tunniHit = skeletonTunniHitTest(glyphPoint, size * 2, skeletonData);
           if (tunniHit) {
             isHoveringSkeletonTunni = true;
             skeletonTunniType = tunniHit.type;
@@ -1506,7 +1506,7 @@ export class PointerTool extends BaseTool {
         };
         const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, this.sceneModel);
         if (skeletonData) {
-          const tunniHit = skeletonTunniHitTest(glyphPoint, size, skeletonData);
+          const tunniHit = skeletonTunniHitTest(glyphPoint, size * 2, skeletonData);
           if (tunniHit) {
             await runDragRoutingOrchestration({
               pointerTool: this,
