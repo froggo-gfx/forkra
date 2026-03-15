@@ -735,15 +735,6 @@ export class SceneModel {
       return { selection: skeletonPointSelection };
     }
 
-    // Check for skeleton segments
-    const skeletonSegmentSelection = this.skeletonSegmentSelectionAtPoint(
-      point,
-      size,
-      parsedCurrentSelection
-    );
-    if (skeletonSegmentSelection.size) {
-      return { selection: skeletonSegmentSelection };
-    }
     const anchorSelection = this.anchorSelectionAtPoint(
       point,
       size,
@@ -760,6 +751,16 @@ export class SceneModel {
     );
     if (guidelineSelection.size) {
       return { selection: guidelineSelection };
+    }
+
+    // Check for skeleton segments (lowest priority)
+    const skeletonSegmentSelection = this.skeletonSegmentSelectionAtPoint(
+      point,
+      size,
+      parsedCurrentSelection
+    );
+    if (skeletonSegmentSelection.size) {
+      return { selection: skeletonSegmentSelection };
     }
 
     // TODO: Font Guidelines
