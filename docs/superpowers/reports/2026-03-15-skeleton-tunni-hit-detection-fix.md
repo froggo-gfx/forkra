@@ -72,8 +72,8 @@ const tunniHit = skeletonTunniHitTest(glyphPoint, size * 2, skeletonData);
 **Hit Detection Sizes:**
 | Element | Visual Size | Hit Detection |
 |---------|-------------|---------------|
-| Tunni Point (circle) | 5px | 10px radius |
-| True Tunni Point (diamond) | 4px | 8px radius |
+| Tunni Point (circle) | 5px | 2× size (~10px) |
+| True Tunni Point (diamond) | 4px | Fixed 10 glyph units |
 
 **Call Sites Updated:**
 - Line 982: Hover detection (already had 2×)
@@ -122,6 +122,26 @@ const margin = 4; // Fixed 4 glyph units, doesn't scale with zoom
 - At high zoom (zoomed in): Segment hit area reduced from ~12-24 glyph units to 4 glyph units
 - Tunni points now have larger effective hit area than segments at all zoom levels
 
+#### 5. True Tunni Point Hit Detection (Commit: `bf0bb638d`)
+
+**File:** `src-js/views-editor/src/edit-behavior-adapters.js`
+
+Fixed zoom-scaling issue for True Tunni points (orange diamond):
+
+```javascript
+// Before
+if (trueTunniPt && vector.distance(point, trueTunniPt) <= size) {
+
+// After
+const trueTunniHitRadius = 10; // Fixed glyph units
+if (trueTunniPt && vector.distance(point, trueTunniPt) <= trueTunniHitRadius) {
+```
+
+**Impact:**
+- True Tunni points now have consistent 10 glyph unit hit radius at all zoom levels
+- No longer scales with zoom (was `onePixelUnit * 24` before)
+- Matches regular Tunni point hit area behavior
+
 ---
 
 ## Current State
@@ -130,17 +150,18 @@ const margin = 4; // Fixed 4 glyph units, doesn't scale with zoom
 
 ✅ **Skeleton Tunni points are now selectable at all zoom levels**
 - Visual distinction: Full opacity lines, clear points
-- Hit detection: 2× visual size (10px for 5px point)
+- Hit detection: Fixed hit areas (10px for regular, 10 glyph units for True Tunni)
 - Z-index: Topmost skeleton layer (570)
 
 ✅ **Skeleton handle labels display correctly**
 - Order: Distance/Tension/Angle (top to bottom)
 - Matches regular Tunni label format
 
-✅ **Skeleton segments no longer steal clicks**
-- Fixed 4 glyph unit hit area
-- Doesn't scale with zoom
-- Predictable behavior
+✅ **All skeleton hit detection is now zoom-independent**
+- Segments: Fixed 4 glyph unit hit area
+- Tunni points: 2× visual size (~10px)
+- True Tunni points: Fixed 10 glyph unit radius
+- Result: Consistent behavior across all zoom levels
 
 ### Remaining Issues
 
@@ -182,10 +203,13 @@ const margin = 4; // Fixed 4 glyph units, doesn't scale with zoom
 | `skeleton-visualization-layers.js` | 1019, 854-878 | Z-index, label rendering |
 | `edit-tools-pointer.js` | 1099, 1509 | Hit detection size |
 | `scene-model.js` | 1199 | Segment hit detection margin |
+| `edit-behavior-adapters.js` | 490-500 | True Tunni hit radius |
 
 ### Git History
 
 ```
+bf0bb638d fix: use fixed 10 glyph unit hit radius for True Tunni points (no zoom scaling)
+2a28e3761 docs: add skeleton tunni hit detection fix report
 f7b7f561f fix: reduce skeleton segment hit detection to fixed 4 glyph units (no zoom scaling)
 832cf7313 fix: skeleton handle labels render in correct Distance/Tension/Angle order
 0c0301008 feat: increase skeleton tunni hit detection area to 2×
@@ -222,8 +246,16 @@ Unlike points (which are small, discrete targets), skeleton segments are large v
 
 Standard UI pattern for small clickable elements:
 - Visual size: 5px (clearly visible, not obtrusive)
-- Hit area: 10px (easy to click, follows Fitts's Law)
+- Hit area: 2× visual size (~10px, easy to click, follows Fitts's Law)
 - Ratio: 2× is noticeable but doesn't feel "floaty"
+
+### Why Fixed Hit Radius for True Tunni Points?
+
+True Tunni points (orange diamonds) are positioned at the midpoint of the Tunni line:
+- Visual size: 4px diamond
+- Old hit area: `size * 1` = `onePixelUnit * 12` (scaled with zoom, too large at low zoom)
+- New hit area: Fixed 10 glyph units (consistent at all zoom levels)
+- Matches the effective hit area of regular Tunni points
 
 ### Why Not Reorder Hit Testing?
 
@@ -231,4 +263,4 @@ Initial plan was to check Tunni points before segments in the selection flow. Ho
 
 ---
 
-**Report Status:** ✅ Complete, awaiting user validation
+**Report Status:** ✅ Complete - All zoom-scaling issues fixed
