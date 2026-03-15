@@ -46,13 +46,18 @@ zIndex: 570, // Topmost skeleton layer (above rib points at 560)
 
 **Visual Layer Ordering (after change):**
 ```
-570 - Skeleton Tunni Lines (NEW - topmost)
+650 - Measure Overlay (when in measure mode)
+570 - Skeleton Tunni Lines (NEW - topmost skeleton layer)
 560 - Skeleton Rib Points
 555 - Skeleton Selected Segments
 550 - Skeleton Nodes
 548 - Skeleton Handles
+500 - Regular path points, nodes, handles (editable elements)
 ...
-500 - Glyph paths/outlines
+450 - (Old skeleton centerline position)
+402 - Skeleton Width Ribs (NEW)
+400 - Skeleton Centerline (NEW - below all editable elements)
+398 - Selected Skeleton Segments (NEW - lowest priority)
 ```
 
 #### 2. Skeleton Tunni Hit Detection (Commit: `0c0301008`)
@@ -122,6 +127,44 @@ const margin = 4; // Fixed 4 glyph units, doesn't scale with zoom
 - At high zoom (zoomed in): Segment hit area reduced from ~12-24 glyph units to 4 glyph units
 - Tunni points now have larger effective hit area than segments at all zoom levels
 
+#### 6. Skeleton Z-Index and Priority (Commit: `c9cc176aa`)
+
+**Files:** `src-js/views-editor/src/skeleton-visualization-layers.js`, `src-js/views-editor/src/scene-model.js`
+
+**Visual stacking (z-index) changes:**
+```javascript
+// Before
+Skeleton Centerline:     zIndex: 450
+Skeleton Width Ribs:     zIndex: 452
+Selected Segments:       zIndex: 448
+
+// After
+Skeleton Centerline:     zIndex: 400  // Below all editable elements
+Skeleton Width Ribs:     zIndex: 402  // Above centerline, below editable
+Selected Segments:       zIndex: 398  // Lowest priority
+```
+
+**Hit detection priority changes:**
+
+Before:
+1. Point selection (regular path points)
+2. Skeleton point selection
+3. Skeleton segment selection ← Too high priority
+4. Anchor selection
+5. Guideline selection
+
+After:
+1. Point selection (regular path points)
+2. Skeleton point selection
+3. Anchor selection
+4. Guideline selection
+5. Skeleton segment selection ← Lowest priority
+
+**Impact:**
+- Editable generated point handles are now visually on top of skeleton elements
+- Skeleton segments only selected when nothing else is under cursor
+- Combined with fixed 4 glyph unit hit area, segments no longer interfere
+
 #### 5. True Tunni Point Hit Detection (Commit: `bf0bb638d`)
 
 **File:** `src-js/views-editor/src/edit-behavior-adapters.js`
@@ -163,6 +206,11 @@ if (trueTunniPt && vector.distance(point, trueTunniPt) <= trueTunniHitRadius) {
 - True Tunni points: Fixed 10 glyph unit radius
 - Result: Consistent behavior across all zoom levels
 
+✅ **Skeleton segments no longer interfere with editable elements**
+- Hit detection priority: Lowest (below anchors, guidelines, and all editable points)
+- Z-index: Centerline (400), Ribs (402), Segments (398) - all below path handles (500)
+- Result: Editable generated point handles are always visually on top and selectable
+
 ### Remaining Issues
 
 ⚠️ **Further adjustment may be necessary**
@@ -200,14 +248,17 @@ if (trueTunniPt && vector.distance(point, trueTunniPt) <= trueTunniHitRadius) {
 
 | File | Lines Changed | Purpose |
 |------|---------------|---------|
-| `skeleton-visualization-layers.js` | 1019, 854-878 | Z-index, label rendering |
+| `skeleton-visualization-layers.js` | 1019, 854-878, 150, 179, 609 | Z-index, label rendering, skeleton z-order |
 | `edit-tools-pointer.js` | 1099, 1509 | Hit detection size |
-| `scene-model.js` | 1199 | Segment hit detection margin |
+| `scene-model.js` | 1199, 739-755 | Segment hit detection margin, selection priority |
 | `edit-behavior-adapters.js` | 490-500 | True Tunni hit radius |
 
 ### Git History
 
 ```
+c9cc176aa fix: lower skeleton centerline/ribs/segments z-index below editable elements (400, 402, 398)
+587456d29 fix: move skeleton segment selection to lowest priority (below anchors and guidelines)
+2921c5610 docs: update report with True Tunni hit detection fix
 bf0bb638d fix: use fixed 10 glyph unit hit radius for True Tunni points (no zoom scaling)
 2a28e3761 docs: add skeleton tunni hit detection fix report
 f7b7f561f fix: reduce skeleton segment hit detection to fixed 4 glyph units (no zoom scaling)
@@ -263,4 +314,4 @@ Initial plan was to check Tunni points before segments in the selection flow. Ho
 
 ---
 
-**Report Status:** ✅ Complete - All zoom-scaling issues fixed
+**Report Status:** ✅ Complete - All zoom-scaling and priority issues fixed
