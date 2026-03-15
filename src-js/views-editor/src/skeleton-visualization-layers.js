@@ -1016,7 +1016,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: false,
-  zIndex: 548, // Between handles (545) and nodes (550)
+  zIndex: 570, // Topmost skeleton layer (above rib points at 560)
   screenParameters: {
     strokeWidth: 1,
     dashPattern: [5, 5],
