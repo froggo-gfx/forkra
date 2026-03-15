@@ -855,9 +855,14 @@ function drawLabelText(context, point, text, offsetX, offsetY, parameters) {
 
   const lines = text.split("\n");
   const lineHeight = SKELETON_LABEL_FONT_SIZE + 2;
+  const totalHeight = lines.length * lineHeight;
 
   const x = point.x + offsetX;
   const y = point.y + offsetY;
+  
+  // Calculate startY so the label is centered vertically on the point
+  // First line (i=0) should appear at the TOP visually
+  const startY = -y - totalHeight / 2 + lineHeight / 2;
 
   // Draw text directly (dark color, no background)
   context.save();
@@ -868,8 +873,7 @@ function drawLabelText(context, point, text, offsetX, offsetY, parameters) {
   context.scale(1, -1); // Flip for canvas coordinate system
 
   for (let i = 0; i < lines.length; i++) {
-    const textY = -(y + (i - (lines.length - 1) / 2) * lineHeight);
-    context.fillText(lines[i], x + SKELETON_LABEL_PADDING, textY);
+    context.fillText(lines[i], x + SKELETON_LABEL_PADDING, startY + i * lineHeight);
   }
   context.restore();
 }
