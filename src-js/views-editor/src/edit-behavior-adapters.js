@@ -487,6 +487,8 @@ export function skeletonTunniHitTest(point, size, skeletonData, options = {}) {
   }
 
   const { midpointOnly = false } = options;
+  // Use fixed hit radius for True Tunni points (doesn't scale with zoom)
+  const trueTunniHitRadius = 10; // Fixed glyph units
   for (let contourIndex = 0; contourIndex < skeletonData.contours.length; contourIndex++) {
     const contour = skeletonData.contours[contourIndex];
     const segments = buildSegmentsFromSkeletonPoints(contour.points, contour.isClosed);
@@ -496,7 +498,7 @@ export function skeletonTunniHitTest(point, size, skeletonData, options = {}) {
       }
       if (!midpointOnly) {
         const trueTunniPt = calculateSkeletonTrueTunniPoint(segment);
-        if (trueTunniPt && vector.distance(point, trueTunniPt) <= size) {
+        if (trueTunniPt && vector.distance(point, trueTunniPt) <= trueTunniHitRadius) {
           return {
             type: "true-tunni",
             contourIndex,
