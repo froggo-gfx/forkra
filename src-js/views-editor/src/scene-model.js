@@ -1194,8 +1194,8 @@ export class SceneModel {
       y: point.y - positionedGlyph.y,
     };
 
-    // Use larger margin for segment hit testing
-    const margin = size * 1.5;
+    // Use fixed margin for segment hit testing (doesn't scale with zoom)
+    const margin = 4;
 
     // Check if we should prefer current selection
     if (parsedCurrentSelection?.skeletonSegment?.size) {
