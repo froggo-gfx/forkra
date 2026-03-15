@@ -147,7 +147,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: true,
-  zIndex: 450,
+  zIndex: 400, // Below all editable elements (path handles at 500)
   screenParameters: { strokeWidth: 1.5 },
   colors: { strokeColor: "#0080FF" },
   colorsDarkMode: { strokeColor: "#00BFFF" },
@@ -176,7 +176,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: true,
-  zIndex: 452,
+  zIndex: 402, // Above centerline (400), below all editable elements
   screenParameters: { strokeWidth: 1 },
   colors: { strokeColor: "rgba(0, 128, 255, 0.4)" },
   colorsDarkMode: { strokeColor: "rgba(0, 191, 255, 0.4)" },
@@ -601,12 +601,12 @@ registerVisualizationLayerDefinition({
   },
 });
 
-// Selected/hovered skeleton segments layer
+// Selected skeleton segments layer
 registerVisualizationLayerDefinition({
   identifier: "fontra.skeleton.selected.segments",
   name: "Selected Skeleton Segments",
   selectionFunc: glyphSelector("editing"),
-  zIndex: 448, // Just below centerline
+  zIndex: 398, // Below centerline (400), lowest priority
   screenParameters: {
     strokeWidth: 4,
   },
