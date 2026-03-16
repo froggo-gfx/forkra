@@ -37,6 +37,7 @@ import {
   makeRegularEqualizeNudgeChanges,
   makeEqualizeDragChanges,
   makeRoundFunc,
+  projectRibPoint,
   resolveEqualizePairForContourPoint,
 } from "./edit-behavior.js";
 import { getGeneratedContourIndexSet } from "./scene-model.js";
@@ -4283,6 +4284,17 @@ async function runSkeletonRibPointDragCanonical(context) {
 
         const combined = new ChangeCollector().concat(...allChanges);
         accumulatedChanges = accumulatedChanges.concat(combined);
+        const activeLayerData = referenceLayerName ? layersData[referenceLayerName] : undefined;
+        const dragHighlight = activeLayerData
+          ? buildRibWidthHighlightPayload(
+              activeLayerData.working,
+              ribHit.contourIndex,
+              ribHit.pointIndex,
+              ribHit.side
+            )
+          : null;
+        sceneController.sceneModel.setDragHoverRibPoint(dragHighlight);
+        pointerTool.canvasController.requestUpdate();
         await sendIncrementalChange(combined.change, true);
       }
 
@@ -4294,10 +4306,61 @@ async function runSkeletonRibPointDragCanonical(context) {
       };
     });
   } finally {
+    sceneController.sceneModel.setDragHoverRibPoint(null);
+    pointerTool.canvasController.requestUpdate();
     pointerTool.canvasController.canvas.style.cursor = previousCursor || "default";
     delete sceneController.sceneModel.initialClickedSkeletonRibPoint;
   }
   return true;
+}
+
+function buildRibWidthHighlightPayload(skeletonData, contourIndex, pointIndex, side) {
+  const contour = skeletonData?.contours?.[contourIndex];
+  const point = contour?.points?.[pointIndex];
+  if (!contour || !point || point.type) {
+    return null;
+  }
+
+  const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
+  if (!normal) {
+    return null;
+  }
+
+  const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
+  let leftWidth = getPointHalfWidth(point, defaultWidth, "left");
+  let rightWidth = getPointHalfWidth(point, defaultWidth, "right");
+  const singleSided = contour.singleSided ?? false;
+  const singleSidedDirection = contour.singleSidedDirection ?? "left";
+
+  if (singleSided) {
+    const totalWidth = leftWidth + rightWidth;
+    if (singleSidedDirection === "left") {
+      leftWidth = totalWidth;
+      rightWidth = 0;
+    } else {
+      leftWidth = 0;
+      rightWidth = totalWidth;
+    }
+  }
+
+  const leftNudge = point.leftEditable && leftWidth >= 0.5 ? point.leftNudge || 0 : 0;
+  const rightNudge = point.rightEditable && rightWidth >= 0.5 ? point.rightNudge || 0 : 0;
+  const ribPoint = projectRibPoint(
+    point,
+    normal,
+    side === "left" ? leftWidth : rightWidth,
+    side,
+    side === "left" ? leftNudge : rightNudge
+  );
+
+  return {
+    x: ribPoint.x,
+    y: ribPoint.y,
+    side,
+    width: leftWidth + rightWidth,
+    leftWidth,
+    rightWidth,
+  };
 }
 
 // Editable-generated routes

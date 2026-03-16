@@ -2990,6 +2990,7 @@ export class PointerTool extends BaseTool {
             return {
               x: leftRibPoint.x,
               y: leftRibPoint.y,
+              side: "left",
               width: leftHW + rightHW,
               leftWidth: leftHW,
               rightWidth: rightHW,
@@ -3004,6 +3005,7 @@ export class PointerTool extends BaseTool {
             return {
               x: rightRibPoint.x,
               y: rightRibPoint.y,
+              side: "right",
               width: leftHW + rightHW,
               leftWidth: leftHW,
               rightWidth: rightHW,

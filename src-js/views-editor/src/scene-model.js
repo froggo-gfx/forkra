@@ -76,7 +76,8 @@ export class SceneModel {
     this.measureMode = false;
     this.measureShowDirect = false; // Alt+Q shows direct distance + angle
     this.measureHoverSegment = null; // { p1, p2, type }
-    this.measureHoverRibPoint = null; // { x, y, width, leftWidth, rightWidth }
+    this.measureHoverRibPoint = null; // { x, y, width, leftWidth, rightWidth, side }
+    this.dragHoverRibPoint = null; // Same payload shape as measureHoverRibPoint, but for rib drag
     this.measureHoverPoints = null; // { p1, p2, type }
     this.measureHoverHandle = null; // { p1, p2, type, tensionContext? }
 
@@ -154,6 +155,10 @@ export class SceneModel {
     this.measureHoverRibPoint = null;
     this.measureHoverPoints = null;
     this.measureHoverHandle = null;
+  }
+
+  setDragHoverRibPoint(payload = null) {
+    this.dragHoverRibPoint = payload;
   }
 
   setMeasureActive(active, options = {}) {
