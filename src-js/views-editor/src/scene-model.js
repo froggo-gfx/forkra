@@ -822,10 +822,57 @@ export class SceneModel {
           return new Set([`point/${pointIndex}`]);
         }
 
-        // Skip skeleton-generated outline points - they shouldn't be directly editable
-        return new Set();
+        // Keep searching: generated outline points are not directly editable,
+        // but nearby editable generated handles should still win over skeleton segments.
+      } else {
+        return new Set([`point/${pointIndex}`]);
       }
-      return new Set([`point/${pointIndex}`]);
+    }
+
+    const editableGeneratedHandleSelection = this._editableGeneratedHandleSelectionAtPoint(
+      positionedGlyph,
+      glyphPoint,
+      Math.max(size, 4),
+      parsedCurrentSelection?.point || []
+    );
+    if (editableGeneratedHandleSelection.size) {
+      return editableGeneratedHandleSelection;
+    }
+
+    return new Set();
+  }
+
+  _editableGeneratedHandleSelectionAtPoint(
+    positionedGlyph,
+    glyphPoint,
+    margin,
+    currentPointSelection
+  ) {
+    const path = positionedGlyph?.glyph?.path;
+    if (!path) {
+      return new Set();
+    }
+
+    const rect = centeredRect(glyphPoint.x, glyphPoint.y, margin);
+    const candidatePointIndices = currentPointSelection.length
+      ? reversed(currentPointSelection)
+      : [...path.reverseIterPointsInRect(rect)].map((hit) => hit.pointIndex);
+
+    for (const pointIndex of candidatePointIndices) {
+      const pointPos = path.getPoint(pointIndex);
+      if (!pointPos || !pointInRect(pointPos.x, pointPos.y, rect)) {
+        continue;
+      }
+      if (!this._isPointInSkeletonGeneratedContour(positionedGlyph, pointIndex)) {
+        continue;
+      }
+      const editableHandleInfo = this._getEditableHandleForGeneratedPoint(
+        positionedGlyph,
+        pointIndex
+      );
+      if (editableHandleInfo) {
+        return new Set([`point/${pointIndex}`]);
+      }
     }
 
     return new Set();
