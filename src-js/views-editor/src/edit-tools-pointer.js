@@ -1315,10 +1315,21 @@ export class PointerTool extends BaseTool {
         parseSelection(sceneController.selection);
       const clickedRibShortKey = `${ribHit.contourIndex}/${ribHit.pointIndex}/${ribHit.side}`;
       const clickedRibFullKey = `skeletonRibPoint/${clickedRibShortKey}`;
+      const shouldPreviewRibWidth =
+        !this.tangentRibMode &&
+        !initialEvent.altKey &&
+        !initialEvent.shiftKey &&
+        !initialEvent.ctrlKey &&
+        !initialEvent.metaKey;
       let targetRibSelection;
 
       if (preSelectedSkeletonPoints?.size) {
+        if (shouldPreviewRibWidth) {
+          this._setRibWidthPreviewFromHit(ribHit);
+        }
         if (!(await shouldInitiateDrag(eventStream, initialEvent))) {
+          this.sceneModel.setDragHoverRibPoint(null);
+          this.canvasController.requestUpdate();
           sceneController.selection = new Set([clickedRibFullKey]);
           initialEvent.preventDefault();
           return;
@@ -1367,7 +1378,12 @@ export class PointerTool extends BaseTool {
           [...targetRibSelection].map((key) => `skeletonRibPoint/${key}`)
         );
 
+        if (shouldPreviewRibWidth) {
+          this._setRibWidthPreviewFromHit(ribHit);
+        }
         if (!(await shouldInitiateDrag(eventStream, initialEvent))) {
+          this.sceneModel.setDragHoverRibPoint(null);
+          this.canvasController.requestUpdate();
           initialEvent.preventDefault();
           return;
         }
@@ -3016,6 +3032,53 @@ export class PointerTool extends BaseTool {
     }
 
     return null;
+  }
+
+  _setRibWidthPreviewFromHit(ribHit) {
+    const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph?.varGlyph?.glyph?.layers) {
+      return;
+    }
+
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    if (!editLayerName) {
+      return;
+    }
+
+    const layer = positionedGlyph.varGlyph.glyph.layers[editLayerName];
+    const skeletonData = getSkeletonData(layer);
+    const contour = skeletonData?.contours?.[ribHit.contourIndex];
+    const skeletonPoint = contour?.points?.[ribHit.pointIndex];
+    if (!contour || !skeletonPoint || skeletonPoint.type) {
+      return;
+    }
+
+    const defaultWidth = contour.defaultWidth ?? (skeletonData.defaultWidth ?? 100);
+    let leftWidth = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
+    let rightWidth = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
+    const singleSided = contour.singleSided ?? false;
+    const singleSidedDirection = contour.singleSidedDirection ?? "left";
+
+    if (singleSided) {
+      const totalWidth = leftWidth + rightWidth;
+      if (singleSidedDirection === "left") {
+        leftWidth = totalWidth;
+        rightWidth = 0;
+      } else {
+        leftWidth = 0;
+        rightWidth = totalWidth;
+      }
+    }
+
+    this.sceneModel.setDragHoverRibPoint({
+      x: ribHit.point.x,
+      y: ribHit.point.y,
+      side: ribHit.side,
+      width: leftWidth + rightWidth,
+      leftWidth,
+      rightWidth,
+    });
+    this.canvasController.requestUpdate();
   }
 
   /**

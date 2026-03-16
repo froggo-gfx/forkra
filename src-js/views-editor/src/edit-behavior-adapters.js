@@ -4100,6 +4100,22 @@ async function runSkeletonRibPointDragCanonical(context) {
 
   const previousCursor = pointerTool.canvasController.canvas.style.cursor;
   pointerTool.canvasController.canvas.style.cursor = "pointer";
+  const shouldShowInitialWidthHighlight =
+    !pointerTool.tangentRibMode &&
+    !initialEvent.altKey &&
+    !initialEvent.shiftKey &&
+    !initialEvent.ctrlKey &&
+    !initialEvent.metaKey;
+  if (shouldShowInitialWidthHighlight) {
+    const initialHighlight = buildRibWidthHighlightPayload(
+      referenceSkeletonData,
+      ribHit.contourIndex,
+      ribHit.pointIndex,
+      ribHit.side
+    );
+    sceneController.sceneModel.setDragHoverRibPoint(initialHighlight);
+    pointerTool.canvasController.requestUpdate();
+  }
 
   try {
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
@@ -4284,7 +4300,14 @@ async function runSkeletonRibPointDragCanonical(context) {
 
         const combined = new ChangeCollector().concat(...allChanges);
         accumulatedChanges = accumulatedChanges.concat(combined);
-        const activeLayerData = referenceLayerName ? layersData[referenceLayerName] : undefined;
+        const showWidthHighlight =
+          !pointerTool.tangentRibMode &&
+          !inputEvent.altKey &&
+          !inputEvent.shiftKey &&
+          !inputEvent.ctrlKey &&
+          !inputEvent.metaKey;
+        const activeLayerData =
+          showWidthHighlight && referenceLayerName ? layersData[referenceLayerName] : undefined;
         const dragHighlight = activeLayerData
           ? buildRibWidthHighlightPayload(
               activeLayerData.working,
