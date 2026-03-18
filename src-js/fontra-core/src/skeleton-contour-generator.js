@@ -3206,6 +3206,293 @@ function computeTunniHandleLengths(startPoint, startDir, endPoint, endDir, tensi
   return { startLen: fallbackLen, endLen: fallbackLen };
 }
 
+function getRoundCapFrame({
+  endpointTangent,
+  capRadiusRatio,
+  capWidth,
+  position,
+}) {
+  const clampedCapRadiusRatio = Math.min(Math.max(capRadiusRatio, 0), MAX_CAP_RADIUS_RATIO);
+  const radiusFactor =
+    MAX_CAP_RADIUS_RATIO > 0 ? clampedCapRadiusRatio / MAX_CAP_RADIUS_RATIO : 0;
+  const maxProjectionShift = Math.max(capWidth / 2 - capWidth / 128, 0);
+  const trimDistance = maxProjectionShift * (1 - radiusFactor);
+  const capTangent =
+    position === "start"
+      ? { x: -endpointTangent.x, y: -endpointTangent.y }
+      : endpointTangent;
+  return { radiusFactor, maxProjectionShift, trimDistance, capTangent };
+}
+
+function solveTerminalSplitForDistance(bezier, fromEnd, trimDistance) {
+  const totalLength = bezier.length();
+  if (!(totalLength > 0.001)) {
+    return fromEnd ? 1 : 0;
+  }
+
+  const clampedTrimDistance = Math.min(Math.max(trimDistance, 0), totalLength);
+  const targetLength = fromEnd ? totalLength - clampedTrimDistance : clampedTrimDistance;
+
+  let low = 0;
+  let high = 1;
+  let bestT = fromEnd ? 1 : 0;
+  let bestError = Infinity;
+
+  for (let i = 0; i < 32; i++) {
+    const mid = (low + high) / 2;
+    const split = bezier.split(mid);
+    const leftLength = split.left.length();
+    const error = Math.abs(leftLength - targetLength);
+
+    if (error < bestError) {
+      bestError = error;
+      bestT = mid;
+    }
+    if (error <= 0.5 || high - low <= 1e-4) {
+      break;
+    }
+    if (leftLength < targetLength) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  return bestT;
+}
+
+function cloneRoundCapPoint(point) {
+  return point ? { ...point } : null;
+}
+
+function buildSplitOffCurve(point) {
+  return {
+    x: point.x,
+    y: point.y,
+    type: "cubic",
+  };
+}
+
+function buildInsertedRoundCapPoint(point) {
+  return {
+    x: point.x,
+    y: point.y,
+    smooth: true,
+  };
+}
+
+function isUsableDirection(direction) {
+  return !!direction && Math.hypot(direction.x, direction.y) > 0.001;
+}
+
+function resolveRoundCapFallbackDirection(fallbackDirections) {
+  const candidateDirections = [
+    fallbackDirections?.endpointTangent,
+    fallbackDirections?.chordDirection,
+    fallbackDirections?.capTangent,
+  ];
+  for (const direction of candidateDirections) {
+    if (isUsableDirection(direction)) {
+      return vector.normalizeVector(direction);
+    }
+  }
+  return { x: 1, y: 0 };
+}
+
+function getRoundCapTerminalSegment(points, sidePosition) {
+  if (!points?.length) {
+    return null;
+  }
+
+  if (sidePosition === "start") {
+    const startIndex = points.findIndex((point) => point && !point.type);
+    if (startIndex < 0) {
+      return null;
+    }
+    for (let endIndex = startIndex + 1; endIndex < points.length; endIndex++) {
+      if (points[endIndex] && !points[endIndex].type) {
+        return {
+          segmentStartIndex: startIndex,
+          segmentEndIndex: endIndex,
+          segmentPoints: points.slice(startIndex, endIndex + 1),
+        };
+      }
+    }
+    return null;
+  }
+
+  let segmentEndIndex = -1;
+  for (let i = points.length - 1; i >= 0; i--) {
+    if (points[i] && !points[i].type) {
+      segmentEndIndex = i;
+      break;
+    }
+  }
+  if (segmentEndIndex < 0) {
+    return null;
+  }
+  for (let startIndex = segmentEndIndex - 1; startIndex >= 0; startIndex--) {
+    if (points[startIndex] && !points[startIndex].type) {
+      return {
+        segmentStartIndex: startIndex,
+        segmentEndIndex,
+        segmentPoints: points.slice(startIndex, segmentEndIndex + 1),
+      };
+    }
+  }
+  return null;
+}
+
+function splitTerminalSideForRoundCap(
+  sidePoints,
+  sidePosition,
+  trimDistance,
+  fallbackDirections
+) {
+  const terminalSegment = getRoundCapTerminalSegment(sidePoints, sidePosition);
+  if (!terminalSegment) {
+    return null;
+  }
+
+  const {
+    segmentStartIndex,
+    segmentEndIndex,
+    segmentPoints,
+  } = terminalSegment;
+  const fromEnd = sidePosition === "end";
+  const referenceEndpointIndex = fromEnd ? segmentEndIndex : segmentStartIndex;
+  const referenceEndpoint = cloneRoundCapPoint(sidePoints[referenceEndpointIndex]);
+  const fallbackDirection = resolveRoundCapFallbackDirection(fallbackDirections);
+  const startPoint = segmentPoints[0];
+  const endPoint = segmentPoints[segmentPoints.length - 1];
+  const chordVector = vector.subVectors(endPoint, startPoint);
+  const segmentBezier =
+    segmentPoints.length === 2 || segmentPoints.length === 4
+      ? createBezierFromPoints(segmentPoints)
+      : null;
+  const terminalSegmentLength = segmentBezier
+    ? segmentBezier.length()
+    : Math.hypot(chordVector.x, chordVector.y);
+
+  let effectiveTrimDistance = Math.min(Math.max(trimDistance, 0), terminalSegmentLength);
+  if (terminalSegmentLength >= 2 && effectiveTrimDistance < 1) {
+    effectiveTrimDistance = 1;
+  }
+
+  const synthesizeInsertedPoint = () => {
+    const insertedPoint = buildInsertedRoundCapPoint({
+      x: referenceEndpoint.x - fallbackDirection.x,
+      y: referenceEndpoint.y - fallbackDirection.y,
+    });
+    const rewrittenSegment = fromEnd
+      ? [cloneRoundCapPoint(startPoint), insertedPoint, referenceEndpoint]
+      : [referenceEndpoint, insertedPoint, cloneRoundCapPoint(endPoint)];
+    const rewrittenSidePoints = [
+      ...sidePoints.slice(0, segmentStartIndex),
+      ...rewrittenSegment,
+      ...sidePoints.slice(segmentEndIndex + 1),
+    ];
+    return {
+      sidePoints: rewrittenSidePoints,
+      insertedPointIndex: fromEnd ? segmentStartIndex + 1 : segmentStartIndex + 1,
+      insertedPoint,
+      referenceEndpointIndex: fromEnd ? segmentStartIndex + 2 : segmentStartIndex,
+      referenceEndpoint,
+      tangentToEndpoint: fallbackDirection,
+    };
+  };
+
+  if (terminalSegmentLength < 2) {
+    return synthesizeInsertedPoint();
+  }
+
+  if (segmentPoints.length === 2) {
+    const lineDirection = vector.normalizeVector(chordVector);
+    if (!isUsableDirection(lineDirection)) {
+      return synthesizeInsertedPoint();
+    }
+    const t = effectiveTrimDistance / terminalSegmentLength;
+    const interpolationT = fromEnd ? 1 - t : t;
+    const insertedCoords = vector.interpolateVectors(startPoint, endPoint, interpolationT);
+    let insertedPoint = buildInsertedRoundCapPoint(insertedCoords);
+    if (vector.distance(insertedPoint, referenceEndpoint) < 1) {
+      insertedPoint = buildInsertedRoundCapPoint({
+        x: referenceEndpoint.x - fallbackDirection.x,
+        y: referenceEndpoint.y - fallbackDirection.y,
+      });
+    }
+    const tangentToEndpoint = fromEnd
+      ? lineDirection
+      : { x: -lineDirection.x, y: -lineDirection.y };
+    const rewrittenSegment = fromEnd
+      ? [cloneRoundCapPoint(startPoint), insertedPoint, referenceEndpoint]
+      : [referenceEndpoint, insertedPoint, cloneRoundCapPoint(endPoint)];
+    const rewrittenSidePoints = [
+      ...sidePoints.slice(0, segmentStartIndex),
+      ...rewrittenSegment,
+      ...sidePoints.slice(segmentEndIndex + 1),
+    ];
+    return {
+      sidePoints: rewrittenSidePoints,
+      insertedPointIndex: segmentStartIndex + 1,
+      insertedPoint,
+      referenceEndpointIndex: fromEnd ? segmentStartIndex + 2 : segmentStartIndex,
+      referenceEndpoint,
+      tangentToEndpoint,
+    };
+  }
+
+  if (segmentPoints.length !== 4) {
+    return synthesizeInsertedPoint();
+  }
+
+  const bezier = segmentBezier ?? createBezierFromPoints(segmentPoints);
+  const splitT = solveTerminalSplitForDistance(bezier, fromEnd, effectiveTrimDistance);
+  const derivative = bezier.derivative(splitT);
+  const derivativeDirection = vector.normalizeVector({ x: derivative.x, y: derivative.y });
+  if (!isUsableDirection(derivativeDirection)) {
+    return synthesizeInsertedPoint();
+  }
+
+  const split = bezier.split(splitT);
+  const leftPoints = split.left.points.map((point) => ({ x: point.x, y: point.y }));
+  const rightPoints = split.right.points.map((point) => ({ x: point.x, y: point.y }));
+  let insertedPoint = buildInsertedRoundCapPoint(leftPoints[leftPoints.length - 1]);
+  if (vector.distance(insertedPoint, referenceEndpoint) < 1) {
+    insertedPoint = buildInsertedRoundCapPoint({
+      x: referenceEndpoint.x - fallbackDirection.x,
+      y: referenceEndpoint.y - fallbackDirection.y,
+    });
+  }
+
+  const tangentToEndpoint = fromEnd
+    ? derivativeDirection
+    : { x: -derivativeDirection.x, y: -derivativeDirection.y };
+  const rewrittenSegment = [
+    cloneRoundCapPoint(startPoint),
+    buildSplitOffCurve(leftPoints[1]),
+    buildSplitOffCurve(leftPoints[2]),
+    insertedPoint,
+    buildSplitOffCurve(rightPoints[1]),
+    buildSplitOffCurve(rightPoints[2]),
+    cloneRoundCapPoint(endPoint),
+  ];
+  const rewrittenSidePoints = [
+    ...sidePoints.slice(0, segmentStartIndex),
+    ...rewrittenSegment,
+    ...sidePoints.slice(segmentEndIndex + 1),
+  ];
+
+  return {
+    sidePoints: rewrittenSidePoints,
+    insertedPointIndex: segmentStartIndex + 3,
+    insertedPoint,
+    referenceEndpointIndex: fromEnd ? segmentStartIndex + 6 : segmentStartIndex,
+    referenceEndpoint,
+    tangentToEndpoint,
+  };
+}
+
 /**
  * Generate cap points for open skeleton endpoints.
  * @param {Object} point - The endpoint
