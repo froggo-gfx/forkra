@@ -1303,179 +1303,78 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
     let endCap = [];
 
       if (startIsRound) {
-        let startTangent = getSegmentTangent(segments[0], "start");
-        let leftStart = getFirstOnCurvePoint(roundedLeftSide);
-        let rightStart = getFirstOnCurvePoint(roundedRightSide);
+        const startTangent = getSegmentTangent(segments[0], "start");
+        const leftStart = getFirstOnCurvePoint(roundedLeftSide);
+        const rightStart = getFirstOnCurvePoint(roundedRightSide);
         if (leftStart && rightStart) {
-        const capVector = vector.subVectors(leftStart, rightStart);
-        const capLength = Math.hypot(capVector.x, capVector.y);
-        const capWidth = startCapLeftHW + startCapRightHW;
-        const capRadiusRatio =
-          firstOnCurvePoint.capRadiusRatio ??
-          skeletonContour.capRadiusRatio ??
-          DEFAULT_CAP_RADIUS_RATIO;
-        const capTension =
-          firstOnCurvePoint.capTension ??
-          skeletonContour.capTension ??
-          DEFAULT_CAP_TENSION;
-        const clampedCapRadiusRatio = Math.min(
-          Math.max(capRadiusRatio, 0),
-          MAX_CAP_RADIUS_RATIO
-        );
-        const radiusFactor =
-          MAX_CAP_RADIUS_RATIO > 0 ? clampedCapRadiusRatio / MAX_CAP_RADIUS_RATIO : 0;
-        const maxProjectionShift = Math.max(capWidth / 2 - capWidth / 128, 0);
-        const mergeCapAtMax = radiusFactor >= 1 - 1e-6;
-        const mergeCap = false;
-        const normalShift = (capWidth / 2) * radiusFactor;
-        if (capLength > 0.001 && capWidth > 0.001) {
-          let startNormal = getEffectiveNormal(
-            firstOnCurvePoint,
-            vector.rotateVector90CW(startTangent)
+          const capWidth = startCapLeftHW + startCapRightHW;
+          const capRadiusRatio =
+            firstOnCurvePoint.capRadiusRatio ??
+            skeletonContour.capRadiusRatio ??
+            DEFAULT_CAP_RADIUS_RATIO;
+          const capTension =
+            firstOnCurvePoint.capTension ??
+            skeletonContour.capTension ??
+            DEFAULT_CAP_TENSION;
+          const frame = getRoundCapFrame({
+            endpointTangent: startTangent,
+            capRadiusRatio,
+            capWidth,
+            position: "start",
+          });
+          const rightNext = getNextOnCurvePoint(roundedRightSide, 0);
+          const leftNext = getNextOnCurvePoint(roundedLeftSide, 0);
+          const rightChordDirection = rightNext
+            ? vector.normalizeVector(vector.subVectors(rightStart, rightNext))
+            : frame.capTangent;
+          const leftChordDirection = leftNext
+            ? vector.normalizeVector(vector.subVectors(leftStart, leftNext))
+            : frame.capTangent;
+          const rightSplit = splitTerminalSideForRoundCap(
+            roundedRightSide,
+            "start",
+            frame.trimDistance,
+            {
+              endpointTangent: frame.capTangent,
+              chordDirection: rightChordDirection,
+              capTangent: frame.capTangent,
+            }
           );
-          let capDir = vector.normalizeVector(startNormal); // right -> left
-          let tOut = { x: -startTangent.x, y: -startTangent.y };
-
-          const origRight = { x: rightStart.x, y: rightStart.y };
-          const origLeft = { x: leftStart.x, y: leftStart.y };
-
-          // Preserve existing outline endpoints for round caps.
-          // This keeps endpoint control anchored to skeleton-generated side geometry.
-          if (segments[0]?.controlPoints?.length) {
-            rightStart.smooth = true;
-            leftStart.smooth = true;
+          const leftSplit = splitTerminalSideForRoundCap(
+            roundedLeftSide,
+            "start",
+            frame.trimDistance,
+            {
+              endpointTangent: frame.capTangent,
+              chordDirection: leftChordDirection,
+              capTangent: frame.capTangent,
+            }
+          );
+          if (rightSplit && leftSplit) {
+            roundedRightSide = trimSideForRoundCapEmission(
+              rightSplit.sidePoints,
+              "start",
+              rightSplit.referenceEndpointIndex
+            );
+            roundedLeftSide = trimSideForRoundCapEmission(
+              leftSplit.sidePoints,
+              "start",
+              leftSplit.referenceEndpointIndex
+            );
+            startCap = buildRoundCapGeometry({
+              position: "start",
+              insertedLeft: leftSplit.insertedPoint,
+              insertedRight: rightSplit.insertedPoint,
+              leftTangentToEndpoint: leftSplit.tangentToEndpoint,
+              rightTangentToEndpoint: rightSplit.tangentToEndpoint,
+              referenceLeft: leftSplit.referenceEndpoint,
+              referenceRight: rightSplit.referenceEndpoint,
+              capTangent: frame.capTangent,
+              capTension,
+              radiusFactor: frame.radiusFactor,
+              capWidth,
+            }).capPoints;
           }
-          const tipNormalShift = normalShift;
-          const tipTangentShift = maxProjectionShift;
-          const projectedTangentShift = maxProjectionShift * (1 - radiusFactor);
-          const newRight = {
-            x: Math.round(origRight.x + capDir.x * tipNormalShift + tOut.x * tipTangentShift),
-            y: Math.round(origRight.y + capDir.y * tipNormalShift + tOut.y * tipTangentShift),
-            smooth: true,
-            skipColinear: true,
-          };
-          const newLeft = {
-            x: Math.round(origLeft.x - capDir.x * tipNormalShift + tOut.x * tipTangentShift),
-            y: Math.round(origLeft.y - capDir.y * tipNormalShift + tOut.y * tipTangentShift),
-            smooth: true,
-            skipColinear: true,
-          };
-          if (mergeCapAtMax) {
-            const mid = {
-              x: Math.round((newRight.x + newLeft.x) / 2),
-              y: Math.round((newRight.y + newLeft.y) / 2),
-            };
-            newRight.x = mid.x;
-            newRight.y = mid.y;
-            newLeft.x = mid.x;
-            newLeft.y = mid.y;
-          }
-          const projectedRight = {
-            x: Math.round(origRight.x + tOut.x * projectedTangentShift),
-            y: Math.round(origRight.y + tOut.y * projectedTangentShift),
-            smooth: true,
-            skipColinear: true,
-          };
-          const projectedLeft = {
-            x: Math.round(origLeft.x + tOut.x * projectedTangentShift),
-            y: Math.round(origLeft.y + tOut.y * projectedTangentShift),
-            smooth: true,
-            skipColinear: true,
-          };
-          const newRightHandleDir = { x: -capDir.x, y: -capDir.y };
-          const newLeftHandleDir = { x: capDir.x, y: capDir.y };
-          const midPoint = mergeCap
-            ? {
-                x: Math.round((newRight.x + newLeft.x) / 2),
-                y: Math.round((newRight.y + newLeft.y) / 2),
-                smooth: true,
-              }
-            : null;
-
-          if (mergeCap) {
-            const rightSegHandles = computeTunniHandleLengths(
-              rightStart,
-              tOut,
-              midPoint,
-              { x: -capDir.x, y: -capDir.y },
-              capTension
-            );
-            const leftSegHandles = computeTunniHandleLengths(
-              midPoint,
-              capDir,
-              leftStart,
-              tOut,
-              capTension
-            );
-            startCap = [
-              {
-                x: Math.round(rightStart.x + tOut.x * rightSegHandles.startLen),
-                y: Math.round(rightStart.y + tOut.y * rightSegHandles.startLen),
-                type: "cubic",
-              },
-              {
-                x: Math.round(midPoint.x - capDir.x * rightSegHandles.endLen),
-                y: Math.round(midPoint.y - capDir.y * rightSegHandles.endLen),
-                type: "cubic",
-              },
-              midPoint,
-              {
-                x: Math.round(midPoint.x + capDir.x * leftSegHandles.startLen),
-                y: Math.round(midPoint.y + capDir.y * leftSegHandles.startLen),
-                type: "cubic",
-              },
-              {
-                x: Math.round(leftStart.x + tOut.x * leftSegHandles.endLen),
-                y: Math.round(leftStart.y + tOut.y * leftSegHandles.endLen),
-                type: "cubic",
-              },
-            ];
-          } else {
-            // Non-merged round cap: preserve max projection with two projected side points
-            // plus two rib-tip points so cap radius can still vary via capRadiusRatio.
-            const projectedHandleDir = { x: tOut.x, y: tOut.y };
-            const rightCornerSegHandles = computeTunniHandleLengths(
-              projectedRight,
-              projectedHandleDir,
-              newRight,
-              newRightHandleDir,
-              capTension
-            );
-            const leftCornerSegHandles = computeTunniHandleLengths(
-              newLeft,
-              newLeftHandleDir,
-              projectedLeft,
-              projectedHandleDir,
-              capTension
-            );
-            startCap = [
-              projectedRight,
-              {
-                x: Math.round(projectedRight.x + projectedHandleDir.x * rightCornerSegHandles.startLen),
-                y: Math.round(projectedRight.y + projectedHandleDir.y * rightCornerSegHandles.startLen),
-                type: "cubic",
-              },
-              {
-                x: Math.round(newRight.x + newRightHandleDir.x * rightCornerSegHandles.endLen),
-                y: Math.round(newRight.y + newRightHandleDir.y * rightCornerSegHandles.endLen),
-                type: "cubic",
-              },
-              newRight,
-              newLeft,
-              {
-                x: Math.round(newLeft.x + newLeftHandleDir.x * leftCornerSegHandles.startLen),
-                y: Math.round(newLeft.y + newLeftHandleDir.y * leftCornerSegHandles.startLen),
-                type: "cubic",
-              },
-              {
-                x: Math.round(projectedLeft.x + projectedHandleDir.x * leftCornerSegHandles.endLen),
-                y: Math.round(projectedLeft.y + projectedHandleDir.y * leftCornerSegHandles.endLen),
-                type: "cubic",
-              },
-              projectedLeft,
-            ];
-          }
-        }
         }
       } else if (startIsSquare) {
         const startAngle =
@@ -3107,6 +3006,22 @@ function getLastOnCurvePoint(points) {
   if (!points) return null;
   for (let i = points.length - 1; i >= 0; i--) {
     if (!points[i].type) return points[i];
+  }
+  return null;
+}
+
+function getNextOnCurvePoint(points, startIndex) {
+  if (!points) return null;
+  for (let i = startIndex + 1; i < points.length; i++) {
+    if (points[i] && !points[i].type) return points[i];
+  }
+  return null;
+}
+
+function getPreviousOnCurvePoint(points, startIndex) {
+  if (!points) return null;
+  for (let i = startIndex - 1; i >= 0; i--) {
+    if (points[i] && !points[i].type) return points[i];
   }
   return null;
 }
