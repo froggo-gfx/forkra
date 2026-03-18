@@ -3493,6 +3493,273 @@ function splitTerminalSideForRoundCap(
   };
 }
 
+function trimSideForRoundCapEmission(sidePoints, sidePosition, referenceEndpointIndex) {
+  const emitted = [...sidePoints];
+  emitted.splice(referenceEndpointIndex, 1);
+  return emitted;
+}
+
+function buildRoundCapEndpoint(point) {
+  return {
+    x: Math.round(point.x),
+    y: Math.round(point.y),
+    smooth: true,
+    skipColinear: true,
+  };
+}
+
+function buildRoundCapTipPoint(point) {
+  return {
+    x: Math.round(point.x),
+    y: Math.round(point.y),
+    smooth: true,
+  };
+}
+
+function orientDirectionToward(direction, targetVector) {
+  if (!isUsableDirection(direction)) {
+    return resolveRoundCapFallbackDirection({ endpointTangent: targetVector });
+  }
+  if (!isUsableDirection(targetVector)) {
+    return vector.normalizeVector(direction);
+  }
+  const normalizedDirection = vector.normalizeVector(direction);
+  const normalizedTarget = vector.normalizeVector(targetVector);
+  const dot = normalizedDirection.x * normalizedTarget.x + normalizedDirection.y * normalizedTarget.y;
+  return dot >= 0
+    ? normalizedDirection
+    : { x: -normalizedDirection.x, y: -normalizedDirection.y };
+}
+
+function buildRoundCapSegment(startPoint, startDir, endPoint, endDir, tension) {
+  if (
+    !isUsableDirection(startDir) ||
+    !isUsableDirection(endDir) ||
+    vector.distance(startPoint, endPoint) < 0.001
+  ) {
+    return [cloneRoundCapPoint(endPoint)];
+  }
+
+  const handleLengths = computeTunniHandleLengths(startPoint, startDir, endPoint, endDir, tension);
+  if (
+    !Number.isFinite(handleLengths.startLen) ||
+    !Number.isFinite(handleLengths.endLen)
+  ) {
+    return [cloneRoundCapPoint(endPoint)];
+  }
+
+  return [
+    {
+      x: Math.round(startPoint.x + startDir.x * handleLengths.startLen),
+      y: Math.round(startPoint.y + startDir.y * handleLengths.startLen),
+      type: "cubic",
+    },
+    {
+      x: Math.round(endPoint.x + endDir.x * handleLengths.endLen),
+      y: Math.round(endPoint.y + endDir.y * handleLengths.endLen),
+      type: "cubic",
+    },
+    cloneRoundCapPoint(endPoint),
+  ];
+}
+
+function buildRoundCapGeometry({
+  position,
+  insertedLeft,
+  insertedRight,
+  leftTangentToEndpoint,
+  rightTangentToEndpoint,
+  referenceLeft,
+  referenceRight,
+  capTangent,
+  capTension,
+  radiusFactor,
+  capWidth,
+}) {
+  const referenceSpan = vector.subVectors(referenceLeft, referenceRight);
+  const rawCapNormal = vector.normalizeVector(referenceSpan);
+  const fallbackCapNormal = vector.normalizeVector(vector.rotateVector90CW(capTangent));
+  const canUseRawCapNormal = isUsableDirection(rawCapNormal);
+  const canUseFallbackCapNormal = isUsableDirection(fallbackCapNormal);
+  const capNormal = canUseRawCapNormal
+    ? rawCapNormal
+    : canUseFallbackCapNormal
+      ? fallbackCapNormal
+      : null;
+
+  const normalShift = (capWidth / 2) * radiusFactor;
+  const zeroWidthCap = !(capWidth > 0.001);
+  let finalEndpoints = null;
+  let tipPoint = null;
+  let isMergedTip = false;
+  let preCollapseRight = null;
+  let preCollapseLeft = null;
+
+  if (!zeroWidthCap && capNormal) {
+    preCollapseRight = buildRoundCapEndpoint({
+      x: referenceRight.x + capNormal.x * normalShift,
+      y: referenceRight.y + capNormal.y * normalShift,
+    });
+    preCollapseLeft = buildRoundCapEndpoint({
+      x: referenceLeft.x - capNormal.x * normalShift,
+      y: referenceLeft.y - capNormal.y * normalShift,
+    });
+
+    if (
+      radiusFactor >= 1 - 1e-6 ||
+      vector.distance(preCollapseRight, preCollapseLeft) <= 0.5
+    ) {
+      isMergedTip = true;
+      tipPoint = buildRoundCapTipPoint({
+        x: (preCollapseRight.x + preCollapseLeft.x) / 2,
+        y: (preCollapseRight.y + preCollapseLeft.y) / 2,
+      });
+    } else {
+      finalEndpoints = {
+        left: preCollapseLeft,
+        right: preCollapseRight,
+      };
+    }
+  } else {
+    isMergedTip = true;
+    tipPoint = buildRoundCapTipPoint({
+      x: (referenceLeft.x + referenceRight.x) / 2,
+      y: (referenceLeft.y + referenceRight.y) / 2,
+    });
+  }
+
+  const capPoints = [];
+
+  if (isMergedTip) {
+    let tipAxis = null;
+    if (preCollapseLeft && preCollapseRight && vector.distance(preCollapseLeft, preCollapseRight) > 0.001) {
+      tipAxis = vector.normalizeVector(vector.subVectors(preCollapseRight, preCollapseLeft));
+    }
+    if (!isUsableDirection(tipAxis) && canUseFallbackCapNormal) {
+      tipAxis = fallbackCapNormal;
+    }
+    if (!isUsableDirection(tipAxis)) {
+      tipAxis = vector.normalizeVector(vector.subVectors(insertedLeft, insertedRight));
+    }
+
+    const rightTipDir = orientDirectionToward(
+      tipAxis,
+      vector.subVectors(insertedRight, tipPoint)
+    );
+    const leftTipDir = orientDirectionToward(
+      tipAxis,
+      vector.subVectors(insertedLeft, tipPoint)
+    );
+
+    if (position === "start") {
+      capPoints.push(
+        ...buildRoundCapSegment(
+          insertedRight,
+          rightTangentToEndpoint,
+          tipPoint,
+          rightTipDir,
+          capTension
+        )
+      );
+      capPoints.push(
+        ...buildRoundCapSegment(
+          tipPoint,
+          leftTipDir,
+          insertedLeft,
+          leftTangentToEndpoint,
+          capTension
+        )
+      );
+    } else {
+      capPoints.push(
+        ...buildRoundCapSegment(
+          insertedLeft,
+          leftTangentToEndpoint,
+          tipPoint,
+          leftTipDir,
+          capTension
+        )
+      );
+      capPoints.push(
+        ...buildRoundCapSegment(
+          tipPoint,
+          rightTipDir,
+          insertedRight,
+          rightTangentToEndpoint,
+          capTension
+        )
+      );
+    }
+
+    return { capPoints, finalEndpoints, tipPoint, isMergedTip };
+  }
+
+  const tipLineDirection = vector.normalizeVector(
+    vector.subVectors(finalEndpoints.left, finalEndpoints.right)
+  );
+  const leftTipDir = orientDirectionToward(
+    tipLineDirection,
+    vector.subVectors(insertedLeft, finalEndpoints.left)
+  );
+  const rightTipDir = orientDirectionToward(
+    { x: -tipLineDirection.x, y: -tipLineDirection.y },
+    vector.subVectors(insertedRight, finalEndpoints.right)
+  );
+
+  if (position === "start") {
+    capPoints.push(
+      ...buildRoundCapSegment(
+        insertedRight,
+        rightTangentToEndpoint,
+        finalEndpoints.right,
+        rightTipDir,
+        capTension
+      )
+    );
+    capPoints.push(cloneRoundCapPoint(finalEndpoints.left));
+    capPoints.push(
+      ...buildRoundCapSegment(
+        finalEndpoints.left,
+        leftTipDir,
+        insertedLeft,
+        leftTangentToEndpoint,
+        capTension
+      )
+    );
+  } else {
+    capPoints.push(
+      ...buildRoundCapSegment(
+        insertedLeft,
+        leftTangentToEndpoint,
+        finalEndpoints.left,
+        leftTipDir,
+        capTension
+      )
+    );
+    capPoints.push(cloneRoundCapPoint(finalEndpoints.right));
+    capPoints.push(
+      ...buildRoundCapSegment(
+        finalEndpoints.right,
+        rightTipDir,
+        insertedRight,
+        rightTangentToEndpoint,
+        capTension
+      )
+    );
+  }
+
+  return { capPoints, finalEndpoints, tipPoint, isMergedTip };
+}
+
+function assembleOpenOutlineWithRoundCaps({ leftSide, endCap, rightSide, startCap }) {
+  const outlinePoints = [];
+  outlinePoints.push(...leftSide);
+  outlinePoints.push(...endCap);
+  outlinePoints.push(...[...rightSide].reverse());
+  outlinePoints.push(...startCap);
+  return outlinePoints;
+}
+
 /**
  * Generate cap points for open skeleton endpoints.
  * @param {Object} point - The endpoint
