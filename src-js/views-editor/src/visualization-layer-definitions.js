@@ -2298,23 +2298,28 @@ registerVisualizationLayerDefinition({
     pathColor: "#44CC66",
   },
   draw: (context, positionedGlyph, parameters, model, controller) => {
-    if (!model.measureMode) return;
+    if (!model.measureMode && !model.dragHoverRibPoint) return;
 
     const {
       measureHoverSegment,
       measureHoverRibPoint,
+      dragHoverRibPoint,
       measureHoverHandle,
       measureHoverPoints,
       measureShowDirect,
     } = model;
 
     // Draw rib point width (Q+hover on rib point)
-    if (measureHoverRibPoint) {
-      const { x, y, width, leftWidth, rightWidth } = measureHoverRibPoint;
-      const isAsym = Math.abs(leftWidth - rightWidth) > 0.01;
-      const label = isAsym
-        ? `${leftWidth.toFixed(1)} | ${rightWidth.toFixed(1)}`
-        : width.toFixed(1);
+    const activeRibHoverPoint = dragHoverRibPoint || measureHoverRibPoint;
+    if (activeRibHoverPoint) {
+      const { x, y, width, leftWidth, rightWidth, side } = activeRibHoverPoint;
+      const isSingleSided = leftWidth <= 0.01 || rightWidth <= 0.01;
+      const ribWidth = side === "right" ? rightWidth : leftWidth;
+      const distribution =
+        width <= 0 ? 0 : Math.round((ribWidth / width) * 100);
+      const label = isSingleSided
+        ? width.toFixed(1)
+        : `${ribWidth.toFixed(1)} (${width.toFixed(1)}) | ${distribution}%`;
       drawMeasureLabel(context, x, y, label, parameters.skeletonColor, parameters);
       return; // Don't show segment when over rib point
     }

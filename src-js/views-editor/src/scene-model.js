@@ -76,7 +76,8 @@ export class SceneModel {
     this.measureMode = false;
     this.measureShowDirect = false; // Alt+Q shows direct distance + angle
     this.measureHoverSegment = null; // { p1, p2, type }
-    this.measureHoverRibPoint = null; // { x, y, width, leftWidth, rightWidth }
+    this.measureHoverRibPoint = null; // { x, y, width, leftWidth, rightWidth, side }
+    this.dragHoverRibPoint = null; // Same payload shape as measureHoverRibPoint, but for rib drag
     this.measureHoverPoints = null; // { p1, p2, type }
     this.measureHoverHandle = null; // { p1, p2, type, tensionContext? }
 
@@ -154,6 +155,10 @@ export class SceneModel {
     this.measureHoverRibPoint = null;
     this.measureHoverPoints = null;
     this.measureHoverHandle = null;
+  }
+
+  setDragHoverRibPoint(payload = null) {
+    this.dragHoverRibPoint = payload;
   }
 
   setMeasureActive(active, options = {}) {
@@ -735,15 +740,6 @@ export class SceneModel {
       return { selection: skeletonPointSelection };
     }
 
-    // Check for skeleton segments
-    const skeletonSegmentSelection = this.skeletonSegmentSelectionAtPoint(
-      point,
-      size,
-      parsedCurrentSelection
-    );
-    if (skeletonSegmentSelection.size) {
-      return { selection: skeletonSegmentSelection };
-    }
     const anchorSelection = this.anchorSelectionAtPoint(
       point,
       size,
@@ -760,6 +756,16 @@ export class SceneModel {
     );
     if (guidelineSelection.size) {
       return { selection: guidelineSelection };
+    }
+
+    // Check for skeleton segments (lowest priority)
+    const skeletonSegmentSelection = this.skeletonSegmentSelectionAtPoint(
+      point,
+      size,
+      parsedCurrentSelection
+    );
+    if (skeletonSegmentSelection.size) {
+      return { selection: skeletonSegmentSelection };
     }
 
     // TODO: Font Guidelines
@@ -821,10 +827,57 @@ export class SceneModel {
           return new Set([`point/${pointIndex}`]);
         }
 
-        // Skip skeleton-generated outline points - they shouldn't be directly editable
-        return new Set();
+        // Keep searching: generated outline points are not directly editable,
+        // but nearby editable generated handles should still win over skeleton segments.
+      } else {
+        return new Set([`point/${pointIndex}`]);
       }
-      return new Set([`point/${pointIndex}`]);
+    }
+
+    const editableGeneratedHandleSelection = this._editableGeneratedHandleSelectionAtPoint(
+      positionedGlyph,
+      glyphPoint,
+      Math.max(size, 4),
+      parsedCurrentSelection?.point || []
+    );
+    if (editableGeneratedHandleSelection.size) {
+      return editableGeneratedHandleSelection;
+    }
+
+    return new Set();
+  }
+
+  _editableGeneratedHandleSelectionAtPoint(
+    positionedGlyph,
+    glyphPoint,
+    margin,
+    currentPointSelection
+  ) {
+    const path = positionedGlyph?.glyph?.path;
+    if (!path) {
+      return new Set();
+    }
+
+    const rect = centeredRect(glyphPoint.x, glyphPoint.y, margin);
+    const candidatePointIndices = currentPointSelection.length
+      ? reversed(currentPointSelection)
+      : [...path.reverseIterPointsInRect(rect)].map((hit) => hit.pointIndex);
+
+    for (const pointIndex of candidatePointIndices) {
+      const pointPos = path.getPoint(pointIndex);
+      if (!pointPos || !pointInRect(pointPos.x, pointPos.y, rect)) {
+        continue;
+      }
+      if (!this._isPointInSkeletonGeneratedContour(positionedGlyph, pointIndex)) {
+        continue;
+      }
+      const editableHandleInfo = this._getEditableHandleForGeneratedPoint(
+        positionedGlyph,
+        pointIndex
+      );
+      if (editableHandleInfo) {
+        return new Set([`point/${pointIndex}`]);
+      }
     }
 
     return new Set();
@@ -1194,8 +1247,8 @@ export class SceneModel {
       y: point.y - positionedGlyph.y,
     };
 
-    // Use larger margin for segment hit testing
-    const margin = size * 1.5;
+    // Use fixed margin for segment hit testing (doesn't scale with zoom)
+    const margin = 4;
 
     // Check if we should prefer current selection
     if (parsedCurrentSelection?.skeletonSegment?.size) {

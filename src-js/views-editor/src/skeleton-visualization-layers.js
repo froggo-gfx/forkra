@@ -147,7 +147,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: true,
-  zIndex: 450,
+  zIndex: 400, // Below all editable elements (path handles at 500)
   screenParameters: { strokeWidth: 1.5 },
   colors: { strokeColor: "#0080FF" },
   colorsDarkMode: { strokeColor: "#00BFFF" },
@@ -176,7 +176,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: true,
-  zIndex: 452,
+  zIndex: 402, // Above centerline (400), below all editable elements
   screenParameters: { strokeWidth: 1 },
   colors: { strokeColor: "rgba(0, 128, 255, 0.4)" },
   colorsDarkMode: { strokeColor: "rgba(0, 191, 255, 0.4)" },
@@ -601,12 +601,12 @@ registerVisualizationLayerDefinition({
   },
 });
 
-// Selected/hovered skeleton segments layer
+// Selected skeleton segments layer
 registerVisualizationLayerDefinition({
   identifier: "fontra.skeleton.selected.segments",
   name: "Selected Skeleton Segments",
   selectionFunc: glyphSelector("editing"),
-  zIndex: 448, // Just below centerline
+  zIndex: 398, // Below centerline (400), lowest priority
   screenParameters: {
     strokeWidth: 4,
   },
@@ -855,9 +855,14 @@ function drawLabelText(context, point, text, offsetX, offsetY, parameters) {
 
   const lines = text.split("\n");
   const lineHeight = SKELETON_LABEL_FONT_SIZE + 2;
+  const totalHeight = lines.length * lineHeight;
 
   const x = point.x + offsetX;
   const y = point.y + offsetY;
+  
+  // Calculate startY so the label is centered vertically on the point
+  // First line (i=0) should appear at the TOP visually
+  const startY = -y - totalHeight / 2 + lineHeight / 2;
 
   // Draw text directly (dark color, no background)
   context.save();
@@ -868,8 +873,7 @@ function drawLabelText(context, point, text, offsetX, offsetY, parameters) {
   context.scale(1, -1); // Flip for canvas coordinate system
 
   for (let i = 0; i < lines.length; i++) {
-    const textY = -(y + (i - (lines.length - 1) / 2) * lineHeight);
-    context.fillText(lines[i], x + SKELETON_LABEL_PADDING, textY);
+    context.fillText(lines[i], x + SKELETON_LABEL_PADDING, startY + i * lineHeight);
   }
   context.restore();
 }
@@ -1016,7 +1020,7 @@ registerVisualizationLayerDefinition({
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: false,
-  zIndex: 548, // Between handles (545) and nodes (550)
+  zIndex: 570, // Topmost skeleton layer (above rib points at 560)
   screenParameters: {
     strokeWidth: 1,
     dashPattern: [5, 5],
