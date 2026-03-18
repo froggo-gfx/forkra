@@ -3031,7 +3031,7 @@ function getRoundCapFrame({
   const radiusFactor =
     MAX_CAP_RADIUS_RATIO > 0 ? clampedCapRadiusRatio / MAX_CAP_RADIUS_RATIO : 0;
   const maxProjectionShift = Math.max(capWidth / 2 - capWidth / 128, 0);
-  const trimDistance = maxProjectionShift * (1 - radiusFactor);
+  const trimDistance = maxProjectionShift * radiusFactor;
   const capTangent =
     position === "start"
       ? { x: -endpointTangent.x, y: -endpointTangent.y }
@@ -3311,6 +3311,15 @@ function splitTerminalSideForRoundCap(
 function trimSideForRoundCapEmission(sidePoints, sidePosition, referenceEndpointIndex) {
   const emitted = [...sidePoints];
   emitted.splice(referenceEndpointIndex, 1);
+  if (sidePosition === "start") {
+    while (emitted.length && emitted[0]?.type) {
+      emitted.shift();
+    }
+  } else if (sidePosition === "end") {
+    while (emitted.length && emitted[emitted.length - 1]?.type) {
+      emitted.pop();
+    }
+  }
   return emitted;
 }
 
