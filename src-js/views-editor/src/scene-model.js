@@ -982,8 +982,6 @@ export class SceneModel {
 
         // Check both sides
         for (const side of ["left", "right"]) {
-          const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
-
           // Compute expected rib point position
           let halfWidth = getPointHalfWidth(skeletonPoint, defaultWidth, side);
 
@@ -998,7 +996,7 @@ export class SceneModel {
           if (halfWidth < 0.5) continue; // Skip zero-width sides
 
           const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-          const nudge = skeletonPoint[lockedKey] ? 0 : skeletonPoint[nudgeKey] || 0;
+          const nudge = skeletonPoint[nudgeKey] || 0;
 
           const sign = side === "left" ? 1 : -1;
           const expectedPoint = projectRibPoint(
@@ -1116,8 +1114,6 @@ export class SceneModel {
         const normal = calculateNormalAtSkeletonPoint(contour, skeletonPointIndex);
 
         for (const side of ["left", "right"]) {
-          const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
-
           let halfWidth = getPointHalfWidth(skeletonPoint, defaultWidth, side);
 
           if (singleSided) {
@@ -1130,7 +1126,7 @@ export class SceneModel {
           if (halfWidth < 0.5) continue;
 
           const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-          const nudge = skeletonPoint[lockedKey] ? 0 : skeletonPoint[nudgeKey] || 0;
+          const nudge = skeletonPoint[nudgeKey] || 0;
 
           const sign = side === "left" ? 1 : -1;
           const expectedAnchor = projectRibPoint(

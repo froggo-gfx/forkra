@@ -2845,13 +2845,9 @@ export class PointerTool extends BaseTool {
         const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
         const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
 
-        // Locked sides still hit-test as rib points; they just ignore side adjustments.
-        const isLeftLocked = skeletonPoint.leftLocked === true;
-        const isRightLocked = skeletonPoint.rightLocked === true;
-
-        // Calculate nudge offsets only for unlocked sides, to match generator behavior.
-        const leftNudge = (!isLeftLocked && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
-        const rightNudge = (!isRightLocked && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+        // Locked sides still hit-test at their preserved adjusted geometry.
+        const leftNudge = leftHW >= 0.5 ? (skeletonPoint.leftNudge || 0) : 0;
+        const rightNudge = rightHW >= 0.5 ? (skeletonPoint.rightNudge || 0) : 0;
 
         const singleSided = contour.singleSided ?? false;
         const singleSidedDirection = contour.singleSidedDirection ?? "left";
@@ -2862,8 +2858,8 @@ export class PointerTool extends BaseTool {
           const side = singleSidedDirection;
           const canNudge = totalWidth >= 0.5;
           const nudge = side === "left"
-            ? ((!isLeftLocked && canNudge) ? (skeletonPoint.leftNudge || 0) : 0)
-            : ((!isRightLocked && canNudge) ? (skeletonPoint.rightNudge || 0) : 0);
+            ? (canNudge ? (skeletonPoint.leftNudge || 0) : 0)
+            : (canNudge ? (skeletonPoint.rightNudge || 0) : 0);
           const ribPoint = projectRibPoint(
             skeletonPoint,
             normal,
@@ -2976,11 +2972,9 @@ export class PointerTool extends BaseTool {
           }
         }
 
-        // Apply nudge offset for unlocked sides.
-        const isLeftLocked = skeletonPoint.leftLocked === true;
-        const isRightLocked = skeletonPoint.rightLocked === true;
-        const leftNudge = (!isLeftLocked && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
-        const rightNudge = (!isRightLocked && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+        // Apply preserved nudge offsets for measurement geometry.
+        const leftNudge = leftHW >= 0.5 ? (skeletonPoint.leftNudge || 0) : 0;
+        const rightNudge = rightHW >= 0.5 ? (skeletonPoint.rightNudge || 0) : 0;
 
         // Calculate rib endpoint positions (including nudge)
         const leftRibPoint = projectRibPoint(
@@ -3390,15 +3384,13 @@ export class PointerTool extends BaseTool {
       }
       const canNudge = totalWidth >= 0.5;
       const nudge = side === "left"
-        ? ((skeletonPoint.leftLocked || !canNudge) ? 0 : (skeletonPoint.leftNudge || 0))
-        : ((skeletonPoint.rightLocked || !canNudge) ? 0 : (skeletonPoint.rightNudge || 0));
+        ? (canNudge ? (skeletonPoint.leftNudge || 0) : 0)
+        : (canNudge ? (skeletonPoint.rightNudge || 0) : 0);
       return projectRibPoint(skeletonPoint, normal, totalWidth, side, nudge);
     }
 
-    const isLeftLocked = skeletonPoint.leftLocked === true;
-    const isRightLocked = skeletonPoint.rightLocked === true;
-    const leftNudge = (!isLeftLocked && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
-    const rightNudge = (!isRightLocked && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+    const leftNudge = leftHW >= 0.5 ? (skeletonPoint.leftNudge || 0) : 0;
+    const rightNudge = rightHW >= 0.5 ? (skeletonPoint.rightNudge || 0) : 0;
     const halfWidth = side === "left" ? leftHW : rightHW;
     const nudge = side === "left" ? leftNudge : rightNudge;
     return projectRibPoint(skeletonPoint, normal, halfWidth, side, nudge);

@@ -580,14 +580,10 @@ export class SkeletonPenTool extends BaseTool {
           }
         }
 
-        // Locked sides still hit-test as rib points; they just ignore side adjustments.
-        const isLeftLocked = skeletonPoint.leftLocked === true;
-        const isRightLocked = skeletonPoint.rightLocked === true;
-
-        // Apply nudge offset only for unlocked sides and width > 0 (matches generator behavior)
+        // Hit testing uses preserved rib geometry even when a side is locked.
         const tangent = { x: -normal.y, y: normal.x };
-        const leftNudge = (!isLeftLocked && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
-        const rightNudge = (!isRightLocked && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+        const leftNudge = leftHW >= 0.5 ? (skeletonPoint.leftNudge || 0) : 0;
+        const rightNudge = rightHW >= 0.5 ? (skeletonPoint.rightNudge || 0) : 0;
 
         // Calculate rib point positions (including nudge)
         const leftRibPoint = {
