@@ -925,13 +925,12 @@ export class SceneModel {
    * Returns rib point info if found, null otherwise.
    * @param {Object} positionedGlyph - The positioned glyph
    * @param {number} pointIndex - The point index in glyph.path
-   * @param {boolean} includeNonEditable - Include non-editable ribs when true
    * @returns {Object|null} {skeletonContourIndex, skeletonPointIndex, side} or null
    */
   _getEditableRibPointForGeneratedPoint(
     positionedGlyph,
     pointIndex,
-    includeNonEditable = false
+    _includeLocked = true
   ) {
     if (!positionedGlyph?.varGlyph?.glyph?.layers) {
       return null;
@@ -966,7 +965,7 @@ export class SceneModel {
     // Tolerance for position matching (in units)
     const tolerance = 1.5;
 
-    // Iterate through skeleton contours and find matching editable rib point
+    // Iterate through skeleton contours and find the matching generated rib point.
     for (let skeletonContourIndex = 0; skeletonContourIndex < skeletonData.contours.length; skeletonContourIndex++) {
       const contour = skeletonData.contours[skeletonContourIndex];
       const defaultWidth = contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
@@ -983,8 +982,7 @@ export class SceneModel {
 
         // Check both sides
         for (const side of ["left", "right"]) {
-          const editableKey = side === "left" ? "leftEditable" : "rightEditable";
-          if (!includeNonEditable && !skeletonPoint[editableKey]) continue;
+          const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
 
           // Compute expected rib point position
           let halfWidth = getPointHalfWidth(skeletonPoint, defaultWidth, side);
@@ -1000,7 +998,7 @@ export class SceneModel {
           if (halfWidth < 0.5) continue; // Skip zero-width sides
 
           const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-          const nudge = skeletonPoint[editableKey] ? skeletonPoint[nudgeKey] || 0 : 0;
+          const nudge = skeletonPoint[lockedKey] ? 0 : skeletonPoint[nudgeKey] || 0;
 
           const sign = side === "left" ? 1 : -1;
           const expectedPoint = projectRibPoint(
@@ -1030,7 +1028,7 @@ export class SceneModel {
   }
 
   /**
-   * Check if a generated control point (handle) corresponds to an editable handle.
+   * Check if a generated control point (handle) corresponds to a generated handle.
    * Returns handle info if found, null otherwise.
    * @param {Object} positionedGlyph - The positioned glyph
    * @param {number} pointIndex - The point index in glyph.path
@@ -1118,8 +1116,7 @@ export class SceneModel {
         const normal = calculateNormalAtSkeletonPoint(contour, skeletonPointIndex);
 
         for (const side of ["left", "right"]) {
-          const editableKey = side === "left" ? "leftEditable" : "rightEditable";
-          if (!skeletonPoint[editableKey]) continue;
+          const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
 
           let halfWidth = getPointHalfWidth(skeletonPoint, defaultWidth, side);
 
@@ -1133,7 +1130,7 @@ export class SceneModel {
           if (halfWidth < 0.5) continue;
 
           const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-          const nudge = skeletonPoint[nudgeKey] || 0;
+          const nudge = skeletonPoint[lockedKey] ? 0 : skeletonPoint[nudgeKey] || 0;
 
           const sign = side === "left" ? 1 : -1;
           const expectedAnchor = projectRibPoint(
