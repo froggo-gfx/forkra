@@ -90,32 +90,12 @@ including values such as:
 
 These fields are not cleared by lock toggles.
 
-### Legacy Compatibility
-
-Older data that still contains `leftEditable` / `rightEditable` must be normalized to
-`leftLocked` / `rightLocked` at the skeleton-data boundary.
-
-Legacy interpretation:
-
-- `leftEditable: true` => `leftLocked: false`
-- `leftEditable: false` => `leftLocked: true`
-- missing `leftEditable` => treat as legacy default and normalize consistently at the chosen
-  boundary
-- same mapping for `rightEditable`
-
-After normalization and any subsequent write, only `leftLocked` / `rightLocked` should be
-persisted.
-
 ## Implementation Shape
 
-### Boundary Normalization
+### Canonical Assumption
 
-Introduce one canonical normalization step where skeleton data is read or cloned for editor
-use. That step should:
-
-1. Convert legacy `*Editable` fields into `*Locked`.
-2. Remove or ignore legacy `*Editable` fields from the in-memory canonical representation.
-3. Ensure new writes persist only `*Locked`.
+This feature assumes clean development data. The canonical skeleton side-state fields are
+`leftLocked` and `rightLocked`, and implementation should read and write only those fields.
 
 ### Interaction Routing
 
@@ -159,7 +139,6 @@ Verification for this change is manual only.
 
 Focus areas:
 
-- older glyphs with legacy `*Editable` data migrate cleanly to `*Locked`
 - unlocked generated rib points still support plain width drag
 - generated control points still require `Z` for direct adjustment
 - locked sides block all generated-side adjustment paths
@@ -172,9 +151,10 @@ Focus areas:
 
 ## Main Risk
 
-The main regression risk is partial schema migration: one route still reading old editable
-semantics while another route reads the new locked semantics. That would create inconsistent
-behavior between hit testing, drag routing, panel state, and persisted skeleton data.
+The main regression risk is inconsistent lock interpretation across routes. If one route still
+behaves as if generated-side editability is gated differently from another route, we will get
+inconsistent behavior between hit testing, drag routing, panel state, and persisted skeleton
+data.
 
 To avoid that, the implementation should establish one canonical `*Locked` interpretation and
 route all generated-side mutation logic through it.
