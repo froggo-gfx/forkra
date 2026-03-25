@@ -26,33 +26,39 @@ side toggle for blocking all generated-side adjustments while preserving existin
 
 ## Approved Behavior
 
-### Generated On-Curve Rib Points
+### `editableGeneratedPoint` Behavior
 
+- `editableGeneratedPoint` refers to the generated on-curve point that corresponds to a
+  skeleton rib point side.
 - Plain drag adjusts rib width.
 - `Z`-drag performs tangent slide.
 - Existing `X`-drag and `Alt`-drag keep their current specialized behaviors.
 - If the side is locked, all of the above are blocked.
 
-### Generated Control Points
+### `editableGeneratedHandle` Behavior
 
+- `editableGeneratedHandle` refers to the generated off-curve control point associated with a
+  skeleton rib point side.
 - Plain drag does nothing.
-- `Z`-drag adjusts the control point.
+- `Z`-drag adjusts the handle position.
 - Existing `X`-drag and `Alt`-drag keep their current specialized behaviors.
 - If the side is locked, all of the above are blocked.
 
-### Skeleton Points
+### `skeletonPoint` Behavior
 
-- Selecting the parent skeleton point shows a combined `Locked` control in the panel.
+- Selecting the parent `skeletonPoint` shows a combined `Locked` control in the panel.
 - The combined control writes both side locks at once.
-- Width and cap edits on the skeleton point remain available.
-- Lock state only applies to generated-side adjustment paths.
+- Width and cap edits on the `skeletonPoint` remain available.
+- Lock state only applies to generated-side adjustment paths, not to core `skeletonPoint`
+  editing.
 
-### Lock Semantics
+### Side Lock Semantics
 
-- Locking a side blocks every mutation path for that generated side:
+- Locking a side blocks every mutation path for that side's `editableGeneratedPoint` and
+  `editableGeneratedHandle`, including:
   - plain rib drag
   - `Z` tangent slide
-  - generated control-point `Z` drag
+  - `Z` handle drag
   - `X` modifier actions
   - `Alt` modifier actions
   - arrow-key nudging
