@@ -271,7 +271,7 @@ registerVisualizationLayerDefinition({
     strokeColor: "rgba(220, 60, 120, 0.7)",
     hoveredColor: "rgba(220, 60, 120, 1.0)",
     selectedColor: "rgba(255, 64, 0, 0.9)",
-    // Editable rib points - more saturated purple
+    // Unlocked rib points - more saturated purple
     editableStrokeColor: "rgba(160, 40, 180, 0.9)",
     editableHoveredColor: "rgba(160, 40, 180, 1.0)",
     editableSelectedColor: "rgba(160, 40, 180, 1.0)",
@@ -280,7 +280,7 @@ registerVisualizationLayerDefinition({
     strokeColor: "rgba(220, 100, 140, 0.7)",
     hoveredColor: "rgba(220, 100, 140, 1.0)",
     selectedColor: "rgba(255, 96, 64, 0.9)",
-    // Editable rib points - more saturated purple
+    // Unlocked rib points - more saturated purple
     editableStrokeColor: "rgba(180, 80, 200, 0.9)",
     editableHoveredColor: "rgba(180, 80, 200, 1.0)",
     editableSelectedColor: "rgba(180, 80, 200, 1.0)",
@@ -317,82 +317,79 @@ registerVisualizationLayerDefinition({
         const leftKey = `${contourIndex}/${pointIndex}/left`;
         const rightKey = `${contourIndex}/${pointIndex}/right`;
 
-        // Determine if each side is editable (per-side editable)
-        const isLeftEditable = point.leftEditable === true;
-        const isRightEditable = point.rightEditable === true;
+        // Determine if each side is unlocked.
+        const isLeftUnlocked = !point.leftLocked;
+        const isRightUnlocked = !point.rightLocked;
 
         if (singleSided) {
           // Single-sided mode: only one rib point at total width
           const totalWidth = leftHW + rightHW;
           const canNudge = totalWidth >= 0.5;
-          let ribPoint, ribKey, isEditable;
+          let ribPoint, ribKey, isUnlocked;
 
           if (singleSidedDirection === "left") {
-            // Only apply nudge if editable is true (matches generator behavior)
-            const nudge = (isLeftEditable && canNudge) ? (point.leftNudge || 0) : 0;
+            const nudge = canNudge ? (point.leftNudge || 0) : 0;
             ribPoint = projectRibPoint(point, normal, totalWidth, "left", nudge);
             ribKey = leftKey;
-            isEditable = isLeftEditable;
+            isUnlocked = isLeftUnlocked;
           } else {
-            // Only apply nudge if editable is true (matches generator behavior)
-            const nudge = (isRightEditable && canNudge) ? (point.rightNudge || 0) : 0;
+            const nudge = canNudge ? (point.rightNudge || 0) : 0;
             ribPoint = projectRibPoint(point, normal, totalWidth, "right", nudge);
             ribKey = rightKey;
-            isEditable = isRightEditable;
+            isUnlocked = isRightUnlocked;
           }
 
-          const pointSize = isEditable ? parameters.editablePointSize : parameters.pointSize;
+          const pointSize = isUnlocked ? parameters.editablePointSize : parameters.pointSize;
           const isSelected = selectedRibPoints?.has(ribKey);
           if (isSelected) {
-            context.strokeStyle = isEditable ? parameters.editableSelectedColor : parameters.selectedColor;
+            context.strokeStyle = isUnlocked ? parameters.editableSelectedColor : parameters.selectedColor;
           } else if (hoveredRibPoints?.has(ribKey)) {
-            context.strokeStyle = isEditable ? parameters.editableHoveredColor : parameters.hoveredColor;
+            context.strokeStyle = isUnlocked ? parameters.editableHoveredColor : parameters.hoveredColor;
           } else {
-            context.strokeStyle = isEditable ? parameters.editableStrokeColor : parameters.strokeColor;
+            context.strokeStyle = isUnlocked ? parameters.editableStrokeColor : parameters.strokeColor;
           }
           strokeDiamondNode(context, ribPoint, pointSize);
           if (isSelected) {
-            context.fillStyle = isEditable ? parameters.editableSelectedColor : parameters.selectedColor;
+            context.fillStyle = isUnlocked ? parameters.editableSelectedColor : parameters.selectedColor;
             fillDiamondNode(context, ribPoint, pointSize);
           }
         } else {
           // Normal mode: two rib points
-          // Only apply nudge offset if editable is true (matches generator behavior)
-          const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (point.leftNudge || 0) : 0;
-          const rightNudge = (isRightEditable && rightHW >= 0.5) ? (point.rightNudge || 0) : 0;
+          const leftNudge = leftHW >= 0.5 ? (point.leftNudge || 0) : 0;
+          const rightNudge = rightHW >= 0.5 ? (point.rightNudge || 0) : 0;
 
           const leftRibPoint = projectRibPoint(point, normal, leftHW, "left", leftNudge);
           const rightRibPoint = projectRibPoint(point, normal, rightHW, "right", rightNudge);
 
           // Draw left rib point
-          const leftPointSize = isLeftEditable ? parameters.editablePointSize : parameters.pointSize;
+          const leftPointSize = isLeftUnlocked ? parameters.editablePointSize : parameters.pointSize;
           const isLeftSelected = selectedRibPoints?.has(leftKey);
           if (isLeftSelected) {
-            context.strokeStyle = isLeftEditable ? parameters.editableSelectedColor : parameters.selectedColor;
+            context.strokeStyle = isLeftUnlocked ? parameters.editableSelectedColor : parameters.selectedColor;
           } else if (hoveredRibPoints?.has(leftKey)) {
-            context.strokeStyle = isLeftEditable ? parameters.editableHoveredColor : parameters.hoveredColor;
+            context.strokeStyle = isLeftUnlocked ? parameters.editableHoveredColor : parameters.hoveredColor;
           } else {
-            context.strokeStyle = isLeftEditable ? parameters.editableStrokeColor : parameters.strokeColor;
+            context.strokeStyle = isLeftUnlocked ? parameters.editableStrokeColor : parameters.strokeColor;
           }
           strokeDiamondNode(context, leftRibPoint, leftPointSize);
           if (isLeftSelected) {
-            context.fillStyle = isLeftEditable ? parameters.editableSelectedColor : parameters.selectedColor;
+            context.fillStyle = isLeftUnlocked ? parameters.editableSelectedColor : parameters.selectedColor;
             fillDiamondNode(context, leftRibPoint, leftPointSize);
           }
 
           // Draw right rib point
-          const rightPointSize = isRightEditable ? parameters.editablePointSize : parameters.pointSize;
+          const rightPointSize = isRightUnlocked ? parameters.editablePointSize : parameters.pointSize;
           const isRightSelected = selectedRibPoints?.has(rightKey);
           if (isRightSelected) {
-            context.strokeStyle = isRightEditable ? parameters.editableSelectedColor : parameters.selectedColor;
+            context.strokeStyle = isRightUnlocked ? parameters.editableSelectedColor : parameters.selectedColor;
           } else if (hoveredRibPoints?.has(rightKey)) {
-            context.strokeStyle = isRightEditable ? parameters.editableHoveredColor : parameters.hoveredColor;
+            context.strokeStyle = isRightUnlocked ? parameters.editableHoveredColor : parameters.hoveredColor;
           } else {
-            context.strokeStyle = isRightEditable ? parameters.editableStrokeColor : parameters.strokeColor;
+            context.strokeStyle = isRightUnlocked ? parameters.editableStrokeColor : parameters.strokeColor;
           }
           strokeDiamondNode(context, rightRibPoint, rightPointSize);
           if (isRightSelected) {
-            context.fillStyle = isRightEditable ? parameters.editableSelectedColor : parameters.selectedColor;
+            context.fillStyle = isRightUnlocked ? parameters.editableSelectedColor : parameters.selectedColor;
             fillDiamondNode(context, rightRibPoint, rightPointSize);
           }
         }

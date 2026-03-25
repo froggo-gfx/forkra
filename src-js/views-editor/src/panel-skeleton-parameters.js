@@ -537,7 +537,7 @@ export default class SkeletonParametersPanel extends Panel {
 
       // Track editable states per side based on selected rib points
       const selectedRibSides = this._getSelectedRibSides();
-      let editableStates = new Set();
+      let lockedStates = new Set();
       let detachedStates = new Set(); // Track detached handle states
       let forceHorizontalStates = new Set();
       let forceVerticalStates = new Set();
@@ -575,14 +575,14 @@ export default class SkeletonParametersPanel extends Panel {
           allSingleSided = false;
         }
 
-        // Collect editable and detached states for selected rib sides
+        // Collect lock and detached states for selected rib sides
         const pointKey = `${contourIdx}/${pointIdx}`;
         if (selectedRibSides.has(`${pointKey}/left`)) {
-          editableStates.add(!!point.leftEditable);
+          lockedStates.add(!!point.leftLocked);
           detachedStates.add(!!point.leftHandleDetached);
         }
         if (selectedRibSides.has(`${pointKey}/right`)) {
-          editableStates.add(!!point.rightEditable);
+          lockedStates.add(!!point.rightLocked);
           detachedStates.add(!!point.rightHandleDetached);
         }
       }
@@ -1060,15 +1060,15 @@ export default class SkeletonParametersPanel extends Panel {
         });
       }
 
-      // === EDITABLE RIB POINTS ===
+      // === LOCKED RIB POINTS ===
       // Only show when rib points are selected (not just skeleton points)
       if (selectedRibSides.size > 0) {
         formContents.push({ type: "spacer" });
 
-      const isEditable = editableStates.has(true) && editableStates.size === 1;
-      const isEditableIndeterminate = editableStates.size > 1;
+      const isLocked = lockedStates.has(true) && lockedStates.size === 1;
+      const isLockedIndeterminate = lockedStates.size > 1;
       let hasRoundedCapEndpoint = false;
-      let hasEditableEligibleRibSide = false;
+      let hasLockEligibleRibSide = false;
 
       if (selectedData?.skeletonData) {
         for (const ribKey of selectedRibSides) {
@@ -1081,30 +1081,30 @@ export default class SkeletonParametersPanel extends Panel {
           if (this._isRoundedCapEndpoint(contour, pointIdx, point)) {
             hasRoundedCapEndpoint = true;
           } else {
-            hasEditableEligibleRibSide = true;
+            hasLockEligibleRibSide = true;
           }
         }
       }
 
-      const editableDisabledByRoundCap =
-        hasRoundedCapEndpoint && !hasEditableEligibleRibSide;
+      const lockDisabledByRoundCap =
+        hasRoundedCapEndpoint && !hasLockEligibleRibSide;
 
-      const editableCheckbox = html.input({
+      const lockedCheckbox = html.input({
         type: "checkbox",
-        id: "editable-toggle",
-        checked: editableDisabledByRoundCap ? false : (isEditableIndeterminate ? false : isEditable),
-        disabled: editableDisabledByRoundCap,
-        onchange: (e) => this._onEditableToggle(e.target.checked, selectedRibSides),
+        id: "locked-toggle",
+        checked: lockDisabledByRoundCap ? true : (isLockedIndeterminate ? false : isLocked),
+        disabled: lockDisabledByRoundCap,
+        onchange: (e) => this._onLockedToggle(e.target.checked, selectedRibSides),
       });
-      if (isEditableIndeterminate) {
-        editableCheckbox.indeterminate = true;
+      if (isLockedIndeterminate) {
+        lockedCheckbox.indeterminate = true;
       }
 
-      // Detach Handles checkbox - only visible when editable
+      // Detach Handles checkbox - only visible when at least one selected side is unlocked
       const isDetached = detachedStates.has(true) && detachedStates.size === 1;
       const isDetachedIndeterminate = detachedStates.size > 1;
       const showDetachOption =
-        !editableDisabledByRoundCap && (isEditable || isEditableIndeterminate);
+        !lockDisabledByRoundCap && (!isLocked || isLockedIndeterminate);
 
       const detachCheckbox = showDetachOption ? html.input({
         type: "checkbox",
@@ -1116,13 +1116,13 @@ export default class SkeletonParametersPanel extends Panel {
         detachCheckbox.indeterminate = true;
       }
 
-      // Check if any selected editable rib points have nudge values or handle offsets
+      // Check if any selected unlocked rib points have nudge values or handle offsets
       const hasNudge = this._selectedRibPointsHaveNudge(selectedRibSides);
       const hasHandleOffsets = this._selectedRibPointsHaveHandleOffsets(selectedRibSides);
 
       // Build reset buttons array
       const resetButtons = [];
-      if (!editableDisabledByRoundCap && (isEditable || isEditableIndeterminate) && hasNudge) {
+      if (!lockDisabledByRoundCap && (!isLocked || isLockedIndeterminate) && hasNudge) {
         resetButtons.push(
           html.button(
             {
@@ -1134,8 +1134,8 @@ export default class SkeletonParametersPanel extends Panel {
         );
       }
       if (
-        !editableDisabledByRoundCap &&
-        (isEditable || isEditableIndeterminate) &&
+        !lockDisabledByRoundCap &&
+        (!isLocked || isLockedIndeterminate) &&
         hasHandleOffsets
       ) {
         resetButtons.push(
@@ -1153,16 +1153,16 @@ export default class SkeletonParametersPanel extends Panel {
         type: "universal-row",
         field1: {
           type: "auxiliaryElement",
-          key: "editable",
+          key: "locked",
           auxiliaryElement: html.span({}, [
-            editableCheckbox,
+            lockedCheckbox,
             html.label({
-              for: "editable-toggle",
-              style: `margin-left: 4px${editableDisabledByRoundCap ? "; opacity: 0.5" : ""}`,
-              title: editableDisabledByRoundCap
-                ? "Editable ribs are not available for round cap endpoints"
+              for: "locked-toggle",
+              style: `margin-left: 4px${lockDisabledByRoundCap ? "; opacity: 0.5" : ""}`,
+              title: lockDisabledByRoundCap
+                ? "Rib adjustments stay locked for round cap endpoints"
                 : undefined,
-            }, "Editable"),
+            }, "Locked"),
           ]),
         },
         field2: {
@@ -1190,17 +1190,26 @@ export default class SkeletonParametersPanel extends Panel {
     }
 
     // === SKELETON POINT RIB CONTROLS ===
-    // Show when skeleton points are selected (not rib points) and they have editable ribs
+    // Show when skeleton points are selected (not rib points)
     if (hasSelection && selectedRibSides.size === 0) {
-      const ribEditInfo = this._getSkeletonPointsRibEditInfo(selectedData);
-
-      if (ribEditInfo.hasEditableRibs) {
+      const ribLockInfo = this._getSkeletonPointsRibLockInfo(selectedData);
+      if (selectedData.points.length) {
         formContents.push({ type: "spacer" });
 
         const buttons = [];
+        const selectedPointRibSides = this._getAllRibSidesForPoints(selectedData);
+        const combinedLockedCheckbox = html.input({
+          type: "checkbox",
+          id: "locked-ribs-toggle",
+          checked: ribLockInfo.isLockedIndeterminate ? false : ribLockInfo.areAllLocked,
+          onchange: (e) => this._onLockedToggle(e.target.checked, selectedPointRibSides),
+        });
+        if (ribLockInfo.isLockedIndeterminate) {
+          combinedLockedCheckbox.indeterminate = true;
+        }
 
-        // Reset Ribs button - only if there are nudged ribs
-        if (ribEditInfo.hasNudgedRibs) {
+        // Reset Ribs button - only if there are unlocked ribs with nudge values
+        if (ribLockInfo.hasUnlockedNudgedRibs) {
           buttons.push(
             html.button(
               {
@@ -1212,25 +1221,21 @@ export default class SkeletonParametersPanel extends Panel {
           );
         }
 
-        // Make Ribs Uneditable button - always when there are editable ribs
-        buttons.push(
-          html.button(
-            {
-              style: "font-size: 11px; padding: 2px 6px;",
-              onclick: () => this._onMakeRibsUneditable(selectedData),
-            },
-            "Make Uneditable"
-          )
-        );
-
         formContents.push({
           type: "universal-row",
           field1: {
             type: "auxiliaryElement",
-            key: "ribControls",
-            auxiliaryElement: html.span({}, buttons),
+            key: "ribLockToggle",
+            auxiliaryElement: html.span({}, [
+              combinedLockedCheckbox,
+              html.label({ for: "locked-ribs-toggle", style: "margin-left: 4px" }, "Locked"),
+            ]),
           },
-          field2: { type: "spacer" },
+          field2: {
+            type: "auxiliaryElement",
+            key: "ribControls",
+            auxiliaryElement: buttons.length ? html.span({}, buttons) : html.span(),
+          },
           field3: { type: "spacer" },
         });
       }
@@ -2730,8 +2735,8 @@ export default class SkeletonParametersPanel extends Panel {
           const contour = skeletonData.contours?.[contourIdx];
           const point = contour?.points?.[pointIdx];
           if (!contour || !point) continue;
-          const editableKey = side === "left" ? "leftEditable" : "rightEditable";
-          if (!point[editableKey]) continue;
+          const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
+          if (point[lockedKey]) continue;
 
           const ribPoint = this._getRibPointPosition(contour, pointIdx, side, defaultWidth);
           if (!ribPoint) continue;
@@ -3685,51 +3690,13 @@ export default class SkeletonParametersPanel extends Panel {
     return { canEdit: true, mixed: false, value: singleValue };
   }
 
-  _disableEditableSide(point, side) {
-    const editableKey = side === "left" ? "leftEditable" : "rightEditable";
-    const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-    const handleInKey = side === "left" ? "leftHandleIn" : "rightHandleIn";
-    const handleOutKey = side === "left" ? "leftHandleOut" : "rightHandleOut";
-    const handleInAngleKey = side === "left" ? "leftHandleInAngle" : "rightHandleInAngle";
-    const handleOutAngleKey = side === "left" ? "leftHandleOutAngle" : "rightHandleOutAngle";
-    // Legacy 1D handle offset keys
-    const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
-    const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
-    // New 2D handle offset keys
-    const handleInOffsetXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
-    const handleInOffsetYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
-    const handleOutOffsetXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
-    const handleOutOffsetYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
-    // Saved keys for preserving values when toggling editable off/on
-    const nudgeSavedKey = side === "left" ? "leftNudgeSaved" : "rightNudgeSaved";
-    const handleInOffsetSavedKey = side === "left" ? "leftHandleInOffsetSaved" : "rightHandleInOffsetSaved";
-    const handleOutOffsetSavedKey = side === "left" ? "leftHandleOutOffsetSaved" : "rightHandleOutOffsetSaved";
-
-    delete point[editableKey];
-    // Save current values before clearing
-    if (point[nudgeKey] !== undefined && point[nudgeKey] !== 0) {
-      point[nudgeSavedKey] = point[nudgeKey];
+  _setSideLocked(point, side, locked = true) {
+    const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
+    if (locked) {
+      point[lockedKey] = true;
+    } else {
+      delete point[lockedKey];
     }
-    if (point[handleInOffsetKey] !== undefined && point[handleInOffsetKey] !== 0) {
-      point[handleInOffsetSavedKey] = point[handleInOffsetKey];
-    }
-    if (point[handleOutOffsetKey] !== undefined && point[handleOutOffsetKey] !== 0) {
-      point[handleOutOffsetSavedKey] = point[handleOutOffsetKey];
-    }
-    // Clear active values when disabling
-    delete point[nudgeKey];
-    delete point[handleInKey];
-    delete point[handleOutKey];
-    delete point[handleInAngleKey];
-    delete point[handleOutAngleKey];
-    // Clear legacy 1D offsets
-    delete point[handleInOffsetKey];
-    delete point[handleOutOffsetKey];
-    // Clear new 2D offsets
-    delete point[handleInOffsetXKey];
-    delete point[handleInOffsetYKey];
-    delete point[handleOutOffsetXKey];
-    delete point[handleOutOffsetYKey];
   }
 
   _capRadiusRatioFromIndex(index) {
@@ -3808,6 +3775,18 @@ export default class SkeletonParametersPanel extends Panel {
     return selectedRibSides;
   }
 
+  _getAllRibSidesForPoints(selectedData) {
+    const ribSides = new Set();
+    if (!selectedData?.points?.length) {
+      return ribSides;
+    }
+    for (const { contourIdx, pointIdx } of selectedData.points) {
+      ribSides.add(`${contourIdx}/${pointIdx}/left`);
+      ribSides.add(`${contourIdx}/${pointIdx}/right`);
+    }
+    return ribSides;
+  }
+
   /**
    * Compute a signature representing current panel state.
    * Used to skip unnecessary form rebuilds.
@@ -3882,9 +3861,9 @@ export default class SkeletonParametersPanel extends Panel {
           const contour = selectedData.skeletonData?.contours?.[contourIdx];
           const w = this._getPointWidths(point, defaultWidth);
             const isLinked = this._isWidthLinked(point);
-          // Include editable and nudge state for Reset button visibility
-          const leftEdit = point.leftEditable ? 1 : 0;
-          const rightEdit = point.rightEditable ? 1 : 0;
+          // Include lock and nudge state for reset button visibility
+          const leftLock = point.leftLocked ? 1 : 0;
+          const rightLock = point.rightLocked ? 1 : 0;
           const leftNudge = point.leftNudge || 0;
           const rightNudge = point.rightNudge || 0;
           const capStyle = point.capStyle ?? "";
@@ -3915,7 +3894,7 @@ export default class SkeletonParametersPanel extends Panel {
           const smoothFlag = point.smooth ? 1 : 0;
           const signatureLeft = Math.round(w.left * 1000) / 1000;
           const signatureRight = Math.round(w.right * 1000) / 1000;
-              parts.push(`${contourIdx}/${pointIdx}:${signatureLeft},${signatureRight},${isLinked},${leftEdit},${rightEdit},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension},${capAngle},${capDistance},${cornerRoundness},${cornerAsymmetry},${cornerReach},${cornerStrength},${forceH},${forceV},${smoothFlag},${handleIn},${handleOut},${handleAngle}`);
+              parts.push(`${contourIdx}/${pointIdx}:${signatureLeft},${signatureRight},${isLinked},${leftLock},${rightLock},${leftNudge},${rightNudge},${capStyle},${capRadiusRatio},${capTension},${capAngle},${capDistance},${cornerRoundness},${cornerAsymmetry},${cornerReach},${cornerStrength},${forceH},${forceV},${smoothFlag},${handleIn},${handleOut},${handleAngle}`);
           }
         }
 
@@ -4163,14 +4142,7 @@ export default class SkeletonParametersPanel extends Panel {
     }
   }
 
-  _clearEditableWhenCollapsed(point, leftHW, rightHW) {
-    if (!point) return;
-    if (Number.isFinite(leftHW) && leftHW <= 0) {
-      point.leftEditable = false;
-    }
-    if (Number.isFinite(rightHW) && rightHW <= 0) {
-      point.rightEditable = false;
-    }
+  _preserveLockStateWhenCollapsed(_point, _leftHW, _rightHW) {
   }
 
   /**
@@ -4350,9 +4322,9 @@ export default class SkeletonParametersPanel extends Panel {
           if (!point || point.type) continue;
           point.capStyle = capStyle;
           if (capStyle === "round") {
-            // Round caps at endpoints must not keep editable rib state.
-            this._disableEditableSide(point, "left");
-            this._disableEditableSide(point, "right");
+            // Round caps at endpoints keep rib adjustments locked.
+            this._setSideLocked(point, "left", true);
+            this._setSideLocked(point, "right", true);
           }
           changed = true;
         }
@@ -4419,8 +4391,8 @@ export default class SkeletonParametersPanel extends Panel {
           this._applyPointCapSnapshot(point, pointSnapshot);
 
           if (point.capStyle === "round") {
-            this._disableEditableSide(point, "left");
-            this._disableEditableSide(point, "right");
+            this._setSideLocked(point, "left", true);
+            this._setSideLocked(point, "right", true);
           }
 
           changed = true;
@@ -4497,8 +4469,8 @@ export default class SkeletonParametersPanel extends Panel {
             );
             point.capRadiusRatio = radius;
             point.capTension = tension;
-            this._disableEditableSide(point, "left");
-            this._disableEditableSide(point, "right");
+            this._setSideLocked(point, "left", true);
+            this._setSideLocked(point, "right", true);
           } else if (capStyle === "square") {
             const angle = this._clampCapParam(
               "capAngle",
@@ -5514,13 +5486,11 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Toggle Editable mode for selected rib points.
-   * When enabled, rib points can be nudged along the tangent direction
-   * and their handle lengths can be adjusted.
-   * @param {boolean} checked - Whether to enable or disable editable mode
+   * Toggle locked state for selected rib sides.
+   * @param {boolean} checked - Whether to lock or unlock the selected sides
    * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
    */
-  async _onEditableToggle(checked, selectedRibSides) {
+  async _onLockedToggle(checked, selectedRibSides) {
     if (!selectedRibSides || selectedRibSides.size === 0) {
       this.update();
       return;
@@ -5561,50 +5531,13 @@ export default class SkeletonParametersPanel extends Panel {
             point
           );
 
-          // Update editable state for each selected side
+          // Update lock state for each selected side
           for (const side of sides) {
-            const editableKey = side === "left" ? "leftEditable" : "rightEditable";
-            const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-            const handleInKey = side === "left" ? "leftHandleIn" : "rightHandleIn";
-            const handleOutKey = side === "left" ? "leftHandleOut" : "rightHandleOut";
-            const handleInAngleKey = side === "left" ? "leftHandleInAngle" : "rightHandleInAngle";
-            const handleOutAngleKey = side === "left" ? "leftHandleOutAngle" : "rightHandleOutAngle";
-            // Legacy 1D handle offset keys
-            const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
-            const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
-            // New 2D handle offset keys
-            const handleInOffsetXKey = side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX";
-            const handleInOffsetYKey = side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY";
-            const handleOutOffsetXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
-            const handleOutOffsetYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
-            // Saved keys for preserving values when toggling editable off/on
-            const nudgeSavedKey = side === "left" ? "leftNudgeSaved" : "rightNudgeSaved";
-            const handleInOffsetSavedKey = side === "left" ? "leftHandleInOffsetSaved" : "rightHandleInOffsetSaved";
-            const handleOutOffsetSavedKey = side === "left" ? "leftHandleOutOffsetSaved" : "rightHandleOutOffsetSaved";
-
-            if (checked) {
-              if (roundedCapEndpoint) {
-                // Do not allow enabling editable ribs on round cap endpoints.
-                this._disableEditableSide(point, side);
-                continue;
-              }
-              point[editableKey] = true;
-              // Restore saved values if they exist
-              if (point[nudgeSavedKey] !== undefined) {
-                point[nudgeKey] = point[nudgeSavedKey];
-                delete point[nudgeSavedKey];
-              }
-              if (point[handleInOffsetSavedKey] !== undefined) {
-                point[handleInOffsetKey] = point[handleInOffsetSavedKey];
-                delete point[handleInOffsetSavedKey];
-              }
-              if (point[handleOutOffsetSavedKey] !== undefined) {
-                point[handleOutOffsetKey] = point[handleOutOffsetSavedKey];
-                delete point[handleOutOffsetSavedKey];
-              }
-            } else {
-              this._disableEditableSide(point, side);
+            if (roundedCapEndpoint && !checked) {
+              this._setSideLocked(point, side, true);
+              continue;
             }
+            this._setSideLocked(point, side, checked);
           }
         }
 
@@ -5627,7 +5560,7 @@ export default class SkeletonParametersPanel extends Panel {
 
       return {
         changes: combined,
-        undoLabel: checked ? "Enable editable rib points" : "Disable editable rib points",
+        undoLabel: checked ? "Lock rib sides" : "Unlock rib sides",
         broadcast: true,
       };
     });
@@ -5636,7 +5569,7 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Toggle Detach Handles mode for selected editable rib points.
+   * Toggle Detach Handles mode for selected unlocked rib sides.
    * When enabled, handle positions are stored as absolute offsets from the rib point,
    * independent of skeleton handle lengths.
    * @param {boolean} checked - Whether to enable or disable detach mode
@@ -5687,7 +5620,11 @@ export default class SkeletonParametersPanel extends Panel {
 
           // Update detached state for each selected side
           for (const side of sides) {
+            const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
             const detachedKey = side === "left" ? "leftHandleDetached" : "rightHandleDetached";
+            if (point[lockedKey]) {
+              continue;
+            }
 
             if (checked) {
               // When enabling detach, capture current handle positions as 2D offsets
@@ -5899,9 +5836,9 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Check if any selected editable rib points have nudge values.
+   * Check if any selected unlocked rib sides have nudge values.
    * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
-   * @returns {boolean} True if at least one selected editable rib point has nudge
+   * @returns {boolean} True if at least one selected unlocked rib side has nudge
    */
   _selectedRibPointsHaveNudge(selectedRibSides) {
     if (!selectedRibSides || selectedRibSides.size === 0) return false;
@@ -5921,10 +5858,10 @@ export default class SkeletonParametersPanel extends Panel {
       const point = skeletonData.contours[contourIdx]?.points[pointIdx];
       if (!point) continue;
 
-      const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+      const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
       const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
 
-      if (point[editableKey] && point[nudgeKey] && point[nudgeKey] !== 0) {
+      if (!point[lockedKey] && point[nudgeKey] && point[nudgeKey] !== 0) {
         return true;
       }
     }
@@ -5932,9 +5869,9 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Check if any selected editable rib points have handle offset values.
+   * Check if any selected unlocked rib sides have handle offset values.
    * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
-   * @returns {boolean} True if at least one selected editable rib point has handle offsets
+   * @returns {boolean} True if at least one selected unlocked rib side has handle offsets
    */
   _selectedRibPointsHaveHandleOffsets(selectedRibSides) {
     if (!selectedRibSides || selectedRibSides.size === 0) return false;
@@ -5954,7 +5891,7 @@ export default class SkeletonParametersPanel extends Panel {
       const point = skeletonData.contours[contourIdx]?.points[pointIdx];
       if (!point) continue;
 
-      const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+      const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
       // Legacy 1D offset keys
       const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
       const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
@@ -5964,7 +5901,7 @@ export default class SkeletonParametersPanel extends Panel {
       const handleOutOffsetXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
       const handleOutOffsetYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
 
-      if (point[editableKey] &&
+      if (!point[lockedKey] &&
           ((point[handleInOffsetKey] && point[handleInOffsetKey] !== 0) ||
            (point[handleOutOffsetKey] && point[handleOutOffsetKey] !== 0) ||
            (point[handleInOffsetXKey] && point[handleInOffsetXKey] !== 0) ||
@@ -5978,7 +5915,7 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Reset handle offset values for selected editable rib points to 0.
+   * Reset handle offset values for selected unlocked rib sides to 0.
    * This returns the handles to their generated positions without affecting nudge.
    * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
    */
@@ -6017,9 +5954,9 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          // Reset handle offsets for each selected side (only if editable)
+          // Reset handle offsets for each selected side (only if unlocked)
           for (const side of sides) {
-            const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+            const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
             // Legacy 1D offset keys
             const handleInOffsetKey = side === "left" ? "leftHandleInOffset" : "rightHandleInOffset";
             const handleOutOffsetKey = side === "left" ? "leftHandleOutOffset" : "rightHandleOutOffset";
@@ -6031,7 +5968,7 @@ export default class SkeletonParametersPanel extends Panel {
             const handleOutOffsetXKey = side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX";
             const handleOutOffsetYKey = side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY";
 
-            if (point[editableKey]) {
+            if (!point[lockedKey]) {
               // Clear legacy 1D offsets
               delete point[handleInOffsetKey];
               delete point[handleOutOffsetKey];
@@ -6074,8 +6011,7 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Reset nudge values for selected editable rib points to 0.
-   * This returns the rib points to their generated positions without disabling editable.
+   * Reset nudge values for selected unlocked rib sides to 0.
    * @param {Set} selectedRibSides - Set of "contourIdx/pointIdx/side" strings
    */
   async _onResetRibPosition(selectedRibSides) {
@@ -6113,12 +6049,12 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          // Reset nudge for each selected side (only if editable)
+          // Reset nudge for each selected side (only if unlocked)
           for (const side of sides) {
-            const editableKey = side === "left" ? "leftEditable" : "rightEditable";
+            const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
             const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
 
-            if (point[editableKey]) {
+            if (!point[lockedKey]) {
               delete point[nudgeKey];
             }
           }
@@ -6152,35 +6088,37 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   /**
-   * Get info about editable ribs for selected skeleton points.
+   * Get lock and nudge info about rib sides for selected skeleton points.
    * @param {Object} selectedData - Data from _getSelectedSkeletonPoints()
-   * @returns {Object} { hasEditableRibs, hasNudgedRibs }
+   * @returns {Object} { areAllLocked, isLockedIndeterminate, hasUnlockedNudgedRibs }
    */
-  _getSkeletonPointsRibEditInfo(selectedData) {
+  _getSkeletonPointsRibLockInfo(selectedData) {
     if (!selectedData || selectedData.points.length === 0) {
-      return { hasEditableRibs: false, hasNudgedRibs: false };
+      return { areAllLocked: false, isLockedIndeterminate: false, hasUnlockedNudgedRibs: false };
     }
 
-    let hasEditableRibs = false;
-    let hasNudgedRibs = false;
+    const lockStates = new Set();
+    let hasUnlockedNudgedRibs = false;
 
     for (const { point } of selectedData.points) {
-      if (point.leftEditable || point.rightEditable) {
-        hasEditableRibs = true;
+      lockStates.add(!!point.leftLocked);
+      lockStates.add(!!point.rightLocked);
 
-        if ((point.leftEditable && point.leftNudge && point.leftNudge !== 0) ||
-            (point.rightEditable && point.rightNudge && point.rightNudge !== 0)) {
-          hasNudgedRibs = true;
-          break; // Found both, no need to continue
-        }
+      if ((!point.leftLocked && point.leftNudge && point.leftNudge !== 0) ||
+          (!point.rightLocked && point.rightNudge && point.rightNudge !== 0)) {
+        hasUnlockedNudgedRibs = true;
       }
     }
 
-    return { hasEditableRibs, hasNudgedRibs };
+    return {
+      areAllLocked: lockStates.has(true) && lockStates.size === 1,
+      isLockedIndeterminate: lockStates.size > 1,
+      hasUnlockedNudgedRibs,
+    };
   }
 
   /**
-   * Reset nudge for all editable ribs of selected skeleton points.
+   * Reset nudge for all unlocked rib sides of selected skeleton points.
    * @param {Object} selectedData - Data from _getSelectedSkeletonPoints()
    */
   async _onResetSkeletonRibs(selectedData) {
@@ -6205,11 +6143,11 @@ export default class SkeletonParametersPanel extends Panel {
           const point = contour.points[pointIdx];
           if (!point) continue;
 
-          // Reset nudge for both sides if editable
-          if (point.leftEditable) {
+          // Reset nudge for both sides if unlocked
+          if (!point.leftLocked) {
             delete point.leftNudge;
           }
-          if (point.rightEditable) {
+          if (!point.rightLocked) {
             delete point.rightNudge;
           }
         }
@@ -6233,75 +6171,7 @@ export default class SkeletonParametersPanel extends Panel {
 
       return {
         changes: combined,
-        undoLabel: "Reset skeleton ribs",
-        broadcast: true,
-      };
-    });
-
-    this.update();
-  }
-
-  /**
-   * Make all ribs of selected skeleton points uneditable.
-   * @param {Object} selectedData - Data from _getSelectedSkeletonPoints()
-   */
-  async _onMakeRibsUneditable(selectedData) {
-    if (!selectedData || selectedData.points.length === 0) {
-      return;
-    }
-
-    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const allChanges = [];
-
-      for (const editLayerName of this.sceneController.editingLayerNames) {
-        const layer = glyph.layers[editLayerName];
-        if (!getSkeletonData(layer)) continue;
-
-        const skeletonData = JSON.parse(
-          JSON.stringify(getSkeletonData(layer))
-        );
-
-        for (const { contourIdx, pointIdx } of selectedData.points) {
-          const contour = skeletonData.contours[contourIdx];
-          if (!contour) continue;
-          const point = contour.points[pointIdx];
-          if (!point) continue;
-
-          // Remove all editable-related properties
-          delete point.leftEditable;
-          delete point.rightEditable;
-          delete point.leftNudge;
-          delete point.rightNudge;
-          delete point.leftHandleIn;
-          delete point.leftHandleOut;
-          delete point.rightHandleIn;
-          delete point.rightHandleOut;
-          delete point.leftHandleInAngle;
-          delete point.leftHandleOutAngle;
-          delete point.rightHandleInAngle;
-          delete point.rightHandleOutAngle;
-        }
-
-        const staticGlyph = layer.glyph;
-        const pathChange = recordChanges(staticGlyph, (sg) => {
-          this._regenerateOutlineContours(sg, skeletonData);
-        });
-        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
-
-        const customDataChange = recordChanges(layer, (l) => {
-          setSkeletonData(l, skeletonData);
-        });
-        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
-      }
-
-      if (allChanges.length === 0) return;
-
-      const combined = new ChangeCollector().concat(...allChanges);
-      await sendIncrementalChange(combined.change);
-
-      return {
-        changes: combined,
-        undoLabel: "Make ribs uneditable",
+        undoLabel: "Reset unlocked ribs",
         broadcast: true,
       };
     });
@@ -6358,7 +6228,7 @@ export default class SkeletonParametersPanel extends Panel {
             point.width = valueClamped;
             delete point.leftWidth;
             delete point.rightWidth;
-            this._clearEditableWhenCollapsed(point, valueClamped / 2, valueClamped / 2);
+            this._preserveLockStateWhenCollapsed(point, valueClamped / 2, valueClamped / 2);
           } else if (isLinked) {
             // Linked: update both sides by the same delta
             if (hasAsym) {
@@ -6368,13 +6238,13 @@ export default class SkeletonParametersPanel extends Panel {
               point.leftWidth = newLeft;
               point.rightWidth = newRight;
               delete point.width;
-              this._clearEditableWhenCollapsed(point, newLeft, newRight);
+              this._preserveLockStateWhenCollapsed(point, newLeft, newRight);
             } else {
               const newHalf = Math.max(0, Math.round(valueClamped));
               point.width = Math.max(0, newHalf * 2);
               delete point.leftWidth;
               delete point.rightWidth;
-              this._clearEditableWhenCollapsed(point, newHalf, newHalf);
+              this._preserveLockStateWhenCollapsed(point, newHalf, newHalf);
             }
           } else {
             // Unlinked: update only the edited side
@@ -6390,7 +6260,7 @@ export default class SkeletonParametersPanel extends Panel {
               }
             }
             delete point.width;
-            this._clearEditableWhenCollapsed(point, point.leftWidth, point.rightWidth);
+            this._preserveLockStateWhenCollapsed(point, point.leftWidth, point.rightWidth);
           }
 
           const newWidths = this._getPointWidths(point, defaultWidth);
@@ -6622,7 +6492,7 @@ export default class SkeletonParametersPanel extends Panel {
             point.width = totalValue;
             delete point.leftWidth;
             delete point.rightWidth;
-            this._clearEditableWhenCollapsed(point, totalValue / 2, totalValue / 2);
+            this._preserveLockStateWhenCollapsed(point, totalValue / 2, totalValue / 2);
           } else {
             const distribution = this._calculateDistribution(leftHW, rightHW);
             let newLeftHW;
@@ -6647,7 +6517,7 @@ export default class SkeletonParametersPanel extends Panel {
             point.leftWidth = Math.max(0, Math.round(newLeftHW));
             point.rightWidth = Math.max(0, Math.round(newRightHW));
             delete point.width;
-            this._clearEditableWhenCollapsed(point, point.leftWidth, point.rightWidth);
+            this._preserveLockStateWhenCollapsed(point, point.leftWidth, point.rightWidth);
           }
 
           const newWidths = this._getPointWidths(point, defaultWidth);
@@ -6731,7 +6601,7 @@ export default class SkeletonParametersPanel extends Panel {
           );
 
           this._applyPointWidthSnapshot(point, pointSnapshot);
-          this._clearEditableWhenCollapsed(point, newWidths.left, newWidths.right);
+          this._preserveLockStateWhenCollapsed(point, newWidths.left, newWidths.right);
           this._applyWidthAnchorTranslation(
             contour,
             originalContour,
@@ -6911,7 +6781,7 @@ export default class SkeletonParametersPanel extends Panel {
             point.leftWidth = Math.round(newLeft);
             point.rightWidth = Math.round(newRight);
             delete point.width;
-            this._clearEditableWhenCollapsed(point, point.leftWidth, point.rightWidth);
+            this._preserveLockStateWhenCollapsed(point, point.leftWidth, point.rightWidth);
           } else {
             const leftHW = point.leftWidth ?? (point.width ?? defaultWidth) / 2;
             const rightHW = point.rightWidth ?? (point.width ?? defaultWidth) / 2;
@@ -6923,7 +6793,7 @@ export default class SkeletonParametersPanel extends Panel {
             point.leftWidth = Math.max(0, Math.round(newLeftHW));
             point.rightWidth = Math.max(0, Math.round(newRightHW));
             delete point.width;
-            this._clearEditableWhenCollapsed(point, point.leftWidth, point.rightWidth);
+            this._preserveLockStateWhenCollapsed(point, point.leftWidth, point.rightWidth);
           }
 
           if (point.widthLinked === undefined) {

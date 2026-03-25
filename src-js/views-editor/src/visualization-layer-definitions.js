@@ -884,12 +884,10 @@ function getCurrentSkeletonRibPointPosition(positionedGlyph, model, ribPointRef)
   const singleSided = contour.singleSided ?? false;
   const singleSidedDirection = contour.singleSidedDirection ?? "left";
 
-  const editableKey = side === "left" ? "leftEditable" : "rightEditable";
   const nudgeKey = side === "left" ? "leftNudge" : "rightNudge";
-  const sideIsEditable = point[editableKey] === true;
 
   let halfWidth = getPointHalfWidth(point, defaultWidth, side);
-  let nudge = sideIsEditable ? point[nudgeKey] || 0 : 0;
+  let nudge = point[nudgeKey] || 0;
 
   if (singleSided) {
     if (singleSidedDirection !== side) {
