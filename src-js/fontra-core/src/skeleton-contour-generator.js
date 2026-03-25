@@ -175,9 +175,9 @@ function applyNudgeToRibPoint(ribPoint, skeletonPoint, normal, side, halfWidth) 
     return ribPoint;
   }
 
-  // Check per-side editable flag
-  const editableKey = side === "left" ? "leftEditable" : "rightEditable";
-  if (!skeletonPoint?.[editableKey]) {
+  // Skip locked sides.
+  const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
+  if (skeletonPoint?.[lockedKey]) {
     return ribPoint;
   }
 
@@ -253,9 +253,9 @@ function getSkeletonHandleDirection(segment, position, handleType) {
  * @returns {Object} Modified control point {x, y}
  */
 function applyHandleOffsetToControlPoint(controlPoint, skeletonPoint, skeletonHandleDir, side, handleType, ribPoint = null) {
-  // Check per-side editable flag
-  const editableKey = side === "left" ? "leftEditable" : "rightEditable";
-  if (!skeletonPoint?.[editableKey]) {
+  // Skip locked sides.
+  const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
+  if (skeletonPoint?.[lockedKey]) {
     return controlPoint;
   }
 
@@ -3579,11 +3579,11 @@ function normalizeSkeletonPoint(point) {
     normalized.capDistance = asFiniteNumber(point.capDistance, 0);
   }
 
-  if (point.leftEditable !== undefined) {
-    normalized.leftEditable = asBoolean(point.leftEditable);
+  if (point.leftLocked !== undefined) {
+    normalized.leftLocked = asBoolean(point.leftLocked);
   }
-  if (point.rightEditable !== undefined) {
-    normalized.rightEditable = asBoolean(point.rightEditable);
+  if (point.rightLocked !== undefined) {
+    normalized.rightLocked = asBoolean(point.rightLocked);
   }
   if (point.smooth !== undefined) {
     normalized.smooth = asBoolean(point.smooth);
