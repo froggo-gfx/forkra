@@ -1740,15 +1740,6 @@ export function isWidthLinked(point) {
   return !hasAsymmetricWidths(point);
 }
 
-export function lockWhenCollapsed(point, leftHW, rightHW) {
-  if (leftHW <= 0) {
-    point.leftLocked = true;
-  }
-  if (rightHW <= 0) {
-    point.rightLocked = true;
-  }
-}
-
 export function applyLinkedWidthDelta(
   point,
   basePoint,
@@ -1774,7 +1765,6 @@ export function applyLinkedWidthDelta(
       delete point.leftWidth;
       delete point.rightWidth;
     }
-    lockWhenCollapsed(point, newLeft, newRight);
     return;
   }
 
@@ -1787,7 +1777,6 @@ export function applyLinkedWidthDelta(
   point.leftWidth = newLeft;
   point.rightWidth = newRight;
   delete point.width;
-  lockWhenCollapsed(point, newLeft, newRight);
 }
 
 export function buildRibInterpolationAxisFromPath(path, ribPointIndex) {
