@@ -26,7 +26,7 @@ import {
   buildRibInterpolationAxisFromPath,
   createEditableHandleBehavior,
   createRibEditBehavior,
-  createEditableRibBehavior,
+  createRibBehavior,
   createInterpolatingRibBehavior,
   createPointBehaviorExecutor,
   findEqualizeHandleForPath,
@@ -1412,9 +1412,9 @@ function createSkeletonBackedMixedEditState({
         );
         behavior = interpolationAxis
           ? createInterpolatingRibBehavior(original, ribHit, interpolationAxis)
-          : createEditableRibBehavior(original, ribHit);
+          : createRibBehavior(original, ribHit);
       } else {
-        behavior = createEditableRibBehavior(original, ribHit);
+        behavior = createRibBehavior(original, ribHit);
       }
       data.pointBehaviors.push({ behavior, editablePoint });
     }
@@ -4174,9 +4174,9 @@ async function runSkeletonRibPointDragCanonical(context) {
                 );
                 behavior = interpolationAxis
                   ? createInterpolatingRibBehavior(data.original, ribHitForPoint, interpolationAxis)
-                  : createEditableRibBehavior(data.original, ribHitForPoint);
+                  : createRibBehavior(data.original, ribHitForPoint);
               } else {
-                behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+                behavior = createRibBehavior(data.original, ribHitForPoint);
               }
               if (behavior.setOriginalHalfWidth) {
                 behavior.setOriginalHalfWidth(totalWidth);
@@ -4200,9 +4200,9 @@ async function runSkeletonRibPointDragCanonical(context) {
               );
               behavior = interpolationAxis
                 ? createInterpolatingRibBehavior(data.original, ribHitForPoint, interpolationAxis)
-                : createEditableRibBehavior(data.original, ribHitForPoint);
+                : createRibBehavior(data.original, ribHitForPoint);
             } else {
-              behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+              behavior = createRibBehavior(data.original, ribHitForPoint);
             }
           } else {
             behavior = createRibEditBehavior(data.original, ribHitForPoint);
@@ -4481,7 +4481,7 @@ async function runEditableGeneratedPointLikeCanonical(context, mode) {
                 editablePoint.interpolationAxis
               );
             } else {
-              behavior = createEditableRibBehavior(data.original, ribHit);
+              behavior = createRibBehavior(data.original, ribHit);
             }
             data.behaviors.push({ behavior, editablePoint });
           }
@@ -4950,7 +4950,7 @@ async function runSkeletonRibPointNudgeCanonical(context) {
                     interpolationAxis
                   );
                 } else {
-                  behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
+                  behavior = createRibBehavior(originalSkeletonData, ribHit);
                 }
                 if (baseContour.singleSided) {
                   const leftHW = getPointHalfWidth(basePoint, contourDefaultWidth, "left");
@@ -4964,7 +4964,7 @@ async function runSkeletonRibPointNudgeCanonical(context) {
                   behavior.minHalfWidth = 2;
                 }
               } else {
-                behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
+                behavior = createRibBehavior(originalSkeletonData, ribHit);
               }
 
               const change = behavior.applyDelta(delta, constrainMode);

@@ -2378,7 +2378,7 @@ function generateOffsetPointsForSegment(
 
       // Copy smooth property from skeleton point, round to UPM grid
       // Use per-point half-widths for left and right sides
-      // Apply nudge offset if point is editable
+      // Apply nudge offset when the side is unlocked
       let startLeftPt = projectPoint(segment.startPoint, startNormal, startLeftHW, 1);
       startLeftPt = applyNudgeToRibPoint(startLeftPt, segment.startPoint, startNormal, "left", startLeftHW);
       left.push(
@@ -2418,7 +2418,7 @@ function generateOffsetPointsForSegment(
 
       // Copy smooth property from skeleton point, round to UPM grid
       // Use per-point half-widths for left and right sides
-      // Apply nudge offset if point is editable
+      // Apply nudge offset when the side is unlocked
       let endLeftPt = projectPoint(segment.endPoint, endNormal, endLeftHW, 1);
       endLeftPt = applyNudgeToRibPoint(endLeftPt, segment.endPoint, endNormal, "left", endLeftHW);
       left.push(
@@ -2489,7 +2489,7 @@ function generateOffsetPointsForSegment(
     const offsetRightCurves = bezier.offset(avgRightHW);
 
     // Fixed endpoint positions (using corner-aware normals and per-point widths), rounded to UPM grid
-    // Apply nudge offset if points are editable
+    // Apply nudge offset when the side is unlocked
     let fixedStartLeft = projectPoint(segment.startPoint, startNormal, startLeftHW, 1);
     fixedStartLeft = applyNudgeToRibPoint(fixedStartLeft, segment.startPoint, startNormal, "left", startLeftHW);
 
@@ -2621,7 +2621,7 @@ function generateOffsetPointsForSegment(
           y: fixedEnd.y + h2Offset.y,
         };
 
-        // Apply handle offsets if the skeleton points are editable
+        // Apply handle offsets when the side is unlocked
         const startHandleDir = getSkeletonHandleDirection(segment, "start", "out");
         const endHandleDir = getSkeletonHandleDirection(segment, "end", "in");
 

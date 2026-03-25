@@ -1705,7 +1705,7 @@ export function createPointBehaviorExecutor({
 }
 
 /**
- * Skeleton behavior helpers (modifiers, ribs, and editable handles).
+ * Skeleton behavior helpers (modifiers, ribs, and generated handles).
  */
 /**
  * Helper to get behavior name from event modifiers.
@@ -2031,12 +2031,12 @@ export function createRibEditBehavior(skeletonData, ribHit) {
 }
 
 /**
- * EditableRibBehavior - Handles dragging of editable rib points.
+ * RibBehavior - Handles dragging of generated rib points.
  * - Width follows normal component by default.
  * - Nudge follows tangent only when constrained (e.g. Shift).
  * - Constrain modes can lock width or nudge.
  */
-export function createEditableRibBehavior(skeletonData, ribHit) {
+export function createRibBehavior(skeletonData, ribHit) {
   const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
   const roundFunc = ribHit.roundFunc || Math.round;
   const contour = skeletonData.contours[contourIndex];
