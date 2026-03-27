@@ -128,6 +128,14 @@ Panel behavior:
 - reset actions remain available when relevant, but execution must skip locked sides
 - lock toggles never clear preserved side adjustments
 
+Single generated-handle reset behavior:
+
+- when exactly one `editableGeneratedHandle` is selected, the panel should expose the same reset
+  flow used for handle-offset reset, but scoped to that single selected handle
+- the action clears only the selected handle's stored offset keys
+- the opposite handle on the same side must remain unchanged
+- the action must continue to respect side lock state
+
 ### Round-Cap Endpoints
 
 Existing restrictions around round-cap endpoints must still apply, but they should align with
