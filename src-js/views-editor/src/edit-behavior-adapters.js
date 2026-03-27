@@ -25,8 +25,7 @@ import {
   applyLinkedWidthDelta,
   buildRibInterpolationAxisFromPath,
   createEditableHandleBehavior,
-  createRibEditBehavior,
-  createEditableRibBehavior,
+  createRibBehavior,
   createInterpolatingRibBehavior,
   createPointBehaviorExecutor,
   findEqualizeHandleForPath,
@@ -1187,6 +1186,11 @@ function excludePointIndicesFromSelection(selection, excludedPointIndices) {
   });
 }
 
+function isSkeletonSideLocked(point, side) {
+  const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
+  return !!point?.[lockedKey];
+}
+
 function createEditableGeneratedLayersData(glyph, editingLayerNames) {
   const layersData = {};
   for (const editLayerName of editingLayerNames || []) {
@@ -1412,9 +1416,9 @@ function createSkeletonBackedMixedEditState({
         );
         behavior = interpolationAxis
           ? createInterpolatingRibBehavior(original, ribHit, interpolationAxis)
-          : createEditableRibBehavior(original, ribHit);
+          : createRibBehavior(original, ribHit);
       } else {
-        behavior = createEditableRibBehavior(original, ribHit);
+        behavior = createRibBehavior(original, ribHit);
       }
       data.pointBehaviors.push({ behavior, editablePoint });
     }
@@ -1644,12 +1648,11 @@ function collectSelectedRibPointTargets(skeletonData, ribPointSelection) {
     if (!point || point.type) {
       continue;
     }
-    const editableKey = side === "left" ? "leftEditable" : "rightEditable";
     result.push({
       contourIndex,
       pointIndex,
       side,
-      isEditable: point[editableKey] === true,
+      isLocked: isSkeletonSideLocked(point, side),
     });
   }
   return result;
@@ -4034,7 +4037,6 @@ async function runSkeletonRibPointDragCanonical(context) {
       return;
     }
     const isSingleSided = contour.singleSided ?? false;
-    const editableKey = side === "left" ? "leftEditable" : "rightEditable";
     targetPointsMap.set(key, {
       ribKey: key,
       contourIndex,
@@ -4042,7 +4044,7 @@ async function runSkeletonRibPointDragCanonical(context) {
       side,
       isLinked: isWidthLinked(point),
       isSingleSided,
-      isEditable: point[editableKey] === true,
+      isLocked: isSkeletonSideLocked(point, side),
     });
   };
 
@@ -4089,12 +4091,15 @@ async function runSkeletonRibPointDragCanonical(context) {
     );
   }
 
-  const allTargetsEditable = targetPoints.every((target) => target.isEditable);
+  const unlockedTargets = targetPoints.filter((target) => !target.isLocked);
   const belongsToSingleSegment = selectedRibTargetsBelongToSingleSegment(
-    targetPoints,
+    unlockedTargets,
     referenceSkeletonData
   );
-  if (!hasSkeletonSelection && !allTargetsEditable && !belongsToSingleSegment) {
+  if (!unlockedTargets.length) {
+    return false;
+  }
+  if (!hasSkeletonSelection && !belongsToSingleSegment) {
     return false;
   }
 
@@ -4138,7 +4143,7 @@ async function runSkeletonRibPointDragCanonical(context) {
       }
 
       for (const data of Object.values(layersData)) {
-        for (const target of targetPoints) {
+        for (const target of unlockedTargets) {
           const contour = data.original.contours?.[target.contourIndex];
           const skeletonPoint = contour?.points?.[target.pointIndex];
           if (!contour || !skeletonPoint) {
@@ -4163,33 +4168,6 @@ async function runSkeletonRibPointDragCanonical(context) {
             const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
             const totalWidth = leftHW + rightHW;
 
-            if (target.isEditable) {
-              if (useInterpolation) {
-                const interpolationAxis = findRibInterpolationAxisFromSkeletonPath(
-                  data.layer.glyph.path,
-                  skeletonPoint,
-                  normal,
-                  contour,
-                  target.side
-                );
-                behavior = interpolationAxis
-                  ? createInterpolatingRibBehavior(data.original, ribHitForPoint, interpolationAxis)
-                  : createEditableRibBehavior(data.original, ribHitForPoint);
-              } else {
-                behavior = createEditableRibBehavior(data.original, ribHitForPoint);
-              }
-              if (behavior.setOriginalHalfWidth) {
-                behavior.setOriginalHalfWidth(totalWidth);
-              } else {
-                behavior.originalHalfWidth = totalWidth;
-              }
-              behavior.minHalfWidth = 2;
-            } else {
-              behavior = createRibEditBehavior(data.original, ribHitForPoint);
-              behavior.originalHalfWidth = totalWidth;
-              behavior.minHalfWidth = 2;
-            }
-          } else if (target.isEditable) {
             if (useInterpolation) {
               const interpolationAxis = findRibInterpolationAxisFromSkeletonPath(
                 data.layer.glyph.path,
@@ -4200,12 +4178,31 @@ async function runSkeletonRibPointDragCanonical(context) {
               );
               behavior = interpolationAxis
                 ? createInterpolatingRibBehavior(data.original, ribHitForPoint, interpolationAxis)
-                : createEditableRibBehavior(data.original, ribHitForPoint);
+                : createRibBehavior(data.original, ribHitForPoint);
             } else {
-              behavior = createEditableRibBehavior(data.original, ribHitForPoint);
+              behavior = createRibBehavior(data.original, ribHitForPoint);
             }
+            if (behavior.setOriginalHalfWidth) {
+              behavior.setOriginalHalfWidth(totalWidth);
+            } else {
+              behavior.originalHalfWidth = totalWidth;
+            }
+            behavior.minHalfWidth = 2;
           } else {
-            behavior = createRibEditBehavior(data.original, ribHitForPoint);
+            if (useInterpolation) {
+              const interpolationAxis = findRibInterpolationAxisFromSkeletonPath(
+                data.layer.glyph.path,
+                skeletonPoint,
+                normal,
+                contour,
+                target.side
+              );
+              behavior = interpolationAxis
+                ? createInterpolatingRibBehavior(data.original, ribHitForPoint, interpolationAxis)
+                : createRibBehavior(data.original, ribHitForPoint);
+            } else {
+              behavior = createRibBehavior(data.original, ribHitForPoint);
+            }
           }
 
           data.ribBehaviors.push({ behavior, target });
@@ -4366,8 +4363,10 @@ function buildRibWidthHighlightPayload(skeletonData, contourIndex, pointIndex, s
     }
   }
 
-  const leftNudge = point.leftEditable && leftWidth >= 0.5 ? point.leftNudge || 0 : 0;
-  const rightNudge = point.rightEditable && rightWidth >= 0.5 ? point.rightNudge || 0 : 0;
+  const leftNudge =
+    !isSkeletonSideLocked(point, "left") && leftWidth >= 0.5 ? point.leftNudge || 0 : 0;
+  const rightNudge =
+    !isSkeletonSideLocked(point, "right") && rightWidth >= 0.5 ? point.rightNudge || 0 : 0;
   const ribPoint = projectRibPoint(
     point,
     normal,
@@ -4481,7 +4480,7 @@ async function runEditableGeneratedPointLikeCanonical(context, mode) {
                 editablePoint.interpolationAxis
               );
             } else {
-              behavior = createEditableRibBehavior(data.original, ribHit);
+              behavior = createRibBehavior(data.original, ribHit);
             }
             data.behaviors.push({ behavior, editablePoint });
           }
@@ -4510,6 +4509,9 @@ async function runEditableGeneratedPointLikeCanonical(context, mode) {
             const baseContour = original.contours?.[editablePoint.skeletonContourIndex];
             const basePoint = baseContour?.points?.[editablePoint.skeletonPointIndex];
             if (!contour || !point || !baseContour || !basePoint || point.type || basePoint.type) {
+              continue;
+            }
+            if (isSkeletonSideLocked(basePoint, editablePoint.side)) {
               continue;
             }
 
@@ -4724,6 +4726,9 @@ async function runEditableGeneratedHandleLikeCanonical(context, mode) {
             if (!point || !basePoint) {
               continue;
             }
+            if (isSkeletonSideLocked(basePoint, editableHandle.side)) {
+              continue;
+            }
 
             if (pointerTool.equalizeMode && equalizeState) {
               if (applyEditableGeneratedHandleEqualizeDelta(point, equalizeState, delta, roundFunc)) {
@@ -4879,12 +4884,15 @@ async function runSkeletonRibPointNudgeCanonical(context) {
     return false;
   }
 
-  const allTargetsEditable = ribTargets.every((target) => target.isEditable);
+  const unlockedTargets = ribTargets.filter((target) => !target.isLocked);
   const belongsToSingleSegment = selectedRibTargetsBelongToSingleSegment(
-    ribTargets,
+    unlockedTargets,
     referenceSkeletonData
   );
-  if (!allTargetsEditable && !belongsToSingleSegment) {
+  if (!unlockedTargets.length) {
+    return false;
+  }
+  if (!belongsToSingleSegment) {
     return false;
   }
 
@@ -4907,7 +4915,7 @@ async function runSkeletonRibPointNudgeCanonical(context) {
 
           const workingSkeletonData = JSON.parse(JSON.stringify(originalSkeletonData));
 
-          for (const target of ribTargets) {
+          for (const target of unlockedTargets) {
             const { contourIndex, pointIndex, side } = target;
             const contour = workingSkeletonData.contours?.[contourIndex];
             const point = contour?.points?.[pointIndex];
@@ -4923,8 +4931,6 @@ async function runSkeletonRibPointNudgeCanonical(context) {
             }
             const contourDefaultWidth =
               baseContour.defaultWidth ?? contour.defaultWidth ?? DEFAULT_SKELETON_WIDTH;
-            const editableKey = side === "left" ? "leftEditable" : "rightEditable";
-            const isEditable = basePoint[editableKey] === true;
             const ribHit = {
               contourIndex,
               pointIndex,
@@ -4933,75 +4939,40 @@ async function runSkeletonRibPointNudgeCanonical(context) {
               onCurvePoint: point,
             };
 
-            if (isEditable) {
-              let behavior;
-              if (useInterpolation) {
-                const interpolationAxis = findRibInterpolationAxisFromSkeletonPath(
-                  layer.glyph.path,
-                  basePoint,
-                  normal,
-                  baseContour,
-                  side
-                );
-                if (interpolationAxis) {
-                  behavior = createInterpolatingRibBehavior(
-                    originalSkeletonData,
-                    ribHit,
-                    interpolationAxis
-                  );
-                } else {
-                  behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
-                }
-                if (baseContour.singleSided) {
-                  const leftHW = getPointHalfWidth(basePoint, contourDefaultWidth, "left");
-                  const rightHW = getPointHalfWidth(basePoint, contourDefaultWidth, "right");
-                  const totalWidth = leftHW + rightHW;
-                  if (behavior.setOriginalHalfWidth) {
-                    behavior.setOriginalHalfWidth(totalWidth);
-                  } else {
-                    behavior.originalHalfWidth = totalWidth;
-                  }
-                  behavior.minHalfWidth = 2;
-                }
-              } else {
-                behavior = createEditableRibBehavior(originalSkeletonData, ribHit);
-              }
-
-              const change = behavior.applyDelta(delta, constrainMode);
-              const linked = isWidthLinked(basePoint);
-              const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
-              applyLinkedWidthDelta(
-                point,
+            let behavior;
+            if (useInterpolation) {
+              const interpolationAxis = findRibInterpolationAxisFromSkeletonPath(
+                layer.glyph.path,
                 basePoint,
-                contourDefaultWidth,
-                side,
-                deltaWidth,
-                linked,
-                Math.round
+                normal,
+                baseContour,
+                side
               );
-              if (change.nudge !== undefined) {
-                point[side === "left" ? "leftNudge" : "rightNudge"] = change.nudge;
+              if (interpolationAxis) {
+                behavior = createInterpolatingRibBehavior(
+                  originalSkeletonData,
+                  ribHit,
+                  interpolationAxis
+                );
+              } else {
+                behavior = createRibBehavior(originalSkeletonData, ribHit);
               }
-              if (change.handleInOffsetX !== undefined) {
-                point[side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX"] =
-                  change.handleInOffsetX;
-              }
-              if (change.handleInOffsetY !== undefined) {
-                point[side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY"] =
-                  change.handleInOffsetY;
-              }
-              if (change.handleOutOffsetX !== undefined) {
-                point[side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX"] =
-                  change.handleOutOffsetX;
-              }
-              if (change.handleOutOffsetY !== undefined) {
-                point[side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY"] =
-                  change.handleOutOffsetY;
-              }
-              continue;
+            } else {
+              behavior = createRibBehavior(originalSkeletonData, ribHit);
             }
 
-            const behavior = createRibEditBehavior(originalSkeletonData, ribHit);
+            if (baseContour.singleSided) {
+              const leftHW = getPointHalfWidth(basePoint, contourDefaultWidth, "left");
+              const rightHW = getPointHalfWidth(basePoint, contourDefaultWidth, "right");
+              const totalWidth = leftHW + rightHW;
+              if (behavior.setOriginalHalfWidth) {
+                behavior.setOriginalHalfWidth(totalWidth);
+              } else {
+                behavior.originalHalfWidth = totalWidth;
+              }
+              behavior.minHalfWidth = 2;
+            }
+
             const change = behavior.applyDelta(delta, constrainMode);
             const linked = isWidthLinked(basePoint);
             const deltaWidth = change.halfWidth - behavior.originalHalfWidth;
@@ -5014,6 +4985,25 @@ async function runSkeletonRibPointNudgeCanonical(context) {
               linked,
               Math.round
             );
+            if (change.nudge !== undefined) {
+              point[side === "left" ? "leftNudge" : "rightNudge"] = change.nudge;
+            }
+            if (change.handleInOffsetX !== undefined) {
+              point[side === "left" ? "leftHandleInOffsetX" : "rightHandleInOffsetX"] =
+                change.handleInOffsetX;
+            }
+            if (change.handleInOffsetY !== undefined) {
+              point[side === "left" ? "leftHandleInOffsetY" : "rightHandleInOffsetY"] =
+                change.handleInOffsetY;
+            }
+            if (change.handleOutOffsetX !== undefined) {
+              point[side === "left" ? "leftHandleOutOffsetX" : "rightHandleOutOffsetX"] =
+                change.handleOutOffsetX;
+            }
+            if (change.handleOutOffsetY !== undefined) {
+              point[side === "left" ? "leftHandleOutOffsetY" : "rightHandleOutOffsetY"] =
+                change.handleOutOffsetY;
+            }
           }
 
           allChanges.push(

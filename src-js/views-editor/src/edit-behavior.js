@@ -1705,7 +1705,7 @@ export function createPointBehaviorExecutor({
 }
 
 /**
- * Skeleton behavior helpers (modifiers, ribs, and editable handles).
+ * Skeleton behavior helpers (modifiers, ribs, and generated handles).
  */
 /**
  * Helper to get behavior name from event modifiers.
@@ -1740,15 +1740,6 @@ export function isWidthLinked(point) {
   return !hasAsymmetricWidths(point);
 }
 
-export function clearEditableWhenCollapsed(point, leftHW, rightHW) {
-  if (leftHW <= 0) {
-    point.leftEditable = false;
-  }
-  if (rightHW <= 0) {
-    point.rightEditable = false;
-  }
-}
-
 export function applyLinkedWidthDelta(
   point,
   basePoint,
@@ -1774,7 +1765,6 @@ export function applyLinkedWidthDelta(
       delete point.leftWidth;
       delete point.rightWidth;
     }
-    clearEditableWhenCollapsed(point, newLeft, newRight);
     return;
   }
 
@@ -1787,7 +1777,6 @@ export function applyLinkedWidthDelta(
   point.leftWidth = newLeft;
   point.rightWidth = newRight;
   delete point.width;
-  clearEditableWhenCollapsed(point, newLeft, newRight);
 }
 
 export function buildRibInterpolationAxisFromPath(path, ribPointIndex) {
@@ -2042,12 +2031,12 @@ export function createRibEditBehavior(skeletonData, ribHit) {
 }
 
 /**
- * EditableRibBehavior - Handles dragging of editable rib points.
+ * RibBehavior - Handles dragging of generated rib points.
  * - Width follows normal component by default.
  * - Nudge follows tangent only when constrained (e.g. Shift).
  * - Constrain modes can lock width or nudge.
  */
-export function createEditableRibBehavior(skeletonData, ribHit) {
+export function createRibBehavior(skeletonData, ribHit) {
   const { contourIndex, pointIndex, side, normal, onCurvePoint } = ribHit;
   const roundFunc = ribHit.roundFunc || Math.round;
   const contour = skeletonData.contours[contourIndex];

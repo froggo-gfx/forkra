@@ -580,14 +580,10 @@ export class SkeletonPenTool extends BaseTool {
           }
         }
 
-        // Per-side editable flags
-        const isLeftEditable = skeletonPoint.leftEditable === true;
-        const isRightEditable = skeletonPoint.rightEditable === true;
-
-        // Apply nudge offset only if editable and width > 0 (matches generator behavior)
+        // Hit testing uses preserved rib geometry even when a side is locked.
         const tangent = { x: -normal.y, y: normal.x };
-        const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
-        const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+        const leftNudge = leftHW >= 0.5 ? (skeletonPoint.leftNudge || 0) : 0;
+        const rightNudge = rightHW >= 0.5 ? (skeletonPoint.rightNudge || 0) : 0;
 
         // Calculate rib point positions (including nudge)
         const leftRibPoint = {

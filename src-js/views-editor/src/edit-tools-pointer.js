@@ -2845,13 +2845,9 @@ export class PointerTool extends BaseTool {
         const leftHW = getPointHalfWidth(skeletonPoint, defaultWidth, "left");
         const rightHW = getPointHalfWidth(skeletonPoint, defaultWidth, "right");
 
-        // Per-side editable flags
-        const isLeftEditable = skeletonPoint.leftEditable === true;
-        const isRightEditable = skeletonPoint.rightEditable === true;
-
-        // Calculate nudge offsets (only if editable, to match generator behavior)
-        const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
-        const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+        // Locked sides still hit-test at their preserved adjusted geometry.
+        const leftNudge = leftHW >= 0.5 ? (skeletonPoint.leftNudge || 0) : 0;
+        const rightNudge = rightHW >= 0.5 ? (skeletonPoint.rightNudge || 0) : 0;
 
         const singleSided = contour.singleSided ?? false;
         const singleSidedDirection = contour.singleSidedDirection ?? "left";
@@ -2860,11 +2856,10 @@ export class PointerTool extends BaseTool {
           // Single-sided: one rib point at total width on the chosen side
           const totalWidth = leftHW + rightHW;
           const side = singleSidedDirection;
-          const sign = side === "left" ? 1 : -1;
           const canNudge = totalWidth >= 0.5;
           const nudge = side === "left"
-            ? ((isLeftEditable && canNudge) ? (skeletonPoint.leftNudge || 0) : 0)
-            : ((isRightEditable && canNudge) ? (skeletonPoint.rightNudge || 0) : 0);
+            ? (canNudge ? (skeletonPoint.leftNudge || 0) : 0)
+            : (canNudge ? (skeletonPoint.rightNudge || 0) : 0);
           const ribPoint = projectRibPoint(
             skeletonPoint,
             normal,
@@ -2884,7 +2879,7 @@ export class PointerTool extends BaseTool {
             };
           }
         } else {
-          // Normal mode: two rib points (including nudge offset if editable)
+          // Normal mode: two rib points (including nudge offset for unlocked sides)
           const leftRibPoint = projectRibPoint(
             skeletonPoint,
             normal,
@@ -2977,11 +2972,9 @@ export class PointerTool extends BaseTool {
           }
         }
 
-        // Apply nudge offset for editable points
-        const isLeftEditable = skeletonPoint.leftEditable === true;
-        const isRightEditable = skeletonPoint.rightEditable === true;
-        const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
-        const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+        // Apply preserved nudge offsets for measurement geometry.
+        const leftNudge = leftHW >= 0.5 ? (skeletonPoint.leftNudge || 0) : 0;
+        const rightNudge = rightHW >= 0.5 ? (skeletonPoint.rightNudge || 0) : 0;
 
         // Calculate rib endpoint positions (including nudge)
         const leftRibPoint = projectRibPoint(
@@ -3391,15 +3384,13 @@ export class PointerTool extends BaseTool {
       }
       const canNudge = totalWidth >= 0.5;
       const nudge = side === "left"
-        ? ((skeletonPoint.leftEditable && canNudge) ? (skeletonPoint.leftNudge || 0) : 0)
-        : ((skeletonPoint.rightEditable && canNudge) ? (skeletonPoint.rightNudge || 0) : 0);
+        ? (canNudge ? (skeletonPoint.leftNudge || 0) : 0)
+        : (canNudge ? (skeletonPoint.rightNudge || 0) : 0);
       return projectRibPoint(skeletonPoint, normal, totalWidth, side, nudge);
     }
 
-    const isLeftEditable = skeletonPoint.leftEditable === true;
-    const isRightEditable = skeletonPoint.rightEditable === true;
-    const leftNudge = (isLeftEditable && leftHW >= 0.5) ? (skeletonPoint.leftNudge || 0) : 0;
-    const rightNudge = (isRightEditable && rightHW >= 0.5) ? (skeletonPoint.rightNudge || 0) : 0;
+    const leftNudge = leftHW >= 0.5 ? (skeletonPoint.leftNudge || 0) : 0;
+    const rightNudge = rightHW >= 0.5 ? (skeletonPoint.rightNudge || 0) : 0;
     const halfWidth = side === "left" ? leftHW : rightHW;
     const nudge = side === "left" ? leftNudge : rightNudge;
     return projectRibPoint(skeletonPoint, normal, halfWidth, side, nudge);
