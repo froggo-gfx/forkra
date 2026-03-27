@@ -1118,7 +1118,13 @@ export default class SkeletonParametersPanel extends Panel {
 
       // Check if any selected unlocked rib points have nudge values or handle offsets
       const hasNudge = this._selectedRibPointsHaveNudge(selectedRibSides);
-      const hasHandleOffsets = this._selectedRibPointsHaveHandleOffsets(selectedRibSides);
+      const singleSelectedGeneratedHandle = this._getSingleSelectedGeneratedHandleInfo();
+      const hasSingleHandleOffset = singleSelectedGeneratedHandle
+        ? this._selectedGeneratedHandleHasOffset(singleSelectedGeneratedHandle)
+        : false;
+      const hasHandleOffsets = singleSelectedGeneratedHandle
+        ? hasSingleHandleOffset
+        : this._selectedRibPointsHaveHandleOffsets(selectedRibSides);
 
       // Build reset buttons array
       const resetButtons = [];
@@ -1142,9 +1148,12 @@ export default class SkeletonParametersPanel extends Panel {
           html.button(
             {
               style: "font-size: 11px; padding: 2px 6px;",
-              onclick: () => this._onResetHandleOffsets(selectedRibSides),
+              onclick: () =>
+                singleSelectedGeneratedHandle
+                  ? this._onResetSingleHandleOffset(singleSelectedGeneratedHandle)
+                  : this._onResetHandleOffsets(selectedRibSides),
             },
-            "Reset Handles"
+            singleSelectedGeneratedHandle ? "Reset Handle" : "Reset Handles"
           )
         );
       }
@@ -3775,6 +3784,51 @@ export default class SkeletonParametersPanel extends Panel {
     return selectedRibSides;
   }
 
+  _getSingleSelectedGeneratedHandleInfo() {
+    const {
+      skeletonRibPoint,
+      skeletonPoint,
+      skeletonHandle,
+      editableGeneratedPoint,
+      point: pointSelection,
+      anchor,
+      guideline,
+    } = parseSelection(this.sceneController.selection);
+
+    if (
+      skeletonRibPoint?.size ||
+      skeletonPoint?.size ||
+      skeletonHandle?.size ||
+      editableGeneratedPoint?.size ||
+      anchor?.length ||
+      guideline?.length ||
+      !pointSelection?.length ||
+      pointSelection.length !== 1
+    ) {
+      return null;
+    }
+
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) {
+      return null;
+    }
+
+    const handleInfo = this.sceneController.sceneModel._getEditableHandleForGeneratedPoint(
+      positionedGlyph,
+      pointSelection[0]
+    );
+    if (!handleInfo) {
+      return null;
+    }
+
+    return {
+      contourIdx: handleInfo.skeletonContourIndex,
+      pointIdx: handleInfo.skeletonPointIndex,
+      side: handleInfo.side,
+      handleType: handleInfo.handleType,
+    };
+  }
+
   _getAllRibSidesForPoints(selectedData) {
     const ribSides = new Set();
     if (!selectedData?.points?.length) {
@@ -5914,6 +5968,42 @@ export default class SkeletonParametersPanel extends Panel {
     return false;
   }
 
+  _selectedGeneratedHandleHasOffset(handleInfo) {
+    if (!handleInfo) return false;
+
+    const positionedGlyph = this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    const editLayerName = this.sceneController.editingLayerNames?.[0];
+    const layer = positionedGlyph?.varGlyph?.glyph?.layers?.[editLayerName];
+    const skeletonData = getSkeletonData(layer);
+    if (!skeletonData) return false;
+
+    const point = skeletonData.contours?.[handleInfo.contourIdx]?.points?.[handleInfo.pointIdx];
+    if (!point) return false;
+
+    const lockedKey = handleInfo.side === "left" ? "leftLocked" : "rightLocked";
+    if (point[lockedKey]) return false;
+
+    const offset1DKey = handleInfo.side === "left"
+      ? (handleInfo.handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
+      : (handleInfo.handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
+    const offsetSavedKey = handleInfo.side === "left"
+      ? (handleInfo.handleType === "in" ? "leftHandleInOffsetSaved" : "leftHandleOutOffsetSaved")
+      : (handleInfo.handleType === "in" ? "rightHandleInOffsetSaved" : "rightHandleOutOffsetSaved");
+    const offsetXKey = handleInfo.side === "left"
+      ? (handleInfo.handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+      : (handleInfo.handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+    const offsetYKey = handleInfo.side === "left"
+      ? (handleInfo.handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+      : (handleInfo.handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+
+    return Boolean(
+      (point[offset1DKey] && point[offset1DKey] !== 0) ||
+        (point[offsetSavedKey] && point[offsetSavedKey] !== 0) ||
+        (point[offsetXKey] && point[offsetXKey] !== 0) ||
+        (point[offsetYKey] && point[offsetYKey] !== 0)
+    );
+  }
+
   /**
    * Reset handle offset values for selected unlocked rib sides to 0.
    * This returns the handles to their generated positions without affecting nudge.
@@ -6172,6 +6262,71 @@ export default class SkeletonParametersPanel extends Panel {
       return {
         changes: combined,
         undoLabel: "Reset unlocked ribs",
+        broadcast: true,
+      };
+    });
+
+    this.update();
+  }
+
+  async _onResetSingleHandleOffset(handleInfo) {
+    if (!handleInfo) {
+      return;
+    }
+
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const allChanges = [];
+
+      for (const editLayerName of this.sceneController.editingLayerNames) {
+        const layer = glyph.layers[editLayerName];
+        if (!getSkeletonData(layer)) continue;
+
+        const skeletonData = JSON.parse(JSON.stringify(getSkeletonData(layer)));
+        const contour = skeletonData.contours?.[handleInfo.contourIdx];
+        const point = contour?.points?.[handleInfo.pointIdx];
+        if (!point) continue;
+
+        const lockedKey = handleInfo.side === "left" ? "leftLocked" : "rightLocked";
+        if (point[lockedKey]) continue;
+
+        const offset1DKey = handleInfo.side === "left"
+          ? (handleInfo.handleType === "in" ? "leftHandleInOffset" : "leftHandleOutOffset")
+          : (handleInfo.handleType === "in" ? "rightHandleInOffset" : "rightHandleOutOffset");
+        const offsetSavedKey = handleInfo.side === "left"
+          ? (handleInfo.handleType === "in" ? "leftHandleInOffsetSaved" : "leftHandleOutOffsetSaved")
+          : (handleInfo.handleType === "in" ? "rightHandleInOffsetSaved" : "rightHandleOutOffsetSaved");
+        const offsetXKey = handleInfo.side === "left"
+          ? (handleInfo.handleType === "in" ? "leftHandleInOffsetX" : "leftHandleOutOffsetX")
+          : (handleInfo.handleType === "in" ? "rightHandleInOffsetX" : "rightHandleOutOffsetX");
+        const offsetYKey = handleInfo.side === "left"
+          ? (handleInfo.handleType === "in" ? "leftHandleInOffsetY" : "leftHandleOutOffsetY")
+          : (handleInfo.handleType === "in" ? "rightHandleInOffsetY" : "rightHandleOutOffsetY");
+
+        delete point[offset1DKey];
+        delete point[offsetSavedKey];
+        delete point[offsetXKey];
+        delete point[offsetYKey];
+
+        const staticGlyph = layer.glyph;
+        const pathChange = recordChanges(staticGlyph, (sg) => {
+          this._regenerateOutlineContours(sg, skeletonData);
+        });
+        allChanges.push(pathChange.prefixed(["layers", editLayerName, "glyph"]));
+
+        const customDataChange = recordChanges(layer, (l) => {
+          setSkeletonData(l, skeletonData);
+        });
+        allChanges.push(customDataChange.prefixed(["layers", editLayerName]));
+      }
+
+      if (allChanges.length === 0) return;
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+
+      return {
+        changes: combined,
+        undoLabel: "Reset handle offset",
         broadcast: true,
       };
     });
