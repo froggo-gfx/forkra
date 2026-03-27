@@ -271,19 +271,19 @@ registerVisualizationLayerDefinition({
     strokeColor: "rgba(220, 60, 120, 0.7)",
     hoveredColor: "rgba(220, 60, 120, 1.0)",
     selectedColor: "rgba(255, 64, 0, 0.9)",
-    // Unlocked rib points - more saturated purple
-    editableStrokeColor: "rgba(160, 40, 180, 0.9)",
-    editableHoveredColor: "rgba(160, 40, 180, 1.0)",
-    editableSelectedColor: "rgba(160, 40, 180, 1.0)",
+    // Unlocked rib points keep the original light-red visualization.
+    editableStrokeColor: "rgba(220, 60, 120, 0.7)",
+    editableHoveredColor: "rgba(220, 60, 120, 1.0)",
+    editableSelectedColor: "rgba(255, 64, 0, 0.9)",
   },
   colorsDarkMode: {
     strokeColor: "rgba(220, 100, 140, 0.7)",
     hoveredColor: "rgba(220, 100, 140, 1.0)",
     selectedColor: "rgba(255, 96, 64, 0.9)",
-    // Unlocked rib points - more saturated purple
-    editableStrokeColor: "rgba(180, 80, 200, 0.9)",
-    editableHoveredColor: "rgba(180, 80, 200, 1.0)",
-    editableSelectedColor: "rgba(180, 80, 200, 1.0)",
+    // Unlocked rib points keep the original light-red visualization.
+    editableStrokeColor: "rgba(220, 100, 140, 0.7)",
+    editableHoveredColor: "rgba(220, 100, 140, 1.0)",
+    editableSelectedColor: "rgba(255, 96, 64, 0.9)",
   },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
