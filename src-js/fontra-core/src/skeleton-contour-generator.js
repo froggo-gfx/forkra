@@ -1301,7 +1301,6 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
 
     let startCap = [];
     let endCap = [];
-
       if (startIsRound) {
         const startTangent = getSegmentTangent(segments[0], "start");
         const leftStart = getFirstOnCurvePoint(roundedLeftSide);
@@ -1361,7 +1360,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
               "start",
               leftSplit.referenceEndpointIndex
             );
-            startCap = buildRoundCapGeometry({
+            const builtStartCap = buildRoundCapGeometry({
               position: "start",
               insertedLeft: leftSplit.insertedPoint,
               insertedRight: rightSplit.insertedPoint,
@@ -1373,7 +1372,15 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
               capTension,
               radiusFactor: frame.radiusFactor,
               capWidth,
-            }).capPoints;
+              preserveCoincidentMaxRadiusEndpoints: singleSided,
+              debugContext: {
+                contourIndex: options.contourIndex ?? null,
+                segmentIndex: 0,
+                side: "cap",
+                capPosition: "start",
+              },
+            });
+            startCap = builtStartCap.capPoints;
           }
         }
       } else if (startIsSquare) {
@@ -1501,7 +1508,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
               "end",
               rightSplit.referenceEndpointIndex
             );
-            endCap = buildRoundCapGeometry({
+            const builtEndCap = buildRoundCapGeometry({
               position: "end",
               insertedLeft: leftSplit.insertedPoint,
               insertedRight: rightSplit.insertedPoint,
@@ -1513,7 +1520,15 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
               capTension,
               radiusFactor: frame.radiusFactor,
               capWidth,
-            }).capPoints;
+              preserveCoincidentMaxRadiusEndpoints: singleSided,
+              debugContext: {
+                contourIndex: options.contourIndex ?? null,
+                segmentIndex: segments.length - 1,
+                side: "cap",
+                capPosition: "end",
+              },
+            });
+            endCap = builtEndCap.capPoints;
           }
         }
       } else if (endIsSquare) {
@@ -3340,6 +3355,18 @@ function buildRoundCapTipPoint(point) {
   };
 }
 
+function serializeRoundCapDebugPoint(point) {
+  if (!point) return null;
+  const serialized = {
+    x: point.x,
+    y: point.y,
+  };
+  if (point.type !== undefined) serialized.type = point.type;
+  if (point.smooth !== undefined) serialized.smooth = point.smooth;
+  if (point.skipColinear !== undefined) serialized.skipColinear = point.skipColinear;
+  return serialized;
+}
+
 function orientDirectionToward(direction, targetVector) {
   if (!isUsableDirection(direction)) {
     return resolveRoundCapFallbackDirection({ endpointTangent: targetVector });
@@ -3355,12 +3382,38 @@ function orientDirectionToward(direction, targetVector) {
     : { x: -normalizedDirection.x, y: -normalizedDirection.y };
 }
 
-function buildRoundCapSegment(startPoint, startDir, endPoint, endDir, tension) {
+function buildRoundCapSegment(
+  startPoint,
+  startDir,
+  endPoint,
+  endDir,
+  tension,
+  debugContext = null,
+  debugLabel = null
+) {
+  const segmentDebugBase = {
+    phase: "round-cap-segment",
+    label: debugLabel,
+    startPoint: serializeRoundCapDebugPoint(startPoint),
+    endPoint: serializeRoundCapDebugPoint(endPoint),
+    startDir,
+    endDir,
+    tension,
+  };
   if (
     !isUsableDirection(startDir) ||
     !isUsableDirection(endDir) ||
     vector.distance(startPoint, endPoint) < 0.001
   ) {
+    logSkeletonDebug(debugContext, {
+      ...segmentDebugBase,
+      degenerate: true,
+      reason: !isUsableDirection(startDir)
+        ? "invalid-start-dir"
+        : !isUsableDirection(endDir)
+          ? "invalid-end-dir"
+          : "coincident-points",
+    });
     return [cloneRoundCapPoint(endPoint)];
   }
 
@@ -3369,22 +3422,34 @@ function buildRoundCapSegment(startPoint, startDir, endPoint, endDir, tension) {
     !Number.isFinite(handleLengths.startLen) ||
     !Number.isFinite(handleLengths.endLen)
   ) {
+    logSkeletonDebug(debugContext, {
+      ...segmentDebugBase,
+      degenerate: true,
+      reason: "invalid-handle-lengths",
+      handleLengths,
+    });
     return [cloneRoundCapPoint(endPoint)];
   }
 
-  return [
-    {
-      x: Math.round(startPoint.x + startDir.x * handleLengths.startLen),
-      y: Math.round(startPoint.y + startDir.y * handleLengths.startLen),
-      type: "cubic",
-    },
-    {
-      x: Math.round(endPoint.x + endDir.x * handleLengths.endLen),
-      y: Math.round(endPoint.y + endDir.y * handleLengths.endLen),
-      type: "cubic",
-    },
-    cloneRoundCapPoint(endPoint),
-  ];
+  const handleOut = {
+    x: Math.round(startPoint.x + startDir.x * handleLengths.startLen),
+    y: Math.round(startPoint.y + startDir.y * handleLengths.startLen),
+    type: "cubic",
+  };
+  const handleIn = {
+    x: Math.round(endPoint.x + endDir.x * handleLengths.endLen),
+    y: Math.round(endPoint.y + endDir.y * handleLengths.endLen),
+    type: "cubic",
+  };
+  const segmentPoints = [handleOut, handleIn, cloneRoundCapPoint(endPoint)];
+  logSkeletonDebug(debugContext, {
+    ...segmentDebugBase,
+    degenerate: false,
+    chordLength: vector.distance(startPoint, endPoint),
+    handleLengths,
+    segmentPoints: segmentPoints.map(serializeRoundCapDebugPoint),
+  });
+  return segmentPoints;
 }
 
 function buildRoundCapGeometry({
@@ -3399,6 +3464,8 @@ function buildRoundCapGeometry({
   capTension,
   radiusFactor,
   capWidth,
+  preserveCoincidentMaxRadiusEndpoints = false,
+  debugContext = null,
 }) {
   const referenceSpan = vector.subVectors(referenceLeft, referenceRight);
   const rawCapNormal = vector.normalizeVector(referenceSpan);
@@ -3418,6 +3485,7 @@ function buildRoundCapGeometry({
   let isMergedTip = false;
   let preCollapseRight = null;
   let preCollapseLeft = null;
+  let coincidentEndpointAxis = null;
 
   if (!zeroWidthCap && capNormal) {
     preCollapseRight = buildRoundCapEndpoint({
@@ -3429,9 +3497,32 @@ function buildRoundCapGeometry({
       y: referenceLeft.y - capNormal.y * normalShift,
     });
 
-    if (
+    const coincidentPreCollapseEndpoints =
+      vector.distance(preCollapseRight, preCollapseLeft) <= 0.5;
+    const shouldKeepCoincidentEndpoints =
+      preserveCoincidentMaxRadiusEndpoints && radiusFactor >= 1 - 1e-6;
+
+    if (shouldKeepCoincidentEndpoints) {
+      const coincidentEndpoint = buildRoundCapEndpoint({
+        x: (preCollapseRight.x + preCollapseLeft.x) / 2,
+        y: (preCollapseRight.y + preCollapseLeft.y) / 2,
+      });
+      coincidentEndpointAxis = vector.normalizeVector(
+        vector.subVectors(insertedLeft, insertedRight)
+      );
+      if (!isUsableDirection(coincidentEndpointAxis) && capNormal) {
+        coincidentEndpointAxis = capNormal;
+      }
+      if (!isUsableDirection(coincidentEndpointAxis) && canUseFallbackCapNormal) {
+        coincidentEndpointAxis = fallbackCapNormal;
+      }
+      finalEndpoints = {
+        left: cloneRoundCapPoint(coincidentEndpoint),
+        right: cloneRoundCapPoint(coincidentEndpoint),
+      };
+    } else if (
       radiusFactor >= 1 - 1e-6 ||
-      vector.distance(preCollapseRight, preCollapseLeft) <= 0.5
+      coincidentPreCollapseEndpoints
     ) {
       isMergedTip = true;
       tipPoint = buildRoundCapTipPoint({
@@ -3482,7 +3573,9 @@ function buildRoundCapGeometry({
           rightTangentToEndpoint,
           tipPoint,
           rightTipDir,
-          capTension
+          capTension,
+          debugContext,
+          "start-right-to-tip"
         )
       );
       capPoints.push(
@@ -3491,7 +3584,9 @@ function buildRoundCapGeometry({
           leftTipDir,
           insertedLeft,
           leftTangentToEndpoint,
-          capTension
+          capTension,
+          debugContext,
+          "start-tip-to-left"
         )
       );
     } else {
@@ -3501,7 +3596,9 @@ function buildRoundCapGeometry({
           leftTangentToEndpoint,
           tipPoint,
           leftTipDir,
-          capTension
+          capTension,
+          debugContext,
+          "end-left-to-tip"
         )
       );
       capPoints.push(
@@ -3510,17 +3607,57 @@ function buildRoundCapGeometry({
           rightTipDir,
           insertedRight,
           rightTangentToEndpoint,
-          capTension
+          capTension,
+          debugContext,
+          "end-tip-to-right"
         )
       );
     }
 
+    logSkeletonDebug(debugContext, {
+      phase: "round-cap-geometry",
+      position,
+      mode: "merged-tip",
+      radiusFactor,
+      capWidth,
+      preserveCoincidentMaxRadiusEndpoints,
+      insertedLeft: serializeRoundCapDebugPoint(insertedLeft),
+      insertedRight: serializeRoundCapDebugPoint(insertedRight),
+      referenceLeft: serializeRoundCapDebugPoint(referenceLeft),
+      referenceRight: serializeRoundCapDebugPoint(referenceRight),
+      preCollapseLeft: serializeRoundCapDebugPoint(preCollapseLeft),
+      preCollapseRight: serializeRoundCapDebugPoint(preCollapseRight),
+      capNormal,
+      fallbackCapNormal,
+      tipAxis,
+      tipPoint: serializeRoundCapDebugPoint(tipPoint),
+      capPoints: capPoints.map(serializeRoundCapDebugPoint),
+    });
     return { capPoints, finalEndpoints, tipPoint, isMergedTip };
   }
 
-  const tipLineDirection = vector.normalizeVector(
+  let tipLineDirection = vector.normalizeVector(
     vector.subVectors(finalEndpoints.left, finalEndpoints.right)
   );
+  if (!isUsableDirection(tipLineDirection) && isUsableDirection(coincidentEndpointAxis)) {
+    tipLineDirection = coincidentEndpointAxis;
+  }
+  if (
+    !isUsableDirection(tipLineDirection) &&
+    preCollapseLeft &&
+    preCollapseRight &&
+    vector.distance(preCollapseLeft, preCollapseRight) > 0.001
+  ) {
+    tipLineDirection = vector.normalizeVector(
+      vector.subVectors(preCollapseLeft, preCollapseRight)
+    );
+  }
+  if (!isUsableDirection(tipLineDirection) && canUseFallbackCapNormal) {
+    tipLineDirection = fallbackCapNormal;
+  }
+  if (!isUsableDirection(tipLineDirection)) {
+    tipLineDirection = vector.normalizeVector(vector.subVectors(insertedLeft, insertedRight));
+  }
   const leftTipDir = orientDirectionToward(
     tipLineDirection,
     vector.subVectors(insertedLeft, finalEndpoints.left)
@@ -3537,7 +3674,9 @@ function buildRoundCapGeometry({
         rightTangentToEndpoint,
         finalEndpoints.right,
         rightTipDir,
-        capTension
+        capTension,
+        debugContext,
+        "start-right-to-final-right"
       )
     );
     capPoints.push(cloneRoundCapPoint(finalEndpoints.left));
@@ -3547,7 +3686,9 @@ function buildRoundCapGeometry({
         leftTipDir,
         insertedLeft,
         leftTangentToEndpoint,
-        capTension
+        capTension,
+        debugContext,
+        "start-final-left-to-left"
       )
     );
   } else {
@@ -3557,7 +3698,9 @@ function buildRoundCapGeometry({
         leftTangentToEndpoint,
         finalEndpoints.left,
         leftTipDir,
-        capTension
+        capTension,
+        debugContext,
+        "end-left-to-final-left"
       )
     );
     capPoints.push(cloneRoundCapPoint(finalEndpoints.right));
@@ -3567,11 +3710,35 @@ function buildRoundCapGeometry({
         rightTipDir,
         insertedRight,
         rightTangentToEndpoint,
-        capTension
+        capTension,
+        debugContext,
+        "end-final-right-to-right"
       )
     );
   }
 
+  logSkeletonDebug(debugContext, {
+    phase: "round-cap-geometry",
+    position,
+    mode: "two-endpoint",
+    radiusFactor,
+    capWidth,
+    preserveCoincidentMaxRadiusEndpoints,
+    insertedLeft: serializeRoundCapDebugPoint(insertedLeft),
+    insertedRight: serializeRoundCapDebugPoint(insertedRight),
+    referenceLeft: serializeRoundCapDebugPoint(referenceLeft),
+    referenceRight: serializeRoundCapDebugPoint(referenceRight),
+    preCollapseLeft: serializeRoundCapDebugPoint(preCollapseLeft),
+    preCollapseRight: serializeRoundCapDebugPoint(preCollapseRight),
+    finalLeft: serializeRoundCapDebugPoint(finalEndpoints.left),
+    finalRight: serializeRoundCapDebugPoint(finalEndpoints.right),
+    capNormal,
+    fallbackCapNormal,
+    tipLineDirection,
+    leftTipDir,
+    rightTipDir,
+    capPoints: capPoints.map(serializeRoundCapDebugPoint),
+  });
   return { capPoints, finalEndpoints, tipPoint, isMergedTip };
 }
 
