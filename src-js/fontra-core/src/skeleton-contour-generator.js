@@ -1372,7 +1372,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
               capTension,
               radiusFactor: frame.radiusFactor,
               capWidth,
-              preserveCoincidentMaxRadiusEndpoints: singleSided,
+              preserveCoincidentMaxRadiusEndpoints: true,
               debugContext: {
                 contourIndex: options.contourIndex ?? null,
                 segmentIndex: 0,
@@ -1520,7 +1520,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
               capTension,
               radiusFactor: frame.radiusFactor,
               capWidth,
-              preserveCoincidentMaxRadiusEndpoints: singleSided,
+              preserveCoincidentMaxRadiusEndpoints: true,
               debugContext: {
                 contourIndex: options.contourIndex ?? null,
                 segmentIndex: segments.length - 1,
