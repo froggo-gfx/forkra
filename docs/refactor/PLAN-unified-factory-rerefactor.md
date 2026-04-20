@@ -414,6 +414,28 @@ Estimated change: ~150 lines tests, ~100 lines implementation.
 Gate: After this step, the factory CAN produce correct skeleton changes.
 But pointer still uses adapters. Nothing visible changes.
 
+**Auxiliary modifier flags (D / S).** The `fixedRibMode` (D) and
+`fixedRibCompressMode` (S) modifiers are not encoded in `behaviorName` — they
+are separate tool-state flags on `pointerTool` consumed by the existing
+rib/handle executor constructors (see adapter lines 1491-1503 and 3745-3841).
+The factory must accept these as construction-time options:
+```js
+new EditBehaviorFactory(layerGlyph, selection, scalingEditBehavior, {
+  fixedRibMode, fixedRibCompressMode,
+})
+```
+and forward them into the per-target executors for skeleton on-curve, skeleton
+handle, rib, and editable-generated behaviors (same fields already consumed by
+the adapters). `behaviorName` continues to carry only the
+Shift/Alt/X/Z-derived name. This keeps the factory API small while preserving
+D/S parity across all skeleton types.
+
+The full behaviorName set the factory must recognize for skeleton types:
+- on-curve / handle: `default`, `constrain`, `alternate`, `alternate-constrain`
+  (plus the X-equalize variants already handled by `makePointExecutors`)
+- rib / editable-generated: `rib-default`, `rib-tangent`, `rib-interpolate`,
+  `rib-tangent-interpolate` (see Step 0.6 / 3.1)
+
 ---
 
 #### Step 0.5: Add skeleton handle behavior to EditBehavior
@@ -432,12 +454,19 @@ What to do:
    - Test: rollback correctly undoes handle changes
 
 2. Implementation:
-   - In `EditBehavior` constructor, when parsing skeleton handles:
-     - Map each `{ contourIndex, pointIndex, direction }` to the actual point
-       index in the skeleton contour
-     - Include in the skeleton point executor's selected indices
+   - In `EditBehavior` constructor, skeleton on-curve points and skeleton
+     handles share a single per-contour point executor (one
+     `createPointBehaviorExecutor` per skeleton contour, not one per selection
+     key). Build the executor once from the full contour's points; the merged
+     set of selected indices for that contour includes both
+     `this.skeletonPoints` and `this.skeletonHandles`.
+   - Map each `{ contourIndex, pointIndex, direction }` to the actual point
+     index in the skeleton contour (handle `in` / `out` resolve to the
+     adjacent off-curve point on that contour).
    - The executor's rule matching handles off-curve vs on-curve naturally
-     because skeleton contour points already have `type` fields
+     because skeleton contour points already have `type` fields — no branching
+     needed here; on-curve and handle behaviors fall out of the same rules
+     used for regular paths.
    - Persistence goes through the same skeleton clone → regenerate → record path
 
 3. Run tests.
@@ -482,10 +511,12 @@ What to do:
        via `findRibInterpolationAxisFromSkeletonPath` using `instance.path` at
        construction time; fall back to `createEditableRibBehavior` if no axis
      - Gate: if no target is editable AND the selection does not belong to a single
-       segment (`selectedRibTargetsBelongToSingleSegment`), the factory returns an
-       inert behavior (no-op `makeChangeForDelta`, empty `rollbackChange`) —
-       pointer treats this as "drag unhandled" and skips the edit session,
-       matching the current adapter's `return false` gate
+       segment (`selectedRibTargetsBelongToSingleSegment`), the per-target executor
+       is the inert variant (no-op apply, empty rollback). Expose this upward as
+       `factory.isInert(behaviorName)` returning `true` when every produced
+       per-target executor is inert — pointer probes this before opening the
+       edit session (see Step 3.1), matching the current adapter's
+       `return false` gate
      - Store alongside skeleton point/handle executors as another per-target
        entry in the skeleton executor collection
    - In `makeChangeForDelta`:
@@ -714,9 +745,18 @@ Estimated change: ~40 lines tests, ~15 lines pointer changes.
 #### Step 2.3: Remove skeletonHandle adapter code
 
 Same pattern as Step 1.3:
-1. Verify with temporary console.warn
-2. Remove entries from adapters and routing maps
-3. Full regression test
+1. Verify with temporary `console.warn("DEAD CODE: skeletonHandle adapter called")`
+   at the handle branch of `runSkeletonPointLikeCanonical` (or whichever adapter
+   entry now owns handle drag after Phase 1). Run full skeleton-handle manual
+   test matrix; warning must not fire. Remove after verification.
+2. Remove dead code:
+   - Remove `skeletonHandle` entry from `canonicalDragAdapters`
+   - Remove `skeletonHandle` entry from `canonicalNudgeAdapters`
+   - Set all `skeletonHandle` rows in `DRAG_ROUTING_MAP` to `"NA"`
+   - Set all `skeletonHandle` rows in `NUDGE_ROUTING_MAP` to `"NA"`
+   - Do NOT remove shared `runSkeletonPointLikeOrchestration` helpers if other
+     skeleton types (rib, editable-generated) still use them — defer to Phase 8.
+3. Run tests: `npm test`
 
 Files to touch:
 - `src-js/views-editor/src/edit-behavior-adapters.js`
@@ -760,6 +800,14 @@ What to do:
      in `sceneController.selection` and no rib selection exists, replace the
      selection with the clicked rib. This stays on pointer because it's a
      selection-state side-effect, not a behavior concern.
+   - Inertness probe: after click-to-select and BEFORE `sceneController.editGlyph`,
+     construct a throwaway factory for the first editing layer and call
+     `factory.isInert(behaviorName)` (new public method on `EditBehaviorFactory`,
+     returning `true` when every produced per-target executor is the Step 0.6
+     inert variant). If inert, skip the edit session entirely — no `editGlyph`
+     opened, no incremental sends, matching the current adapter's `return false`
+     gate. This keeps the "drag unhandled" semantics intact without polluting
+     the drag loop with inertness checks mid-session.
    - Define the modifier → behaviorName mapping used by the factory call:
      - no modifier → `rib-default`
      - Z (tangent-rib mode) → `rib-tangent`
@@ -831,11 +879,29 @@ Estimated change: ~50 lines tests, ~15 lines pointer changes.
 #### Step 3.3: Remove skeletonRibPoint adapter code
 
 Same pattern:
-1. Verify with temporary console.warn
-2. Remove entries from adapters and routing maps
-3. Full regression test (rib + skeleton on/off-curve + regular)
+1. Verify with temporary `console.warn("DEAD CODE: skeletonRibPoint adapter called")`
+   at the top of `runSkeletonRibPointDragCanonical` AND
+   `runSkeletonRibPointNudgeCanonical`. Run full rib manual test matrix
+   (including non-editable / single-segment cases); warning must not fire.
+   Remove after verification.
+2. Remove dead code:
+   - Remove `skeletonRibPoint` entry from `canonicalDragAdapters` and
+     `canonicalNudgeAdapters`
+   - Set all `skeletonRibPoint` rows in `DRAG_ROUTING_MAP` and
+     `NUDGE_ROUTING_MAP` to `"NA"`
+   - Remove `runSkeletonRibPointDragCanonical` and
+     `runSkeletonRibPointNudgeCanonical` function bodies
+   - Remove rib-only adapter helpers that are now unreferenced
+     (`selectedRibTargetsBelongToSingleSegment` stays if still used by factory
+     via re-export; delete only if fully dead)
+3. Full regression test (rib + skeleton on/off-curve + regular).
 
-Estimated change: ~30 lines removed.
+Files to touch:
+- `src-js/views-editor/src/edit-behavior-adapters.js`
+- `src-js/views-editor/src/edit-behavior-registry.js`
+
+Estimated change: ~30 lines removed (plus ~400 if rib helpers are fully dead —
+confirm in Phase 8).
 
 Gate: After Phase 3, rib points go through the factory.
 
@@ -908,7 +974,24 @@ Estimated change: ~40 lines tests, ~25 lines pointer changes.
 
 #### Step 4.3: Remove editableGeneratedPoint adapter code
 
-Same pattern: verify, remove, regression test.
+Same pattern:
+1. Verify with temporary `console.warn("DEAD CODE: editableGeneratedPoint adapter called")`
+   at the top of `runEditableGeneratedPointDragCanonical` and
+   `runEditableGeneratedNudgeCanonical` (point branch). Run the full editable-
+   generated-point manual matrix; warning must not fire.
+2. Remove dead code:
+   - Remove `editableGeneratedPoint` entry from `canonicalDragAdapters` and
+     `canonicalNudgeAdapters`
+   - Set `editableGeneratedPoint` rows in `DRAG_ROUTING_MAP` and
+     `NUDGE_ROUTING_MAP` to `"NA"`
+   - Remove the point-only code paths inside
+     `runEditableGeneratedPointDragCanonical` — keep the function shell only if
+     `editableGeneratedHandle` still shares it (deleted in Step 5.3 otherwise)
+3. Regression test.
+
+Files to touch:
+- `src-js/views-editor/src/edit-behavior-adapters.js`
+- `src-js/views-editor/src/edit-behavior-registry.js`
 
 Estimated change: ~30 lines removed.
 
@@ -980,9 +1063,28 @@ Estimated change: ~40 lines tests, ~25 lines pointer changes.
 
 #### Step 5.3: Remove editableGeneratedHandle adapter code
 
-Same pattern: verify, remove, regression test.
+Same pattern:
+1. Verify with temporary `console.warn("DEAD CODE: editableGeneratedHandle adapter called")`
+   at the handle branch of the editable-generated adapter(s). Run the full
+   editable-generated-handle manual matrix; warning must not fire.
+2. Remove dead code:
+   - Remove `editableGeneratedHandle` entry from `canonicalDragAdapters` and
+     `canonicalNudgeAdapters`
+   - Set `editableGeneratedHandle` rows in `DRAG_ROUTING_MAP` and
+     `NUDGE_ROUTING_MAP` to `"NA"`
+   - Remove remaining handle-specific code in
+     `runEditableGeneratedPointDragCanonical` and
+     `runEditableGeneratedNudgeCanonical`. If these functions are now empty,
+     delete them and remove the pointer-side helper
+     `_getEditableGeneratedHandlesFromSelection` (moved to factory in Step 5.1).
+3. Regression test.
 
-Estimated change: ~30 lines removed.
+Files to touch:
+- `src-js/views-editor/src/edit-behavior-adapters.js`
+- `src-js/views-editor/src/edit-behavior-registry.js`
+- `src-js/views-editor/src/edit-tools-pointer.js` (remove migrated helper)
+
+Estimated change: ~30 lines removed from adapters, ~50 from pointer.
 
 Gate: After Phase 5, all individual point-like types go through the factory.
 Only `mixedSelection` and specialized routes (Tunni, component) remain on adapters.
