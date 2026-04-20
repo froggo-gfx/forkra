@@ -344,8 +344,11 @@ What to do:
 1. Write tests first:
    - Test: factory with `skeletonRibPoint/0/1/left` stores rib data correctly
    - Test: factory with `skeletonRibPoint/0/1/right` stores rib data correctly
-   - Test: factory with skeleton point + rib mixed selection stores both
    - Add to existing test file
+
+Note: Rib-point selections do not mix with other selection types. The factory
+should store rib-point data as a single, homogeneous selection — no tests for
+rib + skeleton-point, rib + regular-point, or rib + handle combinations.
 
 2. Implementation:
    - In constructor, parse `skeletonRibPoint` from selection
@@ -451,9 +454,11 @@ Estimated change: ~80 lines tests, ~40 lines implementation.
 
 #### Step 0.6: Add rib point behavior to EditBehavior
 
-Problem: Rib points need special behavior — movement is constrained to the rib normal
-(perpendicular to the skeleton contour at that point). The delta is projected onto
-the normal direction, and the result is a width change in skeleton data.
+Problem: Rib points are another selection type the factory must produce changes for,
+through the same pipeline established in Step 0.4. Per-target behavior uses the
+existing `createRibEditBehavior` / `createEditableRibBehavior` /
+`createInterpolatingRibBehavior` (already exported from `edit-behavior.js`) —
+same pattern as point executors for on-curve and handle types.
 
 What to do:
 1. Write tests first:
@@ -465,16 +470,40 @@ What to do:
 
 2. Implementation:
    - In `EditBehavior` constructor, when factory has `skeletonRibPoints`:
-     - Create rib edit behaviors using existing `createRibEditBehavior`
-       (already in `edit-behavior.js`)
-     - Store as `this.ribBehaviors`
+     - For each target, read `contour.singleSided`, `point.leftEditable`/
+       `rightEditable`, and the behaviorName's interpolation flag to pick one of
+       `createRibEditBehavior` / `createEditableRibBehavior` /
+       `createInterpolatingRibBehavior` — replicating the decision tree currently
+       in `runSkeletonRibPointDragCanonical` lines ~4141-4190
+     - When `contour.singleSided`, set the executor's `originalHalfWidth` to
+       `leftHalfWidth + rightHalfWidth` (total width) per adapter line 4145;
+       otherwise use the side's halfWidth
+     - When the interpolation variant is selected, compute the interpolation axis
+       via `findRibInterpolationAxisFromSkeletonPath` using `instance.path` at
+       construction time; fall back to `createEditableRibBehavior` if no axis
+     - Gate: if no target is editable AND the selection does not belong to a single
+       segment (`selectedRibTargetsBelongToSingleSegment`), the factory returns an
+       inert behavior (no-op `makeChangeForDelta`, empty `rollbackChange`) —
+       pointer treats this as "drag unhandled" and skips the edit session,
+       matching the current adapter's `return false` gate
+     - Store alongside skeleton point/handle executors as another per-target
+       entry in the skeleton executor collection
    - In `makeChangeForDelta`:
-     - For each rib behavior, call `applyDelta(delta)` to get width changes
-     - Apply width changes to working skeleton data
-     - Regenerate contours
-     - Record combined changes
+     - For each rib-target executor, call `applyDelta(delta, constrainMode, roundFunc)`
+       where `constrainMode` is "tangent" when the behaviorName indicates the Z
+       modifier, otherwise null
+     - Write the result into `this.workingSkeletonData` via the same field-writing
+       block used by the adapter: `applyLinkedWidthDelta` for halfWidth, plus
+       `leftNudge`/`rightNudge` and `leftHandleInOffsetX/Y` / `leftHandleOutOffsetX/Y`
+       (or their `right*` counterparts) when the executor returns `isInterpolation`
+       or `hasHandleOffsets`
+     - Feed through the same clone + regenerate + record path from Step 0.4
    - In `rollbackChange`:
-     - Restore original widths from rib behavior rollbacks
+     - Covered by the Step 0.4 skeleton-data rollback — no rib-specific rollback
+
+   Out of scope: the adapter's `hasSkeletonSelection`/`baseNormalDelta` branch
+   (adapter lines 4209-4212) is not migrated. Rib-point selection does not mix
+   with other selection types, so scalar-projected delta math is not needed.
 
 3. Run tests.
 
@@ -484,7 +513,7 @@ Files to touch:
 
 Manual test: Not needed yet.
 
-Estimated change: ~100 lines tests, ~60 lines implementation.
+Estimated change: ~100 lines tests, ~80 lines implementation.
 
 Gate: After Phase 0, the factory can handle all selection types and produce
 correct changes. But nothing in pointer or adapters has changed. The app
@@ -726,9 +755,22 @@ What to do:
 2. Implementation:
    - In `handleDragSelection`, the rib point classification already exists
      (`objectKind === "skeletonRibPoint"`)
+   - Before entering the factory drag loop, keep the pointer-side click-to-select
+     behavior from the adapter (lines 4083-4087): if the clicked rib is not already
+     in `sceneController.selection` and no rib selection exists, replace the
+     selection with the clicked rib. This stays on pointer because it's a
+     selection-state side-effect, not a behavior concern.
+   - Define the modifier → behaviorName mapping used by the factory call:
+     - no modifier → `rib-default`
+     - Z (tangent-rib mode) → `rib-tangent`
+     - Alt (interpolation) → `rib-interpolate`
+     - Z + Alt → `rib-tangent-interpolate`
+     The factory's Step 0.6 executor consults `behaviorName` to pick variant +
+     `constrainMode`. Shift (10x) applies to nudge only (Step 3.2), not drag.
    - Replace the `runDragRoutingOrchestration` call with the factory drag loop
-   - The factory (from Step 0.6) already creates rib behaviors internally
-   - The behavior's `makeChangeForDelta` handles the normal projection
+     used by every other selection type. Drop the `objectKind`-keyed branching.
+   - Remove the adapter's `hasSkeletonSelection` pre-check — no mixed selection
+     for ribs.
 
 3. Run tests.
 
@@ -743,6 +785,8 @@ Manual tests (REQUIRED):
 - Drag with unlinked widths — only dragged side moves
 - Drag + Z — tangent constraint
 - Drag + Alt — interpolation behavior
+- Drag on non-editable, non-single-segment rib — no-op (drag unhandled)
+- Click unselected rib — selection replaced with clicked rib, drag proceeds
 - Undo/redo
 - Multi-select rib points, drag — each follows its own normal
 
@@ -755,10 +799,17 @@ Estimated change: ~80 lines tests, ~25 lines pointer changes.
 What to do:
 1. Write tests:
    - Nudge rib point with arrow keys, produces correct width change
+   - Nudge + Shift (10x nudge step)
    - Nudge + Z (tangent) constrains correctly
    - Nudge + Z + Shift (10x tangent)
    - Nudge + Alt (interpolation)
-2. Implementation: route nudge through factory
+2. Implementation:
+   - Reuse the Step 3.1 modifier → behaviorName mapping
+     (`rib-default` / `rib-tangent` / `rib-interpolate` /
+     `rib-tangent-interpolate`). Shift multiplies the nudge delta by 10 before
+     the factory call, consistent with nudge handling for all other types.
+   - Replace `runNudgeRoutingOrchestration` with the factory nudge call used
+     by every other selection type.
 3. Run tests.
 
 Files to touch:
@@ -798,9 +849,9 @@ that can be dragged when marked editable) use the factory.
 #### Step 4.1: Add editable generated point unpacking to factory
 
 Problem: Editable generated points use `editableGeneratedPoint/` selection keys
-with a complex format: `editableGeneratedPoint/pathPointIndex/skeletonContourIndex/
-skeletonPointIndex/side`. The factory needs to parse these and create the right
-behavior (same as rib but with editable-flag gating).
+with format: `editableGeneratedPoint/pathPointIndex/skeletonContourIndex/
+skeletonPointIndex/side`. Same factory pattern: parse selection → instantiate
+per-target behavior → feed through the shared skeleton pipeline.
 
 What to do:
 1. Write tests first:
@@ -812,8 +863,8 @@ What to do:
 2. Implementation:
    - In constructor, parse `editableGeneratedPoint` from selection
    - For each, look up the skeleton contour/point, check editable flag
-   - Create `createEditableRibBehavior` (already exists in `edit-behavior.js`)
-   - Store as part of rib behaviors collection
+   - Instantiate `createEditableRibBehavior` / `createInterpolatingRibBehavior`
+   - Store alongside other skeleton executors; same pipeline as Step 0.6
 
 3. Run tests.
 
@@ -873,10 +924,11 @@ projected onto the skeleton handle direction.
 
 #### Step 5.1: Add editable generated handle support to factory
 
-Problem: Editable generated handles are not selection-based (they use
-`editableGeneratedHandle` in the object kind system but are identified
-via the editable generated point parsing + handle detection).
-The factory needs to understand these.
+Problem: Editable generated handles are identified via editable-generated-point
+parsing + handle detection (currently in pointer's
+`_getEditableGeneratedHandlesFromSelection`). Same factory pattern: parse
+selection → instantiate per-target behavior → feed through the shared
+skeleton pipeline.
 
 What to do:
 1. Write tests first:
@@ -887,11 +939,10 @@ What to do:
    - Test: change includes skeleton regeneration
 
 2. Implementation:
-   - In constructor, detect editable generated handles
-     (these are identified by `_getEditableGeneratedHandlesFromSelection`
-     in current pointer code — the factory needs equivalent logic)
-   - Create `createEditableHandleBehavior` for each
-   - Include in behavior's `makeChangeForDelta`
+   - Move the handle-detection logic from pointer's
+     `_getEditableGeneratedHandlesFromSelection` into the factory constructor
+   - Instantiate `createEditableHandleBehavior` for each detected handle
+   - Store alongside other skeleton executors; same pipeline as Step 0.6
 
 3. Run tests.
 
@@ -956,8 +1007,11 @@ What to do:
    - Test: factory with `point/3` + `skeletonPoint/0/1`, `makeChangeForDelta`
      produces changes for BOTH regular path points AND skeleton data
    - Test: rollback undoes both
-   - Test: factory with `point/3` + `skeletonRibPoint/0/1/left` handles both
    - Test: behavior preset changes (shift mid-drag) update both correctly
+
+Note: "mixed selection" here means regular points + skeleton on-curve / handle
+points. Rib points and editable generated points do not participate in mixed
+selection — they are homogeneous selection types handled in Phases 3-5.
 
 2. Verify — these tests may already pass because the factory handles each
    type independently. If they pass, no implementation needed for this step.
@@ -1006,7 +1060,6 @@ Manual tests (REQUIRED — comprehensive):
 - Drag regular point only — works
 - Drag skeleton point only — works
 - Drag with regular + skeleton mixed selection — both move correctly
-- Drag with regular + rib mixed selection — both move correctly
 - Nudge with mixed selection — both move
 - Drag + Shift (constrain) with mixed selection
 - Drag + Alt (alternate) with mixed selection
