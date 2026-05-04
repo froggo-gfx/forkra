@@ -122,10 +122,8 @@ export class EditorController extends ViewController {
     canvas.ondragleave = (event) => this._onDragLeave(event);
     canvas.ondrop = (event) => this._onDrop(event);
 
-    const canvasController = new CanvasController(
-      canvas,
-      (magnification) => this.canvasMagnificationChanged(magnification),
-      () => this.fontController.unitsPerEm
+    const canvasController = new CanvasController(canvas, (magnification) =>
+      this.canvasMagnificationChanged(magnification)
     );
     this.canvasController = canvasController;
 
