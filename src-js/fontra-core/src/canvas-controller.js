@@ -1,17 +1,36 @@
 import { normalizeRect, rectCenter, validateRect } from "./rectangle.js";
 import { assert, consolidateCalls, isNumber, withSavedState } from "./utils.js";
 
-const MIN_MAGNIFICATION = 0.005;
-const MAX_MAGNIFICATION = 200;
+// Minimum pixels per em and maximum pixels per unit for zooming out and in.
+//
+// Note that these are not _screen pixels_, they are css "pixels" which are
+// scaled by screen DPI and browser zoom level. So on a high dpi display or
+// in a browser with a higher zoom level set, the minimum and maximum scale
+// in _screen pixels_ will be higher (for both).
+//
+// Zooming out is capped by pixels per em to allow a consistent size when
+// zoomed all the way out at different em scales, and zooming in is capped
+// by pixels per unit to allow a consistent 1 unit size when zoomed all the
+// way in regardless of em scale.
+//
+// These values are chosen arbitrarily and in the future there may
+// be some merit to letting users configure this to their own taste.
+const MIN_PIX_PER_EM = 5;
+const MAX_PIX_PER_UNIT = 200;
 
 export class CanvasController {
-  constructor(canvas, magnificationChangedCallback) {
+  constructor(canvas, magnificationChangedCallback, getUnitsPerEm) {
     this.canvas = canvas; // The HTML5 Canvas object
     this.context = canvas.getContext("2d");
     this.sceneView = undefined; // will be set later
 
     this.magnification = 1;
     this.origin = { x: this.canvasWidth / 2, y: 0.85 * this.canvasHeight }; // TODO choose y based on initial canvas height
+
+    // The consumer of CanvasController must provide a function that returns
+    // the current units per em. This is used to set the lower limit on the
+    // magnification for zooming out.
+    this._getUnitsPerEm = getUnitsPerEm;
 
     this._magnificationChangedCallback = magnificationChangedCallback;
 
@@ -207,6 +226,19 @@ export class CanvasController {
     delete this._initialMagnification;
   }
 
+  get minMagnification() {
+    // The lower magnification limit is implemented relative to UPM
+    // to provide a consistent em size when zoomed all the way out.
+    return MIN_PIX_PER_EM / this._getUnitsPerEm();
+  }
+
+  get maxMagnification() {
+    // The upper magnification limit is implemented relative to individual
+    // units, so that when zoomed all the way in the size of an individual
+    // unit is the same regardless of em size.
+    return MAX_PIX_PER_UNIT;
+  }
+
   _doPinchMagnify(event, zoomFactor) {
     assert(isNumber(zoomFactor));
     const center = this.localPoint({ x: event.pageX, y: event.pageY });
@@ -214,8 +246,8 @@ export class CanvasController {
 
     this.magnification = this.magnification * zoomFactor;
     this.magnification = Math.min(
-      Math.max(this.magnification, MIN_MAGNIFICATION),
-      MAX_MAGNIFICATION
+      Math.max(this.magnification, this.minMagnification),
+      this.maxMagnification
     );
     zoomFactor = this.magnification / prevMagnification;
 
@@ -309,10 +341,10 @@ export class CanvasController {
 
   getProposedViewBoxClampAdjustment(viewBox) {
     const magnification = this._getProposedViewBoxMagnification(viewBox);
-    if (magnification < MIN_MAGNIFICATION) {
-      return magnification / MIN_MAGNIFICATION;
-    } else if (magnification > MAX_MAGNIFICATION) {
-      return magnification / MAX_MAGNIFICATION;
+    if (magnification < this.minMagnification) {
+      return magnification / this.minMagnification;
+    } else if (magnification > this.maxMagnification) {
+      return magnification / this.maxMagnification;
     }
     return 1;
   }
