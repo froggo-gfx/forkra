@@ -4,6 +4,7 @@
 
 ### Improvements
 
+- [editor view] Make minimum zoom limit relative to em size (units-per-em). Contributed by Qwerasd. [Issue 2573](https://github.com/fontra/fontra/issues/2573), [PR 2574](https://github.com/fontra/fontra/pull/2574)
 - [shaping] When the "Apply text shaping and features" option is _off_, don't do any positioning emulation. [Issue 2517](https://github.com/fontra/fontra/issues/2517), [PR 2571](https://github.com/fontra/fontra/pull/2571)
 - [shaping debugger] Improved message formatting in feature debugger. Contributed by Khaled Hosny. [PR 2566](https://github.com/fontra/fontra/pull/2566)
 - [opentype feature editor] When navigating to a line from an error message or from the shaping debugger, scroll the selected line into the center of the view like most editors do, instead of near the edge. Contributed by Khaled Hosny. [PR 2565](https://github.com/fontra/fontra/pull/2565)
