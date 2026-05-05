@@ -1,5 +1,5 @@
 import { normalizeRect, rectCenter, validateRect } from "./rectangle.js";
-import { assert, consolidateCalls, isNumber, withSavedState } from "./utils.js";
+import { assert, clamp, consolidateCalls, isNumber, withSavedState } from "./utils.js";
 
 const DEFAULT_MIN_MAGNIFICATION = 0.005;
 const DEFAULT_MAX_MAGNIFICATION = 200;
@@ -211,13 +211,14 @@ export class CanvasController {
   }
 
   _clampMagnification() {
-    const old_magnification = this.magnification;
-    this.magnification = Math.min(
-      Math.max(this.magnification, this._minMagnification),
+    const oldMagnification = this.magnification;
+    this.magnification = clamp(
+      this.magnification,
+      this._minMagnification,
       this._maxMagnification
     );
 
-    if (this.magnification !== old_magnification) {
+    if (this.magnification !== oldMagnification) {
       this._magnificationChangedCallback?.(this.magnification);
       this.requestUpdate();
       this._dispatchEvent("viewBoxChanged", "magnification");
@@ -260,8 +261,9 @@ export class CanvasController {
     const prevMagnification = this.magnification;
 
     this.magnification = this.magnification * zoomFactor;
-    this.magnification = Math.min(
-      Math.max(this.magnification, this.minMagnification),
+    this.magnification = clamp(
+      this.magnification,
+      this.minMagnification,
       this.maxMagnification
     );
     zoomFactor = this.magnification / prevMagnification;
