@@ -5,7 +5,7 @@ const DEFAULT_MIN_MAGNIFICATION = 0.005;
 const DEFAULT_MAX_MAGNIFICATION = 200;
 
 export class CanvasController {
-  constructor(canvas, magnificationChangedCallback, getUnitsPerEm) {
+  constructor(canvas, magnificationChangedCallback) {
     this.canvas = canvas; // The HTML5 Canvas object
     this.context = canvas.getContext("2d");
     this.sceneView = undefined; // will be set later
@@ -210,38 +210,40 @@ export class CanvasController {
     delete this._initialMagnification;
   }
 
+  _clampMagnification() {
+    const old_magnification = this.magnification;
+    this.magnification = Math.min(
+      Math.max(this.magnification, this._minMagnification),
+      this._maxMagnification
+    );
+
+    if (this.magnification !== old_magnification) {
+      this._magnificationChangedCallback?.(this.magnification);
+      this.requestUpdate();
+      this._dispatchEvent("viewBoxChanged", "magnification");
+    }
+  }
+
   set minMagnification(newValue) {
     // If there's no change then we don't have to do anything.
-    if (newValue == this._minMagnification) return;
+    if (newValue == this._minMagnification) {
+      return;
+    }
 
     this._minMagnification = newValue;
 
-    // If our magnification is within the new bound then we're done.
-    if (this.magnification >= this._minMagnification) return;
-
-    // Otherwise we have to update our magnification to keep it in bounds.
-    this.magnification = this._minMagnification;
-
-    this._magnificationChangedCallback?.(this.magnification);
-    this.requestUpdate();
-    this._dispatchEvent("viewBoxChanged", "magnification");
+    this._clampMagnification();
   }
 
   set maxMagnification(newValue) {
     // If there's no change then we don't have to do anything.
-    if (newValue == this._maxMagnification) return;
+    if (newValue == this._maxMagnification) {
+      return;
+    }
 
     this._maxMagnification = newValue;
 
-    // If our magnification is within the new bound then we're done.
-    if (this.magnification <= this._maxMagnification) return;
-
-    // Otherwise we have to update our magnification to keep it in bounds.
-    this.magnification = this._maxMagnification;
-
-    this._magnificationChangedCallback?.(this.magnification);
-    this.requestUpdate();
-    this._dispatchEvent("viewBoxChanged", "magnification");
+    this._clampMagnification();
   }
 
   get minMagnification() {
