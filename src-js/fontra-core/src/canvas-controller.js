@@ -1,8 +1,8 @@
 import { normalizeRect, rectCenter, validateRect } from "./rectangle.js";
-import { assert, consolidateCalls, isNumber, withSavedState } from "./utils.js";
+import { assert, clamp, consolidateCalls, isNumber, withSavedState } from "./utils.js";
 
-const MIN_MAGNIFICATION = 0.005;
-const MAX_MAGNIFICATION = 200;
+const DEFAULT_MIN_MAGNIFICATION = 0.005;
+const DEFAULT_MAX_MAGNIFICATION = 200;
 
 export class CanvasController {
   constructor(canvas, magnificationChangedCallback) {
@@ -12,6 +12,9 @@ export class CanvasController {
 
     this.magnification = 1;
     this.origin = { x: this.canvasWidth / 2, y: 0.85 * this.canvasHeight }; // TODO choose y based on initial canvas height
+
+    this._minMagnification = DEFAULT_MIN_MAGNIFICATION;
+    this._maxMagnification = DEFAULT_MAX_MAGNIFICATION;
 
     this._magnificationChangedCallback = magnificationChangedCallback;
 
@@ -207,15 +210,61 @@ export class CanvasController {
     delete this._initialMagnification;
   }
 
+  _clampMagnification() {
+    const oldMagnification = this.magnification;
+    this.magnification = clamp(
+      this.magnification,
+      this._minMagnification,
+      this._maxMagnification
+    );
+
+    if (this.magnification !== oldMagnification) {
+      this._magnificationChangedCallback?.(this.magnification);
+      this.requestUpdate();
+      this._dispatchEvent("viewBoxChanged", "magnification");
+    }
+  }
+
+  set minMagnification(newValue) {
+    // If there's no change then we don't have to do anything.
+    if (newValue == this._minMagnification) {
+      return;
+    }
+
+    this._minMagnification = newValue;
+
+    this._clampMagnification();
+  }
+
+  set maxMagnification(newValue) {
+    // If there's no change then we don't have to do anything.
+    if (newValue == this._maxMagnification) {
+      return;
+    }
+
+    this._maxMagnification = newValue;
+
+    this._clampMagnification();
+  }
+
+  get minMagnification() {
+    return this._minMagnification;
+  }
+
+  get maxMagnification() {
+    return this._maxMagnification;
+  }
+
   _doPinchMagnify(event, zoomFactor) {
     assert(isNumber(zoomFactor));
     const center = this.localPoint({ x: event.pageX, y: event.pageY });
     const prevMagnification = this.magnification;
 
     this.magnification = this.magnification * zoomFactor;
-    this.magnification = Math.min(
-      Math.max(this.magnification, MIN_MAGNIFICATION),
-      MAX_MAGNIFICATION
+    this.magnification = clamp(
+      this.magnification,
+      this.minMagnification,
+      this.maxMagnification
     );
     zoomFactor = this.magnification / prevMagnification;
 
@@ -309,10 +358,10 @@ export class CanvasController {
 
   getProposedViewBoxClampAdjustment(viewBox) {
     const magnification = this._getProposedViewBoxMagnification(viewBox);
-    if (magnification < MIN_MAGNIFICATION) {
-      return magnification / MIN_MAGNIFICATION;
-    } else if (magnification > MAX_MAGNIFICATION) {
-      return magnification / MAX_MAGNIFICATION;
+    if (magnification < this.minMagnification) {
+      return magnification / this.minMagnification;
+    } else if (magnification > this.maxMagnification) {
+      return magnification / this.maxMagnification;
     }
     return 1;
   }
