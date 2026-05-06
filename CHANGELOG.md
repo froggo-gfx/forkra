@@ -2,6 +2,10 @@
 
 ## 2026-05-?? [version 2026.5.0]
 
+### New features
+
+- [fontra pak] Add a checkbox to the launcher window that (when checked) causes fonts to be opened in read-only mode. [fontra-pak Issue 247](https://github.com/fontra/fontra-pak/issues/247), [fontra-pak PR 248](https://github.com/fontra/fontra-pak/pull/248), [PR 2581](https://github.com/fontra/fontra/pull/2581)
+
 ### Improvements
 
 - [editor view] Make minimum zoom limit relative to em size (units-per-em). Contributed by Qwerasd. [Issue 2573](https://github.com/fontra/fontra/issues/2573), [PR 2574](https://github.com/fontra/fontra/pull/2574)
