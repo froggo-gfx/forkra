@@ -101,6 +101,18 @@ function getHelpMenu() {
           callback: () => {
             window.open("https://github.com/fontra", "fontra.github");
           },
+        {
+          title: "Blog",
+          enabled: () => true,
+          callback: () => {
+            window.open("https://blog.fontra.xyz", "fontra.blog");
+          },
+        {
+          title: "Discord",
+          enabled: () => true,
+          callback: () => {
+            window.open("https://discord.gg/SeZWugEYzd", "fontra.discord");
+          },
         },
       ];
     },
