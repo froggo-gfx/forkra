@@ -158,7 +158,7 @@ export default class DesignspaceNavigationPanel extends Panel {
             tooltip: translate(
               "sidebar.designspace-navigation.font-axes-view-options-button.tooltip"
             ),
-            onclick: (event) => this.showFontAxesViewOptionsMenu(event),
+            onclick: (event) => this.showFontAxesViewOptionsMenu(event, false),
           }),
           makeAccordionHeaderButton({
             icon: "tool",
@@ -191,14 +191,14 @@ export default class DesignspaceNavigationPanel extends Panel {
           []
         ),
         auxiliaryHeaderElement: groupAccordionHeaderButtons([
-          //   makeAccordionHeaderButton({
-          //     icon: "menu-2",
-          //     id: "font-axes-view-options-button",
-          //     tooltip: translate(
-          //       "sidebar.designspace-navigation.font-axes-view-options-button.tooltip"
-          //     ),
-          //     onclick: (event) => this.showFontAxesViewOptionsMenu(event),
-          //   }),
+          makeAccordionHeaderButton({
+            icon: "menu-2",
+            id: "hidden-font-axes-view-options-button",
+            tooltip: translate(
+              "sidebar.designspace-navigation.font-axes-view-options-button.tooltip"
+            ),
+            onclick: (event) => this.showFontAxesViewOptionsMenu(event, true),
+          }),
           makeAccordionHeaderButton({
             icon: "tool",
             tooltip: translate("sidebar.designspace-navigation.font-axes.edit"),
@@ -752,7 +752,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     }
   }
 
-  showFontAxesViewOptionsMenu(event) {
+  showFontAxesViewOptionsMenu(event, forHiddenAxes) {
     const menuItems = [
       {
         title: translate(
@@ -787,7 +787,11 @@ export default class DesignspaceNavigationPanel extends Panel {
       },
     ];
 
-    const button = this.accordion.querySelector("#font-axes-view-options-button");
+    const button = this.accordion.querySelector(
+      forHiddenAxes
+        ? "#hidden-font-axes-view-options-button"
+        : "#font-axes-view-options-button"
+    );
     const buttonRect = button.getBoundingClientRect();
     showMenu(menuItems, { x: buttonRect.left, y: buttonRect.bottom });
   }
