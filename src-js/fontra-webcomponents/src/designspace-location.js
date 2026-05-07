@@ -68,6 +68,7 @@ export class DesignspaceLocation extends UnlitElement {
   static properties = {
     axes: { type: Array },
     phantomAxes: { type: Array },
+    onlyShowPhantomAxes: { type: Boolean },
   };
 
   get model() {
@@ -183,6 +184,8 @@ export class DesignspaceLocation extends UnlitElement {
         }
       </div>`
     );
+
+    const sliderGroupContents = [];
     elements.push(
       html.div(
         {
@@ -192,9 +195,12 @@ export class DesignspaceLocation extends UnlitElement {
         [axis.name]
       )
     );
-    const slider = this._createSlider(axis, modelValue);
-    this._sliders[axis.name] = slider;
-    const sliderGroupContents = [slider];
+    if (!this.onlyShowPhantomAxes) {
+      const slider = this._createSlider(axis, modelValue);
+      this._sliders[axis.name] = slider;
+      sliderGroupContents.push(slider);
+    }
+
     if (phantomAxis) {
       const phantomSlider = this._createSlider(phantomAxis, phantomModelValue, true);
       this._phantomSliders[axis.name] = phantomSlider;
