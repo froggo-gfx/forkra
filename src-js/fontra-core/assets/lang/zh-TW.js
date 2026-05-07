@@ -283,12 +283,12 @@ export const strings = {
     "套用跨軸對應",
   "sidebar.designspace-navigation.font-axes-view-options-menu.apply-single-axis-mapping":
     "套用單軸對應",
-  "sidebar.designspace-navigation.font-axes-view-options-menu.only-show-effective-location":
-    "Only show effective location",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-effective-location":
     "顯示有效位置",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-hidden-axes":
     "顯示隱藏參數軸",
+  "sidebar.designspace-navigation.font-axes-view-options-menu.show-only-effective-location":
+    "Show only effective location",
   "sidebar.designspace-navigation.font-axes.edit": "編輯字型參數軸",
   "sidebar.designspace-navigation.font-axes.reset": "重設字型參數軸",
   "sidebar.designspace-navigation.glyph-axes": "字形參數軸",

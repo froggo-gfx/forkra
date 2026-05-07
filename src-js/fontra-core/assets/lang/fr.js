@@ -304,12 +304,12 @@ export const strings = {
     "Apply cross-axis mapping",
   "sidebar.designspace-navigation.font-axes-view-options-menu.apply-single-axis-mapping":
     "Apply single-axis mapping",
-  "sidebar.designspace-navigation.font-axes-view-options-menu.only-show-effective-location":
-    "Only show effective location",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-effective-location":
     "Show effective location",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-hidden-axes":
     "Monter les axes cachés",
+  "sidebar.designspace-navigation.font-axes-view-options-menu.show-only-effective-location":
+    "Show only effective location",
   "sidebar.designspace-navigation.font-axes.edit": "Éditer les axes de la fonte",
   "sidebar.designspace-navigation.font-axes.reset":
     "Réinitialiser les axes de la fonte",

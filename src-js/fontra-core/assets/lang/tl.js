@@ -307,12 +307,12 @@ export const strings = {
     "Ilapat ang cross-axis mapping",
   "sidebar.designspace-navigation.font-axes-view-options-menu.apply-single-axis-mapping":
     "Ilapat ang pagmamapa ng iisang aksis",
-  "sidebar.designspace-navigation.font-axes-view-options-menu.only-show-effective-location":
-    "Only show effective location",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-effective-location":
     "Ipakita ang epektibong lokasyon",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-hidden-axes":
     "Ipakita ang mga nakatagong axes",
+  "sidebar.designspace-navigation.font-axes-view-options-menu.show-only-effective-location":
+    "Show only effective location",
   "sidebar.designspace-navigation.font-axes.edit": "I-edit ang mga font axes",
   "sidebar.designspace-navigation.font-axes.reset": "I-reset ang mga font axes",
   "sidebar.designspace-navigation.glyph-axes": "Mga palakol ng Glyph",

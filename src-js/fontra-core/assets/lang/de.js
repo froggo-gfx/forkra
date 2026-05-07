@@ -301,12 +301,12 @@ export const strings = {
     "Achsübergreifendes Mapping anwenden",
   "sidebar.designspace-navigation.font-axes-view-options-menu.apply-single-axis-mapping":
     "Einachsiges Mapping anwenden",
-  "sidebar.designspace-navigation.font-axes-view-options-menu.only-show-effective-location":
-    "Only show effective location",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-effective-location":
     'effektive "location" anzeigen',
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-hidden-axes":
     "Versteckte Achsen anzeigen",
+  "sidebar.designspace-navigation.font-axes-view-options-menu.show-only-effective-location":
+    "Show only effective location",
   "sidebar.designspace-navigation.font-axes.edit": "Font-Achsen bearbeiten ",
   "sidebar.designspace-navigation.font-axes.reset": "Font-Achsen zurücksetzen",
   "sidebar.designspace-navigation.glyph-axes": "Glyph-Achsen",
