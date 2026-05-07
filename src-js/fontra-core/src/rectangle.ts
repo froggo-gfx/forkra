@@ -49,17 +49,19 @@ export function normalizeRect(rect: Rect): Rect {
   };
 }
 
+/**
+ * Test for rectangle-rectangle intersection.
+ *
+ * @param rect1 First bounding rectangle
+ * @param rect2 Second bounding rectangle
+ *
+ * @returns
+ * A rectangle or undefined.
+ *
+ * If the input rectangles intersect, returns the intersecting rectangle.
+ * Returns ``undefined`` if the input rectangles do not intersect.
+ */
 export function sectRect(rect1: Rect, rect2: Rect): Rect | undefined {
-  // Test for rectangle-rectangle intersection.
-
-  // Args:
-  //     rect1: First bounding rectangle
-  //     rect2: Second bounding rectangle
-
-  // Returns:
-  //     A rectangle or undefined.
-  //     If the input rectangles intersect, returns the intersecting rectangle.
-  //     Returns ``undefined`` if the input rectangles do not intersect.
   const xMin = Math.max(rect1.xMin, rect2.xMin);
   const yMin = Math.max(rect1.yMin, rect2.yMin);
   const xMax = Math.min(rect1.xMax, rect2.xMax);
@@ -187,8 +189,10 @@ export function rectToPoints(rect: Rect): [Point, Point, Point, Point] {
   ];
 }
 
+/**
+ * Return the smallest rect that includes the original rect and the given point.
+ */
 export function updateRect(rect: Rect, point: Point): Rect {
-  // Return the smallest rect that includes the original rect and the given point
   return {
     xMin: Math.min(rect.xMin, point.x),
     yMin: Math.min(rect.yMin, point.y),
