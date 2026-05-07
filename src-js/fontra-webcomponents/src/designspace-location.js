@@ -36,6 +36,11 @@ export class DesignspaceLocation extends UnlitElement {
       gap: 0.1em;
     }
 
+    .slider-group > .slider-disabled:only-child {
+      height: 1.5em;
+      transform: translate(0, 0.275em);
+    }
+
     .info-box {
       display: none;
       grid-column: 1 / -1;
@@ -220,6 +225,7 @@ export class DesignspaceLocation extends UnlitElement {
         }
       },
       disabled: sliderDisabled,
+      class: sliderDisabled ? "slider-disabled" : "",
     };
     if (axis.values) {
       // Discrete axis
