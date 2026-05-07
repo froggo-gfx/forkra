@@ -39,7 +39,7 @@ import {
   stringCompare,
   throttleCalls,
   withTimeout,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { expect } from "chai";
 
 import { getTestData, parametrize } from "./test-support.js";

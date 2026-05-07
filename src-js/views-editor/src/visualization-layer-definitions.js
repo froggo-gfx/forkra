@@ -13,7 +13,7 @@ import {
   round,
   unionIndexSets,
   withSavedState,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { subVectors } from "@fontra/core/vector.js";
 
 export const visualizationLayerDefinitions = [];

@@ -6,7 +6,7 @@ import {
   sectRect,
   unionRect,
 } from "./rectangle.ts";
-import { enumerate, pointCompareFunc, range, reversedEnumerate } from "./utils.js";
+import { enumerate, pointCompareFunc, range, reversedEnumerate } from "./utils.ts";
 import * as vector from "./vector.js";
 
 export class PathHitTester {

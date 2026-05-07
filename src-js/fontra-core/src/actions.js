@@ -6,7 +6,7 @@ import {
   commandKeyProperty,
   isActiveElementTypeable,
   isMac,
-} from "./utils.js";
+} from "./utils.ts";
 
 // Action Info
 // const {

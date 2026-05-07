@@ -4,7 +4,7 @@ import { SimpleElement } from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import { ObservableController } from "@fontra/core/observable-object.js";
 import { labeledTextInput } from "@fontra/core/ui-utils.js";
-import { zip } from "@fontra/core/utils.js";
+import { zip } from "@fontra/core/utils.ts";
 import { dialogSetup } from "@fontra/web-components/modal-dialog.js";
 import { UIList } from "@fontra/web-components/ui-list.js";
 

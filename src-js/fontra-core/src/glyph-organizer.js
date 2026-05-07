@@ -5,7 +5,7 @@ import {
   getBaseGlyphName,
   getCodePointFromGlyphItem,
   getGlyphNameExtension,
-} from "./utils.js";
+} from "./utils.ts";
 
 function getGlyphInfo(codePoint, glyphName) {
   return (

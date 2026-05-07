@@ -20,7 +20,7 @@ import {
   range,
   reversed,
   zip,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";

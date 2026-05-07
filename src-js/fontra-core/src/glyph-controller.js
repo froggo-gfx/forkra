@@ -39,7 +39,7 @@ import {
   range,
   reversed,
   zip,
-} from "./utils.js";
+} from "./utils.ts";
 import { addItemwise } from "./var-funcs.js";
 import { StaticGlyph, copyComponent } from "./var-glyph.js";
 import {

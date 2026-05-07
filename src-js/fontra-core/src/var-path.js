@@ -10,7 +10,7 @@ import {
   objectsEqualSerialized,
   range,
   reversed,
-} from "./utils.js";
+} from "./utils.ts";
 import VarArray from "./var-array.js";
 
 export const POINT_TYPE_OFF_CURVE_QUAD = "quad";

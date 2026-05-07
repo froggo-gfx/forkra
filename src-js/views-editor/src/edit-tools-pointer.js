@@ -27,7 +27,7 @@ import {
   enumerate,
   parseSelection,
   range,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";

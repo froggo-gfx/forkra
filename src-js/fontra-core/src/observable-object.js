@@ -1,4 +1,4 @@
-import { assert, chain } from "./utils.js";
+import { assert, chain } from "./utils.ts";
 
 export const controllerKey = Symbol("controller-key");
 

@@ -17,7 +17,7 @@ import {
   round,
   splitGlyphNameExtension,
   throttleCalls,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialog } from "@fontra/web-components/modal-dialog.js";
 import { Form } from "@fontra/web-components/ui-form.js";

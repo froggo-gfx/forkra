@@ -31,7 +31,7 @@ import {
   stringCompare,
   throttleCalls,
   updateObject,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { GlyphSource, Layer, StaticGlyph } from "@fontra/core/var-glyph.js";
 import {
   isLocationAtDefault,

@@ -1,4 +1,4 @@
-import { isNumber } from "./utils.js";
+import { isNumber } from "./utils.ts";
 
 export type Point = {
   x: number;

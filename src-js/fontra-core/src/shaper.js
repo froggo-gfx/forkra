@@ -1,5 +1,5 @@
 import * as hb from "harfbuzzjs";
-import { assert, enumerate, mapObjectValues, range, reversed } from "./utils.js";
+import { assert, enumerate, mapObjectValues, range, reversed } from "./utils.ts";
 
 export function getShaper(shaperSupport) {
   const shaperClass = shaperSupport.fontData ? HBShaper : DumbShaper;

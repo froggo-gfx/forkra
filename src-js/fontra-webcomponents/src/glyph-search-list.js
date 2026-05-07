@@ -8,7 +8,7 @@ import {
   guessCharFromGlyphName,
   makeUPlusStringFromCodePoint,
   throttleCalls,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { GlyphSearchField } from "./glyph-search-field.js";
 import { UIList } from "./ui-list.js";
 

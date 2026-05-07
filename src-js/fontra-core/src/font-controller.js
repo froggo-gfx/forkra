@@ -30,7 +30,7 @@ import {
   sleepAsync,
   throttleCalls,
   uniqueID,
-} from "./utils.js";
+} from "./utils.ts";
 import { StaticGlyph, VariableGlyph } from "./var-glyph.js";
 import {
   locationToName,

@@ -3,7 +3,7 @@ import {
   enumerate,
   getCharFromCodePoint,
   splitGlyphNameExtension,
-} from "./utils.js";
+} from "./utils.ts";
 
 let glyphDataCSV;
 

@@ -55,7 +55,7 @@ import {
   unionIndexSets,
   writeObjectToURLFragment,
   writeToClipboard,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { addItemwise, mulScalar, subItemwise } from "@fontra/core/var-funcs.js";
 import { StaticGlyph, VariableGlyph, copyComponent } from "@fontra/core/var-glyph.js";
 import { locationToString, makeSparseLocation } from "@fontra/core/var-model.js";

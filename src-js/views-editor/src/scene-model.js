@@ -32,7 +32,7 @@ import {
   range,
   reversed,
   valueInRange,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { normalizeLocation, unnormalizeLocation } from "@fontra/core/var-model.js";
 import * as vector from "@fontra/core/vector.js";
 
