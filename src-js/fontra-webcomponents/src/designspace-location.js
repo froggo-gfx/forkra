@@ -20,10 +20,10 @@ export class DesignspaceLocation extends UnlitElement {
 
     .slider-label {
       text-align: right;
-      overflow: hidden; /* this needs to be set so that width respects fit-content */
       text-overflow: ellipsis;
       vertical-align: middle;
       margin-top: 1px;
+      margin-bottom: -0.3em;
     }
 
     .slider-label:hover {
@@ -37,8 +37,7 @@ export class DesignspaceLocation extends UnlitElement {
     }
 
     .slider-group > .slider-disabled:only-child {
-      height: 1.5em;
-      transform: translate(0, 0.275em);
+      transform: translate(0, 0.25em);
     }
 
     .info-box {
