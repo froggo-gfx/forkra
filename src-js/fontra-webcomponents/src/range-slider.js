@@ -8,6 +8,8 @@ const colors = {
   "track-color": ["#ccc", "#222"],
   "disabled-color": ["#ddd", "#2e2e2e"],
   "disabled-text-color": ["#999", "#aaa"],
+  "disabled-thumb-color": ["#888", "#bbb"],
+  "disabled-thumb-color-at-default": ["#ccc", "#777"],
 };
 
 export class RangeSlider extends html.UnlitElement {
@@ -79,13 +81,13 @@ export class RangeSlider extends html.UnlitElement {
 
     .slider:disabled::-webkit-slider-thumb {
       height: calc(var(--thumb-height) * var(--disabled-factor));
-      background: var(--disabled-color);
+      background: var(--disabled-thumb-color);
       cursor: unset;
       margin-top: calc(-4.5px * var(--disabled-factor));
     }
 
     .slider.is-at-default:disabled::-webkit-slider-thumb {
-      background: var(--disabled-color);
+      background: var(--disabled-thumb-color-at-default);
     }
 
     .slider.is-at-default::-webkit-slider-thumb {
@@ -114,7 +116,7 @@ export class RangeSlider extends html.UnlitElement {
 
     .slider:disabled::-moz-range-thumb {
       height: calc(var(--thumb-height) * var(--disabled-factor));
-      background: var(--disabled-color);
+      background: var(--disabled-thumb-color);
       cursor: unset;
     }
 
@@ -123,7 +125,7 @@ export class RangeSlider extends html.UnlitElement {
     }
 
     .slider.is-at-default:disabled::-moz-range-thumb {
-      background: var(--disabled-color);
+      background: var(--disabled-thumb-color-at-default);
     }
 
     .slider::-moz-range-track {
