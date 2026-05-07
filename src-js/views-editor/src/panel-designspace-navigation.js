@@ -809,7 +809,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     if (forHiddenAxes) {
       menuItems.push({
         title: translate(
-          "sidebar.designspace-navigation.font-axes-view-options-menu.only-show-effective-location"
+          "sidebar.designspace-navigation.font-axes-view-options-menu.show-only-effective-location"
         ),
         callback: () => {
           this.sceneSettings[effectiveLocationKey] =
