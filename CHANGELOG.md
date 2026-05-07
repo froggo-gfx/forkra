@@ -1,5 +1,11 @@
 # Changelog for Fontra
 
+## 2026-05-?? [version 2026.5.1]
+
+### New features
+
+- [Axes panel] Add "Hidden" checkbox to Axis box and New Axis dialog, so we can finally edit the "hidden" axis flag. [Issue 1373](https://github.com/fontra/fontra/issues/1373), [PR 2582](https://github.com/fontra/fontra/pull/2582)
+
 ## 2026-05-06 [version 2026.5.0]
 
 ### New features
