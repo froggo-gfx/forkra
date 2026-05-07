@@ -33,6 +33,7 @@ describe("shaper tests", () => {
       {
         codepoint: 0,
         cluster: 0,
+        flags: 0,
         xAdvance: 500,
         yAdvance: 0,
         xOffset: 0,
@@ -43,6 +44,7 @@ describe("shaper tests", () => {
       {
         codepoint: 24,
         cluster: 1,
+        flags: 0,
         xAdvance: !applyShaping ? 401 : useGlyphObjects ? 301 : 300,
         yAdvance: 0,
         xOffset: 0,
@@ -53,6 +55,7 @@ describe("shaper tests", () => {
       {
         codepoint: 1,
         cluster: 2,
+        flags: applyShaping ? 1 : 0,
         xAdvance: 396,
         yAdvance: 0,
         xOffset: 0,
@@ -63,6 +66,7 @@ describe("shaper tests", () => {
       {
         codepoint: 4,
         cluster: 3,
+        flags: 0,
         xAdvance: 443,
         yAdvance: 0,
         xOffset: 0,
@@ -73,6 +77,7 @@ describe("shaper tests", () => {
       {
         codepoint: 5,
         cluster: 4,
+        flags: 0,
         xAdvance: 499,
         yAdvance: 0,
         xOffset: 0,
@@ -83,6 +88,7 @@ describe("shaper tests", () => {
       {
         codepoint: 3,
         cluster: 5,
+        flags: 0,
         xAdvance: 396,
         yAdvance: 0,
         xOffset: 0,
@@ -93,6 +99,7 @@ describe("shaper tests", () => {
       {
         codepoint: 21,
         cluster: 6,
+        flags: 0,
         xAdvance: 393,
         yAdvance: 0,
         xOffset: 0,
@@ -197,7 +204,10 @@ describe("shaper tests", () => {
     });
     const { glyphs } = shaper.shape(testInputCodePoints, glyphObjects, {
       variations: { wght: 0, wdth: 0 },
-      features: "kern,-rvrn",
+      features: [
+        ["kern", true],
+        ["rvrn", false],
+      ],
     });
 
     expect(glyphs).to.deep.equal(getExpectedGlyphs(true));
@@ -208,7 +218,10 @@ describe("shaper tests", () => {
     const shaper = getShaper({ fontData });
     const { glyphs } = shaper.shape(testInputCodePoints, null, {
       variations: { wght: 0, wdth: 0 },
-      features: "kern,-rvrn",
+      features: [
+        ["kern", true],
+        ["rvrn", false],
+      ],
     });
 
     expect(glyphs).to.deep.equal(getExpectedGlyphs(false));
@@ -1188,6 +1201,7 @@ feature liga {
         {
           codepoint: 2,
           cluster: 0,
+          flags: 0,
           xAdvance: 800,
           yAdvance: 0,
           xOffset: 0,
@@ -1198,6 +1212,7 @@ feature liga {
         {
           codepoint: 5,
           cluster: 0,
+          flags: 0,
           xAdvance: 0,
           yAdvance: 0,
           xOffset: -720,
@@ -1208,6 +1223,7 @@ feature liga {
         {
           codepoint: 3,
           cluster: 0,
+          flags: 0,
           xAdvance: 0,
           yAdvance: 0,
           xOffset: -650,
@@ -1218,6 +1234,7 @@ feature liga {
         {
           codepoint: 3,
           cluster: 4,
+          flags: 1,
           xAdvance: 0,
           yAdvance: 0,
           xOffset: -350,
@@ -1228,6 +1245,7 @@ feature liga {
         {
           codepoint: 5,
           cluster: 5,
+          flags: 1,
           xAdvance: 0,
           yAdvance: 0,
           xOffset: -420,
@@ -1289,6 +1307,7 @@ table GDEF {
       {
         cluster: 0,
         codepoint: 1,
+        flags: 0,
         glyphname: "H",
         mark: false,
         xAdvance: 500,
@@ -1299,6 +1318,7 @@ table GDEF {
       {
         cluster: 1,
         codepoint: 5,
+        flags: 1,
         glyphname: "macroncomb",
         mark: false,
         xAdvance: 500,
@@ -1547,7 +1567,7 @@ describe("shaper tests compare emulation with native", () => {
       },
       {
         input: "H̄",
-        features: "ss03",
+        features: [["ss03", true]],
         expectedGlyphs: [
           {
             cluster: 0,
@@ -1780,9 +1800,9 @@ describe("shaper tests compare emulation with native", () => {
         direction,
       });
 
-      // console.log(JSON.stringify(stripGlyphIDs(nativeGlyphs)));
-
-      expect(stripGlyphIDs(nativeGlyphs)).to.deep.equal(testCase.expectedGlyphs);
+      expect(stripGlyphIDsAndFlags(nativeGlyphs)).to.deep.equal(
+        testCase.expectedGlyphs
+      );
 
       const { glyphs: emulatedGlyphs } = await emulatedShapeFunc(testInputCodePoints, {
         variations: testCase.variations,
@@ -1790,7 +1810,9 @@ describe("shaper tests compare emulation with native", () => {
         direction,
       });
 
-      expect(stripGlyphIDs(emulatedGlyphs)).to.deep.equal(testCase.expectedGlyphs);
+      expect(stripGlyphIDsAndFlags(emulatedGlyphs)).to.deep.equal(
+        testCase.expectedGlyphs
+      );
     });
   }
 });
@@ -1907,10 +1929,11 @@ describe("test conditional substitutions with mapping", () => {
   });
 });
 
-function stripGlyphIDs(glyphs) {
+function stripGlyphIDsAndFlags(glyphs) {
   return glyphs.map((glyph) => {
     glyph = { ...glyph };
     delete glyph.codepoint;
+    delete glyph.flags;
     return glyph;
   });
 }
