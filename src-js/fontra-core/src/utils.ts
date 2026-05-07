@@ -3,8 +3,10 @@ import type { Point } from "./rectangle.ts";
 import { Transform } from "./transform.js";
 import { addItemwise } from "./var-funcs.js";
 
+/**
+ * Shallow object compare. Arguments may be null or undefined
+ */
 export function objectsEqual(obj1: any, obj2: any) {
-  // Shallow object compare. Arguments may be null or undefined
   if (!obj1 || !obj2) {
     return obj1 === obj2;
   }
@@ -29,15 +31,19 @@ export function withSavedState(context: CanvasRenderingContext2D, func: () => vo
   }
 }
 
+/**
+ * Return a function that will request `func` to be called in the next
+ * iteration of the event loop. If it gets called again before `func` was
+ * actually called, ignore the call.
+ *
+ * This ensures that multiple calls within the same event loop cycle get
+ * consolidated into a single call.
+ *
+ * Useful for things like "request update".
+ */
 export function consolidateCalls<Fn extends (...args: any[]) => void>(
   func: Fn
 ): (...args: Parameters<Fn>) => void {
-  // Return a function that will request `func` to be called in the next
-  // iteration of the event loop. If it gets called again before `func` was
-  // actually called, ignore the call.
-  // This ensures that multiple calls within the same event loop cycle get
-  // consolidated into a single call.
-  // Useful for things like "request update".
   let didSchedule = false;
 
   return (...args) => {
@@ -54,15 +60,19 @@ export function consolidateCalls<Fn extends (...args: any[]) => void>(
 
 export type TimeoutID = ReturnType<typeof setTimeout>;
 
+/**
+ * Schedule calls to func with a timer. If a previously scheduled call
+ * has not yet run, cancel it and let the new one override it.
+ *
+ * Returns a wrapped function that should be called instead of func.
+ *
+ * This is useful for calls triggered by events that can supersede
+ * previous calls; it avoids scheduling many redundant tasks.
+ */
 export function scheduleCalls<Fn extends (...args: any[]) => void>(
   func: Fn,
   timeout = 0
 ): (...args: Parameters<Fn>) => TimeoutID {
-  // Schedule calls to func with a timer. If a previously scheduled call
-  // has not yet run, cancel it and let the new one override it.
-  // Returns a wrapped function that should be called instead of func.
-  // This is useful for calls triggered by events that can supersede
-  // previous calls; it avoids scheduling many redundant tasks.
   let timeoutID: TimeoutID | null = null;
   return (...args) => {
     if (timeoutID !== null) {
@@ -76,13 +86,15 @@ export function scheduleCalls<Fn extends (...args: any[]) => void>(
   };
 }
 
+/**
+ * Return a wrapped function. If the function gets called before
+ * minTime (in ms) has elapsed since the last call, don't call
+ * the function.
+ */
 export function throttleCalls<Fn extends (...args: any[]) => void>(
   func: Fn,
   minTime = 0
 ): (...args: Parameters<Fn>) => TimeoutID | null {
-  // Return a wrapped function. If the function gets called before
-  // minTime (in ms) has elapsed since the last call, don't call
-  // the function.
   let lastTime = 0;
   let timeoutID: TimeoutID | null = null;
   return (...args) => {
@@ -156,19 +168,26 @@ export const arrowKeyDeltas = {
   ArrowRight: [1, 0],
 };
 
+/**
+ * Modulo with Python behavior for negative values of `v`
+ *
+ * Assumes `n` to be positive
+ */
 export function modulo(v: number, n: number) {
-  // Modulo with Python behavior for negative values of `v`
-  // Assumes `n` to be positive
   return v >= 0 ? v % n : ((v % n) + n) % n;
 }
 
+/**
+ * Return 1 if `v` is true-y, 0 if `v` is false-y
+ */
 export function boolInt(v: boolean) {
-  // Return 1 if `v` is true-y, 0 if `v` is false-y
   return v ? 1 : 0;
 }
 
+/**
+ * Like Python's reversed(seq) builtin
+ */
 export function* reversed<T>(seq: T[]) {
-  // Like Python's reversed(seq) builtin
   for (let i = seq.length - 1; i >= 0; i--) {
     yield seq[i];
   }
@@ -204,8 +223,10 @@ export function* range(start: number, stop?: number, step = 1) {
   }
 }
 
+/**
+ * After Python's itertools.chain()
+ */
 export function* chain<T>(...iterables: Iterable<T>[]) {
-  // After Python's itertools.chain()
   for (const iterable of iterables) {
     for (const item of iterable) {
       yield item;
@@ -213,9 +234,12 @@ export function* chain<T>(...iterables: Iterable<T>[]) {
   }
 }
 
+/**
+ * Cartesian product of input iterables. Equivalent to nested for-loops.
+ *
+ * After Python's itertools.product()
+ */
 export function* product<T>(...args: Iterable<T>[]): Generator<T[], void, unknown> {
-  // Cartesian product of input iterables.  Equivalent to nested for-loops.
-  // After Python's itertools.product()
   if (!args.length) {
     yield [];
     return;
@@ -236,8 +260,10 @@ export function* product<T>(...args: Iterable<T>[]): Generator<T[], void, unknow
   }
 }
 
+/**
+ * Return -1 when a < b, 1 when a > b, and 0 when a == b
+ */
 export function compare(a: number, b: number): -1 | 0 | 1 {
-  // Return -1 when a < b, 1 when a > b, and 0 when a == b
   return (+(a > b) - +(a < b)) as -1 | 0 | 1;
 }
 
@@ -307,10 +333,13 @@ export function getCharFromCodePoint(codePoint: number | undefined) {
   return codePoint !== undefined ? String.fromCodePoint(codePoint) : "";
 }
 
+/**
+ * Search for a 4-5 char hex string in the glyph name.
+ *
+ * Interpret the hex string as a unicode code point and convert to a
+ * character. Else, return an empty string.
+ */
 export function guessCharFromGlyphName(glyphName: string) {
-  // Search for a 4-5 char hex string in the glyph name.
-  // Interpret the hex string as a unicode code point and convert to a
-  // character. Else, return an empty string.
   const match = glyphName.match(/(^|[^0-9A-F])([0-9A-F]{4,5})($|[^0-9A-F])/);
   return match ? String.fromCodePoint(parseInt(match[2], 16)) : "";
 }
@@ -341,9 +370,11 @@ export function isActiveElementTypeable() {
   return false;
 }
 
+/**
+ * If the element element is part of a Web Component's Shadow DOM, take
+ * *its* active element, recursively.
+ */
 export function findNestedActiveElement(element?: Element | null): Element | null {
-  // If the element element is part of a Web Component's Shadow DOM, take
-  // *its* active element, recursively.
   if (!element) {
     element = document.activeElement;
   }
@@ -442,15 +473,19 @@ export function unionIndexSets(...indexSets: number[][]) {
   return [...new Set(indexSets.flat())].sort((a, b) => a - b);
 }
 
+/**
+ * Return a promise that resolves when `thenable` resolves before
+ * `timeout` ms have passed, or else gets rejected with an error.
+ * Example:
+ * ```ts
+ * try {
+ *   await withTimeout(somePromise, 1000);
+ * catch (error) {
+ *   // the promise timed out
+ * }
+ * ```
+ */
 export function withTimeout(thenable: Promise<any>, timeout: number) {
-  // Return a promise that resolves when `thenable` resolves before
-  // `timeout` ms have passed, or else gets rejected with an error.
-  // Example:
-  // try {
-  //   await withTimeout(somePromise, 1000);
-  // catch (error) {
-  //   // the promise timed out
-  // }
   return new Promise<void>((resolve, reject) => {
     const timerID = setTimeout(() => reject(new Error("timeout")), timeout);
     thenable.then(() => {
@@ -526,8 +561,10 @@ export function getGlyphNameExtension(glyphName: string) {
   return i >= 1 ? glyphName.slice(i) : "";
 }
 
+/**
+ * Return true if `obj` has no properties
+ */
 export function isObjectEmpty(obj: any) {
-  // Return true if `obj` has no properties
   for (const _ in obj) {
     return false;
   }
@@ -836,22 +873,18 @@ export function getCodePointFromGlyphItem(glyphItem: any) {
   return glyphItem.codePoints[0] || glyphItem.associatedCodePoints[0];
 }
 
-export function bisect_right<T>(a: T[], x: T) {
-  // Return the index where to insert item x in list a, assuming a is sorted.
-  //
-  // The return value i is such that all e in a[:i] have e <= x, and all e in
-  // a[i:] have e > x.  So if x already appears in the list, a.insert(i, x) will
-  // insert just after the rightmost x already there.
-  //
-  // Optional args lo (default 0) and hi (default len(a)) bound the
-  // slice of a to be searched.
-  //
-  // A custom key function can be supplied to customize the sort order.
-
+/**
+ * Return the index where to insert item x in list a, assuming a is sorted.
+ *
+ * The return value i is such that all e in a[:i] have e <= x, and all e in
+ * a[i:] have e > x.  So if x already appears in the list, a.insert(i, x) will
+ * insert just after the rightmost x already there.
+ *
+ * Optional args lo (default 0) and hi (default len(a)) bound the
+ * slice of a to be searched.
+ */
+export function bisect_right<T>(a: T[], x: T, lo = 0, hi = a.length) {
   // This is adapted from the Python implementation
-
-  let lo = 0;
-  let hi = a.length;
 
   while (lo < hi) {
     const mid = Math.floor((lo + hi) / 2);
