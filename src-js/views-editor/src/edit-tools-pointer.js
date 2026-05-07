@@ -12,7 +12,7 @@ import {
   offsetRect,
   pointInRect,
   rectSize,
-} from "@fontra/core/rectangle.js";
+} from "@fontra/core/rectangle.ts";
 import {
   difference,
   isSuperset,

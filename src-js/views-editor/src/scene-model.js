@@ -18,7 +18,7 @@ import {
   rectToPoints,
   sectRect,
   unionRect,
-} from "@fontra/core/rectangle.js";
+} from "@fontra/core/rectangle.ts";
 import { difference, isEqualSet, union, updateSet } from "@fontra/core/set-ops.js";
 import { MAX_UNICODE } from "@fontra/core/shaper.js";
 import { decomposedToTransform } from "@fontra/core/transform.js";

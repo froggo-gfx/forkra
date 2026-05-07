@@ -28,7 +28,7 @@ import {
   rectScaleAroundCenter,
   rectSize,
   rectToArray,
-} from "@fontra/core/rectangle.js";
+} from "@fontra/core/rectangle.ts";
 import { SceneView } from "@fontra/core/scene-view.js";
 import { isSuperset } from "@fontra/core/set-ops.js";
 import { themeController } from "@fontra/core/theme-settings.js";

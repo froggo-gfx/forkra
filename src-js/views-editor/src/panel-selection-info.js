@@ -2,7 +2,7 @@ import { applicationSettingsController } from "@fontra/core/application-settings
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import { rectFromPoints, rectSize, unionRect } from "@fontra/core/rectangle.js";
+import { rectFromPoints, rectSize, unionRect } from "@fontra/core/rectangle.ts";
 import { compute, nameCapture } from "@fontra/core/simple-compute.js";
 import { getDecomposedIdentity } from "@fontra/core/transform.js";
 import {

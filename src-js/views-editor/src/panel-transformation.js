@@ -11,7 +11,7 @@ import {
   filterPathByPointIndices,
   getSelectionByContour,
 } from "@fontra/core/path-functions.js";
-import { rectCenter, rectSize } from "@fontra/core/rectangle.js";
+import { rectCenter, rectSize } from "@fontra/core/rectangle.ts";
 import { Transform } from "@fontra/core/transform.js";
 import {
   enumerate,

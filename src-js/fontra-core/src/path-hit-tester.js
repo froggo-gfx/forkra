@@ -5,7 +5,7 @@ import {
   rectSize,
   sectRect,
   unionRect,
-} from "./rectangle.js";
+} from "./rectangle.ts";
 import { enumerate, pointCompareFunc, range, reversedEnumerate } from "./utils.js";
 import * as vector from "./vector.js";
 

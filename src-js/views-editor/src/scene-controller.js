@@ -34,7 +34,7 @@ import {
   rectFromArray,
   rectRound,
   rectToArray,
-} from "@fontra/core/rectangle.js";
+} from "@fontra/core/rectangle.ts";
 import {
   difference,
   isSuperset,

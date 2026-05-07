@@ -16,7 +16,7 @@ import {
   rectToPoints,
   sectRect,
   unionRect,
-} from "./rectangle.js";
+} from "./rectangle.ts";
 import {
   getRepresentation,
   registerRepresentationFactory,
