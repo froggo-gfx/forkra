@@ -381,6 +381,7 @@ export default class DesignspaceNavigationPanel extends Panel {
       [
         "fontAxesUseSourceCoordinates",
         "fontAxesShowEffectiveLocation",
+        "hiddenFontAxesShowEffectiveLocation",
         "fontAxesShowHidden",
         "fontAxesSkipMapping",
       ],
@@ -757,6 +758,9 @@ export default class DesignspaceNavigationPanel extends Panel {
   }
 
   showFontAxesViewOptionsMenu(event, forHiddenAxes) {
+    const effectiveLocationKey = forHiddenAxes
+      ? "hiddenFontAxesShowEffectiveLocation"
+      : "fontAxesShowEffectiveLocation";
     const menuItems = [
       {
         title: translate(
@@ -784,12 +788,25 @@ export default class DesignspaceNavigationPanel extends Panel {
           "sidebar.designspace-navigation.font-axes-view-options-menu.show-effective-location"
         ),
         callback: () => {
-          this.sceneSettings.fontAxesShowEffectiveLocation =
-            !this.sceneSettings.fontAxesShowEffectiveLocation;
+          this.sceneSettings[effectiveLocationKey] =
+            this.sceneSettings[effectiveLocationKey] == 1 ? 0 : 1;
         },
-        checked: this.sceneSettings.fontAxesShowEffectiveLocation,
+        checked: this.sceneSettings[effectiveLocationKey] == 1,
       },
     ];
+
+    if (forHiddenAxes) {
+      menuItems.push({
+        title: translate(
+          "sidebar.designspace-navigation.font-axes-view-options-menu.only-show-effective-location"
+        ),
+        callback: () => {
+          this.sceneSettings[effectiveLocationKey] =
+            this.sceneSettings[effectiveLocationKey] == 2 ? 0 : 2;
+        },
+        checked: this.sceneSettings[effectiveLocationKey] == 2,
+      });
+    }
 
     const button = this.accordion.querySelector(
       forHiddenAxes
@@ -968,11 +985,13 @@ export default class DesignspaceNavigationPanel extends Panel {
       : [...this.hiddenFontAxes];
 
     this.hiddenFontAxesElement.axes = hiddenFontAxes;
-    if (this.sceneSettings.fontAxesShowEffectiveLocation) {
+    if (this.sceneSettings.hiddenFontAxesShowEffectiveLocation) {
       this.hiddenFontAxesElement.phantomAxes = hiddenFontAxesSourceSpace;
     } else {
       this.hiddenFontAxesElement.phantomAxes = [];
     }
+    this.hiddenFontAxesElement.onlyShowPhantomAxes =
+      this.sceneSettings.hiddenFontAxesShowEffectiveLocation == 2;
 
     this.hiddenFontAxesAccordionItem.hidden = !hiddenFontAxesSourceSpace.length;
 
