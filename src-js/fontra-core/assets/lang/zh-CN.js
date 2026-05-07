@@ -282,6 +282,8 @@ export const strings = {
     "应用跨轴映射",
   "sidebar.designspace-navigation.font-axes-view-options-menu.apply-single-axis-mapping":
     "应用单轴映射",
+  "sidebar.designspace-navigation.font-axes-view-options-menu.only-show-effective-location":
+    "Only show effective location",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-effective-location":
     "显示有效位置",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-hidden-axes":

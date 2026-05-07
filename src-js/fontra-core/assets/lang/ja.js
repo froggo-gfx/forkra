@@ -298,6 +298,8 @@ export const strings = {
     "交差補完軸マッピングを適用",
   "sidebar.designspace-navigation.font-axes-view-options-menu.apply-single-axis-mapping":
     "単一補完軸マッピングを適用",
+  "sidebar.designspace-navigation.font-axes-view-options-menu.only-show-effective-location":
+    "Only show effective location",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-effective-location":
     "有効な補完軸の値を表示",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-hidden-axes":
