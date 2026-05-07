@@ -71,6 +71,12 @@ const LIST_HEADER_ANIMATION_STYLE = `
 }
 `;
 
+const ShowLocationSettings = {
+  DontShowEffectiveLocation: 0,
+  ShowEffectiveLocation: 1,
+  OnlyShowEffectiveLocation: 2,
+};
+
 export default class DesignspaceNavigationPanel extends Panel {
   identifier = "designspace-navigation";
   iconPath = "/images/sliders.svg";
@@ -789,9 +795,14 @@ export default class DesignspaceNavigationPanel extends Panel {
         ),
         callback: () => {
           this.sceneSettings[effectiveLocationKey] =
-            this.sceneSettings[effectiveLocationKey] == 1 ? 0 : 1;
+            this.sceneSettings[effectiveLocationKey] ==
+            ShowLocationSettings.ShowEffectiveLocation
+              ? ShowLocationSettings.DontShowEffectiveLocation
+              : ShowLocationSettings.ShowEffectiveLocation;
         },
-        checked: this.sceneSettings[effectiveLocationKey] == 1,
+        checked:
+          this.sceneSettings[effectiveLocationKey] ==
+          ShowLocationSettings.ShowEffectiveLocation,
       },
     ];
 
@@ -802,9 +813,14 @@ export default class DesignspaceNavigationPanel extends Panel {
         ),
         callback: () => {
           this.sceneSettings[effectiveLocationKey] =
-            this.sceneSettings[effectiveLocationKey] == 2 ? 0 : 2;
+            this.sceneSettings[effectiveLocationKey] ==
+            ShowLocationSettings.OnlyShowEffectiveLocation
+              ? ShowLocationSettings.DontShowEffectiveLocation
+              : ShowLocationSettings.OnlyShowEffectiveLocation;
         },
-        checked: this.sceneSettings[effectiveLocationKey] == 2,
+        checked:
+          this.sceneSettings[effectiveLocationKey] ==
+          ShowLocationSettings.OnlyShowEffectiveLocation,
       });
     }
 
