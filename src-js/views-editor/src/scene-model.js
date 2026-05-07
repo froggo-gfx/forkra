@@ -505,10 +505,9 @@ export class SceneModel {
         .map(([k, v]) => [k.slice(0, 4), v])
     );
 
-    const featuresString = featureEntries
-      .filter(([k, v]) => v != undefined && !k.endsWith("-emulated"))
-      .map(([k, v]) => (v ? (v > 1 ? `${k}=${v}` : k) : `-${k}`))
-      .join(",");
+    const nativeFeatures = featureEntries.filter(
+      ([k, v]) => v != undefined && !k.endsWith("-emulated")
+    );
 
     const shaperLocation = this.getShaperLocation(
       this.sceneSettings.fontLocationSourceMapped
@@ -525,7 +524,7 @@ export class SceneModel {
 
     const shaperOptions = {
       variations: shaperLocation,
-      features: featuresString,
+      features: nativeFeatures,
       direction: this.sceneSettings.textDirection,
       script: this.sceneSettings.textScript,
       language: this.sceneSettings.textLanguage,

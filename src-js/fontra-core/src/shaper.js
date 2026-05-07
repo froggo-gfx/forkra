@@ -175,7 +175,11 @@ class HBShaper extends ShaperBase {
 
     buffer.guessSegmentProperties(); // Guess script, language and direction if not provided.
 
-    this.font.setVariations(variations || {});
+    this.font.setVariations(
+      Object.entries(variations || {}).map(
+        ([axis, value]) => new hb.Variation(axis, value)
+      )
+    );
 
     this._messages = options.trace ? [] : null;
     this._glyphsAtBreakIndex = null;
@@ -197,7 +201,11 @@ class HBShaper extends ShaperBase {
       messageFunc(buffer, this.font, "start processing");
     }
 
-    hb.shape(this.font, buffer, features);
+    hb.shape(
+      this.font,
+      buffer,
+      (features ?? []).map(([tag, value]) => new hb.Feature(tag, value))
+    );
 
     const glyphs = this.getGlyphInfoFromBuffer(buffer);
 
@@ -547,6 +555,7 @@ class DumbShaper extends ShaperBase {
       glyphs.push({
         codepoint: glyphName ? this.glyphNameToID[glyphName] : 0,
         cluster: i,
+        flags: 0,
         glyphname: glyphName ?? ".notdef",
         mark: false,
         xAdvance: Math.round(
