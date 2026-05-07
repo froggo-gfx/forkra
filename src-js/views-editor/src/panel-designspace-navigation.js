@@ -785,16 +785,6 @@ export default class DesignspaceNavigationPanel extends Panel {
         },
         checked: this.sceneSettings.fontAxesShowEffectiveLocation,
       },
-      {
-        title: translate(
-          "sidebar.designspace-navigation.font-axes-view-options-menu.show-hidden-axes"
-        ),
-        callback: () => {
-          this.sceneSettings.fontAxesShowHidden =
-            !this.sceneSettings.fontAxesShowHidden;
-        },
-        checked: this.sceneSettings.fontAxesShowHidden,
-      },
     ];
 
     const button = this.accordion.querySelector("#font-axes-view-options-button");
