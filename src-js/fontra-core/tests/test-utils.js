@@ -299,8 +299,8 @@ describe("makeUPlusStringFromCodePoint", () => {
   it("throws an exception when an invalid parameter is given", () => {
     expect(() => makeUPlusStringFromCodePoint("not-a-number")).to.throw();
   });
-  it("should not throw an exception for a falsy value", () => {
-    expect(() => makeUPlusStringFromCodePoint("")).to.not.throw();
+  it("should not throw an exception for undefined", () => {
+    expect(() => makeUPlusStringFromCodePoint(undefined)).to.not.throw();
   });
   it("make a number unicode hex", () => {
     expect(makeUPlusStringFromCodePoint(97)).equals("U+0061"); // a
