@@ -640,8 +640,15 @@ export function writeObjectToURLFragment(obj: any, replace = false) {
   }
 }
 
-// TODO: proper typing for glyphs
-export function areGuidelinesCompatible(parents: any[]) {
+/**
+ * Checks whether the `guidelines` arrays of all `parents`
+ * are matching by comparing the `name` field of each item.
+ */
+export function areGuidelinesCompatible<
+  T extends {
+    guidelines: { name: string }[];
+  },
+>(parents: T[]) {
   const referenceGuidelines = parents[0].guidelines;
   if (!referenceGuidelines) {
     return false;
@@ -663,8 +670,11 @@ export function areGuidelinesCompatible(parents: any[]) {
   return true;
 }
 
-// TODO: proper typing for glyphs
-export function areCustomDatasCompatible(parents: any[]) {
+export function areCustomDatasCompatible<
+  T extends {
+    customData: any;
+  },
+>(parents: T[]) {
   const referenceCustomData = parents[0].customData;
   if (!referenceCustomData) {
     return false;
