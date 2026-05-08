@@ -23,7 +23,6 @@ export class DesignspaceLocation extends UnlitElement {
       text-overflow: ellipsis;
       vertical-align: middle;
       margin-top: 1px;
-      margin-bottom: -0.3em;
     }
 
     .slider-label:hover {
