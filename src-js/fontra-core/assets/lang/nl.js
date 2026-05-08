@@ -302,6 +302,8 @@ export const strings = {
     "Show effective location",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-hidden-axes":
     "Show hidden axes",
+  "sidebar.designspace-navigation.font-axes-view-options-menu.show-only-effective-location":
+    "Show only effective location",
   "sidebar.designspace-navigation.font-axes.edit": "Wijzig font assen",
   "sidebar.designspace-navigation.font-axes.reset": "Reset font assen",
   "sidebar.designspace-navigation.glyph-axes": "Glyph assen",

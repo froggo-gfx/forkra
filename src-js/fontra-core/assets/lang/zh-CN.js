@@ -286,6 +286,8 @@ export const strings = {
     "显示有效位置",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-hidden-axes":
     "显示隐藏参数轴",
+  "sidebar.designspace-navigation.font-axes-view-options-menu.show-only-effective-location":
+    "Show only effective location",
   "sidebar.designspace-navigation.font-axes.edit": "编辑字体参数轴",
   "sidebar.designspace-navigation.font-axes.reset": "重置字体参数轴",
   "sidebar.designspace-navigation.glyph-axes": "字形参数轴",

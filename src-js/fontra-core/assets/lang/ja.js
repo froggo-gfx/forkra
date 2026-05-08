@@ -302,6 +302,8 @@ export const strings = {
     "有効な補完軸の値を表示",
   "sidebar.designspace-navigation.font-axes-view-options-menu.show-hidden-axes":
     "非表示の補完軸を表示",
+  "sidebar.designspace-navigation.font-axes-view-options-menu.show-only-effective-location":
+    "Show only effective location",
   "sidebar.designspace-navigation.font-axes.edit": "フォントの補完軸を編集",
   "sidebar.designspace-navigation.font-axes.reset": "フォントの補完軸をリセット",
   "sidebar.designspace-navigation.glyph-axes": "グリフの補完軸",

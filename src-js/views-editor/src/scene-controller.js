@@ -1821,6 +1821,7 @@ const persistentSceneSettings = [
   // "glyphLocations", // handled separately
   { key: "fontAxesUseSourceCoordinates" },
   { key: "fontAxesShowEffectiveLocation" },
+  { key: "hiddenFontAxesShowEffectiveLocation" },
   { key: "fontAxesShowHidden" },
   { key: "fontAxesSkipMapping" },
   { key: "fontLocationUser", infoKey: "location" },
@@ -1848,6 +1849,7 @@ function getSceneSettingsDefaults() {
     fontLocationSourceMapped: {},
     fontAxesUseSourceCoordinates: false,
     fontAxesShowEffectiveLocation: false,
+    hiddenFontAxesShowEffectiveLocation: false,
     fontAxesShowHidden: false,
     fontAxesSkipMapping: false,
     glyphLocation: {},
