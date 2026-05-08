@@ -10,7 +10,7 @@ import { NumberFormatter, OptionalNumberFormatter } from "@fontra/core/formatter
 import * as html from "@fontra/core/html-utils.js";
 import { addStyleSheet } from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import { ObservableController } from "@fontra/core/observable-object.js";
+import { ObservableController } from "@fontra/core/observable-object.ts";
 import {
   labelForElement,
   labeledCheckbox,

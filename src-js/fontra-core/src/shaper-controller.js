@@ -1,7 +1,7 @@
 import { buildShaperFont } from "build-shaper-font";
 import { collectGlyphNames } from "./changes.js";
 import { getGlyphInfoFromCodePoint, getGlyphInfoFromGlyphName } from "./glyph-data.js";
-import { ObservableController } from "./observable-object.js";
+import { ObservableController } from "./observable-object.ts";
 import { getShaper } from "./shaper.js";
 import { consolidateCalls, filterObject, scheduleCalls } from "./utils.ts";
 import { piecewiseLinearMap } from "./var-model.js";

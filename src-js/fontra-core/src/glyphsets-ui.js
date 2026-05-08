@@ -3,7 +3,7 @@ import { showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialogSetup, message } from "@fontra/web-components/modal-dialog.js";
 import * as html from "./html-utils.js";
 import { translate } from "./localization.js";
-import { ObservableController } from "./observable-object.js";
+import { ObservableController } from "./observable-object.ts";
 import { glyphSetDataFormats } from "./parse-glyphset.js";
 import { union } from "./set-ops.js";
 import {

@@ -11,7 +11,7 @@ import {
   select,
   span,
 } from "@fontra/core/html-utils.js";
-import { ObservableController } from "@fontra/core/observable-object.js";
+import { ObservableController } from "@fontra/core/observable-object.ts";
 import { getOPFS } from "@fontra/core/opfs.js";
 import {
   fetchJSON,

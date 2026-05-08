@@ -21,7 +21,7 @@ import {
 import * as html from "@fontra/core/html-utils.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
 import { translate } from "@fontra/core/localization.js";
-import { ObservableController } from "@fontra/core/observable-object.js";
+import { ObservableController } from "@fontra/core/observable-object.ts";
 import { labeledTextInput } from "@fontra/core/ui-utils.js";
 import {
   assert,

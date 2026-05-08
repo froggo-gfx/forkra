@@ -1,5 +1,5 @@
 import { getGlyphMapProxy } from "./cmap.js";
-import { ObservableController } from "./observable-object.js";
+import { ObservableController } from "./observable-object.ts";
 import { parseGlyphSet, redirectGlyphSetURL } from "./parse-glyphset.js";
 import { assert, friendlyHttpStatus, sleepAsync } from "./utils.ts";
 

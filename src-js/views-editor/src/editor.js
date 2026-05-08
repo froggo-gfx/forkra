@@ -14,7 +14,7 @@ import { staticGlyphToGLIF } from "@fontra/core/glyph-glif.js";
 import { pathToSVG } from "@fontra/core/glyph-svg.js";
 import * as html from "@fontra/core/html-utils.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
-import { ObservableController } from "@fontra/core/observable-object.js";
+import { ObservableController } from "@fontra/core/observable-object.ts";
 import {
   deleteSelectedPoints,
   filterPathByPointIndices,
