@@ -6,9 +6,9 @@ const colors = {
   "thumb-color": ["#333", "#ddd"],
   "thumb-color-at-default": ["#ccc", "#777"],
   "track-color": ["#ccc", "#222"],
-  "disabled-thumb-color": ["#888", "#bbb"],
-  "disabled-thumb-color-at-default": ["#ccc", "#777"],
-  "disabled-track-color": ["#ddd", "#2e2e2e"],
+  "disabled-thumb-color": ["#b8b8b8", "#aaa"],
+  "disabled-thumb-color-at-default": ["#e5e5e5", "#666"],
+  "disabled-track-color": ["#e5e5e5", "#363636"],
   "disabled-text-color": ["#999", "#aaa"],
 };
 
