@@ -19,7 +19,7 @@ export class DesignspaceLocation extends UnlitElement {
     }
 
     .grid-wrapper.only-show-phantom-axes {
-      gap: 0;
+      row-gap: 0;
     }
 
     .slider-label {
