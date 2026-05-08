@@ -705,6 +705,8 @@ export function areCustomDatasCompatible<
   return true;
 }
 
+// TODO: This should be temporary, in the future we should generate types
+//       for Guideline and others based on the python class definitions.
 export type Guideline = {
   x: number;
   y: number;
