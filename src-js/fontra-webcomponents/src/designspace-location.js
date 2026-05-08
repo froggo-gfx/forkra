@@ -11,7 +11,7 @@ export class DesignspaceLocation extends UnlitElement {
   static styles = `
     ${themeColorCSS(colors)}
 
-    :host {
+    .grid-wrapper {
       display: grid;
       grid-template-columns: 25% auto;
       gap: 0.3em;
@@ -162,7 +162,7 @@ export class DesignspaceLocation extends UnlitElement {
       }
       this._setupAxis(elements, axis, phantomAxesByName[axis.name]);
     }
-    return elements;
+    return [html.div({ class: "grid-wrapper" }, elements)];
   }
 
   _setupAxis(elements, axis, phantomAxis) {
