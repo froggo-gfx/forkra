@@ -6,10 +6,10 @@ const colors = {
   "thumb-color": ["#333", "#ddd"],
   "thumb-color-at-default": ["#ccc", "#777"],
   "track-color": ["#ccc", "#222"],
-  "disabled-color": ["#ddd", "#2e2e2e"],
-  "disabled-text-color": ["#999", "#aaa"],
   "disabled-thumb-color": ["#888", "#bbb"],
   "disabled-thumb-color-at-default": ["#ccc", "#777"],
+  "disabled-track-color": ["#ddd", "#2e2e2e"],
+  "disabled-text-color": ["#999", "#aaa"],
 };
 
 export class RangeSlider extends html.UnlitElement {
@@ -100,7 +100,7 @@ export class RangeSlider extends html.UnlitElement {
 
     .slider:disabled::-webkit-slider-runnable-track {
       height: calc(var(--track-height) * var(--disabled-factor));
-      background: var(--disabled-color);
+      background: var(--disabled-track-color);
     }
 
     /* Firefox */
@@ -135,7 +135,7 @@ export class RangeSlider extends html.UnlitElement {
     .slider:disabled::-moz-range-track {
       border-radius: calc(5px * var(--disabled-factor));
       height: calc(var(--track-height) * var(--disabled-factor));
-      background: var(--disabled-color);
+      background: var(--disabled-track-color);
     }
 
     .range-container > input + div {
@@ -192,8 +192,9 @@ export class RangeSlider extends html.UnlitElement {
       width: 1px;
       background: var(--track-color);
     }
+
     .tickmark.disabled {
-      background: var(--disabled-color);
+      background: var(--disabled-track-color);
     }
   `;
 
