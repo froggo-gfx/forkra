@@ -18,6 +18,10 @@ export class DesignspaceLocation extends UnlitElement {
       overflow: auto;
     }
 
+    .grid-wrapper.only-show-phantom-axes {
+      gap: 0;
+    }
+
     .slider-label {
       text-align: right;
       text-overflow: ellipsis;
@@ -162,7 +166,12 @@ export class DesignspaceLocation extends UnlitElement {
       }
       this._setupAxis(elements, axis, phantomAxesByName[axis.name]);
     }
-    return [html.div({ class: "grid-wrapper" }, elements)];
+
+    const gridWrapper = html.div({ class: "grid-wrapper" }, elements);
+    if (this.onlyShowPhantomAxes) {
+      gridWrapper.classList.add("only-show-phantom-axes");
+    }
+    return [gridWrapper];
   }
 
   _setupAxis(elements, axis, phantomAxis) {
