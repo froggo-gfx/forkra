@@ -4,7 +4,7 @@
     "checkJs": false,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "lib": ["es2021", "dom"],
+    "lib": ["es2022", "dom"],
     "target": "es2015",
     "paths": {
       "*": ["./src-js/*"]
