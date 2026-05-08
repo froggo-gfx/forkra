@@ -299,15 +299,13 @@ export function parseSelection(selection: string[]) {
   return result;
 }
 
-export type Falsey = null | undefined | false | 0 | -0 | 0n | "";
-
-export function makeUPlusStringFromCodePoint(codePoint: number | Falsey) {
-  if (codePoint && typeof codePoint != "number") {
+export function makeUPlusStringFromCodePoint(codePoint: number | undefined) {
+  if (codePoint !== undefined && typeof codePoint !== "number") {
     throw new Error(
-      `codePoint argument must be a number or falsey; ${typeof codePoint} found`
+      `codePoint argument must be a number or undefined; ${typeof codePoint} found`
     );
   }
-  return typeof codePoint == "number"
+  return typeof codePoint === "number"
     ? "U+" + codePoint.toString(16).toUpperCase().padStart(4, "0")
     : "";
 }
@@ -684,7 +682,7 @@ export function areCustomDatasCompatible(parents: any[]) {
       }
 
       const vA = parent.customData[kA];
-      if (typeof vA == "object") {
+      if (typeof vA === "object") {
         const vB = referenceCustomData[kB];
         try {
           const _ = addItemwise(vA, vB);
