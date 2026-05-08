@@ -4,6 +4,7 @@
 
 ### New features
 
+- [Designspace navigation panel] Add a new accordion section for hidden axes. Add an associated view option (under its hamburger menu button) "Show only effective location", similar to "Show effective location", but that will only show (inactive) sliders for the effective location. This is useful when the hidden axes are all controlled by the non-hidden axes via cross-axis mappings (aka `avar-2`). [Issue 2553](https://github.com/fontra/fontra/issues/2553), [PR 2584](https://github.com/fontra/fontra/pull/2584)
 - [Axes panel] Add "Hidden" checkbox to Axis box and New Axis dialog, so we can finally edit the "hidden" axis flag. [Issue 1373](https://github.com/fontra/fontra/issues/1373), [PR 2582](https://github.com/fontra/fontra/pull/2582)
 
 ## 2026-05-06 [version 2026.5.0]
