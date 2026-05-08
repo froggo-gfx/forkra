@@ -12,6 +12,8 @@ export class DesignspaceLocation extends UnlitElement {
     ${themeColorCSS(colors)}
 
     .grid-wrapper {
+      height: 100%;
+      width: 100%;
       display: grid;
       grid-template-columns: 25% auto;
       gap: 0.3em;
