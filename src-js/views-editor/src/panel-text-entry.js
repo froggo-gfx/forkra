@@ -3,7 +3,7 @@ import { getGlyphInfoFromCodePoint } from "@fontra/core/glyph-data.js";
 import * as html from "@fontra/core/html-utils.js";
 import { features, languages, scripts } from "@fontra/core/opentype-tags.js";
 import { labeledCheckbox, labeledPopupSelect } from "@fontra/core/ui-utils.js";
-import { findNestedActiveElement } from "@fontra/core/utils.js";
+import { findNestedActiveElement } from "@fontra/core/utils.ts";
 import { showMenu } from "@fontra/web-components/menu-panel.js";
 import {
   Accordion,

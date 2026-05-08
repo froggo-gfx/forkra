@@ -12,7 +12,7 @@ import {
   labeledTextInput,
   popupSelect,
 } from "./ui-utils.js";
-import { fetchJSON } from "./utils.js";
+import { fetchJSON } from "./utils.ts";
 
 export const glyphSetsUIStyles = `
 .glyph-set-container {

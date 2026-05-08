@@ -11,7 +11,7 @@ import {
   labeledTextInput,
   setupSortableList,
 } from "@fontra/core/ui-utils.js";
-import { enumerate, range, zip } from "@fontra/core/utils.js";
+import { enumerate, range, zip } from "@fontra/core/utils.ts";
 import { piecewiseLinearMap } from "@fontra/core/var-model.js";
 import "@fontra/web-components/add-remove-buttons.js";
 import { IconButton } from "@fontra/web-components/icon-button.js"; // for <icon-button>

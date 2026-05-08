@@ -24,7 +24,7 @@ import {
   range,
   round,
   sleepAsync,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import {
   locationToString,
   makeSparseLocation,

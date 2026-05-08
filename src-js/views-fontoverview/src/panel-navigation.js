@@ -9,7 +9,7 @@ import { translate } from "@fontra/core/localization.js";
 import { ObservableController } from "@fontra/core/observable-object.js";
 import { difference, symmetricDifference, union } from "@fontra/core/set-ops.js";
 import { popupSelect } from "@fontra/core/ui-utils.js";
-import { scheduleCalls } from "@fontra/core/utils.js";
+import { scheduleCalls } from "@fontra/core/utils.ts";
 import { DesignspaceLocation } from "@fontra/web-components/designspace-location.js";
 import { GlyphSearchField } from "@fontra/web-components/glyph-search-field.js";
 import { Accordion } from "@fontra/web-components/ui-accordion.js";

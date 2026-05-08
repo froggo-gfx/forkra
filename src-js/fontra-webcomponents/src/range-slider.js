@@ -1,5 +1,5 @@
 import * as html from "@fontra/core/html-utils.js";
-import { clamp, round } from "@fontra/core/utils.js";
+import { clamp, round } from "@fontra/core/utils.ts";
 import { themeColorCSS } from "./theme-support.js";
 
 const colors = {

@@ -3,7 +3,7 @@ import {
   glyphSetsUIStyles,
 } from "@fontra/core/glyphsets-ui.js";
 import * as html from "@fontra/core/html-utils.js";
-import { glyphMapToItemList, isObjectEmpty } from "@fontra/core/utils.js";
+import { glyphMapToItemList, isObjectEmpty } from "@fontra/core/utils.ts";
 import "@fontra/web-components/glyph-search-list.js";
 import { Accordion } from "@fontra/web-components/ui-accordion.js";
 import Panel from "./panel.js";

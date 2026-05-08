@@ -3,7 +3,7 @@ import { collectGlyphNames } from "./changes.js";
 import { getGlyphInfoFromCodePoint, getGlyphInfoFromGlyphName } from "./glyph-data.js";
 import { ObservableController } from "./observable-object.js";
 import { getShaper } from "./shaper.js";
-import { consolidateCalls, filterObject, scheduleCalls } from "./utils.js";
+import { consolidateCalls, filterObject, scheduleCalls } from "./utils.ts";
 import { piecewiseLinearMap } from "./var-model.js";
 
 export class ShaperController {

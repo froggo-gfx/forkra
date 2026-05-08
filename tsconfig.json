@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "lib": ["es2021", "dom"],
+    "target": "es2015",
+    "paths": {
+      "*": ["./src-js/*"]
+    },
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["@types/emscripten"]
+  },
+  "include": ["./src-js/*/src/**/*", "./src-js/*/types/**/*.d.ts"],
+  "exclude": ["**/node_modules/**/*", "**/webpack*"],
+  "$schema": "https://www.schemastore.org/tsconfig"
+}

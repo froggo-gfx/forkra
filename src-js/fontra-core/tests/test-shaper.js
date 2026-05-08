@@ -1,4 +1,4 @@
-import { assert, deepCopyObject } from "@fontra/core/utils.js";
+import { assert, deepCopyObject } from "@fontra/core/utils.ts";
 import { expect } from "chai";
 import { fileURLToPath } from "url";
 import { NodePath } from "./node-path.js";
