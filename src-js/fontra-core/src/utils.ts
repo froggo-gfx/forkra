@@ -261,9 +261,21 @@ export function* product<T>(...args: Iterable<T>[]): Generator<T[], void, unknow
 }
 
 /**
+ * Compares two values which can either be numbers or strings.
+ *
+ * This uses the JavaScript `<` and `>` operators, which means that strings
+ * are compared by the values of their UTF-16 code units, starting at index
+ * zero, until a difference is found or one string runs out of code units
+ * (in which case the longer string is considered greater).
+ *
+ * Generally speaking, if strings are being sorted in order to be shown to
+ * the user then this function should not be used. Instead, use the function
+ * `String.localeCompare` or `Intl.Collator`, since they provide locale-aware
+ * collation and ordering, which the `<` and `>` operators do not.
+ *
  * Return -1 when a < b, 1 when a > b, and 0 when a == b
  */
-export function compare(a: number, b: number): -1 | 0 | 1 {
+export function compare<T extends number | string>(a: T, b: T): -1 | 0 | 1 {
   return (+(a > b) - +(a < b)) as -1 | 0 | 1;
 }
 
@@ -980,10 +992,6 @@ export const friendlyHttpStatus = {
   504: "Gateway Timeout",
   505: "HTTP Version Not Supported",
 };
-
-export function stringCompare(a: string, b: string) {
-  return a < b ? -1 : a === b ? 0 : 1;
-}
 
 export function deepCopyObject<O extends {}>(obj: O): O {
   return JSON.parse(JSON.stringify(obj));

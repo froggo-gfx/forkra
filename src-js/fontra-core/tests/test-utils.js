@@ -5,6 +5,7 @@ import {
   capitalizeFirstLetter,
   chain,
   clamp,
+  compare,
   consolidateCalls,
   dumpURLFragment,
   enumerate,
@@ -36,7 +37,6 @@ import {
   scheduleCalls,
   sleepAsync,
   splitGlyphNameExtension,
-  stringCompare,
   throttleCalls,
   withTimeout,
 } from "@fontra/core/utils.ts";
@@ -784,16 +784,19 @@ describe("longestCommonPrefix", () => {
   });
 });
 
-describe("stringCompare", () => {
+describe("compare", () => {
   const testData = [
     { a: "A", b: "A", result: 0 },
     { a: "A", b: "AA", result: -1 },
     { a: "A", b: "B", result: -1 },
     { a: "BB", b: "B", result: 1 },
     { a: "B", b: "A", result: 1 },
+    { a: 1, b: 1, result: 0 },
+    { a: 0, b: 1, result: -1 },
+    { a: 1, b: 0, result: 1 },
   ];
 
-  parametrize("stringCompare test", testData, (testCase) => {
-    expect(stringCompare(testCase.a, testCase.b)).to.equal(testCase.result);
+  parametrize("compare test", testData, (testCase) => {
+    expect(compare(testCase.a, testCase.b)).to.equal(testCase.result);
   });
 });

@@ -18,6 +18,7 @@ import {
 import {
   FocusKeeper,
   boolInt,
+  compare,
   enumerate,
   escapeHTMLCharacters,
   filterObject,
@@ -28,7 +29,6 @@ import {
   rgbaToCSS,
   round,
   scheduleCalls,
-  stringCompare,
   throttleCalls,
   updateObject,
 } from "@fontra/core/utils.ts";
@@ -1038,7 +1038,7 @@ export default class DesignspaceNavigationPanel extends Panel {
           break;
         case "by-source-name":
           sortFunc = (a, b) => {
-            return stringCompare(
+            return compare(
               varGlyphController.getSourceName(a),
               varGlyphController.getSourceName(b)
             );
