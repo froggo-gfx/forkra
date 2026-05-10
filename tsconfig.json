@@ -4,6 +4,7 @@
     "checkJs": false,
     "noEmit": true,
     "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
     "lib": ["es2022", "dom"],
     "target": "es2015",
     "paths": {
@@ -11,9 +12,9 @@
     },
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "types": ["@types/emscripten"]
+    "types": ["@types/emscripten", "@types/mocha"]
   },
-  "include": ["./src-js/*/src/**/*", "./src-js/*/types/**/*.d.ts"],
+  "include": ["./src-js/*/src/**/*", "./src-js/*/tests/**/*"],
   "exclude": ["**/node_modules/**/*", "**/webpack*"],
   "$schema": "https://www.schemastore.org/tsconfig"
 }
