@@ -9,7 +9,7 @@
 
 ### Improvements
 
-- [front-end code] Our highly competent contributor Qwerasd started to convert part of the front-end code base from JavaScript to TypeScript. This process will in the long term improve maintainability and stability. [PR 2585](https://github.com/fontra/fontra/pull/2585)
+- [front-end code] Our highly competent contributor Qwerasd started to convert part of the front-end code base from JavaScript to TypeScript. This process will in the long term improve maintainability and stability. [PR 2585](https://github.com/fontra/fontra/pull/2585), [PR 2590](https://github.com/fontra/fontra/pull/2590)
 
 ## 2026-05-06 [version 2026.5.0]
 
