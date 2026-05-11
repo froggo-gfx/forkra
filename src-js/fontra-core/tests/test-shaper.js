@@ -8,7 +8,7 @@ import { parametrize } from "./test-support.js";
 import { buildShaperFont } from "build-shaper-font";
 
 import { guessDirectionFromCodePoints } from "@fontra/core/glyph-data.js";
-import { ObservableController } from "@fontra/core/observable-object.js";
+import { ObservableController } from "@fontra/core/observable-object.ts";
 import { ShaperController } from "@fontra/core/shaper-controller.js";
 import {
   applyCursiveAttachments,

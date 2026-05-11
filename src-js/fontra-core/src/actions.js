@@ -1,5 +1,5 @@
 import { translate } from "./localization.js";
-import { ObservableController } from "./observable-object.js";
+import { ObservableController } from "./observable-object.ts";
 import {
   assert,
   capitalizeFirstLetter,
