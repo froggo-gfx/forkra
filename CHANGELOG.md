@@ -11,6 +11,10 @@
 
 - [front-end code] Our highly competent contributor Qwerasd started to convert part of the front-end code base from JavaScript to TypeScript. This process will in the long term improve maintainability and stability. [PR 2585](https://github.com/fontra/fontra/pull/2585), [PR 2590](https://github.com/fontra/fontra/pull/2590)
 
+### Fixes
+
+- [fontra-pak] Fix "Open fonts in read-only mode" on Windows: this new checkbox sometimes had an unpredictable effect. [PR 249](https://github.com/fontra/fontra-pak/pull/249)
+
 ## 2026-05-06 [version 2026.5.0]
 
 ### New features
