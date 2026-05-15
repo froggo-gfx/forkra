@@ -188,8 +188,8 @@ export default class SelectionInfoPanel extends Panel {
             this.fontController.readOnly
               ? "sidebar.selection-info.glyph-locking.tooltip.read-only"
               : glyphLocked
-              ? "sidebar.selection-info.glyph-locking.tooltip.unlock"
-              : "sidebar.selection-info.glyph-locking.tooltip.lock"
+                ? "sidebar.selection-info.glyph-locking.tooltip.unlock"
+                : "sidebar.selection-info.glyph-locking.tooltip.lock"
           ),
           "data-tooltipposition": "left",
         }),

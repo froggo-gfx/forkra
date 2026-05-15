@@ -1304,9 +1304,8 @@ export default class DesignspaceNavigationPanel extends Panel {
         ...defaultLocation,
         ...this.sceneSettings.fontLocationSourceMapped,
       };
-      const sourceIdentifiers = this.fontController.getSortedSourceIdentifiers(
-        !allowSparseSource
-      );
+      const sourceIdentifiers =
+        this.fontController.getSortedSourceIdentifiers(!allowSparseSource);
       if (sourceIdentifiers.length) {
         const locations = sourceIdentifiers.map((sourceIdentifier) => ({
           ...defaultLocation,

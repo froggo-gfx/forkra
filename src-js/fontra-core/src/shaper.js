@@ -252,7 +252,7 @@ class HBShaper extends ShaperBase {
       // Convert Unicode code points to glyph IDs
       glyphs.forEach((glyph) => {
         const glyphName = this.nominalGlyph(glyph.codepoint);
-        glyph.codepoint = glyphName ? this.glyphNameToID[glyphName] ?? 0 : 0;
+        glyph.codepoint = glyphName ? (this.glyphNameToID[glyphName] ?? 0) : 0;
       });
     }
 
@@ -420,7 +420,7 @@ class HBShaper extends ShaperBase {
 
   _getNominalGlyph(font, codePoint) {
     const glyphName = this.nominalGlyph(codePoint);
-    return glyphName ? this.glyphNameToID[glyphName] ?? 0 : 0;
+    return glyphName ? (this.glyphNameToID[glyphName] ?? 0) : 0;
   }
 
   _getHAdvanceFunc(font, glyphID) {
