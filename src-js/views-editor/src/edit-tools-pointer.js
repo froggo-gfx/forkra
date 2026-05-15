@@ -748,8 +748,8 @@ function getSelectModeFunction(event) {
       ? difference
       : symmetricDifference
     : event[commandKeyProperty]
-    ? union
-    : replace;
+      ? union
+      : replace;
 }
 
 registerVisualizationLayerDefinition({

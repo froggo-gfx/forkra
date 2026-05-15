@@ -385,7 +385,6 @@
 ## 2025-07-08
 
 - Herlan/navv-1 contributed several improvements and additions for the OpenType Features panel:
-
   - added syntax coloring
   - added comment toggle (command/control /)
   - fixed undo/redo

@@ -266,8 +266,8 @@ export class ModalDialog extends SimpleElement {
             buttonDef.getResult
               ? buttonDef.getResult()
               : buttonDef.resultValue !== undefined
-              ? buttonDef.resultValue
-              : buttonDef.title
+                ? buttonDef.resultValue
+                : buttonDef.title
           );
         },
       });

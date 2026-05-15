@@ -1337,8 +1337,8 @@ class LineSetter {
       const glyphName =
         glyphInfo.codepoint != 0 || fallbackCodePoint >= MAX_UNICODE
           ? glyphInfo.glyphname
-          : fallbackCharacterMap[fallbackCodePoint] ??
-            getSuggestedGlyphName(fallbackCodePoint);
+          : (fallbackCharacterMap[fallbackCodePoint] ??
+            getSuggestedGlyphName(fallbackCodePoint));
 
       const isSelectedGlyph = glyphIndex == selectedGlyphIndex;
 

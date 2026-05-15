@@ -448,8 +448,8 @@ export class GlyphCellView extends HTMLElement {
         this._firstClickedCell = !firstSelectedCell
           ? this.getFirstGlyphCell()
           : cellCompare(lastSelectedCell, glyphCell) < 0
-          ? firstSelectedCell
-          : lastSelectedCell;
+            ? firstSelectedCell
+            : lastSelectedCell;
       }
     }
   }

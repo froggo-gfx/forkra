@@ -3026,8 +3026,8 @@ export class EditorController extends ViewController {
         const glyphNames = glyphName
           ? [glyphName]
           : truncate
-          ? usedBy.slice(0, MAX_NUM_GLYPHS)
-          : usedBy;
+            ? usedBy.slice(0, MAX_NUM_GLYPHS)
+            : usedBy;
 
         const glyphInfos = glyphNames.map((glyphName) =>
           this.sceneController.glyphInfoFromGlyphName(glyphName)

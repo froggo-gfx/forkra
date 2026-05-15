@@ -681,8 +681,8 @@ export default class TextEntryPanel extends Panel {
           horizontalOnFeatures.has(tag) && emulateDefaultValue
             ? true
             : dynamicFeatures.has(tag)
-            ? undefined
-            : false;
+              ? undefined
+              : false;
 
         element.append(
           ...featureTagButton(this.textSettingsController, tag, label, {
