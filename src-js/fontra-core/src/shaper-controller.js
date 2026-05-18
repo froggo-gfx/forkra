@@ -352,7 +352,7 @@ export function prepareConditionalSubstitutions(
       conditionSets.map(({ conditions }) =>
         Object.fromEntries(
           conditions
-            .filter(({ name }) => !!axesByName[name])
+            .filter(({ name }) => !!axesByName[name]) // filter out non-existent axes
             .map(({ name, minValue, maxValue }) => {
               const axis = axesByName[name];
               const mapFunc = getMapFunc(name);
