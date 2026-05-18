@@ -9,7 +9,10 @@ import { buildShaperFont } from "build-shaper-font";
 
 import { guessDirectionFromCodePoints } from "@fontra/core/glyph-data.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
-import { ShaperController } from "@fontra/core/shaper-controller.js";
+import {
+  prepareConditionalSubstitutions,
+  ShaperController,
+} from "@fontra/core/shaper-controller.js";
 import {
   applyCursiveAttachments,
   applyKerning,
@@ -1926,6 +1929,96 @@ describe("test conditional substitutions with mapping", () => {
     });
     const glyphNames8 = glyphs8.map((g) => g.glyphname);
     expect(glyphNames8).to.deep.equal(["cent", "oslash", "fi.rvrn"]);
+  });
+});
+
+describe("prepareConditionalSubstitutions ", () => {
+  const axes = [
+    { name: "Weight", tag: "wght", minValue: 200, defaultValue: 400, maxValue: 700 },
+  ];
+  const glyphMap = { "A": [], "A.alt": [] };
+
+  it("prepareConditionalSubstitutions with correct inputs", () => {
+    const substitutions = {
+      featureTags: ["rvrn"],
+      rules: [
+        {
+          name: "Weight rule",
+          conditionSets: [
+            { conditions: [{ name: "Weight", minValue: 200, maxValue: 400 }] },
+          ],
+          substitutions: { A: "A.alt" },
+        },
+      ],
+    };
+
+    const substForBuildShaperFont = prepareConditionalSubstitutions(
+      substitutions,
+      axes,
+      axes,
+      glyphMap
+    );
+
+    expect(substForBuildShaperFont).to.deep.equal({
+      featureTags: ["rvrn"],
+      rules: [[[{ wght: [200, 400] }], { A: "A.alt" }]],
+    });
+  });
+
+  it("prepareConditionalSubstitutions with incorrect axis inputs", () => {
+    const substitutions = {
+      featureTags: ["rvrn"],
+      rules: [
+        {
+          name: "Weight rule",
+          conditionSets: [
+            // unknown axis name (misspelled)
+            { conditions: [{ name: "weight", minValue: 200, maxValue: 400 }] },
+          ],
+          substitutions: { A: "A.alt" },
+        },
+      ],
+    };
+
+    const substForBuildShaperFont = prepareConditionalSubstitutions(
+      substitutions,
+      axes,
+      axes,
+      glyphMap
+    );
+
+    expect(substForBuildShaperFont).to.deep.equal({
+      featureTags: ["rvrn"],
+      rules: [[[{}], { A: "A.alt" }]],
+    });
+  });
+
+  it("prepareConditionalSubstitutions with incorrect glyph name inputs", () => {
+    const substitutions = {
+      featureTags: ["rvrn"],
+      rules: [
+        {
+          name: "Weight rule",
+          conditionSets: [
+            { conditions: [{ name: "Weight", minValue: 200, maxValue: 400 }] },
+          ],
+          // non-existent glyph name
+          substitutions: { A: "B" },
+        },
+      ],
+    };
+
+    const substForBuildShaperFont = prepareConditionalSubstitutions(
+      substitutions,
+      axes,
+      axes,
+      glyphMap
+    );
+
+    expect(substForBuildShaperFont).to.deep.equal({
+      featureTags: ["rvrn"],
+      rules: [[[{ wght: [200, 400] }], {}]],
+    });
   });
 });
 
