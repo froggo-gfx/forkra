@@ -320,7 +320,8 @@ function ensureNotdef(glyphOrder) {
   glyphOrder.unshift(".notdef");
 }
 
-function prepareConditionalSubstitutions(
+/* export only for testing */
+export function prepareConditionalSubstitutions(
   substitutions,
   fontAxes,
   fontAxesSourceSpace,
@@ -350,14 +351,19 @@ function prepareConditionalSubstitutions(
     rules: substitutions.rules.map(({ conditionSets, substitutions }) => [
       conditionSets.map(({ conditions }) =>
         Object.fromEntries(
-          conditions.map(({ name, minValue, maxValue }) => {
-            const axis = axesByName[name];
-            const mapFunc = getMapFunc(name);
-            return [
-              axis.tag,
-              [mapFunc(minValue ?? axis.minValue), mapFunc(maxValue ?? axis.maxValue)],
-            ];
-          })
+          conditions
+            .filter(({ name }) => !!axesByName[name]) // filter out non-existent axes
+            .map(({ name, minValue, maxValue }) => {
+              const axis = axesByName[name];
+              const mapFunc = getMapFunc(name);
+              return [
+                axis.tag,
+                [
+                  mapFunc(minValue ?? axis.minValue),
+                  mapFunc(maxValue ?? axis.maxValue),
+                ],
+              ];
+            })
         )
       ),
       filterObject(
