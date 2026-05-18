@@ -1,5 +1,11 @@
 # Changelog for Fontra
 
+## 2026-05-?? [version 2026.5.2]
+
+### Improvements
+
+- [shaping] Gracefully handle invalid conditional substitution rules that use unknown axes. [PR 2598](https://github.com/fontra/fontra/pull/2598)
+
 ## 2026-05-12 [version 2026.5.1]
 
 ### New features
