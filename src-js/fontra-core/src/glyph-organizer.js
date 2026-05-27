@@ -62,8 +62,9 @@ export class GlyphOrganizer {
   }
 
   setSearchString(searchString) {
-    const searchItems = searchString.split(/\s+/).filter((item) => item.length);
-    const hexSearchItems = searchItems
+    const searchStrings = searchString.split(/\s+/).filter((item) => item.length);
+
+    const hexSearchItems = searchStrings
       .filter((item) => [...item].length === 1) // num chars, not utf16 units!
       .map((item) => {
         const hexCodePoint = item
@@ -74,7 +75,11 @@ export class GlyphOrganizer {
         // Only match if there are no hex digits before and after
         return new RegExp(`([^0-9A-F]|^)${hexCodePoint}([^0-9A-F]|$)`);
       });
-    searchItems.push(...hexSearchItems);
+
+    const searchItems = searchStrings
+      .map((s) => RegExp.escape(s))
+      .concat(hexSearchItems);
+
     this._glyphNamesListFilterFunc = (item) => glyphFilterFunc(item, searchItems);
   }
 
