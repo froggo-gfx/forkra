@@ -64,23 +64,37 @@ export class GlyphOrganizer {
   setSearchString(searchString) {
     const searchStrings = searchString.split(/\s+/).filter((item) => item.length);
 
-    const hexSearchItems = searchStrings
+    const singleCharSearchItems = searchStrings
       .filter((item) => [...item].length === 1) // num chars, not utf16 units!
+      .map((item) => item.codePointAt(0));
+
+    // If a search item is a 4-5 characters long hex string, optionally prefixed
+    // by U+ or 0x, look for the character this hex code point represents
+    const literalHexSearchItems = searchStrings
       .map((item) => {
-        const hexCodePoint = item
-          .codePointAt(0)
-          .toString(16)
-          .toUpperCase()
-          .padStart(4, "0");
-        // Only match if there are no hex digits before and after
-        return new RegExp(`([^0-9A-F]|^)${hexCodePoint}([^0-9A-F]|$)`);
-      });
+        const match = item.match(/(?<=U\+|0x|^)([0-9A-Fa-f]{4,5})$/);
+        return match ? parseInt(match[0], 16) : undefined;
+      })
+      .filter((item) => item);
 
-    const searchItems = searchStrings
-      .map((s) => RegExp.escape(s))
-      .concat(hexSearchItems);
+    // If a search item is a single character, search for glyph names that contain
+    // the character's codepoint as an uppercase hex string. For example, if a search
+    // item is 'A', then search for glyph names containing '0041'
+    const hexSearchItems = singleCharSearchItems.map((codePoint) => {
+      const hexCodePoint = codePoint.toString(16).toUpperCase().padStart(4, "0");
+      // Only match if there are no hex digits before and after
+      return new RegExp(`([^0-9A-F]|^)${hexCodePoint}([^0-9A-F]|$)`);
+    });
 
-    this._glyphNamesListFilterFunc = (item) => glyphFilterFunc(item, searchItems);
+    const regexSearchItems = [
+      ...searchStrings.map((s) => new RegExp(RegExp.escape(s))),
+      ...hexSearchItems,
+    ];
+
+    const codePointSearchItems = [...singleCharSearchItems, ...literalHexSearchItems];
+
+    this._glyphNamesListFilterFunc = (item) =>
+      glyphFilterFunc(item, regexSearchItems, codePointSearchItems);
   }
 
   setGroupByKeys(groupByKeys) {
@@ -153,22 +167,20 @@ function compareGroupInfo(groupByEntryA, groupByEntryB) {
   return 0;
 }
 
-function glyphFilterFunc(item, searchItems) {
-  if (!searchItems.length) {
+function glyphFilterFunc(item, regexSearchItems, codePointSearchItems) {
+  if (!regexSearchItems.length && !codePointSearchItems.length) {
     return true;
   }
-  for (const searchItem of searchItems) {
-    if (item.glyphName.search(searchItem) >= 0) {
+
+  for (const regex of regexSearchItems) {
+    if (item.glyphName.search(regex) >= 0) {
       return true;
     }
-    if (item.codePoints[0] !== undefined) {
-      const char = String.fromCodePoint(item.codePoints[0]);
-      if (searchItem === char) {
-        return true;
-      }
-    }
   }
-  return false;
+
+  return item.codePoints.some((codePoint) => {
+    return codePointSearchItems.some((codePointItem) => codePointItem == codePoint);
+  });
 }
 
 function glyphItemSortFunc(item1, item2) {
