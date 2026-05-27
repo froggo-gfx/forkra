@@ -165,6 +165,10 @@ export function guessGlyphPlaceholderString(codePoints, glyphName) {
     }
   }
 
+  if (direction == "bidi") {
+    direction = undefined;
+  }
+
   return { glyphString, direction };
 }
 
