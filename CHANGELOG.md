@@ -5,6 +5,7 @@
 ### Improvements
 
 - [shaping] Gracefully handle invalid conditional substitution rules that use unknown axes. [PR 2598](https://github.com/fontra/fontra/pull/2598)
+- [glyph search] Allow `U+`- or `0x`-prefixed hex code points in various glyph search fields, to find glyphs by their hexadecimal code point. [Issue 2606](https://github.com/fontra/fontra/issues/2606), [PR 2608](https://github.com/fontra/fontra/pull/2608)
 
 ## 2026-05-12 [version 2026.5.1]
 
