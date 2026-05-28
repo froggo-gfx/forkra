@@ -3061,6 +3061,7 @@ export class EditorController extends ViewController {
     if (!showOnlyGlyphsInFont && !isObjectEmpty(this.sceneSettings.combinedGlyphMap)) {
       glyphSearch.glyphMap = this.sceneSettings.combinedGlyphMap;
       glyphSearch.fontGlyphMap = this.fontController.glyphMap;
+      glyphSearch.allowUnknownGlyphSearchResults = true;
     } else {
       glyphSearch.glyphMap = this.fontController.glyphMap;
     }

@@ -33,6 +33,7 @@ export default class GlyphSearchPanel extends Panel {
     );
     this.editorController.fontController.ensureInitialized.then(() => {
       this.glyphSearch.glyphMap = this.editorController.fontController.glyphMap;
+      this.glyphSearch.allowUnknownGlyphSearchResults = true;
     });
 
     this.editorController.sceneSettingsController.addKeyListener(
