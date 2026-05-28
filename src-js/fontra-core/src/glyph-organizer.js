@@ -83,7 +83,9 @@ export class GlyphOrganizer {
 
     // If a search item is a single character, search for glyph names that contain
     // the character's codepoint as an uppercase hex string. For example, if a search
-    // item is 'A', then search for glyph names containing '0041'
+    // item is 'A', then search for glyph names containing '0041'.
+    // This functionality was requested by CJK designers who use hex code points in
+    // variable component glyphs.
     const hexSearchItems = singleCharSearchItems.map((codePoint) => {
       const hexCodePoint = codePoint.toString(16).toUpperCase().padStart(4, "0");
       // Only match if there are no hex digits before and after
