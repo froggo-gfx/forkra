@@ -59,17 +59,14 @@ export class GlyphSearchList extends SimpleElement {
         title: "glyph name",
         width: "10em",
         isIdentifierKey: true,
-        cellFactory: (item, description) => {
-          const glyphName = item.glyphName;
-          return !this._fontGlyphMap || this._fontGlyphMap[glyphName]
-            ? glyphName
-            : html.span({ class: "dimmed" }, [glyphName]);
-        },
+        get: (item) => item.glyphName,
+        cellFactory: (item, description) => this._cellFactory(item, description),
       },
       {
         key: "unicode",
         width: "fit-content",
         get: (item) => item.codePoints.map(makeUPlusStringFromCodePoint).join(","),
+        cellFactory: (item, description) => this._cellFactory(item, description),
       },
     ];
     const glyphNamesList = new UIList();
@@ -96,6 +93,14 @@ export class GlyphSearchList extends SimpleElement {
       this.dispatchEvent(event);
     });
     return glyphNamesList;
+  }
+
+  _cellFactory(item, description) {
+    const glyphName = item.glyphName;
+    const valueString = description.get(item);
+    return !this._fontGlyphMap || this._fontGlyphMap[glyphName]
+      ? valueString
+      : html.span({ class: "dimmed" }, [valueString]);
   }
 
   focusSearchField() {
