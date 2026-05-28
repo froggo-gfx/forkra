@@ -72,8 +72,8 @@ export class GlyphOrganizer {
       .filter((item) => [...item].length === 1) // num chars, not utf16 units!
       .map((item) => item.codePointAt(0));
 
-    // If a search item is a 4-5 characters long hex string, optionally prefixed
-    // by U+ or 0x, look for the character this hex code point represents
+    // If a search item is a 2-5 characters long hex string, prefixed by U+ or 0x,
+    // look for the character this hex code point represents
     const literalHexSearchItems = searchStrings
       .map((item) => {
         const match = item.match(/(?<=U\+|0x)([0-9A-F]{2,5})$/i);
