@@ -72,7 +72,7 @@ export class GlyphOrganizer {
     // by U+ or 0x, look for the character this hex code point represents
     const literalHexSearchItems = searchStrings
       .map((item) => {
-        const match = item.match(/(?<=U\+|0x|^)([0-9A-Fa-f]{4,5})$/);
+        const match = item.match(/(?<=U\+|0x|^)([0-9A-Fa-f]{2,5})$/);
         return match ? parseInt(match[0], 16) : undefined;
       })
       .filter((item) => item);
