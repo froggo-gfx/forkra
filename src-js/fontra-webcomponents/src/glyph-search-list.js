@@ -129,6 +129,15 @@ export class GlyphSearchList extends SimpleElement {
     this.requestUpdate();
   }
 
+  get allowUnknownGlyphSearchResults() {
+    return this._allowUnknownGlyphSearchResults ?? false;
+  }
+
+  set allowUnknownGlyphSearchResults(allowUnknownGlyphSearchResults) {
+    this._allowUnknownGlyphSearchResults = allowUnknownGlyphSearchResults;
+    this.requestUpdate();
+  }
+
   updateGlyphNamesListContent() {
     this.glyphOrganizer.setSearchString(this.searchField.searchString);
     this.glyphsListItems = this.glyphOrganizer.sortGlyphs(
@@ -138,7 +147,10 @@ export class GlyphSearchList extends SimpleElement {
   }
 
   _setFilteredGlyphNamesListContent() {
-    const filteredGlyphItems = this.glyphOrganizer.filterGlyphs(this.glyphsListItems);
+    const filteredGlyphItems = this.glyphOrganizer.filterGlyphs(
+      this.glyphsListItems,
+      this.allowUnknownGlyphSearchResults
+    );
     this.glyphNamesList.setItems(filteredGlyphItems);
     this.glyphNamesList.hidden = filteredGlyphItems.length === 0;
   }

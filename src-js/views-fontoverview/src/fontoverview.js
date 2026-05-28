@@ -350,7 +350,7 @@ export class FontOverviewController extends ViewController {
       combinedItemList = this.glyphOrganizer.sortGlyphs(combinedItemList);
     }
 
-    const glyphItemList = this.glyphOrganizer.filterGlyphs(combinedItemList);
+    const glyphItemList = this.glyphOrganizer.filterGlyphs(combinedItemList, true);
     const glyphSections = this.glyphOrganizer.groupGlyphs(glyphItemList);
     this.glyphCellView.setGlyphSections(glyphSections);
 

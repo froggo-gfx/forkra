@@ -1,4 +1,8 @@
-import { getGlyphInfoFromCodePoint, getGlyphInfoFromGlyphName } from "./glyph-data.js";
+import {
+  getGlyphInfoFromCodePoint,
+  getGlyphInfoFromGlyphName,
+  getSuggestedGlyphName,
+} from "./glyph-data.js";
 import { block, script, scriptNames } from "./unicode-scripts-blocks.js";
 import {
   capitalizeFirstLetter,
@@ -93,6 +97,7 @@ export class GlyphOrganizer {
 
     const codePointSearchItems = [...singleCharSearchItems, ...literalHexSearchItems];
 
+    this._codePointSearchItems = codePointSearchItems;
     this._glyphNamesListFilterFunc = (item) =>
       glyphFilterFunc(item, regexSearchItems, codePointSearchItems);
   }
@@ -114,8 +119,26 @@ export class GlyphOrganizer {
     return glyphs;
   }
 
-  filterGlyphs(glyphs) {
-    return glyphs.filter(this._glyphNamesListFilterFunc);
+  filterGlyphs(glyphs, appendUndefinedCharacters = false) {
+    const filteredGlyphs = glyphs.filter(this._glyphNamesListFilterFunc);
+
+    if (appendUndefinedCharacters) {
+      for (const codePoint of this._codePointSearchItems) {
+        if (
+          filteredGlyphs.some((glyphItem) => glyphItem.codePoints.includes(codePoint))
+        ) {
+          continue;
+        }
+
+        filteredGlyphs.push({
+          glyphName: getSuggestedGlyphName(codePoint),
+          codePoints: [codePoint],
+          associatedCodePoints: [],
+        });
+      }
+    }
+
+    return filteredGlyphs;
   }
 
   groupGlyphs(glyphs) {
