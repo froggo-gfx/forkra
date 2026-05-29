@@ -7,6 +7,7 @@
 - [shaping] Gracefully handle invalid conditional substitution rules that use unknown axes. [PR 2598](https://github.com/fontra/fontra/pull/2598)
 - [glyph search] Allow `U+`- or `0x`-prefixed hex code points in various glyph search fields, to find glyphs by their hexadecimal code point. [Issue 2606](https://github.com/fontra/fontra/issues/2606), [PR 2608](https://github.com/fontra/fontra/pull/2608)
 - [cross-axis mappings] When a font has cross axis mappings, activate "show effective location" by default. [PR 2609](https://github.com/fontra/fontra/pull/2609)
+- [cross-axis mappings] When creating a new cross-axis mapping, make sure it is in view by scrolling to the end. This improves the experience when there are many mappings. [PR 2610](https://github.com/fontra/fontra/pull/2610)
 
 ## 2026-05-12 [version 2026.5.1]
 
