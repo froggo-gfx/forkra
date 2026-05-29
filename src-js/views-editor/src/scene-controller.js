@@ -65,6 +65,12 @@ import { dialog, message } from "@fontra/web-components/modal-dialog.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import { SceneModel } from "./scene-model.js";
 
+export const ShowLocationSettings = Object.freeze({
+  DontShowEffectiveLocation: 0,
+  ShowEffectiveLocation: 1,
+  OnlyShowEffectiveLocation: 2,
+});
+
 // Minimum pixels per em and maximum pixels per unit for zooming out and in.
 //
 // Note that these are not _screen pixels_, they are css "pixels" which are
@@ -134,6 +140,8 @@ export class SceneController {
     this.sceneSettings.myGlyphSets = getMyGlyphSets();
 
     this.fontController.ensureInitialized.then(() => {
+      this._setShowEffectiveLocationDefaults();
+
       this.sceneSettingsController.setItem(
         "projectGlyphSets",
         readProjectGlyphSets(this.fontController),
@@ -373,6 +381,29 @@ export class SceneController {
     );
   }
 
+  _setShowEffectiveLocationDefaults() {
+    // If for each of the sets of non-hidden and hidden axes there exists a
+    // cross-axis mapping that influences it, activate "ShowEffectiveLocation"
+    // by default (used in panel-designspace-navigation.js)
+    for (const [key, hidden] of [
+      ["fontAxesShowEffectiveLocation", false],
+      ["hiddenFontAxesShowEffectiveLocation", true],
+    ]) {
+      const axisNames = new Set(
+        this.fontController.fontAxes
+          .filter((axis) => !!axis.hidden == hidden)
+          .map((axis) => axis.name)
+      );
+      if (
+        this.fontController.axes.mappings.some(({ outputLocation }) =>
+          Object.keys(outputLocation).some((key) => axisNames.has(key))
+        )
+      ) {
+        this.sceneSettings[key] = ShowLocationSettings.ShowEffectiveLocation;
+      }
+    }
+  }
+
   setCanvasMagnificationLimits() {
     // The lower magnification limit is implemented relative to UPM
     // to provide a consistent em size when zoomed all the way out.
@@ -493,7 +524,7 @@ export class SceneController {
           viewInfo[infoKey] = { ...settingsValue };
         }
       } else {
-        assert(false, `can't get here ${[key, defaultValue, viewValue]}`);
+        assert(false, `can't get here ${[key, defaultValue, settingsValue]}`);
       }
     }
 
@@ -1848,8 +1879,8 @@ function getSceneSettingsDefaults() {
     fontLocationSource: {},
     fontLocationSourceMapped: {},
     fontAxesUseSourceCoordinates: false,
-    fontAxesShowEffectiveLocation: false,
-    hiddenFontAxesShowEffectiveLocation: false,
+    fontAxesShowEffectiveLocation: 0,
+    hiddenFontAxesShowEffectiveLocation: 0,
     fontAxesShowHidden: false,
     fontAxesSkipMapping: false,
     glyphLocation: {},
