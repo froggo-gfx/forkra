@@ -35,7 +35,7 @@ export class CrossAxisMappingPanel extends BaseInfoPanel {
     );
   }
 
-  async setupUI() {
+  async setupUI(scrollToLastItem = false) {
     const mappings = this.fontController.axes.mappings;
 
     this.fontAxesSourceSpace = mapAxesFromUserSpaceToSourceSpace(
@@ -89,6 +89,14 @@ export class CrossAxisMappingPanel extends BaseInfoPanel {
     );
     this.panelElement.appendChild(container);
     this.panelElement.focus();
+
+    if (scrollToLastItem) {
+      container.lastChild.scrollIntoView({
+        behavior: "auto",
+        block: "nearest",
+        inline: "nearest",
+      });
+    }
   }
 
   async newCrossAxisMapping() {
@@ -106,7 +114,7 @@ export class CrossAxisMappingPanel extends BaseInfoPanel {
     });
     if (changes.hasChange) {
       this.postChange(changes.change, changes.rollbackChange, undoLabel);
-      this.setupUI();
+      this.setupUI(true);
     }
   }
 
