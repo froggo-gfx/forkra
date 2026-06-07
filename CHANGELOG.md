@@ -4,6 +4,7 @@
 
 ### Improvements
 
+- [fontra-workflow] Reformatted the .yaml test files so that each step starts with its operational keyword, which reads a lot better. [PR 2620](https://github.com/fontra/fontra/pull/2620)
 - [fontra-workflow] Add support for instantiating with cross-axis mappings [PR 2619](https://github.com/fontra/fontra/pull/2619)
 - [fontra-workflow] Make the fontra-workflow backend respond to external changes to the .yaml file. [PR 2618](https://github.com/fontra/fontra/pull/2618)
 - [shaping] Gracefully handle invalid conditional substitution rules that use unknown axes. [PR 2598](https://github.com/fontra/fontra/pull/2598)
