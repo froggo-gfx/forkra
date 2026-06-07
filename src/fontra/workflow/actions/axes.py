@@ -455,6 +455,7 @@ class BaseMoveDefaultLocation(BaseFilter):
         return replace(
             axes,
             axes=self._filterAxisList(axes.axes),
+            mappings=[] if self._shouldApplyCrossAxisMappings() else axes.mappings,
         )
 
     async def getAxes(self) -> Axes:
