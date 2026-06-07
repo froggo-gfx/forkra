@@ -434,7 +434,8 @@ class BaseMoveDefaultLocation(BaseFilter):
         sourceLocation = {
             axis.name: (
                 piecewiseLinearMap(
-                    newDefaultUserLocation[axis.name], {a: b for a, b in axis.mapping}
+                    newDefaultUserLocation.get(axis.name, axis.defaultValue),
+                    {a: b for a, b in axis.mapping},
                 )
                 if axis.mapping
                 else newDefaultUserLocation.get(axis.name, axis.defaultValue)
