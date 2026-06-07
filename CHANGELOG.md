@@ -4,6 +4,7 @@
 
 ### Improvements
 
+- [fontra-workflow] Add support for instantiating with cross-axis mappings [PR 2619](https://github.com/fontra/fontra/pull/2619)
 - [fontra-workflow] Make the fontra-workflow backend respond to external changes to the .yaml file. [PR 2618](https://github.com/fontra/fontra/pull/2618)
 - [shaping] Gracefully handle invalid conditional substitution rules that use unknown axes. [PR 2598](https://github.com/fontra/fontra/pull/2598)
 - [glyph search] Allow `U+`- or `0x`-prefixed hex code points in various glyph search fields, to find glyphs by their hexadecimal code point. [Issue 2606](https://github.com/fontra/fontra/issues/2606), [PR 2608](https://github.com/fontra/fontra/pull/2608)
