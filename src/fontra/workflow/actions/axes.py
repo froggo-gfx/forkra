@@ -418,8 +418,6 @@ def mapKerningSourcesAndFilter(kerning, mapping):
 
 @dataclass(kw_only=True)
 class BaseMoveDefaultLocation(BaseFilter):
-    applyCrossAxisMappings: bool = False
-
     @async_cached_property[dict[str, float]]
     async def newDefaultSourceLocation(self) -> dict[str, float]:
         newDefaultUserLocation = self._getDefaultUserLocation()
@@ -440,7 +438,7 @@ class BaseMoveDefaultLocation(BaseFilter):
             for axis in relevantAxes
         }
 
-        if self.applyCrossAxisMappings:
+        if self._shouldApplyCrossAxisMappings():
             mapper = CrossAxisMapper(axes.axes, axes.mappings)
             sourceLocation = mapper.mapLocation(sourceLocation)
 
@@ -534,6 +532,9 @@ class BaseMoveDefaultLocation(BaseFilter):
 
         filterFunc = partial(filterSubstitutionCondition, locationToDrop)
         return filterConditionalSubstitutions(substitutions, filterFunc)
+
+    def _shouldApplyCrossAxisMappings(self):
+        return False
 
     def _filterAxisList(self, axes):
         raise NotImplementedError()
@@ -633,6 +634,10 @@ class MoveDefaultLocation(BaseMoveDefaultLocation):
 @dataclass(kw_only=True)
 class Instantiate(BaseMoveDefaultLocation):
     location: dict[str, float]
+    applyCrossAxisMappings: bool = False
+
+    def _shouldApplyCrossAxisMappings(self):
+        return self.applyCrossAxisMappings
 
     def _getDefaultUserLocation(self):
         return self.location
