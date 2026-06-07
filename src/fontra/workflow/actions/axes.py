@@ -423,9 +423,13 @@ class BaseMoveDefaultLocation(BaseFilter):
         newDefaultUserLocation = self._getDefaultUserLocation()
         axes = await self.inputAxes
 
-        relevantAxes = [
-            axis for axis in axes.axes if axis.name in newDefaultUserLocation
-        ]
+        applyCrossAxisMappings = self._shouldApplyCrossAxisMappings()
+
+        relevantAxes = (
+            axes.axes
+            if applyCrossAxisMappings
+            else [axis for axis in axes.axes if axis.name in newDefaultUserLocation]
+        )
 
         sourceLocation = {
             axis.name: (
@@ -433,12 +437,12 @@ class BaseMoveDefaultLocation(BaseFilter):
                     newDefaultUserLocation[axis.name], {a: b for a, b in axis.mapping}
                 )
                 if axis.mapping
-                else newDefaultUserLocation[axis.name]
+                else newDefaultUserLocation.get(axis.name, axis.defaultValue)
             )
             for axis in relevantAxes
         }
 
-        if self._shouldApplyCrossAxisMappings():
+        if applyCrossAxisMappings:
             mapper = CrossAxisMapper(axes.axes, axes.mappings)
             sourceLocation = mapper.mapLocation(sourceLocation)
 
@@ -644,7 +648,11 @@ class Instantiate(BaseMoveDefaultLocation):
 
     def _filterAxisList(self, axes):
         location = self._getDefaultUserLocation()
-        return [axis for axis in axes if axis.name not in location]
+        return (
+            []
+            if self.applyCrossAxisMappings
+            else [axis for axis in axes if axis.name not in location]
+        )
 
     def _filterNewLocations(self, newLocations, location):
         filteredLocations = [
