@@ -5,7 +5,7 @@ import logging
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from functools import partial
-from typing import Any
+from typing import Any, Callable
 
 from fontTools.varLib.models import piecewiseLinearMap
 
@@ -24,6 +24,7 @@ from ...core.classes import (
     structure,
     unstructure,
 )
+from ...core.crossaxismapper import CrossAxisMapper
 from ...core.discretevariationmodel import DiscreteVariationModel
 from ...core.instancer import GlyphInstancer
 from ...core.varutils import (
@@ -118,8 +119,8 @@ def dropUnusedSourcesAndLayers(glyph):
 class DropAxisMappings(BaseFilter):
     axes: list[str] | None = None
 
-    @async_cached_property
-    async def axisValueMapFunctions(self) -> dict:
+    @async_cached_property[dict[str, Callable]]
+    async def axisValueMapFunctions(self) -> dict[str, Callable]:
         axes = await self.validatedInput.getAxes()
         relevantAxes = (
             [axis for axis in axes.axes if axis.name in self.axes]
@@ -127,7 +128,7 @@ class DropAxisMappings(BaseFilter):
             else axes.axes
         )
 
-        mapFuncs = {}
+        mapFuncs: dict[str, Callable] = {}
         for axis in relevantAxes:
             if axis.mapping:
                 mapFuncs[axis.name] = partial(
@@ -172,13 +173,13 @@ class AdjustAxes(BaseFilter):
         adjustedAxes, _ = await self._adjustedAxesAndMapFunctions
         return adjustedAxes
 
-    @async_cached_property
-    async def axisValueMapFunctions(self) -> dict:
+    @async_cached_property[dict[str, Callable]]
+    async def axisValueMapFunctions(self) -> dict[str, Callable]:
         _, mapFuncs = await self._adjustedAxesAndMapFunctions
         return mapFuncs
 
-    @async_cached_property
-    async def _adjustedAxesAndMapFunctions(self) -> tuple:
+    @async_cached_property[tuple[Axes, dict]]
+    async def _adjustedAxesAndMapFunctions(self) -> tuple[Axes, dict]:
         mapFuncs: dict = {}
         axes = await self.validatedInput.getAxes()
         adjustedAxes = []
@@ -283,7 +284,7 @@ class SubsetAxes(BaseFilter):
             instancer, await self.mapFilterLocationFunc
         )
 
-    @async_cached_property
+    @async_cached_property[dict[str, FontSource]]
     async def processedSources(self) -> dict[str, FontSource]:
         sources = await self.validatedInput.getSources()
         return mapFontSourceLocationsAndFilter(
@@ -415,9 +416,12 @@ def mapKerningSourcesAndFilter(kerning, mapping):
     return newKerning
 
 
+@dataclass(kw_only=True)
 class BaseMoveDefaultLocation(BaseFilter):
-    @async_cached_property
-    async def newDefaultSourceLocation(self):
+    applyCrossAxisMappings: bool = False
+
+    @async_cached_property[dict[str, float]]
+    async def newDefaultSourceLocation(self) -> dict[str, float]:
         newDefaultUserLocation = self._getDefaultUserLocation()
         axes = await self.inputAxes
 
@@ -425,10 +429,10 @@ class BaseMoveDefaultLocation(BaseFilter):
             axis for axis in axes.axes if axis.name in newDefaultUserLocation
         ]
 
-        return {
+        sourceLocation = {
             axis.name: (
                 piecewiseLinearMap(
-                    newDefaultUserLocation[axis.name], dict(axis.mapping)
+                    newDefaultUserLocation[axis.name], {a: b for a, b in axis.mapping}
                 )
                 if axis.mapping
                 else newDefaultUserLocation[axis.name]
@@ -436,7 +440,13 @@ class BaseMoveDefaultLocation(BaseFilter):
             for axis in relevantAxes
         }
 
-    @async_cached_property
+        if self.applyCrossAxisMappings:
+            mapper = CrossAxisMapper(axes.axes, axes.mappings)
+            sourceLocation = mapper.mapLocation(sourceLocation)
+
+        return sourceLocation
+
+    @async_cached_property[Axes]
     async def processedAxes(self) -> Axes:
         axes = await self.inputAxes
         return replace(
@@ -478,8 +488,8 @@ class BaseMoveDefaultLocation(BaseFilter):
             remainingAxisNames,
         )
 
-    @async_cached_property
-    async def processedSourcesAndLocations(self) -> dict[str, FontSource]:
+    @async_cached_property[tuple[dict[str, FontSource], dict]]
+    async def processedSourcesAndLocations(self) -> tuple[dict[str, FontSource], dict]:
         instancer = await self.fontInstancer.fontSourcesInstancer
         sources = await self.validatedInput.getSources()
 
@@ -645,13 +655,16 @@ class Instantiate(BaseMoveDefaultLocation):
 class TrimAxes(BaseFilter):
     axes: dict[str, dict[str, Any]]
 
-    @async_cached_property
-    async def _trimmedAxesAndSourceRanges(self):
+    @async_cached_property[tuple[Axes, dict[str, AxisRange]]]
+    async def _trimmedAxesAndSourceRanges(self) -> tuple[Axes, dict[str, AxisRange]]:
         axes = await self.validatedInput.getAxes()
-        trimmedAxes = []
+        trimmedAxes: list[FontAxis | DiscreteFontAxis] = []
         sourceRanges = {}
 
         for axis in axes.axes:
+            if isinstance(axis, DiscreteFontAxis):
+                raise TypeError("Discrete axes are not yt supported in trim-axes")
+
             trimmedAxis = deepcopy(axis)
             trimmedAxes.append(trimmedAxis)
 
@@ -685,7 +698,7 @@ class TrimAxes(BaseFilter):
                 )
 
             if trimmedAxis.mapping:
-                mapping = dict(trimmedAxis.mapping)
+                mapping = {a: b for a, b in trimmedAxis.mapping}
                 rangeValues = []
                 for userValue in [trimmedAxis.minValue, trimmedAxis.maxValue]:
                     sourceValue = piecewiseLinearMap(userValue, mapping)
@@ -719,8 +732,10 @@ class TrimAxes(BaseFilter):
         trimmedAxes, _ = await self._trimmedAxesAndSourceRanges
         return trimmedAxes
 
-    @async_cached_property
-    async def processedSourcesAndLocations(self) -> dict[str, FontSource]:
+    @async_cached_property[tuple[dict[str, FontSource], dict[str, dict[str, float]]]]
+    async def processedSourcesAndLocations(
+        self,
+    ) -> tuple[dict[str, FontSource], dict[str, dict[str, float]]]:
         instancer = await self.fontInstancer.fontSourcesInstancer
         sources = await self.validatedInput.getSources()
 
@@ -823,7 +838,9 @@ def trimLocation(
     return newLocation
 
 
-def updateFontSources(instancer, newLocations, remainingFontAxisNames=None):
+def updateFontSources(
+    instancer, newLocations, remainingFontAxisNames=None
+) -> tuple[dict[str, FontSource], dict[str, dict[str, float]]]:
     axisNames = instancer.fontAxisNames
     sources = instancer.fontSources
     sourceIdsByLocation = instancer.sourceIdsByLocationDense
@@ -835,7 +852,7 @@ def updateFontSources(instancer, newLocations, remainingFontAxisNames=None):
         {locationToTuple(filterLocation(loc, axisNames)) for loc in newLocations}
     )
 
-    newSources = {}
+    newSources: dict[str, FontSource] = {}
     instanceLocations = {}
 
     for locationTuple in locationTuples:
