@@ -2,54 +2,6 @@
 "fontInfo": {
 "familyName": "DemoAvar2"
 },
-"axes": {
-"mappings": [
-{
-"description": "Default mapping",
-"groupDescription": "Mappings group one",
-"inputLocation": {
-"Diagonal": 0
-},
-"outputLocation": {
-"Horizontal": 0,
-"Vertical": 0
-}
-},
-{
-"description": null,
-"groupDescription": "Mappings group one",
-"inputLocation": {
-"Diagonal": 25
-},
-"outputLocation": {
-"Horizontal": 0,
-"Vertical": 33
-}
-},
-{
-"description": null,
-"groupDescription": "Mappings group one",
-"inputLocation": {
-"Diagonal": 75
-},
-"outputLocation": {
-"Horizontal": 100,
-"Vertical": 67
-}
-},
-{
-"description": null,
-"groupDescription": "Mappings group one",
-"inputLocation": {
-"Diagonal": 100
-},
-"outputLocation": {
-"Horizontal": 100,
-"Vertical": 100
-}
-}
-]
-},
 "sources": {
 "7505d64a": {
 "name": "default",
