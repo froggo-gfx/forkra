@@ -1,4 +1,4 @@
-import { CrossAxisMapping } from "@fontra/core/cross-axis-mapping.js";
+import { CrossAxisMapper } from "@fontra/core/cross-axis-mapper.js";
 import { expect } from "chai";
 import { parametrize } from "./test-support.js";
 
@@ -61,20 +61,20 @@ describe("CrossAxisMapping Tests", () => {
   ];
 
   parametrize("CrossAxisMapping.mapLocation", testData, (testItem) => {
-    const mapper = new CrossAxisMapping(axes, mappings);
+    const mapper = new CrossAxisMapper(axes, mappings);
     expect(mapper.mapLocation(testItem.inputLocation)).to.deep.equal(
       testItem.outputLocation
     );
   });
 
   it("Test empty mappings", () => {
-    const mapper = new CrossAxisMapping(axes, []);
+    const mapper = new CrossAxisMapper(axes, []);
     const loc = { a: 12, b: 31 };
     expect(mapper.mapLocation(loc)).to.deep.equal(loc);
   });
 
   it("Test undefined mappings", () => {
-    const mapper = new CrossAxisMapping(axes, undefined);
+    const mapper = new CrossAxisMapper(axes, undefined);
     const loc = { a: 12, b: 31 };
     expect(mapper.mapLocation(loc)).to.deep.equal(loc);
   });
@@ -92,7 +92,7 @@ describe("CrossAxisMapping Tests", () => {
       },
     ];
 
-    const mapper = new CrossAxisMapping(axes, mappings);
+    const mapper = new CrossAxisMapper(axes, mappings);
     expect(mapper.mapLocation({})).to.deep.equal({ a: 0, b: 0 });
     expect(mapper.mapLocation({ a: 50 })).to.deep.equal({ a: 50, b: 0 });
     expect(mapper.mapLocation({ a: 100 })).to.deep.equal({ a: 100, b: 0 });
@@ -106,7 +106,7 @@ describe("CrossAxisMapping Tests", () => {
   });
 
   it("Test invalid mappings", () => {
-    const mapper = new CrossAxisMapping(axes, [
+    const mapper = new CrossAxisMapper(axes, [
       {
         inputLocation: {},
         outputLocation: {},

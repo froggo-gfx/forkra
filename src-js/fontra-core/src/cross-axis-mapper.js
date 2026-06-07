@@ -9,7 +9,7 @@ import {
   unnormalizeLocation,
 } from "./var-model.js";
 
-export class CrossAxisMapping {
+export class CrossAxisMapper {
   constructor(fontAxesSourceSpace, mappings) {
     this.fontAxesSourceSpace = fontAxesSourceSpace;
     this.mappings = mappings;
