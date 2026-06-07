@@ -1,0 +1,80 @@
+{
+"fontInfo": {
+"familyName": "DemoAvar2"
+},
+"axes": {
+"mappings": [
+{
+"description": "Default mapping",
+"groupDescription": "Mappings group one",
+"inputLocation": {
+"Diagonal": 0
+},
+"outputLocation": {
+"Horizontal": 0,
+"Vertical": 0
+}
+},
+{
+"description": null,
+"groupDescription": "Mappings group one",
+"inputLocation": {
+"Diagonal": 25
+},
+"outputLocation": {
+"Horizontal": 0,
+"Vertical": 33
+}
+},
+{
+"description": null,
+"groupDescription": "Mappings group one",
+"inputLocation": {
+"Diagonal": 75
+},
+"outputLocation": {
+"Horizontal": 100,
+"Vertical": 67
+}
+},
+{
+"description": null,
+"groupDescription": "Mappings group one",
+"inputLocation": {
+"Diagonal": 100
+},
+"outputLocation": {
+"Horizontal": 100,
+"Vertical": 100
+}
+}
+]
+},
+"sources": {
+"7505d64a": {
+"name": "default",
+"lineMetricsHorizontalLayout": {
+"ascender": {
+"value": 750,
+"zone": 16
+},
+"capHeight": {
+"value": 750,
+"zone": 16
+},
+"xHeight": {
+"value": 500,
+"zone": 16
+},
+"descender": {
+"value": -250,
+"zone": -16
+},
+"baseline": {
+"value": 0,
+"zone": -16
+}
+}
+}
+}
+}
