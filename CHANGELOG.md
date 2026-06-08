@@ -4,6 +4,7 @@
 
 ### Improvements
 
+[fontra-workflow] Add a `drop-kerning` filter. [PR 2622](https://github.com/fontra/fontra/pull/2622)
 [fontra-pak] Fix "check for updates" functionality. [fontra-pak PR 252](https://github.com/fontra/fontra-pak/pull/252)
 
 ## 2026-06-08 [version 2026.6.1]
