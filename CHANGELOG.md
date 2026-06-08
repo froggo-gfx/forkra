@@ -1,5 +1,11 @@
 # Changelog for Fontra
 
+## 2026-06-?? [version 2026.6.2]
+
+### Improvements
+
+[fontra-pak] Fix "check for updates" functionality. [fontra-pak PR 252](https://github.com/fontra/fontra-pak/pull/252)
+
 ## 2026-06-08 [version 2026.6.1]
 
 ### Improvements
