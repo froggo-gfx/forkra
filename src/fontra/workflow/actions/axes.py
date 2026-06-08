@@ -480,6 +480,7 @@ class BaseMoveDefaultLocation(BaseFilter):
             originalDefaultSourceLocation,
             newDefaultSourceLocation,
             allAxisNames,
+            self._allowFullInstantiateShortcut(),
         )
 
         remainingAxisNames = {axis.name for axis in (await self.processedAxes).axes} | {
@@ -510,7 +511,9 @@ class BaseMoveDefaultLocation(BaseFilter):
             originalDefaultSourceLocation,
             newDefaultSourceLocation,
             self.fontInstancer.fontAxisNames,
+            self._allowFullInstantiateShortcut(),
         )
+
         newLocations = self._filterNewLocations(
             newLocations, await self.newDefaultSourceLocation
         )
@@ -542,6 +545,9 @@ class BaseMoveDefaultLocation(BaseFilter):
     def _shouldApplyCrossAxisMappings(self):
         return False
 
+    def _allowFullInstantiateShortcut(self):
+        return False
+
     def _filterAxisList(self, axes):
         raise NotImplementedError()
 
@@ -557,7 +563,13 @@ def moveDefaultLocations(
     originalDefaultSourceLocation,
     newDefaultSourceLocation,
     allAxisNames,
+    allowFullInstantiateShortcut=False,
 ):
+    if allowFullInstantiateShortcut and set(originalDefaultSourceLocation) <= set(
+        newDefaultSourceLocation
+    ):
+        return [newDefaultSourceLocation]
+
     movingAxisNames = set(newDefaultSourceLocation)
     interactingAxisNames = set()
 
@@ -644,6 +656,9 @@ class Instantiate(BaseMoveDefaultLocation):
 
     def _shouldApplyCrossAxisMappings(self):
         return self.applyCrossAxisMappings
+
+    def _allowFullInstantiateShortcut(self):
+        return True
 
     def _getDefaultUserLocation(self):
         return self.location
