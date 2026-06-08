@@ -38,9 +38,10 @@ export class CrossAxisMappingPanel extends BaseInfoPanel {
   async setupUI(scrollToLastItem = false) {
     const mappings = this.fontController.axes.mappings;
 
+    // Map to source space and filter out discrete axes
     this.fontAxesSourceSpace = mapAxesFromUserSpaceToSourceSpace(
       this.fontController.axes.axes
-    );
+    ).filter((axis) => axis.minValue !== undefined);
 
     const container = html.div({
       style: "display: grid; gap: 0.5em;",
