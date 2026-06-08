@@ -1,5 +1,11 @@
 # Changelog for Fontra
 
+## 2026-06-08 [version 2026.6.1]
+
+### Improvements
+
+- [fontra-workflow] Improve performance of full instantiation, especially when there are many axes. [PR 2621](https://github.com/fontra/fontra/pull/2621)
+
 ## 2026-06-07 [version 2026.6.0]
 
 ### Improvements
