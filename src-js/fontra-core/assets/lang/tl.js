@@ -116,6 +116,7 @@ export const strings = {
   "cross-axis-mapping.groupDescription": "Paglalarawan ng grupo",
   "cross-axis-mapping.header.inputLocation": "Lokasyon ng Pag-input",
   "cross-axis-mapping.header.outputLocation": "Lokasyon ng Paglabas",
+  "cross-axis-mapping.inactive": "Inactive",
   "cross-axis-mapping.new": "Bagong pagmamapa ng cross-axis",
   "cross-axis-mapping.title": "Pagmamapa ng cross-axis",
   "cross-axis-mapping.undo.add": "magdagdag ng cross-axis mapping",

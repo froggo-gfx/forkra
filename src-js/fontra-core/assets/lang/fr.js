@@ -115,6 +115,7 @@ export const strings = {
   "cross-axis-mapping.groupDescription": "Description de groupe",
   "cross-axis-mapping.header.inputLocation": "Localisation d'entrée ",
   "cross-axis-mapping.header.outputLocation": "Localisation de sortie",
+  "cross-axis-mapping.inactive": "Inactive",
   "cross-axis-mapping.new": "New cross-axis mapping",
   "cross-axis-mapping.title": "Cross-axis mapping",
   "cross-axis-mapping.undo.add": "add cross-axis mapping",

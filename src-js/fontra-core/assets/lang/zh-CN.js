@@ -115,6 +115,7 @@ export const strings = {
   "cross-axis-mapping.groupDescription": "分组描述",
   "cross-axis-mapping.header.inputLocation": "输入位置",
   "cross-axis-mapping.header.outputLocation": "输出位置",
+  "cross-axis-mapping.inactive": "Inactive",
   "cross-axis-mapping.new": "新建跨轴映射",
   "cross-axis-mapping.title": "跨轴映射",
   "cross-axis-mapping.undo.add": "添加跨轴映射",
