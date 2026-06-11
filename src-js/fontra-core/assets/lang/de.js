@@ -116,6 +116,7 @@ export const strings = {
   "cross-axis-mapping.groupDescription": "Gruppen Bezeichnung",
   "cross-axis-mapping.header.inputLocation": "Input Location",
   "cross-axis-mapping.header.outputLocation": "Output Location",
+  "cross-axis-mapping.inactive": "Inactive",
   "cross-axis-mapping.new": "Neues achsübergreifendes Mapping erstellen",
   "cross-axis-mapping.title": "Achsübergreifendes Mapping",
   "cross-axis-mapping.undo.add": "achsübergreifendes Mapping hinzufügen",

@@ -92,6 +92,7 @@ GLYPH_SOURCE_CUSTOM_DATA_LIB_KEY = "xyz.fontra.glyph.source.customData"
 LINE_METRICS_HOR_ZONES_KEY = "xyz.fontra.lineMetricsHorizontalLayout.zones"
 GLYPH_NOTE_LIB_KEY = "fontra.glyph.note"
 RF_GUIDELINE_LOCK_LIB_PREFIX = "com.typemytype.robofont.guideline.locked."
+CROSS_AXIS_MAPPING_INFO_LIB_KEY = "xyz.fontra.cross-axis-mapping-info"
 
 
 defaultUFOInfoAttrs = {
@@ -407,14 +408,20 @@ class DesignspaceBackend(WatchableBackend, WritableBaseBackend):
             defaultLocation[dsAxis.name] = dsAxis.map_forward(dsAxis.default)
         self.axes = axes
 
+        crossAxisMappingInactive = {
+            info["index"]: info.get("inactive", False)
+            for info in self.dsDoc.lib.get(CROSS_AXIS_MAPPING_INFO_LIB_KEY, [])
+        }
+
         self.axisMappings = [
             CrossAxisMapping(
                 description=mapping.description,
                 groupDescription=mapping.groupDescription,
                 inputLocation=dict(mapping.inputLocation),
                 outputLocation=dict(mapping.outputLocation),
+                inactive=crossAxisMappingInactive.get(index, False),
             )
-            for mapping in self.dsDoc.axisMappings
+            for index, mapping in enumerate(self.dsDoc.axisMappings)
         ]
 
         self.axisNames = set(defaultLocation)
@@ -1235,13 +1242,21 @@ class DesignspaceBackend(WatchableBackend, WritableBaseBackend):
 
             self.dsDoc.addAxisDescriptor(**axisParameters)
 
-        for mapping in axes.mappings:
+        crossAxisMappingInfo = []
+
+        for index, mapping in enumerate(axes.mappings):
             self.dsDoc.addAxisMappingDescriptor(
                 description=mapping.description,
                 groupDescription=mapping.groupDescription,
                 inputLocation=mapping.inputLocation,
                 outputLocation=mapping.outputLocation,
             )
+            if mapping.inactive:
+                crossAxisMappingInfo.append({"index": index, "inactive": True})
+
+        storeInDict(
+            self.dsDoc.lib, CROSS_AXIS_MAPPING_INFO_LIB_KEY, crossAxisMappingInfo
+        )
 
         self.updateAxisInfo()
         self._writeDesignSpaceDocument()

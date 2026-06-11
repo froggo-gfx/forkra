@@ -116,6 +116,7 @@ export const strings = {
   "cross-axis-mapping.groupDescription": "グループ説明",
   "cross-axis-mapping.header.inputLocation": "入力ロケーション",
   "cross-axis-mapping.header.outputLocation": "出力ロケーション",
+  "cross-axis-mapping.inactive": "Inactive",
   "cross-axis-mapping.new": "新しい交差補完軸マッピングを追加",
   "cross-axis-mapping.title": "交差補完軸マッピング",
   "cross-axis-mapping.undo.add": "交差補完軸マッピングを追加",
