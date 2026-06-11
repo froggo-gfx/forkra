@@ -15,7 +15,7 @@ export class CrossAxisMapper {
     this.fontAxesSourceSpace = fontAxesSourceSpace.filter(
       (axis) => axis.minValue !== undefined
     );
-    this.mappings = mappings;
+    this.mappings = mappings.filter((mapping) => !mapping.inactive);
     if (mappings?.length) {
       this._setupModel();
     }
