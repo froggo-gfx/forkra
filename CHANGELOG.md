@@ -4,9 +4,10 @@
 
 ### Improvements
 
-[cross-axis-mappings] Improve behavior in the presence of discrete axes, by ignoring them. [Issue 2623](https://github.com/fontra/fontra/issues/2623), [PR 2624](https://github.com/fontra/fontra/pull/2624), [PR 2625](https://github.com/fontra/fontra/pull/2625)
-[fontra-workflow] Add a `drop-kerning` filter. [PR 2622](https://github.com/fontra/fontra/pull/2622)
-[fontra-pak] Fix "check for updates" functionality. [fontra-pak PR 252](https://github.com/fontra/fontra-pak/pull/252)
+- [cross-axis-mappings] Add checkbox to deactivate individual mappings. [PR 2627](https://github.com/fontra/fontra/pull/2627)
+- [cross-axis-mappings] Improve behavior in the presence of discrete axes, by ignoring them. [Issue 2623](https://github.com/fontra/fontra/issues/2623), [PR 2624](https://github.com/fontra/fontra/pull/2624), [PR 2625](https://github.com/fontra/fontra/pull/2625)
+- [fontra-workflow] Add a `drop-kerning` filter. [PR 2622](https://github.com/fontra/fontra/pull/2622)
+- [fontra-pak] Fix "check for updates" functionality. [fontra-pak PR 252](https://github.com/fontra/fontra-pak/pull/252)
 
 ## 2026-06-08 [version 2026.6.1]
 
