@@ -1,5 +1,11 @@
 # Changelog for Fontra
 
+## 2026-06-15 [version 2026.6.3]
+
+Fixes
+
+- Fix erratic behavior when .fontra data is stored in a folder that is managed by iCloud. [Issue 2626](https://github.com/fontra/fontra/issues/2626), [PR 2630](https://github.com/fontra/fontra/pull/2630)
+
 ## 2026-06-11 [version 2026.6.2]
 
 ### Improvements
