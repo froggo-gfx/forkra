@@ -1,5 +1,11 @@
 # Changelog for Fontra
 
+## 2026-06-?? [version 2026.6.4]
+
+Fixes
+
+- Work around a problem with dead-key text input on Chromium browsers on Windows. [Issue 2628](https://github.com/fontra/fontra/issues/2628), [PR 2631](https://github.com/fontra/fontra/pull/2631)
+
 ## 2026-06-15 [version 2026.6.3]
 
 Fixes
