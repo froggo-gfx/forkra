@@ -13,7 +13,7 @@ authors = [
 keywords = ["font", "fonts"]
 license = {text = "GNU General Public License v3"}
 dependencies = [
-    "aiohttp>=3.14.0",
+    "aiohttp>=3.14.1",
     "cattrs>=23.1.2",
     "fonttools[ufo,unicode,woff]>=4.63.0",
     "watchfiles>=1.2.0",
