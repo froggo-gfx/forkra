@@ -8,6 +8,7 @@
 
 ### Improvements
 
+- [browser] Keep forward history when using the browser back button. [PR 2660](https://github.com/fontra/fontra/pull/2660)
 - Make page/view titles more consistent, remove "Fontra" prefixes. [Issue 2650](https://github.com/fontra/fontra/issues/2650), [PR 2657](https://github.com/fontra/fontra/pull/2657)
 
 ### Fixes
