@@ -162,7 +162,10 @@ export class EditorController extends ViewController {
     this.sceneSettingsController.addKeyListener(
       [...persistentSceneSettingsKeys, "glyphLocation"],
       (event) => {
-        if (event.senderInfo?.senderID !== this && !event.senderInfo?.adjustViewBox) {
+        if (
+          !event.senderInfoStack.find((senderInfo) => senderInfo.senderID === this) &&
+          !event.senderInfo?.adjustViewBox
+        ) {
           this.updateWindowLocation(); // scheduled with delay
         }
       }
