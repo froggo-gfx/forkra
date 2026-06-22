@@ -7,6 +7,7 @@ export type Event<T, K extends keyof T> = {
   newValue: T[K];
   oldValue: T[K];
   senderInfo: any;
+  senderInfoStack: any[];
 };
 
 export type Listener<T> = (event: Event<T, keyof T>) => void;
@@ -149,10 +150,20 @@ export class ObservableController<T extends {}> {
     senderInfo?: any
   ) {
     // Schedule the calls in the event loop rather than call immediately
-    if (!senderInfo && this._senderInfoStack.length) {
+    const senderInfoStack = Array.from(this._senderInfoStack);
+    if (!senderInfo && senderInfoStack.length) {
       senderInfo = this._senderInfoStack.at(-1);
+    } else if (senderInfo) {
+      senderInfoStack.push(senderInfo);
     }
-    const event: Event<T, K> = { key, newValue, oldValue, senderInfo };
+
+    const event: Event<T, K> = {
+      key,
+      newValue,
+      oldValue,
+      senderInfo,
+      senderInfoStack,
+    };
     for (const item of chain(this._generalListeners, this._keyListeners[key] || [])) {
       if (item.immediate) {
         item.listener(event);
