@@ -105,6 +105,10 @@ const PASTE_BEHAVIOR_REPLACE = "replace";
 const PASTE_BEHAVIOR_ADD = "add";
 
 export class EditorController extends ViewController {
+  static titlePattern(displayName) {
+    return `Glyph Editor — ${displayName}`;
+  }
+
   constructor(font, projectIdentifier) {
     super(font, projectIdentifier);
     const canvas = document.querySelector("#edit-canvas");
