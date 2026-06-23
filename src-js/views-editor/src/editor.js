@@ -269,6 +269,13 @@ export class EditorController extends ViewController {
     window.addEventListener("keydown", (event) => this.keyDownHandler(event));
     window.addEventListener("keyup", (event) => this.keyUpHandler(event));
 
+    this.canvasController.canvas.addEventListener("pointerdown", (event) =>
+      this.pointerDownHandler(event)
+    );
+    this.canvasController.canvas.addEventListener("pointerup", (event) =>
+      this.pointerUpHandler(event)
+    );
+
     this.enteredText = "";
     this.updateWindowLocation = scheduleCalls(
       (event) => this._updateWindowLocation(),
@@ -3114,6 +3121,39 @@ export class EditorController extends ViewController {
     }
     const glyphInfo = this.sceneController.glyphInfoFromGlyphName(glyphName);
     this.insertGlyphInfos([glyphInfo], where, true);
+  }
+
+  pointerDownHandler(event) {
+    if (
+      event.button !== 1 ||
+      event.altKey ||
+      event.shitKey ||
+      event.ctrlKey ||
+      event.metaKey
+    ) {
+      return;
+    }
+
+    this.canvasController.canvas.setPointerCapture(event.pointerId);
+
+    this.savedSelectedToolIdentifier = this.selectedToolIdentifier;
+    this.setSelectedTool("hand-tool");
+  }
+
+  pointerUpHandler(event) {
+    if (
+      event.button !== 1 ||
+      event.altKey ||
+      event.shitKey ||
+      event.ctrlKey ||
+      event.metaKey
+    ) {
+      return;
+    }
+
+    this.canvasController.canvas.releasePointerCapture(event.pointerId);
+
+    this.setSelectedTool(this.savedSelectedToolIdentifier);
   }
 
   keyUpHandler(event) {
