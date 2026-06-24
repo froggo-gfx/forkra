@@ -37,6 +37,7 @@ import { labeledCheckbox, labeledTextInput, pickFile } from "@fontra/core/ui-uti
 import {
   commandKeyProperty,
   enumerate,
+  eventIsCausedByWritingURLFragment,
   fetchJSON,
   hyphenatedToCamelCase,
   hyphenatedToLabel,
@@ -275,8 +276,27 @@ export class EditorController extends ViewController {
       200
     );
 
+    // The "popstate" event fires when the active history entry changes.
+    //
+    // We need to listen for this event so we can load the view state from
+    // the URL fragment, since the document does not reload if all that is
+    // different between the previous URL and the new one is the fragment.
     window.addEventListener("popstate", (event) => {
-      this.setupFromWindowLocation();
+      // When we write the URL fragment from our own code, with a call to our
+      // `writeObjectToURLFragment` function, this will also trigger the event.
+      //
+      // I'm not entirely sure that is what should happen based on the
+      // spec, but all 3 major browsers do it, so maybe it is correct.
+      //
+      // Regardless, we need to differentiate between a `popstate` caused by
+      // the user navigating with the forward/back buttons in their browser
+      // and one caused by us writing the URL fragment.
+      //
+      // We only need to run the setup function when it *wasn't* us who changed
+      // the URL (since if we did then we should already be in the right state).
+      if (!eventIsCausedByWritingURLFragment()) {
+        this.setupFromWindowLocation();
+      }
     });
 
     this.updateWithDelay();
