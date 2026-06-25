@@ -362,47 +362,29 @@ describe("Path Functions tests", () => {
     }
   );
 
+  function testContour(type) {
+    return {
+      points: [
+        { x: 0, y: 0 },
+        { x: 0, y: 60, type: type },
+        { x: 40, y: 100, type: type },
+        { x: 100, y: 100 },
+      ],
+      isClosed: false,
+    };
+  }
+
   parametrize(
     "convertCurveType tests",
     [
       {
-        path: [
-          {
-            points: [
-              { x: 0, y: 0 },
-              { x: 0, y: 60, type: "quad" },
-              { x: 40, y: 100, type: "quad" },
-              { x: 100, y: 100 },
-            ],
-            isClosed: false,
-          },
-        ],
+        path: [testContour("quad")],
         pointIndices: [1],
         numQuadraticOffCurvePoints: 2,
-        expectedPath: [
-          {
-            points: [
-              { x: 0, y: 0 },
-              { x: 0, y: 60, type: "quad" },
-              { x: 40, y: 100, type: "quad" },
-              { x: 100, y: 100 },
-            ],
-            isClosed: false,
-          },
-        ],
+        expectedPath: [testContour("quad")],
       },
       {
-        path: [
-          {
-            points: [
-              { x: 0, y: 0 },
-              { x: 0, y: 60, type: "quad" },
-              { x: 40, y: 100, type: "quad" },
-              { x: 100, y: 100 },
-            ],
-            isClosed: false,
-          },
-        ],
+        path: [testContour("quad")],
         pointIndices: [1],
         numQuadraticOffCurvePoints: null,
         expectedPath: [
@@ -418,17 +400,7 @@ describe("Path Functions tests", () => {
         ],
       },
       {
-        path: [
-          {
-            points: [
-              { x: 0, y: 0 },
-              { x: 0, y: 60, type: "cubic" },
-              { x: 40, y: 100, type: "cubic" },
-              { x: 100, y: 100 },
-            ],
-            isClosed: false,
-          },
-        ],
+        path: [testContour("cubic")],
         pointIndices: [1],
         numQuadraticOffCurvePoints: 2,
         expectedPath: [
@@ -444,17 +416,7 @@ describe("Path Functions tests", () => {
         ],
       },
       {
-        path: [
-          {
-            points: [
-              { x: 0, y: 0 },
-              { x: 0, y: 60, type: "cubic" },
-              { x: 40, y: 100, type: "cubic" },
-              { x: 100, y: 100 },
-            ],
-            isClosed: false,
-          },
-        ],
+        path: [testContour("cubic")],
         pointIndices: [1],
         numQuadraticOffCurvePoints: 3,
         expectedPath: [
