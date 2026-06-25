@@ -384,6 +384,12 @@ describe("Path Functions tests", () => {
         expectedPath: [testContour("quad")],
       },
       {
+        path: [testContour("cubic")],
+        pointIndices: [1],
+        numQuadraticOffCurvePoints: null,
+        expectedPath: [testContour("cubic")],
+      },
+      {
         path: [testContour("quad")],
         pointIndices: [1],
         numQuadraticOffCurvePoints: null,
@@ -404,6 +410,32 @@ describe("Path Functions tests", () => {
         pointIndices: [1],
         numQuadraticOffCurvePoints: 2,
         expectedPath: [
+          {
+            points: [
+              { x: 0, y: 0 },
+              { x: 0, y: 45, type: "quad" },
+              { x: 55, y: 100, type: "quad" },
+              { x: 100, y: 100 },
+            ],
+            isClosed: false,
+          },
+        ],
+      },
+      {
+        path: [smallRectPath[0], testContour("cubic"), testContour("cubic")],
+        pointIndices: [5, 9],
+        numQuadraticOffCurvePoints: 2,
+        expectedPath: [
+          smallRectPath[0],
+          {
+            points: [
+              { x: 0, y: 0 },
+              { x: 0, y: 45, type: "quad" },
+              { x: 55, y: 100, type: "quad" },
+              { x: 100, y: 100 },
+            ],
+            isClosed: false,
+          },
           {
             points: [
               { x: 0, y: 0 },
