@@ -1,6 +1,6 @@
 # Changelog for Fontra
 
-## 2026-06-?? [version 2026.6.4]
+## 2026-06-26 [version 2026.6.4]
 
 ### New features
 
