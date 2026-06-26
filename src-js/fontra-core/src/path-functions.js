@@ -1200,6 +1200,38 @@ export function convertCurveType(
   selectedPointIndices,
   numQuadraticOffCurvePoints
 ) {
+  const segments = convertCurveTypeSegments(
+    path,
+    selectedPointIndices,
+    numQuadraticOffCurvePoints
+  );
+
+  if (numQuadraticOffCurvePoints) {
+    convertSegmentsToQuadratic(path, segments, numQuadraticOffCurvePoints);
+  } else {
+    convertSegmentsToCubic(path, segments);
+  }
+
+  return path;
+}
+
+export function canConvertCurveType(
+  path,
+  selectedPointIndices,
+  numQuadraticOffCurvePoints
+) {
+  return !!convertCurveTypeSegments(
+    path,
+    selectedPointIndices,
+    numQuadraticOffCurvePoints
+  ).length;
+}
+
+function convertCurveTypeSegments(
+  path,
+  selectedPointIndices,
+  numQuadraticOffCurvePoints
+) {
   const sel = new Set(selectedPointIndices);
   const sourceSegmentTypes = numQuadraticOffCurvePoints
     ? ["cubic"]
@@ -1230,13 +1262,7 @@ export function convertCurveType(
 
   segments.reverse(); // Change from the end, so we don't invalidate point indices
 
-  if (numQuadraticOffCurvePoints) {
-    convertSegmentsToQuadratic(path, segments, numQuadraticOffCurvePoints);
-  } else {
-    convertSegmentsToCubic(path, segments);
-  }
-
-  return path;
+  return segments;
 }
 
 function convertSegmentsToCubic(path, segments) {
