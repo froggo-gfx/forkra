@@ -1120,6 +1120,13 @@ export class SceneController {
           ),
         actionIdentifier: "action.decompose-component",
       },
+      {
+        title: translate("action-topics.convert-curves"),
+        getItems: () => [
+          { actionIdentifier: "action.glyph.convert-curves-to-cubic" },
+          { actionIdentifier: "action.glyph.convert-curves-to-quadratic" },
+        ],
+      },
       { actionIdentifier: "action.glyph.add-background-image" },
       {
         title: () =>

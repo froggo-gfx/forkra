@@ -16,6 +16,8 @@ import * as html from "@fontra/core/html-utils.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import {
+  canConvertCurveType,
+  convertCurveType,
   deleteSelectedPoints,
   filterPathByPointIndices,
 } from "@fontra/core/path-functions.js";
@@ -555,6 +557,21 @@ export class EditorController extends ViewController {
 
     {
       const topic = "0035-action-topics.menu.glyph";
+
+      registerAction(
+        "action.glyph.convert-curves-to-cubic",
+        { topic },
+        () => this.doConvertCurveType(null),
+        () => this.canConvertCurveType(null)
+      );
+
+      registerAction(
+        "action.glyph.convert-curves-to-quadratic",
+        { topic },
+        () => this.doConvertCurveType(2),
+        () => this.canConvertCurveType(2)
+      );
+
       registerAction(
         "action.glyph.add-background-image",
         { topic },
@@ -2956,6 +2973,40 @@ export class EditorController extends ViewController {
       // TODO: Font Guidelines selection
     }
     this.sceneController.selection = newSelection;
+  }
+
+  async doConvertCurveType(numQuadraticOffCurvePoints) {
+    const { point: pointSelection } = parseSelection(this.sceneController.selection);
+
+    await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        if (pointSelection) {
+          convertCurveType(layerGlyph.path, pointSelection, numQuadraticOffCurvePoints);
+        }
+      }
+      this.sceneController.selection = new Set();
+      return translate(
+        !numQuadraticOffCurvePoints
+          ? "action.glyph.convert-curves-to-cubic"
+          : "action.glyph.convert-curves-to-quadratic"
+      );
+    });
+  }
+
+  canConvertCurveType(numQuadraticOffCurvePoints) {
+    const { point: pointSelection } = parseSelection(this.sceneController.selection);
+
+    if (!pointSelection) {
+      return false;
+    }
+
+    const path = this.sceneModel.getSelectedPositionedGlyph()?.glyph.instance.path;
+
+    if (!path) {
+      return false;
+    }
+
+    return canConvertCurveType(path, pointSelection, numQuadraticOffCurvePoints);
   }
 
   doSelectPreviousNextSource(selectPrevious) {
