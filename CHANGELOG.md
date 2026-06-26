@@ -8,6 +8,7 @@
 
 ### Improvements
 
+- [Safari] Work around Safari performance problem with long canvas texts. Found and fixed by Qwerasd [Issue 2654](https://github.com/fontra/fontra/issues/2654), [PR 2665](https://github.com/fontra/fontra/pull/2665)
 - [editor] Make the middle mouse button a shortcut for the hand tool (for panning), as is common in drawing applications. [Issue 2659](https://github.com/fontra/fontra/issues/2659), [PR 2661](https://github.com/fontra/fontra/pull/2661)
 - [browser] Keep forward history when using the browser back button. [PR 2660](https://github.com/fontra/fontra/pull/2660)
 - Make page/view titles more consistent, remove "Fontra" prefixes. [Issue 2650](https://github.com/fontra/fontra/issues/2650), [PR 2657](https://github.com/fontra/fontra/pull/2657)
