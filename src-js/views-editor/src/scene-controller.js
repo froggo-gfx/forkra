@@ -88,6 +88,8 @@ export const ShowLocationSettings = Object.freeze({
 const MIN_PIX_PER_EM = 5;
 const MAX_PIX_PER_UNIT = 200;
 
+export const numQuadraticOffCurvePointsOptions = [1, 2, 3, 4, 5];
+
 export class SceneController {
   constructor(
     fontController,
@@ -1124,7 +1126,9 @@ export class SceneController {
         title: translate("action-topics.convert-curves"),
         getItems: () => [
           { actionIdentifier: "action.glyph.convert-curves-to-cubic" },
-          { actionIdentifier: "action.glyph.convert-curves-to-quadratic" },
+          ...numQuadraticOffCurvePointsOptions.map((i) => ({
+            actionIdentifier: `action.glyph.convert-curves-to-quadratic-${i}`,
+          })),
         ],
       },
       { actionIdentifier: "action.glyph.add-background-image" },

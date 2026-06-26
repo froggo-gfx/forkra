@@ -75,7 +75,11 @@ import { PenTool } from "./edit-tools-pen.js";
 import { PointerTools } from "./edit-tools-pointer.js";
 import { PowerRulerTool } from "./edit-tools-power-ruler.js";
 import { ShapeTool } from "./edit-tools-shape.js";
-import { SceneController, persistentSceneSettingsKeys } from "./scene-controller.js";
+import {
+  SceneController,
+  numQuadraticOffCurvePointsOptions,
+  persistentSceneSettingsKeys,
+} from "./scene-controller.js";
 import { MIN_SIDEBAR_WIDTH, Sidebar } from "./sidebar.js";
 import {
   allGlyphsCleanVisualizationLayerDefinition,
@@ -565,12 +569,14 @@ export class EditorController extends ViewController {
         () => this.canConvertCurveType(null)
       );
 
-      registerAction(
-        "action.glyph.convert-curves-to-quadratic",
-        { topic },
-        () => this.doConvertCurveType(2),
-        () => this.canConvertCurveType(2)
-      );
+      for (const numQuadraticOffCurvePoints of numQuadraticOffCurvePointsOptions) {
+        registerAction(
+          `action.glyph.convert-curves-to-quadratic-${numQuadraticOffCurvePoints}`,
+          { topic },
+          () => this.doConvertCurveType(numQuadraticOffCurvePoints),
+          () => this.canConvertCurveType(numQuadraticOffCurvePoints)
+        );
+      }
 
       registerAction(
         "action.glyph.add-background-image",
@@ -2988,7 +2994,7 @@ export class EditorController extends ViewController {
       return translate(
         !numQuadraticOffCurvePoints
           ? "action.glyph.convert-curves-to-cubic"
-          : "action.glyph.convert-curves-to-quadratic"
+          : `action.glyph.convert-curves-to-quadratic-${numQuadraticOffCurvePoints}`
       );
     });
   }
