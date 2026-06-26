@@ -3258,9 +3258,9 @@ export class EditorController extends ViewController {
   }
 
   async setupFromWindowLocation() {
-    this.sceneSettingsController.withSenderInfo({ senderID: this }, () =>
-      this._setupFromWindowLocation()
-    );
+    this.sceneSettingsController.withSenderInfo({ senderID: this }, async () => {
+      await this._setupFromWindowLocation();
+    });
   }
 
   async _setupFromWindowLocation() {
