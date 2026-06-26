@@ -1115,14 +1115,6 @@ export class SceneController {
       { actionIdentifier: "action.reverse-contour" },
       { actionIdentifier: "action.set-contour-start" },
       {
-        title: () =>
-          translatePlural(
-            "action.decompose-component",
-            this.contextMenuState.componentSelection?.length
-          ),
-        actionIdentifier: "action.decompose-component",
-      },
-      {
         title: translate("action.glyph.convert-curves"),
         getItems: () => [
           { actionIdentifier: "action.glyph.convert-curves-to-cubic" },
@@ -1130,6 +1122,14 @@ export class SceneController {
             actionIdentifier: `action.glyph.convert-curves-to-quadratic-${i}`,
           })),
         ],
+      },
+      {
+        title: () =>
+          translatePlural(
+            "action.decompose-component",
+            this.contextMenuState.componentSelection?.length
+          ),
+        actionIdentifier: "action.decompose-component",
       },
       { actionIdentifier: "action.glyph.add-background-image" },
       {
