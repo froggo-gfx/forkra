@@ -16,6 +16,8 @@ import * as html from "@fontra/core/html-utils.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import {
+  canConvertCurveType,
+  convertCurveType,
   deleteSelectedPoints,
   filterPathByPointIndices,
 } from "@fontra/core/path-functions.js";
@@ -73,7 +75,11 @@ import { PenTool } from "./edit-tools-pen.js";
 import { PointerTools } from "./edit-tools-pointer.js";
 import { PowerRulerTool } from "./edit-tools-power-ruler.js";
 import { ShapeTool } from "./edit-tools-shape.js";
-import { SceneController, persistentSceneSettingsKeys } from "./scene-controller.js";
+import {
+  SceneController,
+  numQuadraticOffCurvePointsOptions,
+  persistentSceneSettingsKeys,
+} from "./scene-controller.js";
 import { MIN_SIDEBAR_WIDTH, Sidebar } from "./sidebar.js";
 import {
   allGlyphsCleanVisualizationLayerDefinition,
@@ -555,6 +561,23 @@ export class EditorController extends ViewController {
 
     {
       const topic = "0035-action-topics.menu.glyph";
+
+      registerAction(
+        "action.glyph.convert-curves-to-cubic",
+        { topic },
+        () => this.doConvertCurveType(null),
+        () => this.canConvertCurveType(null)
+      );
+
+      for (const numQuadraticOffCurvePoints of numQuadraticOffCurvePointsOptions) {
+        registerAction(
+          `action.glyph.convert-curves-to-quadratic-${numQuadraticOffCurvePoints}`,
+          { topic },
+          () => this.doConvertCurveType(numQuadraticOffCurvePoints),
+          () => this.canConvertCurveType(numQuadraticOffCurvePoints)
+        );
+      }
+
       registerAction(
         "action.glyph.add-background-image",
         { topic },
@@ -2956,6 +2979,40 @@ export class EditorController extends ViewController {
       // TODO: Font Guidelines selection
     }
     this.sceneController.selection = newSelection;
+  }
+
+  async doConvertCurveType(numQuadraticOffCurvePoints) {
+    const { point: pointSelection } = parseSelection(this.sceneController.selection);
+
+    await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        if (pointSelection) {
+          convertCurveType(layerGlyph.path, pointSelection, numQuadraticOffCurvePoints);
+        }
+      }
+      this.sceneController.selection = new Set();
+      return translate(
+        !numQuadraticOffCurvePoints
+          ? "action.glyph.convert-curves-to-cubic"
+          : `action.glyph.convert-curves-to-quadratic-${numQuadraticOffCurvePoints}`
+      );
+    });
+  }
+
+  canConvertCurveType(numQuadraticOffCurvePoints) {
+    const { point: pointSelection } = parseSelection(this.sceneController.selection);
+
+    if (!pointSelection) {
+      return false;
+    }
+
+    const path = this.sceneModel.getSelectedPositionedGlyph()?.glyph.instance.path;
+
+    if (!path) {
+      return false;
+    }
+
+    return canConvertCurveType(path, pointSelection, numQuadraticOffCurvePoints);
   }
 
   doSelectPreviousNextSource(selectPrevious) {
