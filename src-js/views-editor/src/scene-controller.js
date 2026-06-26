@@ -456,7 +456,7 @@ export class SceneController {
       }
 
       if (waitKeyBefore) {
-        await this.sceneSettingsController.waitForKeyChange(waitKeyBefore);
+        await this.sceneSettingsController.waitForKeyChange(waitKeyBefore, false, 20);
       }
 
       if (
@@ -480,7 +480,7 @@ export class SceneController {
       }
 
       if (waitKeyAfter) {
-        await this.sceneSettingsController.waitForKeyChange(waitKeyAfter);
+        await this.sceneSettingsController.waitForKeyChange(waitKeyAfter, false, 20);
       }
     }
   }
