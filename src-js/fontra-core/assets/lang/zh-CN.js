@@ -39,7 +39,7 @@ export const strings = {
   "action.export-as.woff2": "Webfont (*.woff2)",
   "action.glyph.add-background-image": "添加背景图片…",
   "action.glyph.add-source": "添加源…",
-  "action.glyph.convert-curves": "Convert Selected Curves",
+  "action.glyph.convert-curves": "Convert Curve Type",
   "action.glyph.convert-curves-to-cubic": "To Cubic",
   "action.glyph.convert-curves-to-quadratic-1": "To Quadratic (1 off-curve point)",
   "action.glyph.convert-curves-to-quadratic-2": "To Quadratic (2 off-curve points)",
