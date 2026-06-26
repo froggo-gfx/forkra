@@ -4,6 +4,7 @@
 
 ### New features
 
+- [editor] Add contextual menus for curve type conversion (to cubic, to quadratic). [Issue 151](https://github.com/fontra/fontra/issues/151), [Issue 2662](https://github.com/fontra/fontra/issues/2662), [PR 2666](https://github.com/fontra/fontra/pull/2666)
 - [editor] Use tab key to cycle through the selectable items (points, components, anchors, guidelines). [Issue 2638](https://github.com/fontra/fontra/issues/2638), [PR 2645](https://github.com/fontra/fontra/pull/2645)
 
 ### Improvements
