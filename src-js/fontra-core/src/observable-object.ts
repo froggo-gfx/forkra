@@ -109,13 +109,22 @@ export class ObservableController<T extends {}> {
 
   waitForKeyChange<K extends keyof T>(
     keyOrKeys: K | K[],
-    immediate = false
-  ): Promise<Event<T, keyof T>> {
+    immediate = false,
+    timeout?: number
+  ): Promise<Event<T, keyof T> | null> {
     return new Promise((resolve) => {
       const tempListener: Listener<T> = (event) => {
         this.removeKeyListener(keyOrKeys, tempListener);
+        clearTimeout(timerID);
         resolve(event);
       };
+
+      const timerID = timeout
+        ? setTimeout(() => {
+            this.removeKeyListener(keyOrKeys, tempListener);
+            resolve(null);
+          }, timeout)
+        : undefined;
 
       this.addKeyListener(keyOrKeys, tempListener, immediate);
     });
