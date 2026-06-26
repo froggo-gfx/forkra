@@ -1123,7 +1123,7 @@ export class SceneController {
         actionIdentifier: "action.decompose-component",
       },
       {
-        title: translate("action-topics.convert-curves"),
+        title: translate("action.glyph.convert-curves"),
         getItems: () => [
           { actionIdentifier: "action.glyph.convert-curves-to-cubic" },
           ...numQuadraticOffCurvePointsOptions.map((i) => ({
