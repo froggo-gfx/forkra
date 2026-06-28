@@ -15,7 +15,7 @@
     "./assets/*": "./assets/*"
   },
   "scripts": {
-    "test": "mocha tests --reporter spec"
+    "test": "mocha tests --extension js --extension ts --reporter spec"
   },
   "type": "module",
   "devDependencies": {
