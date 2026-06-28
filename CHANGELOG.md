@@ -1,5 +1,11 @@
 # Changelog for Fontra
 
+## 2026-06-?? [version 2026.6.5]
+
+### Fixes
+
+- [languages] Fix caching behavior for language files (UI strings), to ensure we always see the latest version. [Issue 2668](https://github.com/fontra/fontra/issues/2668), [PR 2669](https://github.com/fontra/fontra/pull/2669)
+
 ## 2026-06-26 [version 2026.6.4]
 
 ### New features
