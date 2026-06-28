@@ -3,9 +3,15 @@ from __future__ import annotations
 import logging
 import pathlib
 from dataclasses import dataclass, field, replace
+from typing import Any, Container
 
 from ...core.async_property import async_cached_property
-from ...core.classes import Kerning, OpenTypeFeatures, VariableGlyph
+from ...core.classes import (
+    ConditionalSubstitutions,
+    Kerning,
+    OpenTypeFeatures,
+    VariableGlyph,
+)
 from ..features import LayoutHandling, subsetFeatures
 from . import ActionError
 from .base import BaseFilter, getActiveSources, registerFilterAction
@@ -27,6 +33,12 @@ class BaseGlyphSubsetter(BaseFilter):
         glyphMap, _ = await self._subsettedGlyphMapAndFeatures
         return subsetKerning(kerning, glyphMap)
 
+    async def processConditionalSubstitutions(
+        self, substitutions: ConditionalSubstitutions
+    ) -> ConditionalSubstitutions:
+        glyphMap, _ = await self._subsettedGlyphMapAndFeatures
+        return subsetConditionalSubstitutions(substitutions, glyphMap)
+
     async def getFeatures(self) -> OpenTypeFeatures:
         _, features = await self._subsettedGlyphMapAndFeatures
         return features
@@ -35,16 +47,23 @@ class BaseGlyphSubsetter(BaseFilter):
         glyphMap, _ = await self._subsettedGlyphMapAndFeatures
         return glyphMap
 
-    @async_cached_property
+    async def processGlyphInfos(self, glyphInfos: dict[str, Any]) -> dict[str, Any]:
+        glyphMap = await self.getGlyphMap()
+        return filterGlyphDict(glyphInfos, glyphMap)
+
+    @async_cached_property[tuple[dict[str, list[int]], OpenTypeFeatures]]
     async def _subsettedGlyphMapAndFeatures(
         self,
     ) -> tuple[dict[str, list[int]], OpenTypeFeatures]:
         inputGlyphMap = await self.inputGlyphMap
         selectedGlyphs = await self._buildSubsettedGlyphSet(inputGlyphMap)
 
+        if LayoutHandling(self.layoutHandling) == LayoutHandling.CLOSURE:
+            selectedGlyphs = await self._conditionalSubstitutionsClosure(selectedGlyphs)
+
         selectedGlyphs, features = await self._featuresClosure(selectedGlyphs)
         selectedGlyphs = await self._componentsClosure(selectedGlyphs)
-        glyphMap = filterGlyphMap(inputGlyphMap, selectedGlyphs)
+        glyphMap = filterGlyphDict(inputGlyphMap, selectedGlyphs)
         return glyphMap, features
 
     async def _buildSubsettedGlyphSet(
@@ -52,6 +71,19 @@ class BaseGlyphSubsetter(BaseFilter):
     ) -> set[str]:
         # Override
         raise NotImplementedError
+
+    async def _conditionalSubstitutionsClosure(
+        self, selectedGlyphs: set[str]
+    ) -> set[str]:
+        substitutions = await self.validatedInput.getConditionalSubstitutions()
+        additionalGlyphs = set()
+
+        for rule in substitutions.rules:
+            inputGlyphNames = selectedGlyphs & set(rule.substitutions)
+            for glyphName in sorted(inputGlyphNames):
+                additionalGlyphs.add(rule.substitutions[glyphName])
+
+        return selectedGlyphs | additionalGlyphs
 
     async def _featuresClosure(
         self, selectedGlyphs
@@ -146,6 +178,30 @@ def subsetGroups(groups, glyphNames):
     return newGroups
 
 
+def subsetConditionalSubstitutions(
+    substitutions: ConditionalSubstitutions, glyphNames: Container[str]
+) -> ConditionalSubstitutions:
+    subsettedRules = [
+        subsetSubstitutionRule(rule, glyphNames) for rule in substitutions.rules
+    ]
+    subsettedRules = [rule for rule in subsettedRules if rule.substitutions]
+
+    return ConditionalSubstitutions(
+        featureTags=list(substitutions.featureTags), rules=subsettedRules
+    )
+
+
+def subsetSubstitutionRule(rule, glyphNames):
+    return replace(
+        rule,
+        substitutions={
+            g1: g2
+            for g1, g2 in rule.substitutions.items()
+            if g1 in glyphNames and g2 in glyphNames
+        },
+    )
+
+
 def getComponentNames(glyph):
     return {
         compo.name
@@ -154,10 +210,10 @@ def getComponentNames(glyph):
     }
 
 
-def filterGlyphMap(glyphMap, glyphNames):
+def filterGlyphDict(glyphMap, glyphNames):
     return {
-        glyphName: codePoints
-        for glyphName, codePoints in glyphMap.items()
+        glyphName: value
+        for glyphName, value in glyphMap.items()
         if glyphName in glyphNames
     }
 

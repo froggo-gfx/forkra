@@ -1,8 +1,8 @@
-import { normalizeRect, rectCenter, validateRect } from "./rectangle.js";
-import { assert, consolidateCalls, isNumber, withSavedState } from "./utils.js";
+import { normalizeRect, rectCenter, validateRect } from "./rectangle.ts";
+import { assert, clamp, consolidateCalls, isNumber, withSavedState } from "./utils.ts";
 
-const MIN_MAGNIFICATION = 0.005;
-const MAX_MAGNIFICATION = 200;
+const DEFAULT_MIN_MAGNIFICATION = 0.005;
+const DEFAULT_MAX_MAGNIFICATION = 200;
 
 export class CanvasController {
   constructor(canvas, magnificationChangedCallback) {
@@ -13,6 +13,9 @@ export class CanvasController {
     this.magnification = 1;
     this.origin = { x: this.canvasWidth / 2, y: 0.85 * this.canvasHeight }; // TODO choose y based on initial canvas height
 
+    this._minMagnification = DEFAULT_MIN_MAGNIFICATION;
+    this._maxMagnification = DEFAULT_MAX_MAGNIFICATION;
+
     this._magnificationChangedCallback = magnificationChangedCallback;
 
     const resizeObserver = new ResizeObserver((entries) => {
@@ -21,6 +24,8 @@ export class CanvasController {
       // console.log('Size changed');
     });
     resizeObserver.observe(this.canvas.parentElement);
+
+    this._setupScrollBlocker();
 
     canvas.addEventListener("wheel", (event) => this.handleWheel(event));
 
@@ -50,6 +55,25 @@ export class CanvasController {
     this.requestUpdate();
   }
 
+  _setupScrollBlocker() {
+    this._initialScrollTarget = null;
+    this._scrollTimerID = null;
+
+    document.addEventListener("wheel", (event) => {
+      clearTimeout(this._scrollTimerID);
+      if (!this._initialScrollTarget) {
+        this._initialScrollTarget = event.target;
+      }
+      this._scrollTimerID = setTimeout(() => {
+        this._initialScrollTarget = null;
+      }, 100);
+    });
+  }
+
+  _shouldBlockScroll(event) {
+    return this._initialScrollTarget && this._initialScrollTarget !== this.canvas;
+  }
+
   get canvasWidth() {
     const w = this.canvas.parentElement.getBoundingClientRect().width;
     assert(isNumber(w));
@@ -71,10 +95,33 @@ export class CanvasController {
     const width = this.canvasWidth;
     const height = this.canvasHeight;
     const scale = this.devicePixelRatio;
-    this.canvas.width = Math.floor(width * scale);
-    this.canvas.height = Math.floor(height * scale);
-    this.canvas.style.width = width + "px";
-    this.canvas.style.height = height + "px";
+
+    // We want to be sure that we have at least enough pixels to cover the
+    // entire area of the canvas, accounting for dpi and browser scaling.
+    //
+    // To do this, we take the ceiling of the CSS pixel width and height
+    // values multiplied by the pixel ratio, which is a number that should
+    // be guaranteed to be equal to or greater than the final number of screen
+    // pixels that the canvas element (or rather its container) takes up.
+    this.canvas.width = Math.ceil(width * scale);
+    this.canvas.height = Math.ceil(height * scale);
+
+    // We then take those numbers and divide them back down by the scale
+    // and tell the browser to display the canvas at that many CSS pixels
+    // wide and tall. This should ensure that there is a 1 to 1 mapping
+    // between pixels in the canvas's data buffer and pixels as displayed
+    // on screen for the user.
+    //
+    // If we didn't do this, and just used the container's size, then the
+    // browser might end up stretching the canvas data very slightly to
+    // make it fit the final size. This isn't ideal but usually isn't
+    // noticeable except in Safari where the scaling is switched to
+    // nearest neighbor if the texture is more than 2K pixels wide,
+    // which can cause a column or row of pixels in the center of
+    // the canvas to be repeated and it's very noticeable.
+    this.canvas.style.width = this.canvas.width / scale + "px";
+    this.canvas.style.height = this.canvas.height / scale + "px";
+
     const parentOffsetX = this.canvas.parentElement.offsetLeft;
     const parentOffsetY = this.canvas.parentElement.offsetTop;
 
@@ -115,6 +162,12 @@ export class CanvasController {
 
   handleWheel(event) {
     event.preventDefault();
+
+    if (this._shouldBlockScroll(event)) {
+      // The scroll didn't start in the canvas: ignore
+      return;
+    }
+
     let { deltaX, deltaY, wheelDeltaX, wheelDeltaY } = event;
     // We try to detect whether the event comes from a "clunky" scroll wheel, one
     // that outputs rather large values for deltaY (this appears to be common on
@@ -157,15 +210,61 @@ export class CanvasController {
     delete this._initialMagnification;
   }
 
+  _clampMagnification() {
+    const oldMagnification = this.magnification;
+    this.magnification = clamp(
+      this.magnification,
+      this._minMagnification,
+      this._maxMagnification
+    );
+
+    if (this.magnification !== oldMagnification) {
+      this._magnificationChangedCallback?.(this.magnification);
+      this.requestUpdate();
+      this._dispatchEvent("viewBoxChanged", "magnification");
+    }
+  }
+
+  set minMagnification(newValue) {
+    // If there's no change then we don't have to do anything.
+    if (newValue == this._minMagnification) {
+      return;
+    }
+
+    this._minMagnification = newValue;
+
+    this._clampMagnification();
+  }
+
+  set maxMagnification(newValue) {
+    // If there's no change then we don't have to do anything.
+    if (newValue == this._maxMagnification) {
+      return;
+    }
+
+    this._maxMagnification = newValue;
+
+    this._clampMagnification();
+  }
+
+  get minMagnification() {
+    return this._minMagnification;
+  }
+
+  get maxMagnification() {
+    return this._maxMagnification;
+  }
+
   _doPinchMagnify(event, zoomFactor) {
     assert(isNumber(zoomFactor));
     const center = this.localPoint({ x: event.pageX, y: event.pageY });
     const prevMagnification = this.magnification;
 
     this.magnification = this.magnification * zoomFactor;
-    this.magnification = Math.min(
-      Math.max(this.magnification, MIN_MAGNIFICATION),
-      MAX_MAGNIFICATION
+    this.magnification = clamp(
+      this.magnification,
+      this.minMagnification,
+      this.maxMagnification
     );
     zoomFactor = this.magnification / prevMagnification;
 
@@ -259,10 +358,10 @@ export class CanvasController {
 
   getProposedViewBoxClampAdjustment(viewBox) {
     const magnification = this._getProposedViewBoxMagnification(viewBox);
-    if (magnification < MIN_MAGNIFICATION) {
-      return magnification / MIN_MAGNIFICATION;
-    } else if (magnification > MAX_MAGNIFICATION) {
-      return magnification / MAX_MAGNIFICATION;
+    if (magnification < this.minMagnification) {
+      return magnification / this.minMagnification;
+    } else if (magnification > this.maxMagnification) {
+      return magnification / this.maxMagnification;
     }
     return 1;
   }

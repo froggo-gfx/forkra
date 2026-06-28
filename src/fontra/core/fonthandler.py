@@ -216,8 +216,12 @@ class FontHandler:
                 value = await self.backend.getAxes()
             case "glyphMap":
                 value = await self.backend.getGlyphMap()
+            case "glyphInfos":
+                value = await self.backend.getGlyphInfos()
             case "customData":
                 value = await self.backend.getCustomData()
+            case "conditionalSubstitutions":
+                value = await self.backend.getConditionalSubstitutions()
             case "unitsPerEm":
                 value = await self.backend.getUnitsPerEm()
             case "features":
@@ -265,6 +269,10 @@ class FontHandler:
         return self.glyphMap
 
     @remoteMethod
+    async def getGlyphInfos(self, *, connection=None):
+        return await self.getData("glyphInfos")
+
+    @remoteMethod
     async def getFontInfo(self, *, connection=None) -> FontInfo:
         return await self.getData("fontInfo")
 
@@ -293,6 +301,10 @@ class FontHandler:
         return await self.getData("customData")
 
     @remoteMethod
+    async def getConditionalSubstitutions(self, *, connection=None):
+        return await self.getData("conditionalSubstitutions")
+
+    @remoteMethod
     async def getMetaInfo(self, *, connection=None):
         return await self.getData("metaInfo", connection=connection)
 
@@ -307,6 +319,16 @@ class FontHandler:
             return None
         return dict(
             type=imageData.type, data=base64.b64encode(imageData.data).decode("ascii")
+        )
+
+    @remoteMethod
+    async def getShaperFontData(self, *, connection=None) -> dict | None:
+        shaperFontData = await self.backend.getShaperFontData()
+        if shaperFontData is None:
+            return None
+        return dict(
+            type=shaperFontData.glyphOrderSorting,
+            data=base64.b64encode(shaperFontData.data).decode("ascii"),
         )
 
     def _getClientData(self, connection, key, default=None):
@@ -588,7 +610,7 @@ def popFirstItem(d):
     return (key, d.pop(key))
 
 
-_tasks = set()
+_tasks: set[asyncio.Task] = set()
 
 
 def taskDoneCallback(task):

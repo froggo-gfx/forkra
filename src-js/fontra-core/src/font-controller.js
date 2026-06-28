@@ -1,18 +1,20 @@
+import { Backend } from "./backend-api.js";
 import { recordChanges } from "./change-recorder.js";
 import {
   applyChange,
+  collectGlyphNames,
   consolidateChanges,
   filterChangePattern,
-  iterChanges,
   matchChangePattern,
 } from "./changes.js";
 import { getClassSchema } from "./classes.js";
 import { getGlyphMapProxy, makeCharacterMapFromGlyphMap } from "./cmap.js";
-import { CrossAxisMapping } from "./cross-axis-mapping.js";
+import { CrossAxisMapper } from "./cross-axis-mapper.js";
 import { FontSourcesInstancer } from "./font-sources-instancer.js";
 import { StaticGlyphController, VariableGlyphController } from "./glyph-controller.js";
 import { KerningController } from "./kerning-controller.js";
 import { LRUCache } from "./lru-cache.js";
+import { ObservableController } from "./observable-object.ts";
 import { setPopFirst } from "./set-ops.js";
 import { TaskPool } from "./task-pool.js";
 import {
@@ -28,7 +30,7 @@ import {
   sleepAsync,
   throttleCalls,
   uniqueID,
-} from "./utils.js";
+} from "./utils.ts";
 import { StaticGlyph, VariableGlyph } from "./var-glyph.js";
 import {
   locationToName,
@@ -66,6 +68,7 @@ export class FontController {
     });
     this.undoStacks = {}; // glyph name -> undo stack
     this.readOnly = true;
+    this._glyphsPromiseCacheChanged = new ObservableController({ counter: 0 });
   }
 
   async initialize(initListener = true) {
@@ -104,6 +107,10 @@ export class FontController {
 
   unsubscribeChanges(pathOrPattern, wantLiveChanges) {
     this.font.unsubscribeChanges(pathOrPattern, wantLiveChanges);
+  }
+
+  addGlyphCacheListener(listener, immediate = false) {
+    this._glyphsPromiseCacheChanged.addListener(listener, immediate);
   }
 
   getRootKeys() {
@@ -153,8 +160,10 @@ export class FontController {
     if (!this._rootObject[key]) {
       const methods = {
         fontInfo: "getFontInfo",
+        glyphInfos: "getGlyphInfos",
         features: "getFeatures",
         kerning: "getKerning",
+        conditionalSubstitutions: "getConditionalSubstitutions",
       };
       const methodName = methods[key];
       if (!methodName) {
@@ -165,16 +174,24 @@ export class FontController {
     return this._rootObject[key];
   }
 
+  async getGlyphInfos() {
+    return await this.getData("glyphInfos");
+  }
+
   async getFontInfo() {
     return await this.getData("fontInfo");
   }
 
   async getFeatures() {
-    return await this.getData("features");
+    return { language: "fea", text: "", ...(await this.getData("features")) };
   }
 
   async getKerning() {
     return await this.getData("kerning");
+  }
+
+  async getConditionalSubstitutions() {
+    return await this.getData("conditionalSubstitutions");
   }
 
   async getSources() {
@@ -210,6 +227,10 @@ export class FontController {
           !(skipSparseSources && this.sources[sourceIdentifier].isSparse)
       )
       .sort(sortFunc);
+  }
+
+  async getShaperFontData() {
+    return await this.font.getShaperFontData();
   }
 
   getBackgroundImage(imageIdentifier) {
@@ -429,6 +450,7 @@ export class FontController {
     if (glyphPromise === undefined) {
       glyphPromise = this._getGlyph(glyphName);
       const purgedGlyphName = this._glyphsPromiseCache.put(glyphName, glyphPromise);
+      this._glyphsPromiseCacheChanged.model.counter++;
       // if (purgedGlyphName) {
       //   console.log("purging", purgedGlyphName);
       //   this.font.unloadGlyph(purgedGlyphName);
@@ -507,6 +529,7 @@ export class FontController {
 
     const glyphController = this.makeVariableGlyphController(glyph);
     this._glyphsPromiseCache.put(glyphName, Promise.resolve(glyphController));
+    this._glyphsPromiseCacheChanged.model.counter++;
 
     const codePoints = typeof codePoint == "number" ? [codePoint] : [];
     this.glyphMap[glyphName] = codePoints;
@@ -651,8 +674,12 @@ export class FontController {
     return instanceController;
   }
 
+  get fallbackXAdvance() {
+    return this.unitsPerEm / 2;
+  }
+
   getDummyGlyphInstanceController(glyphName = "<dummy>") {
-    const dummyGlyph = StaticGlyph.fromObject({ xAdvance: this.unitsPerEm / 2 });
+    const dummyGlyph = StaticGlyph.fromObject({ xAdvance: this.fallbackXAdvance });
     return new StaticGlyphController(glyphName, dummyGlyph, undefined);
   }
 
@@ -796,6 +823,7 @@ export class FontController {
         glyphName,
         Promise.resolve(this.makeVariableGlyphController(glyphSet[glyphName]))
       );
+      this._glyphsPromiseCacheChanged.model.counter++;
     }
 
     for (const glyphName of glyphSetTracker.deletedProperties) {
@@ -904,6 +932,7 @@ export class FontController {
     this._glyphsPromiseCache.clear();
     this._glyphInstancePromiseCache.clear();
     this._glyphInstancePromiseCacheKeys = {};
+
     await this.initialize(false);
     this.notifyChangeListeners(null, false, true);
   }
@@ -972,15 +1001,6 @@ export class FontController {
     return undoRecord["info"];
   }
 
-  glyphInfoFromGlyphName(glyphName) {
-    const glyphInfo = { glyphName: glyphName };
-    const codePoint = this.codePointForGlyph(glyphName);
-    if (codePoint !== undefined) {
-      glyphInfo["character"] = getCharFromCodePoint(codePoint);
-    }
-    return glyphInfo;
-  }
-
   mapUserLocationToSourceLocation(userLocation) {
     return mapForward(userLocation, this.fontAxes);
   }
@@ -991,7 +1011,7 @@ export class FontController {
 
   get crossAxisMapping() {
     if (!this._crossAxisMapping) {
-      this._crossAxisMapping = new CrossAxisMapping(
+      this._crossAxisMapping = new CrossAxisMapper(
         this.fontAxesSourceSpace,
         this.axes.mappings
       );
@@ -1332,22 +1352,6 @@ function _popUndoRedoRecord(popStack, pushStack) {
   return undoRecord;
 }
 
-function collectGlyphNames(change) {
-  const glyphNames = new Set();
-
-  for (const { path, change: thisChange } of iterChanges(change)) {
-    if (path.length >= 1 && path[0] == "glyphs") {
-      if (path.length == 1) {
-        glyphNames.add(thisChange.a[0]);
-      } else {
-        glyphNames.add(path[1]);
-      }
-    }
-  }
-
-  return [...glyphNames].sort();
-}
-
 function objectPropertyTracker(obj) {
   const addedProperties = new Set();
   const deletedProperties = new Set();
@@ -1401,6 +1405,7 @@ export function ensureDenseSource(source) {
     ),
     guidelines: normalizeGuidelines(source.guidelines || []),
     customData: source.customData || {},
+    italicAngle: source.italicAngle ?? 0,
   };
 }
 

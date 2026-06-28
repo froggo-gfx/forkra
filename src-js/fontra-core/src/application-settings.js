@@ -1,4 +1,4 @@
-import { ObservableController } from "./observable-object.js";
+import { ObservableController } from "./observable-object.ts";
 
 export const applicationSettingsController = new ObservableController({
   clipboardFormat: "glif",
@@ -6,6 +6,8 @@ export const applicationSettingsController = new ObservableController({
   glyphSourcesSortOptions: "by-axis-value",
   alwaysShowGlobalAxesInComponentLocation: false,
   sortComponentLocationGlyphAxes: true,
+  disableAdHocMarks: false,
+  shapingDebuggerShowIneffectiveItems: false,
 });
 
 applicationSettingsController.synchronizeWithLocalStorage(

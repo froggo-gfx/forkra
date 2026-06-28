@@ -8,7 +8,7 @@ import tempfile
 from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Any, AsyncGenerator, ClassVar
+from typing import Any, AsyncGenerator, ClassVar, Coroutine
 
 from ...backends import getFileSystemBackend, newFileSystemBackend
 from ...backends.base import ReadableBaseBackend
@@ -18,6 +18,7 @@ from ...backends.null import NullBackend
 from ...core.async_property import async_cached_property
 from ...core.classes import (
     Axes,
+    ConditionalSubstitutions,
     FontInfo,
     FontSource,
     ImageData,
@@ -103,19 +104,19 @@ class BaseFilter(ReadableBaseBackend):
     def fontInstancer(self):
         return FontInstancer(self.validatedInput)
 
-    @async_cached_property
-    def inputAxes(self):
+    @async_cached_property[Axes]
+    def inputAxes(self) -> Coroutine[Any, Any, Axes]:
         return self.validatedInput.getAxes()
 
-    @async_cached_property
+    @async_cached_property[dict[str, list[int]]]
     def inputGlyphMap(self):
         return self.validatedInput.getGlyphMap()
 
-    @async_cached_property
+    @async_cached_property[dict[str, FontSource]]
     def inputSources(self):
         return self.validatedInput.getSources()
 
-    @async_cached_property
+    @async_cached_property[dict[str, Kerning]]
     def inputKerning(self):
         return self.validatedInput.getKerning()
 
@@ -170,6 +171,12 @@ class BaseFilter(ReadableBaseBackend):
         customData = await self.validatedInput.getCustomData()
         return await self.processCustomData(customData)
 
+    async def getConditionalSubstitutions(self) -> ConditionalSubstitutions:
+        conditionalSubstitutions = (
+            await self.validatedInput.getConditionalSubstitutions()
+        )
+        return await self.processConditionalSubstitutions(conditionalSubstitutions)
+
     async def getUnitsPerEm(self) -> int:
         unitsPerEm = await self.validatedInput.getUnitsPerEm()
         return await self.processUnitsPerEm(unitsPerEm)
@@ -178,6 +185,10 @@ class BaseFilter(ReadableBaseBackend):
         assert hasattr(self.validatedInput, "getBackgroundImage")
         imageData = await self.validatedInput.getBackgroundImage(imageIdentifier)
         return await self.processBackgroundImage(imageData)
+
+    async def getGlyphInfos(self) -> dict[str, Any]:
+        glyphInfos = await self.validatedInput.getGlyphInfos()
+        return await self.processGlyphInfos(glyphInfos)
 
     # Default no-op process methods, to be overridden.
 
@@ -211,6 +222,12 @@ class BaseFilter(ReadableBaseBackend):
     async def processCustomData(self, customData):
         return customData
 
+    async def processConditionalSubstitutions(
+        self,
+        conditionalSubstitutions: ConditionalSubstitutions,
+    ) -> ConditionalSubstitutions:
+        return conditionalSubstitutions
+
     async def processUnitsPerEm(self, unitsPerEm: int) -> int:
         return unitsPerEm
 
@@ -218,6 +235,9 @@ class BaseFilter(ReadableBaseBackend):
         self, imageData: ImageData | None
     ) -> ImageData | None:
         return imageData
+
+    async def processGlyphInfos(self, glyphInfos):
+        return glyphInfos
 
 
 @registerFilterAction("memory-cache")

@@ -14,8 +14,10 @@ import { staticGlyphToGLIF } from "@fontra/core/glyph-glif.js";
 import { pathToSVG } from "@fontra/core/glyph-svg.js";
 import * as html from "@fontra/core/html-utils.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
-import { ObservableController } from "@fontra/core/observable-object.js";
+import { ObservableController } from "@fontra/core/observable-object.ts";
 import {
+  canConvertCurveType,
+  convertCurveType,
   deleteSelectedPoints,
   filterPathByPointIndices,
 } from "@fontra/core/path-functions.js";
@@ -28,7 +30,7 @@ import {
   rectScaleAroundCenter,
   rectSize,
   rectToArray,
-} from "@fontra/core/rectangle.js";
+} from "@fontra/core/rectangle.ts";
 import { SceneView } from "@fontra/core/scene-view.js";
 import { isSuperset } from "@fontra/core/set-ops.js";
 import { themeController } from "@fontra/core/theme-settings.js";
@@ -37,6 +39,7 @@ import { labeledCheckbox, labeledTextInput, pickFile } from "@fontra/core/ui-uti
 import {
   commandKeyProperty,
   enumerate,
+  eventIsCausedByWritingURLFragment,
   fetchJSON,
   hyphenatedToCamelCase,
   hyphenatedToLabel,
@@ -55,7 +58,7 @@ import {
   unionIndexSets,
   writeObjectToURLFragment,
   writeToClipboard,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { addItemwise, mulScalar, subItemwise } from "@fontra/core/var-funcs.js";
 import { StaticGlyph, VariableGlyph, copyComponent } from "@fontra/core/var-glyph.js";
 import { locationToString, makeSparseLocation } from "@fontra/core/var-model.js";
@@ -72,7 +75,11 @@ import { PenTool } from "./edit-tools-pen.js";
 import { PointerTools } from "./edit-tools-pointer.js";
 import { PowerRulerTool } from "./edit-tools-power-ruler.js";
 import { ShapeTool } from "./edit-tools-shape.js";
-import { SceneController } from "./scene-controller.js";
+import {
+  SceneController,
+  numQuadraticOffCurvePointsOptions,
+  persistentSceneSettingsKeys,
+} from "./scene-controller.js";
 import { MIN_SIDEBAR_WIDTH, Sidebar } from "./sidebar.js";
 import {
   allGlyphsCleanVisualizationLayerDefinition,
@@ -88,6 +95,7 @@ import {
 } from "@fontra/core/localization.js";
 import { subVectors } from "@fontra/core/vector.js";
 import { ViewController } from "@fontra/core/view-controller.js";
+import CharactersGlyphsPanel from "./panel-characters-glyphs.js";
 import DesignspaceNavigationPanel from "./panel-designspace-navigation.js";
 import GlyphNotePanel from "./panel-glyph-note.js";
 import GlyphSearchPanel from "./panel-glyph-search.js";
@@ -104,8 +112,12 @@ const PASTE_BEHAVIOR_REPLACE = "replace";
 const PASTE_BEHAVIOR_ADD = "add";
 
 export class EditorController extends ViewController {
-  constructor(font) {
-    super(font);
+  static titlePattern(displayName) {
+    return `Glyph Editor — ${displayName}`;
+  }
+
+  constructor(font, projectIdentifier) {
+    super(font, projectIdentifier);
     const canvas = document.querySelector("#edit-canvas");
     canvas.focus();
     // This relates to getActionIdentifierFromKeyEvent which contains logic that
@@ -155,25 +167,12 @@ export class EditorController extends ViewController {
     this.sceneModel = this.sceneController.sceneModel;
 
     this.sceneSettingsController.addKeyListener(
-      [
-        "align",
-        "applyKerning",
-        "editLayerName",
-        "editingLayers",
-        "fontLocationUser",
-        "glyphLocation",
-        "fontAxesUseSourceCoordinates",
-        "fontAxesShowEffectiveLocation",
-        "fontAxesShowHidden",
-        "fontAxesSkipMapping",
-        "selectedGlyph",
-        "selection",
-        "substituteGlyphName",
-        "text",
-        "viewBox",
-      ],
+      [...persistentSceneSettingsKeys, "glyphLocation"],
       (event) => {
-        if (event.senderInfo?.senderID !== this && !event.senderInfo?.adjustViewBox) {
+        if (
+          !event.senderInfoStack.find((senderInfo) => senderInfo.senderID === this) &&
+          !event.senderInfo?.adjustViewBox
+        ) {
           this.updateWindowLocation(); // scheduled with delay
         }
       }
@@ -230,13 +229,9 @@ export class EditorController extends ViewController {
       this.showDialogGlyphEditLocationNotAtSource();
     });
 
-    this.sceneController.addEventListener("doubleClickedUndefinedGlyph", () => {
-      if (this.fontController.readOnly) {
-        this.showDialogGlyphEditCannotEditReadOnly(true);
-      } else {
-        this.showDialogNewGlyph();
-      }
-    });
+    this.sceneController.addEventListener("doubleClickedUndefinedGlyph", () =>
+      this.showDialogNewGlyph()
+    );
 
     this.sidebars = [];
     this.contextMenuPosition = { x: 0, y: 0 };
@@ -281,14 +276,40 @@ export class EditorController extends ViewController {
     window.addEventListener("keydown", (event) => this.keyDownHandler(event));
     window.addEventListener("keyup", (event) => this.keyUpHandler(event));
 
+    this.canvasController.canvas.addEventListener("pointerdown", (event) =>
+      this.pointerDownHandler(event)
+    );
+    this.canvasController.canvas.addEventListener("pointerup", (event) =>
+      this.pointerUpHandler(event)
+    );
+
     this.enteredText = "";
     this.updateWindowLocation = scheduleCalls(
       (event) => this._updateWindowLocation(),
       200
     );
 
+    // The "popstate" event fires when the active history entry changes.
+    //
+    // We need to listen for this event so we can load the view state from
+    // the URL fragment, since the document does not reload if all that is
+    // different between the previous URL and the new one is the fragment.
     window.addEventListener("popstate", (event) => {
-      this.setupFromWindowLocation();
+      // When we write the URL fragment from our own code, with a call to our
+      // `writeObjectToURLFragment` function, this will also trigger the event.
+      //
+      // I'm not entirely sure that is what should happen based on the
+      // spec, but all 3 major browsers do it, so maybe it is correct.
+      //
+      // Regardless, we need to differentiate between a `popstate` caused by
+      // the user navigating with the forward/back buttons in their browser
+      // and one caused by us writing the URL fragment.
+      //
+      // We only need to run the setup function when it *wasn't* us who changed
+      // the URL (since if we did then we should already be in the right state).
+      if (!eventIsCausedByWritingURLFragment()) {
+        this.setupFromWindowLocation();
+      }
     });
 
     this.updateWithDelay();
@@ -540,6 +561,23 @@ export class EditorController extends ViewController {
 
     {
       const topic = "0035-action-topics.menu.glyph";
+
+      registerAction(
+        "action.glyph.convert-curves-to-cubic",
+        { topic },
+        () => this.doConvertCurveType(null),
+        () => this.canConvertCurveType(null)
+      );
+
+      for (const numQuadraticOffCurvePoints of numQuadraticOffCurvePointsOptions) {
+        registerAction(
+          `action.glyph.convert-curves-to-quadratic-${numQuadraticOffCurvePoints}`,
+          { topic },
+          () => this.doConvertCurveType(numQuadraticOffCurvePoints),
+          () => this.canConvertCurveType(numQuadraticOffCurvePoints)
+        );
+      }
+
       registerAction(
         "action.glyph.add-background-image",
         { topic },
@@ -785,7 +823,7 @@ export class EditorController extends ViewController {
       false
     );
 
-    await this.fontController.subscribeChanges({ kerning: null }, true);
+    await this.fontController.subscribeChanges({ kerning: null, features: null }, true);
 
     const blankFont = new FontFace("AdobeBlank", `url("/fonts/AdobeBlank.woff2")`, {});
     document.fonts.add(blankFont);
@@ -809,6 +847,11 @@ export class EditorController extends ViewController {
   }
 
   async showDialogNewGlyph() {
+    if (this.fontController.readOnly) {
+      this.showDialogGlyphEditCannotEditReadOnly(true);
+      return;
+    }
+
     const positionedGlyph =
       this.sceneController.sceneModel.getSelectedPositionedGlyph();
     this.sceneSettings.selectedGlyph = {
@@ -1031,6 +1074,10 @@ export class EditorController extends ViewController {
           this._multiToolMouseDownTimer = (withTimeOut ? setTimeout : noTimeout)(() => {
             // Show sub tools
             for (const child of editToolsElement.children) {
+              // When shown, make sure all tooltips are shown on the right, so as
+              // to not obscure the subtool(s) with the tooltip. This will get reset
+              // in collapseSubTools().
+              child.dataset["tooltipposition"] = "right";
               child.style.visibility = "visible";
             }
             window.addEventListener("mousedown", globalListener);
@@ -1078,6 +1125,7 @@ export class EditorController extends ViewController {
     this.addSidebarPanel(new TransformationPanel(this), "right");
     this.addSidebarPanel(new GlyphNotePanel(this), "right");
     this.addSidebarPanel(new RelatedGlyphsPanel(this), "right");
+    this.addSidebarPanel(new CharactersGlyphsPanel(this), "right");
 
     // Upon reload, the "animating" class may still be set (why?), so remove it
     for (const sidebarContainer of document.querySelectorAll(".sidebar-container")) {
@@ -1216,6 +1264,25 @@ export class EditorController extends ViewController {
     this.selectedToolIdentifier = selectedToolIdentifier;
   }
 
+  getPenTool() {
+    return this.tools[this.getToolIdentifierFromMultiTool("pen-tool")];
+  }
+
+  getToolIdentifierFromMultiTool(toolIdentifier) {
+    for (const editToolItem of document.querySelectorAll(
+      "#edit-tools > .tool-button"
+    )) {
+      if (
+        editToolItem.classList.contains("multi-tool") &&
+        editToolItem.dataset.tool === toolIdentifier
+      ) {
+        return editToolItem.children[0].dataset.tool;
+      }
+    }
+
+    return toolIdentifier;
+  }
+
   themeChanged() {
     this.visualizationLayers.darkTheme = this.isThemeDark;
     this.cleanGlyphsLayers.darkTheme = this.isThemeDark;
@@ -1268,35 +1335,39 @@ export class EditorController extends ViewController {
       if (location) {
         glyphLocations[glyphName] = location;
       }
-      glyphInfos.push(this.fontController.glyphInfoFromGlyphName(glyphName));
+      glyphInfos.push(this.sceneController.glyphInfoFromGlyphName(glyphName));
     }
     this.sceneController.updateGlyphLocations(glyphLocations);
     this.insertGlyphInfos(glyphInfos, 1, true);
   }
 
-  insertGlyphInfos(glyphInfos, where = 0, select = false) {
+  async insertGlyphInfos(glyphInfos, where = 0, select = false) {
     // where == 0: replace selected glyph
     // where == 1: insert after selected glyph
     // where == -1: insert before selected glyph
-    const selectedGlyphInfo = this.sceneSettings.selectedGlyph;
-    const glyphLines = [...this.sceneSettings.glyphLines];
+    const { lineIndex } = this.sceneSettings.selectedGlyph;
+    const { cluster: characterIndex } = this.sceneModel.getSelectedPositionedGlyph();
 
-    const insertIndex = selectedGlyphInfo.glyphIndex + (where == 1 ? 1 : 0);
-    glyphLines[selectedGlyphInfo.lineIndex].splice(
-      insertIndex,
-      where ? 0 : 1,
-      ...glyphInfos
-    );
-    this.sceneSettings.glyphLines = glyphLines;
+    const characterLines = [...this.sceneSettings.characterLines];
 
-    const glyphIndex =
-      selectedGlyphInfo.glyphIndex +
-      (select ? (where == 1 ? 1 : 0) : where == -1 ? glyphInfos.length : 0);
+    const insertIndex = characterIndex + (where == 1 ? 1 : 0);
+    const selectionCharacterIndex =
+      characterIndex + (select ? (where == 1 ? 1 : 0) : where == -1 ? 1 : 0);
+
+    characterLines[lineIndex].splice(insertIndex, where ? 0 : 1, ...glyphInfos);
+    this.sceneSettings.characterLines = characterLines;
+
+    await this.sceneSettingsController.waitForKeyChange("positionedLines");
+
+    const { glyphIndex } = this.sceneModel.characterSelectionToGlyphSelection({
+      lineIndex,
+      characterIndex: selectionCharacterIndex,
+    });
 
     const glyphExists = !!this.fontController.glyphMap[glyphInfos[0]?.glyphName];
 
     this.sceneSettings.selectedGlyph = {
-      lineIndex: selectedGlyphInfo.lineIndex,
+      lineIndex: lineIndex,
       glyphIndex: glyphIndex,
       isEditing:
         glyphExists &&
@@ -1905,10 +1976,10 @@ export class EditorController extends ViewController {
       } else {
         await this._pasteReplaceGlyph(pasteVarGlyph);
       }
-      // Force even trigger for fontLocationSourceMapped, as the glyph's
+      // Force event trigger for fontLocationSource, as the glyph's
       // source list may have changed
-      this.sceneSettings.fontLocationSourceMapped = {
-        ...this.sceneSettings.fontLocationSourceMapped,
+      this.sceneSettings.fontLocationSource = {
+        ...this.sceneSettings.fontLocationSource,
       };
       this.sceneSettings.glyphLocation = { ...this.sceneSettings.glyphLocation };
     } else {
@@ -2259,7 +2330,8 @@ export class EditorController extends ViewController {
   async doAddComponent() {
     const glyphName = await this.runGlyphSearchDialog(
       translate("action.add-component"),
-      translate("dialog.add")
+      translate("dialog.add"),
+      true
     );
     if (!glyphName) {
       return;
@@ -2909,6 +2981,40 @@ export class EditorController extends ViewController {
     this.sceneController.selection = newSelection;
   }
 
+  async doConvertCurveType(numQuadraticOffCurvePoints) {
+    const { point: pointSelection } = parseSelection(this.sceneController.selection);
+
+    await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        if (pointSelection) {
+          convertCurveType(layerGlyph.path, pointSelection, numQuadraticOffCurvePoints);
+        }
+      }
+      this.sceneController.selection = new Set();
+      return translate(
+        !numQuadraticOffCurvePoints
+          ? "action.glyph.convert-curves-to-cubic"
+          : `action.glyph.convert-curves-to-quadratic-${numQuadraticOffCurvePoints}`
+      );
+    });
+  }
+
+  canConvertCurveType(numQuadraticOffCurvePoints) {
+    const { point: pointSelection } = parseSelection(this.sceneController.selection);
+
+    if (!pointSelection) {
+      return false;
+    }
+
+    const path = this.sceneModel.getSelectedPositionedGlyph()?.glyph.instance.path;
+
+    if (!path) {
+      return false;
+    }
+
+    return canConvertCurveType(path, pointSelection, numQuadraticOffCurvePoints);
+  }
+
   doSelectPreviousNextSource(selectPrevious) {
     const panel = this.getSidebarPanel("designspace-navigation");
     panel?.doSelectPreviousNextSource(selectPrevious);
@@ -3011,20 +3117,20 @@ export class EditorController extends ViewController {
         const glyphNames = glyphName
           ? [glyphName]
           : truncate
-          ? usedBy.slice(0, MAX_NUM_GLYPHS)
-          : usedBy;
+            ? usedBy.slice(0, MAX_NUM_GLYPHS)
+            : usedBy;
 
         const glyphInfos = glyphNames.map((glyphName) =>
-          this.fontController.glyphInfoFromGlyphName(glyphName)
+          this.sceneController.glyphInfoFromGlyphName(glyphName)
         );
         const selectedGlyphInfo = this.sceneSettings.selectedGlyph;
-        const glyphLines = [...this.sceneSettings.glyphLines];
-        glyphLines[selectedGlyphInfo.lineIndex].splice(
+        const characterLines = [...this.sceneSettings.characterLines];
+        characterLines[selectedGlyphInfo.lineIndex].splice(
           selectedGlyphInfo.glyphIndex + 1,
           0,
           ...glyphInfos
         );
-        this.sceneSettings.glyphLines = glyphLines;
+        this.sceneSettings.characterLines = characterLines;
         if (truncate) {
           await message(
             `The number of added glyphs was truncated to ${MAX_NUM_GLYPHS}`,
@@ -3038,10 +3144,18 @@ export class EditorController extends ViewController {
 
   async runGlyphSearchDialog(
     titleLabel = translate("dialog.glyphs.search"),
-    okLabel = translate("dialog.add")
+    okLabel = translate("dialog.add"),
+    showOnlyGlyphsInFont = false
   ) {
     const glyphSearch = document.createElement("glyph-search-list");
-    glyphSearch.glyphMap = this.fontController.glyphMap;
+
+    if (!showOnlyGlyphsInFont && !isObjectEmpty(this.sceneSettings.combinedGlyphMap)) {
+      glyphSearch.glyphMap = this.sceneSettings.combinedGlyphMap;
+      glyphSearch.fontGlyphMap = this.fontController.glyphMap;
+      glyphSearch.allowUnknownGlyphSearchResults = true;
+    } else {
+      glyphSearch.glyphMap = this.fontController.glyphMap;
+    }
 
     glyphSearch.addEventListener("selectedGlyphNameChanged", (event) => {
       dialog.defaultButton.classList.toggle(
@@ -3082,8 +3196,41 @@ export class EditorController extends ViewController {
     if (!glyphName) {
       return;
     }
-    const glyphInfo = this.fontController.glyphInfoFromGlyphName(glyphName);
+    const glyphInfo = this.sceneController.glyphInfoFromGlyphName(glyphName);
     this.insertGlyphInfos([glyphInfo], where, true);
+  }
+
+  pointerDownHandler(event) {
+    if (
+      event.button !== 1 ||
+      event.altKey ||
+      event.shitKey ||
+      event.ctrlKey ||
+      event.metaKey
+    ) {
+      return;
+    }
+
+    this.canvasController.canvas.setPointerCapture(event.pointerId);
+
+    this.savedSelectedToolIdentifier = this.selectedToolIdentifier;
+    this.setSelectedTool("hand-tool");
+  }
+
+  pointerUpHandler(event) {
+    if (
+      event.button !== 1 ||
+      event.altKey ||
+      event.shitKey ||
+      event.ctrlKey ||
+      event.metaKey
+    ) {
+      return;
+    }
+
+    this.canvasController.canvas.releasePointerCapture(event.pointerId);
+
+    this.setSelectedTool(this.savedSelectedToolIdentifier);
   }
 
   keyUpHandler(event) {
@@ -3158,10 +3305,10 @@ export class EditorController extends ViewController {
   async externalChange(change, isLiveChange) {
     await super.externalChange(change, isLiveChange);
 
-    // Force event trigger for fontLocationSourceMapped, as the glyph's
+    // Force event trigger for fontLocationSource, as the glyph's
     // source list may have changed
-    this.sceneSettings.fontLocationSourceMapped = {
-      ...this.sceneSettings.fontLocationSourceMapped,
+    this.sceneSettings.fontLocationSource = {
+      ...this.sceneSettings.fontLocationSource,
     };
     this.sceneSettings.glyphLocation = { ...this.sceneSettings.glyphLocation };
     await this.sceneModel.updateScene();
@@ -3188,9 +3335,9 @@ export class EditorController extends ViewController {
   }
 
   async setupFromWindowLocation() {
-    this.sceneSettingsController.withSenderInfo({ senderID: this }, () =>
-      this._setupFromWindowLocation()
-    );
+    this.sceneSettingsController.withSenderInfo({ senderID: this }, async () => {
+      await this._setupFromWindowLocation();
+    });
   }
 
   async _setupFromWindowLocation() {
@@ -3216,61 +3363,18 @@ export class EditorController extends ViewController {
         }
       }
     }
-    this.sceneSettings.align = viewInfo["align"] || "center";
-    this.sceneSettings.applyKerning = viewInfo["applyKerning"] === false ? false : true;
+
     if (viewInfo["viewBox"]) {
       this.sceneController.autoViewBox = false;
-      const viewBox = viewInfo["viewBox"];
-      if (viewBox.every((value) => !isNaN(value))) {
-        this.sceneSettings.viewBox = rectFromArray(viewBox);
-      }
     }
 
-    if (viewInfo["text"]) {
-      this.sceneSettings.text = viewInfo["text"];
-      // glyphLines is computed from text asynchronously, but its result is needed
-      // to for selectedGlyphName, so we'll wait until it's done
-      await this.sceneSettingsController.waitForKeyChange("glyphLines");
-    }
-    this._previousURLText = viewInfo["text"];
+    // Grab the autoViewBox state here, as it may get reset via isEditing
+    const initialAutoViewBox = this.sceneController.autoViewBox;
 
     this.sceneModel.setGlyphLocations(viewInfo["glyphLocations"]);
+    await this.sceneController.updateSceneSettingsFromViewInfo(viewInfo);
 
-    if (viewInfo["fontAxesUseSourceCoordinates"]) {
-      this.sceneSettings.fontAxesUseSourceCoordinates = true;
-    }
-    if (viewInfo["fontAxesShowEffectiveLocation"]) {
-      this.sceneSettings.fontAxesShowEffectiveLocation = true;
-    }
-    if (viewInfo["fontAxesShowHidden"]) {
-      this.sceneSettings.fontAxesShowHidden = true;
-    }
-    if (viewInfo["fontAxesSkipMapping"]) {
-      this.sceneSettings.fontAxesSkipMapping = true;
-    }
-
-    if (viewInfo["location"]) {
-      this.sceneSettings.fontLocationUser = viewInfo["location"];
-    }
-
-    this.sceneSettings.selectedGlyph = viewInfo["selectedGlyph"];
-    this.sceneSettings.substituteGlyphName = viewInfo["substituteGlyphName"];
-
-    if (viewInfo["editLayerName"]) {
-      this.sceneSettings.editLayerName = viewInfo["editLayerName"];
-    }
-    if (viewInfo["editingLayers"]) {
-      this.sceneSettings.editingLayers = viewInfo["editingLayers"];
-    }
-
-    if (viewInfo["selection"]) {
-      this.sceneSettings.selection = new Set(viewInfo["selection"]);
-    }
-
-    if (
-      this.sceneController.autoViewBox &&
-      this.sceneSettings.selectedGlyph?.isEditing
-    ) {
+    if (initialAutoViewBox && this.sceneSettings.selectedGlyph?.isEditing) {
       // This is a bit of a hack: if isEditing is true, the autoViewBox
       // doesn't work. Also, autoViewBox *needs* to be off in edit mode,
       // or the canvas behaves really weirdly (it resizes as you drag points)
@@ -3297,60 +3401,7 @@ export class EditorController extends ViewController {
       // an initial setup _from_ the window location
       return;
     }
-    const viewInfo = {};
-    const viewBox = this.sceneSettings.viewBox;
-
-    if (viewBox && Object.values(viewBox).every((value) => !isNaN(value))) {
-      viewInfo["viewBox"] = rectToArray(rectRound(viewBox));
-    }
-    if (this.sceneSettings.text?.length) {
-      viewInfo["text"] = this.sceneSettings.text;
-    }
-    if (this.sceneSettings.selectedGlyph) {
-      viewInfo["selectedGlyph"] = this.sceneSettings.selectedGlyph;
-    }
-    if (this.sceneSettings.substituteGlyphName) {
-      viewInfo["substituteGlyphName"] = this.sceneSettings.substituteGlyphName;
-    }
-
-    viewInfo["location"] = this.sceneSettings.fontLocationUser;
-    if (this.sceneSettings.fontAxesUseSourceCoordinates) {
-      viewInfo["fontAxesUseSourceCoordinates"] = true;
-    }
-    if (this.sceneSettings.fontAxesShowEffectiveLocation) {
-      viewInfo["fontAxesShowEffectiveLocation"] = true;
-    }
-    if (this.sceneSettings.fontAxesShowHidden) {
-      viewInfo["fontAxesShowHidden"] = true;
-    }
-    if (this.sceneSettings.fontAxesSkipMapping) {
-      viewInfo["fontAxesSkipMapping"] = true;
-    }
-
-    if (this.sceneSettings.editLayerName) {
-      viewInfo["editLayerName"] = this.sceneSettings.editLayerName;
-    }
-    if (
-      this.sceneSettings.editingLayers &&
-      Object.keys(this.sceneSettings.editingLayers).length
-    ) {
-      viewInfo["editingLayers"] = this.sceneSettings.editingLayers;
-    }
-
-    const glyphLocations = this.sceneController.getGlyphLocations(true);
-    if (Object.keys(glyphLocations).length) {
-      viewInfo["glyphLocations"] = glyphLocations;
-    }
-    const selArray = Array.from(this.sceneController.selection);
-    if (selArray.length) {
-      viewInfo["selection"] = Array.from(selArray);
-    }
-    if (this.sceneSettings.align !== "center") {
-      viewInfo["align"] = this.sceneSettings.align;
-    }
-    if (!this.sceneSettings.applyKerning) {
-      viewInfo["applyKerning"] = this.sceneSettings.applyKerning;
-    }
+    const viewInfo = this.sceneController.getViewInfoFromSceneSettings();
 
     const url = new URL(window.location);
     clearSearchParams(url.searchParams); /* clear legacy URL format */

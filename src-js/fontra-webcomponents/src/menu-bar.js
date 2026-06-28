@@ -1,6 +1,6 @@
 import * as html from "@fontra/core/html-utils.js";
 import { SimpleElement } from "@fontra/core/html-utils.js";
-import { sleepAsync } from "@fontra/core/utils.js";
+import { sleepAsync } from "@fontra/core/utils.ts";
 import { MenuPanel } from "./menu-panel.js";
 import { themeColorCSS } from "./theme-support.js";
 
@@ -80,6 +80,7 @@ export class MenuBar extends SimpleElement {
   onMouseDown({ target }) {
     if (isMenuItem(target)) {
       if (!this.menuPanel) {
+        MenuPanel.closeMenuPanels({});
         this.openMenu(target);
       } else {
         this.closeMenu();

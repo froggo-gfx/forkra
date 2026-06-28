@@ -8,12 +8,12 @@ import shutil
 from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass, field
-from functools import partial
 from typing import Any, Callable, Sequence
 
 from ..core.async_property import async_property
 from ..core.classes import (
     Axes,
+    ConditionalSubstitutions,
     Font,
     FontInfo,
     FontSource,
@@ -28,7 +28,7 @@ from ..core.classes import (
 from ..core.glyphdependencies import GlyphDependencies
 from ..core.protocols import WritableFontBackend
 from ..core.subprocess import runInSubProcess
-from .base import ReadableBaseBackend
+from .base import WritableBaseBackend
 from .filenames import fileNameToString, stringToFileName
 from .filewatcher import Change
 from .watchable import WatchableBackend
@@ -36,7 +36,7 @@ from .watchable import WatchableBackend
 logger = logging.getLogger(__name__)
 
 
-class FontraBackend(WatchableBackend, ReadableBaseBackend):
+class FontraBackend(WatchableBackend, WritableBaseBackend):
     glyphInfoFileName = "glyph-info.csv"
     fontDataFileName = "font-data.json"
     kerningFileName = "kerning.csv"
@@ -67,6 +67,7 @@ class FontraBackend(WatchableBackend, ReadableBaseBackend):
             self.path.mkdir()
         self.glyphsDir.mkdir(exist_ok=True)
         self.glyphMap: dict[str, list[int]] = {}
+        self.glyphInfos: dict[str, Any] = {}
         self.fontData = Font()
         if not create:
             self._readGlyphInfo()
@@ -201,6 +202,15 @@ class FontraBackend(WatchableBackend, ReadableBaseBackend):
         self.fontData.features = deepcopy(features)
         self._scheduler.schedule(self._writeFeatures)
 
+    async def getConditionalSubstitutions(self) -> ConditionalSubstitutions:
+        return deepcopy(self.fontData.conditionalSubstitutions)
+
+    async def putConditionalSubstitutions(
+        self, substitutions: ConditionalSubstitutions
+    ) -> None:
+        self.fontData.conditionalSubstitutions = deepcopy(substitutions)
+        self._scheduler.schedule(self._writeFontData)
+
     async def getBackgroundImage(self, imageIdentifier: str) -> ImageData | None:
         for imageType in [ImageType.PNG, ImageType.JPEG]:
             fileName = f"{imageIdentifier}.{imageType.lower()}"
@@ -224,27 +234,72 @@ class FontraBackend(WatchableBackend, ReadableBaseBackend):
         self.fontData.customData = deepcopy(customData)
         self._scheduler.schedule(self._writeFontData)
 
+    async def getGlyphInfos(self) -> dict[str, Any]:
+        return deepcopy(self.glyphInfos)
+
+    async def putGlyphInfos(self, glyphInfos: dict[str, Any]) -> None:
+        self.glyphInfos = deepcopy(glyphInfos)
+        self._scheduler.schedule(self._writeGlyphInfo)
+
     def _readGlyphInfo(self) -> None:
         self.glyphMap = {}
+        self.glyphInfos = {}
+
         with self.glyphInfoPath.open("r", encoding="utf-8", newline="") as file:
             reader = csv.reader(file, delimiter=";")
             header = next(reader)
             assert header[:2] == ["glyph name", "code points"]
+            infoKeys = header[2:]
+
             for row in reader:
                 glyphName, *rest = row
                 if rest:
                     codePoints = _parseCodePoints(rest[0])
+                    if infoKeys:
+                        info = readGlyphInfo(infoKeys, rest[1:])
+                        if info:
+                            self.glyphInfos[glyphName] = info
                 else:
                     codePoints = []
                 self.glyphMap[glyphName] = codePoints
 
     def _writeGlyphInfo(self) -> None:
+        infoKeys = set()
+        for info in self.glyphInfos.values():
+            infoKeys.update(info)
+
+        infoKeyList = sorted(infoKeys)
+
         with self.glyphInfoPath.open("w", encoding="utf-8", newline="") as file:
             writer = csv.writer(file, delimiter=";")
-            writer.writerow(["glyph name", "code points"])
+            writer.writerow(["glyph name", "code points"] + infoKeyList)
             for glyphName, codePoints in sorted(self.glyphMap.items()):
+                assert glyphName
                 codePointsString = ",".join(f"U+{cp:04X}" for cp in codePoints)
-                writer.writerow([glyphName, codePointsString])
+                row = [glyphName, codePointsString]
+
+                info = self.glyphInfos.get(glyphName)
+                if info:
+                    for key in infoKeyList:
+                        infoValue = info.get(key)
+                        cellValue = (
+                            ""
+                            if infoValue is None
+                            else (
+                                json.dumps(
+                                    infoValue, separators=(",", ":"), ensure_ascii=False
+                                )
+                                if not isinstance(infoValue, str)
+                                else infoValue
+                            )
+                        )
+
+                        row.append(cellValue)
+
+                while len(row) > 2 and not row[-1]:
+                    del row[-1]
+
+                writer.writerow(row)
 
         self.fileWatcherIgnoreNextChange(self.glyphInfoPath)
 
@@ -271,6 +326,7 @@ class FontraBackend(WatchableBackend, ReadableBaseBackend):
         fontData = unstructure(self.fontData)
         fontData.pop("glyphs", None)
         fontData.pop("glyphMap", None)
+        fontData.pop("glyphInfos", None)
         fontData.pop("kerning", None)
 
         if (
@@ -320,7 +376,7 @@ class FontraBackend(WatchableBackend, ReadableBaseBackend):
     async def findGlyphsThatUseGlyph(self, glyphName):
         return sorted((await self.glyphDependencies).usedBy.get(glyphName, []))
 
-    @async_property
+    @async_property[GlyphDependencies]
     async def glyphDependencies(self) -> GlyphDependencies:
         if self._glyphDependencies is not None:
             return self._glyphDependencies
@@ -617,9 +673,7 @@ class Scheduler:
 async def extractGlyphDependenciesFromFontra(
     glyphsDir: pathlib.Path,
 ) -> GlyphDependencies:
-    componentInfo = await runInSubProcess(
-        partial(_extractComponentInfoFromFontra, glyphsDir)
-    )
+    componentInfo = await runInSubProcess(_extractComponentInfoFromFontra, glyphsDir)
 
     dependencies = GlyphDependencies()
     for glyphName, componentNames in componentInfo.items():
@@ -744,3 +798,15 @@ def fixPrefix(kernPairName, groupPrefix):
         if groupPrefix
         else kernPairName
     )
+
+
+def readGlyphInfo(infoKeys, cells):
+    info = {}
+    for key, cellValue in zip(infoKeys, cells):
+        if cellValue:
+            try:
+                infoValue = json.loads(cellValue)
+            except json.JSONDecodeError:
+                infoValue = cellValue
+            info[key] = infoValue
+    return info

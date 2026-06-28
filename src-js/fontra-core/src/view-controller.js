@@ -13,12 +13,14 @@ export class ViewController {
   }
 
   static async fromBackend() {
-    const projectIdentifier = new URL(window.location).searchParams.get("project");
+    const url = new URL(window.location);
+    const projectIdentifier = url.searchParams.get("project");
+    const readOnly = url.searchParams.get("read-only")?.toLowerCase() == "true";
 
     await ensureLanguageHasLoaded;
 
-    const remoteFontEngine = await Backend.remoteFont(projectIdentifier);
-    const controller = new this(remoteFontEngine);
+    const remoteFontEngine = await Backend.remoteFont(projectIdentifier, readOnly);
+    const controller = new this(remoteFontEngine, projectIdentifier);
     remoteFontEngine.on("close", (event) => controller.handleRemoteClose(event));
     remoteFontEngine.on("error", (event) => controller.handleRemoteError(event));
     remoteFontEngine.on("initializationError", (error) =>
@@ -44,8 +46,9 @@ export class ViewController {
     return controller;
   }
 
-  constructor(font) {
+  constructor(font, projectIdentifier) {
     this.fontController = new FontController(font);
+    this.projectIdentifier = projectIdentifier;
 
     document.addEventListener("visibilitychange", (event) => {
       if (this._reconnectDialog) {

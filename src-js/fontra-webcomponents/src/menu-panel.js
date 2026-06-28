@@ -12,13 +12,14 @@ import {
   findNestedActiveElement,
   reversed,
   sleepAsync,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { InlineSVG } from "@fontra/web-components/inline-svg.js";
 import { themeColorCSS } from "./theme-support.js";
 
 export const MenuItemDivider = { title: "-" };
 
 export function showMenu(menuItems, position, options) {
+  MenuPanel.closeMenuPanels({});
   const container = getMenuContainer();
   const { left, top } = container.getBoundingClientRect();
   position = { x: position.x - left, y: position.y - top };

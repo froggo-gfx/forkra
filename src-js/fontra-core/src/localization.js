@@ -1,4 +1,4 @@
-import { ObservableController } from "./observable-object.js";
+import { ObservableController } from "./observable-object.ts";
 
 // Don't edit this block, see scripts/rebuild_languages.py
 export const languages = [
@@ -8,6 +8,13 @@ export const languages = [
   { code: "fr", langEn: "French", langLang: "Français", status: "beta" },
   { code: "de", langEn: "German", langLang: "Deutsch", status: "wip" },
   { code: "nl", langEn: "Dutch", langLang: "Nederlands", status: "wip" },
+  {
+    code: "zh-TW",
+    langEn: "Traditional Chinese",
+    langLang: "繁體中文",
+    status: "beta",
+  },
+  { code: "tl", langEn: "Filipino", langLang: "Tagalog", status: "beta" },
 ];
 
 const debugTranslation = false;
@@ -26,12 +33,14 @@ export const ensureLanguageHasLoaded = new Promise((resolve) => {
   resolveLanguageHasLoaded = resolve;
 });
 
+const importTimeStamp = Date.now(); /* for cache busting */
+
 function languageChanged(locale) {
   // Do explicit .replace() because our cache busting mechanism is simplistic,
   // and backtick strings don't work.
   const translationsPath = "/lang/locale.js".replace("locale", locale);
 
-  import(/*webpackIgnore: true*/ translationsPath)
+  import(/*webpackIgnore: true*/ translationsPath + `?t=${importTimeStamp}`)
     .then((mod) => {
       localizationData = mod.strings;
       resolveLanguageHasLoaded();

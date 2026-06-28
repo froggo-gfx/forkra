@@ -8,11 +8,13 @@ from aiohttp import web
 
 from .classes import (
     Axes,
+    ConditionalSubstitutions,
     FontInfo,
     FontSource,
     ImageData,
     Kerning,
     OpenTypeFeatures,
+    ShaperFontData,
     VariableGlyph,
 )
 
@@ -49,6 +51,15 @@ class ReadableFontBackend(Protocol):
     async def getUnitsPerEm(self) -> int:
         pass
 
+    async def getShaperFontData(self) -> ShaperFontData | None:
+        pass
+
+    async def getGlyphInfos(self) -> dict[str, Any]:
+        pass
+
+    async def getConditionalSubstitutions(self) -> ConditionalSubstitutions:
+        pass
+
 
 @runtime_checkable
 class WritableFontBackend(ReadableFontBackend, Protocol):
@@ -82,6 +93,14 @@ class WritableFontBackend(ReadableFontBackend, Protocol):
         pass
 
     async def putUnitsPerEm(self, value: int) -> None:
+        pass
+
+    async def putGlyphInfos(self, glyphInfos: dict[str, Any]) -> None:
+        pass
+
+    async def putConditionalSubstitutions(
+        self, substitutions: ConditionalSubstitutions
+    ) -> None:
         pass
 
 
@@ -132,7 +151,9 @@ class ProjectManager(Protocol):
     async def projectAvailable(self, projectIdentifier: str, token: str) -> bool:
         pass
 
-    async def getRemoteSubject(self, projectIdentifier: str, token: str) -> Any:
+    async def getRemoteSubject(
+        self, projectIdentifier: str, token: str, readOnly: bool = False
+    ) -> Any:
         pass
 
     async def getProjectList(self, token: str) -> list[str]:

@@ -1,5 +1,6 @@
+import io
 import uuid
-from copy import deepcopy
+from copy import copy, deepcopy
 from itertools import product
 from os import PathLike
 from typing import Any, Generator
@@ -24,6 +25,8 @@ from ..core.classes import (
     Layer,
     LineMetric,
     OpenTypeFeatures,
+    ShaperFontData,
+    ShaperFontGlyphOrderSorting,
     StaticGlyph,
     VariableGlyph,
 )
@@ -34,6 +37,19 @@ from ..core.varutils import locationToTuple, unnormalizeLocation, unnormalizeVal
 from .base import ReadableBaseBackend
 from .filewatcher import Change
 from .watchable import WatchableBackend
+
+shaperFontTables = {
+    "fvar",
+    "head",
+    "maxp",
+    "name",
+    "Debg",
+    "GDEF",
+    "GSUB",
+    "GPOS",
+    "BASE",
+    "post",
+}
 
 
 class OTFBackend(WatchableBackend, ReadableBaseBackend):
@@ -223,6 +239,24 @@ class OTFBackend(WatchableBackend, ReadableBaseBackend):
     async def getCustomData(self) -> dict[str, Any]:
         return {}
 
+    async def getShaperFontData(self) -> ShaperFontData | None:
+        with self._getShaperFont() as font:
+            for tableTag in font.keys():
+                if tableTag not in shaperFontTables:
+                    del font[tableTag]
+
+            f = io.BytesIO()
+            font.save(f)
+
+        data = f.getvalue()
+
+        return ShaperFontData(
+            glyphOrderSorting=ShaperFontGlyphOrderSorting.FROMGLYPHMAP, data=data
+        )
+
+    def _getShaperFont(self):
+        return self._loadFontFromPath(self.path)
+
     async def fileWatcherProcessChanges(
         self, changes: set[tuple[Change, str]]
     ) -> dict[str, Any] | None:
@@ -237,6 +271,11 @@ class TTXBackend(OTFBackend):
     def _loadFontFromPath(self, path: PathLike) -> TTFont:
         font = TTFont()
         font.importXML(path)
+        return font
+
+    def _getShaperFont(self):
+        font = copy(self.font)  # shallow copy
+        font.tables = dict(font.tables)  # shallow copy tables dict for table subsetting
         return font
 
 
@@ -367,6 +406,13 @@ MVAR_MAPPING = {
     "xhgt": ("lineMetricsHorizontalLayout", "xHeight"),
 }
 
+OS_2_MAPPING = [
+    ("ascender", "sTypoAscender"),
+    ("descender", "sTypoDescender"),
+    ("capHeight", "sCapHeight"),
+    ("xHeight", "sxHeight"),
+]
+
 
 def unpackFontSources(
     font: TTFont, fontraAxes: list[FontAxis]
@@ -394,7 +440,11 @@ def unpackFontSources(
     locations = set()
 
     gdefTable = font.get("GDEF")
-    if gdefTable is not None and getattr(gdefTable.table, "VarStore", None) is not None:
+    if (
+        fvarAxes
+        and gdefTable is not None
+        and getattr(gdefTable.table, "VarStore", None) is not None
+    ):
         locations |= {
             locationToTuple(loc)
             for loc in getLocationsFromVarstore(gdefTable.table.VarStore, fvarAxes)
@@ -406,10 +456,9 @@ def unpackFontSources(
     os2Table = font.get("OS/2")
     if os2Table is not None:
         lineMetricsH = defaultSource.lineMetricsHorizontalLayout
-        lineMetricsH["ascender"] = LineMetric(value=os2Table.sTypoAscender)
-        lineMetricsH["descender"] = LineMetric(value=os2Table.sTypoDescender)
-        lineMetricsH["capHeight"] = LineMetric(value=os2Table.sCapHeight)
-        lineMetricsH["xHeight"] = LineMetric(value=os2Table.sxHeight)
+        for fontraName, os2Name in OS_2_MAPPING:
+            if hasattr(os2Table, os2Name):
+                lineMetricsH[fontraName] = LineMetric(value=getattr(os2Table, os2Name))
     # else:
     #     ...fall back to hhea table?
 

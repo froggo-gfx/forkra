@@ -1,12 +1,12 @@
 import { translate } from "./localization.js";
-import { ObservableController } from "./observable-object.js";
+import { ObservableController } from "./observable-object.ts";
 import {
   assert,
   capitalizeFirstLetter,
   commandKeyProperty,
   isActiveElementTypeable,
   isMac,
-} from "./utils.js";
+} from "./utils.ts";
 
 // Action Info
 // const {
@@ -263,9 +263,13 @@ export function getBaseKeyFromKeyEvent(event) {
 
   if (navigator.keyboard) {
     // Use Keyboard API
-    // Hmm: when the keyboard layout changes, we'll always be one event behind,
-    // since the Keyboard API is async
-    fetchKeyboardLayout();
+    if (event.key != "Dead") {
+      // Fetching the keyboard layout interferes with dead keys
+
+      // Hmm: when the keyboard layout changes, we'll always be one event behind,
+      // since the Keyboard API is async
+      fetchKeyboardLayout();
+    }
     baseKey = currentKeyboardLayoutMap.get(event.code);
   } else if ([...event.key].length === 1) {
     // Use deprecated .keyCode property: "best effort"
