@@ -354,16 +354,16 @@ export function unnormalizeLocation(location, axisList) {
   // The opposite of normalizeLocation
   const out = {};
   for (const axis of axisList) {
-    let v = location[axis.name];
-    if (v === undefined) {
-      v = axis.defaultValue;
-    }
-    out[axis.name] = unnormalizeValue(
-      v,
-      axis.minValue,
-      clamp(axis.defaultValue, axis.minValue, axis.maxValue),
-      clamp(axis.maxValue, axis.minValue, axis.maxValue)
-    );
+    const v = location[axis.name];
+    out[axis.name] =
+      v === undefined
+        ? axis.defaultValue
+        : unnormalizeValue(
+            v,
+            axis.minValue,
+            clamp(axis.defaultValue, axis.minValue, axis.maxValue),
+            clamp(axis.maxValue, axis.minValue, axis.maxValue)
+          );
   }
   return out;
 }

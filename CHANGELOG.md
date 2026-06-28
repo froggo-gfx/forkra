@@ -1,7 +1,15 @@
 # Changelog for Fontra
 
-## 2026-01-?? [version 2026.1.3]
+## 2026-02-03 [version 2026.2.0]
 
+- [ufo] Fix creating a single-UFO project. [PR 2405](https://github.com/fontra/fontra/pull/2405)
+- [designspace/ufo] Fix regression in editing OpenType features, caused by unneeded reloading. [PR 2404](https://github.com/fontra/fontra/pull/2404)
+- [opentype backend] When reading TrueType or OpenType, setup font sources, so we can see the line metrics in the editor, and so that glyph sources will reference font sources where possible. [Issue 2399](https://github.com/fontra/fontra/issues/2399), [PR 2401](https://github.com/fontra/fontra/pull/2401)
+- [opentype backend] When reading TrueType or OpenType, use the user-visible axis ranges instead of normalized values for glyph source locations. [PR 2398](https://github.com/fontra/fontra/pull/2398)
+
+## 2026-01-24 [version 2026.1.3]
+
+- [designspace] Fix a writing failure when multiple glyphs use the same layer name but for different locations. [Issue 2393](https://github.com/fontra/fontra/issues/2393), [PR 2394](https://github.com/fontra/fontra/pull/2394)
 - [designspace] Fix writing the `italicAngle` property to source UFOs. [Issue 2386](https://github.com/fontra/fontra/issues/2386), [PR 2389](https://github.com/fontra/fontra/pull/2389)
 
 ## 2026-01-15 [version 2026.1.2]

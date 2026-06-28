@@ -30,6 +30,7 @@ from fontTools.ufoLib import (
     FONTINFO_FILENAME,
     GROUPS_FILENAME,
     KERNING_FILENAME,
+    LIB_FILENAME,
     UFOLibError,
     UFOReader,
     UFOReaderWriter,
@@ -475,6 +476,7 @@ class DesignspaceBackend(WatchableBackend, ReadableBaseBackend):
                 key=lambda gn: originalGlyphOrderMapping.get(gn, 0xFFFFFFFF)
             )
             reader.writeLib(lib)
+            self.fileWatcherIgnoreNextChange(os.path.join(layer.path, LIB_FILENAME))
 
     def ensureGlyphNotInGlyphOrder(self, layer, glyphName):
         reader = layer.reader
@@ -488,6 +490,7 @@ class DesignspaceBackend(WatchableBackend, ReadableBaseBackend):
         if glyphOrder is not None and glyphName in glyphOrder:
             glyphOrder.remove(glyphName)
             reader.writeLib(lib)
+            self.fileWatcherIgnoreNextChange(os.path.join(layer.path, LIB_FILENAME))
 
     async def getGlyphMap(self) -> dict[str, list[int]]:
         return dict(self.glyphMap)
@@ -691,6 +694,7 @@ class DesignspaceBackend(WatchableBackend, ReadableBaseBackend):
             localDS["sources"] = localSources
 
         revLayerNameMapping = reverseSparseDict(layerNameMapping)
+        assert len(revLayerNameMapping) == len(layerNameMapping)
 
         # Gather all UFO layers
         usedLayers = set()
@@ -780,8 +784,10 @@ class DesignspaceBackend(WatchableBackend, ReadableBaseBackend):
             for layer in self.ufoLayers
             if glyphName in layer.glyphSet
         )
+
         layersToDelete = relevantLayerNames - usedLayers
-        for layerName in layersToDelete:
+
+        for layerName in sorted(layersToDelete):
             ufoLayer = self.ufoLayers.findItem(fontraLayerName=layerName)
             glyphSet = ufoLayer.glyphSet
             glyphSet.deleteGlyph(glyphName)
@@ -927,7 +933,11 @@ class DesignspaceBackend(WatchableBackend, ReadableBaseBackend):
             # Assume sparse source, add new layer to existing UFO
             poleDSSource = self._findDSSourceForSparseSource(location)
             ufoLayer = self._createUFOLayer(
-                glyphName, poleDSSource.layer.path, layerName, sourceIdentifier
+                glyphName,
+                poleDSSource.layer.path,
+                layerName,
+                sourceIdentifier,
+                mustCreateNewLayer=True,
             )
         else:
             # New UFO
@@ -988,19 +998,28 @@ class DesignspaceBackend(WatchableBackend, ReadableBaseBackend):
         ufoPath: str,
         suggestedLayerName: str,
         fontraLayerName: str,
+        mustCreateNewLayer: bool = False,
     ) -> UFOLayer:
         reader = self.ufoManager.getReader(ufoPath)
         existingLayerNames = set(reader.getLayerNames())
         ufoLayerName = suggestedLayerName
         count = 0
-        # getGlyphSet() will create the layer if it doesn't already exist
-        while glyphName in self.ufoManager.getGlyphSet(ufoPath, ufoLayerName):
-            # TODO: THIS IS NOT COVERED BY TESTS
-            # The glyph already exists in the layer, which means there is
-            # a conflict. Let's make up a layer name in which the glyph
-            # does not exist.
-            count += 1
-            ufoLayerName = f"{suggestedLayerName}#{count}"
+
+        if mustCreateNewLayer:
+            while ufoLayerName in existingLayerNames:
+                count += 1
+                ufoLayerName = f"{suggestedLayerName}#{count}"
+            # This creates the layer
+            self.ufoManager.getGlyphSet(ufoPath, ufoLayerName)
+        else:
+            # getGlyphSet() will create the layer if it doesn't already exist
+            while glyphName in self.ufoManager.getGlyphSet(ufoPath, ufoLayerName):
+                # TODO: THIS IS NOT COVERED BY TESTS
+                # The glyph already exists in the layer, which means there is
+                # a conflict. Let's make up a layer name in which the glyph
+                # does not exist.
+                count += 1
+                ufoLayerName = f"{suggestedLayerName}#{count}"
 
         if ufoLayerName not in existingLayerNames:
             reader.writeLayerContents()
@@ -1182,6 +1201,9 @@ class DesignspaceBackend(WatchableBackend, ReadableBaseBackend):
                 self.fileWatcherIgnoreNextChange(
                     os.path.join(dsSource.layer.path, FONTINFO_FILENAME)
                 )
+                self.fileWatcherIgnoreNextChange(
+                    os.path.join(dsSource.layer.path, LIB_FILENAME)
+                )
 
             newDSSources.append(dsSource)
 
@@ -1354,6 +1376,7 @@ class DesignspaceBackend(WatchableBackend, ReadableBaseBackend):
             writer = self.ufoManager.getReader(path)
             featureText = features.text if path == defaultPath else ""
             writer.writeFeatures(featureText)
+            self.fileWatcherIgnoreNextChange(os.path.join(path, FEATURES_FILENAME))
 
     async def getBackgroundImage(self, imageIdentifier: str) -> ImageData | None:
         imageInfo = self._imageMapping.reverse.get(imageIdentifier)
@@ -1674,7 +1697,7 @@ class UFOBackend(DesignspaceBackend):
     def fromPath(cls, path):
         dsDoc = DesignSpaceDocument()
         dsDoc.addSourceDescriptor(
-            name="default", path=os.fspath(path), styleName="default"
+            name="default", path=os.fspath(path), styleName="Regular"
         )
         return cls(dsDoc)
 
@@ -1685,7 +1708,7 @@ class UFOBackend(DesignspaceBackend):
             shutil.rmtree(path)
         elif path.exists():
             path.unlink()
-        dsDoc = createDSDocFromUFOPath(path, "default")
+        dsDoc = createDSDocFromUFOPath(path, "Regular")
         return cls(dsDoc)
 
     def _reloadEverything(self) -> None:
@@ -1696,6 +1719,9 @@ class UFOBackend(DesignspaceBackend):
 
     async def putCustomData(self, lib):
         self.defaultReader.writeLib(lib)
+        self.fileWatcherIgnoreNextChange(
+            os.path.join(self.defaultUFOLayer.path, LIB_FILENAME)
+        )
 
     async def putAxes(self, axes):
         if axes.axes or axes.mappings:
