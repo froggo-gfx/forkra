@@ -5,6 +5,7 @@
 ### Fixes
 
 - [languages] Fix caching behavior for language files (UI strings), to ensure we always see the latest version. [Issue 2668](https://github.com/fontra/fontra/issues/2668), [PR 2669](https://github.com/fontra/fontra/pull/2669)
+- [tests] Ensure tests written in TypeScript are run as part of the test suite. [Issue 2664](https://github.com/fontra/fontra/issues/2664), [PR 2670](https://github.com/fontra/fontra/pull/2670)
 
 ## 2026-06-26 [version 2026.6.4]
 
