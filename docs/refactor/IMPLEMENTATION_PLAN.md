@@ -19,12 +19,14 @@ This plan does **not** implement the skeleton tool, and treats the Distance/Manh
 
 ## 2. Problem Definition
 
-Three sibling fork folders live under a common parent directory:
-- `original/` — pristine upstream clone (reference only).
+Two reference trees plus the target:
+- `original/` — pristine upstream clone (reference only); sibling of `forkra/`.
 - `forkra/` — **this repository; the target we modify.** Already merged with upstream.
-- `skeleton/` — a later fork with extra features + a refactor; **read-only donor** of code/architecture.
+- `skeleton/` — a later fork with extra features + a refactor; **read-only donor** of code/architecture. **It is checked out *nested inside* forkra at `forkra/skeleton/`** (a full repo with its own `.git`), **not** a sibling.
 
-> **Portability / required layout.** This document lives in **forkra** and uses paths relative to the common parent: read every `skeleton/…` as **`../skeleton/…`** and every `forkra/…` as **`./…`** when your working directory is inside `forkra/`. To *execute* this plan you must have **both `forkra/` and `skeleton/` checked out as siblings**, with `skeleton/` at the commit these line-number references were written against — otherwise the donor line numbers drift. `original/` is optional (upstream `f70e2017f` is also reachable as the `upstream/main` ref already fetched in forkra).
+> **Portability / required layout.** This document lives in **forkra**. Read every `skeleton/…` donor path as **`./skeleton/…`** (nested inside this repo) and every `forkra/…` path as **`./…`**, when your working directory is `forkra/`. The donor line numbers are written against the `skeleton/` tree as currently checked out — re-verify them at expansion time (they drift if skeleton is updated). `original/` is optional (upstream `f70e2017f` is also reachable as the `upstream/main` ref already fetched in forkra).
+>
+> ⚠️ **Nested-repo caveat:** `forkra/skeleton/` carries its own `.git`, so forkra's git commands do not see skeleton's history, and the nested tree must be kept out of forkra's commits (`.gitignore` it or treat as a submodule). Never modify anything under `skeleton/` — it is donor-only.
 
 Forkra's fork code has these concrete problems (established by file-level analysis; see `PRE_IMPLEMENTATION_PLAN.md` for the full audit):
 
@@ -48,7 +50,7 @@ Forkra's fork code has these concrete problems (established by file-level analys
 
 Copied verbatim — every task implicitly includes these.
 
-- **Target repo/branch:** **this repository** (forkra), base branch `experimental/up-to-date`. Each workstream on its own branch off it; frequent commits. Never push unless the user asks.
+- **Branching model:** All work happens in the **`refactor-simple/`** branch group, which is cut from **`experimental/up-to-date`** (in its most relevant/current state). Each workstream gets its own branch in that group — `refactor-simple/ws<N>-<name>` — with frequent commits; never push unless the user asks. (This is the single source of truth for the base branch; later references say "the `refactor-simple/` base.")
 - **Upstream baseline:** `upstream/main` = `f70e2017f`. `original/` and `skeleton/` are **read-only references** — never modify them.
 - **Skeleton coupling is OUT:** strip every reference to `skeleton-contour-generator.js`, rib/fixed-rib hotkeys, `measureHoverRibPoint`, `SKELETON`/`SKELETON_DEFAULTS` schema sections.
 - **Language:** ES modules, `"type": "module"`. Import alias `@fontra/core/...` → `src-js/fontra-core/src/...`, `@fontra/web-components/...`, etc.
@@ -64,7 +66,7 @@ Copied verbatim — every task implicitly includes these.
 | D2 | Mid-handle point (midpoint between controls) is named **`control-handle point`** — NOT a tunni point. |
 | D3 | The real (tangent-ray intersection) point becomes the canonical **"Tunni point"**; retire `trueTunniPoint`/"actual" naming. |
 | D4 | **Hard-rename** `fontra.tunni.*` layer identifiers — no back-compat aliases. |
-| D5 | **One** `calculateSegmentTension` in `tunni-calculations.js`; `distance-angle.js` imports it; delete its own `calculateTension`. |
+| D5 | **One** `calculateSegmentTension` in `tunni-calculations.js`; `distance-angle.js` imports it; delete its own `calculateTension` (incl. its leftover `console.log` debug blocks). **Scope is wider than tension:** `distance-angle.js` also holds duplicate *tunni-point geometry* (`calculateTrueTunniPoint`, `calculateTunniPointz`) — those are likewise deleted and routed to the canonical `tunni-calculations.js` functions (see WS-4 "Hidden entanglement"). |
 | D6 | Keep the filename **`tunni-calculations.js`** (already exists), purified to math-only. |
 | D7 | **Rename** the `showTunni*` settings keys consistently with D8. |
 | D8 | Rename the "Tunni Labels" feature to **"Labels" / "Point labels"** (they are point labels, not segment labels). |
@@ -144,9 +146,9 @@ src-js/fontra-core/assets/
 
 **Expansion procedure — do this for each workstream, in turn:**
 
-1. **Prerequisites.** Confirm both `forkra/` and `../skeleton/` are present (see the Portability note in §2); you are on `experimental/up-to-date`; create the workstream branch (`git switch -c ws<N>-<name>`).
+1. **Prerequisites.** Confirm the nested donor `./skeleton/` is present (see the Portability note in §2); create the workstream branch off the `refactor-simple/` base (see §3 "Branching model") — `git switch -c refactor-simple/ws<N>-<name>`.
 2. **Re-read context.** This workstream's outline in §6 + its dependencies in §7 + the relevant locked decisions in §3 + the testing strategy in §4.
-3. **Open the donors.** Read the actual current code at each cited `../skeleton/…` (and forkra) location and **re-verify the line numbers — they may have drifted** since this master was written. Trust the code, not the numbers.
+3. **Open the donors.** Read the actual current code at each cited `./skeleton/…` (and forkra) location and **re-verify the line numbers — they may have drifted** since this master was written. Trust the code, not the numbers.
 4. **Write the Level-2 plan.** Invoke the `superpowers:writing-plans` skill and save to `docs/superpowers/plans/2026-06-28-ws<N>-<name>.md`. Follow its format: File Structure → right-sized **Tasks** → bite-sized **Steps** (write failing test → run it, see it fail → implement minimally → run it, see it pass → commit). **Complete code in every code step; exact commands + expected output; no placeholders.**
 5. **Apply the §4 testing split.** Extracted core math → real mocha TDD (`cd src-js/fontra-core && npx mocha tests/test-<name>.js`). `views-editor` panels/draws/interaction → explicit **manual verification** steps (build, run server, interact, observe) — there is no harness, do not invent one.
 6. **Self-review the Level-2 plan** against this workstream's outline: coverage, no placeholders, and name/type consistency with the canonical names fixed in §5 and WS-4.
@@ -182,9 +184,11 @@ Five independent, shippable workstreams. Outlines below are detailed enough to s
 
 ### WS-4 — Tunni refactor (keystone)  *(risk: high — do behind tests; the big one)*
 - **Goal:** Pure math in `tunni-calculations.js`; interaction in `tunni-interactions.js`; render in the viz file; **single tension source** (D5); **naming cascade** (D2–D4, D7, D8); **strip Tunni from the pointer**; relocate/rename point labels.
-- **Files:** MODIFY `tunni-calculations.js` (purify + rename + add `calculateSegmentTension`), `distance-angle.js` (import tension, delete its `calculateTension`), CREATE `tunni-interactions.js`, MODIFY `edit-tools-pointer.js` (remove ~259 Tunni lines → thin hooks), `visualization-layer-definitions.js` (rename `fontra.tunni.*`, thin draws), `panel-transformation.js` (labels rename + key renames), `scene-controller.js` (key renames). CREATE `tests/test-tunni-calculations.js`.
+- **Files:** MODIFY `tunni-calculations.js` (purify + rename + add `calculateSegmentTension`), `distance-angle.js` (import tension, delete its `calculateTension` **and its duplicate tunni-point geometry — see "Hidden entanglement" below**), CREATE `tunni-interactions.js`, MODIFY `edit-tools-pointer.js` (remove ~259 Tunni lines → thin hooks), `visualization-layer-definitions.js` (rename `fontra.tunni.*`, thin draws), `panel-transformation.js` (labels rename + key renames), `scene-controller.js` (key renames). CREATE `tests/test-tunni-calculations.js`.
+- **⚠️ Hidden entanglement (verified, wider than D5).** `distance-angle.js` does not only duplicate *tension* — it carries its **own copies of tunni-point geometry**: `calculateTrueTunniPoint` (≈line 1058) and a `calculateTunniPointz` (≈line 1173, consumed at ≈1250). So the D5 "single source of truth" + the D2/D3 naming cascade must **also** de-duplicate these: route `distance-angle.js` to the canonical `tunni-calculations.js` functions (real Tunni point), delete `calculateTrueTunniPoint`/`calculateTunniPointz`, and update the ≈1250 consumer to the renamed canonical function. Even though the Distance/Manhattan *layers* are frozen, `distance-angle.js` stays (Q-measure needs it) and its tunni dupes are in-scope for WS-4. Re-verify these line numbers at expansion time.
+- **Cleanup riding along:** forkra's `calculateTension` in `distance-angle.js` has leftover `console.log` debug blocks (≈lines 165 & 270 — algorithm-bring-up cruft). They are deleted with the function as part of the D5 move; no debug logging survives into `calculateSegmentTension`.
 - **Donor/architecture:** `skeleton/.../tunni-calculations.js` (pure-math shape) + `tunni-interactions.js` (interaction shape — **strip** `calculateSkeleton*`, `buildSkeletonTunniSegment`, `skeletonTunniHitTest`). Map current names: `calculateTrueTunniPoint`→`calculateTunniPoint` (real), old `calculateTunniPoint`→`calculateControlHandlePoint`; `fontra.tunni.actual.points`→`fontra.tunni.point`, `fontra.tunni.combined`→`fontra.tunni.handle` (final ids TBD but hard-rename, D4).
-- **Tasks (outline):** (1) **TDD** add `calculateSegmentTension` to `tunni-calculations.js`; (2) repoint `distance-angle.js` to it, delete its `calculateTension`, run tests. (3) **TDD** the rename within `tunni-calculations.js` (function-level), keeping behavior; purge drawing/interaction from it. (4) create `tunni-interactions.js` from the purged interaction code + skeleton structure (no skeleton refs). (5) update `edit-tools-pointer.js`: delete the ~259 Tunni lines, add an import + early-return dispatch hooks in `handleHover`/`handleDrag`. (6) move/rename the Tunni draws in the viz file to render-only consuming core; hard-rename layer ids (D4). (7) `panel-transformation.js` + `scene-controller.js`: rename `showTunni*` keys (D7) and "Tunni Labels"→"Point labels" (D8). (8) prettier + commit per sub-step. (9) manual verify: Tunni lines/points drag, equalize (alt-drag) still works, labels show.
+- **Tasks (outline):** (1) **TDD** add `calculateSegmentTension` to `tunni-calculations.js`; (2) repoint `distance-angle.js` to it, delete its `calculateTension` (and its `console.log` debug blocks), run tests. (2b) **TDD** de-dupe the tunni-point geometry in `distance-angle.js`: delete `calculateTrueTunniPoint`/`calculateTunniPointz`, import the canonical functions from `tunni-calculations.js`, and repoint the ≈1250 consumer. (3) **TDD** the rename within `tunni-calculations.js` (function-level), keeping behavior; purge drawing/interaction from it. (4) create `tunni-interactions.js` from the purged interaction code + skeleton structure (no skeleton refs). (5) update `edit-tools-pointer.js`: delete the ~259 Tunni lines, add an import + early-return dispatch hooks in `handleHover`/`handleDrag`. (6) move/rename the Tunni draws in the viz file to render-only consuming core; hard-rename layer ids (D4). (7) `panel-transformation.js` + `scene-controller.js`: rename `showTunni*` keys (D7) and "Tunni Labels"→"Point labels" (D8). (8) prettier + commit per sub-step. (9) manual verify: Tunni lines/points drag, equalize (alt-drag) still works, labels show.
 - **Testing:** all math/tension/geometry = mocha TDD; pointer/viz/panel = manual. **Regression-watch equalize** (must be untouched in behavior).
 
 ### WS-5 — Letterspacer port  *(risk: medium — introduces persistence surface)*
@@ -216,7 +220,7 @@ WS-5 Letterspacer ── independent; schedule anytime (recommended last)
 - WS-2 before WS-4 so `measure-interactions.js` exists as the pattern WS-4 mirrors when extracting `tunni-interactions.js`, and so the pointer is edited by WS-2 first (small) then cleaned by WS-4 (large) — fewer conflicts than the reverse.
 - WS-5 is fully independent; last keeps the riskier refactors earlier.
 
-Each workstream = its own branch off `experimental/up-to-date`, merged only after its manual/automated verification passes.
+Each workstream = its own branch in the `refactor-simple/` group (see §3 "Branching model"), merged only after its manual/automated verification passes.
 
 ---
 

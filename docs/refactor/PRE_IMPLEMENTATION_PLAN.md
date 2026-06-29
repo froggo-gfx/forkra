@@ -77,7 +77,7 @@ views-editor/src/tunni-interactions.js   ← hit-tests + drag handlers (consume 
 views-editor/src/visualization-layer-definitions.js  ← drawTunniLabels / lines (consume math)
 ```
 
-**Single source of truth for tension/curve math (core ask):** create **one** `calculateSegmentTension(segment)` in `tunni-calculations.js`; have the labels (visualization), the canvas controls (interaction), and `distance-angle.js` all import it. Remove the inline recompute and decide whether `distance-angle.js:calculateTension` becomes a thin re-export or is deleted.
+**Single source of truth for tension/curve math (core ask):** create **one** `calculateSegmentTension(segment)` in `tunni-calculations.js`; have the labels (visualization), the canvas controls (interaction), and `distance-angle.js` all import it. Remove the inline recompute and decide whether `distance-angle.js:calculateTension` becomes a thin re-export or is deleted (D5: deleted). **Note the dedupe is broader than tension:** `distance-angle.js` also duplicates the tunni-point geometry itself (`calculateTrueTunniPoint`, `calculateTunniPointz`) — fold those into the same single-source cleanup (see §2.6 and D5).
 
 **Naming fix (the "tunni point" mislabel)** — confirmed in code: `calculateTunniPoint` returns the **midpoint between the two control points** ("a point along the line segment between the two control points… the midpoint"), while `calculateTrueTunniPoint` is the **real** Tunni point (intersection of the on-curve tangent rays). So:
 
@@ -114,7 +114,7 @@ Forkra's equalize is fine and **must not change behaviour**. Its math (`calculat
 ---
 
 ### 2.6 Distance / Manhattan — out of scope
-Superseded by Q-measure in skeleton; per your direction, no action this round. (For reference: forkra's `fontra.distance-angle` + `fontra.manhattan-distance` layers and `distance-angle.js` remain; note `distance-angle.js:calculateTension` is entangled with the §2.2 dedupe.)
+Superseded by Q-measure in skeleton; per your direction, no action this round. (For reference: forkra's `fontra.distance-angle` + `fontra.manhattan-distance` layers and `distance-angle.js` remain; note `distance-angle.js` is entangled with the §2.2 dedupe **beyond just `calculateTension`** — it also holds duplicate tunni-point geometry `calculateTrueTunniPoint` (≈1058) and `calculateTunniPointz` (≈1173, used ≈1250), all of which the §2.2 / D5 cleanup removes and routes to `tunni-calculations.js`.)
 
 ---
 
@@ -210,7 +210,7 @@ Unlike §2 (refactors of features forkra already has), these are **additive port
 | **D2** | Mid-handle point name | **`control-handle point`** (the midpoint-between-controls, formerly mislabeled "tunni point"). |
 | **D3** | Reclaim "Tunni point" | **Yes** — the real (tangent-ray intersection) point becomes the canonical **"Tunni point"**; the `trueTunniPoint` / "Actual TUNNI" naming is retired. |
 | **D4** | Layer identifiers | **Hard-rename** `fontra.tunni.*` — **no** back-compat aliases. |
-| **D5** | Tension single source of truth | One `calculateSegmentTension` in the tunni math file; **`distance-angle.js` imports it** and its own `calculateTension` is deleted. |
+| **D5** | Tension single source of truth | One `calculateSegmentTension` in the tunni math file; **`distance-angle.js` imports it** and its own `calculateTension` is deleted (along with that function's leftover `console.log` debug blocks). **Verified wider scope:** `distance-angle.js` also duplicates *tunni-point geometry* — `calculateTrueTunniPoint` (≈1058) and `calculateTunniPointz` (≈1173, used ≈1250). These are deleted too and routed to the canonical `tunni-calculations.js` functions. |
 | **D6** | Math file name | **Keep `tunni-calculations.js`** (it already exists in forkra), purified to math-only. (A *new* file would have been named `*-math.js`; not applicable here.) |
 | **D7** | Tunni settings keys | **Rename** (`showTunni*` → consistent new names, alongside D8). |
 | **D8** | "Tunni Labels" feature | They are **point labels** → rename to **"Labels" / "Point labels"** (NOT "segment labels"). |
