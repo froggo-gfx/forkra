@@ -1,5 +1,11 @@
 import { registerAction } from "@fontra/core/actions.js";
 import { applicationSettingsController } from "@fontra/core/application-settings.js";
+import {
+  buildCoarseGridValues,
+  normalizeCoarseGridBase,
+  normalizeCoarseGridIncrement,
+  snapCoarseGridSpacing,
+} from "@fontra/core/coarse-grid-presets.js";
 import { findNearestLocationIndex } from "@fontra/core/discrete-variation-model.js";
 import {
   BACKGROUND_LAYER_SEPARATOR,
@@ -46,6 +52,7 @@ import { IconButton } from "@fontra/web-components/icon-button.js";
 import { InlineSVG } from "@fontra/web-components/inline-svg.js";
 import { showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialog, dialogSetup, message } from "@fontra/web-components/modal-dialog.js";
+import "@fontra/web-components/range-slider.js";
 import {
   Accordion,
   groupAccordionHeaderButtons,
@@ -422,6 +429,172 @@ export default class DesignspaceNavigationPanel extends Panel {
     return this.accordion.querySelector("#coarse-grid-increment-input");
   }
 
+  _readCoarseGridSettingsFromApp() {
+    const model = applicationSettingsController.model;
+    const custom = !!model.coarseGridCustom;
+    const base = normalizeCoarseGridBase(model.coarseGridBase);
+    const increment = normalizeCoarseGridIncrement(model.coarseGridIncrement);
+    const values = buildCoarseGridValues({ custom, base, increment });
+    const spacing = snapCoarseGridSpacing(model.coarseGridDefaultSpacing, values);
+    return { custom, base, increment, spacing };
+  }
+
+  _persistCoarseGridSettings() {
+    const settings = this._coarseGridSettings;
+    const model = applicationSettingsController.model;
+    model.coarseGridCustom = !!settings.custom;
+    model.coarseGridBase = normalizeCoarseGridBase(settings.base);
+    model.coarseGridIncrement = normalizeCoarseGridIncrement(settings.increment);
+    model.coarseGridDefaultSpacing = settings.spacing;
+  }
+
+  _updateCoarseGridCustomFieldsVisibility() {
+    const fields = this.coarseGridCustomFields;
+    if (fields) {
+      fields.style.display = this._coarseGridSettings.custom ? "grid" : "none";
+    }
+  }
+
+  _syncCoarseGridControls() {
+    const settings = this._coarseGridSettings;
+    const values = buildCoarseGridValues(settings);
+    const spacing = snapCoarseGridSpacing(settings.spacing, values);
+
+    this._isApplyingCoarseGridSettings = true;
+    try {
+      const spacingInput = this.coarseGridSpacingInput;
+      if (spacingInput) {
+        spacingInput.values = values;
+        spacingInput.minValue = values[0];
+        spacingInput.maxValue = values[values.length - 1];
+        spacingInput.defaultValue = values[Math.min(1, values.length - 1)];
+        spacingInput.value = spacing;
+      }
+      if (this.coarseGridCustomToggle) {
+        this.coarseGridCustomToggle.checked = settings.custom;
+      }
+      if (this.coarseGridBaseInput) {
+        this.coarseGridBaseInput.value = String(settings.base);
+      }
+      if (this.coarseGridIncrementInput) {
+        this.coarseGridIncrementInput.value = String(settings.increment);
+      }
+      this._updateCoarseGridCustomFieldsVisibility();
+      window.coarseGridValues = values;
+      this.sceneSettingsController.setItem("coarseGridSpacing", spacing, {
+        senderID: this,
+      });
+      this._coarseGridSettings = { ...settings, spacing };
+    } finally {
+      this._isApplyingCoarseGridSettings = false;
+    }
+  }
+
+  _setupCoarseGridControls() {
+    this._coarseGridSettings = this._readCoarseGridSettingsFromApp();
+    this._syncCoarseGridControls();
+    this._persistCoarseGridSettings();
+
+    const spacingInput = this.coarseGridSpacingInput;
+    if (spacingInput) {
+      spacingInput.onChangeCallback = (event) => {
+        this._coarseGridSettings = {
+          ...this._coarseGridSettings,
+          spacing: event.value,
+        };
+        this.sceneSettingsController.setItem("coarseGridSpacing", event.value, {
+          senderID: this,
+        });
+        this._persistCoarseGridSettings();
+      };
+    }
+
+    const customToggle = this.coarseGridCustomToggle;
+    if (customToggle) {
+      customToggle.addEventListener("change", (event) => {
+        const custom = !!event.target.checked;
+        const values = buildCoarseGridValues({
+          ...this._coarseGridSettings,
+          custom,
+        });
+        const spacing = snapCoarseGridSpacing(
+          this.sceneSettings.coarseGridSpacing,
+          values
+        );
+        this._coarseGridSettings = {
+          ...this._coarseGridSettings,
+          custom,
+          spacing,
+        };
+        this._syncCoarseGridControls();
+        this._persistCoarseGridSettings();
+      });
+    }
+
+    const onPresetInput = () => {
+      const base = normalizeCoarseGridBase(Number(this.coarseGridBaseInput?.value));
+      const increment = normalizeCoarseGridIncrement(
+        Number(this.coarseGridIncrementInput?.value)
+      );
+      const values = buildCoarseGridValues({
+        ...this._coarseGridSettings,
+        base,
+        increment,
+      });
+      const spacing = snapCoarseGridSpacing(
+        this.sceneSettings.coarseGridSpacing,
+        values
+      );
+      this._coarseGridSettings = {
+        ...this._coarseGridSettings,
+        base,
+        increment,
+        spacing,
+      };
+      this._syncCoarseGridControls();
+      this._persistCoarseGridSettings();
+    };
+    if (this.coarseGridBaseInput) {
+      this.coarseGridBaseInput.addEventListener("change", onPresetInput);
+    }
+    if (this.coarseGridIncrementInput) {
+      this.coarseGridIncrementInput.addEventListener("change", onPresetInput);
+    }
+
+    this.sceneSettingsController.addKeyListener("coarseGridSpacing", (event) => {
+      if (this._isApplyingCoarseGridSettings || event.senderInfo?.senderID === this) {
+        return;
+      }
+      const values = buildCoarseGridValues(this._coarseGridSettings);
+      const spacing = snapCoarseGridSpacing(event.newValue, values);
+      this._coarseGridSettings = { ...this._coarseGridSettings, spacing };
+      if (this.coarseGridSpacingInput) {
+        this.coarseGridSpacingInput.value = spacing;
+      }
+      if (spacing !== event.newValue) {
+        this.sceneSettingsController.setItem("coarseGridSpacing", spacing, {
+          senderID: this,
+        });
+      }
+      this._persistCoarseGridSettings();
+    });
+  }
+
+  _setupCoarseGridDisplayToggle() {
+    const toggle = this.coarseGridDisplayToggle;
+    if (!toggle) {
+      return;
+    }
+    const visualizationSettings = this.editorController.visualizationLayersSettings;
+    toggle.checked = !!visualizationSettings.model["fontra.coarse.grid"];
+    toggle.addEventListener("change", () => {
+      visualizationSettings.model["fontra.coarse.grid"] = !!toggle.checked;
+    });
+    visualizationSettings.addKeyListener("fontra.coarse.grid", (event) => {
+      toggle.checked = !!event.newValue;
+    });
+  }
+
   setup() {
     this._setFontLocationValues();
     this.glyphAxesElement.values = this.sceneSettings.glyphLocation;
@@ -540,6 +713,9 @@ export default class DesignspaceNavigationPanel extends Panel {
       this._updateAxes();
       this._updateSources();
     });
+
+    this._setupCoarseGridControls();
+    this._setupCoarseGridDisplayToggle();
 
     const columnDescriptions = this._setupSourceListColumnDescriptions();
 
