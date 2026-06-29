@@ -645,14 +645,16 @@ export class SceneController {
 
   setupSettingsListeners() {
     //// grid
-    this.sceneSettingsController.addKeyListener("coarseGridSpacing", () =>
-    this.canvasController.requestUpdate()
-    );
-
-    window.coarseGridSpacing = this.sceneSettings.coarseGridSpacing || 1;
-    this.sceneSettingsController.addKeyListener("coarseGridSpacing", (event) => {
-    window.coarseGridSpacing = event.newValue;
+    this.sceneSettingsController.addKeyListener("coarseGridSpacing", () => {
+      this._updateCoarseGridRuntimeSpacing();
+      this.canvasController.requestUpdate();
     });
+
+    this.visualizationLayersSettings.addKeyListener("fontra.coarse.grid", () => {
+      this._updateCoarseGridRuntimeSpacing();
+      this.canvasController.requestUpdate();
+    });
+    this._updateCoarseGridRuntimeSpacing();
 
     this.sceneSettingsController.addKeyListener("selectedGlyph", (event) => {
       this._resetStoredGlyphPosition();
@@ -718,6 +720,14 @@ export class SceneController {
         }
       }
     );
+  }
+
+  _updateCoarseGridRuntimeSpacing() {
+    window.coarseGridSpacing = this.visualizationLayersSettings.model[
+      "fontra.coarse.grid"
+    ]
+      ? this.sceneSettings.coarseGridSpacing || 1
+      : 1;
   }
 
   setupEventHandling() {

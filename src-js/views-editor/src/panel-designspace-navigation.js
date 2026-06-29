@@ -455,6 +455,22 @@ export default class DesignspaceNavigationPanel extends Panel {
     }
   }
 
+  _updateCoarseGridControlsEnabled() {
+    const enabled =
+      !!this.editorController.visualizationLayersSettings.model["fontra.coarse.grid"];
+    for (const element of [
+      this.coarseGridSpacingInput,
+      this.coarseGridCustomToggle,
+      this.coarseGridBaseInput,
+      this.coarseGridIncrementInput,
+    ]) {
+      if (element) {
+        element.disabled = !enabled;
+        element.requestUpdate?.();
+      }
+    }
+  }
+
   _syncCoarseGridControls() {
     const settings = this._coarseGridSettings;
     const values = buildCoarseGridSliderValues(settings);
@@ -480,6 +496,7 @@ export default class DesignspaceNavigationPanel extends Panel {
         this.coarseGridIncrementInput.value = String(settings.increment);
       }
       this._updateCoarseGridCustomFieldsVisibility();
+      this._updateCoarseGridControlsEnabled();
       window.coarseGridValues = values;
       this.sceneSettingsController.setItem("coarseGridSpacing", spacing, {
         senderID: this,
@@ -587,11 +604,14 @@ export default class DesignspaceNavigationPanel extends Panel {
     }
     const visualizationSettings = this.editorController.visualizationLayersSettings;
     toggle.checked = !!visualizationSettings.model["fontra.coarse.grid"];
+    this._updateCoarseGridControlsEnabled();
     toggle.addEventListener("change", () => {
       visualizationSettings.model["fontra.coarse.grid"] = !!toggle.checked;
+      this._updateCoarseGridControlsEnabled();
     });
     visualizationSettings.addKeyListener("fontra.coarse.grid", (event) => {
       toggle.checked = !!event.newValue;
+      this._updateCoarseGridControlsEnabled();
     });
   }
 
