@@ -2,6 +2,10 @@
 
 ## 2026-06-28 [version 2026.6.5]
 
+### Improvements
+
+- [languages] Some new strings and some improved strings for Simplified Chinese and Traditional Chinese, contributed by 湖远星（Lake桑）. [PR](https://github.com/fontra/fontra/pull/2674)
+
 ### Fixes
 
 - [languages] Fix caching behavior for language files (UI strings), to ensure we always see the latest version. [Issue 2668](https://github.com/fontra/fontra/issues/2668), [PR 2669](https://github.com/fontra/fontra/pull/2669)
