@@ -8,6 +8,11 @@ export const applicationSettingsController = new ObservableController({
   sortComponentLocationGlyphAxes: true,
   disableAdHocMarks: false,
   shapingDebuggerShowIneffectiveItems: false,
+  // fork: coarse-grid panel settings (app-level, per D9 — not written to project files)
+  coarseGridCustom: false,
+  coarseGridBase: 5,
+  coarseGridIncrement: 5,
+  coarseGridDefaultSpacing: 10,
 });
 
 applicationSettingsController.synchronizeWithLocalStorage(
