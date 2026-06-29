@@ -1,10 +1,12 @@
 # Changelog for Fontra
 
-## 2026-06-28 [version 2026.6.5]
+## 2026-06-?? [version 2026.6.6]
 
 ### Improvements
 
 - [languages] Some new strings and some improved strings for Simplified Chinese and Traditional Chinese, contributed by 湖远星（Lake桑）. [PR](https://github.com/fontra/fontra/pull/2674)
+
+## 2026-06-28 [version 2026.6.5]
 
 ### Fixes
 
