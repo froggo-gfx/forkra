@@ -290,6 +290,12 @@ export const strings = {
   "sidebar.characters-glyphs.shaping-debugger.show-ineffective-items":
     "Show ineffective items",
   "sidebar.designspace-navigation": "Designspace Navigation",
+  "sidebar.designspace-navigation.coarse-grid": "Coarse Grid",
+  "sidebar.designspace-navigation.coarse-grid.base": "Base",
+  "sidebar.designspace-navigation.coarse-grid.custom": "Custom",
+  "sidebar.designspace-navigation.coarse-grid.display": "Display",
+  "sidebar.designspace-navigation.coarse-grid.increment": "Increment",
+  "sidebar.designspace-navigation.coarse-grid.spacing": "Spacing",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "Layer:",
   "sidebar.designspace-navigation.dialog.add-source.label.source-name": "Source name:",
   "sidebar.designspace-navigation.dialog.add-source.ok-button-title": "Add",

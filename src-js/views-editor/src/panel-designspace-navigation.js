@@ -291,6 +291,78 @@ export default class DesignspaceNavigationPanel extends Panel {
           ]
         ),
       },
+      {
+        id: "coarse-grid-accordion-item",
+        label: translate("sidebar.designspace-navigation.coarse-grid"),
+        open: false,
+        content: html.div(
+          {
+            style: `
+              display: grid;
+              grid-template-columns: auto 1fr;
+              gap: 0.5em;
+              align-items: center;
+            `,
+          },
+          [
+            html.label(
+              { for: "coarse-grid-display-toggle", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.coarse-grid.display")]
+            ),
+            html.input({ id: "coarse-grid-display-toggle", type: "checkbox" }),
+            html.label(
+              { for: "coarse-grid-spacing-input", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.coarse-grid.spacing")]
+            ),
+            html.createDomElement("range-slider", {
+              id: "coarse-grid-spacing-input",
+              type: "range",
+            }),
+            html.label(
+              { for: "coarse-grid-custom-toggle", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.coarse-grid.custom")]
+            ),
+            html.input({ id: "coarse-grid-custom-toggle", type: "checkbox" }),
+            html.div(),
+            html.div(
+              {
+                id: "coarse-grid-custom-fields",
+                style: `
+                  display: none;
+                  grid-template-columns: auto 1fr;
+                  gap: 0.5em;
+                  align-items: center;
+                `,
+              },
+              [
+                html.label(
+                  { for: "coarse-grid-base-input", style: "white-space: nowrap;" },
+                  [translate("sidebar.designspace-navigation.coarse-grid.base")]
+                ),
+                html.input({
+                  id: "coarse-grid-base-input",
+                  type: "number",
+                  min: 1,
+                  step: 1,
+                }),
+                html.label(
+                  {
+                    for: "coarse-grid-increment-input",
+                    style: "white-space: nowrap;",
+                  },
+                  [translate("sidebar.designspace-navigation.coarse-grid.increment")]
+                ),
+                html.input({
+                  id: "coarse-grid-increment-input",
+                  type: "number",
+                  min: 1,
+                  step: 1,
+                }),
+              ]
+            ),
+          ]
+        ),
+      },
     ];
 
     return html.div({ class: "panel" }, [
@@ -324,6 +396,30 @@ export default class DesignspaceNavigationPanel extends Panel {
 
   get glyphLayersAccordionItem() {
     return this.accordion.querySelector("#glyph-layers-accordion-item");
+  }
+
+  get coarseGridSpacingInput() {
+    return this.accordion.querySelector("#coarse-grid-spacing-input");
+  }
+
+  get coarseGridCustomToggle() {
+    return this.accordion.querySelector("#coarse-grid-custom-toggle");
+  }
+
+  get coarseGridDisplayToggle() {
+    return this.accordion.querySelector("#coarse-grid-display-toggle");
+  }
+
+  get coarseGridCustomFields() {
+    return this.accordion.querySelector("#coarse-grid-custom-fields");
+  }
+
+  get coarseGridBaseInput() {
+    return this.accordion.querySelector("#coarse-grid-base-input");
+  }
+
+  get coarseGridIncrementInput() {
+    return this.accordion.querySelector("#coarse-grid-increment-input");
   }
 
   setup() {
