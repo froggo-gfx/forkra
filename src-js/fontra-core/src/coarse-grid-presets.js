@@ -2,6 +2,7 @@ export const COARSE_GRID_DEFAULT_BASE = 5;
 export const COARSE_GRID_DEFAULT_INCREMENT = 5;
 export const COARSE_GRID_DEFAULT_STEP_COUNT = 8;
 export const COARSE_GRID_DEFAULT_SPACING = 10;
+export const COARSE_GRID_SLIDER_MAX = 40;
 
 export function normalizeCoarseGridBase(value) {
   const n = Number(value);
@@ -33,6 +34,13 @@ export function buildCoarseGridValues(settings) {
     values.push(base + i * increment);
   }
   return values;
+}
+
+export function buildCoarseGridSliderValues(settings) {
+  const values = buildCoarseGridValues(settings).filter(
+    (value) => value <= COARSE_GRID_SLIDER_MAX
+  );
+  return values.length ? values : [COARSE_GRID_SLIDER_MAX];
 }
 
 export function snapCoarseGridSpacing(value, values) {

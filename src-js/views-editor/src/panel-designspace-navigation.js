@@ -1,7 +1,7 @@
 import { registerAction } from "@fontra/core/actions.js";
 import { applicationSettingsController } from "@fontra/core/application-settings.js";
 import {
-  buildCoarseGridValues,
+  buildCoarseGridSliderValues,
   normalizeCoarseGridBase,
   normalizeCoarseGridIncrement,
   snapCoarseGridSpacing,
@@ -434,7 +434,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     const custom = !!model.coarseGridCustom;
     const base = normalizeCoarseGridBase(model.coarseGridBase);
     const increment = normalizeCoarseGridIncrement(model.coarseGridIncrement);
-    const values = buildCoarseGridValues({ custom, base, increment });
+    const values = buildCoarseGridSliderValues({ custom, base, increment });
     const spacing = snapCoarseGridSpacing(model.coarseGridDefaultSpacing, values);
     return { custom, base, increment, spacing };
   }
@@ -457,7 +457,7 @@ export default class DesignspaceNavigationPanel extends Panel {
 
   _syncCoarseGridControls() {
     const settings = this._coarseGridSettings;
-    const values = buildCoarseGridValues(settings);
+    const values = buildCoarseGridSliderValues(settings);
     const spacing = snapCoarseGridSpacing(settings.spacing, values);
 
     this._isApplyingCoarseGridSettings = true;
@@ -513,7 +513,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     if (customToggle) {
       customToggle.addEventListener("change", (event) => {
         const custom = !!event.target.checked;
-        const values = buildCoarseGridValues({
+        const values = buildCoarseGridSliderValues({
           ...this._coarseGridSettings,
           custom,
         });
@@ -536,7 +536,7 @@ export default class DesignspaceNavigationPanel extends Panel {
       const increment = normalizeCoarseGridIncrement(
         Number(this.coarseGridIncrementInput?.value)
       );
-      const values = buildCoarseGridValues({
+      const values = buildCoarseGridSliderValues({
         ...this._coarseGridSettings,
         base,
         increment,
@@ -565,7 +565,7 @@ export default class DesignspaceNavigationPanel extends Panel {
       if (this._isApplyingCoarseGridSettings || event.senderInfo?.senderID === this) {
         return;
       }
-      const values = buildCoarseGridValues(this._coarseGridSettings);
+      const values = buildCoarseGridSliderValues(this._coarseGridSettings);
       const spacing = snapCoarseGridSpacing(event.newValue, values);
       this._coarseGridSettings = { ...this._coarseGridSettings, spacing };
       if (this.coarseGridSpacingInput) {
