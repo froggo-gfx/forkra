@@ -4,6 +4,7 @@
 
 ### Improvements
 
+- [glyphsets] Updated the Google Fonts glyphsets to 1.1.3. [Issue 2673](https://github.com/fontra/fontra/issues/2673), [PR 2675](https://github.com/fontra/fontra/pull/2675)
 - [languages] Some new strings and some improved strings for Simplified Chinese and Traditional Chinese, contributed by 湖远星（Lake桑）. [PR 2674](https://github.com/fontra/fontra/pull/2674)
 
 ## 2026-06-28 [version 2026.6.5]
