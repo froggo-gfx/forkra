@@ -4,7 +4,7 @@
 
 ### Improvements
 
-- [languages] Some new strings and some improved strings for Simplified Chinese and Traditional Chinese, contributed by 湖远星（Lake桑）. [PR](https://github.com/fontra/fontra/pull/2674)
+- [languages] Some new strings and some improved strings for Simplified Chinese and Traditional Chinese, contributed by 湖远星（Lake桑）. [PR 2674](https://github.com/fontra/fontra/pull/2674)
 
 ## 2026-06-28 [version 2026.6.5]
 
