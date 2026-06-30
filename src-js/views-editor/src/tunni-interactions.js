@@ -1,7 +1,7 @@
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { ChangeCollector } from "@fontra/core/changes.js";
 import {
-  areDistancesEqualized,
+  areTensionsEqualized,
   calculateControlHandlePoint,
   calculateEqualizedControlPoints,
   calculateTunniPoint,
@@ -286,8 +286,7 @@ export async function equalizeSegmentDistances(
   sceneController
 ) {
   // Check if distances are already equalized
-  if (areDistancesEqualized(segmentPoints)) {
-    console.log("Distances are already equalized, skipping...");
+  if (areTensionsEqualized(segmentPoints)) {
     return;
   }
 
@@ -323,17 +322,12 @@ export async function equalizeSegmentDistances(
           return "Equalize Control Point Distances"; // Return early but still provide undo label
         }
 
+        const rounded1 = snapToGrid(newControlPoints[0]);
+        const rounded2 = snapToGrid(newControlPoints[1]);
+
         // Update the control points in the path
-        path.setPointPosition(
-          controlPoint1Index,
-          newControlPoints[0].x,
-          newControlPoints[0].y
-        );
-        path.setPointPosition(
-          controlPoint2Index,
-          newControlPoints[1].x,
-          newControlPoints[1].y
-        );
+        path.setPointPosition(controlPoint1Index, rounded1.x, rounded1.y);
+        path.setPointPosition(controlPoint2Index, rounded2.x, rounded2.y);
       }
       return "Equalize Control Point Distances";
     });
@@ -528,23 +522,51 @@ export function calculateTunniPointDragChanges(
   let newControlPoint1, newControlPoint2;
 
   if (equalizeDistances) {
-    // Proportional editing: Move both control points by the same amount along their respective vectors
-    // Project mouse movement onto the 45-degree vector
-    // This gives us the scalar amount to move along the 45-degree vector
     const projection =
       mouseDelta.x * initialState.fortyFiveVector.x +
       mouseDelta.y * initialState.fortyFiveVector.y;
 
-    // Move both control points by the same amount along their respective vectors
-    newControlPoint1 = {
-      x: initialState.initialOffPoint1.x + initialState.unitVector1.x * projection,
-      y: initialState.initialOffPoint1.y + initialState.unitVector1.y * projection,
-    };
+    // forkra original: move both handles by the same projection.
+    // newControlPoint1 = {
+    //   x: initialState.initialOffPoint1.x + initialState.unitVector1.x * projection,
+    //   y: initialState.initialOffPoint1.y + initialState.unitVector1.y * projection,
+    // };
+    // newControlPoint2 = {
+    //   x: initialState.initialOffPoint2.x + initialState.unitVector2.x * projection,
+    //   y: initialState.initialOffPoint2.y + initialState.unitVector2.y * projection,
+    // };
 
-    newControlPoint2 = {
-      x: initialState.initialOffPoint2.x + initialState.unitVector2.x * projection,
-      y: initialState.initialOffPoint2.y + initialState.unitVector2.y * projection,
-    };
+    const trueTunni = calculateTunniPoint(initialState.originalSegmentPoints);
+    const distToTunni1 = trueTunni
+      ? distance(initialState.initialOnPoint1, trueTunni)
+      : 0;
+    const distToTunni2 = trueTunni
+      ? distance(initialState.initialOnPoint2, trueTunni)
+      : 0;
+    if (trueTunni && distToTunni1 > 0 && distToTunni2 > 0) {
+      const totalDist = distToTunni1 + distToTunni2;
+      const k = (2 * projection) / totalDist;
+      const move1 = k * distToTunni1;
+      const move2 = k * distToTunni2;
+      newControlPoint1 = {
+        x: initialState.initialOffPoint1.x + initialState.unitVector1.x * move1,
+        y: initialState.initialOffPoint1.y + initialState.unitVector1.y * move1,
+      };
+      newControlPoint2 = {
+        x: initialState.initialOffPoint2.x + initialState.unitVector2.x * move2,
+        y: initialState.initialOffPoint2.y + initialState.unitVector2.y * move2,
+      };
+    } else {
+      newControlPoint1 = {
+        x: initialState.initialOffPoint1.x + initialState.unitVector1.x * projection,
+        y: initialState.initialOffPoint1.y + initialState.unitVector1.y * projection,
+      };
+
+      newControlPoint2 = {
+        x: initialState.initialOffPoint2.x + initialState.unitVector2.x * projection,
+        y: initialState.initialOffPoint2.y + initialState.unitVector2.y * projection,
+      };
+    }
   } else {
     // Non-proportional editing: Each control point moves independently along its own vector
     // Project mouse movement onto each control point's individual unit vector

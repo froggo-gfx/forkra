@@ -331,6 +331,22 @@ export function areDistancesEqualized(segmentPoints) {
   return Math.abs(dist1 - dist2) < tolerance;
 }
 
+export function areTensionsEqualized(segmentPoints, tolerance = 0.01) {
+  const [p1, p2, p3, p4] = segmentPoints;
+  const trueTunni = calculateTunniPoint(segmentPoints);
+  if (!trueTunni) {
+    return true;
+  }
+  const distStartToTunni = distance(p1, trueTunni);
+  const distEndToTunni = distance(p4, trueTunni);
+  if (distStartToTunni <= 0 || distEndToTunni <= 0) {
+    return true;
+  }
+  const tension1 = distance(p1, p2) / distStartToTunni;
+  const tension2 = distance(p4, p3) / distEndToTunni;
+  return Math.abs(tension1 - tension2) < tolerance;
+}
+
 /**
  * Calculate the Euclidean distance between the two control points of a cubic segment
  * @param {Array} segmentPoints - Array of 4 points representing a cubic segment: [start, control1, control2, end]

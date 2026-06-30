@@ -1,4 +1,5 @@
 import {
+  areTensionsEqualized,
   calculateControlHandlePoint,
   calculateSegmentTension,
   calculateTunniPoint,
@@ -53,5 +54,29 @@ describe("tunni-calculations: geometry naming (D2/D3)", () => {
     const p = calculateTunniPoint(seg);
     expect(p.x).to.be.closeTo(0, 1e-9);
     expect(p.y).to.be.closeTo(200, 1e-9);
+  });
+});
+
+describe("tunni-calculations: areTensionsEqualized (option C)", () => {
+  it("true when both handle tensions match", () => {
+    expect(
+      areTensionsEqualized([
+        { x: 0, y: 0 },
+        { x: 0, y: 100 },
+        { x: 100, y: 200 },
+        { x: 200, y: 200 },
+      ])
+    ).to.equal(true);
+  });
+
+  it("false when handle tensions differ", () => {
+    expect(
+      areTensionsEqualized([
+        { x: 0, y: 0 },
+        { x: 0, y: 50 },
+        { x: 100, y: 200 },
+        { x: 200, y: 200 },
+      ])
+    ).to.equal(false);
   });
 });
