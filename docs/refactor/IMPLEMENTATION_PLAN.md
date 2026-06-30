@@ -101,7 +101,9 @@ src-js/fontra-core/src/
   tunni-calculations.js     [MODIFY] purify to MATH ONLY; add calculateSegmentTension (D5);
                                      rename trueTunni→tunni / tunni→controlHandle (D2/D3)
   curvature.js              [MODIFY] add SpeedPunk sampling math moved out of viz file
-  distance-angle.js         [MODIFY] import tension from tunni-calculations (D5); keep measure helpers
+  distance-angle.js         [MODIFY] import tension from tunni-calculations (D5); becomes the canonical
+                                     measure+label math+render module (Q-measure, distance/angle, manhattan,
+                                     point-label draws) — finalized in WS-4.5
   letterspacer-engine.js    [CREATE] pure area/margin math (extracted from panel for testability)
   fontra-internal-data.js   [CREATE] port from skeleton (customData get/set/ensure)
   fontra-internal-schema.js [CREATE] port from skeleton, LETTERSPACER section only (drop SKELETON*)
@@ -115,7 +117,8 @@ src-js/views-editor/src/
   tunni-interactions.js          [CREATE] Tunni hit-test + drag handlers (consume core math)
   measure-interactions.js        [CREATE] Q-measure hover detect + key handling (D11)
   visualization-layer-definitions.js [MODIFY] thin layers only; render fns consume core math;
-                                     rename fontra.tunni.* (D4); add measure overlay; speedpunk render-only
+                                     rename fontra.tunni.* (D4); add measure overlay; speedpunk render-only;
+                                     all measure/label layers registration-only (draw: imported) — WS-4.5
   panel-designspace-navigation.js [MODIFY] add Coarse-grid + SpeedPunk accordions (app-level settings, D9)
   panel-transformation.js        [MODIFY] rename "Tunni Labels"→"Point labels", showTunni*→new keys (D7/D8)
   panel-letterspacer.js          [CREATE] port from skeleton (strip skeleton branch; engine→core)
@@ -188,8 +191,17 @@ Five independent, shippable workstreams. Outlines below are detailed enough to s
 - **⚠️ Hidden entanglement (verified, wider than D5).** `distance-angle.js` does not only duplicate *tension* — it carries its **own copies of tunni-point geometry**: `calculateTrueTunniPoint` (≈line 1058) and a `calculateTunniPointz` (≈line 1173, consumed at ≈1250). So the D5 "single source of truth" + the D2/D3 naming cascade must **also** de-duplicate these: route `distance-angle.js` to the canonical `tunni-calculations.js` functions (real Tunni point), delete `calculateTrueTunniPoint`/`calculateTunniPointz`, and update the ≈1250 consumer to the renamed canonical function. Even though the Distance/Manhattan *layers* are frozen, `distance-angle.js` stays (Q-measure needs it) and its tunni dupes are in-scope for WS-4. Re-verify these line numbers at expansion time.
 - **Cleanup riding along:** forkra's `calculateTension` in `distance-angle.js` has leftover `console.log` debug blocks (≈lines 165 & 270 — algorithm-bring-up cruft). They are deleted with the function as part of the D5 move; no debug logging survives into `calculateSegmentTension`.
 - **Donor/architecture:** `skeleton/.../tunni-calculations.js` (pure-math shape) + `tunni-interactions.js` (interaction shape — **strip** `calculateSkeleton*`, `buildSkeletonTunniSegment`, `skeletonTunniHitTest`). Map current names: `calculateTrueTunniPoint`→`calculateTunniPoint` (real), old `calculateTunniPoint`→`calculateControlHandlePoint`; `fontra.tunni.actual.points`→`fontra.tunni.point`, `fontra.tunni.combined`→`fontra.tunni.handle` (final ids TBD but hard-rename, D4).
-- **Tasks (outline):** (1) **TDD** add `calculateSegmentTension` to `tunni-calculations.js`; (2) repoint `distance-angle.js` to it, delete its `calculateTension` (and its `console.log` debug blocks), run tests. (2b) **TDD** de-dupe the tunni-point geometry in `distance-angle.js`: delete `calculateTrueTunniPoint`/`calculateTunniPointz`, import the canonical functions from `tunni-calculations.js`, and repoint the ≈1250 consumer. (3) **TDD** the rename within `tunni-calculations.js` (function-level), keeping behavior; purge drawing/interaction from it. (4) create `tunni-interactions.js` from the purged interaction code + skeleton structure (no skeleton refs). (5) update `edit-tools-pointer.js`: delete the ~259 Tunni lines, add an import + early-return dispatch hooks in `handleHover`/`handleDrag`. (6) move/rename the Tunni draws in the viz file to render-only consuming core; hard-rename layer ids (D4). (7) `panel-transformation.js` + `scene-controller.js`: rename `showTunni*` keys (D7) and "Tunni Labels"→"Point labels" (D8). (8) prettier + commit per sub-step. (9) manual verify: Tunni lines/points drag, equalize (alt-drag) still works, labels show.
+- **Tasks (outline):** (1) **TDD** add `calculateSegmentTension` to `tunni-calculations.js`; (2) repoint `distance-angle.js` to it, delete its `calculateTension` (and its `console.log` debug blocks), run tests. (2b) **TDD** de-dupe the tunni-point geometry in `distance-angle.js`: delete `calculateTrueTunniPoint`/`calculateTunniPointz`, import the canonical functions from `tunni-calculations.js`, and repoint the ≈1250 consumer. (3) **TDD** the rename within `tunni-calculations.js` (function-level), keeping behavior; purge drawing/interaction from it. (4) create `tunni-interactions.js` from the purged interaction code + skeleton structure (no skeleton refs). (5) update `edit-tools-pointer.js`: delete the ~259 Tunni lines, add an import + early-return dispatch hooks in `handleHover`/`handleDrag`. (6) move/rename the Tunni **geometry** draws (`drawTunniCombined`/`drawActualTunniPoints` → `fontra.tunni.combined`/`.actual.points`) in the viz file to render-only consuming core; hard-rename those layer ids (D4). *(The point-labels layer/draw + its rename move to WS-4.5.)* (7) `panel-transformation.js` + `scene-controller.js`: rename `showTunni*` keys (D7) and "Tunni Labels"→"Point labels" (D8). (8) prettier + commit per sub-step. (9) manual verify: Tunni lines/points drag, equalize (alt-drag) still works, labels show.
 - **Testing:** all math/tension/geometry = mocha TDD; pointer/viz/panel = manual. **Regression-watch equalize** (must be untouched in behavior).
+
+### WS-4.5 — Measure + label module consolidation  *(risk: low–medium — finalize/verify + rename; viz-delegation cleanup)*
+- **Goal:** Make `distance-angle.js` the **canonical measure + label math/render module**, and reduce `visualization-layer-definitions.js` to registration-only for all four measure/label layers (Distance & Angle, Manhattan, Point labels, Measure overlay). Closes the Part E ✅-pattern gap for the WS-2 measure overlay and finishes the point-labels rename on the draw/layer side.
+- **Depends on WS-4:** needs `calculateSegmentTension` to exist and `distance-angle.js`'s `calculateTension` + duplicate tunni-point geometry already deleted (D5). Runs **immediately after WS-4**.
+- **Files:** MODIFY `distance-angle.js` (absorb the WS-2 overlay draw helpers; `drawTunniLabels` consumes central tension + rename), `visualization-layer-definitions.js` (measure overlay → `draw: imported`; hard-rename `fontra.tunni.labels`), lang (label display-key renames).
+- **Already-true (verify, do NOT rebuild):** Distance & Angle / Manhattan / Tunni-labels layers already delegate to imported draws from `distance-angle.js` (viz import block ≈12–39 — the Part E ✅ rows). Distance/Manhattan stay **frozen** (no behavior change), just confirmed render-only.
+- **The actual gap:** WS-2's measure overlay draws **inline in the viz file** (`drawMeasureLabel`/`drawMeasureLine`/`drawMeasureGuideLine` ≈2854) — the only measure/label layer not delegating. This WS makes it match the other three.
+- **Tasks (outline):** (1) move the WS-2 overlay draw helpers out of the viz file into `distance-angle.js`; export one `drawMeasureOverlay(context, parameters, model)` render fn; rewrite `fontra.measure.overlay` to `draw: drawMeasureOverlay` (registration-only). (2) repoint `drawTunniLabels` to consume `calculateSegmentTension` from `tunni-calculations.js` (drop any inline tension recompute left after WS-4's D5 move); verify distance/tension/angle label values unchanged. (3) point-labels rename on the draw/layer side (D8/D4): hard-rename `fontra.tunni.labels`→`fontra.point.labels` (final id TBD), update the lang display key (panel text/keys already renamed in WS-4). (4) confirm Distance & Angle + Manhattan remain render-only delegating (no change; frozen). (5) prettier + commit per task. (6) manual verify: hold-Q overlay renders identically; point labels show distance/tension/angle under the new name; Distance/Manhattan unaffected.
+- **Testing:** relocated code is **render/draw** → manual verify (no new mocha). Tension/geometry stays covered by WS-4's `test-tunni-calculations.js`; the measure *math* (`calculateHandleMeasure`) keeps its WS-2 `test-distance-angle.js` (relocating *draw* helpers doesn't touch it).
 
 ### WS-5 — Letterspacer port  *(risk: medium — introduces persistence surface)*
 - **Goal:** Auto-sidebearings panel + overlay, persisting `fontra.internal` customData (D1).
@@ -211,13 +223,17 @@ WS-2 Q-measure ──► establishes measure-interactions.js; touches pointer li
                          │
 WS-4 Tunni refactor ◄────┘ (cleans the pointer; do its pointer edit AFTER WS-2's,
                             or coordinate to avoid pointer churn conflicts)
+         │
+WS-4.5 Measure+label module (consolidate measure/label math+draws into distance-angle.js;
+                            viz → registration-only; needs WS-4's calculateSegmentTension)
 
 WS-5 Letterspacer ── independent; schedule anytime (recommended last)
 ```
 
-**Recommended order:** WS-1 → WS-3 → WS-2 → WS-4 → WS-5.
+**Recommended order:** WS-1 → WS-3 → WS-2 → WS-4 → WS-4.5 → WS-5.
 - WS-1 then WS-3 share the panel + app-settings plumbing (do WS-1 first as the cheap warm-up).
 - WS-2 before WS-4 so `measure-interactions.js` exists as the pattern WS-4 mirrors when extracting `tunni-interactions.js`, and so the pointer is edited by WS-2 first (small) then cleaned by WS-4 (large) — fewer conflicts than the reverse.
+- WS-4.5 runs right after WS-4: it needs the single `calculateSegmentTension` to exist and `distance-angle.js`'s `calculateTension`/duplicate tunni-geometry already removed before the labels + measure overlay consume the central math.
 - WS-5 is fully independent; last keeps the riskier refactors earlier.
 
 Each workstream = its own branch in the `refactor-simple/` group (see §3 "Branching model"), merged only after its manual/automated verification passes.
@@ -226,8 +242,8 @@ Each workstream = its own branch in the `refactor-simple/` group (see §3 "Branc
 
 ## 8. Self-Review (against the audit)
 
-- **Spec coverage:** SpeedPunk (WS-3 + viz extraction), Tunni mess incl. naming/tension/pointer/labels (WS-4), Coarse-grid panel (WS-1), Letterspacer incl. persistence (WS-5), Q-measure (WS-2), viz-file cleanup (WS-3 + WS-4). Equalize = intentionally untouched (regression-watched in WS-4). Distance/Manhattan = intentionally frozen. ✅ all audit items mapped.
-- **Decisions:** D1→WS-5, D2/D3/D4/D7/D8→WS-4, D5→WS-4, D6→WS-4, D9→WS-1/WS-3, D10/D11→WS-2. ✅
+- **Spec coverage:** SpeedPunk (WS-3 + viz extraction), Tunni mess incl. naming/tension/pointer (WS-4) + point-labels draw/layer (WS-4.5), Coarse-grid panel (WS-1), Letterspacer incl. persistence (WS-5), Q-measure (WS-2), measure+label math/render consolidation into `distance-angle.js` (WS-4.5), viz-file cleanup (WS-3 + WS-4 + WS-4.5). Equalize = intentionally untouched (regression-watched in WS-4). Distance/Manhattan = intentionally frozen (confirmed render-only in WS-4.5). ✅ all audit items mapped.
+- **Decisions:** D1→WS-5, D2/D3→WS-4, D4→WS-4 + WS-4.5 (labels id), D5→WS-4, D6→WS-4, D7→WS-4, D8→WS-4 (panel text/keys) + WS-4.5 (labels draw/layer), D9→WS-1/WS-3, D10/D11→WS-2. ✅
 - **Type/name consistency:** the canonical renames are fixed in §5/WS-4 (`calculateTunniPoint`=real point, `calculateControlHandlePoint`=mid-handle, `calculateSegmentTension`=single tension). Downstream tasks must use these exact names.
 - **Open item carried forward:** final string for the renamed mid-handle layer id (D4) — pick at WS-4 expansion (`fontra.tunni.handle` proposed).
 
