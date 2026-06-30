@@ -13,6 +13,10 @@ export const applicationSettingsController = new ObservableController({
   coarseGridBase: 5,
   coarseGridIncrement: 5,
   coarseGridDefaultSpacing: 10,
+  // fork: speedpunk panel settings (app-level, per D9 — not written to project files)
+  speedPunkPeakHeightUpm: 24,
+  speedPunkSharpness: 1,
+  speedPunkOpacity: 0.5,
 });
 
 applicationSettingsController.synchronizeWithLocalStorage(

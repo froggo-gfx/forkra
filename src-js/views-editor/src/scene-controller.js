@@ -108,6 +108,9 @@ export class SceneController {
     this.setupSceneSettings();
     //// grid
     this.sceneSettingsController.setItem("coarseGridSpacing", 10);
+    this.sceneSettingsController.setItem("speedPunkPeakHeightUpm", 24);
+    this.sceneSettingsController.setItem("speedPunkSharpness", 1);
+    this.sceneSettingsController.setItem("speedPunkOpacity", 0.5);
     this.sceneSettings = this.sceneSettingsController.model;
     this.visualizationLayersSettings = visualizationLayersSettings;
 
@@ -752,26 +755,29 @@ export class SceneController {
 
     //// grid
     registerAction(
-        "action.decrease-coarse-grid",
-        { titleKey: "action.decrease-coarse-grid", defaultShortCuts: [{ baseKey: "f" }] },
-        () => {
+      "action.decrease-coarse-grid",
+      { titleKey: "action.decrease-coarse-grid", defaultShortCuts: [{ baseKey: "f" }] },
+      () => {
         const v = this.sceneSettings.coarseGridSpacing;
         if (v > 5) this.sceneSettingsController.setItem("coarseGridSpacing", v - 5);
-        }
-        );
-    
-        registerAction(
-        "action.increase-coarse-grid",
-        { titleKey: "action.increase-coarse-grid", defaultShortCuts: [{ baseKey: "g" }] },
-        () => {
+      }
+    );
+
+    registerAction(
+      "action.increase-coarse-grid",
+      { titleKey: "action.increase-coarse-grid", defaultShortCuts: [{ baseKey: "g" }] },
+      () => {
         const v = this.sceneSettings.coarseGridSpacing;
         if (v < 40) this.sceneSettingsController.setItem("coarseGridSpacing", v + 5);
-        }
-        );
-    
-        registerAction(
+      }
+    );
+
+    registerAction(
       "action.toggle-magnetic-snap",
-      { titleKey: "action.toggle-magnetic-snap", defaultShortCuts: [{ baseKey: "g", shiftKey: true }] },
+      {
+        titleKey: "action.toggle-magnetic-snap",
+        defaultShortCuts: [{ baseKey: "g", shiftKey: true }],
+      },
       () => toggleMagneticSnap()
     );
 
@@ -1047,7 +1053,7 @@ export class SceneController {
         this.getEditingLayerFromGlyphLayers(glyph.layers)
       ).map(([layerName, layerGlyph]) => {
         //// grid
-        window._sceneController = this;   // <-- add this
+        window._sceneController = this; // <-- add this
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           this.selection,
@@ -1845,58 +1851,73 @@ export class SceneController {
     await this.editLayersAndRecordChanges((layerGlyphs) => {
       for (const layerGlyph of Object.values(layerGlyphs)) {
         // Debugging: Log what we're working with
-        console.log('Processing layerGlyph:', layerGlyph);
-        console.log('Layer name:', layerGlyph.name);
-        console.log('Path object:', layerGlyph.path);
-        
+        console.log("Processing layerGlyph:", layerGlyph);
+        console.log("Layer name:", layerGlyph.name);
+        console.log("Path object:", layerGlyph.path);
+
         const path = layerGlyph.path;
         // Validate that path is a VarPackedPath instance with all required methods
-        if (!path || typeof path !== 'object') {
-          console.warn('Invalid path object for addOverlap, skipping - not an object');
+        if (!path || typeof path !== "object") {
+          console.warn("Invalid path object for addOverlap, skipping - not an object");
           continue;
         }
         if (!(path instanceof VarPackedPath)) {
-          console.warn('Invalid path object for addOverlap, skipping - not a VarPackedPath instance');
+          console.warn(
+            "Invalid path object for addOverlap, skipping - not a VarPackedPath instance"
+          );
           continue;
         }
-        
-        const requiredMethods = ['copy', 'getPoint', 'getAbsolutePointIndex', 'getNumPointsOfContour', 'setPointPosition', 'insertPoint'];
+
+        const requiredMethods = [
+          "copy",
+          "getPoint",
+          "getAbsolutePointIndex",
+          "getNumPointsOfContour",
+          "setPointPosition",
+          "insertPoint",
+        ];
         let hasAllMethods = true;
         for (const method of requiredMethods) {
-          if (typeof path[method] !== 'function') {
-            console.warn(`Invalid path object for addOverlap, skipping - missing method: ${method}`);
+          if (typeof path[method] !== "function") {
+            console.warn(
+              `Invalid path object for addOverlap, skipping - missing method: ${method}`
+            );
             hasAllMethods = false;
             break;
           }
         }
-        
+
         // Additional check for getPoint method specifically
-        if (typeof path.getPoint !== 'function') {
-          console.warn('Invalid path object for addOverlap, skipping - missing getPoint method');
+        if (typeof path.getPoint !== "function") {
+          console.warn(
+            "Invalid path object for addOverlap, skipping - missing getPoint method"
+          );
           continue;
         }
-        
+
         if (!hasAllMethods) {
           continue;
         }
-        
-        if (typeof path.numContours === 'undefined') {
-          console.warn('Invalid path object for addOverlap, skipping - missing numContours property');
+
+        if (typeof path.numContours === "undefined") {
+          console.warn(
+            "Invalid path object for addOverlap, skipping - missing numContours property"
+          );
           continue;
         }
-        
+
         try {
           // Debugging: Log the parameters we're passing to addOverlap
-          console.log('Calling addOverlapToPath with path:', path);
-          console.log('Point selection:', pointSelection);
-          
+          console.log("Calling addOverlapToPath with path:", path);
+          console.log("Point selection:", pointSelection);
+
           // Create a copy of the path with overlap added
           const newPath = addOverlapToPath(path, pointSelection);
           // Replace the path with the new path that has overlap
           layerGlyph.path = newPath;
         } catch (error) {
-          console.warn('Error while adding overlap:', error);
-          console.warn('Error stack:', error.stack);
+          console.warn("Error while adding overlap:", error);
+          console.warn("Error stack:", error.stack);
         }
       }
       // Clear the selection after adding overlap
