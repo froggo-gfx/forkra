@@ -8,7 +8,6 @@ import {
   calculateHandleMeasure,
   calculateOffCurveAngle,
   calculateProjectedDistanceComponents,
-  calculateTension,
   calculateTunniPointz,
   DISTANCE_ANGLE_BADGE_COLOR,
   DISTANCE_ANGLE_BADGE_PADDING,

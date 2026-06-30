@@ -46,7 +46,7 @@ export function snapToGrid(point) {
 }
 
 // Private: infinite-line intersection carried from distance-angle.js so
-// calculateSegmentTension matches the former calculateTension behavior.
+// calculateSegmentTension matches the former local tension behavior.
 function lineIntersection(p1, p2, p3, p4) {
   const dx1 = p2.x - p1.x;
   const dy1 = p2.y - p1.y;
