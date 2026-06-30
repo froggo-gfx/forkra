@@ -32,3 +32,34 @@ Follow-up notes:
 
 - The coarse-grid implementation now establishes the app-level settings pattern expected by later panel work.
 - Later workstreams should append their own sections below this one, including branch, status, completed work, verification, and any carried-forward notes.
+
+## WS-2: Q-Measure Port
+
+**Branch:** `refactor-simple/ws2-q-measure`
+
+**Status:** Implemented and locally syntax/unit verified; browser verification remains tied to the running bundle watch.
+
+WS-2 ports the skeleton Q-measure feature without the skeleton/rib coupling. Holding Q now enters a realtime measure mode owned by a dedicated interaction module, while the overlay rendering reads measure state from the scene model and uses core distance helpers.
+
+Completed work:
+
+- Added `calculateProjectedDistanceComponents` and `calculateHandleMeasure` to `src-js/fontra-core/src/distance-angle.js`.
+- Added mocha coverage in `src-js/fontra-core/tests/test-distance-angle.js`.
+- Added measure mode, direct-mode, and hover-target state to `src-js/views-editor/src/scene-model.js`.
+- Added `src-js/views-editor/src/measure-interactions.js` for Q/Alt+Q key lifecycle and hover target resolution.
+- Registered `action.realtime.measure` and `action.realtime.measure-direct` with shortcut labels.
+- Wired the pointer tool through thin dispatch hooks for hover, drag suppression, and keydown.
+- Added the render-only `fontra.measure.overlay` visualization layer for handle, segment, and two-selected-point measurement.
+- Kept D10 exclusions out of the port: no realtime X-equalize, rib tangent, fixed-rib, fixed-rib-compress, `measureHoverRibPoint`, or skeleton selection branches.
+
+Verification performed:
+
+- `src-js/fontra-core`: `npx mocha tests/test-distance-angle.js --reporter spec`
+- `src-js/fontra-core`: `npm test`
+- `node --check` on `scene-model.js`, `measure-interactions.js`, `editor.js`, `edit-tools-pointer.js`, `visualization-layer-definitions.js`, and `en.js`.
+- Source scan for skipped realtime/rib terms across the new WS-2 touch points.
+
+Follow-up notes:
+
+- User-side `bundle watch` is the build verification path for this pass; manual hold-Q browser behavior should be checked there.
+- `measure-interactions.js` now provides the interaction-module pattern expected by the later Tunni refactor.
