@@ -15,7 +15,7 @@
 - **Skeleton coupling is OUT:** never introduce `skeleton-contour-generator.js`, rib hotkeys, `getSkeletonData`, `SKELETON*`.
 - **Formatting:** `npx prettier --write <files>` (prettier 3.8.3) before every commit. Working tree is **CRLF**; use `git diff`/`git show` for comparisons.
 - **Syntax check:** `node --check <file>` for every modified views-editor file (no test harness there).
-- **Behavior preservation:** equalize (alt-drag / Ctrl+Shift) and Q-measure tension values must be numerically unchanged. Every math move is byte-faithful — carry helper bodies verbatim rather than "improving" them.
+- **Behavior preservation:** Q-measure tension values, the geometry draws, and the *true*-Tunni-point drag must be numerically unchanged. Every math **move** is byte-faithful — carry helper bodies verbatim rather than "improving" them. **Two deliberate exceptions (Task 9, user-approved):** (A) equalized control points are now **rounded** to integers; (B) the proportional control-handle drag adopts skeleton's tension-preserving formula (forkra's original kept commented). These are the only intended behavior changes.
 
 ### Canonical names (locked — §5/§8 of master plan; use these EXACT spellings everywhere downstream)
 
@@ -38,6 +38,7 @@
 ```
 src-js/fontra-core/src/
   tunni-calculations.js     [MODIFY] add calculateSegmentTension (+private lineIntersection);
+                                     add areTensionsEqualized (Task 9 / option C);
                                      rename calculateTunniPoint→calculateControlHandlePoint,
                                      calculateTrueTunniPoint→calculateTunniPoint;
                                      DELETE the commented-out drawTunniLabels block (314-593);
@@ -54,7 +55,9 @@ src-js/fontra-core/tests/
 
 src-js/views-editor/src/
   tunni-interactions.js          [CREATE] hit-test + mouse state/drag/up + equalize orchestration
-                                          (moved from tunni-calculations.js + pointer)
+                                          (moved from tunni-calculations.js + pointer);
+                                          Task 9: round equalized CPs (A), tension-preserving
+                                          proportional drag (B), tension-based equalize guard (C)
   edit-tools-pointer.js          [MODIFY] delete ~259 Tunni lines; import from ./tunni-interactions.js;
                                           thin dispatch in handleHover/handleDrag
   visualization-layer-definitions.js [MODIFY] rename layer ids (D4) + name strings; repoint imports;
@@ -675,7 +678,203 @@ git commit -m "refactor(tunni): rename showTunni*→showLabels* keys + 'Point la
 
 ---
 
-## Task 9: Format, build, and manual verification
+## Task 9: Equalize/drag math improvements — A (round) + C (tension guard) + B (tension-preserving drag)
+
+User-approved behavior changes ported from skeleton. Runs after the interaction code has moved into `tunni-interactions.js` (Tasks 5–6) and the rename is done (Task 4). The pure new function (C) is TDD'd in core; the apply-side tweaks (A, B) are in `tunni-interactions.js` (manual verify).
+
+**Files:**
+- Modify: `src-js/fontra-core/src/tunni-calculations.js`, `src-js/fontra-core/tests/test-tunni-calculations.js`, `src-js/views-editor/src/tunni-interactions.js`
+
+**Interfaces:**
+- Produces: `areTensionsEqualized(segmentPoints, tolerance = 0.01) -> boolean` (core) — true when the two handle tensions match within tolerance. Uses `calculateTunniPoint` (intersection).
+- Consumes: `snapToGrid`, `calculateTunniPoint`, `distance` (already imported in `tunni-interactions.js` per Task 5).
+
+### Part C — tension-based equalize guard (TDD, core)
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `src-js/fontra-core/tests/test-tunni-calculations.js`:
+
+```javascript
+import { areTensionsEqualized } from "@fontra/core/tunni-calculations.js";
+
+describe("tunni-calculations: areTensionsEqualized (option C)", () => {
+  it("true when both handle tensions match", () => {
+    // seg → trueTunni=(0,200); tension1=100/200=0.5, tension2=100/200=0.5
+    expect(
+      areTensionsEqualized([
+        { x: 0, y: 0 },
+        { x: 0, y: 100 },
+        { x: 100, y: 200 },
+        { x: 200, y: 200 },
+      ])
+    ).to.equal(true);
+  });
+  it("false when handle tensions differ", () => {
+    // shorter start handle → tension1=50/200=0.25 vs tension2=0.5
+    expect(
+      areTensionsEqualized([
+        { x: 0, y: 0 },
+        { x: 0, y: 50 },
+        { x: 100, y: 200 },
+        { x: 200, y: 200 },
+      ])
+    ).to.equal(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cd src-js/fontra-core && npx mocha tests/test-tunni-calculations.js --reporter spec`
+Expected: FAIL — `areTensionsEqualized is not a function`.
+
+- [ ] **Step 3: Add `areTensionsEqualized` to tunni-calculations.js**
+
+Add (must be after the `calculateTunniPoint` intersection function from Task 4, since it calls it):
+
+```javascript
+/**
+ * True when the two handle tensions of a cubic segment are equal within tolerance.
+ * Tension = dist(onCurve, control) / dist(onCurve, tunniPoint). Ported from skeleton's
+ * areSkeletonTensionsEqualized — semantically correct for "already equalized", unlike the
+ * raw-handle-length compare in areDistancesEqualized.
+ */
+export function areTensionsEqualized(segmentPoints, tolerance = 0.01) {
+  const [p1, p2, p3, p4] = segmentPoints;
+  const trueTunni = calculateTunniPoint(segmentPoints); // intersection point
+  if (!trueTunni) {
+    return true;
+  }
+  const distStartToTunni = distance(p1, trueTunni);
+  const distEndToTunni = distance(p4, trueTunni);
+  if (distStartToTunni <= 0 || distEndToTunni <= 0) {
+    return true;
+  }
+  const tension1 = distance(p1, p2) / distStartToTunni;
+  const tension2 = distance(p4, p3) / distEndToTunni;
+  return Math.abs(tension1 - tension2) < tolerance;
+}
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `cd src-js/fontra-core && npx mocha tests/test-tunni-calculations.js --reporter spec`
+Expected: PASS.
+
+### Part A — round equalized control points + Part C wiring (tunni-interactions.js)
+
+- [ ] **Step 5: Import the new guard + ensure snapToGrid is imported**
+
+In `src-js/views-editor/src/tunni-interactions.js`, extend the `@fontra/core/tunni-calculations.js` import to include `areTensionsEqualized` (and confirm `snapToGrid`, `calculateTunniPoint`, `distance` are present from Task 5).
+
+- [ ] **Step 6: Round + switch guard in `equalizeSegmentDistances`**
+
+In `equalizeSegmentDistances`, change the skip-guard and round the applied points:
+
+```javascript
+  // OLD guard: if (areDistancesEqualized(segmentPoints)) { ... return; }
+  if (areTensionsEqualized(segmentPoints)) {
+    return;
+  }
+
+  const newControlPoints = calculateEqualizedControlPoints(segmentPoints);
+
+  // ... inside editLayersAndRecordChanges, where the points are written:
+  // OLD:
+  // path.setPointPosition(controlPoint1Index, newControlPoints[0].x, newControlPoints[0].y);
+  // path.setPointPosition(controlPoint2Index, newControlPoints[1].x, newControlPoints[1].y);
+  const rounded1 = snapToGrid(newControlPoints[0]); // { x: Math.round, y: Math.round }
+  const rounded2 = snapToGrid(newControlPoints[1]);
+  path.setPointPosition(controlPoint1Index, rounded1.x, rounded1.y);
+  path.setPointPosition(controlPoint2Index, rounded2.x, rounded2.y);
+```
+
+### Part B — tension-preserving proportional drag (forkra original kept commented)
+
+- [ ] **Step 7: Replace the proportional branch in `calculateTunniPointDragChanges`**
+
+In `tunni-interactions.js`, in `calculateTunniPointDragChanges`, replace the body of the `if (equalizeDistances) { ... }` branch with skeleton's tension-preserving move, keeping forkra's original commented out per the user's request:
+
+```javascript
+  if (equalizeDistances) {
+    // Project the mouse movement onto the averaged (45°) handle direction.
+    const projection =
+      mouseDelta.x * initialState.fortyFiveVector.x +
+      mouseDelta.y * initialState.fortyFiveVector.y;
+
+    // --- forkra original: move BOTH handles by the same projection (equalizes movement,
+    //     not tension). Kept for reference / easy revert. ---
+    // newControlPoint1 = {
+    //   x: initialState.initialOffPoint1.x + initialState.unitVector1.x * projection,
+    //   y: initialState.initialOffPoint1.y + initialState.unitVector1.y * projection,
+    // };
+    // newControlPoint2 = {
+    //   x: initialState.initialOffPoint2.x + initialState.unitVector2.x * projection,
+    //   y: initialState.initialOffPoint2.y + initialState.unitVector2.y * projection,
+    // };
+
+    // --- skeleton tension-preserving: move each handle ∝ its distance to the true Tunni
+    //     point, so an unequal tension ratio is preserved during the drag (option B). ---
+    const trueTunni = calculateTunniPoint(initialState.originalSegmentPoints);
+    const distToTunni1 = trueTunni
+      ? distance(initialState.initialOnPoint1, trueTunni)
+      : 0;
+    const distToTunni2 = trueTunni
+      ? distance(initialState.initialOnPoint2, trueTunni)
+      : 0;
+    if (trueTunni && distToTunni1 > 0 && distToTunni2 > 0) {
+      const totalDist = distToTunni1 + distToTunni2;
+      const k = (2 * projection) / totalDist;
+      const move1 = k * distToTunni1;
+      const move2 = k * distToTunni2;
+      newControlPoint1 = {
+        x: initialState.initialOffPoint1.x + initialState.unitVector1.x * move1,
+        y: initialState.initialOffPoint1.y + initialState.unitVector1.y * move1,
+      };
+      newControlPoint2 = {
+        x: initialState.initialOffPoint2.x + initialState.unitVector2.x * move2,
+        y: initialState.initialOffPoint2.y + initialState.unitVector2.y * move2,
+      };
+    } else {
+      // Fallback (parallel handles / degenerate): equal projection along each handle.
+      newControlPoint1 = {
+        x: initialState.initialOffPoint1.x + initialState.unitVector1.x * projection,
+        y: initialState.initialOffPoint1.y + initialState.unitVector1.y * projection,
+      };
+      newControlPoint2 = {
+        x: initialState.initialOffPoint2.x + initialState.unitVector2.x * projection,
+        y: initialState.initialOffPoint2.y + initialState.unitVector2.y * projection,
+      };
+    }
+  } else {
+    // (non-proportional branch unchanged)
+  }
+```
+
+> `initialOnPoint1`/`initialOnPoint2` are the segment's start/end on-curve points; `unitVector1`/`unitVector2` are the normalized handle directions — both already populated in `initialState` by `handleTunniPointMouseDown`. No new state needed.
+
+- [ ] **Step 8: Verify parse + core tests**
+
+Run:
+```bash
+node --check src-js/views-editor/src/tunni-interactions.js
+node --check src-js/fontra-core/src/tunni-calculations.js
+git grep -n "areDistancesEqualized" src-js
+cd src-js/fontra-core && npx mocha tests/test-tunni-calculations.js --reporter spec
+```
+Expected: clean parses; `areTensionsEqualized` now guards equalize (note whether `areDistancesEqualized` still has any caller — if none, it may be left as an exported util or removed in a follow-up); core tests PASS.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add src-js/fontra-core/src/tunni-calculations.js src-js/fontra-core/tests/test-tunni-calculations.js src-js/views-editor/src/tunni-interactions.js
+git commit -m "feat(tunni): round equalized handles + tension-preserving drag + tension-based equalize guard (A/B/C)"
+```
+
+---
+
+## Task 10: Format, build, and manual verification
 
 **Files:** all modified files.
 
@@ -693,9 +892,10 @@ Run: `npm run bundle` → Expected: webpack success, no errors.
 Confirm each — observe, do not assume:
 - [ ] Enable the **Tunni handles** layer (was "TUNNI Lines and Points") — handle lines + midpoint dots render.
 - [ ] Enable the **Tunni point** layer (was "Actual TUNNI Points") — intersection squares render.
-- [ ] Hover a Tunni midpoint → pointer cursor; drag it → both controls move proportionally (default).
-- [ ] **Equalize regression:** alt-drag a Tunni point and Ctrl+Shift on a handle → distances equalize exactly as before (this MUST be unchanged).
-- [ ] Drag the real Tunni point → on-curve points move along fixed handle directions.
+- [ ] Hover a Tunni midpoint → pointer cursor; drag it → controls move **tension-preserving** (option B): with unequal handles the tension ratio holds during the drag (no longer snaps to equal movement).
+- [ ] **Equalize (Ctrl+Shift on a handle):** tensions equalize; resulting control points land on **integer** coordinates (option A — verify in the coordinates panel). Skip-when-already-equal now uses the tension check (option C).
+- [ ] Drag the real Tunni point → on-curve points move along fixed handle directions (**unchanged**).
+- [ ] **Alt during drag** still disables proportional/equalized behavior (per-handle independent move) as before.
 - [ ] **Point labels** (Transformation panel checkboxes, renamed from "Tunni Labels") toggle distance/tension/angle text; values match pre-refactor.
 - [ ] Undo (`Cmd/Ctrl+Z`) reverts each Tunni drag in one step with the expected undo label.
 
@@ -719,8 +919,13 @@ git commit -m "style(tunni): prettier pass for WS-4"
 - (5) strip Tunni from pointer → **Tasks 5–6** (import repoint, then drag-orchestration move).
 - (6) geometry draws render-only + layer-id hard-rename (D4) → **Task 7**.
 - (7) panel/scene key + label renames (D7/D8) → **Task 8**.
-- (8) prettier + commit per step → throughout + **Task 9**.
-- (9) manual verify incl. equalize regression-watch → **Task 9**.
+- (8) prettier + commit per step → throughout + **Task 10**.
+- (9) manual verify incl. equalize regression-watch → **Task 10**.
+
+**Skeleton logic additions (user-approved, from skeleton analysis) → Task 9:**
+- (A) round equalized control points to integers — `snapToGrid` in `equalizeSegmentDistances`.
+- (B) tension-preserving proportional drag (`k = 2·projection/totalDist`) — forkra's original kept commented for easy revert.
+- (C) tension-based "already equalized" guard — new pure `areTensionsEqualized` (TDD), replaces the raw-handle-length `areDistancesEqualized` in the equalize path. (Option D — drag-time modifier rounding — was declined.)
 
 **Decisions:** D2/D3 (Task 4), D4 (Task 7; labels-id deferred to WS-4.5 by design), D5 (Tasks 1–3), D6 (Task 5 purify), D7/D8 (Task 8; labels-layer/tension deferred to WS-4.5).
 
@@ -730,7 +935,7 @@ git commit -m "style(tunni): prettier pass for WS-4"
 
 **Type/name consistency:** `calculateControlHandlePoint` (midpoint), `calculateTunniPoint` (intersection), `calculateSegmentTension` (4 point args), `fontra.tunni.handle`/`fontra.tunni.point` ids, `showLabelsDistance/Tension/Angle` keys — used identically in every task. Phase-ordered rename (A before B) avoids the `calculateTunniPoint` identifier collision.
 
-**Risk notes:** Task 6 (pointer drag-orchestration move) is the only step with no automated test — the ~190-line undo loop must preserve atomic-edit + undo-label behavior; Task 9 manual checks gate it. Equalize is regression-watched explicitly. The `lineIntersection` body is carried verbatim (not swapped for vector.js `intersect`) so tension output is bit-for-bit identical.
+**Risk notes:** Task 6 (pointer drag-orchestration move) is the only step with no automated test — the ~190-line undo loop must preserve atomic-edit + undo-label behavior; Task 10 manual checks gate it. The `lineIntersection` body is carried verbatim (not swapped for vector.js `intersect`) so tension output is bit-for-bit identical. Task 9 introduces the **only** intended behavior changes (A round / B tension-preserving drag / C tension guard); B keeps forkra's original commented for one-line revert, and the *true*-Tunni-point drag is untouched.
 
 ---
 
