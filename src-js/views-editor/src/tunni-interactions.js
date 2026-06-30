@@ -52,8 +52,8 @@ export function tunniHoverResult(
   positionedGlyph,
   visualizationLayersSettings
 ) {
-  const handleLayerOn = visualizationLayersSettings.model["fontra.tunni.combined"];
-  const pointLayerOn = visualizationLayersSettings.model["fontra.tunni.actual.points"];
+  const handleLayerOn = visualizationLayersSettings.model["fontra.tunni.handle"];
+  const pointLayerOn = visualizationLayersSettings.model["fontra.tunni.point"];
   if (!handleLayerOn && !pointLayerOn) {
     return null;
   }
@@ -357,8 +357,8 @@ export function handleTunniPointMouseDown(
 ) {
   // Check if any Tunni layer is active
   if (
-    !visualizationLayerSettings.model["fontra.tunni.combined"] &&
-    !visualizationLayerSettings.model["fontra.tunni.actual.points"]
+    !visualizationLayerSettings.model["fontra.tunni.handle"] &&
+    !visualizationLayerSettings.model["fontra.tunni.point"]
   ) {
     return null;
   }
@@ -707,8 +707,8 @@ export function handleTrueTunniPointMouseDown(
 ) {
   // Check if any Tunni layer is active
   if (
-    !visualizationLayerSettings.model["fontra.tunni.combined"] &&
-    !visualizationLayerSettings.model["fontra.tunni.actual.points"]
+    !visualizationLayerSettings.model["fontra.tunni.handle"] &&
+    !visualizationLayerSettings.model["fontra.tunni.point"]
   ) {
     return null;
   }

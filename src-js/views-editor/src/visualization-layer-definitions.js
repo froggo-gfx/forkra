@@ -1999,8 +1999,8 @@ registerVisualizationLayerDefinition({
 });
 
 registerVisualizationLayerDefinition({
-  identifier: "fontra.tunni.combined",
-  name: "TUNNI Lines and Points",
+  identifier: "fontra.tunni.handle",
+  name: "Tunni handles",
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: false,
@@ -2101,10 +2101,10 @@ function drawTunniCombined(context, positionedGlyph, parameters, model, controll
   }
 }
 
-// Register the Actual TUNNI Points visualization layer
+// Register the Tunni point visualization layer
 registerVisualizationLayerDefinition({
-  identifier: "fontra.tunni.actual.points",
-  name: "Actual TUNNI Points",
+  identifier: "fontra.tunni.point",
+  name: "Tunni point",
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: false,

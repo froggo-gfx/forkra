@@ -154,9 +154,9 @@ export class PointerTool extends BaseTool {
       // If it's a true Tunni point, we could use a different cursor
       // Only show cursor if the corresponding layer is active
       const isTunniCombinedLayerActive =
-        this.editor.visualizationLayersSettings.model["fontra.tunni.combined"];
+        this.editor.visualizationLayersSettings.model["fontra.tunni.handle"];
       const isTunniActualLayerActive =
-        this.editor.visualizationLayersSettings.model["fontra.tunni.actual.points"];
+        this.editor.visualizationLayersSettings.model["fontra.tunni.point"];
 
       if (isHoveringTrueTunniPoint && isTunniActualLayerActive) {
         this.canvasController.canvas.style.cursor = "crosshair"; // Different cursor for true Tunni point
@@ -220,9 +220,9 @@ export class PointerTool extends BaseTool {
     const initialSelection = sceneController.selection;
 
     const isTunniCombinedLayerActive =
-      this.editor.visualizationLayersSettings.model["fontra.tunni.combined"];
+      this.editor.visualizationLayersSettings.model["fontra.tunni.handle"];
     const isTunniActualLayerActive =
-      this.editor.visualizationLayersSettings.model["fontra.tunni.actual.points"];
+      this.editor.visualizationLayersSettings.model["fontra.tunni.point"];
     let tunniInitialState = null;
     let isTrueTunniPoint = false;
 
