@@ -66,6 +66,15 @@ import { ShowLocationSettings } from "./scene-controller.js";
 
 const FONTRA_STATUS_KEY = "fontra.development.status";
 const FONTRA_STATUS_DEFINITIONS_KEY = "fontra.sourceStatusFieldDefinitions";
+const SPEEDPUNK_PEAK_HEIGHT_DEFAULT_UPM = 24;
+const SPEEDPUNK_PEAK_HEIGHT_MIN_UPM = 1;
+const SPEEDPUNK_PEAK_HEIGHT_MAX_UPM = 1000;
+const SPEEDPUNK_SHARPNESS_DEFAULT = 1;
+const SPEEDPUNK_SHARPNESS_MIN = 0.1;
+const SPEEDPUNK_SHARPNESS_MAX = 4;
+const SPEEDPUNK_OPACITY_DEFAULT = 0.5;
+const SPEEDPUNK_OPACITY_MIN = 0;
+const SPEEDPUNK_OPACITY_MAX = 1;
 
 const LIST_HEADER_ANIMATION_STYLE = `
 .clickable-icon-header {
@@ -370,6 +379,61 @@ export default class DesignspaceNavigationPanel extends Panel {
           ]
         ),
       },
+      {
+        id: "speedpunk-accordion-item",
+        label: translate("sidebar.designspace-navigation.speedpunk"),
+        open: false,
+        content: html.div(
+          {
+            style: `
+              display: grid;
+              grid-template-columns: auto 1fr;
+              gap: 0.5em;
+              align-items: center;
+            `,
+          },
+          [
+            html.label(
+              { for: "speedpunk-display-toggle", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.speedpunk.display")]
+            ),
+            html.input({ id: "speedpunk-display-toggle", type: "checkbox" }),
+            html.label(
+              { for: "speedpunk-peak-height-input", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.speedpunk.peak-height")]
+            ),
+            html.input({
+              id: "speedpunk-peak-height-input",
+              type: "number",
+              min: SPEEDPUNK_PEAK_HEIGHT_MIN_UPM,
+              max: SPEEDPUNK_PEAK_HEIGHT_MAX_UPM,
+              step: 1,
+            }),
+            html.label(
+              { for: "speedpunk-sharpness-input", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.speedpunk.sharpness")]
+            ),
+            html.input({
+              id: "speedpunk-sharpness-input",
+              type: "number",
+              min: SPEEDPUNK_SHARPNESS_MIN,
+              max: SPEEDPUNK_SHARPNESS_MAX,
+              step: 0.1,
+            }),
+            html.label(
+              { for: "speedpunk-opacity-input", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.speedpunk.opacity")]
+            ),
+            html.input({
+              id: "speedpunk-opacity-input",
+              type: "number",
+              min: SPEEDPUNK_OPACITY_MIN,
+              max: SPEEDPUNK_OPACITY_MAX,
+              step: 0.05,
+            }),
+          ]
+        ),
+      },
     ];
 
     return html.div({ class: "panel" }, [
@@ -427,6 +491,22 @@ export default class DesignspaceNavigationPanel extends Panel {
 
   get coarseGridIncrementInput() {
     return this.accordion.querySelector("#coarse-grid-increment-input");
+  }
+
+  get speedPunkDisplayToggle() {
+    return this.accordion.querySelector("#speedpunk-display-toggle");
+  }
+
+  get speedPunkPeakHeightInput() {
+    return this.accordion.querySelector("#speedpunk-peak-height-input");
+  }
+
+  get speedPunkSharpnessInput() {
+    return this.accordion.querySelector("#speedpunk-sharpness-input");
+  }
+
+  get speedPunkOpacityInput() {
+    return this.accordion.querySelector("#speedpunk-opacity-input");
   }
 
   _readCoarseGridSettingsFromApp() {
@@ -615,6 +695,136 @@ export default class DesignspaceNavigationPanel extends Panel {
     });
   }
 
+  _normalizeSpeedPunkPeakHeightUpm(value) {
+    if (!Number.isFinite(value)) return SPEEDPUNK_PEAK_HEIGHT_DEFAULT_UPM;
+    return Math.max(
+      SPEEDPUNK_PEAK_HEIGHT_MIN_UPM,
+      Math.min(SPEEDPUNK_PEAK_HEIGHT_MAX_UPM, Math.round(value))
+    );
+  }
+
+  _normalizeSpeedPunkSharpness(value) {
+    if (!Number.isFinite(value)) return SPEEDPUNK_SHARPNESS_DEFAULT;
+    return Math.max(SPEEDPUNK_SHARPNESS_MIN, Math.min(SPEEDPUNK_SHARPNESS_MAX, value));
+  }
+
+  _normalizeSpeedPunkOpacity(value) {
+    if (!Number.isFinite(value)) return SPEEDPUNK_OPACITY_DEFAULT;
+    return Math.max(SPEEDPUNK_OPACITY_MIN, Math.min(SPEEDPUNK_OPACITY_MAX, value));
+  }
+
+  _readSpeedPunkSettingsFromApp() {
+    const model = applicationSettingsController.model;
+    return {
+      peakHeightUpm: this._normalizeSpeedPunkPeakHeightUpm(
+        model.speedPunkPeakHeightUpm
+      ),
+      sharpness: this._normalizeSpeedPunkSharpness(model.speedPunkSharpness),
+      opacity: this._normalizeSpeedPunkOpacity(model.speedPunkOpacity),
+    };
+  }
+
+  _persistSpeedPunkSettings() {
+    const settings = this._speedPunkSettings;
+    const model = applicationSettingsController.model;
+    model.speedPunkPeakHeightUpm = settings.peakHeightUpm;
+    model.speedPunkSharpness = settings.sharpness;
+    model.speedPunkOpacity = settings.opacity;
+  }
+
+  _updateSpeedPunkControlsEnabled() {
+    const enabled =
+      !!this.editorController.visualizationLayersSettings.model["fontra.curvature"];
+    for (const input of [
+      this.speedPunkPeakHeightInput,
+      this.speedPunkSharpnessInput,
+      this.speedPunkOpacityInput,
+    ]) {
+      if (input) {
+        input.disabled = !enabled;
+      }
+    }
+  }
+
+  _syncSpeedPunkControls() {
+    const settings = this._speedPunkSettings;
+    if (this.speedPunkPeakHeightInput) {
+      this.speedPunkPeakHeightInput.value = String(settings.peakHeightUpm);
+    }
+    if (this.speedPunkSharpnessInput) {
+      this.speedPunkSharpnessInput.value = String(settings.sharpness);
+    }
+    if (this.speedPunkOpacityInput) {
+      this.speedPunkOpacityInput.value = String(settings.opacity);
+    }
+    this.sceneSettingsController.setItem(
+      "speedPunkPeakHeightUpm",
+      settings.peakHeightUpm,
+      { senderID: this }
+    );
+    this.sceneSettingsController.setItem("speedPunkSharpness", settings.sharpness, {
+      senderID: this,
+    });
+    this.sceneSettingsController.setItem("speedPunkOpacity", settings.opacity, {
+      senderID: this,
+    });
+    this._updateSpeedPunkControlsEnabled();
+  }
+
+  _setupSpeedPunkControls() {
+    this._speedPunkSettings = this._readSpeedPunkSettingsFromApp();
+    this._syncSpeedPunkControls();
+    this._persistSpeedPunkSettings();
+
+    const bindNumberInput = (input, normalize, appKey, sceneKey) => {
+      if (!input) return;
+      input.addEventListener("change", () => {
+        const value = normalize(Number(input.value));
+        this._speedPunkSettings = {
+          ...this._speedPunkSettings,
+          [appKey]: value,
+        };
+        input.value = String(value);
+        this.sceneSettingsController.setItem(sceneKey, value, { senderID: this });
+        this._persistSpeedPunkSettings();
+      });
+    };
+
+    bindNumberInput(
+      this.speedPunkPeakHeightInput,
+      (value) => this._normalizeSpeedPunkPeakHeightUpm(value),
+      "peakHeightUpm",
+      "speedPunkPeakHeightUpm"
+    );
+    bindNumberInput(
+      this.speedPunkSharpnessInput,
+      (value) => this._normalizeSpeedPunkSharpness(value),
+      "sharpness",
+      "speedPunkSharpness"
+    );
+    bindNumberInput(
+      this.speedPunkOpacityInput,
+      (value) => this._normalizeSpeedPunkOpacity(value),
+      "opacity",
+      "speedPunkOpacity"
+    );
+
+    const toggle = this.speedPunkDisplayToggle;
+    if (toggle) {
+      const visualizationSettings = this.editorController.visualizationLayersSettings;
+      toggle.checked = !!visualizationSettings.model["fontra.curvature"];
+      this._updateSpeedPunkControlsEnabled();
+      toggle.addEventListener("change", () => {
+        visualizationSettings.model["fontra.curvature"] = !!toggle.checked;
+        this._updateSpeedPunkControlsEnabled();
+      });
+      visualizationSettings.addKeyListener("fontra.curvature", (event) => {
+        toggle.checked = !!event.newValue;
+        this._updateSpeedPunkControlsEnabled();
+      });
+    }
+  }
+
   setup() {
     this._setFontLocationValues();
     this.glyphAxesElement.values = this.sceneSettings.glyphLocation;
@@ -736,6 +946,7 @@ export default class DesignspaceNavigationPanel extends Panel {
 
     this._setupCoarseGridControls();
     this._setupCoarseGridDisplayToggle();
+    this._setupSpeedPunkControls();
 
     const columnDescriptions = this._setupSourceListColumnDescriptions();
 
