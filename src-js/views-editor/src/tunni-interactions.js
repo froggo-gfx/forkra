@@ -1,3 +1,5 @@
+import { recordChanges } from "@fontra/core/change-recorder.js";
+import { ChangeCollector } from "@fontra/core/changes.js";
 import {
   areDistancesEqualized,
   calculateControlHandlePoint,
@@ -5,7 +7,150 @@ import {
   calculateTunniPoint,
   snapToGrid,
 } from "@fontra/core/tunni-calculations.js";
+import { assert } from "@fontra/core/utils.ts";
 import { distance, normalizeVector, subVectors } from "@fontra/core/vector.js";
+
+function applyTunniDragChanges(path, dragChanges, isTrueTunniPoint) {
+  if (isTrueTunniPoint) {
+    path.setPointPosition(
+      dragChanges.onPoint1Index,
+      dragChanges.newOnPoint1.x,
+      dragChanges.newOnPoint1.y
+    );
+    path.setPointPosition(
+      dragChanges.onPoint2Index,
+      dragChanges.newOnPoint2.x,
+      dragChanges.newOnPoint2.y
+    );
+    path.setPointPosition(
+      dragChanges.controlPoint1Index,
+      dragChanges.newControlPoint1.x,
+      dragChanges.newControlPoint1.y
+    );
+    path.setPointPosition(
+      dragChanges.controlPoint2Index,
+      dragChanges.newControlPoint2.x,
+      dragChanges.newControlPoint2.y
+    );
+  } else {
+    path.setPointPosition(
+      dragChanges.controlPoint1Index,
+      dragChanges.newControlPoint1.x,
+      dragChanges.newControlPoint1.y
+    );
+    path.setPointPosition(
+      dragChanges.controlPoint2Index,
+      dragChanges.newControlPoint2.x,
+      dragChanges.newControlPoint2.y
+    );
+  }
+}
+
+export function tunniHoverResult(
+  point,
+  size,
+  positionedGlyph,
+  visualizationLayersSettings
+) {
+  const handleLayerOn = visualizationLayersSettings.model["fontra.tunni.combined"];
+  const pointLayerOn = visualizationLayersSettings.model["fontra.tunni.actual.points"];
+  if (!handleLayerOn && !pointLayerOn) {
+    return null;
+  }
+  const hit = tunniLayerHitTest(point, size, positionedGlyph);
+  if (!hit) {
+    return null;
+  }
+  if (hit.hitType === "true-tunni-point" && pointLayerOn) {
+    return { cursor: "crosshair" };
+  }
+  if (hit.hitType === "tunni-point" && handleLayerOn) {
+    return { cursor: "pointer" };
+  }
+  return null;
+}
+
+export async function handleTunniDrag({
+  sceneController,
+  eventStream,
+  initialEvent,
+  isTrueTunniPoint,
+  tunniInitialState,
+}) {
+  if (!isTrueTunniPoint && initialEvent.ctrlKey && initialEvent.shiftKey) {
+    await equalizeSegmentDistances(
+      tunniInitialState.tunniPointHit.segment,
+      tunniInitialState.originalSegmentPoints,
+      sceneController.sceneModel,
+      sceneController.sceneModel.getSelectedPositionedGlyph(),
+      sceneController
+    );
+    return;
+  }
+
+  const gridSnap = sceneController.sceneSettings?.gridSnapEnabled;
+
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const layerInfo = Object.entries(
+      sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+    ).map(([layerName, layerGlyph]) => ({
+      layerGlyph,
+      changePath: ["layers", layerName, "glyph"],
+    }));
+    assert(layerInfo.length >= 1, "no layer to edit");
+
+    let accumulated = new ChangeCollector();
+    let dragged = false;
+
+    for await (const event of eventStream) {
+      if (event.type === "mouseup") {
+        break;
+      }
+      if (event.type !== "mousemove") {
+        continue;
+      }
+      const dragChanges = isTrueTunniPoint
+        ? handleTrueTunniPointMouseDrag(
+            event,
+            tunniInitialState,
+            sceneController,
+            gridSnap
+          )
+        : handleTunniPointMouseDrag(
+            event,
+            tunniInitialState,
+            sceneController,
+            gridSnap
+          );
+      if (!dragChanges) {
+        continue;
+      }
+      dragged = true;
+
+      let frame = new ChangeCollector();
+      for (const { layerGlyph, changePath } of layerInfo) {
+        const layerChanges = recordChanges(layerGlyph, (proxy) => {
+          applyTunniDragChanges(proxy.path, dragChanges, isTrueTunniPoint);
+        });
+        frame = frame.concat(layerChanges.prefixed(changePath));
+      }
+      accumulated = accumulated.concat(frame);
+      await sendIncrementalChange(frame.change, true);
+    }
+
+    if (!dragged || !accumulated.hasChange) {
+      return;
+    }
+
+    return {
+      changes: accumulated,
+      undoLabel: isTrueTunniPoint
+        ? "Move On-Curve Points via Tunni"
+        : "Move Tunni Points",
+      broadcast: true,
+    };
+  });
+}
 /**
  * Finds if a point is hitting a Tunni point within a given size margin
  * @param {Object} point - The point to check

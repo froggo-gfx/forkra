@@ -46,20 +46,10 @@ import {
 } from "./visualization-layer-definitions.js";
 // Import Tunni functions for integration with pointer tool
 import {
-  areDistancesEqualized,
-  calculateEqualizedControlPoints,
-} from "@fontra/core/tunni-calculations.js";
-// Import Tunni functions for integration with pointer tool
-import {
-  calculateTrueTunniPointDragChanges,
-  equalizeSegmentDistances,
   handleTrueTunniPointMouseDown,
-  handleTrueTunniPointMouseDrag,
-  handleTrueTunniPointMouseUp,
+  handleTunniDrag,
   handleTunniPointMouseDown,
-  handleTunniPointMouseDrag,
-  handleTunniPointMouseUp,
-  tunniLayerHitTest,
+  tunniHoverResult,
 } from "./tunni-interactions.js";
 
 const transformHandleMargin = 6;
@@ -129,46 +119,21 @@ export class PointerTool extends BaseTool {
 
     this.sceneController.sceneModel.showTransformSelection = true;
 
-    // Check if any Tunni visualization layer is active and if we're hovering over a Tunni point
-    const isTunniCombinedLayerActive =
-      this.editor.visualizationLayersSettings.model["fontra.tunni.combined"];
-    const isTunniActualLayerActive =
-      this.editor.visualizationLayersSettings.model["fontra.tunni.actual.points"];
-    let isHoveringTunniPoint = false;
-    let isHoveringTrueTunniPoint = false; // New flag for true Tunni point
-
-    if (isTunniCombinedLayerActive || isTunniActualLayerActive) {
-      const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
-      if (positionedGlyph) {
-        // Convert from scene coordinates to glyph coordinates for hit testing
-        const glyphPoint = {
-          x: point.x - positionedGlyph.x,
-          y: point.y - positionedGlyph.y,
-        };
-        const tunniHit = tunniLayerHitTest(glyphPoint, size, positionedGlyph);
-        if (tunniHit) {
-          // Only register the hit if the corresponding layer is active
-          if (tunniHit.hitType === "tunni-point" && isTunniCombinedLayerActive) {
-            isHoveringTunniPoint = true;
-          } else if (
-            tunniHit.hitType === "true-tunni-point" &&
-            isTunniActualLayerActive
-          ) {
-            isHoveringTrueTunniPoint = true;
-          } else if (
-            tunniHit.hitType === "tunni-point" &&
-            !isTunniCombinedLayerActive
-          ) {
-            // Visual tunni point hit but layer is not active, so ignore
-            isHoveringTunniPoint = false;
-          } else if (
-            tunniHit.hitType === "true-tunni-point" &&
-            !isTunniActualLayerActive
-          ) {
-            // Actual tunni point hit but layer is not active, so ignore
-            isHoveringTrueTunniPoint = false;
-          }
-        }
+    const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (positionedGlyph) {
+      const glyphPoint = {
+        x: point.x - positionedGlyph.x,
+        y: point.y - positionedGlyph.y,
+      };
+      const tunni = tunniHoverResult(
+        glyphPoint,
+        size,
+        positionedGlyph,
+        this.editor.visualizationLayersSettings
+      );
+      if (tunni) {
+        this.canvasController.canvas.style.cursor = tunni.cursor;
+        return;
       }
     }
 
@@ -254,31 +219,26 @@ export class PointerTool extends BaseTool {
     const sceneController = this.sceneController;
     const initialSelection = sceneController.selection;
 
-    // Check if any Tunni visualization layer is active and if we clicked on a Tunni point
     const isTunniCombinedLayerActive =
       this.editor.visualizationLayersSettings.model["fontra.tunni.combined"];
     const isTunniActualLayerActive =
       this.editor.visualizationLayersSettings.model["fontra.tunni.actual.points"];
     let tunniInitialState = null;
-    let isTrueTunniPoint = false; // Flag to distinguish between current handle and true Tunni point
+    let isTrueTunniPoint = false;
 
     if (isTunniCombinedLayerActive || isTunniActualLayerActive) {
-      // First try to handle true Tunni point (intersection) - but only if that layer is active
       if (isTunniActualLayerActive) {
         tunniInitialState = handleTrueTunniPointMouseDown(
           initialEvent,
           sceneController,
           this.editor.visualizationLayersSettings
         );
-
         if (tunniInitialState) {
           isTrueTunniPoint = true;
         }
       }
 
-      // If true Tunni point wasn't hit (or layer wasn't active), try visual Tunni point - but only if that layer is active
       if (!tunniInitialState && isTunniCombinedLayerActive) {
-        // Fall back to current handle
         tunniInitialState = handleTunniPointMouseDown(
           initialEvent,
           sceneController,
@@ -287,320 +247,13 @@ export class PointerTool extends BaseTool {
       }
     }
 
-    // If we clicked on a Tunni point, handle the drag operation to provide visual feedback during drag
-    // while maintaining a single undo record
     if (tunniInitialState) {
-      // Check if Ctrl+Shift keys are pressed to equalize control point distances
-      // Only for current handle, not for true Tunni point
-      if (!isTrueTunniPoint && initialEvent.ctrlKey && initialEvent.shiftKey) {
-        // Equalize the control point distances instead of starting drag
-        await equalizeSegmentDistances(
-          tunniInitialState.tunniPointHit.segment,
-          tunniInitialState.originalSegmentPoints,
-          sceneController.sceneModel,
-          sceneController.sceneModel.getSelectedPositionedGlyph(),
-          sceneController
-        );
-        return;
-      }
-
-      // Process the drag events for Tunni point manipulation with visual feedback
-      await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-        let finalChanges = null;
-
-        // Set up the initial layer info for the editing operation
-        const layerInfo = Object.entries(
-          sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
-        ).map(([layerName, layerGlyph]) => {
-          return {
-            layerName,
-            layerGlyph,
-            changePath: ["layers", layerName, "glyph"],
-          };
-        });
-
-        assert(layerInfo.length >= 1, "no layer to edit");
-
-        // Get the original point positions for rollback
-        let originalOnPoint1, originalOnPoint2;
-        if (isTrueTunniPoint) {
-          // For true Tunni point, we need to get on-curve point positions
-          originalOnPoint1 = {
-            ...layerInfo[0].layerGlyph.path.getPoint(
-              tunniInitialState.selectedSegment.parentPointIndices[0]
-            ),
-          };
-          originalOnPoint2 = {
-            ...layerInfo[0].layerGlyph.path.getPoint(
-              tunniInitialState.selectedSegment.parentPointIndices[3]
-            ),
-          };
-        } else {
-          // For current handle, get control point positions
-          originalOnPoint1 = {
-            ...layerInfo[0].layerGlyph.path.getPoint(
-              tunniInitialState.originalControlPoints.controlPoint1Index
-            ),
-          };
-          originalOnPoint2 = {
-            ...layerInfo[0].layerGlyph.path.getPoint(
-              tunniInitialState.originalControlPoints.controlPoint2Index
-            ),
-          };
-        }
-
-        for await (const event of eventStream) {
-          if (event.type === "mouseup") {
-            // Handle mouse up event for Tunni point - finalize the changes
-            break;
-          } else if (event.type === "mousemove") {
-            // Calculate the changes for this mouse move event
-            let dragChanges;
-            if (isTrueTunniPoint) {
-              dragChanges = handleTrueTunniPointMouseDrag(
-                event,
-                tunniInitialState,
-                sceneController,
-                sceneController.sceneSettings?.gridSnapEnabled
-              );
-            } else {
-              dragChanges = handleTunniPointMouseDrag(
-                event,
-                tunniInitialState,
-                sceneController,
-                sceneController.sceneSettings?.gridSnapEnabled
-              );
-            }
-
-            if (dragChanges) {
-              finalChanges = dragChanges;
-
-              // Apply temporary visual changes for each mouse move event
-              const deepEditChanges = [];
-              for (const layer of layerInfo) {
-                let tempChanges = [];
-
-                if (isTrueTunniPoint) {
-                  // For true Tunni point, change on-curve points while keeping off-curve points unchanged
-                  tempChanges = [
-                    {
-                      f: "=xy",
-                      a: [
-                        dragChanges.onPoint1Index,
-                        dragChanges.newOnPoint1.x,
-                        dragChanges.newOnPoint1.y,
-                      ],
-                    },
-                    {
-                      f: "=xy",
-                      a: [
-                        dragChanges.onPoint2Index,
-                        dragChanges.newOnPoint2.x,
-                        dragChanges.newOnPoint2.y,
-                      ],
-                    },
-                    // Keep control points unchanged
-                    {
-                      f: "=xy",
-                      a: [
-                        dragChanges.controlPoint1Index,
-                        dragChanges.newControlPoint1.x,
-                        dragChanges.newControlPoint1.y,
-                      ],
-                    },
-                    {
-                      f: "=xy",
-                      a: [
-                        dragChanges.controlPoint2Index,
-                        dragChanges.newControlPoint2.x,
-                        dragChanges.newControlPoint2.y,
-                      ],
-                    },
-                  ];
-                } else {
-                  // For current handle, change control points
-                  tempChanges = [
-                    {
-                      f: "=xy",
-                      a: [
-                        dragChanges.controlPoint1Index,
-                        dragChanges.newControlPoint1.x,
-                        dragChanges.newControlPoint1.y,
-                      ],
-                    },
-                    {
-                      f: "=xy",
-                      a: [
-                        dragChanges.controlPoint2Index,
-                        dragChanges.newControlPoint2.x,
-                        dragChanges.newControlPoint2.y,
-                      ],
-                    },
-                  ];
-                }
-
-                // Apply the changes to the layer glyph path for visual feedback
-                for (const tempChange of tempChanges) {
-                  applyChange(layer.layerGlyph.path, tempChange);
-                }
-
-                // Consolidate the temporary changes for this layer
-                deepEditChanges.push(
-                  consolidateChanges(tempChanges, [...layer.changePath, "path"])
-                );
-              }
-
-              const editChange = consolidateChanges(deepEditChanges);
-              await sendIncrementalChange(editChange, true); // true: "may drop" - for visual feedback only
-            }
-          }
-        }
-
-        // Prepare the final atomic changes for the undo record
-        if (finalChanges) {
-          // Create the final change that will be recorded for undo
-          const finalLayerChanges = [];
-          const rollbackChanges = [];
-
-          for (const layer of layerInfo) {
-            let finalChangesForLayer = [];
-            let rollbackChangesForLayer = [];
-
-            if (isTrueTunniPoint) {
-              // For true Tunni point, change on-curve points while keeping off-curve points unchanged
-              finalChangesForLayer = [
-                {
-                  f: "=xy",
-                  a: [
-                    finalChanges.onPoint1Index,
-                    finalChanges.newOnPoint1.x,
-                    finalChanges.newOnPoint1.y,
-                  ],
-                },
-                {
-                  f: "=xy",
-                  a: [
-                    finalChanges.onPoint2Index,
-                    finalChanges.newOnPoint2.x,
-                    finalChanges.newOnPoint2.y,
-                  ],
-                },
-                // Keep control points unchanged
-                {
-                  f: "=xy",
-                  a: [
-                    finalChanges.controlPoint1Index,
-                    finalChanges.newControlPoint1.x,
-                    finalChanges.newControlPoint1.y,
-                  ],
-                },
-                {
-                  f: "=xy",
-                  a: [
-                    finalChanges.controlPoint2Index,
-                    finalChanges.newControlPoint2.x,
-                    finalChanges.newControlPoint2.y,
-                  ],
-                },
-              ];
-
-              // Rollback to original on-curve positions
-              rollbackChangesForLayer = [
-                {
-                  f: "=xy",
-                  a: [
-                    finalChanges.onPoint1Index,
-                    originalOnPoint1.x,
-                    originalOnPoint1.y,
-                  ],
-                },
-                {
-                  f: "=xy",
-                  a: [
-                    finalChanges.onPoint2Index,
-                    originalOnPoint2.x,
-                    originalOnPoint2.y,
-                  ],
-                },
-                // Control points remain unchanged
-                {
-                  f: "=xy",
-                  a: [
-                    finalChanges.controlPoint1Index,
-                    tunniInitialState.originalControlPoints.originalControlPoint1.x,
-                    tunniInitialState.originalControlPoints.originalControlPoint1.y,
-                  ],
-                },
-                {
-                  f: "=xy",
-                  a: [
-                    finalChanges.controlPoint2Index,
-                    tunniInitialState.originalControlPoints.originalControlPoint2.x,
-                    tunniInitialState.originalControlPoints.originalControlPoint2.y,
-                  ],
-                },
-              ];
-            } else {
-              // For current handle, change control points
-              finalChangesForLayer = [
-                {
-                  f: "=xy",
-                  a: [
-                    finalChanges.controlPoint1Index,
-                    finalChanges.newControlPoint1.x,
-                    finalChanges.newControlPoint1.y,
-                  ],
-                },
-                {
-                  f: "=xy",
-                  a: [
-                    finalChanges.controlPoint2Index,
-                    finalChanges.newControlPoint2.x,
-                    finalChanges.newControlPoint2.y,
-                  ],
-                },
-              ];
-
-              // Rollback to original control point positions
-              rollbackChangesForLayer = [
-                {
-                  f: "=xy",
-                  a: [
-                    tunniInitialState.originalControlPoints.controlPoint1Index,
-                    tunniInitialState.originalControlPoints.originalControlPoint1.x,
-                    tunniInitialState.originalControlPoints.originalControlPoint1.y,
-                  ],
-                },
-                {
-                  f: "=xy",
-                  a: [
-                    tunniInitialState.originalControlPoints.controlPoint2Index,
-                    tunniInitialState.originalControlPoints.originalControlPoint2.x,
-                    tunniInitialState.originalControlPoints.originalControlPoint2.y,
-                  ],
-                },
-              ];
-            }
-
-            finalLayerChanges.push(
-              consolidateChanges(finalChangesForLayer, [...layer.changePath, "path"])
-            );
-            rollbackChanges.push(
-              consolidateChanges(rollbackChangesForLayer, [...layer.changePath, "path"])
-            );
-          }
-
-          return {
-            changes: ChangeCollector.fromChanges(
-              consolidateChanges(finalLayerChanges),
-              consolidateChanges(rollbackChanges)
-            ),
-            undoLabel: isTrueTunniPoint
-              ? "Move On-Curve Points via Tunni"
-              : "Move Tunni Points",
-            broadcast: true,
-          };
-        }
+      await handleTunniDrag({
+        sceneController,
+        eventStream,
+        initialEvent,
+        isTrueTunniPoint,
+        tunniInitialState,
       });
       return;
     }
