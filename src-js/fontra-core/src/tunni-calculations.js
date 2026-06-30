@@ -108,7 +108,7 @@ export function calculateSegmentTension(
   return numerator / denominator;
 }
 
-export function calculateTunniPoint(segmentPoints) {
+export function calculateControlHandlePoint(segmentPoints) {
   // segmentPoints should be an array of 4 points: [start, control1, control2, end]
   if (segmentPoints.length !== 4) {
     throw new Error("Segment must have exactly 4 points");
@@ -131,7 +131,7 @@ export function calculateTunniPoint(segmentPoints) {
  * @param {Array} segmentPoints - Array of 4 points: [start, control1, control2, end]
  * @returns {Object|null} The intersection point or null if lines are parallel
  */
-export function calculateTrueTunniPoint(segmentPoints) {
+export function calculateTunniPoint(segmentPoints) {
   // segmentPoints should be an array of 4 points: [start, control1, control2, end]
   if (segmentPoints.length !== 4) {
     throw new Error("Segment must have exactly 4 points");
@@ -261,7 +261,7 @@ export function calculateControlPointsFromTunni(
 export function calculateEqualizedControlPoints(segmentPoints) {
   const [p1, p2, p3, p4] = segmentPoints;
 
-  const pt = calculateTrueTunniPoint(segmentPoints); // <- true Tunni point
+  const pt = calculateTunniPoint(segmentPoints); // <- true Tunni point
   if (!pt) return [p2, p3];
 
   const dist1ToPt = distance(p1, pt);
@@ -296,7 +296,7 @@ export function calculateEqualizedControlPoints(segmentPoints) {
 }
 
 export function balanceSegment(segmentPoints) {
-  const tunniPoint = calculateTrueTunniPoint(segmentPoints);
+  const tunniPoint = calculateTunniPoint(segmentPoints);
   if (!tunniPoint) {
     const [p1, p2, p3, p4] = segmentPoints;
     return [p1, p2, p3, p4]; // Can't balance if lines are parallel
@@ -428,10 +428,10 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
             const p4 = segment.points[3];  // on-curve end point
             
             // Calculate Tunni point for visualization (keep midpoint)
-            const visualPt = calculateTunniPoint(segment.points);
+            const visualPt = calculateControlHandlePoint(segment.points);
 
             // Calculate true Tunni point for tension calculations
-            const truePt = calculateTrueTunniPoint(segment.points);
+            const truePt = calculateTunniPoint(segment.points);
 
             // Calculate tensions using the true intersection point (with fallback to midpoint)
             const tensionPt1 = truePt || visualPt;
@@ -677,7 +677,7 @@ export function drawTunniLabels(context, positionedGlyph, parameters, model, con
  * @param {Object} point - The point to check
  * @param {number} size - The size margin to check within
  * @param {Object} positionedGlyph - The positioned glyph containing the path
- * @param {Function} calculateTunniPoint - Function to calculate Tunni point from segment
+ * @param {Function} calculateControlHandlePoint - Function to calculate Tunni point from segment
  * @param {Function} distance - Function to calculate distance between two points
  * @returns {Object|null} Object with tunniPoint, segment, and segmentPoints if hit, null otherwise
  */
@@ -685,7 +685,7 @@ export function findTunniPointHit(
   point,
   size,
   positionedGlyph,
-  calculateTunniPoint,
+  calculateControlHandlePoint,
   distance
 ) {
   if (!positionedGlyph) {
@@ -710,8 +710,8 @@ export function findTunniPointHit(
         if (pointTypes[1] === 2 && pointTypes[2] === 2) {
           // Both are cubic control points
           // Calculate both the true intersection point and the visual point (midpoint)
-          const trueTunniPoint = calculateTrueTunniPoint(segment.points);
-          const visualTunniPoint = calculateTunniPoint(segment.points);
+          const trueTunniPoint = calculateTunniPoint(segment.points);
+          const visualTunniPoint = calculateControlHandlePoint(segment.points);
 
           // Check both the true intersection point and the visual point (midpoint)
           if (trueTunniPoint && distance(glyphPoint, trueTunniPoint) <= size) {
@@ -758,7 +758,7 @@ export async function handleEqualizeDistances(
     point,
     size,
     positionedGlyph,
-    calculateTunniPoint,
+    calculateControlHandlePoint,
     distance
   );
   if (hit) {
@@ -1181,8 +1181,8 @@ export function tunniLayerHitTest(point, size, positionedGlyph) {
         if (pointTypes[1] === 2 && pointTypes[2] === 2) {
           // Both are cubic control points
           // Calculate the true Tunni point (intersection-based) for this segment
-          const trueTunniPoint = calculateTrueTunniPoint(segment.points);
-          const visualTunniPoint = calculateTunniPoint(segment.points);
+          const trueTunniPoint = calculateTunniPoint(segment.points);
+          const visualTunniPoint = calculateControlHandlePoint(segment.points);
 
           // Check both the true intersection point and the visual point (midpoint)
           // This ensures we can hit both the actual intersection and the visual representation

@@ -33,7 +33,7 @@ import { rectToPoints } from "@fontra/core/rectangle.ts";
 import { difference, isSuperset, union } from "@fontra/core/set-ops.js";
 import { decomposedToTransform } from "@fontra/core/transform.js";
 import {
-  calculateTrueTunniPoint,
+  calculateControlHandlePoint,
   calculateTunniPoint,
 } from "@fontra/core/tunni-calculations.js";
 import {
@@ -2083,7 +2083,7 @@ function drawTunniCombined(context, positionedGlyph, parameters, model, controll
         // Both control points must be cubic
         if (pointTypes[1] === 2 && pointTypes[2] === 2) {
           // Draw the current Tunni point (midpoint between control points)
-          const tunniPoint = calculateTunniPoint(segment.points);
+          const tunniPoint = calculateControlHandlePoint(segment.points);
           if (tunniPoint) {
             context.beginPath();
             context.arc(
@@ -2145,7 +2145,7 @@ function drawActualTunniPoints(
         // Both control points must be cubic
         if (pointTypes[1] === 2 && pointTypes[2] === 2) {
           // Draw the true Tunni point (intersection of on-curve to off-curve vectors)
-          const trueTunniPoint = calculateTrueTunniPoint(segment.points);
+          const trueTunniPoint = calculateTunniPoint(segment.points);
           if (trueTunniPoint) {
             context.beginPath();
             // Draw as a square/diamond shape to distinguish from visual points

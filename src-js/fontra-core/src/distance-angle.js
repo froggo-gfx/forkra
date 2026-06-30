@@ -3,8 +3,8 @@
 
 // Import necessary functions from vector.js for the new functions
 import {
+  calculateControlHandlePoint,
   calculateSegmentTension,
-  calculateTrueTunniPoint,
   calculateTunniPoint,
 } from "./tunni-calculations.js";
 import { distance } from "./vector.js";
@@ -1092,10 +1092,10 @@ export function drawTunniLabels(
             const p4 = segment.points[3]; // on-curve end point
 
             // Calculate Tunni point for visualization (keep midpoint)
-            const visualPt = calculateTunniPoint(segment.points);
+            const visualPt = calculateControlHandlePoint(segment.points);
 
             // Calculate true Tunni point for tension calculations
-            const truePt = calculateTrueTunniPoint(segment.points);
+            const truePt = calculateTunniPoint(segment.points);
 
             // Calculate tensions using the true intersection point (with fallback to midpoint)
             const tensionPt1 = truePt || visualPt;
