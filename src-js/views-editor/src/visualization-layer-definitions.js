@@ -2,13 +2,11 @@ import { computeSpeedPunkSamples } from "@fontra/core/curvature.js";
 import {
   calculateBadgeDimensions,
   calculateBadgePosition,
-  calculateControlHandleDistance,
   calculateDistanceAndAngle,
   calculateDistancesFromPoint,
   calculateHandleMeasure,
   calculateOffCurveAngle,
   calculateProjectedDistanceComponents,
-  calculateTunniPointz,
   DISTANCE_ANGLE_BADGE_COLOR,
   DISTANCE_ANGLE_BADGE_PADDING,
   DISTANCE_ANGLE_BADGE_RADIUS,
