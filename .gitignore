@@ -268,3 +268,4 @@ src/fontra/localplugins/
 src/fontra/client
 
 skeleton/
+.claude/
