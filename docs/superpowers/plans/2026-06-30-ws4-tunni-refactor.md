@@ -56,10 +56,11 @@ src-js/fontra-core/tests/
 src-js/views-editor/src/
   tunni-interactions.js          [CREATE] hit-test + mouse state/drag/up + equalize orchestration
                                           (moved from tunni-calculations.js + pointer);
+                                          drag commit via recordChanges (Task 6, proper undo);
                                           Task 9: round equalized CPs (A), tension-preserving
                                           proportional drag (B), tension-based equalize guard (C)
-  edit-tools-pointer.js          [MODIFY] delete ~259 Tunni lines; import from ./tunni-interactions.js;
-                                          thin dispatch in handleHover/handleDrag
+  edit-tools-pointer.js          [MODIFY] delete ~259 Tunni lines incl. the hand-built forward/
+                                          rollback undo loop; thin dispatch → ./tunni-interactions.js
   visualization-layer-definitions.js [MODIFY] rename layer ids (D4) + name strings; repoint imports;
                                           drawTunniCombined/drawActualTunniPoints stay render-only
   panel-transformation.js        [MODIFY] "Tunni Labels"→"Point labels"; showTunni*→showLabels* keys
@@ -547,49 +548,234 @@ git commit -m "refactor(tunni): extract interaction to tunni-interactions.js; pu
 
 ---
 
-## Task 6: Thin the pointer — move drag orchestration into tunni-interactions.js
+## Task 6: Thin the pointer + proper undo integration (recordChanges)
 
-`edit-tools-pointer.js` holds ~259 lines of Tunni: the hover/cursor block (≈129–230) and a ~190-line inline drag/undo loop (≈254–600) that calls the interaction helpers and runs `editLayersAndRecordChanges`. Move the orchestration into a single `handleTunniDrag(...)` entry point in `tunni-interactions.js` (skeleton's `handleSkeletonTunniDrag` is the structural model — but operate on the regular path, NOT skeletonData) and reduce the pointer to a dispatch hook.
+`edit-tools-pointer.js` holds ~259 lines of Tunni: the hover/cursor block (≈129–230) and a ~190-line inline drag loop (≈254–601). The drag loop does **not** use the editor's standard recorder — it calls `sceneController.editGlyph(...)` and **hand-builds both the forward `=xy` change arrays and the inverse rollback arrays**, then wraps them with `ChangeCollector.fromChanges(forward, rollback)` (lines 456–599). That manual bookkeeping is the ~150-line bulk and the only place in the file that doesn't use the auto-recorder.
+
+This task moves the orchestration into `tunni-interactions.js` **and replaces the manual change/rollback construction with `recordChanges`** — the same primitive `editLayersAndRecordChanges` (used by Tunni's own equalize path) and the pointer's connect-contours code already rest on. Tunni keeps its bespoke projection math (`handleTunniPointMouseDrag` / `handleTrueTunniPointMouseDrag` — genuine domain logic); only the undo bookkeeping is shared. Net: ~150 fewer lines, identical behavior, one atomic undo step, no hand-written inverse arrays, zero changes to the shared edit-behavior core.
+
+> **Why not route Tunni through the common selection-drag (EditBehavior) path?** That engine applies one *uniform translate* to *selected, self-storing* entities. A Tunni point has no storage of its own and its drag is a *per-handle directional projection* (each control slides along its own ray by its own scalar) — neither expressible as `makePointTranslateFunction(delta)` without injecting Tunni-specific motion into the shared core. The right factoring is **share the mechanism (change recording), not the policy (uniform-delta selection editing)**. `recordChanges` gives the auto-rollback guidelines get, without touching EditBehavior.
 
 **Files:**
 - Modify: `src-js/views-editor/src/tunni-interactions.js`, `src-js/views-editor/src/edit-tools-pointer.js`
 
 **Interfaces:**
-- Produces: `handleTunniDrag({ sceneController, eventStream, initialEvent, isTrueTunniPoint, tunniInitialState })` — runs the drag/equalize/undo loop, returns when the drag ends. `tunniHoverResult(glyphPoint, size, positionedGlyph, visualizationLayersSettings) -> { cursor } | null` — encapsulates the hover hit-test + cursor decision.
+- Consumes: `recordChanges` (`@fontra/core/change-recorder.js`), `ChangeCollector` (`@fontra/core/changes.js`), the moved `handleTunniPointMouseDrag`/`handleTrueTunniPointMouseDrag`, `equalizeSegmentDistances`.
+- Produces: `handleTunniDrag({ sceneController, eventStream, initialEvent, isTrueTunniPoint, tunniInitialState })` — runs the equalize-or-drag loop and commits via `recordChanges`. `tunniHoverResult(glyphPoint, size, positionedGlyph, visualizationLayersSettings) -> { cursor } | null` — hover hit-test + cursor decision.
 
-> Manual verification only.
+> Manual verification only (no views-editor harness); undo correctness gated by Task 10.
 
-- [ ] **Step 1: Add `handleTunniDrag` + `tunniHoverResult` to tunni-interactions.js**
+- [ ] **Step 1: Add imports + the apply helper to tunni-interactions.js**
 
-Move the body of the pointer's inline Tunni drag loop (the block that builds `tunniInitialState`, branches on `isTrueTunniPoint`, calls `handleTrueTunniPointMouseDrag`/`handleTunniPointMouseDrag`, and commits via `sceneController.editLayersAndRecordChanges`) into an exported `async function handleTunniDrag(...)` in `tunni-interactions.js`. Move the hover hit-test + cursor-selection logic (the `isHoveringTunniPoint`/`isHoveringTrueTunniPoint` computation) into `tunniHoverResult(...)`. Preserve the exact `undoLabel` strings (`"Move On-Curve Points via Tunni"`, `"Move Tunni Points"`) and the Ctrl+Shift equalize branch.
+Add to the top of `src-js/views-editor/src/tunni-interactions.js`:
 
-- [ ] **Step 2: Replace the pointer's inline blocks with dispatch calls**
+```javascript
+import { recordChanges } from "@fontra/core/change-recorder.js";
+import { ChangeCollector } from "@fontra/core/changes.js";
+import { assert } from "@fontra/core/utils.ts"; // match the pointer's existing assert import
+```
+
+Add a private helper that writes the dragged positions through the path (works on a `recordChanges` proxy, so each `setPointPosition` auto-records forward + inverse):
+
+```javascript
+function applyTunniDragChanges(path, dragChanges, isTrueTunniPoint) {
+  if (isTrueTunniPoint) {
+    // Move the two on-curve points; control points follow (unchanged values rewritten is fine).
+    path.setPointPosition(
+      dragChanges.onPoint1Index,
+      dragChanges.newOnPoint1.x,
+      dragChanges.newOnPoint1.y
+    );
+    path.setPointPosition(
+      dragChanges.onPoint2Index,
+      dragChanges.newOnPoint2.x,
+      dragChanges.newOnPoint2.y
+    );
+    path.setPointPosition(
+      dragChanges.controlPoint1Index,
+      dragChanges.newControlPoint1.x,
+      dragChanges.newControlPoint1.y
+    );
+    path.setPointPosition(
+      dragChanges.controlPoint2Index,
+      dragChanges.newControlPoint2.x,
+      dragChanges.newControlPoint2.y
+    );
+  } else {
+    path.setPointPosition(
+      dragChanges.controlPoint1Index,
+      dragChanges.newControlPoint1.x,
+      dragChanges.newControlPoint1.y
+    );
+    path.setPointPosition(
+      dragChanges.controlPoint2Index,
+      dragChanges.newControlPoint2.x,
+      dragChanges.newControlPoint2.y
+    );
+  }
+}
+```
+
+- [ ] **Step 2: Add `handleTunniDrag` (recordChanges-based) to tunni-interactions.js**
+
+```javascript
+export async function handleTunniDrag({
+  sceneController,
+  eventStream,
+  initialEvent,
+  isTrueTunniPoint,
+  tunniInitialState,
+}) {
+  // Ctrl+Shift on a control-handle Tunni point equalizes instead of dragging.
+  // equalizeSegmentDistances already records its own undo via editLayersAndRecordChanges.
+  if (!isTrueTunniPoint && initialEvent.ctrlKey && initialEvent.shiftKey) {
+    await equalizeSegmentDistances(
+      tunniInitialState.tunniPointHit.segment,
+      tunniInitialState.originalSegmentPoints,
+      sceneController.sceneModel,
+      sceneController.sceneModel.getSelectedPositionedGlyph(),
+      sceneController
+    );
+    return;
+  }
+
+  const gridSnap = sceneController.sceneSettings?.gridSnapEnabled;
+
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const layerInfo = Object.entries(
+      sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+    ).map(([layerName, layerGlyph]) => ({
+      layerGlyph,
+      changePath: ["layers", layerName, "glyph"],
+    }));
+    assert(layerInfo.length >= 1, "no layer to edit");
+
+    // Each frame records its own forward + inverse (recordChanges derives the
+    // rollback from the proxy). Concatenating frames chains the rollbacks so the
+    // net inverse returns to the original positions — one atomic undo step.
+    let accumulated = new ChangeCollector();
+    let dragged = false;
+
+    for await (const event of eventStream) {
+      if (event.type === "mouseup") {
+        break;
+      }
+      if (event.type !== "mousemove") {
+        continue;
+      }
+      const dragChanges = isTrueTunniPoint
+        ? handleTrueTunniPointMouseDrag(event, tunniInitialState, sceneController, gridSnap)
+        : handleTunniPointMouseDrag(event, tunniInitialState, sceneController, gridSnap);
+      if (!dragChanges) {
+        continue;
+      }
+      dragged = true;
+
+      let frame = new ChangeCollector();
+      for (const { layerGlyph, changePath } of layerInfo) {
+        const layerChanges = recordChanges(layerGlyph, (proxy) => {
+          applyTunniDragChanges(proxy.path, dragChanges, isTrueTunniPoint);
+        });
+        frame = frame.concat(layerChanges.prefixed(changePath));
+      }
+      accumulated = accumulated.concat(frame);
+      await sendIncrementalChange(frame.change, true); // "may drop" — live feedback only
+    }
+
+    if (!dragged || !accumulated.hasChange) {
+      return;
+    }
+
+    return {
+      changes: accumulated,
+      undoLabel: isTrueTunniPoint
+        ? "Move On-Curve Points via Tunni"
+        : "Move Tunni Points",
+      broadcast: true,
+    };
+  });
+}
+```
+
+- [ ] **Step 3: Add `tunniHoverResult` to tunni-interactions.js**
+
+Move the pointer's hover hit-test + cursor-selection logic (the `isHoveringTunniPoint`/`isHoveringTrueTunniPoint` computation, ≈129–198) into:
+
+```javascript
+export function tunniHoverResult(point, size, positionedGlyph, visualizationLayersSettings) {
+  const handleLayerOn = visualizationLayersSettings.model["fontra.tunni.handle"];
+  const pointLayerOn = visualizationLayersSettings.model["fontra.tunni.point"];
+  if (!handleLayerOn && !pointLayerOn) {
+    return null;
+  }
+  const hit = tunniLayerHitTest(point, size, positionedGlyph);
+  if (!hit) {
+    return null;
+  }
+  if (hit.hitType === "true-tunni-point" && pointLayerOn) {
+    return { cursor: "crosshair" };
+  }
+  if (hit.hitType === "tunni-point" && handleLayerOn) {
+    return { cursor: "pointer" };
+  }
+  return null;
+}
+```
+
+> Uses the **renamed** layer ids from Task 7 (`fontra.tunni.handle` / `fontra.tunni.point`). If Task 7 runs after this, temporarily use the old ids and let Task 7's grep-rename catch them — or run Task 7 first. Either order is fine as long as the final grep in Task 7 Step 3 passes.
+
+- [ ] **Step 4: Replace the pointer's inline blocks with dispatch calls**
 
 In `edit-tools-pointer.js`:
-- `handleHover`: replace the inline Tunni hover block with `const tunni = tunniHoverResult(glyphPoint, size, positionedGlyph, this.editor.visualizationLayersSettings); if (tunni) { this.canvasController.canvas.style.cursor = tunni.cursor; return; }` (preserving the existing early-return structure).
-- `handleDrag` (or `handleDragBegin`, matching the current method): after detecting a Tunni hit, `return await handleTunniDrag({ sceneController: this.sceneController, eventStream, initialEvent, isTrueTunniPoint, tunniInitialState });`.
-- Delete the now-moved inline lines. Keep the import list pointing at `./tunni-interactions.js`, adding `handleTunniDrag`, `tunniHoverResult`.
+- `handleHover`: replace the inline Tunni hover block (≈129–198) with:
+```javascript
+const tunni = tunniHoverResult(
+  glyphPoint,
+  size,
+  positionedGlyph,
+  this.editor.visualizationLayersSettings
+);
+if (tunni) {
+  this.canvasController.canvas.style.cursor = tunni.cursor;
+  return;
+}
+```
+- The drag method (the block at ≈254–603 that builds `tunniInitialState`/`isTrueTunniPoint` then runs the inline `editGlyph` loop): keep the hit-detection that produces `tunniInitialState` + `isTrueTunniPoint`, then replace the entire inline `editGlyph(...)` block (the equalize branch + the ~190-line manual loop, 289–602) with:
+```javascript
+if (tunniInitialState) {
+  await handleTunniDrag({
+    sceneController: this.sceneController,
+    eventStream,
+    initialEvent,
+    isTrueTunniPoint,
+    tunniInitialState,
+  });
+  return;
+}
+```
+- Update the `./tunni-interactions.js` import to add `handleTunniDrag`, `tunniHoverResult`. Remove now-unused imports (`applyChange`, `consolidateChanges`, `ChangeCollector`, `assert`) **only if** `git grep` shows no other use in the pointer.
 
-- [ ] **Step 3: Verify parse + line reduction**
+- [ ] **Step 5: Verify thinning + no hand-built undo remains**
 
 Run:
 ```bash
 node --check src-js/views-editor/src/tunni-interactions.js
 node --check src-js/views-editor/src/edit-tools-pointer.js
+git grep -n "ChangeCollector.fromChanges\|originalOnPoint1\|f: \"=xy\"" src-js/views-editor/src/edit-tools-pointer.js
 git grep -c "[Tt]unni" src-js/views-editor/src/edit-tools-pointer.js
 ```
-Expected: clean parses; the Tunni reference count in the pointer drops sharply (target: only the import + the two dispatch hooks remain — roughly <20 lines vs ~259 before).
+Expected: clean parses; **no matches** for the manual-undo markers (`ChangeCollector.fromChanges`, `originalOnPoint1`, hand-written `=xy`) in the pointer; Tunni reference count drops to roughly the import + two dispatch hooks (<20 vs ~259).
 
-- [ ] **Step 4: Build**
+- [ ] **Step 6: Build**
 
 Run: `npm run bundle`
 Expected: webpack completes with no errors.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src-js/views-editor/src/tunni-interactions.js src-js/views-editor/src/edit-tools-pointer.js
-git commit -m "refactor(tunni): move drag orchestration to tunni-interactions; thin the pointer"
+git commit -m "refactor(tunni): drag undo via recordChanges; thin the pointer (proper undo integration)"
 ```
 
 ---
@@ -897,7 +1083,7 @@ Confirm each — observe, do not assume:
 - [ ] Drag the real Tunni point → on-curve points move along fixed handle directions (**unchanged**).
 - [ ] **Alt during drag** still disables proportional/equalized behavior (per-handle independent move) as before.
 - [ ] **Point labels** (Transformation panel checkboxes, renamed from "Tunni Labels") toggle distance/tension/angle text; values match pre-refactor.
-- [ ] Undo (`Cmd/Ctrl+Z`) reverts each Tunni drag in one step with the expected undo label.
+- [ ] **Undo integration (the Task 6 rewrite):** a full Tunni drag reverts in **one** `Cmd/Ctrl+Z` straight back to the pre-drag positions (not frame-by-frame), with the expected undo label; **redo** (`Cmd/Ctrl+Shift+Z`) reapplies it cleanly. Same for the true-Tunni-point drag and the equalize.
 
 - [ ] **Step 4: Commit the formatting pass (if prettier changed anything)**
 
@@ -916,7 +1102,7 @@ git commit -m "style(tunni): prettier pass for WS-4"
 - (2b) de-dupe tunni-point geometry in distance-angle → **Task 3**.
 - (3) rename within tunni-calculations.js (D2/D3) → **Task 4**.
 - (4) create `tunni-interactions.js` → **Task 5**.
-- (5) strip Tunni from pointer → **Tasks 5–6** (import repoint, then drag-orchestration move).
+- (5) strip Tunni from pointer → **Tasks 5–6** (import repoint, then drag-orchestration move + **recordChanges undo integration**: the hand-built forward/rollback arrays are replaced, not relocated).
 - (6) geometry draws render-only + layer-id hard-rename (D4) → **Task 7**.
 - (7) panel/scene key + label renames (D7/D8) → **Task 8**.
 - (8) prettier + commit per step → throughout + **Task 10**.
@@ -935,7 +1121,7 @@ git commit -m "style(tunni): prettier pass for WS-4"
 
 **Type/name consistency:** `calculateControlHandlePoint` (midpoint), `calculateTunniPoint` (intersection), `calculateSegmentTension` (4 point args), `fontra.tunni.handle`/`fontra.tunni.point` ids, `showLabelsDistance/Tension/Angle` keys — used identically in every task. Phase-ordered rename (A before B) avoids the `calculateTunniPoint` identifier collision.
 
-**Risk notes:** Task 6 (pointer drag-orchestration move) is the only step with no automated test — the ~190-line undo loop must preserve atomic-edit + undo-label behavior; Task 10 manual checks gate it. The `lineIntersection` body is carried verbatim (not swapped for vector.js `intersect`) so tension output is bit-for-bit identical. Task 9 introduces the **only** intended behavior changes (A round / B tension-preserving drag / C tension guard); B keeps forkra's original commented for one-line revert, and the *true*-Tunni-point drag is untouched.
+**Risk notes:** Task 6 (drag rewrite to `recordChanges`) is the highest-risk untested step — the undo record now comes from accumulated per-frame collectors instead of hand-built forward/rollback arrays; Task 10 manual checks (single-step undo **and redo**) gate it. This is a deliberate **mechanism** change (proper undo integration), not a behavior change: the on-canvas result and the `undoLabel`s are identical; Tunni's projection math is untouched. The `lineIntersection` body is carried verbatim (not swapped for vector.js `intersect`) so tension output is bit-for-bit identical. Task 9 introduces the **only** intended *behavior* changes (A round / B tension-preserving drag / C tension guard); B keeps forkra's original commented for one-line revert, and the *true*-Tunni-point drag motion is untouched.
 
 ---
 
