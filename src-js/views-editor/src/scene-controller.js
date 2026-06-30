@@ -145,11 +145,11 @@ export class SceneController {
   setupSceneSettings() {
     this.sceneSettingsController = new ObservableController({
       ...getSceneSettingsDefaults(),
-      // fork: extra scene settings for coarse-grid snapping + Tunni labels
+      // fork: extra scene settings for coarse-grid snapping + Point labels
       gridSnapEnabled: true, // Default to enabled
-      showTunniDistance: true,
-      showTunniTension: true,
-      showTunniAngle: false,
+      showLabelsDistance: true,
+      showLabelsTension: true,
+      showLabelsAngle: false,
     });
     this.sceneSettings = this.sceneSettingsController.model;
 

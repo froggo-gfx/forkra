@@ -1061,9 +1061,9 @@ export function drawTunniLabels(
 
   // Extract visibility settings from model or controller
   // Try multiple ways to access scene settings to ensure compatibility
-  const showDistance = model.sceneSettings?.showTunniDistance ?? true;
-  const showTension = model.sceneSettings?.showTunniTension ?? true;
-  const showAngle = model.sceneSettings?.showTunniAngle ?? true;
+  const showDistance = model.sceneSettings?.showLabelsDistance ?? true;
+  const showTension = model.sceneSettings?.showLabelsTension ?? true;
+  const showAngle = model.sceneSettings?.showLabelsAngle ?? true;
 
   // Debug logging to see if the function is being called and what values we're getting
   // console.log("drawTunniLabels called", { showDistance, showTension, showAngle, model });

@@ -2198,7 +2198,7 @@ registerVisualizationLayerDefinition({
 
 registerVisualizationLayerDefinition({
   identifier: "fontra.tunni.labels",
-  name: "Tunni Labels",
+  name: "Point labels",
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: true,
