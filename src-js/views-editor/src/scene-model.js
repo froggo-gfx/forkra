@@ -55,6 +55,13 @@ export class SceneModel {
     this.cachedGlyphNames = new Set();
     this.updateSceneCancelSignal = {};
 
+    // fork: Q-measure realtime overlay state (WS-2; no skeleton/rib)
+    this.measureMode = false;
+    this.measureShowDirect = false;
+    this.measureHoverSegment = null;
+    this.measureHoverPoints = null;
+    this.measureHoverHandle = null;
+
     this.sceneSettingsController.addKeyListener(
       [
         "characterLines",
@@ -153,6 +160,58 @@ export class SceneModel {
 
   getSelectedPositionedGlyph() {
     return this.getPositionedGlyphFromSelection(this.selectedGlyph);
+  }
+
+  setMeasureActive(active, options = {}) {
+    this.measureMode = !!active;
+    if (!this.measureMode) {
+      this.measureShowDirect = false;
+      this._clearMeasureHover();
+      return;
+    }
+    this.measureShowDirect = !!options.showDirect;
+  }
+
+  setMeasureShowDirect(showDirect) {
+    this.measureShowDirect = !!showDirect;
+  }
+
+  _clearMeasureHover() {
+    this.measureHoverSegment = null;
+    this.measureHoverPoints = null;
+    this.measureHoverHandle = null;
+  }
+
+  setMeasureHoverTarget(kind, payload = null) {
+    this._clearMeasureHover();
+    switch (kind) {
+      case "handle":
+        this.measureHoverHandle = payload;
+        break;
+      case "segment":
+        this.measureHoverSegment = payload;
+        break;
+      case "points":
+        this.measureHoverPoints = payload;
+        break;
+    }
+  }
+
+  getMeasureHoverTarget() {
+    if (this.measureHoverHandle) {
+      return { kind: "handle", payload: this.measureHoverHandle };
+    }
+    if (this.measureHoverSegment) {
+      return { kind: "segment", payload: this.measureHoverSegment };
+    }
+    if (this.measureHoverPoints) {
+      return { kind: "points", payload: this.measureHoverPoints };
+    }
+    return null;
+  }
+
+  resetMeasureState() {
+    this.setMeasureActive(false);
   }
 
   getHoveredPositionedGlyph() {
