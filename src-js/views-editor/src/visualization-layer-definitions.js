@@ -1,7 +1,11 @@
 import {
+  adjustStepsForCurve,
   calculateCurvatureForQuadraticSegment,
   calculateCurvatureForSegment,
+  calculateSegmentBudget,
+  countCurveSegments,
   curvatureToColor,
+  estimateCurveLength,
   findCurvatureRange,
   solveCubicBezier,
   solveQuadraticBezier,
@@ -1706,103 +1710,6 @@ registerVisualizationLayerDefinition({
     context.strokeRect(x, y, w, h);
   },
 });
-
-//// speedpunk
-// Add new functions before the main draw function
-function calculateSegmentBudget(
-  numCurves,
-  zoomFactor,
-  baseSegments = 400,
-  minSegmentsPerCurve = 5
-) {
-  // Apply zoom-based scaling: increase budget at higher zoom for smoother ribbons
-  const zoomAdjustedBudget = Math.ceil(baseSegments * Math.sqrt(zoomFactor));
-
-  // Divide budget among curves, respecting minimum
-  const stepsPerSegment = Math.max(
-    Math.floor(zoomAdjustedBudget / Math.max(numCurves, 1)),
-    minSegmentsPerCurve
-  );
-
-  return stepsPerSegment;
-}
-
-function estimateCurveLength(p1, p2, p3, p4 = null) {
-  // Simple linear approximation for quick estimate
-  if (p4) {
-    // Cubic: sum of control polygon
-    return (
-      Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) +
-      Math.hypot(p3[0] - p2[0], p3[1] - p2[1]) +
-      Math.hypot(p4[0] - p3[0], p4[1] - p3[1])
-    );
-  } else {
-    // Quadratic
-    return (
-      Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) +
-      Math.hypot(p3[0] - p2[0], p3[1] - p2[1])
-    );
-  }
-}
-
-function adjustStepsForCurve(
-  baseSteps,
-  curveLength,
-  averageLength,
-  maxAdjustment = 2.0
-) {
-  if (averageLength === 0) return baseSteps;
-
-  // Increase steps for longer curves, decrease for shorter
-  const ratio = curveLength / averageLength;
-  const adjustment = Math.min(Math.max(ratio, 1.0 / maxAdjustment), maxAdjustment);
-
-  return Math.max(Math.floor(baseSteps * adjustment), 3);
-}
-
-function countCurveSegments(path) {
-  let count = 0;
-
-  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
-    const contour = path.getContour(contourIndex);
-    const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
-    const numPoints = contour.pointTypes.length;
-
-    for (let i = 0; i < numPoints; i++) {
-      const pointIndex = startPoint + i;
-      const pointType = path.pointTypes[pointIndex];
-
-      if ((pointType & VarPackedPath.POINT_TYPE_MASK) !== VarPackedPath.ON_CURVE) {
-        continue;
-      }
-
-      const next1 = path.getAbsolutePointIndex(contourIndex, (i + 1) % numPoints);
-      const next2 = path.getAbsolutePointIndex(contourIndex, (i + 2) % numPoints);
-      const next3 = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
-
-      const t1 = path.pointTypes[next1];
-      const t2 = path.pointTypes[next2];
-      const t3 = path.pointTypes[next3];
-
-      // Check for cubic
-      const isCubic =
-        (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
-        (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
-        (t3 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
-
-      // Check for quadratic
-      const isQuadratic =
-        (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD &&
-        (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
-
-      if (isCubic || isQuadratic) {
-        count++;
-      }
-    }
-  }
-
-  return count;
-}
 
 // --- SpeedPunk / curvature visualization (replace existing fontra.curvature block) ---
 registerVisualizationLayerDefinition({

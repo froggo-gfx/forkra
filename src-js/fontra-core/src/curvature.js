@@ -10,6 +10,8 @@
 //  calculateCurvatureForSegment, calculateCurvatureForQuadraticSegment,
 //  curvatureToColor
 
+import { VarPackedPath } from "./var-path.js";
+
 // --- cubic solver
 export function solveCubicBezier(p1, p2, p3, p4, t) {
   const mt = 1 - t;
@@ -17,12 +19,16 @@ export function solveCubicBezier(p1, p2, p3, p4, t) {
   const t2 = t * t;
 
   // Position r(t)
-  const r_x = p1[0] * mt2 * mt + 3 * p2[0] * mt2 * t + 3 * p3[0] * mt * t2 + p4[0] * t2 * t;
-  const r_y = p1[1] * mt2 * mt + 3 * p2[1] * mt2 * t + 3 * p3[1] * mt * t2 + p4[1] * t2 * t;
+  const r_x =
+    p1[0] * mt2 * mt + 3 * p2[0] * mt2 * t + 3 * p3[0] * mt * t2 + p4[0] * t2 * t;
+  const r_y =
+    p1[1] * mt2 * mt + 3 * p2[1] * mt2 * t + 3 * p3[1] * mt * t2 + p4[1] * t2 * t;
 
   // First derivative r'(t) * 3
-  const r1_x = (p2[0] - p1[0]) * mt2 + 2 * (p3[0] - p2[0]) * mt * t + (p4[0] - p3[0]) * t2;
-  const r1_y = (p2[1] - p1[1]) * mt2 + 2 * (p3[1] - p2[1]) * mt * t + (p4[1] - p3[1]) * t2;
+  const r1_x =
+    (p2[0] - p1[0]) * mt2 + 2 * (p3[0] - p2[0]) * mt * t + (p4[0] - p3[0]) * t2;
+  const r1_y =
+    (p2[1] - p1[1]) * mt2 + 2 * (p3[1] - p2[1]) * mt * t + (p4[1] - p3[1]) * t2;
   const r1 = [r1_x * 3, r1_y * 3];
 
   // Second derivative r''(t) * 6
@@ -57,8 +63,10 @@ export function solveQuadraticBezier(p1, p2, p3, t) {
 // the existing code used absolute values in many places; keep returning ABS (old behavior),
 // but callers may use Math.sign(...) if they want signed height.
 export function solveCubicBezierCurvature(r1, r2) {
-  const dx = r1[0], dy = r1[1];
-  const d2x = r2[0], d2y = r2[1];
+  const dx = r1[0],
+    dy = r1[1];
+  const d2x = r2[0],
+    d2y = r2[1];
   const cross = dx * d2y - dy * d2x;
   const mag_r1_sq = dx * dx + dy * dy;
   if (mag_r1_sq === 0) {
@@ -70,8 +78,10 @@ export function solveCubicBezierCurvature(r1, r2) {
 }
 
 export function solveQuadraticBezierCurvature(r1, r2) {
-  const dx = r1[0], dy = r1[1];
-  const d2x = r2[0], d2y = r2[1];
+  const dx = r1[0],
+    dy = r1[1];
+  const d2x = r2[0],
+    d2y = r2[1];
   const cross = dx * d2y - dy * d2x;
   const mag_r1_sq = dx * dx + dy * dy;
   if (mag_r1_sq === 0) {
@@ -141,7 +151,12 @@ function interpolateColor(color1, color2, t) {
  * - minAbs, maxAbs: per-segment min/max absolute curvature (the visualization must pass these)
  * - colorStops: array of hex strings
  */
-export function curvatureToColor(curvatureAbs, minAbs, maxAbs, colorStops = ["#8b939c", "#f29400", "#e3004f"]) {
+export function curvatureToColor(
+  curvatureAbs,
+  minAbs,
+  maxAbs,
+  colorStops = ["#8b939c", "#f29400", "#e3004f"]
+) {
   // safe defaults
   if (!Array.isArray(colorStops) || colorStops.length === 0) {
     return "rgba(0,0,0,1)";
@@ -161,4 +176,93 @@ export function curvatureToColor(curvatureAbs, minAbs, maxAbs, colorStops = ["#8
   const segIndex = Math.min(Math.floor(t * segments), segments - 1);
   const localT = t * segments - segIndex;
   return interpolateColor(colorStops[segIndex], colorStops[segIndex + 1], localT);
+}
+
+// --- SpeedPunk sampling helpers (moved out of visualization-layer-definitions.js) ---
+
+export function calculateSegmentBudget(
+  numCurves,
+  zoomFactor,
+  baseSegments = 400,
+  minSegmentsPerCurve = 5
+) {
+  const zoomAdjustedBudget = Math.ceil(baseSegments * Math.sqrt(zoomFactor));
+
+  const stepsPerSegment = Math.max(
+    Math.floor(zoomAdjustedBudget / Math.max(numCurves, 1)),
+    minSegmentsPerCurve
+  );
+
+  return stepsPerSegment;
+}
+
+export function estimateCurveLength(p1, p2, p3, p4 = null) {
+  if (p4) {
+    return (
+      Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) +
+      Math.hypot(p3[0] - p2[0], p3[1] - p2[1]) +
+      Math.hypot(p4[0] - p3[0], p4[1] - p3[1])
+    );
+  } else {
+    return (
+      Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) +
+      Math.hypot(p3[0] - p2[0], p3[1] - p2[1])
+    );
+  }
+}
+
+export function adjustStepsForCurve(
+  baseSteps,
+  curveLength,
+  averageLength,
+  maxAdjustment = 2.0
+) {
+  if (averageLength === 0) return baseSteps;
+
+  const ratio = curveLength / averageLength;
+  const adjustment = Math.min(Math.max(ratio, 1.0 / maxAdjustment), maxAdjustment);
+
+  return Math.max(Math.floor(baseSteps * adjustment), 3);
+}
+
+export function countCurveSegments(path) {
+  let count = 0;
+
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    const contour = path.getContour(contourIndex);
+    const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
+    const numPoints = contour.pointTypes.length;
+
+    for (let i = 0; i < numPoints; i++) {
+      const pointIndex = startPoint + i;
+      const pointType = path.pointTypes[pointIndex];
+
+      if ((pointType & VarPackedPath.POINT_TYPE_MASK) !== VarPackedPath.ON_CURVE) {
+        continue;
+      }
+
+      const next1 = path.getAbsolutePointIndex(contourIndex, (i + 1) % numPoints);
+      const next2 = path.getAbsolutePointIndex(contourIndex, (i + 2) % numPoints);
+      const next3 = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
+
+      const t1 = path.pointTypes[next1];
+      const t2 = path.pointTypes[next2];
+      const t3 = path.pointTypes[next3];
+
+      const isCubic =
+        (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
+        (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
+        (t3 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
+
+      const isQuadratic =
+        (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD &&
+        (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
+
+      if (isCubic || isQuadratic) {
+        count++;
+      }
+    }
+  }
+
+  return count;
 }
