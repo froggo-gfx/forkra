@@ -3,6 +3,7 @@ import {
   getActionIdentifierFromKeyEvent,
   registerAction,
   registerActionCallbacks,
+  registerActionInfo,
 } from "@fontra/core/actions.js";
 import { Backend } from "@fontra/core/backend-api.js";
 import { CanvasController } from "@fontra/core/canvas-controller.js";
@@ -659,6 +660,20 @@ export class EditorController extends ViewController {
       },
       (event) => this.enterCleanViewAndHandTool(event)
     );
+
+    {
+      const topic = "0055-action-topics.realtime-hotkeys";
+      registerActionInfo("action.realtime.measure", {
+        topic,
+        titleKey: "shortcuts.realtime.measure",
+        defaultShortCuts: [{ baseKey: "q" }],
+      });
+      registerActionInfo("action.realtime.measure-direct", {
+        topic,
+        titleKey: "shortcuts.realtime.measure-direct",
+        defaultShortCuts: [{ baseKey: "q", altKey: true }],
+      });
+    }
 
     {
       const topic = "0060-action-topics.glyph-editor-appearance";
