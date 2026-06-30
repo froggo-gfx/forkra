@@ -48,6 +48,9 @@ import {
 import {
   areDistancesEqualized,
   calculateEqualizedControlPoints,
+} from "@fontra/core/tunni-calculations.js";
+// Import Tunni functions for integration with pointer tool
+import {
   calculateTrueTunniPointDragChanges,
   equalizeSegmentDistances,
   handleTrueTunniPointMouseDown,
@@ -57,7 +60,7 @@ import {
   handleTunniPointMouseDrag,
   handleTunniPointMouseUp,
   tunniLayerHitTest,
-} from "@fontra/core/tunni-calculations.js";
+} from "./tunni-interactions.js";
 
 const transformHandleMargin = 6;
 const transformHandleSize = 8;
