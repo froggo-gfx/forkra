@@ -266,3 +266,195 @@ export function countCurveSegments(path) {
 
   return count;
 }
+
+// --- SpeedPunk geometry: pure quad/color generation (consumed by the viz layer) ---
+
+function _isOnCurve(t) {
+  return (t & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
+}
+
+function _segmentKind(t1, t2, t3) {
+  const isCubic =
+    (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
+    (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_CUBIC &&
+    (t3 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
+  const isQuadratic =
+    (t1 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.OFF_CURVE_QUAD &&
+    (t2 & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE;
+  return { isCubic, isQuadratic };
+}
+
+export function computeSpeedPunkSamples(path, params = {}) {
+  const peakHeightGlyphUnits = params.peakHeightGlyphUnits ?? 24;
+  const sharpness = Math.max(0.1, params.sharpness ?? 1);
+  const illustrationPosition = params.illustrationPosition ?? "outsideOfCurve";
+  const useGlobalNormalization = params.useGlobalNormalization ?? false;
+  const colorStops = params.colorStops ?? ["#8b939c", "#f29400", "#e3004f"];
+  const baseSegmentBudget = params.baseSegmentBudget ?? 400;
+  const minSegmentsPerCurve = params.minSegmentsPerCurve ?? 5;
+  const zoomFactor = params.zoomFactor ?? 1;
+  const adaptToCurveLength = params.adaptStepsToCurveLength ?? false;
+
+  if (!path || !path.numContours) {
+    return [];
+  }
+
+  const totalCurveCount = countCurveSegments(path);
+  if (totalCurveCount === 0) {
+    return [];
+  }
+
+  const stepsPerSegment = calculateSegmentBudget(
+    totalCurveCount,
+    zoomFactor,
+    baseSegmentBudget,
+    minSegmentsPerCurve
+  );
+
+  let averageCurveLength = 0;
+  if (adaptToCurveLength) {
+    let totalLength = 0;
+    let curveCount = 0;
+    forEachCurveSegment(path, (kind, pts) => {
+      totalLength += estimateCurveLength(...pts);
+      curveCount++;
+    });
+    averageCurveLength = curveCount > 0 ? totalLength / curveCount : 0;
+  }
+
+  let globalMinAbs = Infinity;
+  let globalMaxAbs = -Infinity;
+  if (useGlobalNormalization) {
+    forEachCurveSegment(path, (kind, pts) => {
+      const steps = adaptToCurveLength
+        ? adjustStepsForCurve(
+            stepsPerSegment,
+            estimateCurveLength(...pts),
+            averageCurveLength
+          )
+        : stepsPerSegment;
+      const samples =
+        kind === "cubic"
+          ? calculateCurvatureForSegment(...pts, steps)
+          : calculateCurvatureForQuadraticSegment(...pts, steps);
+      for (const sample of samples) {
+        const absK = Math.abs(sample.curvature);
+        globalMinAbs = Math.min(globalMinAbs, absK);
+        globalMaxAbs = Math.max(globalMaxAbs, absK);
+      }
+    });
+    if (globalMinAbs === Infinity) {
+      globalMinAbs = 0;
+      globalMaxAbs = 1;
+    }
+  }
+
+  const quads = [];
+  forEachCurveSegment(path, (kind, pts) => {
+    const steps = adaptToCurveLength
+      ? adjustStepsForCurve(
+          stepsPerSegment,
+          estimateCurveLength(...pts),
+          averageCurveLength
+        )
+      : stepsPerSegment;
+    const samples =
+      kind === "cubic"
+        ? calculateCurvatureForSegment(...pts, steps)
+        : calculateCurvatureForQuadraticSegment(...pts, steps);
+
+    const absVals = samples.map((s) => Math.abs(s.curvature));
+    const minAbsSegment = Math.min(...absVals);
+    const maxAbsSegment = Math.max(...absVals);
+    const segmentPeakAbsCurvature = maxAbsSegment > 1e-12 ? maxAbsSegment : 1;
+    const minAbs = useGlobalNormalization ? globalMinAbs : minAbsSegment;
+    const maxAbs = useGlobalNormalization ? globalMaxAbs : maxAbsSegment;
+
+    const onCurve = [];
+    const offCurve = [];
+    for (let s = 0; s < samples.length; s++) {
+      const t = samples[s].t;
+      const { r, r1 } =
+        kind === "cubic"
+          ? solveCubicBezier(...pts, t)
+          : solveQuadraticBezier(...pts, t);
+      const [x, y] = r;
+      onCurve.push({ x, y, k: samples[s].curvature });
+
+      let nx = illustrationPosition === "outsideOfCurve" ? -r1[1] : r1[1];
+      let ny = illustrationPosition === "outsideOfCurve" ? r1[0] : -r1[0];
+      const mag = Math.hypot(nx, ny) || 1;
+      nx /= mag;
+      ny /= mag;
+
+      const rawNormalizedHeight =
+        Math.abs(samples[s].curvature) / segmentPeakAbsCurvature;
+      const normalizedHeight = Math.pow(
+        Math.max(0, Math.min(1, rawNormalizedHeight)),
+        sharpness
+      );
+      const h = -normalizedHeight * peakHeightGlyphUnits;
+      offCurve.push({ x: x + nx * h, y: y + ny * h });
+    }
+
+    for (let s = 0; s < onCurve.length - 1; s++) {
+      const a = onCurve[s];
+      const b = onCurve[s + 1];
+      quads.push({
+        points: [
+          [a.x, a.y],
+          [b.x, b.y],
+          [offCurve[s + 1].x, offCurve[s + 1].y],
+          [offCurve[s].x, offCurve[s].y],
+        ],
+        color: curvatureToColor(Math.abs(a.k), minAbs, maxAbs, colorStops),
+      });
+    }
+  });
+
+  return quads;
+}
+
+function forEachCurveSegment(path, cb) {
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    const contour = path.getContour(contourIndex);
+    const startPoint = path.getAbsolutePointIndex(contourIndex, 0);
+    const numPoints = contour.pointTypes.length;
+
+    for (let i = 0; i < numPoints; i++) {
+      const pointIndex = startPoint + i;
+      if (!_isOnCurve(path.pointTypes[pointIndex])) {
+        continue;
+      }
+      const next1 = path.getAbsolutePointIndex(contourIndex, (i + 1) % numPoints);
+      const next2 = path.getAbsolutePointIndex(contourIndex, (i + 2) % numPoints);
+      const next3 = path.getAbsolutePointIndex(contourIndex, (i + 3) % numPoints);
+      const { isCubic, isQuadratic } = _segmentKind(
+        path.pointTypes[next1],
+        path.pointTypes[next2],
+        path.pointTypes[next3]
+      );
+      if (isCubic) {
+        const p1 = path.getPoint(pointIndex);
+        const p2 = path.getPoint(next1);
+        const p3 = path.getPoint(next2);
+        const p4 = path.getPoint(next3);
+        cb("cubic", [
+          [p1.x, p1.y],
+          [p2.x, p2.y],
+          [p3.x, p3.y],
+          [p4.x, p4.y],
+        ]);
+      } else if (isQuadratic) {
+        const p1 = path.getPoint(pointIndex);
+        const p2 = path.getPoint(next1);
+        const p3 = path.getPoint(next2);
+        cb("quadratic", [
+          [p1.x, p1.y],
+          [p2.x, p2.y],
+          [p3.x, p3.y],
+        ]);
+      }
+    }
+  }
+}
