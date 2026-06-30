@@ -63,3 +63,37 @@ Follow-up notes:
 
 - User-side `bundle watch` is the build verification path for this pass; manual hold-Q browser behavior should be checked there.
 - `measure-interactions.js` now provides the interaction-module pattern expected by the later Tunni refactor.
+
+## WS-3: SpeedPunk Panel + Visualization Extraction
+
+**Branch:** `refactor-simple/ws3-speedpunk-panel`
+
+**Status:** Implemented and locally syntax/unit verified; browser behavior remains tied to the running bundle watch.
+
+WS-3 moves SpeedPunk sampling and geometry out of the visualization layer and adds an app-level SpeedPunk accordion to Designspace Navigation. The visualization layer now renders quads returned by core math, while the panel persists display parameters through `applicationSettingsController` and bridges them into scene settings for live redraw.
+
+Completed work:
+
+- Added SpeedPunk sampling helpers to `src-js/fontra-core/src/curvature.js`.
+- Added pure `computeSpeedPunkSamples(path, params)` for quad/color generation.
+- Added mocha coverage in `src-js/fontra-core/tests/test-curvature-sampling.js`.
+- Replaced the inline `fontra.curvature` math/draw loop with a render-only fill loop.
+- Removed the old hard-coded `-180000` / `-48000` height scaling from the visualization layer.
+- Added app-level settings for peak height, sharpness, and opacity.
+- Added scene-setting defaults used by the live rendering bridge.
+- Added English localization strings for the SpeedPunk accordion.
+- Added the sidebar controls: Display, Peak height, Sharpness, and Opacity.
+- Wired the Display checkbox to `visualizationLayersSettings["fontra.curvature"]`.
+- Wired numeric controls to app-level persistence and live scene settings.
+
+Verification performed:
+
+- `src-js/fontra-core`: `npx mocha tests/test-curvature-sampling.js --reporter spec`
+- `src-js/fontra-core`: `npm test`
+- `node --check` on the modified core and browser-side modules.
+- Source scan confirmed old inline SpeedPunk helper/math names and magic constants are gone from `visualization-layer-definitions.js`.
+
+Follow-up notes:
+
+- The default SpeedPunk look intentionally changes because comb height is now parameterized by peak height and sharpness instead of the old cubic/quad magic constants.
+- User-side `bundle watch` is the build/browser verification path for this pass; manual checks should confirm Display toggle, live value changes, localStorage persistence, and no font dirty state.
