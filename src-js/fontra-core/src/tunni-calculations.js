@@ -6,17 +6,6 @@ import {
   subVectors,
 } from "./vector.js";
 
-/* Distance and Angle imports
-import {
-  unitVectorFromTo,
-  calculateBadgeDimensions,
-  calculateBadgePosition,
-  calculateOffCurveAngle,
-  DISTANCE_ANGLE_FONT_SIZE,
-  DISTANCE_ANGLE_BADGE_RADIUS
-} from "./distance-angle.js";
-*/
-
 // Grid Snap Utility Function
 export function snapToGrid(point) {
   return {
