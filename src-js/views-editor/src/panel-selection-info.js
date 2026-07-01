@@ -295,7 +295,7 @@ export default class SelectionInfoPanel extends Panel {
             },
           },
         });
-        formContents.push({ element: this.letterspacerHost });
+        formContents.push({ type: "single-icon", element: this.letterspacerHost });
         formContents.push({
           type: "edit-text-double",
           key: '["kern-l-r"]',
