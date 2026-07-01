@@ -35,6 +35,12 @@ font-overview-navigation {
   padding: 1em;
 }
 
+glyph-cell-view {
+  position: relative;
+  display: grid;
+  gap: 0;
+}
+
 .font-source-selector {
   display: grid;
   grid-template-columns: max-content auto;
