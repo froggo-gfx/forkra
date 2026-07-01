@@ -20,7 +20,7 @@ import {
 } from "@fontra/core/glyphsets-controller.js";
 import * as html from "@fontra/core/html-utils.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
-import { translate } from "@fontra/core/localization.js";
+import { translate, translatePlural } from "@fontra/core/localization.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import { labeledTextInput } from "@fontra/core/ui-utils.js";
 import {
@@ -118,6 +118,9 @@ export class FontOverviewController extends ViewController {
       { actionIdentifier: "action.copy" },
       { actionIdentifier: "action.paste" },
       { actionIdentifier: "action.delete" },
+      MenuItemDivider,
+      { actionIdentifier: "action.copy-glyphname" },
+      { actionIdentifier: "action.copy-character" },
       MenuItemDivider,
       { actionIdentifier: "action.select-all" },
       { actionIdentifier: "action.select-none" },
@@ -445,6 +448,28 @@ export class FontOverviewController extends ViewController {
     );
 
     registerActionCallbacks(
+      "action.copy-glyphname",
+      () => this.doCopyGlyphNames(),
+      () => !!this.glyphCellView.glyphSelection?.size,
+      () =>
+        translatePlural(
+          "action.copy-glyphname",
+          this.glyphCellView.glyphSelection?.size ?? 0
+        )
+    );
+
+    registerActionCallbacks(
+      "action.copy-character",
+      () => this.doCopyCharacters(),
+      () => !!this.glyphCellView.glyphSelection?.size,
+      () =>
+        translatePlural(
+          "action.copy-character",
+          this.glyphCellView.glyphSelection?.size ?? 0
+        )
+    );
+
+    registerActionCallbacks(
       "action.paste",
       () => this.doPaste(),
       () => this.canPaste()
@@ -458,10 +483,12 @@ export class FontOverviewController extends ViewController {
 
     registerActionCallbacks(
       "action.select-all",
-      () =>
-        (this.glyphCellView.glyphSelection = new Set(
-          Object.keys(this.fontController.glyphMap)
-        )),
+      async () => {
+        const { combinedGlyphMap } = await this.glyphSetsController.getCombinedGlyphMap(
+          this._fontGlyphItemList
+        );
+        this.glyphCellView.glyphSelection = new Set(Object.keys(combinedGlyphMap));
+      },
       () => true
     );
 
@@ -625,6 +652,26 @@ export class FontOverviewController extends ViewController {
     );
 
     return { svgString, glifString };
+  }
+
+  async doCopyGlyphNames() {
+    await writeToClipboard({
+      "text/plain": Array.from(this.glyphCellView.glyphSelection).join(" "),
+    });
+  }
+
+  async doCopyCharacters() {
+    const { combinedGlyphMap } = await this.glyphSetsController.getCombinedGlyphMap(
+      this._fontGlyphItemList
+    );
+
+    await writeToClipboard({
+      "text/plain": Array.from(this.glyphCellView.glyphSelection)
+        .map((glyphName) => combinedGlyphMap[glyphName][0])
+        .filter((codePoint) => codePoint)
+        .map((codePoint) => String.fromCodePoint(codePoint))
+        .join(""),
+    });
   }
 
   canPaste() {
