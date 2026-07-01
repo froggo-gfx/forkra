@@ -19,6 +19,161 @@ import { translate } from "@fontra/core/localization.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
 
+// ============================================================
+// Letterspacer persistence helpers (fontra.internal customData)
+// ============================================================
+
+const LETTERSPACER_SOURCE_FIELDS = Object.freeze({
+  area: "area",
+  depth: "depth",
+  overshoot: "overshoot",
+});
+
+const LETTERSPACER_FONT_FIELDS = Object.freeze({
+  enabled: "enabled",
+});
+
+const LETTERSPACER_GLYPH_FIELDS = Object.freeze({
+  referenceGlyphName: "referenceGlyphName",
+});
+
+const LETTERSPACER_DEFAULTS = {
+  area: 400,
+  depth: 15,
+  overshoot: 0,
+  referenceGlyph: "",
+};
+
+const HT_REFERENCE_RULES = [
+  // Letters
+  { script: "*", category: "Letter", subCategory: "Uppercase", factor: 1.25, reference: "H", filter: "*" }, // prettier-ignore
+  { script: "*", category: "Letter", subCategory: "Smallcaps", factor: 1.1, reference: "h.sc", filter: "*" }, // prettier-ignore
+  { script: "*", category: "Letter", subCategory: "Lowercase", factor: 1.0, reference: "x", filter: "*" }, // prettier-ignore
+  { script: "*", category: "Letter", subCategory: "Lowercase", factor: 0.7, reference: "m.sups", filter: ".sups" }, // prettier-ignore
+
+  // Numbers
+  { script: "*", category: "Number", subCategory: "Decimal Digit", factor: 1.2, reference: "one", filter: "*" }, // prettier-ignore
+  { script: "*", category: "Number", subCategory: "Decimal Digit", factor: 1.2, reference: "zero.osf", filter: ".osf" }, // prettier-ignore
+  { script: "*", category: "Number", subCategory: "Fraction", factor: 1.3, reference: "*", filter: "*" }, // prettier-ignore
+  { script: "*", category: "Number", subCategory: "*", factor: 0.8, reference: "*", filter: ".dnom" }, // prettier-ignore
+  { script: "*", category: "Number", subCategory: "*", factor: 0.8, reference: "*", filter: ".numr" }, // prettier-ignore
+  { script: "*", category: "Number", subCategory: "*", factor: 0.8, reference: "*", filter: ".inferior" }, // prettier-ignore
+  { script: "*", category: "Number", subCategory: "*", factor: 0.8, reference: "*", filter: "superior" }, // prettier-ignore
+
+  // Punctuation
+  { script: "*", category: "Punctuation", subCategory: "Other", factor: 1.4, reference: "*", filter: "*" }, // prettier-ignore
+  { script: "*", category: "Punctuation", subCategory: "Parenthesis", factor: 1.2, reference: "*", filter: "*" }, // prettier-ignore
+  { script: "*", category: "Punctuation", subCategory: "Quote", factor: 1.2, reference: "*", filter: "*" }, // prettier-ignore
+  { script: "*", category: "Punctuation", subCategory: "Dash", factor: 1.0, reference: "*", filter: "*" }, // prettier-ignore
+  { script: "*", category: "Punctuation", subCategory: "*", factor: 1.0, reference: "*", filter: "slash" }, // prettier-ignore
+  { script: "*", category: "Punctuation", subCategory: "*", factor: 1.2, reference: "*", filter: "*" }, // prettier-ignore
+
+  // Symbols
+  { script: "*", category: "Symbol", subCategory: "Currency", factor: 1.6, reference: "*", filter: "*" }, // prettier-ignore
+  { script: "*", category: "Symbol", subCategory: "*", factor: 1.5, reference: "*", filter: "*" }, // prettier-ignore
+  { script: "*", category: "Mark", subCategory: "*", factor: 1.0, reference: "*", filter: "*" }, // prettier-ignore
+
+  // Devanagari
+  { script: "devanagari", category: "Letter", subCategory: "Other", factor: 1.0, reference: "devaHeight", filter: "*" }, // prettier-ignore
+  { script: "devanagari", category: "Letter", subCategory: "Ligature", factor: 1.0, reference: "devaHeight", filter: "*" }, // prettier-ignore
+];
+
+function matchesRuleField(ruleValue, glyphValue) {
+  if (ruleValue === "*") return true;
+  if (glyphValue === undefined || glyphValue === null) return false;
+  return String(ruleValue).toLowerCase() === String(glyphValue).toLowerCase();
+}
+
+function coerceNumber(value, fallback) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function getLetterspacerSection(entity) {
+  const section = getFontraInternalSection(
+    entity,
+    FONTRA_INTERNAL_SECTIONS.LETTERSPACER
+  );
+  return isRecord(section) ? section : null;
+}
+
+function getSourceLetterspacerValues(source) {
+  const section = getLetterspacerSection(source);
+  return {
+    area: coerceNumber(
+      section?.[LETTERSPACER_SOURCE_FIELDS.area],
+      LETTERSPACER_DEFAULTS.area
+    ),
+    depth: coerceNumber(
+      section?.[LETTERSPACER_SOURCE_FIELDS.depth],
+      LETTERSPACER_DEFAULTS.depth
+    ),
+    overshoot: coerceNumber(
+      section?.[LETTERSPACER_SOURCE_FIELDS.overshoot],
+      LETTERSPACER_DEFAULTS.overshoot
+    ),
+  };
+}
+
+function hasCompleteSourceLetterspacerValues(source) {
+  const section = getLetterspacerSection(source);
+  if (!section) {
+    return false;
+  }
+  return (
+    Number.isFinite(Number(section[LETTERSPACER_SOURCE_FIELDS.area])) &&
+    Number.isFinite(Number(section[LETTERSPACER_SOURCE_FIELDS.depth])) &&
+    Number.isFinite(Number(section[LETTERSPACER_SOURCE_FIELDS.overshoot]))
+  );
+}
+
+function setSourceLetterspacerValues(source, values) {
+  const section = {
+    ...(getLetterspacerSection(source) || {}),
+  };
+
+  if (values.area !== undefined) {
+    section[LETTERSPACER_SOURCE_FIELDS.area] = coerceNumber(
+      values.area,
+      LETTERSPACER_DEFAULTS.area
+    );
+  }
+  if (values.depth !== undefined) {
+    section[LETTERSPACER_SOURCE_FIELDS.depth] = coerceNumber(
+      values.depth,
+      LETTERSPACER_DEFAULTS.depth
+    );
+  }
+  if (values.overshoot !== undefined) {
+    section[LETTERSPACER_SOURCE_FIELDS.overshoot] = coerceNumber(
+      values.overshoot,
+      LETTERSPACER_DEFAULTS.overshoot
+    );
+  }
+
+  setFontraInternalSection(source, FONTRA_INTERNAL_SECTIONS.LETTERSPACER, section);
+}
+
+function setFontLetterspacerEnabled(entity, enabled) {
+  const section = {
+    ...(getLetterspacerSection(entity) || {}),
+    [LETTERSPACER_FONT_FIELDS.enabled]: !!enabled,
+  };
+  setFontraInternalSection(entity, FONTRA_INTERNAL_SECTIONS.LETTERSPACER, section);
+}
+
+function setGlyphLetterspacerReference(glyph, value) {
+  const section = {
+    ...(getLetterspacerSection(glyph) || {}),
+    [LETTERSPACER_GLYPH_FIELDS.referenceGlyphName]: String(value ?? ""),
+  };
+  setFontraInternalSection(glyph, FONTRA_INTERNAL_SECTIONS.LETTERSPACER, section);
+}
+
 export default class LetterspacerPanel extends Panel {
   identifier = "letterspacer";
   iconPath = "/tabler-icons/spacing-horizontal.svg";
@@ -1052,15 +1207,18 @@ export default class LetterspacerPanel extends Panel {
   }
 
   async toggle(on, focus) {
+    // forkra's sceneController is not an EventTarget and never dispatches
+    // "selectionChanged"; selection changes surface through the scene settings
+    // controller instead (same mechanism used for refreshPersistedParams).
     if (on) {
       this.update();
-      this.sceneController.addEventListener(
-        "selectionChanged",
+      this.sceneSettingsController.addKeyListener(
+        ["selection"],
         this.handleSelectionChangeBound
       );
     } else {
-      this.sceneController.removeEventListener(
-        "selectionChanged",
+      this.sceneSettingsController.removeKeyListener(
+        ["selection"],
         this.handleSelectionChangeBound
       );
     }
