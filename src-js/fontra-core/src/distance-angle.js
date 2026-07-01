@@ -1050,7 +1050,7 @@ function drawRoundRect(context, x, y, width, height, radii) {
  * @param {Object} model - The model
  * @param {Object} controller - The controller
  */
-export function drawTunniLabels(
+export function drawPointLabels(
   context,
   positionedGlyph,
   parameters,
@@ -1066,7 +1066,7 @@ export function drawTunniLabels(
   const showAngle = model.sceneSettings?.showLabelsAngle ?? true;
 
   // Debug logging to see if the function is being called and what values we're getting
-  // console.log("drawTunniLabels called", { showDistance, showTension, showAngle, model });
+  // console.log("drawPointLabels called", { showDistance, showTension, showAngle, model });
 
   // Save context state
   context.save();

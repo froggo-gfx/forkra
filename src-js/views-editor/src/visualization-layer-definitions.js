@@ -14,7 +14,7 @@ import {
   drawManhattanDistanceVisualization,
   drawMeasureOverlay,
   drawOffCurveDistanceVisualization,
-  drawTunniLabels,
+  drawPointLabels,
   formatDistanceAndAngle,
   formatDistanceTensionAngle,
   OFFCURVE_DISTANCE_BADGE_COLOR,
@@ -2195,7 +2195,7 @@ registerVisualizationLayerDefinition({
 });
 
 registerVisualizationLayerDefinition({
-  identifier: "fontra.tunni.labels",
+  identifier: "fontra.point.labels",
   name: "Point labels",
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
@@ -2210,7 +2210,7 @@ registerVisualizationLayerDefinition({
     textColor: "white",
   },
   colorsDarkMode: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
-  draw: drawTunniLabels,
+  draw: drawPointLabels,
 });
 
 registerVisualizationLayerDefinition({
