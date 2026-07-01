@@ -6,7 +6,13 @@ import {
   symmetricDifference,
   union,
 } from "@fontra/core/set-ops.js";
-import { arrowKeyDeltas, assert, compare, enumerate } from "@fontra/core/utils.ts";
+import {
+  arrowKeyDeltas,
+  assert,
+  compare,
+  enumerate,
+  sleepAsync,
+} from "@fontra/core/utils.ts";
 import { GlyphCell } from "@fontra/web-components/glyph-cell.js";
 import { Accordion } from "@fontra/web-components/ui-accordion.js";
 
@@ -138,25 +144,9 @@ export class GlyphCellView extends HTMLElement {
 
         this.accordion.openCloseAccordionItem(foundAccordionItem, true);
 
-        // TODO: if found glyph does not yet have a cell, add cells until it does
-
-        for (const glyphCell of foundAccordionItem.content.querySelectorAll(
-          "glyph-cell"
-        )) {
-          if (glyphCell.glyphName == foundGlyph.glyphName) {
-            setTimeout(() => {
-              glyphCell.scrollIntoView({
-                behavior: "auto",
-                block: "nearest",
-                inline: "nearest",
-              });
-            }, 0);
-            break;
-          }
-        }
-
         this._resetSelectionHelpers();
         this.glyphSelection = new Set([foundGlyph.glyphName]);
+        setTimeout(() => this.scrollFirstSelectedGlyphIntoView(), 0);
       },
     });
 
@@ -406,6 +396,33 @@ export class GlyphCellView extends HTMLElement {
 
   set closedGlyphSections(selection) {
     this.settingsController.model[this.closedGlyphSectionsKey] = selection;
+  }
+
+  async scrollFirstSelectedGlyphIntoView() {
+    if (!this.glyphSelection.size) {
+      return;
+    }
+
+    const { glyph, item } = findFirstSelectedGlyphItem(
+      this.accordion.items,
+      this.glyphSelection
+    );
+
+    if (!glyph) {
+      return;
+    }
+
+    while (item.glyphsToAdd.length && item.glyphsToAdd.includes(glyph)) {
+      this._addCellsIfNeeded(item);
+      await sleepAsync(0);
+    }
+
+    const firstSelectedCell = this.findFirstSelectedCell();
+    firstSelectedCell?.scrollIntoView({
+      behavior: "auto",
+      block: "nearest",
+      inline: "nearest",
+    });
   }
 
   findFirstSelectedCell() {
@@ -951,4 +968,16 @@ function findGlyphInSections(targetString, codePoint, items) {
   matches.sort((a, b) => compare(a.foundGlyph.glyphName, b.foundGlyph.glyphName));
 
   return matches[0] ?? {};
+}
+
+function findFirstSelectedGlyphItem(items, glyphSelection) {
+  for (const item of items) {
+    for (const glyph of item.section.resolvedGlyphs ?? []) {
+      if (glyphSelection.has(glyph.glyphName)) {
+        return { item, glyph };
+      }
+    }
+  }
+
+  return {};
 }
