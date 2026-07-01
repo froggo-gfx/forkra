@@ -270,6 +270,11 @@ function rerouteViewPath(path, targetView) {
     defaultShortCuts: [{ baseKey: "c", commandKey: true }],
   });
 
+  registerActionInfo("action.copy-glyphname", {
+    topic,
+    defaultShortCuts: [{ baseKey: "c", commandKey: true, shiftKey: true }],
+  });
+
   registerActionInfo("action.paste", {
     topic,
     defaultShortCuts: [{ baseKey: "v", commandKey: true }],
