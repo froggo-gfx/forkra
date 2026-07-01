@@ -20,7 +20,7 @@ import {
 } from "@fontra/core/glyphsets-controller.js";
 import * as html from "@fontra/core/html-utils.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
-import { translate } from "@fontra/core/localization.js";
+import { translate, translatePlural } from "@fontra/core/localization.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import { labeledTextInput } from "@fontra/core/ui-utils.js";
 import {
@@ -116,6 +116,7 @@ export class FontOverviewController extends ViewController {
       MenuItemDivider,
       { actionIdentifier: "action.cut" }, // TODO: see comment below
       { actionIdentifier: "action.copy" },
+      { actionIdentifier: "action.copy-glyphname" },
       { actionIdentifier: "action.paste" },
       { actionIdentifier: "action.delete" },
       MenuItemDivider,
@@ -445,6 +446,17 @@ export class FontOverviewController extends ViewController {
     );
 
     registerActionCallbacks(
+      "action.copy-glyphname",
+      () => this.doCopyGlyphNames(),
+      () => !!this.glyphCellView.glyphSelection?.size,
+      () =>
+        translatePlural(
+          "action.copy-glyphname",
+          this.glyphCellView.glyphSelection?.size ?? 0
+        )
+    );
+
+    registerActionCallbacks(
       "action.paste",
       () => this.doPaste(),
       () => this.canPaste()
@@ -625,6 +637,12 @@ export class FontOverviewController extends ViewController {
     );
 
     return { svgString, glifString };
+  }
+
+  async doCopyGlyphNames() {
+    await writeToClipboard({
+      "text/plain": Array.from(this.glyphCellView.glyphSelection).join(" "),
+    });
   }
 
   canPaste() {
