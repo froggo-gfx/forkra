@@ -21,6 +21,8 @@ export const strings = {
   "action.close-contour": "%0パスを閉じる",
   "action.close-contour.plural": "%0パスを閉じる",
   "action.copy": "コピー",
+  "action.copy-character": "Copy Character",
+  "action.copy-character.plural": "Copy Characters",
   "action.copy-glyphname": "Copy Glyph Name",
   "action.copy-glyphname.plural": "Copy Glyph Names",
   "action.cut": "カット",
