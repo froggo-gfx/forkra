@@ -1356,3 +1356,161 @@ export function drawTunniLabels(
   // Restore context state
   context.restore();
 }
+
+export function drawMeasureOverlay(
+  context,
+  positionedGlyph,
+  parameters,
+  model,
+  controller
+) {
+  if (!model.measureMode) return;
+
+  const {
+    measureHoverSegment,
+    measureHoverHandle,
+    measureHoverPoints,
+    measureShowDirect,
+  } = model;
+
+  if (measureHoverHandle) {
+    const { p1, p2, type } = measureHoverHandle;
+    const segmentColor =
+      type === "skeleton" ? parameters.skeletonColor : parameters.pathColor;
+    const tensionContext = measureHoverHandle.tensionContext;
+    const handleMeasure = calculateHandleMeasure(
+      tensionContext?.segmentPoints,
+      tensionContext?.hoveredHandleSide
+    );
+    const fallbackMeasure = calculateDistanceAndAngle(p2, p1);
+    const dist = handleMeasure?.distance ?? fallbackMeasure.distance;
+    const angle = handleMeasure?.angle ?? fallbackMeasure.angle;
+    const tension = handleMeasure?.tension ?? null;
+    const tensionText = tension == null ? "n/a" : tension.toFixed(2);
+    const label = `${dist.toFixed(1)}\n${tensionText}\n${angle.toFixed(1)}°`;
+    drawMeasureGuideLine(context, p2, p1, segmentColor, parameters);
+    drawMeasureLabel(context, p1.x, p1.y, label, segmentColor, parameters, {
+      offsetY: 8,
+      alignBottom: true,
+    });
+    return;
+  }
+
+  if (measureHoverSegment || measureHoverPoints) {
+    const { p1, p2, type } = measureHoverSegment || measureHoverPoints;
+    const segmentColor =
+      type === "skeleton" ? parameters.skeletonColor : parameters.pathColor;
+    if (measureShowDirect) {
+      const { distance: dist, angle } = calculateDistanceAndAngle(p1, p2);
+      const label = `${dist.toFixed(1)}  ${angle.toFixed(1)}°`;
+      drawMeasureLine(context, p1, p2, label, segmentColor, parameters);
+    } else {
+      const { dx, dy } = calculateProjectedDistanceComponents(p1, p2);
+      const cornerPoint = { x: p2.x, y: p1.y };
+      if (dx > 0.5) {
+        drawMeasureLine(
+          context,
+          p1,
+          cornerPoint,
+          dx.toFixed(1),
+          segmentColor,
+          parameters
+        );
+      }
+      if (dy > 0.5) {
+        drawMeasureLine(
+          context,
+          cornerPoint,
+          p2,
+          dy.toFixed(1),
+          segmentColor,
+          parameters
+        );
+      }
+    }
+  }
+}
+
+function drawMeasureLine(context, p1, p2, label, color, parameters) {
+  context.strokeStyle = color;
+  context.lineWidth = parameters.strokeWidth;
+  context.setLineDash(parameters.dashPattern);
+  strokeLine(context, p1.x, p1.y, p2.x, p2.y);
+  context.setLineDash([]);
+
+  const midX = (p1.x + p2.x) / 2;
+  const midY = (p1.y + p2.y) / 2;
+
+  context.save();
+  context.scale(1, -1);
+  context.font = `500 ${parameters.fontSize}px fontra-ui-regular, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  const textWidth = context.measureText(label).width;
+  const padding = 4;
+  const bgX = midX - textWidth / 2 - padding;
+  const bgY = -midY - parameters.fontSize / 2 - padding;
+  const bgW = textWidth + padding * 2;
+  const bgH = parameters.fontSize + padding * 2;
+
+  context.beginPath();
+  context.roundRect(bgX, bgY, bgW, bgH, 3);
+  context.fillStyle = parameters.textBgColor;
+  context.fill();
+  context.strokeStyle = parameters.textBorderColor;
+  context.lineWidth = 1;
+  context.stroke();
+  context.fillStyle = parameters.textColor;
+  context.fillText(label, midX, -midY);
+  context.restore();
+}
+
+function drawMeasureGuideLine(context, p1, p2, color, parameters) {
+  context.strokeStyle = color;
+  context.lineWidth = parameters.strokeWidth;
+  context.setLineDash(parameters.dashPattern);
+  strokeLine(context, p1.x, p1.y, p2.x, p2.y);
+  context.setLineDash([]);
+}
+
+function drawMeasureLabel(context, x, y, label, color, parameters, options = {}) {
+  const offsetY = options.offsetY ?? 15;
+  const alignBottom = options.alignBottom ?? false;
+
+  context.save();
+  context.scale(1, -1);
+  context.font = `500 ${parameters.fontSize}px fontra-ui-regular, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  const lines = String(label).split("\n");
+  const lineHeight = parameters.fontSize + 2;
+  const totalHeight = lines.length * lineHeight;
+  let textWidth = 0;
+  for (const line of lines) {
+    textWidth = Math.max(textWidth, context.measureText(line).width);
+  }
+
+  const padding = 4;
+  const labelY = alignBottom ? -y - offsetY - totalHeight / 2 : -y - offsetY;
+  const bgX = x - textWidth / 2 - padding;
+  const bgY = labelY - totalHeight / 2 - padding;
+  const bgW = textWidth + padding * 2;
+  const bgH = totalHeight + padding * 2;
+
+  context.beginPath();
+  context.roundRect(bgX, bgY, bgW, bgH, 3);
+  context.fillStyle = parameters.textBgColor;
+  context.fill();
+  context.strokeStyle = parameters.textBorderColor;
+  context.lineWidth = 1;
+  context.stroke();
+
+  context.fillStyle = parameters.textColor;
+  for (let i = 0; i < lines.length; i++) {
+    const lineY = labelY + (i - (lines.length - 1) / 2) * lineHeight;
+    context.fillText(lines[i], x, lineY);
+  }
+  context.restore();
+}
