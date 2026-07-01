@@ -4,6 +4,7 @@
 
 ### New features
 
+- [font overview] Allow quick glyph selection by typing a glyph name or a character. [Issue 2677](https://github.com/fontra/fontra/issues/2677), [PR 2682](https://github.com/fontra/fontra/pull/2682)
 - [font overview] Add "Copy Glyph Name(s) and "Copy Character(s)" context menus. [Issue 2676](https://github.com/fontra/fontra/issues/2676), [PR 2681](https://github.com/fontra/fontra/pull/2681)
 
 ### Improvements
