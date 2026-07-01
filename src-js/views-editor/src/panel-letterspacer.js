@@ -1,0 +1,1350 @@
+import { recordChanges } from "@fontra/core/change-recorder.js";
+import {
+  getFontraInternalSection,
+  setFontraInternalSection,
+} from "@fontra/core/fontra-internal-data.js";
+import { FONTRA_INTERNAL_SECTIONS } from "@fontra/core/fontra-internal-schema.js";
+import { getGlyphInfoFromGlyphName } from "@fontra/core/glyph-data.js";
+import * as html from "@fontra/core/html-utils.js";
+import {
+  calculateSidebearing,
+  closePolygon,
+  computeParamAreaFromTargetArea,
+  computeTargetAreaFromSidebearing,
+  LetterspacerEngine,
+  polygonArea,
+  setDepth,
+} from "@fontra/core/letterspacer-engine.js";
+import { translate } from "@fontra/core/localization.js";
+import { Form } from "@fontra/web-components/ui-form.js";
+import Panel from "./panel.js";
+
+export default class LetterspacerPanel extends Panel {
+  identifier = "letterspacer";
+  iconPath = "/tabler-icons/spacing-horizontal.svg";
+
+  constructor(editorController) {
+    super(editorController);
+    this.infoForm = new Form();
+    this.contentElement.appendChild(
+      html.div(
+        { class: "panel-section panel-section--flex panel-section--scrollable" },
+        [this.infoForm]
+      )
+    );
+    this.fontController = this.editorController.fontController;
+    this.sceneController = this.editorController.sceneController;
+    this.sceneSettingsController = this.editorController.sceneSettingsController;
+    this.handleSelectionChangeBound = this.handleSelectionChange.bind(this);
+
+    // Listen for glyph edits to clear visualization
+    this.sceneController.addCurrentGlyphChangeListener((event) => {
+      this.clearVisualization();
+      this.refreshPersistedParams();
+    });
+
+    this.refreshPersistedParamsBound = this.refreshPersistedParams.bind(this);
+    this.sceneSettingsController.addKeyListener(
+      [
+        "fontLocationSourceMapped",
+        "selectedGlyphName",
+        "selection",
+        "editingLayers",
+        "editLayerName",
+      ],
+      this.refreshPersistedParamsBound
+    );
+
+    this.params = {
+      area: 400,
+      depth: 15,
+      overshoot: 0,
+      applyLSB: 1,
+      applyRSB: 1,
+      referenceGlyph: "",
+    };
+
+    // Track current and calculated spacing values
+    this.currentLSB = 0;
+    this.currentRSB = 0;
+    this.calculatedLSB = null;
+    this.calculatedRSB = null;
+    this.visualizationOpacity = 1;
+    this.reverseWarningArmed = false;
+    this.reverseWarningMessage = "";
+    this.reverseWarningTooltip = null;
+    this.debugLogging = true;
+    this.algorithmEnabled = true;
+  }
+
+  getContentElement() {
+    return html.div({ class: "panel" }, []);
+  }
+
+  buildHeaderControls() {
+    const toggleInput = html.input({
+      type: "checkbox",
+      checked: this.algorithmEnabled,
+      onchange: (event) => this.setAlgorithmEnabled(event.target.checked),
+    });
+    const toggleLabel = html.label(
+      {
+        style:
+          "display: flex; align-items: center; gap: 0.35rem; font-weight: normal; font-size: 0.85rem;",
+        title: "Enable letterspacer",
+      },
+      [toggleInput, html.span({ style: "font-weight: normal;" }, ["Enabled"])]
+    );
+
+    const controls = html.div(
+      { style: "display: flex; align-items: center; gap: 0.5rem;" },
+      [toggleLabel]
+    );
+
+    if (this.algorithmEnabled) {
+      const reverseButton = html.createDomElement(
+        "button",
+        {
+          style:
+            "margin-left: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;",
+          onclick: (event) => this.reverseSpacing(event),
+          disabled: !this.hasCurrentMaster,
+        },
+        ["Reverse"]
+      );
+      controls.appendChild(reverseButton);
+    }
+
+    return controls;
+  }
+
+  async setAlgorithmEnabled(enabled) {
+    const nextValue = !!enabled;
+    if (this.algorithmEnabled === nextValue) {
+      return;
+    }
+    this.algorithmEnabled = nextValue;
+    if (!this.algorithmEnabled) {
+      this.calculatedLSB = null;
+      this.calculatedRSB = null;
+      this.clearVisualizationData();
+    }
+    await this.persistAlgorithmEnabled(nextValue);
+    await this.refreshDesignspacePanel();
+    await this.update();
+  }
+
+  async update(senderInfo) {
+    if (!this.infoForm.contentElement.offsetParent) return;
+    await this.fontController.ensureInitialized;
+
+    this._suppressPersist = true;
+    try {
+      await this.loadAlgorithmEnabled();
+      if (this.algorithmEnabled) {
+        await this.loadPersistedParams();
+      }
+      this.hasCurrentMaster = this.algorithmEnabled
+        ? await this.hasCurrentMasterForGlyph()
+        : false;
+
+      const headerControls = this.buildHeaderControls();
+      const formContents = [
+        {
+          type: "header",
+          label: translate("sidebar.letterspacer.title"),
+          auxiliaryElement: headerControls,
+        },
+      ];
+
+      if (this.algorithmEnabled) {
+        formContents.push(
+          {
+            type: "edit-number",
+            key: "area",
+            label: translate("sidebar.letterspacer.area"),
+            value: this.params.area,
+          },
+
+          {
+            type: "edit-number",
+            key: "depth",
+            label: translate("sidebar.letterspacer.depth"),
+            value: this.params.depth,
+          },
+
+          {
+            type: "edit-number",
+            key: "overshoot",
+            label: translate("sidebar.letterspacer.overshoot"),
+            value: this.params.overshoot,
+          },
+
+          { type: "divider" },
+
+          {
+            type: "edit-number",
+            key: "applyLSB",
+            label: translate("sidebar.letterspacer.apply-lsb"),
+            value: this.params.applyLSB ? 1 : 0,
+            minValue: 0,
+            maxValue: 1,
+            integer: true,
+          },
+
+          {
+            type: "edit-number",
+            key: "applyRSB",
+            label: translate("sidebar.letterspacer.apply-rsb"),
+            value: this.params.applyRSB ? 1 : 0,
+            minValue: 0,
+            maxValue: 1,
+            integer: true,
+          },
+
+          { type: "divider" },
+
+          {
+            type: "edit-text",
+            key: "referenceGlyph",
+            label: translate("sidebar.letterspacer.reference"),
+            value: this.params.referenceGlyph,
+          },
+
+          { type: "divider" },
+
+          // Display current and calculated spacing values
+          {
+            type: "header",
+            label: `Current: LSB=${this.formatValue(this.currentLSB)}, RSB=${this.formatValue(this.currentRSB)}`,
+            class: "current-values",
+          },
+
+          {
+            type: "header",
+            label: `Calculated: LSB=${this.formatValue(this.calculatedLSB)}, RSB=${this.formatValue(this.calculatedRSB)}`,
+            class: "calculated-values",
+          },
+
+          { type: "spacer" }
+        );
+      }
+
+      this.infoForm.setFieldDescriptions(formContents);
+      this.infoForm.onFieldChange = async (fieldItem, value) => {
+        if (this._suppressPersist) {
+          this.params[fieldItem.key] = value;
+          return;
+        }
+        if (!this.algorithmEnabled) {
+          return;
+        }
+        this.params[fieldItem.key] = value;
+        await this.persistParam(fieldItem.key, value);
+
+        if (
+          fieldItem.key === "area" ||
+          fieldItem.key === "depth" ||
+          fieldItem.key === "overshoot" ||
+          fieldItem.key === "referenceGlyph"
+        ) {
+          this.calculatedLSB = null;
+          this.calculatedRSB = null;
+          this.clearVisualizationData();
+        }
+
+        // Update value display without rebuilding the form
+        this.updateValueDisplay();
+      };
+
+      if (this.algorithmEnabled) {
+        // Calculate and Apply buttons at the bottom
+        const buttonContainer = html.div({ class: "button-container" }, []);
+
+        const calculateButton = html.button(
+          {
+            onclick: () => this.calculateSpacing(),
+            class: "calculate-button",
+            disabled: !this.hasCurrentMaster,
+          },
+          ["Calculate"]
+        );
+
+        const applyButton = html.button(
+          {
+            onclick: () => this.applySpacing(),
+            class: "apply-button",
+            disabled: !this.hasCurrentMaster,
+          },
+          ["Apply"]
+        );
+
+        buttonContainer.appendChild(calculateButton);
+        buttonContainer.appendChild(applyButton);
+
+        this.infoForm.contentElement.appendChild(buttonContainer);
+      }
+    } finally {
+      this._suppressPersist = false;
+    }
+
+    if (this.algorithmEnabled) {
+      this.updateValueDisplay();
+    }
+  }
+
+  updateValueDisplay() {
+    // Update the value display elements without rebuilding the form
+    const currentLabel = this.infoForm.contentElement.querySelector(".current-values");
+    const calculatedLabel =
+      this.infoForm.contentElement.querySelector(".calculated-values");
+
+    if (currentLabel) {
+      currentLabel.textContent = `Current: LSB=${this.formatValue(this.currentLSB)}, RSB=${this.formatValue(this.currentRSB)}`;
+    }
+    if (calculatedLabel) {
+      calculatedLabel.textContent = `Calculated: LSB=${this.formatValue(this.calculatedLSB)}, RSB=${this.formatValue(this.calculatedRSB)}`;
+    }
+  }
+
+  clearVisualizationData() {
+    const sceneModel =
+      this.editorController.sceneController?.sceneModel ||
+      this.editorController.sceneModel;
+    if (sceneModel?.letterspacerVisualizationData) {
+      sceneModel.letterspacerVisualizationData = null;
+    }
+    if (this.editorController.canvasController) {
+      this.editorController.canvasController.requestUpdate();
+    }
+  }
+
+  async updateCurrentValues() {
+    const positionedGlyph =
+      this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return false;
+
+    const path = positionedGlyph.glyph.path;
+    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    if (!bounds) return false;
+
+    this.currentLSB = Math.round(bounds.xMin);
+    this.currentRSB = Math.round(positionedGlyph.glyph.xAdvance - bounds.xMax);
+    return true;
+  }
+
+  async applySpacing() {
+    if (!this.algorithmEnabled) {
+      return;
+    }
+    if (!(await this.hasCurrentMasterForGlyph())) {
+      return;
+    }
+    this.visualizationOpacity = 1;
+    const positionedGlyph =
+      this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return;
+
+    const fontMetrics = await this.getFontMetrics();
+    const glyphName = this.getSelectedGlyphName() || positionedGlyph.glyphName;
+    const { referenceGlyph, factor } = this.getReferenceSettings(glyphName);
+    const referenceGlyphController = referenceGlyph
+      ? await this.fontController.getGlyph(referenceGlyph)
+      : null;
+    const engine = new LetterspacerEngine(this.params, fontMetrics);
+
+    // Store calculated values from the edit operation
+    let calculatedLSB = null;
+    let calculatedRSB = null;
+    let warnedNoRefZone = false;
+
+    await this.sceneController.editGlyphAndRecordChanges(
+      (glyph) => {
+        const layerGlyphs = this.sceneController.getEditingLayerFromGlyphLayers(
+          glyph.layers
+        );
+
+        for (const [layerName, layerGlyph] of Object.entries(layerGlyphs)) {
+          const path = layerGlyph.path;
+          const bounds = path.getBounds?.() || path.getControlBounds?.();
+          if (!bounds) continue;
+
+          const refBounds = this.getReferenceBoundsForLayer(
+            referenceGlyph,
+            referenceGlyphController,
+            layerName,
+            layerGlyph,
+            fontMetrics,
+            glyphName
+          );
+
+          // Calculate fresh values for this layer
+          const result = engine.computeSpacing(
+            path,
+            bounds,
+            refBounds.minY,
+            refBounds.maxY,
+            factor
+          );
+
+          if (result.noRefIntersections) {
+            if (!warnedNoRefZone) {
+              warnedNoRefZone = true;
+            }
+            continue;
+          }
+
+          const { lsb, rsb } = result;
+
+          if (lsb === null || rsb === null) continue;
+
+          // Store calculated values (rounded to avoid fractional sidebearings)
+          const roundedLSB = Math.round(lsb);
+          const roundedRSB = Math.round(rsb);
+          calculatedLSB = roundedLSB;
+          calculatedRSB = roundedRSB;
+
+          const currentLSB = bounds.xMin;
+
+          if (this.params.applyLSB) {
+            const deltaLSB = roundedLSB - currentLSB;
+            this.shiftPath(layerGlyph.path, deltaLSB);
+          }
+
+          if (this.params.applyRSB || this.params.applyLSB) {
+            const newBounds =
+              layerGlyph.path.getBounds?.() || layerGlyph.path.getControlBounds?.();
+            if (this.params.applyRSB) {
+              layerGlyph.xAdvance = Math.round(newBounds.xMax + roundedRSB);
+            } else {
+              layerGlyph.xAdvance = Math.round(
+                newBounds.xMax + (layerGlyph.xAdvance - bounds.xMax)
+              );
+            }
+          }
+        }
+
+        return "letterspacer";
+      },
+      undefined,
+      true
+    );
+
+    // Update the stored calculated values
+    this.calculatedLSB = calculatedLSB;
+    this.calculatedRSB = calculatedRSB;
+
+    // Update current values from the modified glyph
+    const path = positionedGlyph.glyph.path;
+    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    if (bounds) {
+      this.currentLSB = Math.round(bounds.xMin);
+      this.currentRSB = Math.round(positionedGlyph.glyph.xAdvance - bounds.xMax);
+    }
+
+    // Update value display without rebuilding the form
+    this.updateValueDisplay();
+
+    if (this.editorController.sceneModel) {
+      this.editorController.sceneModel.letterspacerVisualizationData =
+        await this.getVisualizationData();
+      if (this.editorController.canvasController) {
+        this.editorController.canvasController.requestUpdate();
+      }
+    }
+
+    // Force interpolation status to refresh after edits
+    const mappedLocation = this.sceneController.sceneSettings.fontLocationSourceMapped;
+    if (mappedLocation) {
+      this.sceneSettingsController.setItem(
+        "fontLocationSourceMapped",
+        { ...mappedLocation },
+        { senderID: this }
+      );
+    }
+
+    await this.refreshDesignspacePanel();
+    await this.update();
+  }
+
+  async loadPersistedParams() {
+    await this.ensureLetterspacerSchema();
+    const sourceId = this.getCurrentSourceIdentifier();
+    const activeSourceIds = await this.getCurrentGlyphSourceIdentifiers();
+    const effectiveSourceId = this.getEffectiveSourceIdentifier(
+      sourceId,
+      activeSourceIds
+    );
+    if (effectiveSourceId && this.fontController.sources[effectiveSourceId]) {
+      const values = getSourceLetterspacerValues(
+        this.fontController.sources[effectiveSourceId]
+      );
+      this.params.area = coerceNumber(
+        values.area,
+        this.params.area ?? LETTERSPACER_DEFAULTS.area
+      );
+      this.params.depth = coerceNumber(
+        values.depth,
+        this.params.depth ?? LETTERSPACER_DEFAULTS.depth
+      );
+      this.params.overshoot = coerceNumber(
+        values.overshoot,
+        this.params.overshoot ?? LETTERSPACER_DEFAULTS.overshoot
+      );
+    } else {
+      this.params.overshoot = this.params.overshoot ?? LETTERSPACER_DEFAULTS.overshoot;
+    }
+
+    const referenceValue = await this.getGlyphReferenceValue();
+    this.params.referenceGlyph =
+      typeof referenceValue === "string"
+        ? referenceValue
+        : LETTERSPACER_DEFAULTS.referenceGlyph;
+  }
+
+  async loadAlgorithmEnabled() {
+    const value = getLetterspacerSection(this.fontController)?.[
+      LETTERSPACER_FONT_FIELDS.enabled
+    ];
+    if (value === undefined || value === null) {
+      return;
+    }
+    this.algorithmEnabled = !!value;
+  }
+
+  async persistAlgorithmEnabled(enabled) {
+    if (this.fontController.readOnly) {
+      return;
+    }
+    const nextValue = !!enabled;
+    const root = { customData: this.fontController.customData || {} };
+    const changes = recordChanges(root, (root) => {
+      setFontLetterspacerEnabled(root, nextValue);
+    });
+    if (changes.hasChange) {
+      await this.fontController.postChange(
+        changes.change,
+        changes.rollbackChange,
+        "edit letterspacer enabled",
+        this
+      );
+    }
+  }
+
+  getCurrentSourceIdentifier() {
+    const mappedLocation =
+      this.sceneController.sceneSettings.fontLocationSourceMapped || {};
+    const sourceLocation = this.sceneController.sceneSettings.fontLocationSource || {};
+    const hasMappedKeys = Object.keys(mappedLocation).length > 0;
+    const location = hasMappedKeys ? mappedLocation : sourceLocation;
+    return (
+      this.fontController.fontSourcesInstancer?.getSourceIdentifierForLocation(
+        location
+      ) || this.fontController.defaultSourceIdentifier
+    );
+  }
+
+  async getCurrentGlyphSourceIdentifiers() {
+    const positionedGlyph =
+      this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    let varGlyph = positionedGlyph?.varGlyph;
+    if (!varGlyph) {
+      varGlyph =
+        await this.sceneController.sceneModel.getSelectedVariableGlyphController();
+    }
+    if (!varGlyph?.sources) {
+      return [];
+    }
+    const ids = new Set();
+    for (const source of varGlyph.sources) {
+      const id = source.locationBase || source.layerName;
+      if (id && this.fontController.sources?.[id]) {
+        ids.add(id);
+      }
+    }
+    return [...ids];
+  }
+
+  getEffectiveSourceIdentifier(sourceId, activeSourceIds) {
+    if (!sourceId) {
+      return sourceId;
+    }
+    if (!activeSourceIds?.length || activeSourceIds.includes(sourceId)) {
+      return sourceId;
+    }
+    return this.getNearestSourceIdentifier(sourceId, activeSourceIds) || sourceId;
+  }
+
+  getSourceLocationForId(sourceId) {
+    const source = this.fontController.sources[sourceId];
+    if (!source)
+      return this.fontController.fontSourcesInstancer?.defaultSourceLocation || {};
+    const base = this.fontController.fontSourcesInstancer?.defaultSourceLocation || {};
+    return { ...base, ...source.location };
+  }
+
+  getLetterspacerValuesForSource(sourceId) {
+    const source = this.fontController.sources[sourceId];
+    return getSourceLetterspacerValues(source);
+  }
+
+  getNearestSourceIdentifier(targetId, candidateIds) {
+    if (!candidateIds.length) return undefined;
+    const axes = this.fontController.fontAxesSourceSpace || [];
+    const targetLoc = this.getSourceLocationForId(targetId);
+    const defaultId = this.fontController.defaultSourceIdentifier;
+    let bestId = undefined;
+    let bestDist = Infinity;
+    for (const id of candidateIds) {
+      if (id === targetId) continue;
+      const loc = this.getSourceLocationForId(id);
+      let sum = 0;
+      for (const axis of axes) {
+        const a = targetLoc[axis.name] ?? axis.defaultValue ?? 0;
+        const b = loc[axis.name] ?? axis.defaultValue ?? 0;
+        const d = a - b;
+        sum += d * d;
+      }
+      const dist = Math.sqrt(sum);
+      if (
+        dist < bestDist - 1e-9 ||
+        (Math.abs(dist - bestDist) < 1e-9 && id === defaultId)
+      ) {
+        bestDist = dist;
+        bestId = id;
+      }
+    }
+    if (!bestId && candidateIds.includes(defaultId)) {
+      bestId = defaultId;
+    }
+    return bestId ?? candidateIds[0];
+  }
+
+  getMissingLetterspacerValues(sourceIds) {
+    const sources = this.fontController.sources || {};
+    const idsToCheck =
+      Array.isArray(sourceIds) && sourceIds.length
+        ? sourceIds.filter((id) => sources[id])
+        : Object.keys(sources);
+    const hasKeys = (source) => hasCompleteSourceLetterspacerValues(source);
+    const candidateIds = idsToCheck.filter((id) => hasKeys(sources[id]));
+    const missing = {};
+    for (const id of idsToCheck) {
+      const source = sources[id];
+      if (hasKeys(source)) {
+        continue;
+      }
+      const nearestId = this.getNearestSourceIdentifier(id, candidateIds);
+      const values = nearestId
+        ? this.getLetterspacerValuesForSource(nearestId)
+        : { ...LETTERSPACER_DEFAULTS };
+      missing[id] = values;
+    }
+    return missing;
+  }
+
+  async ensureLetterspacerSchema() {
+    if (this.fontController.readOnly || this._ensuringSchema) {
+      return;
+    }
+    const activeSourceIds = await this.getCurrentGlyphSourceIdentifiers();
+    if (!activeSourceIds.length) {
+      return;
+    }
+    const missing = this.getMissingLetterspacerValues(activeSourceIds);
+    const missingIds = Object.keys(missing);
+    if (!missingIds.length) {
+      return;
+    }
+    this._ensuringSchema = true;
+    try {
+      const root = { sources: this.fontController.sources };
+      const changes = recordChanges(root, (root) => {
+        for (const id of missingIds) {
+          const source = root.sources[id];
+          if (!source) {
+            continue;
+          }
+          setSourceLetterspacerValues(source, {
+            area: missing[id].area,
+            depth: missing[id].depth,
+            overshoot: missing[id].overshoot,
+          });
+        }
+      });
+      if (changes.hasChange) {
+        await this.fontController.postChange(
+          changes.change,
+          changes.rollbackChange,
+          "init letterspacer schema",
+          this
+        );
+      }
+    } finally {
+      this._ensuringSchema = false;
+    }
+  }
+
+  async persistParam(key, value) {
+    if (key === "referenceGlyph") {
+      await this.persistGlyphReference(value);
+      return;
+    }
+    if (key === "area" || key === "depth" || key === "overshoot") {
+      const sourceId = this.getCurrentSourceIdentifier();
+      const activeSourceIds = await this.getCurrentGlyphSourceIdentifiers();
+      const effectiveSourceId = this.getEffectiveSourceIdentifier(
+        sourceId,
+        activeSourceIds
+      );
+      if (!effectiveSourceId || !this.fontController.sources[effectiveSourceId]) {
+        return;
+      }
+      const targetSourceIds = activeSourceIds.length
+        ? activeSourceIds
+        : [effectiveSourceId];
+      const valueToStore = coerceNumber(value, 0);
+
+      const missing = this.getMissingLetterspacerValues(targetSourceIds);
+      const root = { sources: this.fontController.sources };
+      const changes = recordChanges(root, (root) => {
+        for (const id of targetSourceIds) {
+          const source = root.sources[id];
+          if (!source) {
+            continue;
+          }
+          const nextValues = {
+            area: missing[id]?.area ?? LETTERSPACER_DEFAULTS.area,
+            depth: missing[id]?.depth ?? LETTERSPACER_DEFAULTS.depth,
+            overshoot: missing[id]?.overshoot ?? LETTERSPACER_DEFAULTS.overshoot,
+          };
+          if (id === effectiveSourceId) {
+            nextValues[key] = valueToStore;
+          }
+          setSourceLetterspacerValues(source, nextValues);
+        }
+      });
+      if (changes.hasChange) {
+        await this.fontController.postChange(
+          changes.change,
+          changes.rollbackChange,
+          `edit letterspacer ${key}`,
+          this
+        );
+      }
+    }
+  }
+
+  async getGlyphReferenceValue() {
+    const varGlyph = await this.getSelectedVarGlyph();
+    return getLetterspacerSection(varGlyph?.glyph)?.[
+      LETTERSPACER_GLYPH_FIELDS.referenceGlyphName
+    ];
+  }
+
+  async persistGlyphReference(value) {
+    const glyphName =
+      this.getSelectedGlyphName() ||
+      this.sceneController.sceneModel?.getSelectedPositionedGlyph?.()?.glyphName;
+    if (!glyphName) {
+      return;
+    }
+    const nextValue = String(value ?? "");
+    await this.sceneController.editNamedGlyphAndRecordChanges(glyphName, (glyph) => {
+      const existing =
+        getLetterspacerSection(glyph)?.[LETTERSPACER_GLYPH_FIELDS.referenceGlyphName];
+      if (existing === nextValue) {
+        return "edit letterspacer reference";
+      }
+      setGlyphLetterspacerReference(glyph, nextValue);
+      return "edit letterspacer reference";
+    });
+  }
+
+  async getSelectedVarGlyph() {
+    const positionedGlyph =
+      this.sceneController.sceneModel?.getSelectedPositionedGlyph?.();
+    if (positionedGlyph?.varGlyph) {
+      return positionedGlyph.varGlyph;
+    }
+    if (this.sceneController.sceneModel?.getSelectedVariableGlyphController) {
+      return await this.sceneController.sceneModel.getSelectedVariableGlyphController();
+    }
+    return null;
+  }
+
+  async reverseSpacing(event) {
+    if (!this.algorithmEnabled) {
+      return;
+    }
+    if (!(await this.hasCurrentMasterForGlyph())) {
+      return;
+    }
+    const guardInfo = await this.getReverseGuardInfo();
+    if (guardInfo.shouldGuard && !this.reverseWarningArmed) {
+      this.reverseWarningArmed = true;
+      this.reverseWarningMessage = guardInfo.message;
+      this.showReverseWarningTooltip(event?.currentTarget, guardInfo.message);
+      return;
+    }
+    this.reverseWarningArmed = false;
+    this.reverseWarningMessage = "";
+    this.hideReverseWarningTooltip();
+
+    const positionedGlyph =
+      this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return;
+
+    const fontMetrics = await this.getFontMetrics();
+    const glyphName = this.getSelectedGlyphName() || positionedGlyph.glyphName;
+    const { factor } = this.getReferenceSettings(glyphName);
+    const path = positionedGlyph.glyph.path;
+    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    if (!bounds) return;
+
+    const currentLSB = bounds.xMin;
+    const currentRSB = positionedGlyph.glyph.xAdvance - bounds.xMax;
+
+    const freq = 5;
+    const minY = bounds.yMin;
+    const maxY = bounds.yMax;
+    const amplitudeY = maxY - minY;
+    if (amplitudeY === 0) return;
+
+    const reverseEngine = new LetterspacerEngine(this.params, fontMetrics);
+    const margins = reverseEngine.collectMargins(path, bounds, minY, maxY, freq);
+
+    if (!margins.leftMargins || !margins.rightMargins) {
+      return;
+    }
+
+    const maxDepth = (fontMetrics.xHeight * this.params.depth) / 100;
+    const processedLeft = setDepth(
+      margins.leftMargins,
+      margins.leftExtreme,
+      maxDepth,
+      true
+    );
+    const processedRight = setDepth(
+      margins.rightMargins,
+      margins.rightExtreme,
+      maxDepth,
+      false
+    );
+
+    if (processedLeft.length < 2 || processedRight.length < 2) {
+      return;
+    }
+
+    const leftPolygon = closePolygon(processedLeft, margins.leftExtreme, minY, maxY);
+    const rightPolygon = closePolygon(processedRight, margins.rightExtreme, minY, maxY);
+
+    const areaLeft = polygonArea(leftPolygon);
+    const areaRight = polygonArea(rightPolygon);
+
+    const targetAreaLeft = computeTargetAreaFromSidebearing(
+      areaLeft,
+      currentLSB,
+      amplitudeY
+    );
+    const targetAreaRight = computeTargetAreaFromSidebearing(
+      areaRight,
+      currentRSB,
+      amplitudeY
+    );
+
+    const paramAreaLeft = computeParamAreaFromTargetArea(
+      targetAreaLeft,
+      fontMetrics,
+      amplitudeY,
+      factor
+    );
+    const paramAreaRight = computeParamAreaFromTargetArea(
+      targetAreaRight,
+      fontMetrics,
+      amplitudeY,
+      factor
+    );
+
+    const averagedArea = (paramAreaLeft + paramAreaRight) / 2;
+    this.params.area = Math.max(50, Math.min(2000, Math.round(averagedArea)));
+    await this.persistParam("area", this.params.area);
+
+    const finalEngine = new LetterspacerEngine(this.params, fontMetrics);
+    const result = finalEngine.computeSpacing(path, bounds, minY, maxY, factor);
+    if (result.lsb !== null && result.rsb !== null) {
+      this.calculatedLSB = Math.round(result.lsb);
+      this.calculatedRSB = Math.round(result.rsb);
+    }
+
+    await this.update();
+    this.updateValueDisplay();
+
+    if (this.editorController.sceneController?.sceneModel) {
+      this.editorController.sceneModel.letterspacerVisualizationData =
+        await this.getVisualizationData();
+    }
+    if (this.editorController.canvasController) {
+      this.editorController.canvasController.requestUpdate();
+    }
+  }
+
+  shiftPath(path, deltaX) {
+    const coords = path.coordinates;
+    for (let i = 0; i < coords.length; i += 2) {
+      coords[i] += deltaX;
+    }
+  }
+
+  async getFontMetrics() {
+    const fontSource = this.fontController.fontSourcesInstancer?.fontSourceAtLocation?.(
+      this.sceneController.sceneSettings.fontLocationSourceMapped
+    );
+    const lineMetrics = fontSource?.lineMetricsHorizontalLayout || {};
+
+    return {
+      upm: this.fontController.unitsPerEm,
+      xHeight: lineMetrics.xHeight?.value || this.fontController.unitsPerEm * 0.5,
+      italicAngle: fontSource?.italicAngle || 0,
+    };
+  }
+
+  getSelectedGlyphName() {
+    return (
+      this.sceneController.sceneModel?.getSelectedGlyphName?.() ??
+      this.sceneController.sceneSettings?.selectedGlyphName
+    );
+  }
+
+  getReferenceSettings(glyphName) {
+    const manualReference = (this.params.referenceGlyph || "").trim();
+    if (manualReference) {
+      return { referenceGlyph: manualReference, factor: 1 };
+    }
+    return this.getAutoReferenceSettings(glyphName);
+  }
+
+  getAutoReferenceSettings(glyphName) {
+    if (!glyphName) {
+      return { referenceGlyph: "", factor: 1 };
+    }
+    let glyphInfo = getGlyphInfoFromGlyphName(glyphName);
+    if (!glyphInfo && glyphName.includes(".")) {
+      const baseName = glyphName.split(".")[0];
+      glyphInfo = getGlyphInfoFromGlyphName(baseName);
+    }
+    glyphInfo = glyphInfo || {};
+    const category = glyphInfo.category;
+    const script = glyphInfo.script;
+    const subCategory = this.getHtSubCategory(glyphName, glyphInfo);
+
+    let match = null;
+    for (const rule of HT_REFERENCE_RULES) {
+      if (
+        !matchesRuleField(rule.script, script) ||
+        !matchesRuleField(rule.category, category) ||
+        !matchesRuleField(rule.subCategory, subCategory)
+      ) {
+        continue;
+      }
+
+      if (!match) {
+        match = rule;
+        continue;
+      }
+
+      if (rule.filter && rule.filter !== "*" && glyphName.includes(rule.filter)) {
+        match = rule;
+      }
+    }
+
+    if (!match) {
+      return { referenceGlyph: glyphName, factor: 1 };
+    }
+
+    const referenceGlyph = match.reference === "*" ? glyphName : match.reference;
+    return {
+      referenceGlyph: referenceGlyph || glyphName,
+      factor: Number(match.factor) || 1,
+    };
+  }
+
+  getHtSubCategory(glyphName, glyphInfo) {
+    const suffixes =
+      glyphName
+        ?.split(".")
+        .slice(1)
+        .map((item) => item.toLowerCase()) || [];
+    if (
+      suffixes.includes("sc") ||
+      suffixes.includes("smcp") ||
+      suffixes.includes("c2sc")
+    ) {
+      return "Smallcaps";
+    }
+
+    if (glyphInfo?.subCategory) {
+      return glyphInfo.subCategory;
+    }
+
+    const caseValue = glyphInfo?.case;
+    if (!caseValue) {
+      return undefined;
+    }
+
+    const normalized = String(caseValue).toLowerCase();
+    if (normalized === "upper") return "Uppercase";
+    if (normalized === "lower") return "Lowercase";
+    if (normalized === "smallcaps") return "Smallcaps";
+
+    return undefined;
+  }
+
+  getLayerBounds(layerGlyph) {
+    if (!layerGlyph) {
+      return null;
+    }
+    const path = layerGlyph.path;
+    return path?.getBounds?.() || path?.getControlBounds?.() || null;
+  }
+
+  getReferenceBoundsForLayer(
+    referenceGlyphName,
+    referenceGlyphController,
+    sourceId,
+    layerGlyph,
+    fontMetrics,
+    glyphName
+  ) {
+    const overshoot = (fontMetrics.xHeight * this.params.overshoot) / 100;
+    const fallbackBounds = this.getLayerBounds(layerGlyph);
+
+    if (referenceGlyphName && referenceGlyphController?.layers) {
+      const refLayer =
+        referenceGlyphController.layers[sourceId] ||
+        Object.values(referenceGlyphController.layers)[0];
+      const refBounds = this.getLayerBounds(refLayer?.glyph);
+      if (refBounds) {
+        return {
+          minY: refBounds.yMin - overshoot,
+          maxY: refBounds.yMax + overshoot,
+          referenceGlyph: referenceGlyphName,
+        };
+      }
+    }
+
+    if (referenceGlyphName) {
+    }
+
+    if (fallbackBounds) {
+      return {
+        minY: fallbackBounds.yMin - overshoot,
+        maxY: fallbackBounds.yMax + overshoot,
+        referenceGlyph: glyphName,
+      };
+    }
+
+    return {
+      minY: -overshoot,
+      maxY: fontMetrics.xHeight + overshoot,
+      referenceGlyph: glyphName,
+    };
+  }
+
+  async toggle(on, focus) {
+    if (on) {
+      this.update();
+      this.sceneController.addEventListener(
+        "selectionChanged",
+        this.handleSelectionChangeBound
+      );
+    } else {
+      this.sceneController.removeEventListener(
+        "selectionChanged",
+        this.handleSelectionChangeBound
+      );
+    }
+  }
+
+  async handleSelectionChange() {
+    this.clearVisualizationData();
+  }
+
+  async refreshPersistedParams() {
+    if (!this.infoForm.contentElement.offsetParent) {
+      return;
+    }
+    await this.update();
+  }
+
+  async clearVisualization() {
+    if (!this.algorithmEnabled) {
+      this.clearVisualizationData();
+      return;
+    }
+    // Fade the visualization when glyph is edited (until Calculate/Apply)
+    this.visualizationOpacity = 0.2;
+    const sceneModel = this.editorController.sceneController?.sceneModel;
+    if (sceneModel?.letterspacerVisualizationData) {
+      sceneModel.letterspacerVisualizationData = {
+        ...sceneModel.letterspacerVisualizationData,
+        opacity: this.visualizationOpacity,
+      };
+    }
+    if (this.editorController.canvasController) {
+      this.editorController.canvasController.requestUpdate();
+    }
+
+    await this.refreshDesignspacePanel();
+    await this.update();
+  }
+
+  formatValue(value) {
+    // Format spacing value for display
+    if (value === null || value === undefined) return "-";
+    return Math.round(value);
+  }
+
+  async updateCalculatedValues({ warnOnNoRef = false } = {}) {
+    // Update current and calculated spacing values
+    const positionedGlyph =
+      this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) return;
+
+    const hasBounds = await this.updateCurrentValues();
+    if (!hasBounds) return;
+    if (!this.algorithmEnabled) return;
+
+    // Calculate new values using letterspacer
+    const path = positionedGlyph.glyph.path;
+    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    if (!bounds) return;
+
+    const fontMetrics = await this.getFontMetrics();
+    const glyphName = this.getSelectedGlyphName() || positionedGlyph.glyphName;
+    const { referenceGlyph, factor } = this.getReferenceSettings(glyphName);
+    const referenceGlyphController = referenceGlyph
+      ? await this.fontController.getGlyph(referenceGlyph)
+      : null;
+    const sourceId = this.getCurrentSourceIdentifier();
+    const refBounds = this.getReferenceBoundsForLayer(
+      referenceGlyph,
+      referenceGlyphController,
+      sourceId,
+      positionedGlyph.glyph,
+      fontMetrics,
+      glyphName
+    );
+    const engine = new LetterspacerEngine(this.params, fontMetrics);
+    const result = engine.computeSpacing(
+      path,
+      bounds,
+      refBounds.minY,
+      refBounds.maxY,
+      factor
+    );
+
+    if (result.noRefIntersections) {
+      this.calculatedLSB = null;
+      this.calculatedRSB = null;
+      if (warnOnNoRef) {
+      }
+      return;
+    }
+
+    if (result.lsb !== null && result.rsb !== null) {
+      this.calculatedLSB = Math.round(result.lsb);
+      this.calculatedRSB = Math.round(result.rsb);
+    }
+  }
+
+  async calculateSpacing() {
+    if (!this.algorithmEnabled) {
+      return;
+    }
+    if (!(await this.hasCurrentMasterForGlyph())) {
+      return;
+    }
+    // Recalculate spacing after glyph edits
+    this.visualizationOpacity = 1;
+    await this.updateCalculatedValues({ warnOnNoRef: true });
+    this.updateValueDisplay();
+    await this.update();
+
+    // Refresh visualization
+    if (this.editorController.sceneController?.sceneModel) {
+      this.editorController.sceneController.sceneModel.letterspacerVisualizationData =
+        await this.getVisualizationData();
+    }
+    if (this.editorController.canvasController) {
+      this.editorController.canvasController.requestUpdate();
+    }
+  }
+
+  getEngine() {
+    return this.engine;
+  }
+
+  async getVisualizationData() {
+    if (!this.algorithmEnabled) {
+      return null;
+    }
+    const positionedGlyph =
+      this.sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (!positionedGlyph) {
+      return null;
+    }
+
+    const fontMetrics = await this.getFontMetrics();
+    const glyphName = this.getSelectedGlyphName() || positionedGlyph.glyphName;
+    const { referenceGlyph, factor } = this.getReferenceSettings(glyphName);
+    const referenceGlyphController = referenceGlyph
+      ? await this.fontController.getGlyph(referenceGlyph)
+      : null;
+    const sourceId = this.getCurrentSourceIdentifier();
+    const refBounds = this.getReferenceBoundsForLayer(
+      referenceGlyph,
+      referenceGlyphController,
+      sourceId,
+      positionedGlyph.glyph,
+      fontMetrics,
+      glyphName
+    );
+    const engine = new LetterspacerEngine(this.params, fontMetrics);
+
+    const path = positionedGlyph.glyph.path;
+    const bounds = path.getBounds?.() || path.getControlBounds?.();
+    if (!bounds) {
+      return null;
+    }
+
+    const spacingResult = engine.computeSpacing(
+      path,
+      bounds,
+      refBounds.minY,
+      refBounds.maxY,
+      factor
+    );
+    if (spacingResult.noRefIntersections) {
+      return null;
+    }
+
+    const result = {
+      opacity: this.visualizationOpacity ?? 1,
+      scanLines: engine.scanLines,
+      leftPolygon: engine.leftPolygon,
+      rightPolygon: engine.rightPolygon,
+      leftSBPolygon: engine.leftSBPolygon,
+      rightSBPolygon: engine.rightSBPolygon,
+      leftSBLine: engine.leftSBLine,
+      rightSBLine: engine.rightSBLine,
+      lsb: engine.lsb,
+      rsb: engine.rsb,
+      leftExtreme: engine.leftExtreme,
+      rightExtreme: engine.rightExtreme,
+      leftDepthLimit: engine.leftDepthLimit,
+      rightDepthLimit: engine.rightDepthLimit,
+      leftExtremeDepthLimited: engine.leftExtremeDepthLimited,
+      rightExtremeDepthLimited: engine.rightExtremeDepthLimited,
+      leftMargins: engine.leftMargins,
+      rightMargins: engine.rightMargins,
+      leftMarginsProcessed: engine.leftMarginsProcessed,
+      rightMarginsProcessed: engine.rightMarginsProcessed,
+      params: this.params,
+      referenceBounds: { minY: refBounds.minY, maxY: refBounds.maxY },
+    };
+
+    return result;
+  }
+
+  async hasCurrentMasterForGlyph() {
+    const sourceId = this.getCurrentSourceIdentifier();
+    if (!sourceId) {
+      return false;
+    }
+    const activeSourceIds = await this.getCurrentGlyphSourceIdentifiers();
+    return activeSourceIds.includes(sourceId);
+  }
+
+  async refreshDesignspacePanel() {
+    const panel = this.editorController.getSidebarPanel?.("designspace-navigation");
+    if (panel?.refreshSourcesAndStatus) {
+      await panel.refreshSourcesAndStatus();
+    }
+  }
+
+  async getReverseGuardInfo() {
+    const sourceId = this.getCurrentSourceIdentifier();
+    const activeSourceIds = await this.getCurrentGlyphSourceIdentifiers();
+    const effectiveSourceId = this.getEffectiveSourceIdentifier(
+      sourceId,
+      activeSourceIds
+    );
+    if (!effectiveSourceId) {
+      return { shouldGuard: false, message: "" };
+    }
+    const values = this.getLetterspacerValuesForSource(effectiveSourceId);
+    if (values.area === LETTERSPACER_DEFAULTS.area) {
+      return { shouldGuard: false, message: "" };
+    }
+    const message =
+      "Will apply reverse value across the whole source. Press again to continue.";
+    return { shouldGuard: true, message };
+  }
+
+  showReverseWarningTooltip(anchor, message) {
+    if (!anchor || !message) {
+      return;
+    }
+    this.hideReverseWarningTooltip();
+
+    const tooltip = document.createElement("div");
+    tooltip.textContent = message;
+    Object.assign(tooltip.style, {
+      position: "fixed",
+      zIndex: "9999",
+      maxWidth: "220px",
+      padding: "8px 10px",
+      borderRadius: "6px",
+      fontSize: "0.85rem",
+      lineHeight: "1.3",
+      color: "var(--tooltip-foreground-color, #fff)",
+      background: "var(--tooltip-background-color, #000)",
+      boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
+      pointerEvents: "none",
+      whiteSpace: "normal",
+      overflowWrap: "anywhere",
+      wordBreak: "break-word",
+      boxSizing: "border-box",
+    });
+
+    document.body.appendChild(tooltip);
+
+    const rect = anchor.getBoundingClientRect();
+    const tipRect = tooltip.getBoundingClientRect();
+    const margin = 8;
+    let left = rect.left - tipRect.width - margin;
+    if (left < margin) {
+      left = rect.right + margin;
+    }
+    if (left + tipRect.width > window.innerWidth - margin) {
+      left = Math.max(margin, window.innerWidth - tipRect.width - margin);
+    }
+    let top = rect.top + rect.height / 2 - tipRect.height / 2;
+    top = Math.min(window.innerHeight - tipRect.height - margin, Math.max(margin, top));
+
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+
+    this.reverseWarningTooltip = tooltip;
+  }
+
+  hideReverseWarningTooltip() {
+    if (this.reverseWarningTooltip) {
+      this.reverseWarningTooltip.remove();
+      this.reverseWarningTooltip = null;
+    }
+  }
+}
+
+customElements.define("panel-letterspacer", LetterspacerPanel);
