@@ -609,6 +609,8 @@ export class GlyphCellView extends HTMLElement {
     if (event.key in arrowKeyDeltas) {
       this.handleArrowKeys(event);
     } else if (event.key == "Enter") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
       this.onOpenSelectedGlyphs?.(event);
     }
   }
