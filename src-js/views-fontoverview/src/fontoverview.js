@@ -116,9 +116,11 @@ export class FontOverviewController extends ViewController {
       MenuItemDivider,
       { actionIdentifier: "action.cut" }, // TODO: see comment below
       { actionIdentifier: "action.copy" },
-      { actionIdentifier: "action.copy-glyphname" },
       { actionIdentifier: "action.paste" },
       { actionIdentifier: "action.delete" },
+      MenuItemDivider,
+      { actionIdentifier: "action.copy-glyphname" },
+      { actionIdentifier: "action.copy-character" },
       MenuItemDivider,
       { actionIdentifier: "action.select-all" },
       { actionIdentifier: "action.select-none" },
@@ -457,6 +459,17 @@ export class FontOverviewController extends ViewController {
     );
 
     registerActionCallbacks(
+      "action.copy-character",
+      () => this.doCopyCharacters(),
+      () => !!this.glyphCellView.glyphSelection?.size,
+      () =>
+        translatePlural(
+          "action.copy-character",
+          this.glyphCellView.glyphSelection?.size ?? 0
+        )
+    );
+
+    registerActionCallbacks(
       "action.paste",
       () => this.doPaste(),
       () => this.canPaste()
@@ -642,6 +655,20 @@ export class FontOverviewController extends ViewController {
   async doCopyGlyphNames() {
     await writeToClipboard({
       "text/plain": Array.from(this.glyphCellView.glyphSelection).join(" "),
+    });
+  }
+
+  async doCopyCharacters() {
+    const { combinedGlyphMap } = await this.glyphSetsController.getCombinedGlyphMap(
+      this._fontGlyphItemList
+    );
+
+    await writeToClipboard({
+      "text/plain": Array.from(this.glyphCellView.glyphSelection)
+        .map((glyphName) => combinedGlyphMap[glyphName][0])
+        .filter((codePoint) => codePoint)
+        .map((codePoint) => String.fromCodePoint(codePoint))
+        .join(""),
     });
   }
 
