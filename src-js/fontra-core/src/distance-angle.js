@@ -4,7 +4,6 @@
 // Import necessary functions from vector.js for the new functions
 import {
   calculateControlHandlePoint,
-  calculateSegmentTension,
   calculateTunniPoint,
 } from "./tunni-calculations.js";
 import { distance } from "./vector.js";
@@ -137,18 +136,23 @@ export function calculateHandleMeasure(segmentPoints, hoveredHandleSide) {
   const [onStart, offStart, offEnd, onEnd] = segmentPoints;
   const anchorPoint = hoveredHandleSide === "start" ? onStart : onEnd;
   const handlePoint = hoveredHandleSide === "start" ? offStart : offEnd;
-  const oppositeAnchor = hoveredHandleSide === "start" ? onEnd : onStart;
-  const oppositeHandle = hoveredHandleSide === "start" ? offEnd : offStart;
-  const { distance, angle } = calculateDistanceAndAngle(anchorPoint, handlePoint);
-  const tension = calculateSegmentTension(
-    handlePoint,
+  const { distance: handleDistance, angle } = calculateDistanceAndAngle(
     anchorPoint,
-    oppositeHandle,
-    oppositeAnchor
+    handlePoint
   );
 
+  // Per-handle tension: the ratio of this handle's length to the distance from its
+  // anchor to the Tunni point. This is handle-specific (start and end differ on an
+  // unbalanced curve), matching the per-handle values in the Point labels overlay.
+  // Falls back to the midpoint control-handle point when the true intersection is
+  // undefined (parallel handles), consistent with drawPointLabels.
+  const tunniPoint =
+    calculateTunniPoint(segmentPoints) || calculateControlHandlePoint(segmentPoints);
+  const anchorToTunni = tunniPoint ? distance(anchorPoint, tunniPoint) : 0;
+  const tension = anchorToTunni > 0 ? handleDistance / anchorToTunni : null;
+
   return {
-    distance,
+    distance: handleDistance,
     angle,
     tension: Number.isFinite(tension) ? tension : null,
   };
