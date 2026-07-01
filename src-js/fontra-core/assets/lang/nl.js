@@ -21,6 +21,8 @@ export const strings = {
   "action.close-contour": "Sluit %0 contour",
   "action.close-contour.plural": "Sluit %0 contouren",
   "action.copy": "Kopiëer",
+  "action.copy-glyphname": "Copy Glyph Name",
+  "action.copy-glyphname.plural": "Copy Glyph Names",
   "action.cut": "Snij",
   "action.decompose-component": "%0 component ontleden",
   "action.decompose-component.plural": "%0 componenten ontleden",
