@@ -483,10 +483,12 @@ export class FontOverviewController extends ViewController {
 
     registerActionCallbacks(
       "action.select-all",
-      () =>
-        (this.glyphCellView.glyphSelection = new Set(
-          Object.keys(this.fontController.glyphMap)
-        )),
+      async () => {
+        const { combinedGlyphMap } = await this.glyphSetsController.getCombinedGlyphMap(
+          this._fontGlyphItemList
+        );
+        this.glyphCellView.glyphSelection = new Set(Object.keys(combinedGlyphMap));
+      },
       () => true
     );
 
