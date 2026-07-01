@@ -4,7 +4,7 @@
 
 ### New features
 
-[font overview] Add "Copy Glyph Name(s) and "Copy Character(s)" context menus. [Issue 2676](https://github.com/fontra/fontra/issues/2676), [PR 2681](https://github.com/fontra/fontra/pull/2681)
+- [font overview] Add "Copy Glyph Name(s) and "Copy Character(s)" context menus. [Issue 2676](https://github.com/fontra/fontra/issues/2676), [PR 2681](https://github.com/fontra/fontra/pull/2681)
 
 ### Improvements
 
