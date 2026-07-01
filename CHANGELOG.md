@@ -7,6 +7,10 @@
 - [glyphsets] Updated the Google Fonts glyphsets to 1.1.3. [Issue 2673](https://github.com/fontra/fontra/issues/2673), [PR 2675](https://github.com/fontra/fontra/pull/2675)
 - [languages] Some new strings and some improved strings for Simplified Chinese and Traditional Chinese, contributed by 湖远星（Lake桑）. [PR 2674](https://github.com/fontra/fontra/pull/2674)
 
+### Fixes
+
+- [font overview, Firefox] Prevent opening two tabs instead of one when typing Enter to open the selection in the glyph editor. [Issue 2678](https://github.com/fontra/fontra/issues/2678) [PR 2680](https://github.com/fontra/fontra/pull/2680)
+
 ## 2026-06-28 [version 2026.6.5]
 
 ### Fixes
