@@ -6,7 +6,7 @@ import {
   symmetricDifference,
   union,
 } from "@fontra/core/set-ops.js";
-import { arrowKeyDeltas, assert, enumerate } from "@fontra/core/utils.ts";
+import { arrowKeyDeltas, assert, compare, enumerate } from "@fontra/core/utils.ts";
 import { GlyphCell } from "@fontra/web-components/glyph-cell.js";
 import { Accordion } from "@fontra/web-components/ui-accordion.js";
 
@@ -84,9 +84,83 @@ export class GlyphCellView extends HTMLElement {
     //   this.magnification = this.magnification * zoomFactor;
     // });
 
+    this._setupHiddenTextEntry();
+
     this.appendChild(this.getContentElement());
 
     this.addEventListener("keydown", (event) => this.handleKeyDown(event));
+  }
+
+  _setupHiddenTextEntry() {
+    let timerId;
+
+    html.addStyleSheet(
+      `
+      input[type="text"].hidden-text-entry {
+        position: sticky;
+        left: 0;
+        top: 0;
+        width: 0;
+        height: 0;
+        margin: 0;
+        padding: 0;
+        opacity: 0%;
+      }
+    `,
+      this
+    );
+    this.hiddenTextEntry = html.input({
+      type: "text",
+      class: "hidden-text-entry",
+      oninput: (event) => {
+        clearTimeout(timerId);
+        timerId = setTimeout(() => (this.hiddenTextEntry.value = ""), 500);
+
+        const targetString = this.hiddenTextEntry.value;
+        if (!targetString) {
+          return;
+        }
+
+        const characters = [...targetString];
+
+        const codePoint =
+          characters.length === 1 ? targetString.codePointAt(0) : undefined;
+
+        const { foundAccordionItem, foundGlyph } = findGlyphInSections(
+          targetString,
+          codePoint,
+          this.accordion.items
+        );
+
+        if (!foundAccordionItem || !foundGlyph) {
+          return;
+        }
+
+        this.accordion.openCloseAccordionItem(foundAccordionItem, true);
+
+        // TODO: if found glyph does not yet have a cell, add cells until it does
+
+        for (const glyphCell of foundAccordionItem.content.querySelectorAll(
+          "glyph-cell"
+        )) {
+          if (glyphCell.glyphName == foundGlyph.glyphName) {
+            setTimeout(() => {
+              glyphCell.scrollIntoView({
+                behavior: "auto",
+                block: "nearest",
+                inline: "nearest",
+              });
+            }, 0);
+            break;
+          }
+        }
+
+        this._resetSelectionHelpers();
+        this.glyphSelection = new Set([foundGlyph.glyphName]);
+      },
+    });
+
+    this.appendChild(this.hiddenTextEntry);
   }
 
   connectedCallback() {
@@ -405,7 +479,7 @@ export class GlyphCellView extends HTMLElement {
         // If indeed a double-click comes, the timer is cancelled.
         this._selectionTimerID = setTimeout(() => {
           this.glyphSelection = new Set([glyphName]);
-        }, 500);
+        }, 800);
       }
     } else {
       if (event.metaKey || event.altKey) {
@@ -612,6 +686,14 @@ export class GlyphCellView extends HTMLElement {
       event.preventDefault();
       event.stopImmediatePropagation();
       this.onOpenSelectedGlyphs?.(event);
+    } else if (
+      !(event.metaKey || event.ctrlKey) &&
+      event.target !== this.hiddenTextEntry
+    ) {
+      event.stopImmediatePropagation();
+      const keyEvent = new event.constructor(event.type, event);
+      this.hiddenTextEntry.focus();
+      this.hiddenTextEntry.dispatchEvent(keyEvent);
     }
   }
 
@@ -850,4 +932,23 @@ function makeGlyphCountString(glyphs, glyphMap) {
   return numGlyphs === numDefinedGlyphs
     ? `(${numGlyphs})`
     : `(${numDefinedGlyphs}/${numGlyphs})`;
+}
+
+function findGlyphInSections(targetString, codePoint, items) {
+  const matches = [];
+
+  for (const item of items) {
+    for (const glyph of item.section.resolvedGlyphs ?? []) {
+      if (
+        glyph.glyphName.startsWith(targetString) ||
+        glyph.codePoints.includes(codePoint)
+      ) {
+        matches.push({ foundAccordionItem: item, foundGlyph: glyph });
+      }
+    }
+  }
+
+  matches.sort((a, b) => compare(a.foundGlyph.glyphName, b.foundGlyph.glyphName));
+
+  return matches[0] ?? {};
 }
