@@ -433,14 +433,29 @@ is visually verifiable.
 
 ## 9. Donor usage rules
 
-- `./skeleton/` is read-only, pinned at `fd76d3abe` (detached HEAD). Copy
-  from it; never modify it; never re-checkout without updating this roadmap.
-- The post-refactor state stays reachable inside the same checkout:
-  `git -C skeleton show ref/cleanup:<path>` for files,
-  `git -C skeleton log ref/cleanup -- <path>` for history. Use it for the
-  `docs/refactor/` matrices/reviews, the three cherry-picked generator
-  fixes, and the refactor-era test suites as behavioral fixtures. Do not
-  port its plumbing.
+- `./skeleton/` is a full, independent git clone of the old fork
+  (`froggo-gfx/glyphcad`), nested inside forkra and covered by forkra's
+  `.gitignore` — the two repos never interact. All git operations on it run
+  from forkra's root via `git -C skeleton …`; no directory-jumping needed.
+- It is read-only and pinned at `fd76d3abe` (detached HEAD). Copy from it;
+  never modify it; **never move its HEAD** (`checkout`/`switch`) without
+  updating this roadmap — plans and agents assume the on-disk state is the
+  pinned donor.
+- Every other state is readable without moving HEAD, and these are the only
+  sanctioned forms:
+  - `git -C skeleton show ref/cleanup:<path>` — a file from the
+    post-refactor state
+  - `git -C skeleton log ref/cleanup --oneline -- <path>` — history
+  - `git -C skeleton diff fd76d3abe ref/cleanup -- <path>` — what the
+    refactor era changed in a file
+- If browsing the post-refactor tree on disk becomes necessary, use a linked
+  worktree, not a re-checkout:
+  `git -C skeleton worktree add ../skeleton-refactored ref/cleanup`
+  (and add `skeleton-refactored/` to forkra's `.gitignore` in the same
+  change). The pin in `./skeleton/` stays untouched.
+- Use the post-refactor state for the `docs/refactor/` matrices/reviews, the
+  three cherry-picked generator fixes, and the refactor-era test suites as
+  behavioral fixtures. Do not port its plumbing.
 - **Port verbatim**: geometry/math (generator internals, rib projection,
   normals, tension math, cap/join construction), visualization drawing code,
   behavior *semantics* and their test cases.
@@ -480,3 +495,95 @@ is visually verifiable.
   WS-16 investigates and either matches donor behavior or specifies better.
 - **Equalize-in-the-rules-model** (WS-13) is an experiment with a defined
   fallback; it must not block WS-14/15, which don't depend on it.
+
+## 11. Instructions for plan authors
+
+You are writing the detailed implementation plan for one workstream of this
+roadmap. Read this whole roadmap first. Then follow these rules — each one
+exists because its violation already happened once in the donor's history.
+
+**Ground your plan in the code, not in this document.**
+
+1. Before writing a single task, audit the current forkra code your
+   workstream touches. File names, sizes, line numbers and helper names in
+   this roadmap describe the state at 2026-07-02; earlier workstreams will
+   have moved things. Every path, symbol and line reference in your plan must
+   be verified by grep/read against the tree you're planning for, the day you
+   write the plan.
+2. Never trust a progress report, review doc, or this roadmap over the code.
+   (The donor's progress report claimed a duplicate function had been
+   unified; the tree said otherwise.) If a claim matters to your plan, verify
+   it with a grep and put the grep in the plan as a verification step.
+
+**Donor discipline.**
+
+3. `./skeleton/` is read-only, pinned at `fd76d3abe`. Plans may copy from it,
+   never modify it, never re-checkout it.
+4. Port **verbatim**: geometry, math, drawing code, behavior semantics.
+   Redesign **always**: selection kinds, parsers, persistence calls,
+   executor plumbing, anything reaching into the pointer monolith's
+   structure. If your plan says "adapt the donor's routing/dispatch/handler
+   structure", the plan is wrong. The correct wording is either "copy
+   function `<exact name>` verbatim" or "implement `<semantics>` behind
+   `<forkra seam>`".
+5. When you need the post-refactor state (matrices, the three cherry-picked
+   generator fixes, refactor-era tests as fixtures), read it via
+   `git -C skeleton show ref/cleanup:<path>`. Its plumbing is never a
+   template.
+
+**Architecture rails (check your plan against every one).**
+
+6. All skeleton mutation flows through `editSkeleton` (C2). If any task adds
+   a second call site of the generator on the editing side, or writes
+   skeleton customData outside `editSkeleton`, the plan is wrong.
+7. No branching on object kind inside change-emission code
+   (`makeChangeForDelta` and below). Kind decisions happen at construction
+   time. If a task adds `if (skeleton…)` to a shared emit path, the plan is
+   wrong.
+8. No geometric recovery, no tolerance-based inverse projection, ever —
+   provenance is emitted forward by the generator (C3). Selection and
+   provenance reference stable ids, never raw path-point indices.
+9. Layer placement is fixed: pure geometry → `fontra-core` (mocha-tested);
+   hit-testing → `scene-model.js` as `*AtPoint` methods; pointer stays a
+   thin dispatcher and must not grow glyph-geometry logic. One copy of every
+   constant and geometry function — if a symbol you need exists anywhere in
+   forkra, import it; re-declaring it (even "it's just a constant") is a
+   plan failure.
+10. Cross-cutting modifiers (D/S/X/Z) are behavior names and executor
+    variants inside the rules model — never side-channel flags threaded
+    around it.
+
+**Scope and parity.**
+
+11. Pure parity, no improvements. The target behavior is what `fd76d3abe`
+    does (§8); where the two donor states disagree, `fd76d3abe` wins except
+    for the three cherry-picks (§2). Any deliberate deviation gets its own
+    line in the plan under a "Deviations" heading, with the reason.
+12. Do not pull work from later workstreams forward, even when it looks
+    cheap. If your workstream discovers that a later workstream's interface
+    assumption is wrong, update this roadmap in the same commit and say so
+    in the plan.
+
+**Plan mechanics (forkra conventions).**
+
+13. Use the superpowers plan format: header block, exact file paths, tasks
+    with TDD step cycles, complete code in every step, no placeholders, an
+    Interfaces block per task (consumes/produces with exact signatures).
+    Name the file `docs/superpowers/plans/YYYY-MM-DD-wsN-<name>.md`; the
+    branch is `refactor-simple/wsN-<name>`, cut from the current
+    `refactor-simple` head.
+14. Every task ends with: run the relevant tests (`npm test` in
+    `src-js/fontra-core` for core code), `node --check` on every touched
+    views-editor file, `npx prettier --write` on touched files, then a
+    commit with a focused message. One concern per commit — never mix a
+    verbatim port and a modification of the ported code in the same commit;
+    port first, change in the next commit, so every diff is either "pure
+    copy" or "pure change".
+15. views-editor work has no test harness: your plan must carry an explicit
+    manual test matrix naming every interaction × modifier combination it
+    affects, with the donor open side-by-side as reference. "Test manually"
+    without the matrix is a placeholder, i.e. a plan failure.
+16. End the plan with acceptance criteria that include the rail checks from
+    this section expressed as runnable greps (e.g. "grep for generator call
+    sites outside `editSkeleton` returns only the one in
+    `skeleton-editing.js`").
