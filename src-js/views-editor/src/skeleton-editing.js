@@ -6,6 +6,7 @@ import {
 } from "@fontra/core/skeleton-generator.js";
 import {
   getSkeletonData,
+  makeEmptySkeletonData,
   normalizeSkeletonData,
   setSkeletonData,
 } from "@fontra/core/skeleton-model.js";
@@ -85,11 +86,13 @@ export function makeEditSkeletonChange(layerGlyph, mutate, options = {}) {
 
 function applySkeletonMutation(layerGlyph, mutate, options = {}) {
   const original = getSkeletonData(layerGlyph);
-  if (!original) {
+  if (!original && !options.createIfMissing) {
     return;
   }
 
-  const working = normalizeSkeletonData(structuredClone(original));
+  const working = normalizeSkeletonData(
+    structuredClone(original || makeEmptySkeletonData())
+  );
   mutate(working);
   const generated = generateFromSkeleton(working);
   replaceGeneratedSkeletonContours(layerGlyph, working, generated);
