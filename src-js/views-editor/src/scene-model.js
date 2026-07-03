@@ -21,6 +21,7 @@ import {
 } from "@fontra/core/rectangle.ts";
 import { difference, isEqualSet, union, updateSet } from "@fontra/core/set-ops.js";
 import { MAX_UNICODE } from "@fontra/core/shaper.js";
+import { getSkeletonData } from "@fontra/core/skeleton-model.js";
 import { decomposedToTransform } from "@fontra/core/transform.js";
 import {
   assert,
@@ -35,6 +36,7 @@ import {
 } from "@fontra/core/utils.ts";
 import { normalizeLocation, unnormalizeLocation } from "@fontra/core/var-model.js";
 import * as vector from "@fontra/core/vector.js";
+import { makeSkeletonPointKey } from "./skeleton-editing.js";
 
 export class SceneModel {
   constructor(
@@ -731,6 +733,15 @@ export class SceneModel {
       return { selection: anchorSelection };
     }
 
+    const skeletonPointSelection = this.skeletonPointAtPoint(
+      point,
+      size,
+      parsedCurrentSelection
+    );
+    if (skeletonPointSelection.size) {
+      return { selection: skeletonPointSelection };
+    }
+
     const pointSelection = this.pointSelectionAtPoint(
       point,
       size,
@@ -781,6 +792,65 @@ export class SceneModel {
     }
     if (pointIndex !== undefined) {
       return new Set([`point/${pointIndex}`]);
+    }
+
+    return new Set();
+  }
+
+  _getEditLayerSkeletonData(positionedGlyph) {
+    const editLayerName =
+      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+    const layerGlyph =
+      editLayerName && positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName]?.glyph;
+    return getSkeletonData(layerGlyph || positionedGlyph.glyph);
+  }
+
+  skeletonPointAtPoint(point, size, parsedCurrentSelection) {
+    const positionedGlyph = this.getSelectedPositionedGlyph();
+    if (!positionedGlyph) {
+      return new Set();
+    }
+    const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+    if (!skeletonData?.contours?.length) {
+      return new Set();
+    }
+
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+
+    const isHit = (skeletonPoint) =>
+      Math.abs(skeletonPoint.x - glyphPoint.x) <= size &&
+      Math.abs(skeletonPoint.y - glyphPoint.y) <= size;
+
+    // Prefer points already in the current selection, matching regular point
+    // hit-test behavior (cycles among stacked points).
+    const currentKeys = new Set(
+      (parsedCurrentSelection?.skeletonPoint || []).map((item) => `${item}`)
+    );
+    if (currentKeys.size) {
+      for (const contour of skeletonData.contours) {
+        for (const skeletonPoint of contour.points) {
+          if (
+            currentKeys.has(`${contour.id}/${skeletonPoint.id}`) &&
+            isHit(skeletonPoint)
+          ) {
+            return new Set([makeSkeletonPointKey(contour.id, skeletonPoint.id)]);
+          }
+        }
+      }
+    }
+
+    // Otherwise search all skeleton points in reverse contour/point order.
+    for (let ci = skeletonData.contours.length - 1; ci >= 0; ci--) {
+      const contour = skeletonData.contours[ci];
+      for (let pi = contour.points.length - 1; pi >= 0; pi--) {
+        const skeletonPoint = contour.points[pi];
+        if (isHit(skeletonPoint)) {
+          return new Set([makeSkeletonPointKey(contour.id, skeletonPoint.id)]);
+        }
+      }
     }
 
     return new Set();
@@ -1016,6 +1086,15 @@ export class SceneModel {
     for (let i = 0; i < anchors.length; i++) {
       if (pointInRect(anchors[i].x, anchors[i].y, selRect)) {
         selection.add(`anchor/${i}`);
+      }
+    }
+
+    const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+    for (const contour of skeletonData?.contours || []) {
+      for (const skeletonPoint of contour.points) {
+        if (pointInRect(skeletonPoint.x, skeletonPoint.y, selRect)) {
+          selection.add(makeSkeletonPointKey(contour.id, skeletonPoint.id));
+        }
       }
     }
 
