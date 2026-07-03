@@ -1,0 +1,1005 @@
+[
+  {
+    "name": "open-line-butt-cap",
+    "canonical": {
+      "version": 1,
+      "nextId": 4,
+      "contours": [
+        {
+          "id": 1,
+          "closed": false,
+          "defaultWidth": 80,
+          "singleSided": null,
+          "points": [
+            {
+              "id": 2,
+              "x": 0,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 40,
+                "right": 40,
+                "linked": true
+              },
+              "nudge": {
+                "left": 0,
+                "right": 0
+              },
+              "editable": {
+                "left": false,
+                "right": false
+              },
+              "handleOffsets": {}
+            },
+            {
+              "id": 3,
+              "x": 100,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 40,
+                "right": 40,
+                "linked": true
+              },
+              "nudge": {
+                "left": 0,
+                "right": 0
+              },
+              "editable": {
+                "left": false,
+                "right": false
+              },
+              "handleOffsets": {}
+            }
+          ]
+        }
+      ],
+      "generated": []
+    },
+    "donorInput": {
+      "contours": [
+        {
+          "isClosed": false,
+          "defaultWidth": 80,
+          "singleSided": false,
+          "singleSidedDirection": "left",
+          "capStyle": "butt",
+          "reversed": false,
+          "points": [
+            {
+              "x": 0,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 40,
+              "rightWidth": 40,
+              "leftNudge": 0,
+              "rightNudge": 0,
+              "leftEditable": false,
+              "rightEditable": false
+            },
+            {
+              "x": 100,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 40,
+              "rightWidth": 40,
+              "leftNudge": 0,
+              "rightNudge": 0,
+              "leftEditable": false,
+              "rightEditable": false
+            }
+          ]
+        }
+      ]
+    },
+    "expectedContours": [
+      {
+        "points": [
+          {
+            "x": 0,
+            "y": -40,
+            "smooth": false
+          },
+          {
+            "x": 100,
+            "y": -40,
+            "smooth": false
+          },
+          {
+            "x": 100,
+            "y": 40,
+            "smooth": false
+          },
+          {
+            "x": 0,
+            "y": 40,
+            "smooth": false
+          }
+        ],
+        "isClosed": true
+      }
+    ]
+  },
+  {
+    "name": "closed-triangle",
+    "canonical": {
+      "version": 1,
+      "nextId": 5,
+      "contours": [
+        {
+          "id": 1,
+          "closed": true,
+          "defaultWidth": 60,
+          "singleSided": null,
+          "points": [
+            {
+              "id": 2,
+              "x": 0,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 40,
+                "right": 40,
+                "linked": true
+              },
+              "nudge": {
+                "left": 0,
+                "right": 0
+              },
+              "editable": {
+                "left": false,
+                "right": false
+              },
+              "handleOffsets": {}
+            },
+            {
+              "id": 3,
+              "x": 100,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 40,
+                "right": 40,
+                "linked": true
+              },
+              "nudge": {
+                "left": 0,
+                "right": 0
+              },
+              "editable": {
+                "left": false,
+                "right": false
+              },
+              "handleOffsets": {}
+            },
+            {
+              "id": 4,
+              "x": 50,
+              "y": 80,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 40,
+                "right": 40,
+                "linked": true
+              },
+              "nudge": {
+                "left": 0,
+                "right": 0
+              },
+              "editable": {
+                "left": false,
+                "right": false
+              },
+              "handleOffsets": {}
+            }
+          ]
+        }
+      ],
+      "generated": []
+    },
+    "donorInput": {
+      "contours": [
+        {
+          "isClosed": true,
+          "defaultWidth": 60,
+          "singleSided": false,
+          "singleSidedDirection": "left",
+          "capStyle": "butt",
+          "reversed": false,
+          "points": [
+            {
+              "x": 0,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 40,
+              "rightWidth": 40,
+              "leftNudge": 0,
+              "rightNudge": 0,
+              "leftEditable": false,
+              "rightEditable": false
+            },
+            {
+              "x": 100,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 40,
+              "rightWidth": 40,
+              "leftNudge": 0,
+              "rightNudge": 0,
+              "leftEditable": false,
+              "rightEditable": false
+            },
+            {
+              "x": 50,
+              "y": 80,
+              "smooth": false,
+              "leftWidth": 40,
+              "rightWidth": 40,
+              "leftNudge": 0,
+              "rightNudge": 0,
+              "leftEditable": false,
+              "rightEditable": false
+            }
+          ]
+        }
+      ]
+    },
+    "expectedContours": [
+      {
+        "points": [
+          {
+            "x": -35,
+            "y": -19,
+            "smooth": false
+          },
+          {
+            "x": 135,
+            "y": -19,
+            "smooth": false
+          },
+          {
+            "x": 50,
+            "y": 120,
+            "smooth": false
+          }
+        ],
+        "isClosed": true
+      },
+      {
+        "points": [
+          {
+            "x": 50,
+            "y": 40,
+            "smooth": false
+          },
+          {
+            "x": 65,
+            "y": 19,
+            "smooth": false
+          },
+          {
+            "x": 35,
+            "y": 19,
+            "smooth": false
+          }
+        ],
+        "isClosed": true
+      }
+    ]
+  },
+  {
+    "name": "open-cubic-round-cap",
+    "canonical": {
+      "version": 1,
+      "nextId": 6,
+      "contours": [
+        {
+          "id": 1,
+          "closed": false,
+          "defaultWidth": 70,
+          "singleSided": null,
+          "points": [
+            {
+              "id": 2,
+              "x": 0,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 40,
+                "right": 40,
+                "linked": true
+              },
+              "nudge": {
+                "left": 0,
+                "right": 0
+              },
+              "editable": {
+                "left": false,
+                "right": false
+              },
+              "handleOffsets": {},
+              "capStyle": "round"
+            },
+            {
+              "id": 3,
+              "x": 40,
+              "y": 120,
+              "type": "cubic",
+              "smooth": false
+            },
+            {
+              "id": 4,
+              "x": 120,
+              "y": 120,
+              "type": "cubic",
+              "smooth": false
+            },
+            {
+              "id": 5,
+              "x": 160,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 40,
+                "right": 40,
+                "linked": true
+              },
+              "nudge": {
+                "left": 0,
+                "right": 0
+              },
+              "editable": {
+                "left": false,
+                "right": false
+              },
+              "handleOffsets": {},
+              "capStyle": "round"
+            }
+          ]
+        }
+      ],
+      "generated": []
+    },
+    "donorInput": {
+      "contours": [
+        {
+          "isClosed": false,
+          "defaultWidth": 70,
+          "singleSided": false,
+          "singleSidedDirection": "left",
+          "capStyle": "butt",
+          "reversed": false,
+          "points": [
+            {
+              "x": 0,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 40,
+              "rightWidth": 40,
+              "leftNudge": 0,
+              "rightNudge": 0,
+              "leftEditable": false,
+              "rightEditable": false,
+              "capStyle": "round"
+            },
+            {
+              "x": 40,
+              "y": 120,
+              "smooth": false,
+              "type": "cubic"
+            },
+            {
+              "x": 120,
+              "y": 120,
+              "smooth": false,
+              "type": "cubic"
+            },
+            {
+              "x": 160,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 40,
+              "rightWidth": 40,
+              "leftNudge": 0,
+              "rightNudge": 0,
+              "leftEditable": false,
+              "rightEditable": false,
+              "capStyle": "round"
+            }
+          ]
+        }
+      ]
+    },
+    "expectedContours": [
+      {
+        "points": [
+          {
+            "x": 38,
+            "y": -13,
+            "smooth": true
+          },
+          {
+            "x": 66.85366536573444,
+            "y": 78.36994032482573,
+            "type": "cubic"
+          },
+          {
+            "x": 98.1934750599143,
+            "y": 62.38732897693802,
+            "type": "cubic"
+          },
+          {
+            "x": 122,
+            "y": -13,
+            "smooth": true
+          },
+          {
+            "x": 128,
+            "y": -32,
+            "smooth": true,
+            "skipColinear": true
+          },
+          {
+            "x": 131,
+            "y": -42,
+            "type": "cubic"
+          },
+          {
+            "x": 143,
+            "y": -47,
+            "type": "cubic"
+          },
+          {
+            "x": 153,
+            "y": -44,
+            "smooth": true,
+            "skipColinear": true
+          },
+          {
+            "x": 191,
+            "y": -31,
+            "smooth": true,
+            "skipColinear": true
+          },
+          {
+            "x": 202,
+            "y": -27,
+            "type": "cubic"
+          },
+          {
+            "x": 207,
+            "y": -16,
+            "type": "cubic"
+          },
+          {
+            "x": 204,
+            "y": -6,
+            "smooth": true,
+            "skipColinear": true
+          },
+          {
+            "x": 198,
+            "y": 13,
+            "smooth": true
+          },
+          {
+            "x": 149.72027351025656,
+            "y": 165.88580055085416,
+            "type": "cubic"
+          },
+          {
+            "x": 13.136504236124544,
+            "y": 174.93226341439438,
+            "type": "cubic"
+          },
+          {
+            "x": -38,
+            "y": 13,
+            "smooth": true
+          },
+          {
+            "x": -44,
+            "y": -6,
+            "smooth": true,
+            "skipColinear": true
+          },
+          {
+            "x": -47,
+            "y": -16,
+            "type": "cubic"
+          },
+          {
+            "x": -42,
+            "y": -27,
+            "type": "cubic"
+          },
+          {
+            "x": -31,
+            "y": -31,
+            "smooth": true,
+            "skipColinear": true
+          },
+          {
+            "x": 7,
+            "y": -44,
+            "smooth": true,
+            "skipColinear": true
+          },
+          {
+            "x": 17,
+            "y": -47,
+            "type": "cubic"
+          },
+          {
+            "x": 29,
+            "y": -42,
+            "type": "cubic"
+          },
+          {
+            "x": 32,
+            "y": -32,
+            "smooth": true,
+            "skipColinear": true
+          }
+        ],
+        "isClosed": true
+      }
+    ]
+  },
+  {
+    "name": "single-sided-left",
+    "canonical": {
+      "version": 1,
+      "nextId": 4,
+      "contours": [
+        {
+          "id": 1,
+          "closed": false,
+          "defaultWidth": 80,
+          "singleSided": "left",
+          "points": [
+            {
+              "id": 2,
+              "x": 0,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 40,
+                "right": 40,
+                "linked": true
+              },
+              "nudge": {
+                "left": 0,
+                "right": 0
+              },
+              "editable": {
+                "left": false,
+                "right": false
+              },
+              "handleOffsets": {}
+            },
+            {
+              "id": 3,
+              "x": 120,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 40,
+                "right": 40,
+                "linked": true
+              },
+              "nudge": {
+                "left": 0,
+                "right": 0
+              },
+              "editable": {
+                "left": false,
+                "right": false
+              },
+              "handleOffsets": {}
+            }
+          ]
+        }
+      ],
+      "generated": []
+    },
+    "donorInput": {
+      "contours": [
+        {
+          "isClosed": false,
+          "defaultWidth": 80,
+          "singleSided": true,
+          "singleSidedDirection": "left",
+          "capStyle": "butt",
+          "reversed": false,
+          "points": [
+            {
+              "x": 0,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 40,
+              "rightWidth": 40,
+              "leftNudge": 0,
+              "rightNudge": 0,
+              "leftEditable": false,
+              "rightEditable": false
+            },
+            {
+              "x": 120,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 40,
+              "rightWidth": 40,
+              "leftNudge": 0,
+              "rightNudge": 0,
+              "leftEditable": false,
+              "rightEditable": false
+            }
+          ]
+        }
+      ]
+    },
+    "expectedContours": [
+      {
+        "points": [
+          {
+            "x": 0,
+            "y": -80,
+            "smooth": false
+          },
+          {
+            "x": 120,
+            "y": -80,
+            "smooth": false
+          },
+          {
+            "x": 120,
+            "y": 0,
+            "smooth": false
+          },
+          {
+            "x": 0,
+            "y": 0,
+            "smooth": false
+          }
+        ],
+        "isClosed": true
+      }
+    ]
+  },
+  {
+    "name": "asymmetric-editable-nudge",
+    "canonical": {
+      "version": 1,
+      "nextId": 4,
+      "contours": [
+        {
+          "id": 1,
+          "closed": false,
+          "defaultWidth": 80,
+          "singleSided": null,
+          "points": [
+            {
+              "id": 2,
+              "x": 0,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 20,
+                "right": 45,
+                "linked": false
+              },
+              "nudge": {
+                "left": 8,
+                "right": -6
+              },
+              "editable": {
+                "left": true,
+                "right": true
+              },
+              "handleOffsets": {}
+            },
+            {
+              "id": 3,
+              "x": 140,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 35,
+                "right": 10,
+                "linked": false
+              },
+              "nudge": {
+                "left": -4,
+                "right": 5
+              },
+              "editable": {
+                "left": true,
+                "right": true
+              },
+              "handleOffsets": {}
+            }
+          ]
+        }
+      ],
+      "generated": []
+    },
+    "donorInput": {
+      "contours": [
+        {
+          "isClosed": false,
+          "defaultWidth": 80,
+          "singleSided": false,
+          "singleSidedDirection": "left",
+          "capStyle": "butt",
+          "reversed": false,
+          "points": [
+            {
+              "x": 0,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 20,
+              "rightWidth": 45,
+              "leftNudge": 8,
+              "rightNudge": -6,
+              "leftEditable": true,
+              "rightEditable": true
+            },
+            {
+              "x": 140,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 35,
+              "rightWidth": 10,
+              "leftNudge": -4,
+              "rightNudge": 5,
+              "leftEditable": true,
+              "rightEditable": true
+            }
+          ]
+        }
+      ]
+    },
+    "expectedContours": [
+      {
+        "points": [
+          {
+            "x": 8,
+            "y": -20,
+            "smooth": false
+          },
+          {
+            "x": 136,
+            "y": -35,
+            "smooth": false
+          },
+          {
+            "x": 145,
+            "y": 10,
+            "smooth": false
+          },
+          {
+            "x": -6,
+            "y": 45,
+            "smooth": false
+          }
+        ],
+        "isClosed": true
+      }
+    ]
+  },
+  {
+    "name": "detached-handle-offsets",
+    "canonical": {
+      "version": 1,
+      "nextId": 6,
+      "contours": [
+        {
+          "id": 1,
+          "closed": false,
+          "defaultWidth": 80,
+          "singleSided": null,
+          "points": [
+            {
+              "id": 2,
+              "x": 0,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 40,
+                "right": 40,
+                "linked": true
+              },
+              "nudge": {
+                "left": 0,
+                "right": 0
+              },
+              "editable": {
+                "left": true,
+                "right": true
+              },
+              "handleOffsets": {
+                "leftOut": {
+                  "x": -12,
+                  "y": 20,
+                  "detached": true
+                },
+                "rightOut": {
+                  "x": 12,
+                  "y": -16,
+                  "detached": true
+                }
+              }
+            },
+            {
+              "id": 3,
+              "x": 40,
+              "y": 90,
+              "type": "cubic",
+              "smooth": false
+            },
+            {
+              "id": 4,
+              "x": 100,
+              "y": 90,
+              "type": "cubic",
+              "smooth": false
+            },
+            {
+              "id": 5,
+              "x": 140,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 40,
+                "right": 40,
+                "linked": true
+              },
+              "nudge": {
+                "left": 0,
+                "right": 0
+              },
+              "editable": {
+                "left": true,
+                "right": true
+              },
+              "handleOffsets": {
+                "leftIn": {
+                  "x": 10,
+                  "y": 22,
+                  "detached": true
+                },
+                "rightIn": {
+                  "x": -10,
+                  "y": -18,
+                  "detached": true
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "generated": []
+    },
+    "donorInput": {
+      "contours": [
+        {
+          "isClosed": false,
+          "defaultWidth": 80,
+          "singleSided": false,
+          "singleSidedDirection": "left",
+          "capStyle": "butt",
+          "reversed": false,
+          "points": [
+            {
+              "x": 0,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 40,
+              "rightWidth": 40,
+              "leftNudge": 0,
+              "rightNudge": 0,
+              "leftEditable": true,
+              "rightEditable": true,
+              "leftHandleOutOffsetX": -12,
+              "leftHandleOutOffsetY": 20,
+              "leftHandleOutDetached": true,
+              "rightHandleOutOffsetX": 12,
+              "rightHandleOutOffsetY": -16,
+              "rightHandleOutDetached": true
+            },
+            {
+              "x": 40,
+              "y": 90,
+              "smooth": false,
+              "type": "cubic"
+            },
+            {
+              "x": 100,
+              "y": 90,
+              "smooth": false,
+              "type": "cubic"
+            },
+            {
+              "x": 140,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 40,
+              "rightWidth": 40,
+              "leftNudge": 0,
+              "rightNudge": 0,
+              "leftEditable": true,
+              "rightEditable": true,
+              "leftHandleInOffsetX": 10,
+              "leftHandleInOffsetY": 22,
+              "leftHandleInDetached": true,
+              "rightHandleInOffsetX": -10,
+              "rightHandleInOffsetY": -18,
+              "rightHandleInDetached": true
+            }
+          ]
+        }
+      ]
+    },
+    "expectedContours": [
+      {
+        "points": [
+          {
+            "x": 37,
+            "y": -16,
+            "smooth": false
+          },
+          {
+            "x": 70,
+            "y": 57,
+            "type": "cubic"
+          },
+          {
+            "x": 72,
+            "y": 53,
+            "type": "cubic"
+          },
+          {
+            "x": 103,
+            "y": -16,
+            "smooth": false
+          },
+          {
+            "x": 177,
+            "y": 16,
+            "smooth": false
+          },
+          {
+            "x": 129,
+            "y": 125,
+            "type": "cubic"
+          },
+          {
+            "x": 14,
+            "y": 130,
+            "type": "cubic"
+          },
+          {
+            "x": -37,
+            "y": 16,
+            "smooth": false
+          }
+        ],
+        "isClosed": true
+      }
+    ]
+  }
+]
