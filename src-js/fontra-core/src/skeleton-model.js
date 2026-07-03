@@ -1,4 +1,6 @@
+import { Bezier } from "bezier-js";
 import { deepCopyObject } from "./utils.ts";
+import { normalizeVector, rotateVector90CW, subVectors } from "./vector.js";
 
 export const SKELETON_SCHEMA_VERSION = 1;
 export const DEFAULT_SKELETON_WIDTH = 80;
@@ -185,6 +187,180 @@ export function deleteSkeletonPoint(skeletonData, contourId, pointId) {
   }
   contour.points.splice(pointIndex, 1);
   return true;
+}
+
+export function getSkeletonPointHalfWidth(point, defaultWidth, side) {
+  const width = normalizeWidth(point?.width);
+  if (side === "left") {
+    return width.left;
+  }
+  if (side === "right") {
+    return width.right;
+  }
+  return asNonNegativeNumber(defaultWidth, DEFAULT_SKELETON_WIDTH) / 2;
+}
+
+export function getSkeletonPointWidth(point, defaultWidth, side = null) {
+  if (side === "left") {
+    return getSkeletonPointHalfWidth(point, defaultWidth, "left") * 2;
+  }
+  if (side === "right") {
+    return getSkeletonPointHalfWidth(point, defaultWidth, "right") * 2;
+  }
+  return (
+    getSkeletonPointHalfWidth(point, defaultWidth, "left") +
+    getSkeletonPointHalfWidth(point, defaultWidth, "right")
+  );
+}
+
+export function getSkeletonPointNudge(
+  point,
+  side,
+  defaultWidth = DEFAULT_SKELETON_WIDTH
+) {
+  const editable = normalizeEditable(point?.editable);
+  if (!editable[side]) {
+    return 0;
+  }
+  if (getSkeletonPointHalfWidth(point, defaultWidth, side) < 0.5) {
+    return 0;
+  }
+  return normalizeNudge(point?.nudge)[side];
+}
+
+export function buildSegmentsFromSkeletonPoints(points, closed) {
+  const segments = [];
+  const onCurveIndices = [];
+  for (let i = 0; i < points.length; i++) {
+    if (!points[i].type) {
+      onCurveIndices.push(i);
+    }
+  }
+  if (onCurveIndices.length < 2) {
+    return segments;
+  }
+  for (let i = 0; i < onCurveIndices.length - 1; i++) {
+    segments.push(makeSegment(points, onCurveIndices[i], onCurveIndices[i + 1]));
+  }
+  if (closed) {
+    const lastIdx = onCurveIndices[onCurveIndices.length - 1];
+    const firstIdx = onCurveIndices[0];
+    segments.push(makeWrappingSegment(points, lastIdx, firstIdx));
+  }
+  return segments;
+}
+
+export function calculateNormalAtSkeletonPoint(skeletonContour, pointIndexOrPointId) {
+  const points = skeletonContour?.points || [];
+  if (points.length < 2) {
+    return { x: 0, y: 1 };
+  }
+  const pointIndex =
+    pointIndexOrPointId >= 0 && pointIndexOrPointId < points.length
+      ? pointIndexOrPointId
+      : points.findIndex((point) => point.id === pointIndexOrPointId);
+  const point = points[pointIndex];
+  if (!point || point.type) {
+    return { x: 0, y: 1 };
+  }
+
+  const segments = buildSegmentsFromSkeletonPoints(points, skeletonContour.closed);
+  let incomingSegment = null;
+  let outgoingSegment = null;
+  for (const segment of segments) {
+    if (segment.endPoint === point) {
+      incomingSegment = segment;
+    }
+    if (segment.startPoint === point) {
+      outgoingSegment = segment;
+    }
+  }
+
+  const dir1 = incomingSegment ? segmentEndDirection(incomingSegment) : null;
+  const dir2 = outgoingSegment ? segmentStartDirection(outgoingSegment) : null;
+
+  if (!dir1 && dir2) {
+    return getEffectiveNormal(point, rotateVector90CW(dir2));
+  }
+  if (dir1 && !dir2) {
+    return getEffectiveNormal(point, rotateVector90CW(dir1));
+  }
+  if (!dir1 && !dir2) {
+    return getEffectiveNormal(point, { x: 0, y: 1 });
+  }
+
+  const dot = dir1.x * dir2.x + dir1.y * dir2.y;
+  const cross = dir1.x * dir2.y - dir1.y * dir2.x;
+  const halfAngle = Math.atan2(cross, dot) / 2;
+  const cosH = Math.cos(halfAngle);
+  const sinH = Math.sin(halfAngle);
+  const bisector = normalizeVector({
+    x: dir1.x * cosH - dir1.y * sinH,
+    y: dir1.x * sinH + dir1.y * cosH,
+  });
+  return getEffectiveNormal(point, rotateVector90CW(bisector));
+}
+
+export function projectSkeletonRibPoint(point, normal, halfWidth, side, nudge = 0) {
+  const sign = side === "left" ? 1 : -1;
+  const tangent = { x: -normal.y, y: normal.x };
+  const baseX = Math.round(point.x + sign * normal.x * halfWidth);
+  const baseY = Math.round(point.y + sign * normal.y * halfWidth);
+  return {
+    x: Math.round(baseX + tangent.x * nudge),
+    y: Math.round(baseY + tangent.y * nudge),
+  };
+}
+
+function makeSegment(points, startIdx, endIdx) {
+  return {
+    startPoint: points[startIdx],
+    endPoint: points[endIdx],
+    controlPoints: points.slice(startIdx + 1, endIdx).filter((point) => point.type),
+  };
+}
+
+function makeWrappingSegment(points, lastIdx, firstIdx) {
+  return {
+    startPoint: points[lastIdx],
+    endPoint: points[firstIdx],
+    controlPoints: [
+      ...points.slice(lastIdx + 1).filter((point) => point.type),
+      ...points.slice(0, firstIdx).filter((point) => point.type),
+    ],
+  };
+}
+
+function segmentStartDirection(segment) {
+  if (!segment.controlPoints.length) {
+    return normalizeVector(subVectors(segment.endPoint, segment.startPoint));
+  }
+  const bezier = createBezierFromSegment(segment);
+  const deriv = bezier.derivative(0);
+  return normalizeVector({ x: deriv.x, y: deriv.y });
+}
+
+function segmentEndDirection(segment) {
+  if (!segment.controlPoints.length) {
+    return normalizeVector(subVectors(segment.endPoint, segment.startPoint));
+  }
+  const bezier = createBezierFromSegment(segment);
+  const deriv = bezier.derivative(1);
+  return normalizeVector({ x: deriv.x, y: deriv.y });
+}
+
+function createBezierFromSegment(segment) {
+  return new Bezier(segment.startPoint, ...segment.controlPoints, segment.endPoint);
+}
+
+function getEffectiveNormal(point, calculatedNormal) {
+  if (point.forceHorizontal) {
+    return { x: 0, y: calculatedNormal.y >= 0 ? 1 : -1 };
+  }
+  if (point.forceVertical) {
+    return { x: calculatedNormal.x >= 0 ? 1 : -1, y: 0 };
+  }
+  return calculatedNormal;
 }
 
 function allocateSkeletonId(skeletonData, requestedId = undefined) {

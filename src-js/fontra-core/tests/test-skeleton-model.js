@@ -3,13 +3,19 @@ import {
   SKELETON_SCHEMA_VERSION,
   appendSkeletonContour,
   appendSkeletonPoint,
+  buildSegmentsFromSkeletonPoints,
+  calculateNormalAtSkeletonPoint,
   deleteSkeletonPoint,
   getSkeletonContour,
   getSkeletonPoint,
+  getSkeletonPointHalfWidth,
+  getSkeletonPointNudge,
+  getSkeletonPointWidth,
   makeEmptySkeletonData,
   makeSkeletonContour,
   makeSkeletonPoint,
   normalizeSkeletonData,
+  projectSkeletonRibPoint,
   updateSkeletonPoint,
 } from "@fontra/core/skeleton-model.js";
 import { expect } from "chai";
@@ -117,6 +123,79 @@ describe("skeleton-model constructors and normalization", () => {
       capTension: 0.6,
       roundnessStrength: 0.8,
       cornerAsymmetry: -0.2,
+    });
+  });
+});
+
+describe("skeleton-model geometry helpers", () => {
+  it("reads symmetric and asymmetric widths from the canonical schema", () => {
+    const point = makeSkeletonPoint({
+      width: { left: 12, right: 18, linked: false },
+    });
+    expect(getSkeletonPointHalfWidth(point, DEFAULT_SKELETON_WIDTH, "left")).to.equal(
+      12
+    );
+    expect(getSkeletonPointHalfWidth(point, DEFAULT_SKELETON_WIDTH, "right")).to.equal(
+      18
+    );
+    expect(getSkeletonPointWidth(point, DEFAULT_SKELETON_WIDTH)).to.equal(30);
+    expect(getSkeletonPointWidth(point, DEFAULT_SKELETON_WIDTH, "left")).to.equal(24);
+    expect(getSkeletonPointWidth(point, DEFAULT_SKELETON_WIDTH, "right")).to.equal(36);
+  });
+
+  it("returns nudge only for editable non-zero-width sides", () => {
+    const point = makeSkeletonPoint({
+      nudge: { left: 7, right: 9 },
+      editable: { left: true, right: false },
+    });
+    expect(getSkeletonPointNudge(point, "left")).to.equal(7);
+    expect(getSkeletonPointNudge(point, "right")).to.equal(0);
+
+    const zeroWidthPoint = makeSkeletonPoint({
+      width: { left: 0, right: 40, linked: false },
+      nudge: { left: 11, right: 13 },
+      editable: { left: true, right: true },
+    });
+    expect(getSkeletonPointNudge(zeroWidthPoint, "left")).to.equal(0);
+    expect(getSkeletonPointNudge(zeroWidthPoint, "right")).to.equal(13);
+  });
+
+  it("builds line and cubic segments between on-curve skeleton points", () => {
+    const points = [
+      makeSkeletonPoint({ id: 1, x: 0, y: 0 }),
+      makeSkeletonPoint({ id: 2, x: 25, y: 50, type: "cubic" }),
+      makeSkeletonPoint({ id: 3, x: 75, y: 50, type: "cubic" }),
+      makeSkeletonPoint({ id: 4, x: 100, y: 0 }),
+    ];
+    const segments = buildSegmentsFromSkeletonPoints(points, false);
+    expect(segments).to.have.length(1);
+    expect(segments[0].startPoint.id).to.equal(1);
+    expect(segments[0].endPoint.id).to.equal(4);
+    expect(segments[0].controlPoints.map((point) => point.id)).to.deep.equal([2, 3]);
+  });
+
+  it("calculates normals and rib endpoints using the donor orientation", () => {
+    const contour = makeSkeletonContour({
+      points: [
+        makeSkeletonPoint({ id: 1, x: 0, y: 0 }),
+        makeSkeletonPoint({ id: 2, x: 100, y: 0 }),
+      ],
+    });
+    const normal = calculateNormalAtSkeletonPoint(contour, 0);
+    expect(normal.x).to.be.closeTo(0, 1e-9);
+    expect(normal.y).to.be.closeTo(-1, 1e-9);
+
+    expect(
+      projectSkeletonRibPoint(contour.points[0], normal, 40, "left")
+    ).to.deep.equal({
+      x: 0,
+      y: -40,
+    });
+    expect(
+      projectSkeletonRibPoint(contour.points[0], normal, 40, "right", 10)
+    ).to.deep.equal({
+      x: 10,
+      y: 40,
     });
   });
 });
