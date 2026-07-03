@@ -102,6 +102,9 @@ export class ShapeToolRect extends BaseTool {
         this.sceneController.selection = selection;
 
         for (const [layerName, layerGlyph] of Object.entries(editLayerGlyphs)) {
+          // appendPath adds the new shape contours at the end of the path, after
+          // any skeleton-generated block; existing generated indices are
+          // unchanged, so no skeleton bookkeeping is required.
           layerGlyph.path.appendPath(pathNew);
         }
         return `add ${this.shapeNames[event.shiftKey ? 1 : 0]}`;

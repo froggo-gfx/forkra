@@ -66,7 +66,10 @@ import * as vector from "@fontra/core/vector.js";
 import { dialog, message } from "@fontra/web-components/modal-dialog.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import { SceneModel } from "./scene-model.js";
-import { makeSkeletonPointTargetEntry } from "./skeleton-editing.js";
+import {
+  makeSkeletonPointTargetEntry,
+  recordSkeletonContourIndexShift,
+} from "./skeleton-editing.js";
 //// grid
 import { toggleMagneticSnap } from "./edit-behavior.js";
 
@@ -1696,6 +1699,8 @@ export class SceneController {
             contour.points.splice(0, 0, lastPoint);
           }
           const packedContour = packContour(contour);
+          // Net-zero contour count (delete + re-insert at same index): generated
+          // contour indices are unaffected, no skeleton bookkeeping needed.
           layerGlyph.path.deleteContour(contourIndex);
           layerGlyph.path.insertContour(contourIndex, packedContour);
         }
@@ -1735,6 +1740,7 @@ export class SceneController {
           const contour = path.getUnpackedContour(contourIndex);
           const head = contour.points.splice(0, contourPointIndex);
           contour.points.push(...head);
+          // Net-zero contour count (delete + re-insert at same index): no shift.
           layerGlyph.path.deleteContour(contourIndex);
           layerGlyph.path.insertContour(contourIndex, packContour(contour));
           newSelection.add(`point/${path.getAbsolutePointIndex(contourIndex, 0)}`);
@@ -1760,6 +1766,9 @@ export class SceneController {
         for (const pointIndex of selectionPointIndices) {
           newSelection.add(`point/${pointIndex}`);
         }
+        // joinContours merges two (user) contours into one, removing one contour
+        // that precedes the generated block; shift generated indices down by 1.
+        recordSkeletonContourIndexShift(layerGlyph, 0, -1);
       }
       this.selection = newSelection;
       return translate("action.join-contours");
@@ -2313,6 +2322,9 @@ export function joinContours(path, firstPointIndex, secondPointIndex) {
     isClosed: false,
   };
 
+  // Bare-path helper: net -1 contour. Skeleton generated-index bookkeeping is
+  // handled by the caller (doJoinSelectedOpenContours) via
+  // recordSkeletonContourIndexShift, where the layer glyph is in scope.
   path.deleteContour(firstContourIndex);
   path.insertUnpackedContour(firstContourIndex, newContour);
   path.deleteContour(secondContourIndex);

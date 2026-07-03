@@ -2216,6 +2216,9 @@ export class EditorController extends ViewController {
               locationStringsBySourceLayerName[layerName]
             ] ||
             defaultPasteGlyph;
+          // Paste appends contours at the end of the path, after any
+          // skeleton-generated block; existing generated indices are unchanged,
+          // so no skeleton bookkeeping is required.
           layerGlyph.path.appendPath(pasteGlyph.path);
           layerGlyph.components.push(...pasteGlyph.components.map(copyComponent));
           layerGlyph.anchors.push(...pasteGlyph.anchors);

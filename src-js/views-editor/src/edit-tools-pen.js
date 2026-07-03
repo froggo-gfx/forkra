@@ -306,13 +306,25 @@ export class PenToolQuad extends PenToolCubic {
         const pt2 = hit.segment.points[1];
         if (event.altKey && event.shiftKey) {
           // For quadratic curves with alt+shift, create two handles like cubic
-          const handle1 = vector.roundVector(vector.interpolateVectors(pt1, pt2, 1 / 3));
-          const handle2 = vector.roundVector(vector.interpolateVectors(pt1, pt2, 2 / 3));
-          return { insertHandles: { points: [handle1, handle2], hit: hit, shiftKey: event.shiftKey } };
+          const handle1 = vector.roundVector(
+            vector.interpolateVectors(pt1, pt2, 1 / 3)
+          );
+          const handle2 = vector.roundVector(
+            vector.interpolateVectors(pt1, pt2, 2 / 3)
+          );
+          return {
+            insertHandles: {
+              points: [handle1, handle2],
+              hit: hit,
+              shiftKey: event.shiftKey,
+            },
+          };
         } else {
           // For quadratic curves with alt, create one handle at the midpoint
           const handle = vector.roundVector(vector.interpolateVectors(pt1, pt2, 0.5));
-          return { insertHandles: { points: [handle], hit: hit, shiftKey: event.shiftKey } };
+          return {
+            insertHandles: { points: [handle], hit: hit, shiftKey: event.shiftKey },
+          };
         }
       } else {
         const targetPoint = { ...hit };
@@ -487,6 +499,11 @@ class PenToolBehavior {
 }
 
 function insertContourAndSetupAnchorPoint(context, path, point, shiftKey) {
+  // A brand-new pen contour is inserted at context.contourIndex (= path end),
+  // i.e. after any skeleton-generated block; existing generated indices are
+  // unaffected. WS-9 limitation: pen contour merges (mergeAppendContours, below)
+  // reduce the contour count on the bare path and do not update generated
+  // indices — see Deviations in the WS-9 plan.
   path.insertContour(context.contourIndex, emptyContour());
   context.anchorIndex = context.contourPointIndex;
 }
@@ -641,6 +658,10 @@ function connectToContour(context, path, point, shiftKey) {
   if (targetContourBefore) {
     deleteIndices.reverse();
   }
+  // WS-9 limitation: merging pen contours changes the contour count on the bare
+  // path (no layer glyph / skeleton data in scope here). Combining live pen
+  // contour merges with an active skeleton can drift generated-contour indices;
+  // documented in the WS-9 plan Deviations rather than recovered geometrically.
   for (const index of deleteIndices) {
     path.deleteContour(index);
   }

@@ -924,6 +924,13 @@ export default class TransformationPanel extends Panel {
       (glyph) => {
         for (const [layerName, layerPath] of Object.entries(layerPaths)) {
           if (doUnion && pointIndices.length) {
+            // Path boolean operations rewrite outline contours wholesale and are
+            // not skeleton-aware: they operate on outline point selections, never
+            // on skeletonPoint selections, so they don't run against generated
+            // contours in the WS-9 flow. Combining a boolean op with an active
+            // skeleton is a documented WS-9 limitation (Deviations): generated
+            // indices are not maintained here and the skeleton should be
+            // regenerated via editSkeleton afterwards.
             const path = glyph.layers[layerName].glyph.path;
             for (const contourIndex of reversed(selectedContourIndices)) {
               path.deleteContour(contourIndex);

@@ -213,6 +213,31 @@ export function toggleSkeletonSmooth(layer, selection, forceValue = null) {
   });
 }
 
+// Shift generated-contour path indices when a non-skeleton structural path edit
+// inserts or deletes contours before the generated block. Keeps
+// skeleton.generated[*].pathContourIndex valid without geometric recovery.
+export function shiftGeneratedContourIndices(skeletonData, startIndex, delta) {
+  for (const entry of skeletonData?.generated || []) {
+    if (entry.pathContourIndex >= startIndex) {
+      entry.pathContourIndex += delta;
+    }
+  }
+}
+
+// Records a generated-contour-index shift on a (proxied) layer glyph so it lands
+// in the surrounding editGlyph change. No-op when the layer has no generated
+// contours. Call after a non-skeleton structural path edit inserts/deletes
+// contours before the generated block.
+export function recordSkeletonContourIndexShift(layerGlyph, startIndex, delta) {
+  const skeletonData = getSkeletonData(layerGlyph);
+  if (!skeletonData?.generated?.length || !delta) {
+    return;
+  }
+  const updated = structuredClone(skeletonData);
+  shiftGeneratedContourIndices(updated, startIndex, delta);
+  setSkeletonData(layerGlyph, updated);
+}
+
 // Bounding box of the selected skeleton points in glyph space, or undefined.
 export function getSkeletonSelectionBounds(layer, selection) {
   const skeletonData = getSkeletonData(layer);
