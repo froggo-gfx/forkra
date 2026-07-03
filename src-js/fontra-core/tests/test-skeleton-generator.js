@@ -61,6 +61,57 @@ describe("skeleton-generator provenance", () => {
   });
 });
 
+describe("skeleton-generator near-zero handle stabilization", () => {
+  it("does not flip near-zero handles across the anchor", () => {
+    const skeleton = {
+      version: 1,
+      nextId: 6,
+      contours: [
+        {
+          id: 1,
+          closed: false,
+          defaultWidth: 80,
+          singleSided: null,
+          points: [
+            {
+              id: 2,
+              x: 0,
+              y: 0,
+              type: null,
+              smooth: false,
+              width: { left: 40, right: 40, linked: true },
+              nudge: { left: 0, right: 0 },
+              editable: { left: false, right: false },
+              handleOffsets: {},
+            },
+            { id: 3, x: 0.00001, y: 0, type: "cubic", smooth: false },
+            { id: 4, x: 120, y: 40, type: "cubic", smooth: false },
+            {
+              id: 5,
+              x: 160,
+              y: 0,
+              type: null,
+              smooth: false,
+              width: { left: 40, right: 40, linked: true },
+              nudge: { left: 0, right: 0 },
+              editable: { left: false, right: false },
+              handleOffsets: {},
+            },
+          ],
+        },
+      ],
+      generated: [],
+    };
+
+    const result = generateFromSkeleton(skeleton);
+    const allPoints = result.contours.flatMap((contour) => contour.points);
+    for (const point of allPoints) {
+      expect(Number.isFinite(point.x)).to.equal(true);
+      expect(Number.isFinite(point.y)).to.equal(true);
+    }
+  });
+});
+
 function roundContours(contours) {
   return contours.map((contour) => ({
     isClosed: contour.isClosed === true,
