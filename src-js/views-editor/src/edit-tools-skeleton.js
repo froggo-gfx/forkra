@@ -14,6 +14,7 @@ import { BaseTool } from "./edit-tools-base.js";
 import {
   editSkeleton,
   getSkeletonPointAddress,
+  hasSkeletonPointSelection,
   makeSkeletonPointKey,
   parseSkeletonPointKey,
   resolveSkeletonAddressAcrossLayers,
@@ -683,6 +684,92 @@ export class SkeletonPenTool extends BaseTool {
           makeSkeletonPointKey(contour.id, handle1.id),
           makeSkeletonPointKey(contour.id, handle2.id),
         ];
+      }
+    );
+  }
+
+  // The delete action is dispatched to the active tool via callDelegateMethod.
+  // Delete selected skeleton points; otherwise fall back to the editor's default
+  // delete (regular points, components, anchors, ...).
+  async doDelete(event) {
+    if (hasSkeletonPointSelection(this.sceneController.selection)) {
+      await this._handleDeleteSkeletonPoints();
+    } else {
+      await this.editor.doDelete(event);
+    }
+  }
+
+  async _handleDeleteSkeletonPoints() {
+    const { skeletonPoint } = parseSelection([...this.sceneController.selection]);
+    const selectedIds = (skeletonPoint || []).map((item) =>
+      parseSkeletonPointKey(item)
+    );
+    if (!selectedIds.length) {
+      return;
+    }
+
+    await this._editSkeletonAcrossLayers(
+      translate("edit-tools-skeleton.undo.delete-point"),
+      (working, referenceSkeletonData) => {
+        const reference = referenceSkeletonData || working;
+        const deleteRefs = new Set();
+        for (const { contourId, pointId } of selectedIds) {
+          const address = resolveSkeletonAddressAcrossLayers(
+            reference,
+            working,
+            contourId,
+            pointId
+          );
+          if (address) {
+            deleteRefs.add(address.point);
+          }
+        }
+        if (!deleteRefs.size) {
+          return null;
+        }
+
+        // Deleting an on-curve point orphans its adjacent off-curve handles;
+        // remove those too so no dangling handles remain.
+        for (const contour of working.contours) {
+          const pts = contour.points;
+          const n = pts.length;
+          for (let i = 0; i < n; i++) {
+            if (pts[i].type || !deleteRefs.has(pts[i])) {
+              continue;
+            }
+            const neighbors = [];
+            if (i > 0) {
+              neighbors.push(pts[i - 1]);
+            } else if (contour.closed) {
+              neighbors.push(pts[n - 1]);
+            }
+            if (i < n - 1) {
+              neighbors.push(pts[i + 1]);
+            } else if (contour.closed) {
+              neighbors.push(pts[0]);
+            }
+            for (const neighbor of neighbors) {
+              if (neighbor.type) {
+                deleteRefs.add(neighbor);
+              }
+            }
+          }
+        }
+
+        for (let ci = working.contours.length - 1; ci >= 0; ci--) {
+          const contour = working.contours[ci];
+          contour.points = contour.points.filter((point) => !deleteRefs.has(point));
+          const onCurveCount = contour.points.filter((point) => !point.type).length;
+          if (onCurveCount === 0) {
+            working.contours.splice(ci, 1);
+          } else if (contour.closed && onCurveCount < 2) {
+            // Too few on-curve points to remain a closed contour: reopen it.
+            contour.closed = false;
+          }
+        }
+
+        // Clear selection (the deleted ids are gone); honored from edit layer.
+        return [];
       }
     );
   }
