@@ -9,6 +9,28 @@ finding depends on was re-verified against the forkra tree on 2026-07-03
 `edit-behavior.js` rules tables, pointer `rollbackChange` usage, tool key dispatch,
 tabler icon assets, donor checkout at `fd76d3abe`).
 
+> **Status update (2026-07-03):** the blocking findings have been fixed in the
+> plan documents themselves — B1 (WS-9 gained Task 0 extending `parseSelection`;
+> `.size`→`.length` usages corrected in WS-9/10), B2 (WS-6 schema now normalizes
+> cap/corner fields, verified against the donor generator's inputs; WS-7
+> conversions pass them through; WS-15 references the canonical names), B3
+> (WS-9's `replaceGeneratedSkeletonContours` rewritten to in-place steady-state
+> updates with stable-position structural fallback), B4 (cross-layer ordinal
+> resolution via `resolveSkeletonAddressAcrossLayers` specified in WS-9 and
+> referenced from WS-10/13/14/15), plus WS-6/1 (nudge test corrected to donor
+> semantics — donor `projectRibPoint` verified identical to the plan's
+> implementation, including the double rounding, so finding WS-6/3 is
+> withdrawn), WS-7/1+2 (import path, `writeFileSync`), WS-9/1 (key parse
+> round-trip), WS-9/2 (rules reuse specified concretely as a synthetic
+> `VarPackedPath` driven through the existing `EditBehaviorFactory`), WS-9/4
+> (signature), WS-11/1+2 (test expectation aligned; measure payload renamed to
+> `sideWidths`), WS-12/1+2 (path indices removed from selection keys;
+> `findGeneratedPathAddress` added; resolver takes the path), WS-15/1+2
+> (schema block keeps `SKELETON`; bone.svg vendoring step added), WS-16/1+2
+> (rib bounds via the shared core forward-projection helper; nested-recorder
+> caution added). **Part 3 (O1–O9) and the Medium finding WS-13/1 remain open
+> by request** — optimizations were explicitly not applied.
+
 Findings are grouped as:
 
 - **Part 1 — Blockers**: cross-cutting defects that make the plans fail as written.

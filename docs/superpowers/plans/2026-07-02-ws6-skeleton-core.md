@@ -157,6 +157,13 @@ git commit -m "feat(skeleton): add fontra internal skeleton section"
   - `normalizeSkeletonData(data)`
   - `normalizeSkeletonContour(contour, skeletonData)`
   - `normalizeSkeletonPoint(point, skeletonData)`
+- Produces canonical cap/corner fields (verified donor generator inputs at
+  `skeleton-contour-generator.js:1118-1129` and the cap builders at `:3249`/`:3328`):
+  - contour: `capStyle` (`"butt" | "round" | "square"`, default `"butt"`),
+    `reversed` (boolean), optional `cornerTrimRatio`, optional `cornerRadiusBoost`
+  - on-curve point: `capStyle` (`null` = inherit contour), optional
+    `capRadiusRatio`, `capTension`, `capAngle`, `capDistance`,
+    `roundnessStrength`, `cornerAsymmetry`
 
 - [ ] **Step 1: Write the failing constructor/normalization tests**
 
@@ -232,6 +239,52 @@ describe("skeleton-model constructors and normalization", () => {
       { skeletonContourId: 10, pathContourIndex: 3, pointMap: [] },
     ]);
   });
+
+  it("preserves cap and corner parameters through normalization", () => {
+    const normalized = normalizeSkeletonData({
+      nextId: 1,
+      contours: [
+        {
+          capStyle: "round",
+          reversed: true,
+          cornerTrimRatio: 0.5,
+          cornerRadiusBoost: 1.5,
+          points: [
+            { x: 0, y: 0, capStyle: "square", capAngle: 30, capDistance: 12 },
+            {
+              x: 10,
+              y: 0,
+              capStyle: "bogus",
+              capRadiusRatio: 0.25,
+              capTension: 0.6,
+              roundnessStrength: 0.8,
+              cornerAsymmetry: -0.2,
+            },
+          ],
+        },
+      ],
+    });
+
+    const contour = normalized.contours[0];
+    expect(contour).to.include({
+      capStyle: "round",
+      reversed: true,
+      cornerTrimRatio: 0.5,
+      cornerRadiusBoost: 1.5,
+    });
+    expect(contour.points[0]).to.include({
+      capStyle: "square",
+      capAngle: 30,
+      capDistance: 12,
+    });
+    expect(contour.points[1].capStyle).to.equal(null);
+    expect(contour.points[1]).to.include({
+      capRadiusRatio: 0.25,
+      capTension: 0.6,
+      roundnessStrength: 0.8,
+      cornerAsymmetry: -0.2,
+    });
+  });
 });
 ```
 
@@ -258,6 +311,16 @@ export const DEFAULT_SKELETON_WIDTH = 80;
 
 const VALID_POINT_TYPES = new Set([null, "cubic"]);
 const VALID_SINGLE_SIDED = new Set([null, "left", "right"]);
+const VALID_CAP_STYLES = new Set(["butt", "round", "square"]);
+// Numeric cap/corner generator inputs, kept sparse: present only when finite.
+const CAP_CORNER_POINT_FIELDS = [
+  "capRadiusRatio",
+  "capTension",
+  "capAngle",
+  "capDistance",
+  "roundnessStrength",
+  "cornerAsymmetry",
+];
 
 export function makeEmptySkeletonData() {
   return {
@@ -330,8 +393,16 @@ export function normalizeSkeletonContour(contour, skeletonData = null, usedIds =
     singleSided: VALID_SINGLE_SIDED.has(contour?.singleSided)
       ? contour.singleSided
       : null,
+    capStyle: VALID_CAP_STYLES.has(contour?.capStyle) ? contour.capStyle : "butt",
+    reversed: contour?.reversed === true,
     points: [],
   };
+  if (Number.isFinite(contour?.cornerTrimRatio)) {
+    normalized.cornerTrimRatio = contour.cornerTrimRatio;
+  }
+  if (Number.isFinite(contour?.cornerRadiusBoost)) {
+    normalized.cornerRadiusBoost = contour.cornerRadiusBoost;
+  }
   for (const point of Array.isArray(contour?.points) ? contour.points : []) {
     normalized.points.push(normalizeSkeletonPoint(point, skeletonData, usedIds));
   }
@@ -353,6 +424,14 @@ export function normalizeSkeletonPoint(point, skeletonData = null, usedIds = nul
     normalized.nudge = normalizeNudge(point?.nudge);
     normalized.editable = normalizeEditable(point?.editable);
     normalized.handleOffsets = normalizeHandleOffsets(point?.handleOffsets);
+    normalized.capStyle = VALID_CAP_STYLES.has(point?.capStyle)
+      ? point.capStyle
+      : null;
+    for (const field of CAP_CORNER_POINT_FIELDS) {
+      if (Number.isFinite(point?.[field])) {
+        normalized[field] = point[field];
+      }
+    }
   }
 
   return normalized;
@@ -740,10 +819,13 @@ describe("skeleton-model geometry helpers", () => {
       x: 0,
       y: -40,
     });
+    // Donor parity: donor projectRibPoint (edit-tools-pointer.js:100) applies the
+    // nudge along tangent = (-normal.y, normal.x) WITHOUT flipping per side, so
+    // for normal (0, -1) the right-side nudge of 10 lands at +10 on x.
     expect(
       projectSkeletonRibPoint(contour.points[0], normal, 40, "right", 10)
     ).to.deep.equal({
-      x: -10,
+      x: 10,
       y: 40,
     });
   });
@@ -1225,6 +1307,7 @@ No `views-editor` files are touched in WS-6, so there is no editor manual test m
 - `FONTRA_INTERNAL_SECTIONS.SKELETON` exists and is `"skeleton"`.
 - `src-js/fontra-core/src/skeleton-model.js` exports schema constructors, normalization, id allocation, accessors/mutators, width/nudge helpers, segment construction, normal calculation, rib projection, and layer persistence helpers.
 - `normalizeSkeletonData()` always returns schema `version: 1`, monotonic `nextId`, normalized contours/points, and copied `generated` metadata.
+- Cap/corner generator inputs survive normalization: contour `capStyle`/`reversed` (plus optional `cornerTrimRatio`/`cornerRadiusBoost`) and on-curve point `capStyle`/`capRadiusRatio`/`capTension`/`capAngle`/`capDistance`/`roundnessStrength`/`cornerAsymmetry` — WS-7's generator conversion and WS-15's panel depend on these fields existing here.
 - All contour/point lookup and mutation helpers operate by stable ids, not path point indices.
 - No generated contour algorithm, editor hit-testing, pointer dispatch, visualization, drawing tool, or parameter panel code is added.
 - No geometric recovery, inverse projection, or tolerance-based generated-to-skeleton lookup is introduced.

@@ -15,9 +15,14 @@
 - **Branch:** implement on `refactor-simple/ws12-skeleton-editable-generated`, cut after WS-11 is merged.
 - **Donor is read-only:** `./skeleton/` stays detached at `fd76d3abe`. Read donor editable-generated handlers for semantics only; never port index routing, direct persistence, or geometric lookup helpers.
 - **One write path:** all mutations call `editSkeleton(layerGlyph, mutate)`. Do not call the generator or write skeleton customData outside WS-9's editing helper.
-- **Selection keys:** use provenance-addressed stable keys:
-  - `editableGeneratedPoint/<contourId>/<pointId>/<side>/<pathContourIndex>/<pathPointIndex>`
-  - `editableGeneratedHandle/<contourId>/<pointId>/<side>/<role>/<pathContourIndex>/<pathPointIndex>`
+- **Selection keys carry skeleton-space identity only (C3):**
+  - `editableGeneratedPoint/<contourId>/<pointId>/<side>`
+  - `editableGeneratedHandle/<contourId>/<pointId>/<side>/<role>`
+  Path addresses (`pathContourIndex`/`pathPointIndex`) are **never** part of a
+  selection key — they change on regeneration. The current path address is a
+  lookup through `skeletonData.generated[*].pointMap` at use time (hit result,
+  drag-start geometry), so selection stays valid across regeneration by
+  construction.
 - **No geometric recovery:** do not port donor `_getEditableRibPointForGeneratedPoint()`, `_getEditableHandleForGeneratedPoint()`, `_findHandlesForRibPointFromSkeleton()`, or any `pointIndexNearPoint()` source recovery.
 - **Canonical schema only:** editable flags are `point.editable.left/right`; handle offsets are `point.handleOffsets.leftIn/leftOut/rightIn/rightOut = { x, y, detached }`. Do not write donor flat fields such as `leftHandleInOffsetX`.
 - **Scope:** WS-12 includes editable generated on-curve points, generated handles, detached handle mode, arrow-key nudge for generated handles, and visual/selection integration. D fixed-rib, S fixed-rib-compress, X equalize, skeleton Tunni, source defaults, and the parameters panel remain later workstreams.
@@ -133,16 +138,23 @@ git commit -m "feat(skeleton): add editable handle offset helpers"
 
 **Interfaces:**
 - Produces:
-  - `makeEditableGeneratedPointKey(contourId, pointId, side, pathContourIndex, pathPointIndex)`
+  - `makeEditableGeneratedPointKey(contourId, pointId, side)`
   - `parseEditableGeneratedPointKey(key)`
-  - `makeEditableGeneratedHandleKey(contourId, pointId, side, role, pathContourIndex, pathPointIndex)`
+  - `makeEditableGeneratedHandleKey(contourId, pointId, side, role)`
   - `parseEditableGeneratedHandleKey(key)`
-  - `resolveGeneratedPointProvenance(skeletonData, pathPointIndex)`
-  - `resolveEditableGeneratedTarget(skeletonData, pathPointIndex)`
+  - `resolveGeneratedPointProvenance(skeletonData, path, pathPointIndex)`
+  - `resolveEditableGeneratedTarget(skeletonData, path, pathPointIndex)`
+  - `findGeneratedPathAddress(skeletonData, contourId, pointId, side, role) -> { pathContourIndex, pathPointIndex } | null`
+    — the forward lookup (skeleton-space key → current path address) used by
+    rendering, drag-start geometry, and bounds
 
 - [ ] **Step 1: Implement strict key parsing**
 
-Keys must include stable skeleton ids and the current generated path address. The path address is not identity; it is only a fast way to fetch visible geometry for the current edit frame.
+Keys carry stable skeleton ids only (see Global Constraints). The current path
+address is resolved from `generated[*].pointMap` when needed
+(`findGeneratedPathAddress()`), never stored in the key. The parsers accept
+both the full key and the `parseSelection` remainder, like WS-9's
+`parseSkeletonPointKey`.
 
 Reject:
 
@@ -151,12 +163,15 @@ donor index keys
 missing side/role
 role not in onCurve/in/out
 side not left/right
-non-numeric ids/indices
+non-numeric ids
 ```
 
 - [ ] **Step 2: Implement provenance resolver**
 
-`resolveGeneratedPointProvenance()` walks `skeletonData.generated` and compares `pathContourIndex` plus contour-local point offset to find the matching `pointMap` entry. It returns:
+`resolveGeneratedPointProvenance()` converts the global `pathPointIndex` into a
+`(pathContourIndex, contour-local offset)` pair using the supplied `path`, then
+walks `skeletonData.generated` comparing `pathContourIndex` plus the
+contour-local offset to find the matching `pointMap` entry. It returns:
 
 ```javascript
 {
@@ -274,12 +289,13 @@ For each selected `editableGeneratedPoint` key:
 resolve contourId/pointId/side by stable id
 verify point.editable[side] remains true
 construct the same executor target WS-11 uses for skeletonRib
-include pathPointIndex only for interpolation-axis lookup on the current path
+resolve the current path address via findGeneratedPathAddress() when the
+  interpolation axis needs current generated geometry
 ```
 
 - [ ] **Step 2: Preserve Alt and Z behavior**
 
-Alt interpolation and Z tangent use the same behavior-name mechanism from WS-11. For interpolation, use the current generated path point address in the selection key to inspect adjacent generated handles. If the address is stale after regeneration, fall back to non-interpolating rib behavior for that frame.
+Alt interpolation and Z tangent use the same behavior-name mechanism from WS-11. For interpolation, resolve the generated path address per frame with `findGeneratedPathAddress()` (keys carry no path address). If it cannot resolve for a frame, fall back to non-interpolating rib behavior for that frame.
 
 - [ ] **Step 3: Pointer dispatch**
 
@@ -510,9 +526,9 @@ Run forkra and donor `fd76d3abe` side by side with the WS-8 fixture and a WS-10-
 
 ```text
 hit testing:
-  editable generated on-curve point -> selection key editableGeneratedPoint/...
-  editable generated in handle -> selection key editableGeneratedHandle/.../in/...
-  editable generated out handle -> selection key editableGeneratedHandle/.../out/...
+  editable generated on-curve point -> selection key editableGeneratedPoint/<cId>/<pId>/<side>
+  editable generated in handle -> selection key editableGeneratedHandle/<cId>/<pId>/<side>/in
+  editable generated out handle -> selection key editableGeneratedHandle/<cId>/<pId>/<side>/out
   non-editable generated point -> falls through to ordinary path selection or no skeleton edit
   stale provenance entry -> no editable generated target, no crash
 

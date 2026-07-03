@@ -166,8 +166,9 @@ git commit -m "feat(skeleton): pure translate/transform/id-allocation helpers"
 - Modify: `src-js/fontra-core/tests/test-skeleton-model.js` (or a bounds test file if one exists)
 
 **Interfaces:**
-- Consumes: `getSkeletonData(this.instance)`, WS-11 `parseSkeletonRibKey`, WS-12 `parseEditableGeneratedKey`, WS-7 provenance lookups.
+- Consumes: `getSkeletonData(this.instance)`, WS-11 `parseSkeletonRibKey`, WS-12 `parseEditableGeneratedKey`, WS-7 provenance lookups, and the shared **core** rib-position helper (WS-11's `getSkeletonRibPosition` — the C4 gizmo's forward projection).
 - Produces: `getSelectionBounds` returns a rect that includes selected `skeletonPoint`, `skeletonRib`, and editable-generated addresses.
+- Scope note on C3: what C3 forbids is **inverse** recovery (mapping generated geometry back to sources by coordinates). Forward projection from source data is the *definition* of the rib gizmo's position (C4) and must come from the single shared helper — a rib endpoint is not guaranteed to have a generated on-curve twin (caps, single-sided contours), so a provenance-only lookup is not a substitute.
 
 - [ ] **Step 0: Verify selection kinds + provenance readers**
 
@@ -185,7 +186,7 @@ Given a fixture skeleton with known point coordinates, assert:
 ```text
 selection {skeletonPoint/<cId>/<pId>} → bounds is the point's coordinate rect
 selection of two skeleton points → union rect
-selection {skeletonRib/<cId>/<pId>/left} → rib endpoint coordinate rect (from generated provenance, not projection)
+selection {skeletonRib/<cId>/<pId>/left} → rib endpoint coordinate rect (from the shared core rib-position helper — same numbers WS-11 hit-testing and WS-8 rendering use)
 mixed {point/0, skeletonPoint/<cId>/<pId>} → union of path point and skeleton point
 ```
 
@@ -199,13 +200,24 @@ Extend the `parseSelection` destructure with `skeletonPoint`, `skeletonRib`, and
 
 ```text
 skeletonPoint/<cId>/<pId> -> skeletonPointById() -> centeredRect(x, y, 0)
-skeletonRib/<cId>/<pId>/<side> -> resolve the rib endpoint via WS-7 provenance
-                                  (map skeleton point id+side+role "onCurve" to a generated path point index,
-                                   read that path point's coord) -> centeredRect(x, y, 0)
-editableGenerated... -> resolve via WS-12 provenance helper to a generated path point coord
+skeletonRib/<cId>/<pId>/<side> -> the shared core rib-position helper
+                                  (getSkeletonRibPosition — forward projection
+                                   from skeleton data, the same single source
+                                   WS-8 rendering and WS-11 hit-testing use)
+                                  -> centeredRect(x, y, 0)
+editableGenerated... -> resolve via WS-12 provenance helper
+                        (findGeneratedPathAddress) to a generated path point coord
 ```
 
-Resolution is **always** a provenance-map/model lookup (C3). Never re-derive the rib endpoint by projecting the skeleton point. If `getSkeletonData(this.instance)` is null, the skeleton keys contribute nothing (defensive, matches empty selection behavior).
+Skeleton-point and editable-generated resolution is a model/provenance lookup
+(C3); the rib endpoint comes from the one shared forward-projection helper (C4)
+— never from a second local projection and never from tolerance-based inverse
+matching. If WS-11 left `getSkeletonRibPosition` in `views-editor`, move it to
+`skeleton-model.js` (core) in this task — `glyph-controller.js` is core and
+must not import from `views-editor` — and update WS-11's call sites to the
+core import in the same commit. If `getSkeletonData(this.instance)` is null,
+the skeleton keys contribute nothing (defensive, matches empty selection
+behavior).
 
 - [ ] **Step 4: Run and commit**
 
@@ -355,6 +367,16 @@ rg -n "export function editSkeleton|editSkeleton\\(" src-js/views-editor/src/ske
 ```
 
 Determine whether `editSkeleton(layerGlyph, mutate)` mutates in place (usable inside the existing `editGlyphAndRecordChanges` callback at line ~517) or returns a `ChangeCollector` (needs merging). Adapt Step 1 accordingly.
+
+Nested-recorder caution: inside `editGlyphAndRecordChanges` the `layerGlyph`
+is already a `recordChanges` proxy, and `editSkeleton` wraps its argument in a
+second `recordChanges` proxy. Writes through the inner proxy do reach the outer
+recorder (verified against `change-recorder.js`: the inner proxy's target *is*
+the outer proxy, so the outer collector records every mutation), but the inner
+collector's result is discarded. Verify this explicitly with a quick undo test
+at implementation time; if anything is off, call `editSkeleton` on the **raw**
+layer glyph outside the recording callback and merge the returned
+`ChangeCollector` instead — never let a skeleton edit go unrecorded.
 
 - [ ] **Step 1: Re-add the skeleton branch (redesigned)**
 

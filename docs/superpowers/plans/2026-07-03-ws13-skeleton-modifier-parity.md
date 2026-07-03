@@ -620,8 +620,10 @@ mixed selections:
 
 state:
   generated contours update live
-  multi-layer editing applies modifier behavior to every editable layer with matching stable ids
-  missing ids in one layer are skipped without blocking other layers
+  multi-layer editing resolves the edit layer's selection ids into other layers
+    via WS-9's resolveSkeletonAddressAcrossLayers (structural ordinal, not
+    matching ids)
+  layers whose structure cannot resolve are skipped without blocking other layers
 ```
 
 - [ ] **Step 4: Final formatting and commit if needed**

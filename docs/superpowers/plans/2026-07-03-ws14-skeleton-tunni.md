@@ -628,7 +628,9 @@ Use:
 ```text
 a WS-10-created open skeleton contour with one cubic segment
 a closed skeleton contour with one wraparound cubic segment
-a multi-layer glyph where both editable layers have matching skeleton ids
+a multi-layer glyph where both editable layers have structurally parallel
+  skeletons (segment resolution across layers goes through WS-9's ordinal
+  resolution — ids are per-layer and need not match)
 a layer mismatch case where one editable layer lacks the target segment
 a glyph with both regular path cubic contours and skeleton-generated contours
 ```

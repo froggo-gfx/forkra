@@ -80,7 +80,9 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { generateContoursFromSkeleton as generateDonorContours } from "../../../../../skeleton/src-js/fontra-core/src/skeleton-contour-generator.js";
+// Four levels up from tests/scripts/ reaches the repo root; the donor checkout
+// lives at <repo>/skeleton.
+import { generateContoursFromSkeleton as generateDonorContours } from "../../../../skeleton/src-js/fontra-core/src/skeleton-contour-generator.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -240,7 +242,7 @@ for (const fixture of fixtures) {
 }
 
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-fs.writeFileSync(`${outputPath}\n`.trim(), `${JSON.stringify(fixtures, null, 2)}\n`);
+fs.writeFileSync(outputPath, `${JSON.stringify(fixtures, null, 2)}\n`);
 
 function point(id, x, y, extra = {}) {
   return {
@@ -261,6 +263,16 @@ function offCurve(id, x, y) {
   return { id, x, y, type: "cubic", smooth: false };
 }
 
+const CAP_CORNER_POINT_FIELDS = [
+  "capStyle",
+  "capRadiusRatio",
+  "capTension",
+  "capAngle",
+  "capDistance",
+  "roundnessStrength",
+  "cornerAsymmetry",
+];
+
 function canonicalToDonor(skeletonData) {
   return {
     contours: skeletonData.contours.map((contour) => ({
@@ -268,7 +280,10 @@ function canonicalToDonor(skeletonData) {
       defaultWidth: contour.defaultWidth,
       singleSided: contour.singleSided !== null,
       singleSidedDirection: contour.singleSided || "left",
-      capStyle: "butt",
+      capStyle: contour.capStyle || "butt",
+      reversed: contour.reversed === true,
+      cornerTrimRatio: contour.cornerTrimRatio,
+      cornerRadiusBoost: contour.cornerRadiusBoost,
       points: contour.points.map(canonicalPointToDonor),
     })),
   };
@@ -291,8 +306,10 @@ function canonicalPointToDonor(point) {
   donorPoint.rightNudge = point.nudge?.right ?? 0;
   donorPoint.leftEditable = point.editable?.left === true;
   donorPoint.rightEditable = point.editable?.right === true;
-  if (point.capStyle) {
-    donorPoint.capStyle = point.capStyle;
+  for (const field of CAP_CORNER_POINT_FIELDS) {
+    if (point[field] !== null && point[field] !== undefined) {
+      donorPoint[field] = point[field];
+    }
   }
 
   copyHandleOffsetsToDonor(donorPoint, "left", point.handleOffsets?.leftIn, "In");
@@ -538,6 +555,16 @@ Then rename the donor `export function generateContoursFromSkeleton(skeletonData
 Add:
 
 ```javascript
+const CAP_CORNER_POINT_FIELDS = [
+  "capStyle",
+  "capRadiusRatio",
+  "capTension",
+  "capAngle",
+  "capDistance",
+  "roundnessStrength",
+  "cornerAsymmetry",
+];
+
 function canonicalToGeneratorInput(skeletonData) {
   return {
     contours: skeletonData.contours.map((contour) => ({
@@ -548,6 +575,9 @@ function canonicalToGeneratorInput(skeletonData) {
       singleSidedDirection: contour.singleSided || "left",
       capStyle: contour.capStyle || "butt",
       reversed: contour.reversed === true,
+      // undefined falls back to the generator's destructuring defaults
+      cornerTrimRatio: contour.cornerTrimRatio,
+      cornerRadiusBoost: contour.cornerRadiusBoost,
       points: contour.points.map(canonicalPointToGeneratorPoint),
     })),
   };
@@ -571,6 +601,11 @@ function canonicalPointToGeneratorPoint(point) {
   generatorPoint.rightNudge = point.nudge?.right ?? 0;
   generatorPoint.leftEditable = point.editable?.left === true;
   generatorPoint.rightEditable = point.editable?.right === true;
+  for (const field of CAP_CORNER_POINT_FIELDS) {
+    if (point[field] !== null && point[field] !== undefined) {
+      generatorPoint[field] = point[field];
+    }
+  }
   copyHandleOffsetsToGenerator(generatorPoint, "left", point.handleOffsets?.leftIn, "In");
   copyHandleOffsetsToGenerator(generatorPoint, "left", point.handleOffsets?.leftOut, "Out");
   copyHandleOffsetsToGenerator(generatorPoint, "right", point.handleOffsets?.rightIn, "In");

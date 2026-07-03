@@ -97,7 +97,11 @@ unlinked asymmetric point:
   setting left changes left only and keeps linked false
 
 missing point width:
-  setting right initializes canonical width object from contour.defaultWidth / 2
+  setting right initializes the canonical width object from
+  DEFAULT_SKELETON_WIDTH / 2 (WS-6 normalization materializes point widths from
+  the global constant; whether contour.defaultWidth should be the fallback
+  instead is an open schema decision — see docs/PLANS-OPTIMISATION.md O5 — and
+  must not be silently decided here)
 
 single-sided contour:
   getSkeletonRibSidesForPoint(contour, point) returns only contour.singleSided
@@ -490,11 +494,10 @@ git commit -m "feat(skeleton): nudge rib endpoints"
 
 ```javascript
 {
-  p1: { x, y },          // center skeleton point
-  p2: { x, y },          // rib endpoint
+  p1: { x, y },            // center skeleton point
+  p2: { x, y },            // rib endpoint
   width,
-  leftWidth,
-  rightWidth,
+  sideWidths: { left, right },
   side,
   type: "skeletonRib"
 }
@@ -511,12 +514,14 @@ Resolve the rib address from skeleton data and compute:
 ```text
 width = left + right for normal contours
 width = total projected width for single-sided contours
-leftWidth / rightWidth = canonical per-side half-widths
+sideWidths.left / sideWidths.right = canonical per-side half-widths
 p1 = skeleton point
 p2 = rib endpoint
 ```
 
-Do not add donor `leftWidth` fields to skeleton data; these names exist only in the measure payload.
+Do not use donor `leftWidth`/`rightWidth` names anywhere — not even in the
+measure payload. The payload uses `sideWidths` so Task 9's repo-wide rail grep
+for donor flat fields stays clean.
 
 - [ ] **Step 3: Draw using existing measure overlay where possible**
 

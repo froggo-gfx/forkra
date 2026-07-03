@@ -257,6 +257,7 @@ import {
   getSkeletonPointAddress,
   makeSkeletonPointKey,
   parseSkeletonPointKey,
+  resolveSkeletonAddressAcrossLayers,
 } from "./skeleton-editing.js";
 ```
 
@@ -308,27 +309,35 @@ git commit -m "feat(skeleton): add drawing tool data helpers"
 Add:
 
 ```javascript
-_getSelectedOpenEndpoint(skeletonData) {
-  const { skeletonPoint } = parseSelection(this.sceneController.selection);
-  if (!skeletonPoint || skeletonPoint.size !== 1) return null;
-  const { contourId, pointId } = parseSkeletonPointKey([...skeletonPoint][0]);
-  const address = getSkeletonPointAddress(skeletonData, contourId, pointId);
+// referenceSkeletonData is the EDIT layer's skeleton; selection ids are
+// canonical there and resolve into this layer by structural ordinal (WS-9
+// cross-layer addressing). parseSelection returns arrays (WS-9 Task 0).
+_getSelectedOpenEndpoint(skeletonData, referenceSkeletonData) {
+  const { skeletonPoint } = parseSelection([...this.sceneController.selection]);
+  if (!skeletonPoint || skeletonPoint.length !== 1) return null;
+  const { contourId, pointId } = parseSkeletonPointKey(skeletonPoint[0]);
+  const address = resolveSkeletonAddressAcrossLayers(
+    referenceSkeletonData || skeletonData,
+    skeletonData,
+    contourId,
+    pointId
+  );
   if (!address || address.contour.closed || address.point.type) return null;
   const onCurves = address.contour.points.filter((point) => !point.type);
   if (onCurves.length < 1) return null;
-  if (onCurves[0].id === pointId) return { ...address, appendMode: "prepend" };
-  if (onCurves.at(-1).id === pointId) return { ...address, appendMode: "append" };
+  if (onCurves[0].id === address.point.id) return { ...address, appendMode: "prepend" };
+  if (onCurves.at(-1).id === address.point.id) return { ...address, appendMode: "append" };
   return null;
 }
 ```
 
 - [ ] **Step 2: Implement `_handleAddSkeletonPoint()`**
 
-Inside `sceneController.editGlyph()`, loop over `sceneController.getEditingLayerFromGlyphLayers(glyph.layers)`. For each `layerGlyph`:
+Inside `sceneController.editGlyph()`, loop over `sceneController.getEditingLayerFromGlyphLayers(glyph.layers)`. Before the loop, read the edit layer's skeleton once as `referenceSkeletonData` (ids in the selection are canonical only there — WS-9 cross-layer addressing). For each `layerGlyph`:
 
 ```javascript
 const changes = editSkeleton(layerGlyph, (skeletonData) => {
-  const endpoint = this._getSelectedOpenEndpoint(skeletonData);
+  const endpoint = this._getSelectedOpenEndpoint(skeletonData, referenceSkeletonData);
   const pointData = { x: Math.round(glyphPoint.x), y: Math.round(glyphPoint.y), type: null, smooth: false };
   if (endpoint) {
     const point = makeSkeletonPoint(pointData, skeletonData);

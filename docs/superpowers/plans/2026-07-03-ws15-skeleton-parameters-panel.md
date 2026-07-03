@@ -27,7 +27,7 @@
 
 - Donor checkout verified at `fd76d3abe66f5ea64ebde8fc245ef596b9270f5b`.
 - Roadmap WS-15 requires: "Skeleton parameters panel + source defaults", rewritten to write only through `editSkeleton` and `skeleton-model.js` accessors, with full numeric-editing parity.
-- Current forkra has no `panel-skeleton-parameters.js` and no skeleton defaults section in `src-js/fontra-core/src/fontra-internal-schema.js`; only `LETTERSPACER` exists.
+- Current forkra has no `panel-skeleton-parameters.js` and no skeleton-defaults section in `src-js/fontra-core/src/fontra-internal-schema.js`. (As of the 2026-07-03 planning tree only `LETTERSPACER` exists; by implementation time WS-6 will have added `SKELETON` — verify with a grep and keep both when adding `SKELETON_DEFAULTS`.)
 - Existing panel patterns:
   - `panel-letterspacer.js` shows `fontra.internal` source/glyph persistence with `recordChanges()` and `fontController.postChange()`.
   - `panel-glyph-note.js` shows glyph customData editing through scene-controller helpers.
@@ -66,6 +66,9 @@ src-js/views-editor/src/
 
 src-js/fontra-core/assets/lang/
   en.js                                  [MODIFY] sidebar and panel labels
+
+src-js/fontra-core/assets/tabler-icons/
+  bone.svg                               [CREATE] panel icon (absent from forkra AND the donor — verified 2026-07-03)
 ```
 
 If WS-11/12/13 already created helper modules that own some panel edit operations, reuse those files and keep `skeleton-panel-edits.js` as a thin coordinator instead of duplicating executor logic.
@@ -119,11 +122,14 @@ Expected: fail because `skeleton-source-defaults.js` does not exist.
 
 - [ ] **Step 3: Add `SKELETON_DEFAULTS` section**
 
-In `fontra-internal-schema.js`:
+In `fontra-internal-schema.js`, **add** the new key to the existing object.
+WS-6 added `SKELETON: "skeleton"`; it must be preserved — replacing the object
+without it would break all skeleton persistence:
 
 ```javascript
 export const FONTRA_INTERNAL_SECTIONS = Object.freeze({
   LETTERSPACER: "letterspacer",
+  SKELETON: "skeleton",
   SKELETON_DEFAULTS: "skeletonDefaults",
 });
 ```
@@ -402,15 +408,18 @@ Changing contour single-sided/default width must regenerate outlines through `ed
 
 - [ ] **Step 4: Implement cap and corner operations**
 
-Use donor numeric ranges but canonical fields:
+Use donor numeric ranges with the canonical WS-6 field names (these exist in
+the schema — WS-6 normalizes them; verified against the donor generator inputs
+at `skeleton-contour-generator.js:1118-1129`):
 
 ```text
-round cap: capRadiusRatio, capTension
-square cap: capAngle, capDistance
-corner: roundnessStrength, cornerAsymmetry, cornerTrimRatioDebug, cornerRadiusBoostDebug
+round cap:  point.capStyle = "round" with point.capRadiusRatio, point.capTension
+square cap: point.capStyle = "square" with point.capAngle, point.capDistance
+corner:     point.roundnessStrength, point.cornerAsymmetry
+debug:      contour.cornerTrimRatio, contour.cornerRadiusBoost
+            (the donor panel's "…DebugPercent" sliders write these contour-level
+             generator inputs)
 ```
-
-If WS-6 named these fields differently, use the WS-6 names and document the donor mapping in the helper comments.
 
 - [ ] **Step 5: Implement rib/editable-generated handle operations**
 
@@ -451,7 +460,14 @@ git commit -m "feat(skeleton): add panel edit operations"
 - Icon: `/tabler-icons/bone.svg`
 - Custom element: `panel-skeleton-parameters`
 
-- [ ] **Step 1: Add panel registration**
+- [ ] **Step 1: Vendor the panel icon, then add panel registration**
+
+`/tabler-icons/bone.svg` exists in neither forkra nor the donor assets
+(verified 2026-07-03). Vendor the official Tabler outline `bone` icon into
+`src-js/fontra-core/assets/tabler-icons/bone.svg`, matching the stroke
+conventions of the neighboring icons in that directory. If the official SVG is
+unavailable offline, pick an existing icon from that directory instead and
+record the substitution under Deviations — do not ship a broken icon path.
 
 In `editor.js`, import and add the panel to the right sidebar after `TransformationPanel` or beside `SelectionInfoPanel`:
 
@@ -728,16 +744,18 @@ profile dropdown from capProfiles.square
 
 - [ ] **Step 4: Add corner controls**
 
-For applicable skeleton corner selections:
+For applicable skeleton corner selections (canonical WS-6 fields):
 
 ```text
-roundness slider 0..1
-asymmetry slider -1..1
-corner trim ratio debug slider 0.05..0.99
-corner radius boost debug slider 0.1..4
+roundness slider 0..1            -> point.roundnessStrength
+asymmetry slider -1..1           -> point.cornerAsymmetry
+corner trim ratio debug 0.05..0.99  -> contour.cornerTrimRatio
+corner radius boost debug 0.1..4    -> contour.cornerRadiusBoost
 ```
 
-If the current schema dropped donor debug fields, show only fields the generator consumes and list the debug fields as explicit deviations.
+The two debug sliders write contour-level generator inputs (donor
+`generateOutlineFromSkeletonContour` destructures them from the contour), so
+they apply to the whole selected contour, not per point.
 
 - [ ] **Step 5: Route every edit through panel edit helpers**
 
@@ -987,8 +1005,9 @@ ribs and handles:
   in/out length and angle fields update selected handles
 
 state:
-  all skeleton edits update every editable layer with matching stable ids
-  layers missing a selected id are skipped without blocking others
+  all skeleton edits resolve the edit layer's selection ids into other layers
+    via WS-9's resolveSkeletonAddressAcrossLayers (structural ordinal)
+  layers whose structure cannot resolve are skipped without blocking others
   undo/redo restores skeleton data and generated outlines
   reload preserves source defaults and skeleton edits
 ```
@@ -1016,7 +1035,7 @@ git commit -m "fix(skeleton): complete parameters panel checks"
 - Donor generated-path handle matching is not ported; editable-generated handle operations use WS-7/12 provenance helpers.
 - Donor flat fields are mapped to canonical schema fields from WS-6/11/12.
 - Transformation buttons may be displayed only if earlier workstreams already implemented the corresponding actions; transformation parity itself remains WS-16.
-- If donor debug corner fields are not present in the landed WS-6/7 generator schema, omit them and list that as an implementation note instead of adding unused data.
+- Donor debug corner fields land as canonical contour-level fields (`cornerTrimRatio`, `cornerRadiusBoost`) per WS-6's schema; the donor's `…DebugPercent` UI keys are not reused.
 
 ---
 
@@ -1029,7 +1048,7 @@ git commit -m "fix(skeleton): complete parameters panel checks"
 - Cap and corner numeric settings are editable through the panel where the canonical schema supports them.
 - Rib/editable-generated handle settings, reset buttons, detach/attach, and numeric handle controls are available with donor parity.
 - All skeleton data changes go through `editSkeleton`; source default changes go through `fontController.postChange()`.
-- Multi-layer editing applies panel skeleton edits to every editable layer with matching stable ids and skips missing ids safely.
+- Multi-layer editing applies panel skeleton edits to every editable layer through WS-9's cross-layer ordinal resolution and skips structurally incompatible layers safely.
 - Regular non-skeleton panel behavior and WS-14 Tunni remain unaffected.
 - Automated checks and `npm run bundle` pass.
 - Rail greps show no donor flat fields, no direct skeleton persistence in panel files, no generated geometry recovery, and no index-based selection keys.
