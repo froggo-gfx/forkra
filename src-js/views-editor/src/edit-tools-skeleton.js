@@ -11,6 +11,7 @@ import { parseSelection } from "@fontra/core/utils.ts";
 import { BaseTool } from "./edit-tools-base.js";
 import {
   editSkeleton,
+  getSkeletonPointAddress,
   makeSkeletonPointKey,
   parseSkeletonPointKey,
   resolveSkeletonAddressAcrossLayers,
@@ -79,8 +80,14 @@ export class SkeletonPenTool extends BaseTool {
 
     const skeletonHit = this._hitTestSkeletonPoint(initialEvent);
     if (skeletonHit) {
+      const closeTarget = this._getCloseTarget(skeletonHit);
+      if (closeTarget) {
+        await this._handleCloseSkeletonContour(closeTarget);
+        eventStream.done();
+        return;
+      }
       // Clicking an existing skeleton point selects it (dragging is handled by
-      // the pointer tool's skeleton behavior). Closing is added in a later task.
+      // the pointer tool's skeleton behavior).
       this.sceneController.selection = new Set([
         makeSkeletonPointKey(skeletonHit.contourId, skeletonHit.pointId),
       ]);
@@ -206,6 +213,68 @@ export class SkeletonPenTool extends BaseTool {
     for await (const event of eventStream) {
       // consume
     }
+  }
+
+  // If the click hits the opposite endpoint of the same open contour whose
+  // endpoint is currently selected, return the close target (edit-layer
+  // canonical ids); otherwise null. Uses edit-layer skeleton data.
+  _getCloseTarget(skeletonHit) {
+    const skeletonData = this._getEditLayerSkeletonData();
+    if (!skeletonData) {
+      return null;
+    }
+    const { skeletonPoint } = parseSelection([...this.sceneController.selection]);
+    if (!skeletonPoint || skeletonPoint.length !== 1) {
+      return null;
+    }
+    const selected = parseSkeletonPointKey(skeletonPoint[0]);
+    if (selected.contourId !== skeletonHit.contourId) {
+      return null;
+    }
+    const address = getSkeletonPointAddress(
+      skeletonData,
+      skeletonHit.contourId,
+      skeletonHit.pointId
+    );
+    if (!address || address.contour.closed) {
+      return null;
+    }
+    const onCurves = address.contour.points.filter((point) => !point.type);
+    if (onCurves.length < 2) {
+      return null;
+    }
+    const firstId = onCurves[0].id;
+    const lastId = onCurves.at(-1).id;
+    const clickedId = skeletonHit.pointId;
+    const selectedId = selected.pointId;
+    const opposite =
+      (selectedId === lastId && clickedId === firstId) ||
+      (selectedId === firstId && clickedId === lastId);
+    if (!opposite) {
+      return null;
+    }
+    return { contourId: skeletonHit.contourId, clickedPointId: clickedId };
+  }
+
+  async _handleCloseSkeletonContour(closeTarget) {
+    await this._editSkeletonAcrossLayers(
+      translate("edit-tools-skeleton.undo.close-contour"),
+      (working, referenceSkeletonData) => {
+        const address = resolveSkeletonAddressAcrossLayers(
+          referenceSkeletonData || working,
+          working,
+          closeTarget.contourId,
+          closeTarget.clickedPointId
+        );
+        if (!address) {
+          return null;
+        }
+        address.contour.closed = true;
+        return [
+          makeSkeletonPointKey(closeTarget.contourId, closeTarget.clickedPointId),
+        ];
+      }
+    );
   }
 
   deactivate() {
