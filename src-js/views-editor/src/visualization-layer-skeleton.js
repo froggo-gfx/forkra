@@ -338,6 +338,32 @@ registerVisualizationLayerDefinition({
 });
 
 registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.insert-handles-preview",
+  name: "Skeleton insert handles preview",
+  selectionFunc: glyphSelector("editing"),
+  zIndex: 565,
+  screenParameters: {
+    nodeSize: 5,
+  },
+  colors: {
+    fillColor: "rgba(34, 121, 210, 0.6)",
+  },
+  colorsDarkMode: {
+    fillColor: "rgba(95, 178, 255, 0.7)",
+  },
+  draw: (context, positionedGlyph, parameters, model) => {
+    const preview = model.skeletonInsertHandles;
+    if (!preview?.points?.length) {
+      return;
+    }
+    context.fillStyle = parameters.fillColor;
+    for (const point of preview.points) {
+      fillRoundNode(context, point, parameters.nodeSize);
+    }
+  },
+});
+
+registerVisualizationLayerDefinition({
   identifier: "fontra.skeleton.editable-markers",
   name: "Skeleton editable markers",
   selectionFunc: glyphSelector("editing"),
