@@ -1,10 +1,16 @@
 import {
   DEFAULT_SKELETON_WIDTH,
   SKELETON_SCHEMA_VERSION,
+  appendSkeletonContour,
+  appendSkeletonPoint,
+  deleteSkeletonPoint,
+  getSkeletonContour,
+  getSkeletonPoint,
   makeEmptySkeletonData,
   makeSkeletonContour,
   makeSkeletonPoint,
   normalizeSkeletonData,
+  updateSkeletonPoint,
 } from "@fontra/core/skeleton-model.js";
 import { expect } from "chai";
 
@@ -112,5 +118,48 @@ describe("skeleton-model constructors and normalization", () => {
       roundnessStrength: 0.8,
       cornerAsymmetry: -0.2,
     });
+  });
+});
+
+describe("skeleton-model id accessors and mutators", () => {
+  it("appends contours and points using stable ids", () => {
+    const skeleton = makeEmptySkeletonData();
+    const contour = appendSkeletonContour(skeleton, { closed: true });
+    const p0 = appendSkeletonPoint(skeleton, contour.id, { x: 100, y: 200 });
+    const p1 = appendSkeletonPoint(skeleton, contour.id, { x: 150, y: 250 });
+
+    expect(getSkeletonContour(skeleton, contour.id)).to.equal(contour);
+    expect(getSkeletonPoint(skeleton, contour.id, p0.id)).to.equal(p0);
+    expect(getSkeletonPoint(skeleton, contour.id, p1.id)).to.equal(p1);
+    expect(skeleton.nextId).to.equal(4);
+  });
+
+  it("updates a point by id and keeps canonical point shape", () => {
+    const skeleton = makeEmptySkeletonData();
+    const contour = appendSkeletonContour(skeleton);
+    const point = appendSkeletonPoint(skeleton, contour.id, { x: 10, y: 20 });
+
+    const updated = updateSkeletonPoint(skeleton, contour.id, point.id, {
+      x: Number.NaN,
+      y: 35,
+      type: "bogus",
+      width: { left: 14, right: 18, linked: false },
+    });
+
+    expect(updated).to.equal(getSkeletonPoint(skeleton, contour.id, point.id));
+    expect(updated).to.include({ id: point.id, x: 0, y: 35, type: null });
+    expect(updated.width).to.deep.equal({ left: 14, right: 18, linked: false });
+  });
+
+  it("deletes points by id and reports missing targets", () => {
+    const skeleton = makeEmptySkeletonData();
+    const contour = appendSkeletonContour(skeleton);
+    const point = appendSkeletonPoint(skeleton, contour.id, { x: 10, y: 20 });
+
+    expect(deleteSkeletonPoint(skeleton, contour.id, point.id)).to.equal(true);
+    expect(getSkeletonPoint(skeleton, contour.id, point.id)).to.equal(null);
+    expect(deleteSkeletonPoint(skeleton, contour.id, point.id)).to.equal(false);
+    expect(appendSkeletonPoint(skeleton, 999, { x: 1, y: 2 })).to.equal(null);
+    expect(updateSkeletonPoint(skeleton, 999, point.id, { x: 1 })).to.equal(null);
   });
 });

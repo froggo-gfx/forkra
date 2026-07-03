@@ -128,6 +128,65 @@ export function normalizeSkeletonPoint(point, skeletonData = null, usedIds = nul
   return normalized;
 }
 
+export function getSkeletonContour(skeletonData, contourId) {
+  return skeletonData?.contours?.find((contour) => contour.id === contourId) ?? null;
+}
+
+export function getSkeletonPoint(skeletonData, contourId, pointId) {
+  const contour = getSkeletonContour(skeletonData, contourId);
+  return contour?.points?.find((point) => point.id === pointId) ?? null;
+}
+
+export function appendSkeletonContour(skeletonData, contourData = {}) {
+  if (!skeletonData) {
+    return null;
+  }
+  const contour = makeSkeletonContour(contourData, skeletonData);
+  skeletonData.contours.push(contour);
+  return contour;
+}
+
+export function appendSkeletonPoint(skeletonData, contourId, pointData = {}) {
+  const contour = getSkeletonContour(skeletonData, contourId);
+  if (!contour) {
+    return null;
+  }
+  const point = makeSkeletonPoint(pointData, skeletonData);
+  contour.points.push(point);
+  return point;
+}
+
+export function updateSkeletonPoint(skeletonData, contourId, pointId, patch) {
+  const contour = getSkeletonContour(skeletonData, contourId);
+  if (!contour) {
+    return null;
+  }
+  const pointIndex = contour.points.findIndex((point) => point.id === pointId);
+  if (pointIndex < 0) {
+    return null;
+  }
+  const updatedPoint = normalizeSkeletonPoint({
+    ...contour.points[pointIndex],
+    ...patch,
+    id: pointId,
+  });
+  contour.points[pointIndex] = updatedPoint;
+  return updatedPoint;
+}
+
+export function deleteSkeletonPoint(skeletonData, contourId, pointId) {
+  const contour = getSkeletonContour(skeletonData, contourId);
+  if (!contour) {
+    return false;
+  }
+  const pointIndex = contour.points.findIndex((point) => point.id === pointId);
+  if (pointIndex < 0) {
+    return false;
+  }
+  contour.points.splice(pointIndex, 1);
+  return true;
+}
+
 function allocateSkeletonId(skeletonData, requestedId = undefined) {
   if (Number.isInteger(requestedId) && requestedId > 0) {
     if (skeletonData) {
