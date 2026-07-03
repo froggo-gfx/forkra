@@ -1,4 +1,5 @@
 import { recordChanges } from "@fontra/core/change-recorder.js";
+import { applyChange } from "@fontra/core/changes.js";
 import {
   generateFromSkeleton,
   outlineContourToPackedPath,
@@ -8,6 +9,9 @@ import {
   normalizeSkeletonData,
   setSkeletonData,
 } from "@fontra/core/skeleton-model.js";
+import { parseSelection } from "@fontra/core/utils.ts";
+import { VarPackedPath } from "@fontra/core/var-path.js";
+import { EditBehaviorFactory } from "./edit-behavior.js";
 
 export function makeSkeletonPointKey(contourId, pointId) {
   return `skeletonPoint/${contourId}/${pointId}`;
@@ -178,4 +182,121 @@ function canUpdateGeneratedContoursInPlace(path, previousEntries, generated) {
         (existing.points[j].smooth === true) === (point.smooth === true)
     );
   });
+}
+
+export function makeSkeletonPointTargetEntry(
+  layer,
+  selection,
+  behaviorName,
+  referenceSkeletonData = null
+) {
+  const skeletonData = getSkeletonData(layer);
+  if (!skeletonData) return null;
+  // Cross-layer addressing: selection ids are canonical in the edit layer;
+  // resolve them into this layer by structural ordinal (Global Constraints).
+  const reference = referenceSkeletonData || skeletonData;
+  const selected = collectSkeletonPointSelection(selection, reference, skeletonData);
+  if (!selected.length) return null;
+
+  const originalLayerGlyph = cloneLayerGlyphForSkeletonEdit(layer);
+  const synthetic = makeSyntheticSkeletonPathInstance(skeletonData, selected);
+  const behaviorFactory = new EditBehaviorFactory(
+    synthetic.instance,
+    synthetic.selection
+  );
+  const syntheticBehavior = behaviorFactory.getBehavior(behaviorName);
+
+  let rollbackChange = null;
+  const makeChange = (method, argument) => {
+    // 1. Run the regular point-behavior rules on the synthetic path. The
+    //    behavior computes absolute coordinates from the captured originals,
+    //    so applying its change to the synthetic instance per frame yields
+    //    current-frame positions.
+    applyChange(synthetic.instance, syntheticBehavior[method](argument));
+    // 2. Copy EVERY mapped point position back onto the skeleton working copy
+    //    (not only selected points — the rules move unselected neighbors too).
+    const changes = makeEditSkeletonChange(originalLayerGlyph, (working) => {
+      for (const [pointIndex, address] of synthetic.pointAddresses) {
+        const target = resolveSkeletonAddressAcrossLayers(
+          skeletonData,
+          working,
+          address.contourId,
+          address.pointId
+        );
+        if (!target) continue;
+        const [x, y] = synthetic.instance.path.getPointPosition(pointIndex);
+        target.point.x = x;
+        target.point.y = y;
+      }
+    });
+    rollbackChange = changes.rollbackChange;
+    return changes.change;
+  };
+
+  return {
+    get rollbackChange() {
+      return rollbackChange;
+    },
+    makeChangeForDelta(delta) {
+      return makeChange("makeChangeForDelta", delta);
+    },
+    makeChangeForTransformation(transformation) {
+      return makeChange("makeChangeForTransformation", transformation);
+    },
+  };
+}
+
+function collectSkeletonPointSelection(
+  selection,
+  referenceSkeletonData,
+  targetSkeletonData
+) {
+  const { skeletonPoint } = parseSelection([...selection]);
+  const selected = [];
+  for (const item of skeletonPoint || []) {
+    const { contourId, pointId } = parseSkeletonPointKey(item);
+    const address = resolveSkeletonAddressAcrossLayers(
+      referenceSkeletonData,
+      targetSkeletonData,
+      contourId,
+      pointId
+    );
+    if (address) {
+      selected.push({ contourId: address.contour.id, pointId: address.point.id });
+    }
+  }
+  return selected;
+}
+
+function makeSyntheticSkeletonPathInstance(skeletonData, selected) {
+  const path = new VarPackedPath();
+  const pointAddresses = new Map(); // absolute path point index -> { contourId, pointId }
+  const selection = new Set();
+  const selectedKeys = new Set(
+    selected.map((item) => `${item.contourId}/${item.pointId}`)
+  );
+  let pointIndex = 0;
+  for (const contour of skeletonData.contours) {
+    path.appendUnpackedContour({
+      points: contour.points.map((point) => ({
+        x: point.x,
+        y: point.y,
+        ...(point.type ? { type: point.type } : {}),
+        ...(point.smooth ? { smooth: true } : {}),
+      })),
+      isClosed: contour.closed,
+    });
+    for (const point of contour.points) {
+      pointAddresses.set(pointIndex, { contourId: contour.id, pointId: point.id });
+      if (selectedKeys.has(`${contour.id}/${point.id}`)) {
+        selection.add(`point/${pointIndex}`);
+      }
+      pointIndex++;
+    }
+  }
+  return {
+    instance: { path, components: [], anchors: [], guidelines: [] },
+    selection,
+    pointAddresses,
+  };
 }

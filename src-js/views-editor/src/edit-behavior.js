@@ -29,12 +29,17 @@ import {
 //// grid
 let magneticSnapEnabled = false;
 export function toggleMagneticSnap() {
-      magneticSnapEnabled = !magneticSnapEnabled;
-      console.log("Magnetic snap", magneticSnapEnabled ? "ON" : "OFF");
-    }
+  magneticSnapEnabled = !magneticSnapEnabled;
+  console.log("Magnetic snap", magneticSnapEnabled ? "ON" : "OFF");
+}
 
 export class EditBehaviorFactory {
-  constructor(instance, selection, enableScalingEdit = false) {
+  constructor(
+    instance,
+    selection,
+    enableScalingEdit = false,
+    { targetEntries = [] } = {}
+  ) {
     const {
       point: pointSelection,
       component: componentSelection,
@@ -64,6 +69,7 @@ export class EditBehaviorFactory {
     this.componentTCenterIndices = componentTCenterSelection || [];
     this.behaviors = {};
     this.enableScalingEdit = enableScalingEdit;
+    this.targetEntries = targetEntries;
   }
 
   getBehavior(behaviorName) {
@@ -94,7 +100,8 @@ export class EditBehaviorFactory {
         this.componentOriginIndices,
         this.componentTCenterIndices,
         behaviorType,
-        doFullTransform
+        doFullTransform,
+        this.targetEntries
       );
       this.behaviors[behaviorName] = behavior;
     }
@@ -112,9 +119,11 @@ class EditBehavior {
     componentOriginIndices,
     componentTCenterIndices,
     behavior,
-    doFullTransform
+    doFullTransform,
+    targetEntries = []
   ) {
     this.doFullTransform = doFullTransform;
+    this.targetEntries = targetEntries;
     //// grid
     this.roundFunc = (value, isArrowKey = false) => {
       const coarseUnit = window.coarseGridSpacing || 1;
@@ -219,7 +228,7 @@ class EditBehavior {
       backgroundImageRollbackChanges.push(backgroundImageRollback);
     }
 
-    this.rollbackChange = makeRollbackChange(
+    this.baseRollbackChange = makeRollbackChange(
       contours,
       participatingPointIndices,
       componentRollbackChanges,
@@ -227,6 +236,16 @@ class EditBehavior {
       guidelineRollbackChanges,
       backgroundImageRollbackChanges
     );
+  }
+
+  get rollbackChange() {
+    const targetRollbackChanges = this.targetEntries
+      ?.map((entry) => entry.rollbackChange)
+      .filter((change) => change);
+    return consolidateChanges([
+      this.baseRollbackChange,
+      ...(targetRollbackChanges || []),
+    ]);
   }
 
   makeChangeForDelta(delta) {
@@ -243,10 +262,16 @@ class EditBehavior {
     // For the latter, we don't want the initial change (before the constraint)
     // to be constrained, but pin the handle angle based on the freely transformed
     // off-curve point.
-    return this._makeChangeForTransformFunc(
+    const pathChange = this._makeChangeForTransformFunc(
       makePointTranslateFunction(this.constrainDelta(delta)),
       makePointTranslateFunction(delta)
     );
+    const entryChanges = (this.targetEntries || [])
+      .map((entry) => entry.makeChangeForDelta(delta))
+      .filter((change) => change);
+    return entryChanges.length
+      ? consolidateChanges([pathChange, ...entryChanges])
+      : pathChange;
   }
 
   makeChangeForTransformation(transformation) {
@@ -276,12 +301,18 @@ class EditBehavior {
       return backgroundImage;
     };
 
-    return this._makeChangeForTransformFunc(
+    const pathChange = this._makeChangeForTransformFunc(
       pointTransformFunction,
       null,
       componentTransformFunction,
       backgroundImageTransformFunction
     );
+    const entryChanges = (this.targetEntries || [])
+      .map((entry) => entry.makeChangeForTransformation(transformation))
+      .filter((change) => change);
+    return entryChanges.length
+      ? consolidateChanges([pathChange, ...entryChanges])
+      : pathChange;
   }
 
   _makeChangeForTransformFunc(
@@ -1133,64 +1164,56 @@ const actionFactories = {
     };
   },
 
-   
   //// equalize
   Equalize: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
-      const handle = vector.subVectors(thePoint, prev);
-      const handleLength = Math.hypot(handle.x, handle.y);
+    const handle = vector.subVectors(thePoint, prev);
+    const handleLength = Math.hypot(handle.x, handle.y);
     return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
-        const delta = vector.subVectors(prev, prevPrev);
-        if (!delta.x && !delta.y) {
-          // The angle is undefined, atan2 will return 0, let's just not touch the point
-          return thePoint;
-        }
-        const angle = Math.atan2(delta.y, delta.x);
-        const handlePoint = {
-          x: prev.x + handleLength * Math.cos(angle),
-          y: prev.y + handleLength * Math.sin(angle),
-        };
-        return handlePoint;
+      const delta = vector.subVectors(prev, prevPrev);
+      if (!delta.x && !delta.y) {
+        // The angle is undefined, atan2 will return 0, let's just not touch the point
+        return thePoint;
+      }
+      const angle = Math.atan2(delta.y, delta.x);
+      const handlePoint = {
+        x: prev.x + handleLength * Math.cos(angle),
+        y: prev.y + handleLength * Math.sin(angle),
       };
-    },
+      return handlePoint;
+    };
+  },
 
   //// equalize
-  RotateNextEqualLength: (
-  prevPrevPrev,
-  prevPrev,
-  prev,
-  thePoint,
-  next,
-  nextNext
-) => {
-  // original positions
-  const originDragged = prevPrev;   // the off-curve point that is being moved
-  const originOpposite = thePoint;  // the opposite off-curve point
-  const anchor = prev;              // the on-curve (smooth) point between them
+  RotateNextEqualLength: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    // original positions
+    const originDragged = prevPrev; // the off-curve point that is being moved
+    const originOpposite = thePoint; // the opposite off-curve point
+    const anchor = prev; // the on-curve (smooth) point between them
 
-  return (
-    transform,
-    /* unused */ prevPrevPrev,
-    newDragged,
-    /* unused */ newPrev,
-    /* unused */ newOpposite,
-    /* unused */ next,
-    /* unused */ nextNext
-  ) => {
-    // vector from anchor to the NEW dragged handle
-    const vec = { x: newDragged.x - anchor.x, y: newDragged.y - anchor.y };
+    return (
+      transform,
+      /* unused */ prevPrevPrev,
+      newDragged,
+      /* unused */ newPrev,
+      /* unused */ newOpposite,
+      /* unused */ next,
+      /* unused */ nextNext
+    ) => {
+      // vector from anchor to the NEW dragged handle
+      const vec = { x: newDragged.x - anchor.x, y: newDragged.y - anchor.y };
 
-    if (vec.x === 0 && vec.y === 0) {
-      return originOpposite;        // avoid division by zero
-    }
+      if (vec.x === 0 && vec.y === 0) {
+        return originOpposite; // avoid division by zero
+      }
 
-    // same distance, opposite direction
-    const len = Math.hypot(vec.x, vec.y);
-    const angle = Math.atan2(vec.y, vec.x);
+      // same distance, opposite direction
+      const len = Math.hypot(vec.x, vec.y);
+      const angle = Math.atan2(vec.y, vec.x);
 
-    return {
-      x: anchor.x - len * Math.cos(angle),
-      y: anchor.y - len * Math.sin(angle),
-    };
+      return {
+        x: anchor.x - len * Math.cos(angle),
+        y: anchor.y - len * Math.sin(angle),
+      };
     };
   },
 
@@ -1344,7 +1367,6 @@ const alternateRules = [
   [    ANY|NIL,    ANY|NIL,    SMO|SEL,    OFF|SEL,    SMO|SEL,    ANY|NIL,    false,      "DontMove"],
 
 ]
-
 
 // prettier-ignore
 const alternateConstrainRules = alternateRules.concat([
