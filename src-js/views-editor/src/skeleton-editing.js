@@ -184,6 +184,10 @@ function canUpdateGeneratedContoursInPlace(path, previousEntries, generated) {
   });
 }
 
+export function hasSkeletonPointSelection(selection) {
+  return !!parseSelection([...selection]).skeletonPoint?.length;
+}
+
 export function makeSkeletonPointTargetEntry(
   layer,
   selection,

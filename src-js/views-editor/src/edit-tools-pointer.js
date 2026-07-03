@@ -19,6 +19,7 @@ import {
   symmetricDifference,
   union,
 } from "@fontra/core/set-ops.js";
+import { getSkeletonData } from "@fontra/core/skeleton-model.js";
 import { Transform } from "@fontra/core/transform.js";
 import {
   assert,
@@ -38,6 +39,10 @@ import { handlesEqual } from "./edit-tools-pen.js";
 import { MeasureInteraction } from "./measure-interactions.js";
 import { getPinPoint } from "./panel-transformation.js";
 import { equalGlyphSelection } from "./scene-controller.js";
+import {
+  hasSkeletonPointSelection,
+  makeSkeletonPointTargetEntry,
+} from "./skeleton-editing.js";
 import {
   glyphSelector,
   registerVisualizationLayerDefinition,
@@ -455,13 +460,32 @@ export class PointerTool extends BaseTool {
       const initialPoint = sceneController.selectedGlyphPoint(initialEvent);
       let behaviorName = getBehaviorName(initialEvent);
 
-      const layerInfo = Object.entries(
-        sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
-      ).map(([layerName, layerGlyph]) => {
+      // Read the edit layer's skeleton data once; every layer's skeleton target
+      // entry resolves selection ids against this single reference by structural
+      // ordinal (cross-layer addressing).
+      const editingLayers = sceneController.getEditingLayerFromGlyphLayers(
+        glyph.layers
+      );
+      const editLayerName = sceneController.sceneSettings.editLayerName;
+      const referenceSkeletonData = getSkeletonData(
+        editingLayers[editLayerName] || Object.values(editingLayers)[0]
+      );
+      const makeSkeletonTargetEntries = (layerGlyph, name) => {
+        const entry = makeSkeletonPointTargetEntry(
+          layerGlyph,
+          sceneController.selection,
+          name,
+          referenceSkeletonData
+        );
+        return entry ? [entry] : [];
+      };
+
+      const layerInfo = Object.entries(editingLayers).map(([layerName, layerGlyph]) => {
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           sceneController.selection,
-          this.scalingEditBehavior
+          this.scalingEditBehavior,
+          { targetEntries: makeSkeletonTargetEntries(layerGlyph, behaviorName) }
         );
         return {
           layerName,
@@ -492,6 +516,20 @@ export class PointerTool extends BaseTool {
             applyChange(layer.layerGlyph, layer.editBehavior.rollbackChange);
             rollbackChanges.push(
               consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
+            );
+            // Skeleton target entries bind their behavior at construction and
+            // capture the (now rolled-back) original layer state, so rebuild the
+            // factory for the new behavior name.
+            layer.behaviorFactory = new EditBehaviorFactory(
+              layer.layerGlyph,
+              sceneController.selection,
+              this.scalingEditBehavior,
+              {
+                targetEntries: makeSkeletonTargetEntries(
+                  layer.layerGlyph,
+                  behaviorName
+                ),
+              }
             );
             layer.editBehavior = layer.behaviorFactory.getBehavior(behaviorName);
           }
