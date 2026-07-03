@@ -5,8 +5,10 @@ import {
   appendSkeletonPoint,
   buildSegmentsFromSkeletonPoints,
   calculateNormalAtSkeletonPoint,
+  clearSkeletonData,
   deleteSkeletonPoint,
   getSkeletonContour,
+  getSkeletonData,
   getSkeletonPoint,
   getSkeletonPointHalfWidth,
   getSkeletonPointNudge,
@@ -16,6 +18,7 @@ import {
   makeSkeletonPoint,
   normalizeSkeletonData,
   projectSkeletonRibPoint,
+  setSkeletonData,
   updateSkeletonPoint,
 } from "@fontra/core/skeleton-model.js";
 import { expect } from "chai";
@@ -124,6 +127,30 @@ describe("skeleton-model constructors and normalization", () => {
       roundnessStrength: 0.8,
       cornerAsymmetry: -0.2,
     });
+  });
+});
+
+describe("skeleton-model layer persistence helpers", () => {
+  it("sets, normalizes, reads, and clears skeleton data on a layer", () => {
+    const layer = {};
+    setSkeletonData(layer, {
+      nextId: 1,
+      contours: [{ points: [{ x: 10, y: 20 }] }],
+    });
+
+    const skeleton = getSkeletonData(layer);
+    expect(skeleton.version).to.equal(1);
+    expect(skeleton.contours).to.have.length(1);
+    expect(skeleton.contours[0].points[0]).to.include({ x: 10, y: 20 });
+    expect(skeleton.contours[0].points[0].id).to.be.a("number");
+
+    clearSkeletonData(layer);
+    expect(getSkeletonData(layer)).to.equal(null);
+  });
+
+  it("returns null for absent or malformed skeleton data", () => {
+    expect(getSkeletonData(null)).to.equal(null);
+    expect(getSkeletonData({ customData: {} })).to.equal(null);
   });
 });
 

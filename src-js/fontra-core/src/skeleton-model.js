@@ -1,4 +1,13 @@
 import { Bezier } from "bezier-js";
+import {
+  deleteFontraInternalSection,
+  getFontraInternalSection,
+  setFontraInternalSection,
+} from "./fontra-internal-data.js";
+import {
+  FONTRA_INTERNAL_KEY,
+  FONTRA_INTERNAL_SECTIONS,
+} from "./fontra-internal-schema.js";
 import { deepCopyObject } from "./utils.ts";
 import { normalizeVector, rotateVector90CW, subVectors } from "./vector.js";
 
@@ -310,6 +319,42 @@ export function projectSkeletonRibPoint(point, normal, halfWidth, side, nudge = 
     x: Math.round(baseX + tangent.x * nudge),
     y: Math.round(baseY + tangent.y * nudge),
   };
+}
+
+export function getSkeletonData(layerOrCustomData) {
+  if (layerOrCustomData?.customData) {
+    const internalSkeleton = getFontraInternalSection(
+      layerOrCustomData,
+      FONTRA_INTERNAL_SECTIONS.SKELETON
+    );
+    return internalSkeleton ? normalizeSkeletonData(internalSkeleton) : null;
+  }
+  const customData = layerOrCustomData?.customData ?? layerOrCustomData;
+  const internalSkeleton =
+    customData?.[FONTRA_INTERNAL_KEY]?.[FONTRA_INTERNAL_SECTIONS.SKELETON];
+  return internalSkeleton ? normalizeSkeletonData(internalSkeleton) : null;
+}
+
+export function setSkeletonData(layer, skeletonData) {
+  if (!layer) {
+    return;
+  }
+  if (skeletonData === null || skeletonData === undefined) {
+    clearSkeletonData(layer);
+    return;
+  }
+  setFontraInternalSection(
+    layer,
+    FONTRA_INTERNAL_SECTIONS.SKELETON,
+    normalizeSkeletonData(skeletonData)
+  );
+}
+
+export function clearSkeletonData(layer) {
+  if (!layer) {
+    return;
+  }
+  deleteFontraInternalSection(layer, FONTRA_INTERNAL_SECTIONS.SKELETON);
 }
 
 function makeSegment(points, startIdx, endIdx) {
