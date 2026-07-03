@@ -76,6 +76,7 @@ import { PenTool } from "./edit-tools-pen.js";
 import { PointerTools } from "./edit-tools-pointer.js";
 import { PowerRulerTool } from "./edit-tools-power-ruler.js";
 import { ShapeTool } from "./edit-tools-shape.js";
+import { SkeletonPenTool } from "./edit-tools-skeleton.js";
 import {
   SceneController,
   numQuadraticOffCurvePointsOptions,
@@ -976,6 +977,7 @@ export class EditorController extends ViewController {
     const editToolClasses = [
       PointerTools,
       PenTool,
+      SkeletonPenTool,
       KnifeTool,
       ShapeTool,
       MetricsTool,
