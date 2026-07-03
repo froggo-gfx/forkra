@@ -63,6 +63,7 @@ function generateContoursFromGeneratorInput(generatorInput) {
     });
     for (const generatedContour of generatedContours) {
       const generatedContourIndex = contours.length;
+      annotateGeneratedContourProvenance(generatedContour, skeletonContour);
       contours.push(generatedContour);
       provenance.push({
         skeletonContourId: skeletonContour.id,
@@ -79,6 +80,59 @@ function stripPointProvenance(contour) {
   for (const point of contour.points) {
     delete point._provenance;
   }
+}
+
+function annotateGeneratedContourProvenance(contour, skeletonContour) {
+  const sourcePoints = skeletonContour.points.filter((point) => !point.type);
+  if (!sourcePoints.length) {
+    return;
+  }
+  const lastSourceIndex = sourcePoints.length - 1;
+  let cubicRole = "out";
+  for (let i = 0; i < contour.points.length; i++) {
+    const point = contour.points[i];
+    if (point._provenance) {
+      continue;
+    }
+    const sourceIndex =
+      contour.points.length <= 1
+        ? 0
+        : Math.round((i / (contour.points.length - 1)) * lastSourceIndex);
+    const sourcePoint = sourcePoints[Math.min(sourceIndex, lastSourceIndex)];
+    if (point.type === "cubic" || point.type === "quad") {
+      point._provenance = generatedHandle(
+        point,
+        sourcePoint,
+        null,
+        cubicRole
+      )._provenance;
+      cubicRole = cubicRole === "out" ? "in" : "out";
+    } else {
+      point._provenance = generatedOnCurve(point, sourcePoint, null)._provenance;
+    }
+  }
+}
+
+function withProvenance(point, sourcePoint, side, role) {
+  if (!sourcePoint?._sourcePointId) {
+    return point;
+  }
+  return {
+    ...point,
+    _provenance: {
+      skeletonPointId: sourcePoint._sourcePointId,
+      side,
+      role,
+    },
+  };
+}
+
+function generatedOnCurve(basePoint, sourcePoint, side) {
+  return withProvenance(basePoint, sourcePoint, side, "onCurve");
+}
+
+function generatedHandle(basePoint, sourcePoint, side, role) {
+  return withProvenance(basePoint, sourcePoint, side, role);
 }
 
 function canonicalToGeneratorInput(skeletonData) {

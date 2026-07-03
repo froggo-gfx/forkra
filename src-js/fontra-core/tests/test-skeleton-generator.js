@@ -25,6 +25,42 @@ describe("skeleton-generator golden master", () => {
   });
 });
 
+describe("skeleton-generator provenance", () => {
+  it("emits contour-level provenance keyed by skeleton contour id", () => {
+    const fixture = fixtures.find((item) => item.name === "open-line-butt-cap");
+    const result = generateFromSkeleton(fixture.canonical);
+    expect(result.provenance).to.have.length(result.contours.length);
+    expect(result.provenance[0]).to.include({
+      skeletonContourId: 1,
+      generatedContourIndex: 0,
+    });
+    expect(result.provenance[0].pointMap).to.have.length(
+      result.contours[0].points.length
+    );
+  });
+
+  it("maps generated points to stable skeleton point ids and roles", () => {
+    const fixture = fixtures.find((item) => item.name === "open-cubic-round-cap");
+    const result = generateFromSkeleton(fixture.canonical);
+    const pointMaps = result.provenance.flatMap((entry) => entry.pointMap);
+    expect(pointMaps.some((entry) => entry?.skeletonPointId === 2)).to.equal(true);
+    expect(pointMaps.some((entry) => entry?.skeletonPointId === 5)).to.equal(true);
+    expect(pointMaps.some((entry) => entry?.role === "onCurve")).to.equal(true);
+    expect(pointMaps.some((entry) => entry?.role === "in")).to.equal(true);
+    expect(pointMaps.some((entry) => entry?.role === "out")).to.equal(true);
+  });
+
+  it("does not persist private provenance on output contour points", () => {
+    const fixture = fixtures.find((item) => item.name === "open-line-butt-cap");
+    const result = generateFromSkeleton(fixture.canonical);
+    expect(
+      result.contours.some((contour) =>
+        contour.points.some((point) => Object.hasOwn(point, "_provenance"))
+      )
+    ).to.equal(false);
+  });
+});
+
 function roundContours(contours) {
   return contours.map((contour) => ({
     isClosed: contour.isClosed === true,
