@@ -49,4 +49,19 @@ describe("fontra-internal-data", () => {
       undefined
     );
   });
+
+  it("round-trips the skeleton section name", () => {
+    expect(FONTRA_INTERNAL_SECTIONS.SKELETON).to.equal("skeleton");
+    const e = {};
+    const skeleton = {
+      version: 1,
+      nextId: 1,
+      contours: [],
+      generated: [],
+    };
+    setFontraInternalSection(e, FONTRA_INTERNAL_SECTIONS.SKELETON, skeleton);
+    expect(
+      getFontraInternalSection(e, FONTRA_INTERNAL_SECTIONS.SKELETON)
+    ).to.deep.equal(skeleton);
+  });
 });
