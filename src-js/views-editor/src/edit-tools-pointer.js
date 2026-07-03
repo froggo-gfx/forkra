@@ -42,6 +42,7 @@ import { equalGlyphSelection } from "./scene-controller.js";
 import {
   hasSkeletonPointSelection,
   makeSkeletonPointTargetEntry,
+  toggleSkeletonSmooth,
 } from "./skeleton-editing.js";
 import {
   glyphSelector,
@@ -360,6 +361,9 @@ export class PointerTool extends BaseTool {
       }
     } else {
       const instance = this.sceneModel.getSelectedPositionedGlyph().glyph.instance;
+      if (hasSkeletonPointSelection(sceneController.selection)) {
+        await this.handleSkeletonPointsDoubleClick();
+      }
       const {
         point: pointIndices,
         component: componentIndices,
@@ -407,6 +411,16 @@ export class PointerTool extends BaseTool {
         sceneController.selection = modeFunc(selection, newSelection);
       }
     }
+  }
+
+  async handleSkeletonPointsDoubleClick() {
+    const selection = this.sceneController.selection;
+    await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        toggleSkeletonSmooth(layerGlyph, selection);
+      }
+      return translate("edit-tools-pointer.undo.toggle-smooth");
+    });
   }
 
   async handlePointsDoubleClick(pointIndices) {

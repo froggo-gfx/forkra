@@ -43,6 +43,7 @@ import {
   union,
 } from "@fontra/core/set-ops.js";
 import { ShaperController } from "@fontra/core/shaper-controller.js";
+import { getSkeletonData } from "@fontra/core/skeleton-model.js";
 import {
   arrowKeyDeltas,
   assert,
@@ -65,6 +66,7 @@ import * as vector from "@fontra/core/vector.js";
 import { dialog, message } from "@fontra/web-components/modal-dialog.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import { SceneModel } from "./scene-model.js";
+import { makeSkeletonPointTargetEntry } from "./skeleton-editing.js";
 //// grid
 import { toggleMagneticSnap } from "./edit-behavior.js";
 
@@ -1048,25 +1050,34 @@ export class SceneController {
       dy *= 10;
     }
     const delta = { x: dx, y: dy };
+    const behaviorName = event.altKey ? "alternate" : "default";
     await this.editGlyph((sendIncrementalChange, glyph) => {
-      const layerInfo = Object.entries(
-        this.getEditingLayerFromGlyphLayers(glyph.layers)
-      ).map(([layerName, layerGlyph]) => {
+      const editingLayers = this.getEditingLayerFromGlyphLayers(glyph.layers);
+      const editLayerName = this.sceneSettings.editLayerName;
+      const referenceSkeletonData = getSkeletonData(
+        editingLayers[editLayerName] || Object.values(editingLayers)[0]
+      );
+      const layerInfo = Object.entries(editingLayers).map(([layerName, layerGlyph]) => {
         //// grid
         window._sceneController = this; // <-- add this
+        const skeletonEntry = makeSkeletonPointTargetEntry(
+          layerGlyph,
+          this.selection,
+          behaviorName,
+          referenceSkeletonData
+        );
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           this.selection,
-          this.selectedTool.scalingEditBehavior
+          this.selectedTool.scalingEditBehavior,
+          { targetEntries: skeletonEntry ? [skeletonEntry] : [] }
         );
         return {
           layerName,
           layerGlyph,
           changePath: ["layers", layerName, "glyph"],
           pathPrefix: [],
-          editBehavior: behaviorFactory.getBehavior(
-            event.altKey ? "alternate" : "default"
-          ),
+          editBehavior: behaviorFactory.getBehavior(behaviorName),
         };
       });
 

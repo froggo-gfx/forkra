@@ -188,6 +188,31 @@ export function hasSkeletonPointSelection(selection) {
   return !!parseSelection([...selection]).skeletonPoint?.length;
 }
 
+// Toggle (or force) the `smooth` flag of the selected on-curve skeleton points.
+// Off-curve handles are ignored. Returns the ChangeCollector from editSkeleton.
+export function toggleSkeletonSmooth(layer, selection, forceValue = null) {
+  const skeletonData = getSkeletonData(layer);
+  if (!skeletonData) return null;
+  const { skeletonPoint } = parseSelection([...selection]);
+  const keys = skeletonPoint || [];
+  if (!keys.length) return null;
+
+  return editSkeleton(layer, (working) => {
+    // Determine the new value from the current state of the first togglable
+    // on-curve point, so all selected points flip together (matches toggleSmooth).
+    let newValue = forceValue;
+    for (const item of keys) {
+      const { contourId, pointId } = parseSkeletonPointKey(item);
+      const address = getSkeletonPointAddress(working, contourId, pointId);
+      if (!address || address.point.type) continue;
+      if (newValue === null) {
+        newValue = !address.point.smooth;
+      }
+      address.point.smooth = newValue;
+    }
+  });
+}
+
 export function makeSkeletonPointTargetEntry(
   layer,
   selection,
