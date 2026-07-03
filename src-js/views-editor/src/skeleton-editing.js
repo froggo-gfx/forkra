@@ -213,6 +213,29 @@ export function toggleSkeletonSmooth(layer, selection, forceValue = null) {
   });
 }
 
+// Bounding box of the selected skeleton points in glyph space, or undefined.
+export function getSkeletonSelectionBounds(layer, selection) {
+  const skeletonData = getSkeletonData(layer);
+  if (!skeletonData) return undefined;
+  const { skeletonPoint } = parseSelection([...selection]);
+  let xMin = Infinity;
+  let yMin = Infinity;
+  let xMax = -Infinity;
+  let yMax = -Infinity;
+  for (const item of skeletonPoint || []) {
+    const { contourId, pointId } = parseSkeletonPointKey(item);
+    const address = getSkeletonPointAddress(skeletonData, contourId, pointId);
+    if (!address) continue;
+    const { x, y } = address.point;
+    xMin = Math.min(xMin, x);
+    yMin = Math.min(yMin, y);
+    xMax = Math.max(xMax, x);
+    yMax = Math.max(yMax, y);
+  }
+  if (xMin > xMax) return undefined;
+  return { xMin, yMin, xMax, yMax };
+}
+
 export function makeSkeletonPointTargetEntry(
   layer,
   selection,

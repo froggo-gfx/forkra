@@ -11,7 +11,8 @@ import {
   filterPathByPointIndices,
   getSelectionByContour,
 } from "@fontra/core/path-functions.js";
-import { rectCenter, rectSize } from "@fontra/core/rectangle.ts";
+import { rectCenter, rectSize, unionRect } from "@fontra/core/rectangle.ts";
+import { getSkeletonData } from "@fontra/core/skeleton-model.js";
 import { Transform } from "@fontra/core/transform.js";
 import {
   enumerate,
@@ -26,6 +27,10 @@ import { VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import Panel from "./panel.js";
+import {
+  getSkeletonSelectionBounds,
+  makeSkeletonPointTargetEntry,
+} from "./skeleton-editing.js";
 
 export default class TransformationPanel extends Panel {
   identifier = "selection-transformation";
@@ -943,17 +948,20 @@ export default class TransformationPanel extends Panel {
       component: componentIndices,
       anchor: anchorIndices,
       backgroundImage: backgroundImageIndices,
+      skeletonPoint: skeletonPointKeys,
     } = parseSelection(this.sceneController.selection);
 
     pointIndices = pointIndices || [];
     componentIndices = componentIndices || [];
     anchorIndices = anchorIndices || [];
     backgroundImageIndices = backgroundImageIndices || [];
+    skeletonPointKeys = skeletonPointKeys || [];
     if (
       !pointIndices.length &&
       !componentIndices.length &&
       !anchorIndices.length &&
-      !backgroundImageIndices.length
+      !backgroundImageIndices.length &&
+      !skeletonPointKeys.length
     ) {
       return;
     }
@@ -964,23 +972,38 @@ export default class TransformationPanel extends Panel {
       await this.sceneController.getStaticGlyphControllers();
 
     await this.sceneController.editGlyph((sendIncrementalChange, glyph) => {
-      const layerInfo = Object.entries(
-        this.sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
-      ).map(([layerName, layerGlyph]) => {
+      const editingLayers = this.sceneController.getEditingLayerFromGlyphLayers(
+        glyph.layers
+      );
+      const editLayerName = this.sceneController.sceneSettings.editLayerName;
+      const referenceSkeletonData = getSkeletonData(
+        editingLayers[editLayerName] || Object.values(editingLayers)[0]
+      );
+      const layerInfo = Object.entries(editingLayers).map(([layerName, layerGlyph]) => {
+        const skeletonEntry = makeSkeletonPointTargetEntry(
+          layerGlyph,
+          this.sceneController.selection,
+          "default",
+          referenceSkeletonData
+        );
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           this.sceneController.selection,
-          this.sceneController.selectedTool.scalingEditBehavior
+          this.sceneController.selectedTool.scalingEditBehavior,
+          { targetEntries: skeletonEntry ? [skeletonEntry] : [] }
         );
         return {
           layerName,
           changePath: ["layers", layerName, "glyph"],
           layerGlyph: layerGlyph,
-          selectionBounds: (
-            staticGlyphControllers[layerName] || glyphController
-          ).getSelectionBounds(
-            this.sceneController.selection,
-            this.fontController.getBackgroundImageBoundsFunc
+          selectionBounds: unionRect(
+            ...[
+              (staticGlyphControllers[layerName] || glyphController).getSelectionBounds(
+                this.sceneController.selection,
+                this.fontController.getBackgroundImageBoundsFunc
+              ),
+              getSkeletonSelectionBounds(layerGlyph, this.sceneController.selection),
+            ].filter((bounds) => bounds)
           ),
           editBehavior: behaviorFactory.getTransformBehavior("default"),
         };
