@@ -32,11 +32,14 @@ export class SkeletonPenTool extends BaseTool {
     if (!positionedGlyph?.glyph?.canEdit) {
       return null;
     }
-    const editLayerName = this.sceneController.editingLayerNames?.[0];
-    const layerGlyph = editLayerName
-      ? positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName]?.glyph
-      : positionedGlyph.glyph.instance;
-    return layerGlyph ? getSkeletonData(layerGlyph) : null;
+    // Mirror scene-model._getEditLayerSkeletonData so this tool's centerline /
+    // close / drawing-contour lookups reference the SAME layer whose ids the
+    // scene-model hit test treats as canonical.
+    const editLayerName =
+      this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+    const layerGlyph =
+      editLayerName && positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName]?.glyph;
+    return getSkeletonData(layerGlyph || positionedGlyph.glyph);
   }
 
   // Positioned-glyph-relative point from a mouse event, in glyph coordinates.
@@ -189,7 +192,10 @@ export class SkeletonPenTool extends BaseTool {
       if (!entries.length) {
         return;
       }
-      const editLayerName = this.sceneController.editingLayerNames?.[0];
+      // The reference layer is the one whose ids the scene-model hit test treats
+      // as canonical (sceneSettings.editLayerName); resolve every other editable
+      // layer against it by structural ordinal (WS-9 cross-layer addressing).
+      const editLayerName = this.sceneSettings?.editLayerName;
       const editLayerGlyph = editingLayers[editLayerName] || entries[0][1];
       const referenceSkeletonData = getSkeletonData(editLayerGlyph);
 
