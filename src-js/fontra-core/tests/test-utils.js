@@ -314,6 +314,18 @@ describe("parseSelection", () => {
       point: [2, 3, 4],
     });
   });
+  it("keeps compound selection keys intact", () => {
+    const parsed = parseSelection([
+      "point/12",
+      "point/3",
+      "skeletonPoint/3/5",
+      "skeletonPoint/3/4",
+      "skeletonRib/3/5/left",
+    ]);
+    expect(parsed.point).to.deep.equal([3, 12]);
+    expect(parsed.skeletonPoint).to.deep.equal(["3/4", "3/5"]);
+    expect(parsed.skeletonRib).to.deep.equal(["3/5/left"]);
+  });
 });
 
 describe("getCharFromCodePoint", () => {

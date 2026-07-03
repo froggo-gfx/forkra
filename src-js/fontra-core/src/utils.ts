@@ -284,17 +284,25 @@ export function valueInRange(min: number, v: number, max: number) {
 }
 
 export function parseSelection(selection: string[]) {
-  const result: Record<string, number[]> = {};
+  const result: Record<string, (number | string)[]> = {};
   for (const item of selection) {
-    const [tp, index] = item.split("/");
+    const sep = item.indexOf("/");
+    const tp = sep < 0 ? item : item.slice(0, sep);
+    const rest = sep < 0 ? "" : item.slice(sep + 1);
     if (result[tp] === undefined) {
       result[tp] = [];
     }
-    result[tp].push(parseInt(index, 10));
+    // Single-segment kinds stay numeric (upstream behavior);
+    // compound kinds (skeletonPoint/…, skeletonRib/…) keep the raw remainder.
+    result[tp].push(rest.includes("/") ? rest : parseInt(rest, 10));
   }
-  for (const indices of Object.values(result)) {
-    // Ensure indices are sorted
-    indices.sort((a, b) => a - b);
+  for (const values of Object.values(result)) {
+    // Ensure values are sorted; numeric kinds keep numeric order
+    values.sort((a, b) =>
+      typeof a === "number" && typeof b === "number"
+        ? a - b
+        : String(a).localeCompare(String(b))
+    );
   }
   return result;
 }
