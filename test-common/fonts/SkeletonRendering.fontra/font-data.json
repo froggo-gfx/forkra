@@ -1,0 +1,35 @@
+{
+  "axes": {
+    "axes": []
+  },
+  "fontInfo": {
+    "familyName": "SkeletonRendering",
+    "versionMajor": 1,
+    "versionMinor": 0
+  },
+  "sources": {
+    "default": {
+      "lineMetricsHorizontalLayout": {
+        "ascender": {
+          "value": 800,
+          "zone": 16
+        },
+        "baseline": {
+          "value": 0,
+          "zone": -16
+        },
+        "descender": {
+          "value": -200,
+          "zone": -16
+        },
+        "xHeight": {
+          "value": 500,
+          "zone": 16
+        }
+      },
+      "location": {},
+      "name": "Default"
+    }
+  },
+  "unitsPerEm": 1000
+}
