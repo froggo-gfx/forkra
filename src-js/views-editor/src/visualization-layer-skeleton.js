@@ -8,7 +8,6 @@ import {
 
 import {
   fillRoundNode,
-  fillSquareNode,
   glyphSelector,
   registerVisualizationLayerDefinition,
   strokeLine,
@@ -149,6 +148,10 @@ function drawDiamondNode(context, point, size, fill) {
     context.fill();
   }
   context.stroke();
+}
+
+function fillSquareNode(context, point, size) {
+  context.fillRect(point.x - size / 2, point.y - size / 2, size, size);
 }
 
 function forEachSkeletonContour(positionedGlyph, model, callback) {
