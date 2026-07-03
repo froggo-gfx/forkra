@@ -87,6 +87,7 @@ import {
   visualizationLayerDefinitions,
 } from "./visualization-layer-definitions.js";
 import "./visualization-layer-letterspacer.js";
+import "./visualization-layer-skeleton.js";
 import { VisualizationContext, VisualizationLayers } from "./visualization-layers.js";
 
 import { applicationSettingsController } from "@fontra/core/application-settings.js";
