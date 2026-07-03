@@ -1,7 +1,20 @@
-import { getSkeletonData } from "@fontra/core/skeleton-model.js";
+import { ChangeCollector } from "@fontra/core/changes.js";
+import { translate } from "@fontra/core/localization.js";
+import {
+  DEFAULT_SKELETON_WIDTH,
+  appendSkeletonContour,
+  appendSkeletonPoint,
+  getSkeletonData,
+  makeSkeletonPoint,
+} from "@fontra/core/skeleton-model.js";
 import { parseSelection } from "@fontra/core/utils.ts";
 import { BaseTool } from "./edit-tools-base.js";
-import { makeSkeletonPointKey, parseSkeletonPointKey } from "./skeleton-editing.js";
+import {
+  editSkeleton,
+  makeSkeletonPointKey,
+  parseSkeletonPointKey,
+  resolveSkeletonAddressAcrossLayers,
+} from "./skeleton-editing.js";
 
 export class SkeletonPenTool extends BaseTool {
   iconPath = "/images/skeleton-pen.svg";
@@ -63,7 +76,136 @@ export class SkeletonPenTool extends BaseTool {
       await this.editor.tools["pointer-tool"].handleDrag(eventStream, initialEvent);
       return;
     }
-    eventStream.done();
+
+    const skeletonHit = this._hitTestSkeletonPoint(initialEvent);
+    if (skeletonHit) {
+      // Clicking an existing skeleton point selects it (dragging is handled by
+      // the pointer tool's skeleton behavior). Closing is added in a later task.
+      this.sceneController.selection = new Set([
+        makeSkeletonPointKey(skeletonHit.contourId, skeletonHit.pointId),
+      ]);
+      eventStream.done();
+      return;
+    }
+
+    await this._handleAddSkeletonPoint(eventStream, initialEvent);
+  }
+
+  // Runs one editSkeleton mutation across every editable layer and folds the
+  // per-layer changes into one undo item. `applyMutation(working, reference)`
+  // mutates a layer's working skeleton and returns the selection keys to apply
+  // (honored from the edit layer only, where ids are canonical).
+  async _editSkeletonAcrossLayers(undoLabel, applyMutation) {
+    await this.sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+      const editingLayers = this.sceneController.getEditingLayerFromGlyphLayers(
+        glyph.layers
+      );
+      const entries = Object.entries(editingLayers);
+      if (!entries.length) {
+        return;
+      }
+      const editLayerName = this.sceneController.editingLayerNames?.[0];
+      const editLayerGlyph = editingLayers[editLayerName] || entries[0][1];
+      const referenceSkeletonData = getSkeletonData(editLayerGlyph);
+
+      let primarySelection = null;
+      const allChanges = [];
+      for (const [layerName, layerGlyph] of entries) {
+        const isEditLayer = layerGlyph === editLayerGlyph;
+        const changes = editSkeleton(
+          layerGlyph,
+          (working) => {
+            const selectionKeys = applyMutation(working, referenceSkeletonData);
+            if (isEditLayer && selectionKeys) {
+              primarySelection = new Set(selectionKeys);
+            }
+          },
+          { createIfMissing: true }
+        );
+        allChanges.push(changes.prefixed(["layers", layerName, "glyph"]));
+      }
+
+      const combined = new ChangeCollector().concat(...allChanges);
+      await sendIncrementalChange(combined.change);
+      if (primarySelection) {
+        this.sceneController.selection = primarySelection;
+      }
+      return { changes: combined, undoLabel, broadcast: true };
+    });
+  }
+
+  // referenceSkeletonData is the EDIT layer's skeleton; selection ids are
+  // canonical there and resolve into this layer by structural ordinal (WS-9
+  // cross-layer addressing). parseSelection returns arrays (WS-9 Task 0).
+  _getSelectedOpenEndpoint(skeletonData, referenceSkeletonData) {
+    const { skeletonPoint } = parseSelection([...this.sceneController.selection]);
+    if (!skeletonPoint || skeletonPoint.length !== 1) {
+      return null;
+    }
+    const { contourId, pointId } = parseSkeletonPointKey(skeletonPoint[0]);
+    const address = resolveSkeletonAddressAcrossLayers(
+      referenceSkeletonData || skeletonData,
+      skeletonData,
+      contourId,
+      pointId
+    );
+    if (!address || address.contour.closed || address.point.type) {
+      return null;
+    }
+    const onCurves = address.contour.points.filter((point) => !point.type);
+    if (onCurves.length < 1) {
+      return null;
+    }
+    if (onCurves[0].id === address.point.id) {
+      return { ...address, appendMode: "prepend" };
+    }
+    if (onCurves.at(-1).id === address.point.id) {
+      return { ...address, appendMode: "append" };
+    }
+    return null;
+  }
+
+  async _handleAddSkeletonPoint(eventStream, initialEvent) {
+    const glyphPoint = this._getGlyphPoint(initialEvent);
+    if (!glyphPoint) {
+      eventStream.done();
+      return;
+    }
+    const pointData = {
+      x: Math.round(glyphPoint.x),
+      y: Math.round(glyphPoint.y),
+      type: null,
+      smooth: false,
+    };
+
+    await this._editSkeletonAcrossLayers(
+      translate("edit-tools-skeleton.undo.add-point"),
+      (working, referenceSkeletonData) => {
+        const endpoint = this._getSelectedOpenEndpoint(working, referenceSkeletonData);
+        if (endpoint) {
+          const point = makeSkeletonPoint(pointData, working);
+          if (endpoint.appendMode === "append") {
+            endpoint.contour.points.push(point);
+          } else {
+            endpoint.contour.points.unshift(point);
+          }
+          return [makeSkeletonPointKey(endpoint.contour.id, point.id)];
+        }
+        const contour = appendSkeletonContour(working, {
+          closed: false,
+          defaultWidth: DEFAULT_SKELETON_WIDTH,
+          points: [],
+        });
+        const point = appendSkeletonPoint(working, contour.id, pointData);
+        return [makeSkeletonPointKey(contour.id, point.id)];
+      }
+    );
+
+    // Drag-to-curve is out of scope for the Skeleton Pen (WS-10 Deviations):
+    // consume any remaining drag events without action.
+    for await (const event of eventStream) {
+      // consume
+    }
   }
 
   deactivate() {
