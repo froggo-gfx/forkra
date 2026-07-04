@@ -71,7 +71,16 @@ import {
   makeSkeletonPointTargetEntry,
   recordSkeletonContourIndexShift,
 } from "./skeleton-editing.js";
-import { createEditableGeneratedHandleTargetEntries } from "./skeleton-generated.js";
+import {
+  createEditableGeneratedHandleTargetEntries,
+  createEditableGeneratedPointTargetEntries,
+} from "./skeleton-generated.js";
+import {
+  getSelectionTargetKinds,
+  getSkeletonModifierBehaviorName,
+  makeSkeletonModifierOptions,
+} from "./skeleton-modifiers.js";
+import { getSkeletonRibBehaviorName } from "./skeleton-ribs.js";
 //// grid
 import { toggleMagneticSnap } from "./edit-behavior.js";
 
@@ -1059,11 +1068,25 @@ export class SceneController {
     const hasGeneratedHandleSelection =
       !!parsedSelection.editableGeneratedHandle?.length;
     const hasRibSelection = !!parsedSelection.skeletonRib?.length;
-    const behaviorName = hasRibSelection
-      ? "rib-default"
-      : event.altKey
-        ? "alternate"
-        : "default";
+    const hasGeneratedPointSelection = !!parsedSelection.editableGeneratedPoint?.length;
+    const hasRibLikeSelection = hasRibSelection || hasGeneratedPointSelection;
+    const modifiers = {
+      equalizeMode: this.selectedTool?.equalizeMode === true,
+      fixedRibMode: this.selectedTool?.fixedRibMode === true,
+      fixedRibCompressMode: this.selectedTool?.fixedRibCompressMode === true,
+      tangentRibMode: this.selectedTool?.tangentRibMode === true,
+    };
+    const behaviorName =
+      getSkeletonModifierBehaviorName(
+        event,
+        modifiers,
+        getSelectionTargetKinds(this.selection)
+      ) ||
+      (hasRibLikeSelection
+        ? getSkeletonRibBehaviorName(event, modifiers)
+        : event.altKey
+          ? "alternate"
+          : "default");
     await this.editGlyph((sendIncrementalChange, glyph) => {
       const editingLayers = this.getEditingLayerFromGlyphLayers(glyph.layers);
       const editLayerName = this.sceneSettings.editLayerName;
@@ -1073,23 +1096,38 @@ export class SceneController {
       const layerInfo = Object.entries(editingLayers).map(([layerName, layerGlyph]) => {
         //// grid
         window._sceneController = this; // <-- add this
+        const modifierOptions = makeSkeletonModifierOptions(behaviorName, {
+          referenceSkeletonData,
+        });
         const targetEntries = hasGeneratedHandleSelection
           ? createEditableGeneratedHandleTargetEntries(
               layerGlyph,
               this.selection,
               behaviorName,
-              { referenceSkeletonData }
+              modifierOptions
             )
-          : hasRibSelection
-            ? createSkeletonRibTargetEntries(layerGlyph, this.selection, behaviorName, {
-                referenceSkeletonData,
-              })
+          : hasRibLikeSelection
+            ? [
+                ...createSkeletonRibTargetEntries(
+                  layerGlyph,
+                  this.selection,
+                  behaviorName,
+                  modifierOptions
+                ),
+                ...createEditableGeneratedPointTargetEntries(
+                  layerGlyph,
+                  this.selection,
+                  behaviorName,
+                  modifierOptions
+                ),
+              ]
             : [
                 makeSkeletonPointTargetEntry(
                   layerGlyph,
                   this.selection,
                   behaviorName,
-                  referenceSkeletonData
+                  referenceSkeletonData,
+                  modifierOptions
                 ),
               ].filter((entry) => entry);
         const behaviorFactory = new EditBehaviorFactory(
