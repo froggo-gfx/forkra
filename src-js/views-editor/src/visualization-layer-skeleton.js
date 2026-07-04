@@ -1,6 +1,13 @@
-import { getSkeletonData } from "@fontra/core/skeleton-model.js";
+import {
+  getSkeletonData,
+  getSkeletonHandleOffset,
+} from "@fontra/core/skeleton-model.js";
 import { parseSelection } from "@fontra/core/utils.ts";
 
+import {
+  makeEditableGeneratedHandleKey,
+  makeEditableGeneratedPointKey,
+} from "./skeleton-generated.js";
 import { getSkeletonRibPosition, makeSkeletonRibKey } from "./skeleton-ribs.js";
 import {
   fillRoundNode,
@@ -110,6 +117,31 @@ function getSkeletonRibSelectionSets(model) {
   };
 }
 
+function getEditableGeneratedSelectionSets(model) {
+  return {
+    selectedPoints: new Set(
+      (parseSelection(model.selection).editableGeneratedPoint || []).map(
+        (item) => `editableGeneratedPoint/${item}`
+      )
+    ),
+    hoveredPoints: new Set(
+      (parseSelection(model.hoverSelection).editableGeneratedPoint || []).map(
+        (item) => `editableGeneratedPoint/${item}`
+      )
+    ),
+    selectedHandles: new Set(
+      (parseSelection(model.selection).editableGeneratedHandle || []).map(
+        (item) => `editableGeneratedHandle/${item}`
+      )
+    ),
+    hoveredHandles: new Set(
+      (parseSelection(model.hoverSelection).editableGeneratedHandle || []).map(
+        (item) => `editableGeneratedHandle/${item}`
+      )
+    ),
+  };
+}
+
 function drawDiamondNode(context, point, size, fill) {
   const half = size / 2;
   context.beginPath();
@@ -136,6 +168,62 @@ function forEachSkeletonContour(positionedGlyph, model, callback) {
   for (const contour of skeletonData.contours) {
     if (contour.points?.length) {
       callback(contour);
+    }
+  }
+}
+
+function forEachEditableGeneratedTarget(positionedGlyph, model, callback) {
+  const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
+  const path = positionedGlyph.glyph.path;
+  if (!skeletonData?.generated?.length || !path) {
+    return;
+  }
+  for (const entry of skeletonData.generated) {
+    if (!Number.isInteger(entry.pathContourIndex)) {
+      continue;
+    }
+    for (const [contourPointIndex, provenance] of (entry.pointMap || []).entries()) {
+      if (
+        !provenance ||
+        (provenance.role !== "onCurve" &&
+          provenance.role !== "in" &&
+          provenance.role !== "out") ||
+        (provenance.side !== "left" && provenance.side !== "right")
+      ) {
+        continue;
+      }
+      const contourId = provenance.skeletonContourId ?? entry.skeletonContourId;
+      const contour = (skeletonData.contours || []).find(
+        (contour) => contour.id === contourId
+      );
+      const sourcePoint = (contour?.points || []).find(
+        (point) => point.id === provenance.skeletonPointId
+      );
+      if (
+        !contour ||
+        sourcePoint?.type ||
+        sourcePoint?.editable?.[provenance.side] !== true
+      ) {
+        continue;
+      }
+      let pathPointIndex;
+      try {
+        pathPointIndex = path.getAbsolutePointIndex(
+          entry.pathContourIndex,
+          contourPointIndex
+        );
+      } catch {
+        continue;
+      }
+      callback({
+        point: path.getPoint(pathPointIndex),
+        contour,
+        sourcePoint,
+        contourId,
+        pointId: sourcePoint.id,
+        side: provenance.side,
+        role: provenance.role,
+      });
     }
   }
 }
@@ -360,16 +448,25 @@ registerVisualizationLayerDefinition({
   defaultOn: true,
   zIndex: 560,
   screenParameters: {
+    handleSize: 7,
     pointSize: 11,
     strokeWidth: 2,
   },
   colors: {
     fillColor: "rgba(161, 73, 184, 0.22)",
+    hoverFillColor: "rgba(161, 73, 184, 0.35)",
+    selectedFillColor: "rgba(255, 128, 0, 0.28)",
     strokeColor: "rgba(161, 73, 184, 0.95)",
+    hoverStrokeColor: "rgba(161, 73, 184, 1)",
+    selectedStrokeColor: "rgba(255, 128, 0, 0.95)",
   },
   colorsDarkMode: {
     fillColor: "rgba(199, 119, 221, 0.28)",
+    hoverFillColor: "rgba(199, 119, 221, 0.42)",
+    selectedFillColor: "rgba(255, 174, 68, 0.35)",
     strokeColor: "rgba(199, 119, 221, 0.95)",
+    hoverStrokeColor: "rgba(199, 119, 221, 1)",
+    selectedStrokeColor: "rgba(255, 174, 68, 1)",
   },
   draw: (context, positionedGlyph, parameters, model) => {
     context.lineWidth = parameters.strokeWidth;
@@ -384,6 +481,45 @@ registerVisualizationLayerDefinition({
         if (rib.editableRight) {
           drawDiamondNode(context, rib.right, parameters.pointSize, true);
         }
+      }
+    });
+    const generatedSelection = getEditableGeneratedSelectionSets(model);
+    forEachEditableGeneratedTarget(positionedGlyph, model, (target) => {
+      const isHandle = target.role === "in" || target.role === "out";
+      const key = isHandle
+        ? makeEditableGeneratedHandleKey(
+            target.contourId,
+            target.pointId,
+            target.side,
+            target.role
+          )
+        : makeEditableGeneratedPointKey(target.contourId, target.pointId, target.side);
+      const selected = isHandle
+        ? generatedSelection.selectedHandles.has(key)
+        : generatedSelection.selectedPoints.has(key);
+      const hovered = isHandle
+        ? generatedSelection.hoveredHandles.has(key)
+        : generatedSelection.hoveredPoints.has(key);
+      context.strokeStyle = selected
+        ? parameters.selectedStrokeColor
+        : hovered
+          ? parameters.hoverStrokeColor
+          : parameters.strokeColor;
+      context.fillStyle = selected
+        ? parameters.selectedFillColor
+        : hovered
+          ? parameters.hoverFillColor
+          : parameters.fillColor;
+      if (isHandle) {
+        fillRoundNode(context, target.point, parameters.handleSize);
+        context.stroke();
+        if (
+          getSkeletonHandleOffset(target.sourcePoint, target.side, target.role).detached
+        ) {
+          drawDiamondNode(context, target.point, parameters.handleSize + 4, false);
+        }
+      } else {
+        drawDiamondNode(context, target.point, parameters.pointSize, true);
       }
     });
   },
