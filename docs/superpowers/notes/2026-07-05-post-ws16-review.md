@@ -75,41 +75,85 @@ files, `npx prettier --write` applied, fontra-core `npm test` 1352 passing,
 
 ---
 
-## B. User reports NOT reproducible in the source — suspect stale bundle
+## B. Second pass (same day): runtime errors traced to root causes — ALL FIXED
 
-Both remaining reports contradict the current tree, and `npm run bundle`
-compiles cleanly from it. If the running editor was built by a bundle-watch
-that crashed or was started before WS-15/16 landed, both symptoms are exactly
-what you'd see. **First step: rebuild (`npm run bundle` in `src-js/`), hard
-reload, and check the browser console for load errors.**
+The first pass wrongly attributed the undo and panel reports to a stale
+bundle. Runtime console output disproved that; each symptom had a real
+defect. All are fixed in this pass.
 
-### B1. "No undo/redo on skeleton points" (user report 2)
-Every skeleton write path is wired through the standard undo mechanism:
-- drags: `edit-tools-pointer.handleDragSelection` → `sceneController.editGlyph`
-  → returns `{changes, undoLabel}` → `editContext.editFinal(change, rollback,
-  undoInfo)`; skeleton target entries feed rollback through the
-  `EditBehavior.rollbackChange` getter (composed in `edit-behavior.js`);
-- nudges: `scene-controller` nudge → same `editGlyph` contract;
-- delete: `editor._deleteSelection` → `editLayersAndRecordChanges`;
-- smooth toggle: `handleSkeletonPointsDoubleClick` → `editLayersAndRecordChanges`;
-- drawing tool: `_editSkeletonAcrossLayers` → `editGlyph` with `undoLabel`;
-- panel: `skeleton-panel-edits.js` (same pattern, per its header).
+### B1. Skeleton data never persisted; server rejected every skeleton edit — FIXED (root cause of user reports 2 and "no persistence")
+- **Symptom:** `Uncaught (in promise) o: KeyError('customData')` from
+  `_handleIncomingMessage` on every skeleton edit; skeleton "converts to
+  basic contours" after a page refresh; undo/redo dead for skeleton edits.
+- **Root cause:** the entire feature (WS-6 through WS-16, and the WS-8
+  rendering fixture) stores skeleton data in the **layer glyph's**
+  (`StaticGlyph`) `customData` — but the Python data model's `StaticGlyph`
+  has **no `customData` field**. `_applyChange` → `getItemCast` →
+  `classFields["customData"]` raises `KeyError('customData')`, so the server
+  rejected every skeleton change (killing server-side persistence and the
+  echoed edit round-trip), and cattrs dropped the key on read/write, so
+  nothing survived a refresh. The frozen generated contours survive because
+  they are ordinary path contours. The donor avoided this by writing to
+  `Layer.customData` (which Python supports). No Python file was touched in
+  any skeleton workstream — the review's cross-language boundary check
+  failed to happen in WS-6 planning and in the first review pass.
+- **Fix (schema extension, chosen over relocating storage):**
+  - `src/fontra/core/classes.py`: `StaticGlyph.customData: CustomData`
+    (same shape as `Layer.customData`).
+  - `src-js/fontra-core/src/classes.json`: regenerated
+    (`PYTHONPATH=src python -m fontra.core.classes`). Note: running
+    `scripts/rebuild_classes_json.sh` bare picks up whatever `fontra` the
+    ambient Python resolves (an editable install of a *different* checkout,
+    `Desktop/fontra-skeletron`) and silently strips fork fields — always
+    regenerate with the repo source on `PYTHONPATH`, and verify the diff.
+  - `src-js/fontra-core/src/var-glyph.js`: `StaticGlyph.fromObject` now
+    carries `customData` (it silently dropped it before; this also removes
+    the "fromObject drops customData" caveat recorded in
+    `ws16-parity-audit.md`'s copy/paste exclusion — re-check that analysis
+    when implementing the paste follow-up).
+  - Relocating storage to `Layer.customData` (the donor's choice) was
+    rejected because WS-9's target entries compose changes relative to the
+    layer *glyph* inside `EditBehavior`; `Layer.customData` is a sibling of
+    `glyph` and cannot be expressed there without restructuring the seam.
+  - Verified: `structure`/`unstructure`/`applyChange` round-trip in Python
+    (empty dict omitted on write), `test_classes.py` + `test_changes.py`
+    130 passing, JS test expectations updated (`test-var-glyph.js`).
+- **Runtime requirement:** restart the fontra server (it runs forkra's
+  `venv`, which imports `forkra/src`) and hard-reload the browser (new
+  bundle hash). Undo/redo is expected to work once the server stops
+  rejecting the changes; if it still fails after that, re-diagnose with the
+  server accepting edits.
 
-If undo still fails after a fresh bundle, capture: (a) whether the Edit menu
-shows an undo label after a skeleton drag, (b) whether Ctrl+Z reverts the
-*path* but not the skeleton or vice versa (that would implicate the customData
-half of the change object, i.e. `recordChanges` proxying of
-`setSkeletonData`), (c) whether it fails only for a specific entry point
-(drag vs delete vs panel). Each answer isolates a different layer.
+### B2. Skeleton parameters panel crashed on update — FIXED (user report "panel broken")
+- **Symptom:** `TypeError: defaultValue: expected instance of Number, got
+  undefined` at `_addEditNumberSlider` → the panel's `update()` aborts, so
+  the panel shows but is broken/empty.
+- **Cause:** every `edit-number-slider` descriptor built by
+  `panel-skeleton-parameters.js` omitted `defaultValue`; the `RangeSlider`
+  web component type-checks it. Every other panel passes it.
+- **Fix:** `_pushSlider`/`_pushSummarySlider` take a `defaultValue`
+  (falling back to `minValue`), call sites pass the natural neutral values
+  (distribution 0, scale 100, roundness 0, asymmetry 0, trim-ratio 0.5,
+  radius-boost 1).
 
-### B2. "Skeleton panel is missing" (user report 3, second half)
-`SkeletonParametersPanel` is registered (`editor.js:1172`,
-`addSidebarPanel(…, "right")` — same pattern as every other panel), defines
-`identifier`/`iconPath` like its peers, and its icon asset exists
-(`fontra-core/assets/tabler-icons/bone.svg`). After rebuilding, look for a
-bone icon tab in the right sidebar; if absent, check the console for an
-exception thrown during panel construction (the constructor touches
-`sceneSettingsController` key listeners).
+### B3. Tunni points appeared (and were draggable) on generated contours — FIXED
+- **Symptom:** regular Tunni handles shown on generated outlines; dragging
+  them edits the generated path directly (not via `editSkeleton`), and the
+  edit is discarded on the next regeneration.
+- **Fix:** new `getGeneratedPathContourIndices(skeletonData)` in
+  `fontra-core/src/skeleton-model.js`; `tunniLayerHitTest`
+  (`tunni-interactions.js`) and both Tunni visualization draw functions
+  (`visualization-layer-definitions.js`) skip generated contours. Skeleton
+  Tunni (on the skeleton itself) is unaffected.
+
+### B4. Console spam `invalid behavior name: "rib-default"` / `"rib-interpolate"` — FIXED
+- **Cause:** rib drags/nudges pass `getSkeletonRibBehaviorName()` results to
+  the base `EditBehaviorFactory.getBehavior`, and `behaviorTypes` had no
+  entries for them (unlike the fixed-rib/equalize names added by WS-13), so
+  every rib interaction logged and fell back.
+- **Fix:** added `rib-default`/`rib-interpolate` entries mirroring
+  `fixed-rib` (default point rules; rib semantics live in the rib executor
+  target entries).
 
 ---
 

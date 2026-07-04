@@ -1423,4 +1423,17 @@ const behaviorTypes = {
     actions: actionFactories,
     constrainDelta: constrainHorVerDiag,
   },
+
+  // Rib drags: the rib semantics live in the skeleton rib executors (target
+  // entries); the base point behavior for any co-selected path points is the
+  // default one.
+  "rib-default": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
+
+  "rib-interpolate": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
 };

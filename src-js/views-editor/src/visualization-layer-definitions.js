@@ -29,6 +29,10 @@ import { guessGlyphPlaceholderString } from "@fontra/core/glyph-data.js";
 import { translate } from "@fontra/core/localization.js";
 import { rectToPoints } from "@fontra/core/rectangle.ts";
 import { difference, isSuperset, union } from "@fontra/core/set-ops.js";
+import {
+  getGeneratedPathContourIndices,
+  getSkeletonData,
+} from "@fontra/core/skeleton-model.js";
 import { decomposedToTransform } from "@fontra/core/transform.js";
 import {
   calculateControlHandlePoint,
@@ -2019,8 +2023,24 @@ registerVisualizationLayerDefinition({
   draw: drawTunniCombined,
 });
 
+// Generated skeleton contours are derived geometry and get no regular Tunni
+// points/lines (skeleton Tunni operates on the skeleton itself).
+function getGeneratedContourIndicesForTunni(positionedGlyph, model) {
+  const editLayerName =
+    model.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+  const layerGlyph =
+    editLayerName && positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName]?.glyph;
+  return getGeneratedPathContourIndices(
+    getSkeletonData(layerGlyph || positionedGlyph.glyph)
+  );
+}
+
 function drawTunniCombined(context, positionedGlyph, parameters, model, controller) {
   const path = positionedGlyph.glyph.path;
+  const generatedContourIndices = getGeneratedContourIndicesForTunni(
+    positionedGlyph,
+    model
+  );
 
   // Draw the Tunni lines
   context.strokeStyle = parameters.tunniLineColor;
@@ -2029,6 +2049,9 @@ function drawTunniCombined(context, positionedGlyph, parameters, model, controll
 
   // Iterate through all contours
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
     // Iterate through all segments in the contour
     for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
       if (segment.points.length === 4) {
@@ -2070,6 +2093,9 @@ function drawTunniCombined(context, positionedGlyph, parameters, model, controll
 
   // Iterate through all contours
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
     // Iterate through all segments in the contour
     for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
       if (segment.points.length === 4) {
@@ -2127,11 +2153,18 @@ function drawActualTunniPoints(
   controller
 ) {
   const path = positionedGlyph.glyph.path;
+  const generatedContourIndices = getGeneratedContourIndicesForTunni(
+    positionedGlyph,
+    model
+  );
 
   context.fillStyle = parameters.tunniPointColor;
 
   // Iterate through all contours
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
     // Iterate through all segments in the contour
     for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
       if (segment.points.length === 4) {

@@ -1,6 +1,9 @@
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { ChangeCollector } from "@fontra/core/changes.js";
-import { getSkeletonData } from "@fontra/core/skeleton-model.js";
+import {
+  getGeneratedPathContourIndices,
+  getSkeletonData,
+} from "@fontra/core/skeleton-model.js";
 import {
   areSkeletonTensionsEqualized,
   buildSkeletonTunniSegments,
@@ -834,8 +837,19 @@ export function tunniLayerHitTest(point, size, positionedGlyph) {
   // The point is already in the glyph coordinate system when passed from the pointer tool
   const glyphPoint = point;
 
+  // Generated skeleton contours are derived geometry: they get no regular
+  // Tunni points (skeleton Tunni operates on the skeleton itself).
+  const skeletonData = getSkeletonData(
+    positionedGlyph.varGlyph?.glyph?.layers?.[positionedGlyph.glyph?.layerName]
+      ?.glyph || positionedGlyph.glyph
+  );
+  const generatedContourIndices = getGeneratedPathContourIndices(skeletonData);
+
   // Iterate through ALL contours and check if the point is near any Tunni point
   for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
     for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
       // Process each segment in the contour
       if (segment.points.length === 4) {

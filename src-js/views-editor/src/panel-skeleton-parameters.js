@@ -295,7 +295,8 @@ export default class SkeletonParametersPanel extends Panel {
       "default-distribution",
       () => this._sourceDefault(distKey),
       -100,
-      100
+      100,
+      0
     );
     formContents.push({ type: "divider" });
     formContents.push({
@@ -338,7 +339,8 @@ export default class SkeletonParametersPanel extends Panel {
       "distribution",
       summary.distribution,
       -100,
-      100
+      100,
+      0
     );
     formContents.push({
       type: "edit-number-slider",
@@ -346,6 +348,7 @@ export default class SkeletonParametersPanel extends Panel {
       label: translate("sidebar.skeleton-parameters.scale"),
       value: 100,
       minValue: 10,
+      defaultValue: 100,
       maxValue: 300,
     });
   }
@@ -408,7 +411,8 @@ export default class SkeletonParametersPanel extends Panel {
       "corner-roundness",
       corner.roundnessStrength,
       0,
-      1
+      1,
+      0
     );
     this._pushSummarySlider(
       formContents,
@@ -416,7 +420,8 @@ export default class SkeletonParametersPanel extends Panel {
       "corner-asymmetry",
       corner.cornerAsymmetry,
       -1,
-      1
+      1,
+      0
     );
     this._pushSummarySlider(
       formContents,
@@ -424,7 +429,8 @@ export default class SkeletonParametersPanel extends Panel {
       "corner-trim-ratio",
       corner.cornerTrimRatio,
       0.05,
-      0.99
+      0.99,
+      0.5
     );
     this._pushSummarySlider(
       formContents,
@@ -432,7 +438,8 @@ export default class SkeletonParametersPanel extends Panel {
       "corner-radius-boost",
       corner.cornerRadiusBoost,
       0.1,
-      4
+      4,
+      1
     );
   }
 
@@ -473,13 +480,15 @@ export default class SkeletonParametersPanel extends Panel {
     });
   }
 
-  _pushSlider(formContents, key, labelKey, getValue, minValue, maxValue) {
+  _pushSlider(formContents, key, labelKey, getValue, minValue, maxValue, defaultValue) {
     formContents.push({
       type: "edit-number-slider",
       key,
       label: translate(`sidebar.skeleton-parameters.${labelKey}`),
       value: getValue(),
       minValue,
+      // The RangeSlider web component requires a numeric defaultValue
+      defaultValue: defaultValue ?? minValue,
       maxValue,
     });
   }
@@ -494,13 +503,23 @@ export default class SkeletonParametersPanel extends Panel {
     });
   }
 
-  _pushSummarySlider(formContents, key, labelKey, summary, minValue, maxValue) {
+  _pushSummarySlider(
+    formContents,
+    key,
+    labelKey,
+    summary,
+    minValue,
+    maxValue,
+    defaultValue
+  ) {
     formContents.push({
       type: "edit-number-slider",
       key,
       label: translate(`sidebar.skeleton-parameters.${labelKey}`),
       value: summary.mixed || summary.value == null ? minValue : summary.value,
       minValue,
+      // The RangeSlider web component requires a numeric defaultValue
+      defaultValue: defaultValue ?? minValue,
       maxValue,
     });
   }

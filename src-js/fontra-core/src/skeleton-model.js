@@ -198,6 +198,19 @@ export function deleteSkeletonPoint(skeletonData, contourId, pointId) {
   return true;
 }
 
+// Path contour indices currently occupied by generated skeleton contours.
+// Generated geometry is derived data: interaction surfaces (point selection,
+// Tunni, segment hits) must not treat it as regular path geometry.
+export function getGeneratedPathContourIndices(skeletonData) {
+  const indices = new Set();
+  for (const entry of skeletonData?.generated || []) {
+    if (Number.isInteger(entry.pathContourIndex) && entry.pathContourIndex >= 0) {
+      indices.add(entry.pathContourIndex);
+    }
+  }
+  return indices;
+}
+
 export function getSkeletonPointHalfWidth(point, defaultWidth, side) {
   const width = normalizeWidth(point?.width);
   if (side === "left") {
