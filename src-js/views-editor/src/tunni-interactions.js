@@ -50,8 +50,27 @@ export function tunniHoverResult(
   point,
   size,
   positionedGlyph,
-  visualizationLayersSettings
+  visualizationLayersSettings,
+  sceneModel = null
 ) {
+  if (visualizationLayersSettings.model["fontra.skeleton.tunni"] && sceneModel) {
+    const scenePoint = {
+      x: point.x + positionedGlyph.x,
+      y: point.y + positionedGlyph.y,
+    };
+    const skeletonHit = sceneModel.skeletonTunniAtPoint(
+      scenePoint,
+      size,
+      positionedGlyph
+    );
+    if (skeletonHit?.type === "true-tunni") {
+      return { cursor: "crosshair", skeletonHit };
+    }
+    if (skeletonHit?.type === "tunni") {
+      return { cursor: "pointer", skeletonHit };
+    }
+  }
+
   const handleLayerOn = visualizationLayersSettings.model["fontra.tunni.handle"];
   const pointLayerOn = visualizationLayersSettings.model["fontra.tunni.point"];
   if (!handleLayerOn && !pointLayerOn) {

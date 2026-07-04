@@ -211,7 +211,8 @@ export class PointerTool extends BaseTool {
         glyphPoint,
         size,
         positionedGlyph,
-        this.editor.visualizationLayersSettings
+        this.editor.visualizationLayersSettings,
+        this.sceneModel
       );
       if (tunni) {
         this.canvasController.canvas.style.cursor = tunni.cursor;

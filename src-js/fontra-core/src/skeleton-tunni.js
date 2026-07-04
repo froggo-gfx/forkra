@@ -144,6 +144,54 @@ export function areSkeletonTensionsEqualized(segment, tolerance = 0.01) {
   return points ? areTensionsEqualized(points, tolerance) : true;
 }
 
+export function skeletonTunniHitTest(point, size, skeletonData, options = {}) {
+  if (!skeletonData?.contours?.length) {
+    return null;
+  }
+  const { midpointOnly = false, includeTrueTunni = true } = options;
+
+  for (
+    let contourIndex = skeletonData.contours.length - 1;
+    contourIndex >= 0;
+    contourIndex--
+  ) {
+    const contour = skeletonData.contours[contourIndex];
+    const segments = buildSkeletonTunniSegments(contour);
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const segment = segments[i];
+      if (segment.controlPoints.length !== 2) {
+        continue;
+      }
+      if (!midpointOnly && includeTrueTunni) {
+        const trueTunniPoint = calculateSkeletonTrueTunniPoint(segment);
+        if (trueTunniPoint && distance(point, trueTunniPoint) <= size) {
+          return {
+            type: "true-tunni",
+            contourId: contour.id,
+            contourIndex,
+            segmentIndex: segment.segmentIndex,
+            segment,
+            tunniPoint: trueTunniPoint,
+          };
+        }
+      }
+
+      const tunniPoint = calculateSkeletonTunniPoint(segment);
+      if (tunniPoint && distance(point, tunniPoint) <= size) {
+        return {
+          type: "tunni",
+          contourId: contour.id,
+          contourIndex,
+          segmentIndex: segment.segmentIndex,
+          segment,
+          tunniPoint,
+        };
+      }
+    }
+  }
+  return null;
+}
+
 function makeSkeletonTunniSegment(contour, startIndex, endIndex) {
   const points = contour.points || [];
   const controlEntries =

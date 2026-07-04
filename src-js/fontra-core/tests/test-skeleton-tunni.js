@@ -7,6 +7,7 @@ import {
   calculateSkeletonTrueTunniPoint,
   calculateSkeletonTunniPoint,
   segmentToTunniPoints,
+  skeletonTunniHitTest,
 } from "@fontra/core/skeleton-tunni.js";
 import { expect } from "chai";
 
@@ -157,6 +158,62 @@ describe("skeleton Tunni geometry helpers", () => {
       segment.controlPoints[1],
     ]);
     expect(areSkeletonTensionsEqualized(segment)).to.equal(true);
+  });
+});
+
+describe("skeleton Tunni hit testing", () => {
+  it("prefers true Tunni hits when true and midpoint are both in range", () => {
+    const skeletonData = { contours: [makeIntersectingContour()] };
+
+    const hit = skeletonTunniHitTest({ x: 50, y: 75 }, 30, skeletonData);
+
+    expect(hit).to.include({
+      type: "true-tunni",
+      contourId: 30,
+      contourIndex: 0,
+      segmentIndex: 0,
+    });
+    expect(hit.segment.startPointId).to.equal(1);
+    expect(hit.segment.endPointId).to.equal(4);
+    expect(hit.segment.controlPointIds).to.deep.equal([2, 3]);
+    expect(roundPoint(hit.tunniPoint)).to.deep.equal({ x: 50, y: 100 });
+  });
+
+  it("returns midpoint hits for midpoint-only mode and ignores true Tunni points", () => {
+    const skeletonData = { contours: [makeIntersectingContour()] };
+
+    const hit = skeletonTunniHitTest({ x: 50, y: 50 }, 5, skeletonData, {
+      midpointOnly: true,
+    });
+    const trueHit = skeletonTunniHitTest({ x: 50, y: 100 }, 5, skeletonData, {
+      midpointOnly: true,
+    });
+
+    expect(hit).to.include({
+      type: "tunni",
+      contourId: 30,
+      contourIndex: 0,
+      segmentIndex: 0,
+    });
+    expect(hit.tunniPoint).to.deep.equal({ x: 50, y: 50 });
+    expect(trueHit).to.equal(null);
+  });
+
+  it("can exclude true Tunni hits without midpoint-only targeting", () => {
+    const skeletonData = { contours: [makeIntersectingContour()] };
+
+    const hit = skeletonTunniHitTest({ x: 50, y: 100 }, 5, skeletonData, {
+      includeTrueTunni: false,
+    });
+
+    expect(hit).to.equal(null);
+  });
+
+  it("returns null for misses and missing skeleton contours", () => {
+    expect(skeletonTunniHitTest({ x: 500, y: 500 }, 5, { contours: [] })).to.equal(
+      null
+    );
+    expect(skeletonTunniHitTest({ x: 50, y: 50 }, 5, null)).to.equal(null);
   });
 });
 

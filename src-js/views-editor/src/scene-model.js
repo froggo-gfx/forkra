@@ -22,6 +22,7 @@ import {
 import { difference, isEqualSet, union, updateSet } from "@fontra/core/set-ops.js";
 import { MAX_UNICODE } from "@fontra/core/shaper.js";
 import { getSkeletonData } from "@fontra/core/skeleton-model.js";
+import { skeletonTunniHitTest } from "@fontra/core/skeleton-tunni.js";
 import { decomposedToTransform } from "@fontra/core/transform.js";
 import {
   assert,
@@ -1014,6 +1015,27 @@ export class SceneModel {
       }
     }
     return null;
+  }
+
+  skeletonTunniAtPoint(
+    point,
+    size,
+    positionedGlyph = this.getSelectedPositionedGlyph(),
+    options = {}
+  ) {
+    if (!positionedGlyph) {
+      return null;
+    }
+    const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+    if (!skeletonData?.contours?.length) {
+      return null;
+    }
+
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+    return skeletonTunniHitTest(glyphPoint, size, skeletonData, options);
   }
 
   skeletonRibSelectionAtPoint(point, size, parsedCurrentSelection) {
