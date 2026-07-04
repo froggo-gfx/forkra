@@ -43,6 +43,7 @@ import { equalGlyphSelection } from "./scene-controller.js";
 import {
   createSkeletonRibTargetEntries,
   hasSkeletonPointSelection,
+  makeSkeletonPointKey,
   makeSkeletonPointTargetEntry,
   toggleSkeletonSmooth,
 } from "./skeleton-editing.js";
@@ -51,6 +52,11 @@ import {
   createEditableGeneratedPointTargetEntries,
   toggleEditableGeneratedHandleDetached,
 } from "./skeleton-generated.js";
+import {
+  getSelectionTargetKinds,
+  getSkeletonModifierBehaviorName,
+  makeSkeletonModifierOptions,
+} from "./skeleton-modifiers.js";
 import {
   getSkeletonRibBehaviorName,
   isSkeletonRibDragAllowed,
@@ -345,10 +351,15 @@ export class PointerTool extends BaseTool {
       initialEvent.altKey
     );
     let initialClickedPointIndex;
+    let initialClickedSkeletonPointKey;
     if (!pathHit) {
-      const { point: pointIndices } = parseSelection(selection);
+      const { point: pointIndices, skeletonPoint } = parseSelection(selection);
       if (pointIndices?.length) {
         initialClickedPointIndex = pointIndices[0];
+      }
+      if (skeletonPoint?.length) {
+        const [contourId, pointId] = skeletonPoint[0].split("/").map(Number);
+        initialClickedSkeletonPointKey = makeSkeletonPointKey(contourId, pointId);
       }
     }
     if (initialEvent.detail == 2 || initialEvent.myTapCount == 2) {
@@ -411,8 +422,11 @@ export class PointerTool extends BaseTool {
     } else if (initiateDrag) {
       this.sceneController.sceneModel.initialClickedPointIndex =
         initialClickedPointIndex;
+      this.sceneController.sceneModel.initialClickedSkeletonPointKey =
+        initialClickedSkeletonPointKey;
       const result = await this.handleDragSelection(eventStream, initialEvent);
       delete this.sceneController.sceneModel.initialClickedPointIndex;
+      delete this.sceneController.sceneModel.initialClickedSkeletonPointKey;
       return result;
     }
   }
@@ -557,12 +571,18 @@ export class PointerTool extends BaseTool {
     const sceneController = this.sceneController;
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const initialPoint = sceneController.selectedGlyphPoint(initialEvent);
+      const targetKinds = getSelectionTargetKinds(sceneController.selection);
+      const getRealtimeModifiers = () => ({
+        equalizeMode: this.equalizeMode,
+        fixedRibMode: this.fixedRibMode,
+        fixedRibCompressMode: this.fixedRibCompressMode,
+        tangentRibMode: this.tangentRibMode,
+      });
       const getSelectionBehaviorName = (event) =>
-        hasRibLikeSelection(sceneController.selection)
-          ? getSkeletonRibBehaviorName(event, {
-              tangentRibMode: this.tangentRibMode,
-            })
-          : getBehaviorName(event);
+        getSkeletonModifierBehaviorName(event, getRealtimeModifiers(), targetKinds) ||
+        (hasRibLikeSelection(sceneController.selection)
+          ? getSkeletonRibBehaviorName(event, getRealtimeModifiers())
+          : getBehaviorName(event));
       let behaviorName = getSelectionBehaviorName(initialEvent);
 
       // Read the edit layer's skeleton data once; every layer's skeleton target
@@ -576,14 +596,17 @@ export class PointerTool extends BaseTool {
         editingLayers[editLayerName] || Object.values(editingLayers)[0]
       );
       const makeSkeletonTargetEntries = (layerGlyph, name) => {
+        const modifierOptions = makeSkeletonModifierOptions(name, {
+          referenceSkeletonData,
+          clickedSkeletonPointKey:
+            sceneController.sceneModel.initialClickedSkeletonPointKey,
+        });
         if (hasEditableGeneratedHandleSelection(sceneController.selection)) {
           return createEditableGeneratedHandleTargetEntries(
             layerGlyph,
             sceneController.selection,
             name,
-            {
-              referenceSkeletonData,
-            }
+            modifierOptions
           );
         }
         if (hasRibLikeSelection(sceneController.selection)) {
@@ -600,7 +623,7 @@ export class PointerTool extends BaseTool {
               sceneController.selection,
               name,
               {
-                referenceSkeletonData,
+                ...modifierOptions,
                 constrainMode: this.tangentRibMode ? "tangent" : null,
               }
             )
@@ -611,7 +634,7 @@ export class PointerTool extends BaseTool {
               sceneController.selection,
               name,
               {
-                referenceSkeletonData,
+                ...modifierOptions,
                 constrainMode: this.tangentRibMode ? "tangent" : null,
               }
             )
@@ -622,7 +645,8 @@ export class PointerTool extends BaseTool {
           layerGlyph,
           sceneController.selection,
           name,
-          referenceSkeletonData
+          referenceSkeletonData,
+          modifierOptions
         );
         return entry ? [entry] : [];
       };
