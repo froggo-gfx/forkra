@@ -9,6 +9,8 @@ import {
   deleteSkeletonPoint,
   getSkeletonContour,
   getSkeletonData,
+  getSkeletonHandleOffset,
+  getSkeletonHandleOffsetKey,
   getSkeletonPoint,
   getSkeletonPointHalfWidth,
   getSkeletonPointNudge,
@@ -21,6 +23,8 @@ import {
   projectSkeletonRibPoint,
   setSkeletonContourDefaultWidth,
   setSkeletonData,
+  setSkeletonHandleDetached,
+  setSkeletonHandleOffset,
   setSkeletonPointSideNudge,
   setSkeletonPointSideWidth,
   updateSkeletonPoint,
@@ -288,6 +292,54 @@ describe("skeleton-model rib mutation helpers", () => {
 
     setSkeletonContourDefaultWidth(contour, 95.6);
     expect(contour.defaultWidth).to.equal(96);
+  });
+});
+
+describe("skeleton-model handle offset helpers", () => {
+  it("returns a default handle offset for missing values", () => {
+    expect(getSkeletonHandleOffset({}, "left", "in")).to.deep.equal({
+      x: 0,
+      y: 0,
+      detached: false,
+    });
+  });
+
+  it("sets rounded canonical 2D handle offsets", () => {
+    const point = makeSkeletonPoint();
+
+    setSkeletonHandleOffset(point, "left", "out", { x: 12.4, y: -3.7 });
+
+    expect(point.handleOffsets.leftOut).to.deep.equal({
+      x: 12,
+      y: -4,
+      detached: false,
+    });
+  });
+
+  it("sets detached state for both handles on a side", () => {
+    const point = makeSkeletonPoint();
+
+    setSkeletonHandleDetached(point, "right", true);
+
+    expect(point.handleOffsets.rightIn).to.deep.equal({
+      x: 0,
+      y: 0,
+      detached: true,
+    });
+    expect(point.handleOffsets.rightOut).to.deep.equal({
+      x: 0,
+      y: 0,
+      detached: true,
+    });
+  });
+
+  it("rejects invalid handle sides and roles", () => {
+    expect(() => getSkeletonHandleOffsetKey("center", "in")).to.throw(
+      "invalid skeleton rib side"
+    );
+    expect(() => getSkeletonHandleOffsetKey("left", "middle")).to.throw(
+      "invalid skeleton handle role"
+    );
   });
 });
 

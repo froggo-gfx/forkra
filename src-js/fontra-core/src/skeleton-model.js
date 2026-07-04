@@ -282,6 +282,55 @@ export function setSkeletonContourDefaultWidth(
   contour.defaultWidth = Math.max(0, round(asFiniteNumber(defaultWidth, 0)));
 }
 
+export function getSkeletonHandleOffsetKey(side, role) {
+  assertSkeletonRibSide(side);
+  assertSkeletonHandleRole(role);
+  return `${side}${role === "in" ? "In" : "Out"}`;
+}
+
+export function getSkeletonHandleOffset(point, side, role) {
+  const key = getSkeletonHandleOffsetKey(side, role);
+  const offset = point?.handleOffsets?.[key];
+  return {
+    x: asFiniteNumber(offset?.x, 0),
+    y: asFiniteNumber(offset?.y, 0),
+    detached: offset?.detached === true,
+  };
+}
+
+export function setSkeletonHandleOffset(
+  point,
+  side,
+  role,
+  offset,
+  { round = Math.round } = {}
+) {
+  const key = getSkeletonHandleOffsetKey(side, role);
+  const existing = getSkeletonHandleOffset(point, side, role);
+  point.handleOffsets = {
+    ...normalizeHandleOffsets(point?.handleOffsets),
+    [key]: {
+      x: round(asFiniteNumber(offset?.x, 0)),
+      y: round(asFiniteNumber(offset?.y, 0)),
+      detached: offset?.detached === true || existing.detached === true,
+    },
+  };
+}
+
+export function setSkeletonHandleDetached(point, side, detached) {
+  assertSkeletonRibSide(side);
+  for (const role of ["in", "out"]) {
+    const offset = getSkeletonHandleOffset(point, side, role);
+    setSkeletonHandleOffset(
+      point,
+      side,
+      role,
+      { ...offset, detached: detached === true },
+      { round: (value) => value }
+    );
+  }
+}
+
 export function getSkeletonRibSidesForPoint(contour, point) {
   if (!point || point.type) {
     return [];
@@ -526,6 +575,12 @@ function normalizeHandleOffsets(handleOffsets) {
 function assertSkeletonRibSide(side) {
   if (side !== "left" && side !== "right") {
     throw new Error(`invalid skeleton rib side: ${side}`);
+  }
+}
+
+function assertSkeletonHandleRole(role) {
+  if (role !== "in" && role !== "out") {
+    throw new Error(`invalid skeleton handle role: ${role}`);
   }
 }
 
