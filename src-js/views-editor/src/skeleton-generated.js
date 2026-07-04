@@ -1,3 +1,8 @@
+import { getSkeletonData } from "@fontra/core/skeleton-model.js";
+import { parseSelection } from "@fontra/core/utils.ts";
+import { createSkeletonRibTargetEntries } from "./skeleton-editing.js";
+import { getSkeletonRibAddress, makeSkeletonRibKey } from "./skeleton-ribs.js";
+
 const EDITABLE_GENERATED_POINT_KEY_KIND = "editableGeneratedPoint";
 const EDITABLE_GENERATED_HANDLE_KEY_KIND = "editableGeneratedHandle";
 const VALID_GENERATED_SIDES = new Set(["left", "right"]);
@@ -165,6 +170,48 @@ export function findGeneratedPathAddress(skeletonData, contourId, pointId, side,
     }
   }
   return null;
+}
+
+export function createEditableGeneratedPointTargetEntries(
+  layerGlyph,
+  selection,
+  behaviorName,
+  options = {}
+) {
+  const referenceSkeletonData =
+    options.referenceSkeletonData || getSkeletonData(layerGlyph);
+  const ribSelection = new Set();
+  for (const item of parseSelection([...selection]).editableGeneratedPoint || []) {
+    const { contourId, pointId, side } = parseEditableGeneratedPointKey(item);
+    const address = getSkeletonRibAddress(
+      referenceSkeletonData,
+      contourId,
+      pointId,
+      side
+    );
+    if (!address || address.point.editable?.[side] !== true) {
+      continue;
+    }
+    if (
+      !findGeneratedPathAddress(
+        referenceSkeletonData,
+        address.contour.id,
+        address.point.id,
+        side,
+        "onCurve"
+      )
+    ) {
+      continue;
+    }
+    ribSelection.add(makeSkeletonRibKey(address.contour.id, address.point.id, side));
+  }
+  if (!ribSelection.size) {
+    return [];
+  }
+  return createSkeletonRibTargetEntries(layerGlyph, ribSelection, behaviorName, {
+    ...options,
+    referenceSkeletonData,
+  });
 }
 
 function normalizeKeyParts(key, kind, expectedLength) {

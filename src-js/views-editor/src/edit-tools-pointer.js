@@ -46,6 +46,7 @@ import {
   makeSkeletonPointTargetEntry,
   toggleSkeletonSmooth,
 } from "./skeleton-editing.js";
+import { createEditableGeneratedPointTargetEntries } from "./skeleton-generated.js";
 import {
   getSkeletonRibBehaviorName,
   isSkeletonRibDragAllowed,
@@ -513,7 +514,7 @@ export class PointerTool extends BaseTool {
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const initialPoint = sceneController.selectedGlyphPoint(initialEvent);
       const getSelectionBehaviorName = (event) =>
-        hasSkeletonRibSelection(sceneController.selection)
+        hasRibLikeSelection(sceneController.selection)
           ? getSkeletonRibBehaviorName(event, {
               tangentRibMode: this.tangentRibMode,
             })
@@ -531,21 +532,37 @@ export class PointerTool extends BaseTool {
         editingLayers[editLayerName] || Object.values(editingLayers)[0]
       );
       const makeSkeletonTargetEntries = (layerGlyph, name) => {
-        if (hasSkeletonRibSelection(sceneController.selection)) {
+        if (hasRibLikeSelection(sceneController.selection)) {
+          const targetEntries = [];
           if (
+            hasSkeletonRibSelection(sceneController.selection) &&
             !isSkeletonRibDragAllowed(referenceSkeletonData, sceneController.selection)
           ) {
             return [];
           }
-          return createSkeletonRibTargetEntries(
-            layerGlyph,
-            sceneController.selection,
-            name,
-            {
-              referenceSkeletonData,
-              constrainMode: this.tangentRibMode ? "tangent" : null,
-            }
+          targetEntries.push(
+            ...createSkeletonRibTargetEntries(
+              layerGlyph,
+              sceneController.selection,
+              name,
+              {
+                referenceSkeletonData,
+                constrainMode: this.tangentRibMode ? "tangent" : null,
+              }
+            )
           );
+          targetEntries.push(
+            ...createEditableGeneratedPointTargetEntries(
+              layerGlyph,
+              sceneController.selection,
+              name,
+              {
+                referenceSkeletonData,
+                constrainMode: this.tangentRibMode ? "tangent" : null,
+              }
+            )
+          );
+          return targetEntries;
         }
         const entry = makeSkeletonPointTargetEntry(
           layerGlyph,
@@ -1034,6 +1051,16 @@ function getBehaviorName(event) {
 
 function hasSkeletonRibSelection(selection) {
   return !!parseSelection([...selection]).skeletonRib?.length;
+}
+
+function hasEditableGeneratedPointSelection(selection) {
+  return !!parseSelection([...selection]).editableGeneratedPoint?.length;
+}
+
+function hasRibLikeSelection(selection) {
+  return (
+    hasSkeletonRibSelection(selection) || hasEditableGeneratedPointSelection(selection)
+  );
 }
 
 function replace(setA, setB) {
