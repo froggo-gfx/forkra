@@ -37,6 +37,7 @@ import {
 import { normalizeLocation, unnormalizeLocation } from "@fontra/core/var-model.js";
 import * as vector from "@fontra/core/vector.js";
 import { makeSkeletonPointKey } from "./skeleton-editing.js";
+import { iterSkeletonRibTargets } from "./skeleton-ribs.js";
 
 export class SceneModel {
   constructor(
@@ -742,6 +743,15 @@ export class SceneModel {
       return { selection: skeletonPointSelection };
     }
 
+    const skeletonRibSelection = this.skeletonRibSelectionAtPoint(
+      point,
+      size,
+      parsedCurrentSelection
+    );
+    if (skeletonRibSelection.size) {
+      return { selection: skeletonRibSelection };
+    }
+
     const pointSelection = this.pointSelectionAtPoint(
       point,
       size,
@@ -853,6 +863,81 @@ export class SceneModel {
       }
     }
 
+    return new Set();
+  }
+
+  skeletonRibAtPoint(point, size, positionedGlyph = this.getSelectedPositionedGlyph()) {
+    if (!positionedGlyph) {
+      return null;
+    }
+    const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+    if (!skeletonData?.contours?.length) {
+      return null;
+    }
+
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+    const isHit = (ribPoint) =>
+      Math.abs(ribPoint.x - glyphPoint.x) <= size &&
+      Math.abs(ribPoint.y - glyphPoint.y) <= size;
+
+    for (const target of iterSkeletonRibTargets(skeletonData)) {
+      if (target.position && isHit(target.position)) {
+        return {
+          selectionKey: target.selectionKey,
+          contourId: target.contourId,
+          pointId: target.pointId,
+          side: target.side,
+          point: target.position,
+          normal: target.normal,
+          layerName:
+            this.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName,
+        };
+      }
+    }
+    return null;
+  }
+
+  skeletonRibSelectionAtPoint(point, size, parsedCurrentSelection) {
+    const positionedGlyph = this.getSelectedPositionedGlyph();
+    if (!positionedGlyph) {
+      return new Set();
+    }
+    const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+    if (!skeletonData?.contours?.length) {
+      return new Set();
+    }
+
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+    const isHit = (ribPoint) =>
+      Math.abs(ribPoint.x - glyphPoint.x) <= size &&
+      Math.abs(ribPoint.y - glyphPoint.y) <= size;
+
+    const currentKeys = new Set(
+      (parsedCurrentSelection?.skeletonRib || []).map((item) => `skeletonRib/${item}`)
+    );
+    if (currentKeys.size) {
+      for (const target of iterSkeletonRibTargets(skeletonData)) {
+        if (
+          currentKeys.has(target.selectionKey) &&
+          target.position &&
+          isHit(target.position)
+        ) {
+          return new Set([target.selectionKey]);
+        }
+      }
+    }
+
+    for (const target of [...iterSkeletonRibTargets(skeletonData)].reverse()) {
+      if (target.position && isHit(target.position)) {
+        return new Set([target.selectionKey]);
+      }
+    }
     return new Set();
   }
 
