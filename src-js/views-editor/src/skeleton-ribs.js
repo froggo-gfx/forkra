@@ -4,6 +4,8 @@ import {
   getSkeletonPointNudge,
   getSkeletonRibSidesForPoint,
   projectSkeletonRibPoint,
+  setSkeletonPointSideNudge,
+  setSkeletonPointSideWidth,
 } from "@fontra/core/skeleton-model.js";
 
 const SKELETON_RIB_KEY_KIND = "skeletonRib";
@@ -25,6 +27,19 @@ export function parseSkeletonRibKey(key) {
     throw new Error(`invalid skeleton rib key: ${key}`);
   }
   return { contourId, pointId, side };
+}
+
+export function getSkeletonRibBehaviorName(event, modifiers = {}) {
+  if (modifiers.tangentRibMode && event?.altKey) {
+    return "rib-tangent-interpolate";
+  }
+  if (modifiers.tangentRibMode) {
+    return "rib-tangent";
+  }
+  if (event?.altKey) {
+    return "rib-interpolate";
+  }
+  return "rib-default";
 }
 
 export function getSkeletonRibAddress(skeletonData, contourId, pointId, side) {
@@ -81,6 +96,54 @@ export function getSkeletonRibPosition(contour, point, side) {
   return projectSkeletonRibPoint(point, normal, halfWidth, side, nudge);
 }
 
+export function createSkeletonRibExecutor(address, behaviorName = "rib-default") {
+  const { contour, point, side, defaultWidth, normal } = address;
+  const leftHalfWidth = getSkeletonPointHalfWidth(point, defaultWidth, "left");
+  const rightHalfWidth = getSkeletonPointHalfWidth(point, defaultWidth, "right");
+  const isSingleSided =
+    contour.singleSided === "left" || contour.singleSided === "right";
+  const originalHalfWidth = isSingleSided
+    ? leftHalfWidth + rightHalfWidth
+    : getSkeletonPointHalfWidth(point, defaultWidth, side);
+  const originalNudge = getSkeletonPointNudge(point, side, defaultWidth);
+  const tangent = { x: -normal.y, y: normal.x };
+  const editable = point.editable?.[side] === true;
+  const forceTangent =
+    behaviorName === "rib-tangent" || behaviorName === "rib-tangent-interpolate";
+
+  return {
+    contourId: contour.id,
+    pointId: point.id,
+    side,
+    applyDelta(delta, { constrainMode = null, round = Math.round } = {}) {
+      const normalSign = side === "left" ? 1 : -1;
+      const normalDelta = normalSign * (delta.x * normal.x + delta.y * normal.y);
+      const tangentDelta = delta.x * tangent.x + delta.y * tangent.y;
+      const tangentOnly = forceTangent || constrainMode === "tangent";
+      const halfWidth = tangentOnly
+        ? originalHalfWidth
+        : Math.max(0, round(originalHalfWidth + normalDelta));
+      const nudge =
+        editable && (tangentOnly || !forceTangent)
+          ? round(originalNudge + tangentDelta)
+          : originalNudge;
+      return { halfWidth, nudge, side };
+    },
+  };
+}
+
+export function applySkeletonRibExecutorResult(address, result) {
+  const { contour, point, side, defaultWidth } = address;
+  if (contour.singleSided === "left" || contour.singleSided === "right") {
+    setSingleSidedTotalWidth(point, defaultWidth, side, result.halfWidth);
+  } else {
+    setSkeletonPointSideWidth(point, defaultWidth, side, result.halfWidth);
+  }
+  if (point.editable?.[side] === true) {
+    setSkeletonPointSideNudge(point, side, result.nudge);
+  }
+}
+
 export function* iterSkeletonRibTargets(skeletonData) {
   for (const contour of skeletonData?.contours || []) {
     for (let pointIndex = 0; pointIndex < (contour.points || []).length; pointIndex++) {
@@ -111,4 +174,22 @@ function assertSkeletonRibSide(side) {
   if (!VALID_RIB_SIDES.has(side)) {
     throw new Error(`invalid skeleton rib side: ${side}`);
   }
+}
+
+function setSingleSidedTotalWidth(point, defaultWidth, side, totalWidth) {
+  const linked = point.width?.linked !== false;
+  const value = Math.max(0, totalWidth);
+  if (linked) {
+    const half = value / 2;
+    setSkeletonPointSideWidth(point, defaultWidth, side, half, {
+      linked: true,
+      round: (value) => value,
+    });
+    return;
+  }
+  const oppositeSide = side === "left" ? "right" : "left";
+  const opposite = getSkeletonPointHalfWidth(point, defaultWidth, oppositeSide);
+  setSkeletonPointSideWidth(point, defaultWidth, side, value - opposite, {
+    linked: false,
+  });
 }

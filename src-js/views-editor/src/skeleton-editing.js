@@ -13,6 +13,12 @@ import {
 import { parseSelection } from "@fontra/core/utils.ts";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
+import {
+  applySkeletonRibExecutorResult,
+  createSkeletonRibExecutor,
+  getSkeletonRibAddress,
+  parseSkeletonRibKey,
+} from "./skeleton-ribs.js";
 
 export function makeSkeletonPointKey(contourId, pointId) {
   return `skeletonPoint/${contourId}/${pointId}`;
@@ -326,6 +332,65 @@ export function makeSkeletonPointTargetEntry(
   };
 }
 
+export function createSkeletonRibTargetEntries(
+  layer,
+  selection,
+  behaviorName,
+  { referenceSkeletonData = null, constrainMode = null } = {}
+) {
+  const skeletonData = getSkeletonData(layer);
+  if (!skeletonData) {
+    return [];
+  }
+  const reference = referenceSkeletonData || skeletonData;
+  const selected = collectSkeletonRibSelection(selection, reference, skeletonData);
+  if (!selected.length) {
+    return [];
+  }
+
+  const originalLayerGlyph = cloneLayerGlyphForSkeletonEdit(layer);
+  const executors = selected.map((address) => ({
+    reference: {
+      contourId: address.reference.contour.id,
+      pointId: address.reference.point.id,
+      side: address.reference.side,
+    },
+    executor: createSkeletonRibExecutor(address.target, behaviorName),
+  }));
+
+  let rollbackChange = null;
+  return [
+    {
+      get rollbackChange() {
+        return rollbackChange;
+      },
+      makeChangeForDelta(delta) {
+        const changes = makeEditSkeletonChange(originalLayerGlyph, (working) => {
+          for (const { reference, executor } of executors) {
+            const target = resolveSkeletonRibAddressAcrossLayers(
+              skeletonData,
+              working,
+              reference.contourId,
+              reference.pointId,
+              reference.side
+            );
+            if (!target) {
+              continue;
+            }
+            const result = executor.applyDelta(delta, { constrainMode });
+            applySkeletonRibExecutorResult(target, result);
+          }
+        });
+        rollbackChange = changes.rollbackChange;
+        return changes.change;
+      },
+      makeChangeForTransformation() {
+        return null;
+      },
+    },
+  ];
+}
+
 function collectSkeletonPointSelection(
   selection,
   referenceSkeletonData,
@@ -346,6 +411,62 @@ function collectSkeletonPointSelection(
     }
   }
   return selected;
+}
+
+function collectSkeletonRibSelection(
+  selection,
+  referenceSkeletonData,
+  targetSkeletonData
+) {
+  const { skeletonRib } = parseSelection([...selection]);
+  const selected = [];
+  for (const item of skeletonRib || []) {
+    const { contourId, pointId, side } = parseSkeletonRibKey(`skeletonRib/${item}`);
+    const reference = getSkeletonRibAddress(
+      referenceSkeletonData,
+      contourId,
+      pointId,
+      side
+    );
+    const target = resolveSkeletonRibAddressAcrossLayers(
+      referenceSkeletonData,
+      targetSkeletonData,
+      contourId,
+      pointId,
+      side
+    );
+    if (reference && target) {
+      selected.push({ reference, target });
+    }
+  }
+  return selected;
+}
+
+function resolveSkeletonRibAddressAcrossLayers(
+  referenceSkeletonData,
+  targetSkeletonData,
+  contourId,
+  pointId,
+  side
+) {
+  const reference = getSkeletonRibAddress(
+    referenceSkeletonData,
+    contourId,
+    pointId,
+    side
+  );
+  if (!reference) {
+    return null;
+  }
+  if (referenceSkeletonData === targetSkeletonData) {
+    return reference;
+  }
+  const contour = targetSkeletonData?.contours?.[reference.contourIndex];
+  const point = contour?.points?.[reference.pointIndex];
+  if (!contour || !point || point.type) {
+    return null;
+  }
+  return getSkeletonRibAddress(targetSkeletonData, contour.id, point.id, side);
 }
 
 function makeSyntheticSkeletonPathInstance(skeletonData, selected) {
