@@ -1,3 +1,4 @@
+import { getBaseKeyFromKeyEvent, getShortCuts } from "@fontra/core/actions.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import {
   ChangeCollector,
@@ -40,10 +41,15 @@ import { MeasureInteraction } from "./measure-interactions.js";
 import { getPinPoint } from "./panel-transformation.js";
 import { equalGlyphSelection } from "./scene-controller.js";
 import {
+  createSkeletonRibTargetEntries,
   hasSkeletonPointSelection,
   makeSkeletonPointTargetEntry,
   toggleSkeletonSmooth,
 } from "./skeleton-editing.js";
+import {
+  getSkeletonRibBehaviorName,
+  isSkeletonRibDragAllowed,
+} from "./skeleton-ribs.js";
 import {
   glyphSelector,
   registerVisualizationLayerDefinition,
@@ -61,6 +67,37 @@ import {
 const transformHandleMargin = 6;
 const transformHandleSize = 8;
 const rotationHandleSizeFactor = 1.2;
+const REALTIME_RIB_TANGENT_ACTION = "action.realtime.rib-tangent";
+
+function matchEventModifiers(shortCut, event) {
+  const expectedModifiers = { ...shortCut };
+  if (shortCut.commandKey) {
+    expectedModifiers[commandKeyProperty] = true;
+  }
+  return ["metaKey", "ctrlKey", "shiftKey", "altKey"].every(
+    (modifierProp) => !!expectedModifiers[modifierProp] === !!event[modifierProp]
+  );
+}
+
+function eventMatchesActionShortCut(actionIdentifier, event) {
+  const shortCuts = getShortCuts(actionIdentifier);
+  if (!shortCuts?.length) return false;
+  const baseKey = getBaseKeyFromKeyEvent(event);
+  for (const shortCut of shortCuts) {
+    if (!shortCut?.baseKey) continue;
+    if (shortCut.baseKey !== baseKey) continue;
+    if (!matchEventModifiers(shortCut, event)) continue;
+    return true;
+  }
+  return false;
+}
+
+function eventMatchesActionBaseKey(actionIdentifier, event) {
+  const shortCuts = getShortCuts(actionIdentifier);
+  if (!shortCuts?.length) return false;
+  const baseKey = getBaseKeyFromKeyEvent(event);
+  return shortCuts.some((shortCut) => shortCut?.baseKey === baseKey);
+}
 
 export class PointerTools {
   identifier = "pointer-tools";
@@ -74,6 +111,9 @@ export class PointerTool extends BaseTool {
   constructor(...args) {
     super(...args);
     this.measureInteraction = new MeasureInteraction(this);
+    this.tangentRibMode = false;
+    this._boundRibTangentKeyUp = null;
+    this._boundRibTangentWindowBlur = null;
   }
 
   handleHover(event) {
@@ -472,7 +512,13 @@ export class PointerTool extends BaseTool {
     const sceneController = this.sceneController;
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const initialPoint = sceneController.selectedGlyphPoint(initialEvent);
-      let behaviorName = getBehaviorName(initialEvent);
+      const getSelectionBehaviorName = (event) =>
+        hasSkeletonRibSelection(sceneController.selection)
+          ? getSkeletonRibBehaviorName(event, {
+              tangentRibMode: this.tangentRibMode,
+            })
+          : getBehaviorName(event);
+      let behaviorName = getSelectionBehaviorName(initialEvent);
 
       // Read the edit layer's skeleton data once; every layer's skeleton target
       // entry resolves selection ids against this single reference by structural
@@ -485,6 +531,22 @@ export class PointerTool extends BaseTool {
         editingLayers[editLayerName] || Object.values(editingLayers)[0]
       );
       const makeSkeletonTargetEntries = (layerGlyph, name) => {
+        if (hasSkeletonRibSelection(sceneController.selection)) {
+          if (
+            !isSkeletonRibDragAllowed(referenceSkeletonData, sceneController.selection)
+          ) {
+            return [];
+          }
+          return createSkeletonRibTargetEntries(
+            layerGlyph,
+            sceneController.selection,
+            name,
+            {
+              referenceSkeletonData,
+              constrainMode: this.tangentRibMode ? "tangent" : null,
+            }
+          );
+        }
         const entry = makeSkeletonPointTargetEntry(
           layerGlyph,
           sceneController.selection,
@@ -521,7 +583,7 @@ export class PointerTool extends BaseTool {
       let editChange;
 
       for await (const event of eventStream) {
-        const newEditBehaviorName = getBehaviorName(event);
+        const newEditBehaviorName = getSelectionBehaviorName(event);
         if (behaviorName !== newEditBehaviorName) {
           // Behavior changed, undo current changes
           behaviorName = newEditBehaviorName;
@@ -854,6 +916,18 @@ export class PointerTool extends BaseTool {
     if (this.measureInteraction.handleKeyDown(event)) {
       return;
     }
+    if (eventMatchesActionShortCut(REALTIME_RIB_TANGENT_ACTION, event)) {
+      if (!this.tangentRibMode) {
+        this.tangentRibMode = true;
+        this._boundRibTangentKeyUp = (e) => this._handleRibTangentKeyUp(e);
+        this._boundRibTangentWindowBlur = () => this._endRibTangentMode();
+        window.addEventListener("keyup", this._boundRibTangentKeyUp);
+        window.addEventListener("blur", this._boundRibTangentWindowBlur);
+        this.canvasController.requestUpdate();
+      }
+      event.preventDefault();
+      return;
+    }
     if (event.key !== "Tab" || !this.sceneSettings.selectedGlyph?.isEditing) {
       return;
     }
@@ -909,6 +983,28 @@ export class PointerTool extends BaseTool {
     this.sceneSettings.selection = new Set([`${selectionType}/${newIndex}`]);
   }
 
+  _handleRibTangentKeyUp(event) {
+    if (eventMatchesActionBaseKey(REALTIME_RIB_TANGENT_ACTION, event)) {
+      this._endRibTangentMode();
+    }
+  }
+
+  _endRibTangentMode() {
+    if (!this.tangentRibMode) {
+      return;
+    }
+    this.tangentRibMode = false;
+    if (this._boundRibTangentKeyUp) {
+      window.removeEventListener("keyup", this._boundRibTangentKeyUp);
+    }
+    if (this._boundRibTangentWindowBlur) {
+      window.removeEventListener("blur", this._boundRibTangentWindowBlur);
+    }
+    this._boundRibTangentKeyUp = null;
+    this._boundRibTangentWindowBlur = null;
+    this.canvasController.requestUpdate();
+  }
+
   activate() {
     super.activate();
     this.sceneController.sceneModel.showTransformSelection = true;
@@ -934,6 +1030,10 @@ function pointInCircleHandle(point, handle, handleSize) {
 function getBehaviorName(event) {
   const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
   return behaviorNames[boolInt(event.shiftKey) + 2 * boolInt(event.altKey)];
+}
+
+function hasSkeletonRibSelection(selection) {
+  return !!parseSelection([...selection]).skeletonRib?.length;
 }
 
 function replace(setA, setB) {

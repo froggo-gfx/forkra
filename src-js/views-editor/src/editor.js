@@ -676,6 +676,11 @@ export class EditorController extends ViewController {
         titleKey: "shortcuts.realtime.measure-direct",
         defaultShortCuts: [{ baseKey: "q", altKey: true }],
       });
+      registerActionInfo("action.realtime.rib-tangent", {
+        topic,
+        titleKey: "shortcuts.realtime.rib-tangent",
+        defaultShortCuts: [{ baseKey: "z" }],
+      });
     }
 
     {

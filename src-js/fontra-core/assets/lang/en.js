@@ -285,6 +285,7 @@ export const strings = {
   "shortcuts.import": "Import shortcuts",
   "shortcuts.realtime.measure": "Measure (hold)",
   "shortcuts.realtime.measure-direct": "Measure direct (hold)",
+  "shortcuts.realtime.rib-tangent": "Rib tangent (hold)",
   "shortcuts.reset-all": "Reset all shortcuts",
   "shortcuts.tooltip.clear": "Clear",
   "shortcuts.tooltip.click-and-record": "Click and record a shortcut",
