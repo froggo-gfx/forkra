@@ -22,6 +22,7 @@ import {
   registerRepresentationFactory,
 } from "./representation-cache.js";
 import { setPopFirst } from "./set-ops.js";
+import { getSkeletonData, getSkeletonRibPosition } from "./skeleton-model.js";
 import {
   Transform,
   decomposedToTransform,
@@ -761,12 +762,20 @@ export class StaticGlyphController {
       component: componentIndices,
       anchor: anchorIndices,
       backgroundImage: backgroundImageIndices,
+      skeletonPoint: skeletonPointKeys,
+      skeletonRib: skeletonRibKeys,
+      editableGeneratedPoint: editableGeneratedPointKeys,
+      editableGeneratedHandle: editableGeneratedHandleKeys,
     } = parseSelection(selection);
 
     pointIndices = pointIndices || [];
     componentIndices = componentIndices || [];
     anchorIndices = anchorIndices || [];
     backgroundImageIndices = backgroundImageIndices || [];
+    skeletonPointKeys = skeletonPointKeys || [];
+    skeletonRibKeys = skeletonRibKeys || [];
+    editableGeneratedPointKeys = editableGeneratedPointKeys || [];
+    editableGeneratedHandleKeys = editableGeneratedHandleKeys || [];
 
     const selectionRects = [];
     if (pointIndices.length) {
@@ -815,6 +824,56 @@ export class StaticGlyphController {
       const polygon = rectPoly.map((point) => affine.transformPointObject(point));
 
       selectionRects.push(rectFromPoints(polygon));
+    }
+
+    // Skeleton selections resolve from stable ids through skeleton-model
+    // accessors + the shared rib forward-projection (C3/C4) — never by inverse
+    // geometric recovery. Editable-generated addresses use the rib anchor
+    // position (bounds-only approximation, see Deviations).
+    const skeletonData = getSkeletonData(this.instance);
+    if (
+      skeletonData &&
+      (skeletonPointKeys.length ||
+        skeletonRibKeys.length ||
+        editableGeneratedPointKeys.length ||
+        editableGeneratedHandleKeys.length)
+    ) {
+      const findAddress = (contourId, pointId) => {
+        for (const contour of skeletonData.contours || []) {
+          if (`${contour.id}` !== `${contourId}`) continue;
+          const point = (contour.points || []).find(
+            (candidate) => `${candidate.id}` === `${pointId}`
+          );
+          if (point) {
+            return { contour, point };
+          }
+        }
+        return null;
+      };
+
+      for (const key of skeletonPointKeys) {
+        const [contourId, pointId] = `${key}`.split("/");
+        const address = findAddress(contourId, pointId);
+        if (address) {
+          selectionRects.push(centeredRect(address.point.x, address.point.y, 0));
+        }
+      }
+
+      const ribKeys = [
+        ...skeletonRibKeys,
+        ...editableGeneratedPointKeys,
+        ...editableGeneratedHandleKeys,
+      ];
+      for (const key of ribKeys) {
+        const [contourId, pointId, side] = `${key}`.split("/");
+        if (side !== "left" && side !== "right") continue;
+        const address = findAddress(contourId, pointId);
+        if (!address) continue;
+        const position = getSkeletonRibPosition(address.contour, address.point, side);
+        if (position) {
+          selectionRects.push(centeredRect(position.x, position.y, 0));
+        }
+      }
     }
 
     return unionRect(...selectionRects);
