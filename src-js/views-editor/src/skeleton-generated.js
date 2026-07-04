@@ -1,6 +1,20 @@
-import { getSkeletonData } from "@fontra/core/skeleton-model.js";
+import {
+  getSkeletonData,
+  getSkeletonHandleOffset,
+  setSkeletonHandleOffset,
+} from "@fontra/core/skeleton-model.js";
 import { parseSelection } from "@fontra/core/utils.ts";
-import { createSkeletonRibTargetEntries } from "./skeleton-editing.js";
+import {
+  dotVector,
+  mulVectorScalar,
+  normalizeVector,
+  subVectors,
+  vectorLength,
+} from "@fontra/core/vector.js";
+import {
+  createSkeletonRibTargetEntries,
+  makeEditSkeletonChange,
+} from "./skeleton-editing.js";
 import { getSkeletonRibAddress, makeSkeletonRibKey } from "./skeleton-ribs.js";
 
 const EDITABLE_GENERATED_POINT_KEY_KIND = "editableGeneratedPoint";
@@ -212,6 +226,225 @@ export function createEditableGeneratedPointTargetEntries(
     ...options,
     referenceSkeletonData,
   });
+}
+
+export function getSkeletonHandleDirectionForPoint(contour, pointIndex, role) {
+  assertHandleRole(role);
+  const points = contour?.points || [];
+  const point = points[pointIndex];
+  if (!point || point.type) {
+    return null;
+  }
+  const handleIndex =
+    role === "in"
+      ? getPreviousContourPointIndex(contour, pointIndex)
+      : getNextContourPointIndex(contour, pointIndex);
+  const handle = points[handleIndex];
+  if (!handle?.type) {
+    return null;
+  }
+  const direction = normalizeVector(subVectors(handle, point));
+  return vectorLength(direction) ? direction : null;
+}
+
+export function createEditableGeneratedHandleTargetEntries(
+  layerGlyph,
+  selection,
+  behaviorName,
+  options = {}
+) {
+  const skeletonData = getSkeletonData(layerGlyph);
+  if (!skeletonData) {
+    return [];
+  }
+  const referenceSkeletonData = options.referenceSkeletonData || skeletonData;
+  const selected = collectEditableGeneratedHandleSelection(
+    selection,
+    referenceSkeletonData,
+    skeletonData
+  );
+  if (!selected.length) {
+    return [];
+  }
+
+  const originalLayerGlyph = {
+    ...layerGlyph,
+    path: layerGlyph.path.copy(),
+    customData: structuredClone(layerGlyph.customData || {}),
+  };
+  const executors = selected.map((address) => ({
+    reference: {
+      contourId: address.reference.contour.id,
+      pointId: address.reference.point.id,
+      side: address.reference.side,
+      role: address.reference.role,
+    },
+    executor: createEditableGeneratedHandleExecutor(address.target),
+  }));
+
+  let rollbackChange = null;
+  return [
+    {
+      get rollbackChange() {
+        return rollbackChange;
+      },
+      makeChangeForDelta(delta) {
+        const changes = makeEditSkeletonChange(originalLayerGlyph, (working) => {
+          for (const { reference, executor } of executors) {
+            const target = resolveEditableGeneratedHandleAddressAcrossLayers(
+              skeletonData,
+              working,
+              reference.contourId,
+              reference.pointId,
+              reference.side,
+              reference.role
+            );
+            if (!target) {
+              continue;
+            }
+            setSkeletonHandleOffset(
+              target.point,
+              target.side,
+              target.role,
+              executor.applyDelta(delta)
+            );
+          }
+        });
+        rollbackChange = changes.rollbackChange;
+        return changes.change;
+      },
+      makeChangeForTransformation() {
+        return null;
+      },
+    },
+  ];
+}
+
+function createEditableGeneratedHandleExecutor(address) {
+  const originalOffset = getSkeletonHandleOffset(
+    address.point,
+    address.side,
+    address.role
+  );
+  const direction = address.direction;
+  return {
+    applyDelta(delta, { round = Math.round } = {}) {
+      if (originalOffset.detached) {
+        return {
+          x: round(originalOffset.x + delta.x),
+          y: round(originalOffset.y + delta.y),
+          detached: true,
+        };
+      }
+      const projectedDelta = dotVector(delta, direction);
+      const offsetDelta = mulVectorScalar(direction, projectedDelta);
+      return {
+        x: round(originalOffset.x + offsetDelta.x),
+        y: round(originalOffset.y + offsetDelta.y),
+        detached: false,
+      };
+    },
+  };
+}
+
+function collectEditableGeneratedHandleSelection(
+  selection,
+  referenceSkeletonData,
+  targetSkeletonData
+) {
+  const selected = [];
+  for (const item of parseSelection([...selection]).editableGeneratedHandle || []) {
+    const { contourId, pointId, side, role } = parseEditableGeneratedHandleKey(item);
+    const reference = resolveEditableGeneratedHandleAddressAcrossLayers(
+      referenceSkeletonData,
+      referenceSkeletonData,
+      contourId,
+      pointId,
+      side,
+      role
+    );
+    const target = resolveEditableGeneratedHandleAddressAcrossLayers(
+      referenceSkeletonData,
+      targetSkeletonData,
+      contourId,
+      pointId,
+      side,
+      role
+    );
+    if (!reference || !target) {
+      continue;
+    }
+    if (
+      !findGeneratedPathAddress(
+        referenceSkeletonData,
+        reference.contour.id,
+        reference.point.id,
+        side,
+        role
+      )
+    ) {
+      continue;
+    }
+    selected.push({ reference, target });
+  }
+  return selected;
+}
+
+function resolveEditableGeneratedHandleAddressAcrossLayers(
+  referenceSkeletonData,
+  targetSkeletonData,
+  contourId,
+  pointId,
+  side,
+  role
+) {
+  assertGeneratedSide(side);
+  assertHandleRole(role);
+  const reference = getSkeletonRibAddress(
+    referenceSkeletonData,
+    contourId,
+    pointId,
+    side
+  );
+  if (!reference || reference.point.editable?.[side] !== true) {
+    return null;
+  }
+  const contour = targetSkeletonData?.contours?.[reference.contourIndex];
+  const point = contour?.points?.[reference.pointIndex];
+  if (!contour || !point || point.type || point.editable?.[side] !== true) {
+    return null;
+  }
+  const direction = getSkeletonHandleDirectionForPoint(
+    contour,
+    reference.pointIndex,
+    role
+  );
+  if (!direction) {
+    return null;
+  }
+  return {
+    contour,
+    contourIndex: reference.contourIndex,
+    point,
+    pointIndex: reference.pointIndex,
+    side,
+    role,
+    direction,
+  };
+}
+
+function getPreviousContourPointIndex(contour, pointIndex) {
+  if (pointIndex > 0) {
+    return pointIndex - 1;
+  }
+  return contour?.closed ? (contour.points || []).length - 1 : -1;
+}
+
+function getNextContourPointIndex(contour, pointIndex) {
+  if (pointIndex < (contour?.points || []).length - 1) {
+    return pointIndex + 1;
+  }
+  return contour?.closed ? 0 : -1;
 }
 
 function normalizeKeyParts(key, kind, expectedLength) {
