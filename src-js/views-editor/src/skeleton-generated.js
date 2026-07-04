@@ -158,6 +158,7 @@ export function findGeneratedPathAddress(skeletonData, contourId, pointId, side,
       ) {
         return {
           pathContourIndex: generatedEntry.pathContourIndex,
+          contourPointIndex,
           pathPointIndex: contourPointIndex,
         };
       }

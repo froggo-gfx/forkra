@@ -37,6 +37,12 @@ import {
 import { normalizeLocation, unnormalizeLocation } from "@fontra/core/var-model.js";
 import * as vector from "@fontra/core/vector.js";
 import { makeSkeletonPointKey } from "./skeleton-editing.js";
+import {
+  findGeneratedPathAddress,
+  parseEditableGeneratedHandleKey,
+  parseEditableGeneratedPointKey,
+  resolveEditableGeneratedTarget,
+} from "./skeleton-generated.js";
 import { iterSkeletonRibTargets } from "./skeleton-ribs.js";
 
 export class SceneModel {
@@ -760,6 +766,16 @@ export class SceneModel {
       return { selection: skeletonRibSelection };
     }
 
+    const editableGeneratedTarget = this.editableGeneratedAtPoint(
+      point,
+      size,
+      undefined,
+      parsedCurrentSelection
+    );
+    if (editableGeneratedTarget) {
+      return { selection: new Set([editableGeneratedTarget.selectionKey]) };
+    }
+
     const pointSelection = this.pointSelectionAtPoint(
       point,
       size,
@@ -872,6 +888,98 @@ export class SceneModel {
     }
 
     return new Set();
+  }
+
+  editableGeneratedAtPoint(
+    point,
+    size,
+    positionedGlyph = this.getSelectedPositionedGlyph(),
+    parsedCurrentSelection = undefined
+  ) {
+    if (!positionedGlyph) {
+      return null;
+    }
+    const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+    if (!skeletonData?.generated?.length) {
+      return null;
+    }
+    const path = positionedGlyph.glyph.path;
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+    const currentPointIndices = this._getEditableGeneratedCurrentPointIndices(
+      skeletonData,
+      path,
+      parsedCurrentSelection
+    );
+    if (parsedCurrentSelection && !currentPointIndices.length) {
+      return null;
+    }
+    const pointIndex = currentPointIndices.length
+      ? path.pointIndexNearPointFromPointIndices(glyphPoint, size, currentPointIndices)
+      : path.pointIndexNearPoint(glyphPoint, size);
+    if (pointIndex === undefined) {
+      return null;
+    }
+    const target = resolveEditableGeneratedTarget(skeletonData, path, pointIndex);
+    if (!target) {
+      return null;
+    }
+    return {
+      selectionKey: target.selectionKey,
+      kind: target.kind,
+      contourId: target.contourId,
+      pointId: target.pointId,
+      side: target.side,
+      role: target.role,
+      pathContourIndex: target.pathContourIndex,
+      pathPointIndex: target.pathPointIndex,
+      point: path.getPoint(pointIndex),
+    };
+  }
+
+  _getEditableGeneratedCurrentPointIndices(skeletonData, path, parsedSelection) {
+    const keys = [
+      ...(parsedSelection?.editableGeneratedPoint || []).map(
+        (item) => `editableGeneratedPoint/${item}`
+      ),
+      ...(parsedSelection?.editableGeneratedHandle || []).map(
+        (item) => `editableGeneratedHandle/${item}`
+      ),
+    ];
+    const pointIndices = [];
+    for (const key of keys) {
+      let parsed;
+      try {
+        parsed = key.startsWith("editableGeneratedPoint/")
+          ? parseEditableGeneratedPointKey(key)
+          : parseEditableGeneratedHandleKey(key);
+      } catch {
+        continue;
+      }
+      const address = findGeneratedPathAddress(
+        skeletonData,
+        parsed.contourId,
+        parsed.pointId,
+        parsed.side,
+        parsed.role
+      );
+      if (!address) {
+        continue;
+      }
+      try {
+        pointIndices.push(
+          path.getAbsolutePointIndex(
+            address.pathContourIndex,
+            address.contourPointIndex
+          )
+        );
+      } catch {
+        continue;
+      }
+    }
+    return pointIndices;
   }
 
   skeletonRibAtPoint(point, size, positionedGlyph = this.getSelectedPositionedGlyph()) {
