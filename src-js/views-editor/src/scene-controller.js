@@ -1816,6 +1816,12 @@ export class SceneController {
     const [pointIndex1, pointIndex2] = this.contextMenuState.joinContourSelection;
     await this.editLayersAndRecordChanges((layerGlyphs) => {
       for (const layerGlyph of Object.values(layerGlyphs)) {
+        // joinContours removes the second (higher-indexed) contour; compute its
+        // index before the join, while the point indices are still valid, so
+        // only generated contours after it shift down.
+        const [removedContourIndex] = layerGlyph.path.getContourAndPointIndex(
+          Math.max(pointIndex1, pointIndex2)
+        );
         const selectionPointIndices = joinContours(
           layerGlyph.path,
           pointIndex1,
@@ -1825,9 +1831,7 @@ export class SceneController {
         for (const pointIndex of selectionPointIndices) {
           newSelection.add(`point/${pointIndex}`);
         }
-        // joinContours merges two (user) contours into one, removing one contour
-        // that precedes the generated block; shift generated indices down by 1.
-        recordSkeletonContourIndexShift(layerGlyph, 0, -1);
+        recordSkeletonContourIndexShift(layerGlyph, removedContourIndex, -1);
       }
       this.selection = newSelection;
       return translate("action.join-contours");
