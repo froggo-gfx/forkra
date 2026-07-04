@@ -16,8 +16,10 @@ import {
   setDepth,
 } from "@fontra/core/letterspacer-engine.js";
 import { translate } from "@fontra/core/localization.js";
+import { getSkeletonData, translateSkeletonData } from "@fontra/core/skeleton-model.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
+import { editSkeleton } from "./skeleton-editing.js";
 
 // ============================================================
 // Letterspacer persistence helpers (fontra.internal customData)
@@ -564,6 +566,17 @@ export default class LetterspacerPanel extends Panel {
           if (this.params.applyLSB) {
             const deltaLSB = roundedLSB - currentLSB;
             this.shiftPath(layerGlyph.path, deltaLSB);
+            // Move the skeleton by the same delta through the one write path
+            // (WS-16). editSkeleton regenerates the generated contours from the
+            // translated skeleton; because it sets absolute positions, this does
+            // not double-shift the contours shiftPath already moved.
+            if (deltaLSB && getSkeletonData(layerGlyph)) {
+              editSkeleton(layerGlyph, (skeletonData) => {
+                const moved = translateSkeletonData(skeletonData, deltaLSB, 0);
+                skeletonData.contours = moved.contours;
+                skeletonData.nextId = moved.nextId;
+              });
+            }
           }
 
           if (this.params.applyRSB || this.params.applyLSB) {
