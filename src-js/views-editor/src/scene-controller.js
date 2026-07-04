@@ -1094,8 +1094,6 @@ export class SceneController {
         editingLayers[editLayerName] || Object.values(editingLayers)[0]
       );
       const layerInfo = Object.entries(editingLayers).map(([layerName, layerGlyph]) => {
-        //// grid
-        window._sceneController = this; // <-- add this
         const modifierOptions = makeSkeletonModifierOptions(behaviorName, {
           referenceSkeletonData,
         });
