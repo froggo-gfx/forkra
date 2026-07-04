@@ -1073,6 +1073,7 @@ export default class TransformationPanel extends Panel {
       component: componentIndices,
       anchor: anchorIndices,
       backgroundImage: backgroundImageIndices,
+      skeletonPoint: skeletonPointKeys,
     } = parseSelection(selection);
     pointIndices = pointIndices || [];
 
@@ -1081,9 +1082,22 @@ export default class TransformationPanel extends Panel {
     const components = componentIndices || [];
     const anchors = anchorIndices || [];
     const backgroundImages = backgroundImageIndices || [];
+    // Each selected skeleton on-curve point is its own movable object (donor
+    // per-point align/distribute behavior). Keys stay id-based (skeletonPoint/
+    // <contourId>/<pointId>); the factory skeleton target entry moves them.
+    const skeletonPoints = (skeletonPointKeys || []).map(
+      (remainder) => `skeletonPoint/${remainder}`
+    );
 
     if (!pointIndices.length) {
-      return { points, contours, components, anchors, backgroundImages };
+      return {
+        points,
+        contours,
+        components,
+        anchors,
+        backgroundImages,
+        skeletonPoints,
+      };
     }
 
     const path = layerGlyphController.instance.path;
@@ -1126,11 +1140,11 @@ export default class TransformationPanel extends Panel {
       }
     }
 
-    return { points, contours, components, anchors, backgroundImages };
+    return { points, contours, components, anchors, backgroundImages, skeletonPoints };
   }
 
   _collectMovableObjects(moveDescriptor, controller) {
-    const { points, contours, components, anchors, backgroundImages } =
+    const { points, contours, components, anchors, backgroundImages, skeletonPoints } =
       this._splitSelection(controller, this.sceneController.selection);
 
     const movableObjects = [];
@@ -1155,6 +1169,9 @@ export default class TransformationPanel extends Panel {
     for (const backgroundImageIndex of backgroundImages) {
       const individualSelection = new Set([`backgroundImage/${backgroundImageIndex}`]);
       movableObjects.push(new MovableObject(individualSelection));
+    }
+    for (const skeletonPointKey of skeletonPoints) {
+      movableObjects.push(new MovableObject(new Set([skeletonPointKey])));
     }
 
     if (moveDescriptor.compareObjects) {
@@ -1185,6 +1202,12 @@ export default class TransformationPanel extends Panel {
       const editLayerGlyphs = this.sceneController.getEditingLayerFromGlyphLayers(
         glyph.layers
       );
+      // Skeleton selection ids are canonical in the edit layer; other layers
+      // resolve by structural ordinal (WS-9 cross-layer addressing).
+      const editLayerName = this.sceneController.sceneSettings.editLayerName;
+      const referenceSkeletonData = getSkeletonData(
+        editLayerGlyphs[editLayerName] || Object.values(editLayerGlyphs)[0]
+      );
 
       const editChanges = [];
       const rollbackChanges = [];
@@ -1206,7 +1229,8 @@ export default class TransformationPanel extends Panel {
           const [editChange, rollbackChange] = movableObject.makeChangesForDelta(
             delta,
             layerGlyph,
-            this.sceneController
+            this.sceneController,
+            referenceSkeletonData
           );
           applyChange(layerGlyph, editChange);
           editChanges.push(consolidateChanges(editChange, changePath));
@@ -1273,11 +1297,25 @@ class MovableObject {
     );
   }
 
-  makeChangesForDelta(delta, layerGlyph, sceneController) {
+  makeChangesForDelta(
+    delta,
+    layerGlyph,
+    sceneController,
+    referenceSkeletonData = null
+  ) {
+    // A skeleton-only movable object carries its point through the WS-9 factory
+    // target entry (no SkeletonMovableObject; the factory owns dispatch).
+    const skeletonEntry = makeSkeletonPointTargetEntry(
+      layerGlyph,
+      this.selection,
+      "default",
+      referenceSkeletonData
+    );
     const behaviorFactory = new EditBehaviorFactory(
       layerGlyph,
       this.selection,
-      sceneController.selectedTool.scalingEditBehavior
+      sceneController.selectedTool.scalingEditBehavior,
+      { targetEntries: skeletonEntry ? [skeletonEntry] : [] }
     );
 
     const editBehavior = behaviorFactory.getBehavior("default");
