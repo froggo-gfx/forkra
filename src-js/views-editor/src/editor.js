@@ -106,6 +106,7 @@ import GlyphSearchPanel from "./panel-glyph-search.js";
 import ReferenceFontPanel from "./panel-reference-font.js";
 import RelatedGlyphsPanel from "./panel-related-glyphs.js";
 import SelectionInfoPanel from "./panel-selection-info.js";
+import SkeletonParametersPanel from "./panel-skeleton-parameters.js";
 import TextEntryPanel from "./panel-text-entry.js";
 import TransformationPanel from "./panel-transformation.js";
 import Panel from "./panel.js";
@@ -1162,6 +1163,7 @@ export class EditorController extends ViewController {
     this.addSidebarPanel(new ReferenceFontPanel(this), "left");
     this.addSidebarPanel(new SelectionInfoPanel(this), "right");
     this.addSidebarPanel(new TransformationPanel(this), "right");
+    this.addSidebarPanel(new SkeletonParametersPanel(this), "right");
     this.addSidebarPanel(new GlyphNotePanel(this), "right");
     this.addSidebarPanel(new RelatedGlyphsPanel(this), "right");
     this.addSidebarPanel(new CharactersGlyphsPanel(this), "right");
