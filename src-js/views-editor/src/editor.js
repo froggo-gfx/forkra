@@ -34,6 +34,7 @@ import {
 } from "@fontra/core/rectangle.ts";
 import { SceneView } from "@fontra/core/scene-view.js";
 import { isSuperset } from "@fontra/core/set-ops.js";
+import { deleteSkeletonPoint, getSkeletonData } from "@fontra/core/skeleton-model.js";
 import { themeController } from "@fontra/core/theme-settings.js";
 import { getDecomposedIdentity } from "@fontra/core/transform.js";
 import { labeledCheckbox, labeledTextInput, pickFile } from "@fontra/core/ui-utils.js";
@@ -83,6 +84,11 @@ import {
   persistentSceneSettingsKeys,
 } from "./scene-controller.js";
 import { MIN_SIDEBAR_WIDTH, Sidebar } from "./sidebar.js";
+import {
+  editSkeleton,
+  parseSkeletonPointKey,
+  resolveSkeletonAddressAcrossLayers,
+} from "./skeleton-editing.js";
 import {
   allGlyphsCleanVisualizationLayerDefinition,
   visualizationLayerDefinitions,
@@ -2322,6 +2328,7 @@ export class EditorController extends ViewController {
       anchor: anchorSelection,
       guideline: guidelineSelection,
       backgroundImage: backgroundImageSelection,
+      skeletonPoint: skeletonPointKeys,
       //fontGuideline: fontGuidelineSelection,
     } = parseSelection(this.sceneController.selection);
     // TODO: Font Guidelines
@@ -2364,6 +2371,38 @@ export class EditorController extends ViewController {
             // (even though we shouldn't be able to select them)
             layerGlyph.backgroundImage = undefined;
           }
+        }
+      }
+      // Skeleton points delete through the one write path (WS-9 editSkeleton),
+      // which regenerates the generated contours. Selection ids are canonical in
+      // the edit layer; other layers resolve by structural ordinal (WS-9).
+      if (skeletonPointKeys?.length && !event.altKey) {
+        const editLayerName = this.sceneController.sceneSettings.editLayerName;
+        const referenceSkeletonData = getSkeletonData(
+          layerGlyphs[editLayerName] || Object.values(layerGlyphs)[0]
+        );
+        for (const layerGlyph of Object.values(layerGlyphs)) {
+          if (!getSkeletonData(layerGlyph)) {
+            continue;
+          }
+          editSkeleton(layerGlyph, (working) => {
+            const toDelete = [];
+            for (const key of skeletonPointKeys) {
+              const { contourId, pointId } = parseSkeletonPointKey(key);
+              const address = resolveSkeletonAddressAcrossLayers(
+                referenceSkeletonData,
+                working,
+                contourId,
+                pointId
+              );
+              if (address) {
+                toDelete.push([address.contour.id, address.point.id]);
+              }
+            }
+            for (const [contourId, pointId] of toDelete) {
+              deleteSkeletonPoint(working, contourId, pointId);
+            }
+          });
         }
       }
       this.sceneController.selection = new Set();
