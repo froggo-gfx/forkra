@@ -425,6 +425,85 @@ function clearCollapsedRibSides(point) {
   }
 }
 
+// Pure translate of all skeleton point coordinates. Returns a new data object.
+// Widths, nudges and handle offsets are relative to the point and therefore
+// translation-invariant, so they are left untouched.
+export function translateSkeletonData(skeletonData, dx, dy) {
+  const data = deepCopyObject(skeletonData);
+  for (const contour of data?.contours || []) {
+    for (const point of contour.points || []) {
+      point.x = asFiniteNumber(point.x, 0) + dx;
+      point.y = asFiniteNumber(point.y, 0) + dy;
+    }
+  }
+  return data;
+}
+
+// Pure affine of all skeleton point coordinates. Point positions go through the
+// full affine; handle offsets are vectors relative to their point, so only the
+// linear part (xx, xy, yx, yy) applies — never the translation (dx, dy).
+export function transformSkeletonData(skeletonData, affine) {
+  const data = deepCopyObject(skeletonData);
+  const linearX = (x, y) => affine.xx * x + affine.yx * y;
+  const linearY = (x, y) => affine.xy * x + affine.yy * y;
+  for (const contour of data?.contours || []) {
+    for (const point of contour.points || []) {
+      const [x, y] = affine.transformPoint(
+        asFiniteNumber(point.x, 0),
+        asFiniteNumber(point.y, 0)
+      );
+      point.x = x;
+      point.y = y;
+      if (point.handleOffsets && typeof point.handleOffsets === "object") {
+        for (const key of Object.keys(point.handleOffsets)) {
+          const offset = point.handleOffsets[key];
+          if (!offset || typeof offset !== "object") {
+            continue;
+          }
+          const ox = asFiniteNumber(offset.x, 0);
+          const oy = asFiniteNumber(offset.y, 0);
+          offset.x = linearX(ox, oy);
+          offset.y = linearY(ox, oy);
+        }
+      }
+    }
+  }
+  return data;
+}
+
+// Re-key every contour and point id from `nextId` upward, remapping provenance
+// references (generated[].skeletonContourId and each pointMap entry's
+// skeletonPointId). Used on paste so pasted ids never collide with the target
+// glyph's existing skeleton ids. Returns { data, nextId }.
+export function allocateSkeletonIds(skeletonData, nextId) {
+  const data = deepCopyObject(skeletonData);
+  let counter = Number.isInteger(nextId) && nextId > 0 ? nextId : 1;
+  const contourIdMap = new Map();
+  const pointIdMap = new Map();
+  for (const contour of data?.contours || []) {
+    const oldContourId = contour.id;
+    contour.id = counter++;
+    contourIdMap.set(oldContourId, contour.id);
+    for (const point of contour.points || []) {
+      const oldPointId = point.id;
+      point.id = counter++;
+      pointIdMap.set(oldPointId, point.id);
+    }
+  }
+  for (const entry of data?.generated || []) {
+    if (contourIdMap.has(entry.skeletonContourId)) {
+      entry.skeletonContourId = contourIdMap.get(entry.skeletonContourId);
+    }
+    for (const mapEntry of entry.pointMap || []) {
+      if (pointIdMap.has(mapEntry.skeletonPointId)) {
+        mapEntry.skeletonPointId = pointIdMap.get(mapEntry.skeletonPointId);
+      }
+    }
+  }
+  data.nextId = counter;
+  return { data, nextId: counter };
+}
+
 export function getSkeletonRibSidesForPoint(contour, point) {
   if (!point || point.type) {
     return [];

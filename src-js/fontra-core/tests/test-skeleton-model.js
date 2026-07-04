@@ -1,6 +1,7 @@
 import {
   DEFAULT_SKELETON_WIDTH,
   SKELETON_SCHEMA_VERSION,
+  allocateSkeletonIds,
   appendSkeletonContour,
   appendSkeletonPoint,
   buildSegmentsFromSkeletonPoints,
@@ -35,8 +36,11 @@ import {
   setSkeletonPointTotalWidth,
   setSkeletonPointWidthDistribution,
   setSkeletonPointWidthLinked,
+  transformSkeletonData,
+  translateSkeletonData,
   updateSkeletonPoint,
 } from "@fontra/core/skeleton-model.js";
+import { Transform } from "@fontra/core/transform.js";
 import { expect } from "chai";
 
 describe("skeleton-model constructors and normalization", () => {
@@ -544,5 +548,116 @@ describe("skeleton-model panel-facing mutators", () => {
     expect(point.editable.left).to.equal(true);
     expect(point.nudge.left).to.equal(5);
     expect(point.handleOffsets.rightOut).to.not.equal(undefined);
+  });
+});
+
+describe("skeleton-model transform/translate/id-allocation", () => {
+  function makeFixture() {
+    return {
+      version: SKELETON_SCHEMA_VERSION,
+      nextId: 10,
+      contours: [
+        {
+          id: 1,
+          closed: true,
+          singleSided: null,
+          defaultWidth: 80,
+          points: [
+            {
+              id: 2,
+              x: 100,
+              y: 200,
+              type: null,
+              smooth: false,
+              width: { left: 40, right: 40, linked: true },
+              nudge: { left: 3, right: 0 },
+              editable: { left: true, right: false },
+              handleOffsets: { leftIn: { x: 10, y: 0, detached: true } },
+            },
+            { id: 3, x: 150, y: 250, type: "cubic", smooth: false },
+          ],
+        },
+      ],
+      generated: [
+        {
+          skeletonContourId: 1,
+          pathContourIndex: 0,
+          pointMap: [
+            { skeletonPointId: 2, side: "left", role: "onCurve" },
+            { skeletonPointId: 3, side: "left", role: "in" },
+          ],
+        },
+      ],
+    };
+  }
+
+  it("translate shifts every point by (dx, dy)", () => {
+    const out = translateSkeletonData(makeFixture(), 5, -7);
+    expect(out.contours[0].points[0].x).to.equal(105);
+    expect(out.contours[0].points[0].y).to.equal(193);
+    expect(out.contours[0].points[1].x).to.equal(155);
+    expect(out.contours[0].points[1].y).to.equal(243);
+  });
+
+  it("translate leaves widths/nudges/handleOffsets unchanged", () => {
+    const out = translateSkeletonData(makeFixture(), 5, -7);
+    const point = out.contours[0].points[0];
+    expect(point.width).to.deep.equal({ left: 40, right: 40, linked: true });
+    expect(point.nudge).to.deep.equal({ left: 3, right: 0 });
+    expect(point.handleOffsets.leftIn).to.deep.equal({ x: 10, y: 0, detached: true });
+  });
+
+  it("translate does not mutate the input", () => {
+    const input = makeFixture();
+    translateSkeletonData(input, 5, -7);
+    expect(input.contours[0].points[0].x).to.equal(100);
+  });
+
+  it("transform applies the affine to point coordinates", () => {
+    const out = transformSkeletonData(makeFixture(), new Transform(2, 0, 0, 3, 10, 20));
+    expect(out.contours[0].points[0].x).to.equal(210);
+    expect(out.contours[0].points[0].y).to.equal(620);
+  });
+
+  it("transform applies only the linear part to handle offsets", () => {
+    const out = transformSkeletonData(makeFixture(), new Transform(2, 0, 0, 3, 10, 20));
+    // offset (10, 0) under linear part (xx=2) → (20, 0); translation ignored
+    expect(out.contours[0].points[0].handleOffsets.leftIn.x).to.equal(20);
+    expect(out.contours[0].points[0].handleOffsets.leftIn.y).to.equal(0);
+    expect(out.contours[0].points[0].handleOffsets.leftIn.detached).to.equal(true);
+  });
+
+  it("transform of a horizontal flip negates x offsets", () => {
+    const out = transformSkeletonData(makeFixture(), new Transform(-1, 0, 0, 1, 0, 0));
+    expect(out.contours[0].points[0].x).to.equal(-100);
+    expect(out.contours[0].points[0].handleOffsets.leftIn.x).to.equal(-10);
+  });
+
+  it("allocateSkeletonIds re-keys contours and points from nextId", () => {
+    const { data, nextId } = allocateSkeletonIds(makeFixture(), 100);
+    expect(data.contours[0].id).to.equal(100);
+    expect(data.contours[0].points[0].id).to.equal(101);
+    expect(data.contours[0].points[1].id).to.equal(102);
+    expect(nextId).to.equal(103);
+    expect(data.nextId).to.equal(103);
+  });
+
+  it("allocateSkeletonIds rewrites provenance references", () => {
+    const { data } = allocateSkeletonIds(makeFixture(), 100);
+    expect(data.generated[0].skeletonContourId).to.equal(100);
+    expect(data.generated[0].pointMap[0].skeletonPointId).to.equal(101);
+    expect(data.generated[0].pointMap[1].skeletonPointId).to.equal(102);
+  });
+
+  it("allocateSkeletonIds preserves geometry and contour flags", () => {
+    const { data } = allocateSkeletonIds(makeFixture(), 100);
+    expect(data.contours[0].closed).to.equal(true);
+    expect(data.contours[0].defaultWidth).to.equal(80);
+    expect(data.contours[0].points[0].x).to.equal(100);
+    expect(data.contours[0].points[0].width).to.deep.equal({
+      left: 40,
+      right: 40,
+      linked: true,
+    });
   });
 });
