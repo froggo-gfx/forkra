@@ -2,8 +2,10 @@ import { recordChanges } from "@fontra/core/change-recorder.js";
 import { ChangeCollector } from "@fontra/core/changes.js";
 import { getSkeletonData } from "@fontra/core/skeleton-model.js";
 import {
+  areSkeletonTensionsEqualized,
   buildSkeletonTunniSegments,
   calculateSkeletonControlPointsFromTunniDelta,
+  calculateSkeletonEqualizedControlPoints,
   calculateSkeletonOnCurveFromTunni,
   calculateSkeletonTrueTunniPoint,
   calculateSkeletonTunniPoint,
@@ -326,6 +328,72 @@ export async function handleSkeletonTunniDrag({
       broadcast: true,
     };
   });
+}
+
+export async function equalizeSkeletonTunniTensions({ sceneController, tunniHit }) {
+  if (areSkeletonTensionsEqualized(tunniHit.segment)) {
+    return true;
+  }
+
+  let handled = false;
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    let accumulated = new ChangeCollector();
+    const layerInfo = Object.entries(
+      sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+    )
+      .map(([layerName, layerGlyph]) => ({
+        layerName,
+        layerGlyph,
+        changePath: ["layers", layerName, "glyph"],
+        originalSkeletonData: getSkeletonData(layerGlyph),
+      }))
+      .filter((entry) => entry.originalSkeletonData?.contours?.length);
+
+    for (const { layerGlyph, changePath, originalSkeletonData } of layerInfo) {
+      const changes = editSkeleton(layerGlyph, (working) => {
+        const target = resolveSkeletonTunniSegment(
+          originalSkeletonData,
+          working,
+          tunniHit
+        );
+        if (!target || areSkeletonTensionsEqualized(target.originalSegment)) {
+          return;
+        }
+        const controlPoints = calculateSkeletonEqualizedControlPoints(
+          target.originalSegment
+        );
+        if (!controlPoints) {
+          return;
+        }
+        const [controlIndex1, controlIndex2] = target.originalSegment.controlIndices;
+        writePointPosition(
+          target.workingContour.points[controlIndex1],
+          controlPoints[0],
+          Math.round
+        );
+        writePointPosition(
+          target.workingContour.points[controlIndex2],
+          controlPoints[1],
+          Math.round
+        );
+      });
+      if (changes.hasChange) {
+        accumulated = accumulated.concat(changes.prefixed(changePath));
+      }
+    }
+
+    if (!accumulated.hasChange) {
+      return;
+    }
+    handled = true;
+    return {
+      changes: accumulated,
+      undoLabel: "Equalize Skeleton Tunni Tensions",
+      broadcast: true,
+    };
+  });
+
+  return handled;
 }
 
 function copySkeletonTunniSegment(segment) {

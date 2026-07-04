@@ -69,6 +69,7 @@ import {
 } from "./visualization-layer-definitions.js";
 // Import Tunni functions for integration with pointer tool
 import {
+  equalizeSkeletonTunniTensions,
   handleSkeletonTunniDrag,
   handleTrueTunniPointMouseDown,
   handleTunniDrag,
@@ -292,6 +293,22 @@ export class PointerTool extends BaseTool {
     const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
     const isSkeletonTunniLayerActive =
       this.editor.visualizationLayersSettings.model["fontra.skeleton.tunni"];
+
+    if (initialEvent.ctrlKey && initialEvent.shiftKey && positionedGlyph) {
+      const tunniHit = this.sceneModel.skeletonTunniAtPoint(
+        point,
+        size * 2,
+        positionedGlyph,
+        { midpointOnly: true }
+      );
+      if (tunniHit) {
+        await equalizeSkeletonTunniTensions({
+          sceneController,
+          tunniHit,
+        });
+        return;
+      }
+    }
 
     if (isSkeletonTunniLayerActive && positionedGlyph) {
       const skeletonPointSelection = this.sceneModel.skeletonPointAtPoint(
