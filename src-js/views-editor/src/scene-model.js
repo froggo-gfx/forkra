@@ -64,6 +64,7 @@ export class SceneModel {
     this.measureHoverSegment = null;
     this.measureHoverPoints = null;
     this.measureHoverHandle = null;
+    this.measureHoverSkeletonRib = null;
 
     this.sceneSettingsController.addKeyListener(
       [
@@ -183,6 +184,7 @@ export class SceneModel {
     this.measureHoverSegment = null;
     this.measureHoverPoints = null;
     this.measureHoverHandle = null;
+    this.measureHoverSkeletonRib = null;
   }
 
   setMeasureHoverTarget(kind, payload = null) {
@@ -197,6 +199,9 @@ export class SceneModel {
       case "points":
         this.measureHoverPoints = payload;
         break;
+      case "skeletonRib":
+        this.measureHoverSkeletonRib = payload;
+        break;
     }
   }
 
@@ -209,6 +214,9 @@ export class SceneModel {
     }
     if (this.measureHoverPoints) {
       return { kind: "points", payload: this.measureHoverPoints };
+    }
+    if (this.measureHoverSkeletonRib) {
+      return { kind: "skeletonRib", payload: this.measureHoverSkeletonRib };
     }
     return null;
   }

@@ -1,7 +1,12 @@
 import { getBaseKeyFromKeyEvent, getShortCuts } from "@fontra/core/actions.js";
 import { centeredRect } from "@fontra/core/rectangle.ts";
+import {
+  getSkeletonPointHalfWidth,
+  getSkeletonPointWidth,
+} from "@fontra/core/skeleton-model.js";
 import { commandKeyProperty, parseSelection } from "@fontra/core/utils.ts";
 import * as vector from "@fontra/core/vector.js";
+import { getSkeletonRibAddress, getSkeletonRibPosition } from "./skeleton-ribs.js";
 
 const REALTIME_MEASURE_ACTION = "action.realtime.measure";
 const REALTIME_MEASURE_DIRECT_ACTION = "action.realtime.measure-direct";
@@ -97,6 +102,10 @@ export class MeasureInteraction {
     const handle = this._findControlPointForMeasure(point, size, positionedGlyph);
     let target = handle ? { kind: "handle", payload: handle } : null;
     if (!target) {
+      const rib = this._findSkeletonRibForMeasure(point, size, positionedGlyph);
+      if (rib) target = { kind: "skeletonRib", payload: rib };
+    }
+    if (!target) {
       const segment = this._findSegmentForMeasure(point, size, positionedGlyph);
       if (segment) target = { kind: "segment", payload: segment };
     }
@@ -114,6 +123,40 @@ export class MeasureInteraction {
       this.canvasController.requestUpdate();
     }
     return true;
+  }
+
+  _findSkeletonRibForMeasure(
+    point,
+    size,
+    positionedGlyph = this.sceneModel.getSelectedPositionedGlyph()
+  ) {
+    const hit = this.sceneModel.skeletonRibAtPoint(point, size, positionedGlyph);
+    if (!hit) {
+      return null;
+    }
+    const skeletonData = this.sceneModel._getEditLayerSkeletonData(positionedGlyph);
+    const address = getSkeletonRibAddress(
+      skeletonData,
+      hit.contourId,
+      hit.pointId,
+      hit.side
+    );
+    if (!address) {
+      return null;
+    }
+    const { contour, point: skeletonPoint, side, defaultWidth } = address;
+    const sideWidths = {
+      left: getSkeletonPointHalfWidth(skeletonPoint, defaultWidth, "left"),
+      right: getSkeletonPointHalfWidth(skeletonPoint, defaultWidth, "right"),
+    };
+    return {
+      p1: { x: skeletonPoint.x, y: skeletonPoint.y },
+      p2: getSkeletonRibPosition(contour, skeletonPoint, side),
+      width: getSkeletonPointWidth(skeletonPoint, defaultWidth),
+      sideWidths,
+      side,
+      type: "skeletonRib",
+    };
   }
 
   _handleKeyUp(event) {

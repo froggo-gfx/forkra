@@ -1374,6 +1374,7 @@ export function drawMeasureOverlay(
     measureHoverSegment,
     measureHoverHandle,
     measureHoverPoints,
+    measureHoverSkeletonRib,
     measureShowDirect,
   } = model;
 
@@ -1394,6 +1395,20 @@ export function drawMeasureOverlay(
     const label = `${dist.toFixed(1)}\n${tensionText}\n${angle.toFixed(1)}°`;
     drawMeasureGuideLine(context, p2, p1, segmentColor, parameters);
     drawMeasureLabel(context, p1.x, p1.y, label, segmentColor, parameters, {
+      offsetY: 8,
+      alignBottom: true,
+    });
+    return;
+  }
+
+  if (measureHoverSkeletonRib) {
+    const { p1, p2, width, sideWidths } = measureHoverSkeletonRib;
+    const segmentColor = parameters.skeletonColor;
+    const label = `${width.toFixed(1)}\nL ${sideWidths.left.toFixed(
+      1
+    )}  R ${sideWidths.right.toFixed(1)}`;
+    drawMeasureGuideLine(context, p1, p2, segmentColor, parameters);
+    drawMeasureLabel(context, p2.x, p2.y, label, segmentColor, parameters, {
       offsetY: 8,
       alignBottom: true,
     });
