@@ -2,6 +2,11 @@ import {
   getSkeletonData,
   getSkeletonHandleOffset,
 } from "@fontra/core/skeleton-model.js";
+import {
+  buildSkeletonTunniSegments,
+  calculateSkeletonTrueTunniPoint,
+  calculateSkeletonTunniPoint,
+} from "@fontra/core/skeleton-tunni.js";
 import { parseSelection } from "@fontra/core/utils.ts";
 
 import {
@@ -411,6 +416,79 @@ registerVisualizationLayerDefinition({
         }
       }
     });
+  },
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.tunni",
+  name: "Skeleton Tunni",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: false,
+  zIndex: 547,
+  screenParameters: {
+    lineDash: [4, 4],
+    midpointSize: 7,
+    strokeWidth: 1,
+    truePointSize: 8,
+  },
+  colors: {
+    lineColor: "rgba(34, 121, 210, 0.55)",
+    midpointColor: "rgba(0, 185, 220, 0.95)",
+    truePointColor: "rgba(255, 128, 0, 0.95)",
+  },
+  colorsDarkMode: {
+    lineColor: "rgba(95, 178, 255, 0.65)",
+    midpointColor: "rgba(77, 213, 236, 1)",
+    truePointColor: "rgba(255, 174, 68, 1)",
+  },
+  draw: (context, positionedGlyph, parameters, model) => {
+    context.save();
+    context.lineWidth = parameters.strokeWidth;
+    context.strokeStyle = parameters.lineColor;
+    context.setLineDash(parameters.lineDash);
+    forEachSkeletonContour(positionedGlyph, model, (contour) => {
+      for (const segment of buildSkeletonTunniSegments(contour)) {
+        if (segment.controlPoints.length !== 2) {
+          continue;
+        }
+        const [control1, control2] = segment.controlPoints;
+        strokeLine(
+          context,
+          segment.startPoint.x,
+          segment.startPoint.y,
+          control1.x,
+          control1.y
+        );
+        strokeLine(
+          context,
+          segment.endPoint.x,
+          segment.endPoint.y,
+          control2.x,
+          control2.y
+        );
+        strokeLine(context, control1.x, control1.y, control2.x, control2.y);
+      }
+    });
+    context.setLineDash([]);
+    forEachSkeletonContour(positionedGlyph, model, (contour) => {
+      for (const segment of buildSkeletonTunniSegments(contour)) {
+        if (segment.controlPoints.length !== 2) {
+          continue;
+        }
+        const midpoint = calculateSkeletonTunniPoint(segment);
+        const truePoint = calculateSkeletonTrueTunniPoint(segment);
+        if (midpoint) {
+          context.fillStyle = parameters.midpointColor;
+          fillRoundNode(context, midpoint, parameters.midpointSize);
+        }
+        if (truePoint) {
+          context.fillStyle = parameters.truePointColor;
+          drawDiamondNode(context, truePoint, parameters.truePointSize, true);
+        }
+      }
+    });
+    context.restore();
   },
 });
 
