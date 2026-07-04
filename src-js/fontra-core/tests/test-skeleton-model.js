@@ -13,12 +13,16 @@ import {
   getSkeletonPointHalfWidth,
   getSkeletonPointNudge,
   getSkeletonPointWidth,
+  getSkeletonRibSidesForPoint,
   makeEmptySkeletonData,
   makeSkeletonContour,
   makeSkeletonPoint,
   normalizeSkeletonData,
   projectSkeletonRibPoint,
+  setSkeletonContourDefaultWidth,
   setSkeletonData,
+  setSkeletonPointSideNudge,
+  setSkeletonPointSideWidth,
   updateSkeletonPoint,
 } from "@fontra/core/skeleton-model.js";
 import { expect } from "chai";
@@ -224,6 +228,66 @@ describe("skeleton-model geometry helpers", () => {
       x: 10,
       y: 40,
     });
+  });
+});
+
+describe("skeleton-model rib mutation helpers", () => {
+  it("sets linked symmetric side widths", () => {
+    const point = makeSkeletonPoint({
+      width: { left: 40, right: 40, linked: true },
+    });
+
+    setSkeletonPointSideWidth(point, DEFAULT_SKELETON_WIDTH, "left", 55);
+
+    expect(point.width).to.deep.equal({ left: 55, right: 55, linked: true });
+  });
+
+  it("sets unlinked asymmetric side widths without changing the opposite side", () => {
+    const point = makeSkeletonPoint({
+      width: { left: 40, right: 60, linked: false },
+    });
+
+    setSkeletonPointSideWidth(point, DEFAULT_SKELETON_WIDTH, "left", 55);
+
+    expect(point.width).to.deep.equal({ left: 55, right: 60, linked: false });
+  });
+
+  it("initializes missing width from the global default width", () => {
+    const point = { id: 1, x: 0, y: 0, type: null };
+
+    setSkeletonPointSideWidth(point, 120, "right", 55, { linked: false });
+
+    expect(point.width).to.deep.equal({
+      left: DEFAULT_SKELETON_WIDTH / 2,
+      right: 55,
+      linked: false,
+    });
+  });
+
+  it("returns only the active rib side for single-sided contours", () => {
+    const contour = makeSkeletonContour({ singleSided: "right" });
+    const point = makeSkeletonPoint();
+
+    expect(getSkeletonRibSidesForPoint(contour, point)).to.deep.equal(["right"]);
+  });
+
+  it("sets canonical side nudge values", () => {
+    const point = makeSkeletonPoint();
+
+    setSkeletonPointSideNudge(point, "left", 12.4);
+    setSkeletonPointSideNudge(point, "right", -8.6);
+
+    expect(point.nudge).to.deep.equal({ left: 12, right: -9 });
+  });
+
+  it("sets non-negative rounded contour default widths", () => {
+    const contour = makeSkeletonContour({ defaultWidth: 80 });
+
+    setSkeletonContourDefaultWidth(contour, -12.4);
+    expect(contour.defaultWidth).to.equal(0);
+
+    setSkeletonContourDefaultWidth(contour, 95.6);
+    expect(contour.defaultWidth).to.equal(96);
   });
 });
 

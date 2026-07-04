@@ -237,6 +237,61 @@ export function getSkeletonPointNudge(
   return normalizeNudge(point?.nudge)[side];
 }
 
+export function setSkeletonPointSideWidth(
+  point,
+  defaultWidth,
+  side,
+  halfWidth,
+  { linked = point?.width?.linked !== false, round = Math.round } = {}
+) {
+  assertSkeletonRibSide(side);
+  const width = normalizeWidth(point?.width);
+  const value = Math.max(0, round(halfWidth));
+  if (side === "left") {
+    width.left = value;
+    if (linked) {
+      width.right = value;
+    }
+  } else {
+    width.right = value;
+    if (linked) {
+      width.left = value;
+    }
+  }
+  width.linked = linked;
+  point.width = width;
+}
+
+export function setSkeletonPointSideNudge(
+  point,
+  side,
+  nudge,
+  { round = Math.round } = {}
+) {
+  assertSkeletonRibSide(side);
+  const normalizedNudge = normalizeNudge(point?.nudge);
+  normalizedNudge[side] = round(asFiniteNumber(nudge, 0));
+  point.nudge = normalizedNudge;
+}
+
+export function setSkeletonContourDefaultWidth(
+  contour,
+  defaultWidth,
+  { round = Math.round } = {}
+) {
+  contour.defaultWidth = Math.max(0, round(asFiniteNumber(defaultWidth, 0)));
+}
+
+export function getSkeletonRibSidesForPoint(contour, point) {
+  if (!point || point.type) {
+    return [];
+  }
+  if (contour?.singleSided === "left" || contour?.singleSided === "right") {
+    return [contour.singleSided];
+  }
+  return ["left", "right"];
+}
+
 export function buildSegmentsFromSkeletonPoints(points, closed) {
   const segments = [];
   const onCurveIndices = [];
@@ -466,6 +521,12 @@ function normalizeHandleOffsets(handleOffsets) {
     !Array.isArray(handleOffsets)
     ? deepCopyObject(handleOffsets)
     : {};
+}
+
+function assertSkeletonRibSide(side) {
+  if (side !== "left" && side !== "right") {
+    throw new Error(`invalid skeleton rib side: ${side}`);
+  }
 }
 
 function asInteger(value, fallback) {
