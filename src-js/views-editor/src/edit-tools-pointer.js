@@ -69,6 +69,7 @@ import {
 } from "./visualization-layer-definitions.js";
 // Import Tunni functions for integration with pointer tool
 import {
+  handleSkeletonTunniDrag,
   handleTrueTunniPointMouseDown,
   handleTunniDrag,
   handleTunniPointMouseDown,
@@ -286,6 +287,35 @@ export class PointerTool extends BaseTool {
 
     const sceneController = this.sceneController;
     const initialSelection = sceneController.selection;
+    const point = sceneController.localPoint(initialEvent);
+    const size = sceneController.mouseClickMargin;
+    const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+    const isSkeletonTunniLayerActive =
+      this.editor.visualizationLayersSettings.model["fontra.skeleton.tunni"];
+
+    if (isSkeletonTunniLayerActive && positionedGlyph) {
+      const skeletonPointSelection = this.sceneModel.skeletonPointAtPoint(
+        point,
+        size,
+        parseSelection(sceneController.selection)
+      );
+      if (!skeletonPointSelection.size) {
+        const tunniHit = this.sceneModel.skeletonTunniAtPoint(
+          point,
+          size,
+          positionedGlyph
+        );
+        if (tunniHit) {
+          await handleSkeletonTunniDrag({
+            sceneController,
+            eventStream,
+            initialEvent,
+            tunniHit,
+          });
+          return;
+        }
+      }
+    }
 
     const isTunniCombinedLayerActive =
       this.editor.visualizationLayersSettings.model["fontra.tunni.handle"];
@@ -342,8 +372,6 @@ export class PointerTool extends BaseTool {
       return;
     }
 
-    const point = sceneController.localPoint(initialEvent);
-    const size = sceneController.mouseClickMargin;
     const { selection, pathHit } = this.sceneModel.selectionAtPoint(
       point,
       size,

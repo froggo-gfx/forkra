@@ -1,5 +1,13 @@
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { ChangeCollector } from "@fontra/core/changes.js";
+import { getSkeletonData } from "@fontra/core/skeleton-model.js";
+import {
+  buildSkeletonTunniSegments,
+  calculateSkeletonControlPointsFromTunniDelta,
+  calculateSkeletonOnCurveFromTunni,
+  calculateSkeletonTrueTunniPoint,
+  calculateSkeletonTunniPoint,
+} from "@fontra/core/skeleton-tunni.js";
 import {
   areTensionsEqualized,
   calculateControlHandlePoint,
@@ -9,6 +17,7 @@ import {
 } from "@fontra/core/tunni-calculations.js";
 import { assert } from "@fontra/core/utils.ts";
 import { distance, normalizeVector, subVectors } from "@fontra/core/vector.js";
+import { editSkeleton } from "./skeleton-editing.js";
 
 function applyTunniDragChanges(path, dragChanges, isTrueTunniPoint) {
   if (isTrueTunniPoint) {
@@ -169,6 +178,194 @@ export async function handleTunniDrag({
       broadcast: true,
     };
   });
+}
+
+export async function handleSkeletonTunniDrag({
+  sceneController,
+  eventStream,
+  initialEvent,
+  tunniHit,
+}) {
+  const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+  if (!positionedGlyph) {
+    return;
+  }
+
+  const startPoint = sceneController.localPoint(initialEvent);
+  const startGlyphPoint = {
+    x: startPoint.x - positionedGlyph.x,
+    y: startPoint.y - positionedGlyph.y,
+  };
+  const originalSegment = copySkeletonTunniSegment(tunniHit.segment);
+  const isTrueTunni = tunniHit.type === "true-tunni";
+  const originalTunniPoint = isTrueTunni
+    ? calculateSkeletonTrueTunniPoint(originalSegment)
+    : calculateSkeletonTunniPoint(originalSegment);
+  if (!originalTunniPoint) {
+    return;
+  }
+
+  await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const layerInfo = Object.entries(
+      sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
+    )
+      .map(([layerName, layerGlyph]) => ({
+        layerName,
+        layerGlyph,
+        changePath: ["layers", layerName, "glyph"],
+        originalSkeletonData: getSkeletonData(layerGlyph),
+      }))
+      .filter((entry) => entry.originalSkeletonData?.contours?.length);
+    if (!layerInfo.length) {
+      return;
+    }
+
+    let accumulated = new ChangeCollector();
+    let dragged = false;
+
+    for await (const event of eventStream) {
+      if (event.type === "mouseup") {
+        break;
+      }
+      if (event.type !== "mousemove") {
+        continue;
+      }
+      const currentPoint = sceneController.localPoint(event);
+      const currentGlyphPoint = {
+        x: currentPoint.x - positionedGlyph.x,
+        y: currentPoint.y - positionedGlyph.y,
+      };
+      const delta = {
+        x: currentGlyphPoint.x - startGlyphPoint.x,
+        y: currentGlyphPoint.y - startGlyphPoint.y,
+      };
+      const nextTrueTunniPoint = {
+        x: originalTunniPoint.x + delta.x,
+        y: originalTunniPoint.y + delta.y,
+      };
+      const round = sceneController.sceneSettings?.gridSnapEnabled
+        ? Math.round
+        : (value) => value;
+      let frame = new ChangeCollector();
+
+      for (const { layerGlyph, changePath, originalSkeletonData } of layerInfo) {
+        const changes = editSkeleton(layerGlyph, (working) => {
+          const target = resolveSkeletonTunniSegment(
+            originalSkeletonData,
+            working,
+            tunniHit
+          );
+          if (!target) {
+            return;
+          }
+          if (isTrueTunni) {
+            const endpoints = calculateSkeletonOnCurveFromTunni(
+              nextTrueTunniPoint,
+              target.originalSegment,
+              !event.altKey
+            );
+            if (!endpoints) {
+              return;
+            }
+            const [nextStartPoint, nextEndPoint] = endpoints;
+            writePointPosition(
+              target.workingContour.points[target.originalSegment.startIndex],
+              nextStartPoint,
+              round
+            );
+            writePointPosition(
+              target.workingContour.points[target.originalSegment.endIndex],
+              nextEndPoint,
+              round
+            );
+          } else {
+            const controlPoints = calculateSkeletonControlPointsFromTunniDelta(
+              delta,
+              target.originalSegment,
+              !event.altKey
+            );
+            if (!controlPoints) {
+              return;
+            }
+            const [controlIndex1, controlIndex2] =
+              target.originalSegment.controlIndices;
+            writePointPosition(
+              target.workingContour.points[controlIndex1],
+              controlPoints[0],
+              round
+            );
+            writePointPosition(
+              target.workingContour.points[controlIndex2],
+              controlPoints[1],
+              round
+            );
+          }
+        });
+        if (changes.hasChange) {
+          frame = frame.concat(changes.prefixed(changePath));
+        }
+      }
+
+      if (!frame.hasChange) {
+        continue;
+      }
+      dragged = true;
+      accumulated = accumulated.concat(frame);
+      await sendIncrementalChange(frame.change, true);
+    }
+
+    if (!dragged || !accumulated.hasChange) {
+      return;
+    }
+
+    return {
+      changes: accumulated,
+      undoLabel: isTrueTunni
+        ? "Move Skeleton On-Curve Points (Tunni)"
+        : "Move Skeleton Control Points (Tunni)",
+      broadcast: true,
+    };
+  });
+}
+
+function copySkeletonTunniSegment(segment) {
+  return {
+    ...segment,
+    startPoint: { ...segment.startPoint },
+    endPoint: { ...segment.endPoint },
+    controlPoints: segment.controlPoints.map((point) => ({ ...point })),
+    controlPointIds: [...(segment.controlPointIds || [])],
+    controlIndices: [...(segment.controlIndices || [])],
+  };
+}
+
+function resolveSkeletonTunniSegment(referenceSkeletonData, workingSkeletonData, hit) {
+  const referenceContour = referenceSkeletonData?.contours?.[hit.contourIndex];
+  const workingContour = workingSkeletonData?.contours?.[hit.contourIndex];
+  if (!referenceContour || !workingContour) {
+    return null;
+  }
+  const referenceSegments = buildSkeletonTunniSegments(referenceContour);
+  const originalSegment = referenceSegments[hit.segmentIndex];
+  if (
+    !originalSegment ||
+    originalSegment.controlPoints.length !== 2 ||
+    !workingContour.points?.[originalSegment.startIndex] ||
+    !workingContour.points?.[originalSegment.endIndex]
+  ) {
+    return null;
+  }
+  for (const index of originalSegment.controlIndices) {
+    if (!workingContour.points?.[index]?.type) {
+      return null;
+    }
+  }
+  return { originalSegment, workingContour };
+}
+
+function writePointPosition(point, nextPoint, round) {
+  point.x = round(nextPoint.x);
+  point.y = round(nextPoint.y);
 }
 /**
  * Equalize the distances of control points in a segment using arithmetic mean
