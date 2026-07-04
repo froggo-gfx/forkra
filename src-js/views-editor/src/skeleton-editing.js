@@ -369,15 +369,15 @@ function makeFixedRibSkeletonPointTargetEntry(
   options
 ) {
   const originalLayerGlyph = cloneLayerGlyphForSkeletonEdit(layer);
-  const selectedPointKeys = selected.map((item) =>
-    makeSkeletonPointKey(item.contourId, item.pointId)
+  const selectedPointKeys = new Set(
+    selected.map((item) => makeSkeletonPointKey(item.contourId, item.pointId))
   );
   const clickedPointKey =
     resolveClickedSkeletonPointKey(
       skeletonData,
       referenceSkeletonData,
       options.clickedSkeletonPointKey
-    ) || selectedPointKeys[0];
+    ) || selectedPointKeys.values().next().value;
   let rollbackChange = null;
   return {
     get rollbackChange() {

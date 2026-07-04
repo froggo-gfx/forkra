@@ -1,7 +1,10 @@
+import { applyChange } from "@fontra/core/changes.js";
 import {
+  getSkeletonData,
   makeSkeletonContour,
   makeSkeletonPoint,
   normalizeSkeletonData,
+  setSkeletonData,
 } from "@fontra/core/skeleton-model.js";
 import {
   applyFixedRibDelta,
@@ -10,7 +13,25 @@ import {
   equalizeSkeletonHandleToPoint,
   getSkeletonHandleEqualizeInfo,
 } from "@fontra/core/skeleton-modifiers.js";
+import { VarPackedPath } from "@fontra/core/var-path.js";
 import { expect } from "chai";
+import { EditBehaviorFactory } from "../../views-editor/src/edit-behavior.js";
+import {
+  makeSkeletonPointKey,
+  makeSkeletonPointTargetEntry,
+} from "../../views-editor/src/skeleton-editing.js";
+import { createEditableGeneratedHandleTargetEntries } from "../../views-editor/src/skeleton-generated.js";
+import {
+  getSelectionTargetKinds,
+  getSkeletonModifierBehaviorName,
+} from "../../views-editor/src/skeleton-modifiers.js";
+
+before(() => {
+  globalThis.window = {
+    coarseGridSpacing: 1,
+    event: null,
+  };
+});
 
 describe("skeleton modifier fixed-rib helpers", () => {
   it("moves selected on-curve points and expands the opposite anchored width", () => {
@@ -191,6 +212,138 @@ describe("skeleton modifier equalize helpers", () => {
   });
 });
 
+describe("skeleton modifier target-entry parity fixtures", () => {
+  it("applies fixed-rib skeleton point movement through target-entry persistence", () => {
+    const layer = makeLayerGlyph(makeLineSkeleton());
+    const selection = new Set(["skeletonPoint/10/1"]);
+    const targetEntry = makeSkeletonPointTargetEntry(
+      layer,
+      selection,
+      "fixed-rib",
+      getSkeletonData(layer),
+      { clickedSkeletonPointKey: makeSkeletonPointKey(10, 1) }
+    );
+    const behavior = new EditBehaviorFactory(layer, selection, false, {
+      targetEntries: [targetEntry],
+    }).getBehavior("fixed-rib");
+
+    applyChange(layer, behavior.makeChangeForDelta({ x: 0, y: -10 }));
+
+    const point = getSkeletonData(layer).contours[0].points[0];
+    expect(point).to.include({ x: 0, y: -10 });
+    expect(point.width).to.deep.equal({ left: 50, right: 50, linked: true });
+    expect(layer.path.numContours).to.be.greaterThan(0);
+  });
+
+  it("applies fixed-rib-compress skeleton point movement through target-entry persistence", () => {
+    const layer = makeLayerGlyph(makeLineSkeleton());
+    const selection = new Set(["skeletonPoint/10/1"]);
+    const targetEntry = makeSkeletonPointTargetEntry(
+      layer,
+      selection,
+      "fixed-rib-compress",
+      getSkeletonData(layer),
+      { clickedSkeletonPointKey: makeSkeletonPointKey(10, 1) }
+    );
+    const behavior = new EditBehaviorFactory(layer, selection, false, {
+      targetEntries: [targetEntry],
+    }).getBehavior("fixed-rib-compress");
+
+    applyChange(layer, behavior.makeChangeForDelta({ x: 0, y: -10 }));
+
+    const point = getSkeletonData(layer).contours[0].points[0];
+    expect(point).to.include({ x: 0, y: -10 });
+    expect(point.width).to.deep.equal({ left: 30, right: 30, linked: true });
+  });
+
+  it("ignores fixed-rib skeleton point selections on layers without skeleton data", () => {
+    const layer = makeLayerGlyph();
+
+    expect(
+      makeSkeletonPointTargetEntry(
+        layer,
+        new Set(["skeletonPoint/10/1"]),
+        "fixed-rib",
+        null,
+        { clickedSkeletonPointKey: makeSkeletonPointKey(10, 1) }
+      )
+    ).to.equal(null);
+  });
+
+  it("equalizes skeleton handles through target-entry persistence", () => {
+    const layer = makeLayerGlyph(
+      normalizeSkeletonData({
+        contours: [
+          makeSkeletonContour({
+            id: 40,
+            points: makeSmoothHandleContour().points,
+          }),
+        ],
+      })
+    );
+    const selection = new Set(["skeletonPoint/40/2"]);
+    const targetEntry = makeSkeletonPointTargetEntry(
+      layer,
+      selection,
+      "equalize",
+      getSkeletonData(layer)
+    );
+    const behavior = new EditBehaviorFactory(layer, selection, false, {
+      targetEntries: [targetEntry],
+    }).getBehavior("equalize");
+
+    applyChange(layer, behavior.makeChangeForDelta({ x: 20, y: 0 }));
+
+    const points = getSkeletonData(layer).contours[0].points;
+    expect(points[2]).to.include({ x: 80, y: 0 });
+    expect(points[3]).to.include({ x: 20, y: 0 });
+  });
+
+  it("equalizes editable generated handles through the live target-entry path", () => {
+    const layer = makeLayerGlyph(makeEditableGeneratedHandleSkeleton());
+    const selection = new Set(["editableGeneratedHandle/80/2/left/out"]);
+    const targetEntries = createEditableGeneratedHandleTargetEntries(
+      layer,
+      selection,
+      "equalize",
+      { referenceSkeletonData: getSkeletonData(layer) }
+    );
+    const behavior = new EditBehaviorFactory(layer, selection, false, {
+      targetEntries,
+    }).getBehavior("equalize");
+
+    applyChange(layer, behavior.makeChangeForDelta({ x: 5, y: 0 }));
+
+    const point = getSkeletonData(layer).contours[0].points[1];
+    expect(point.handleOffsets.leftOut).to.deep.equal({
+      x: 15,
+      y: 0,
+      detached: true,
+    });
+    expect(point.handleOffsets.leftIn).to.deep.equal({
+      x: -15,
+      y: 0,
+      detached: true,
+    });
+  });
+
+  it("routes editable generated point X equalize through alternate behavior", () => {
+    const selection = new Set(["editableGeneratedPoint/10/1/left"]);
+    const targetKinds = getSelectionTargetKinds(selection);
+
+    expect(
+      getSkeletonModifierBehaviorName({}, { equalizeMode: true }, targetKinds)
+    ).to.equal("alternate");
+    expect(
+      getSkeletonModifierBehaviorName(
+        { shiftKey: true },
+        { equalizeMode: true },
+        targetKinds
+      )
+    ).to.equal("alternate-constrain");
+  });
+});
+
 function makeLineSkeleton() {
   return normalizeSkeletonData({
     contours: [
@@ -225,6 +378,57 @@ function makeSmoothHandleContour() {
       makeSkeletonPoint({ id: 2, x: 60, y: 0, type: "cubic" }),
       makeSkeletonPoint({ id: 3, x: 40, y: 0, type: "cubic" }),
       makeSkeletonPoint({ id: 5, x: 100, y: 0 }),
+    ],
+  });
+}
+
+function makeLayerGlyph(skeletonData = null) {
+  const layer = {
+    path: new VarPackedPath(),
+    components: [],
+    anchors: [],
+    guidelines: [],
+    customData: {},
+  };
+  if (skeletonData) {
+    setSkeletonData(layer, skeletonData);
+  }
+  return layer;
+}
+
+function makeEditableGeneratedHandleSkeleton() {
+  return normalizeSkeletonData({
+    contours: [
+      makeSkeletonContour({
+        id: 80,
+        defaultWidth: 80,
+        points: [
+          makeSkeletonPoint({ id: 1, x: 40, y: 0, type: "cubic" }),
+          makeSkeletonPoint({
+            id: 2,
+            x: 50,
+            y: 0,
+            editable: { left: true },
+            handleOffsets: {
+              leftIn: { x: -5, y: 0, detached: true },
+              leftOut: { x: 10, y: 0, detached: true },
+            },
+          }),
+          makeSkeletonPoint({ id: 3, x: 60, y: 0, type: "cubic" }),
+        ],
+        generated: undefined,
+      }),
+    ],
+    generated: [
+      {
+        skeletonContourId: 80,
+        pathContourIndex: 0,
+        pointMap: [
+          { skeletonPointId: 2, side: "left", role: "in" },
+          { skeletonPointId: 2, side: "left", role: "onCurve" },
+          { skeletonPointId: 2, side: "left", role: "out" },
+        ],
+      },
     ],
   });
 }
