@@ -331,6 +331,100 @@ export function setSkeletonHandleDetached(point, side, detached) {
   }
 }
 
+export function setSkeletonPointTotalWidth(
+  point,
+  defaultWidth,
+  totalWidth,
+  { round = Math.round } = {}
+) {
+  const width = normalizeWidth(point?.width);
+  const total = Math.max(0, asFiniteNumber(totalWidth, 0));
+  const currentTotal = width.left + width.right;
+  const leftFrac = currentTotal > 0 ? width.left / currentTotal : 0.5;
+  width.left = Math.max(0, round(total * leftFrac));
+  width.right = Math.max(0, round(total * (1 - leftFrac)));
+  point.width = width;
+  clearCollapsedRibSides(point);
+}
+
+export function setSkeletonPointWidthDistribution(
+  point,
+  defaultWidth,
+  distribution,
+  { round = Math.round } = {}
+) {
+  const width = normalizeWidth(point?.width);
+  const total = width.left + width.right;
+  const d = Math.max(-100, Math.min(100, asFiniteNumber(distribution, 0)));
+  width.left = Math.max(0, round((total * (1 + d / 100)) / 2));
+  width.right = Math.max(0, round((total * (1 - d / 100)) / 2));
+  point.width = width;
+  clearCollapsedRibSides(point);
+}
+
+export function setSkeletonPointWidthLinked(point, linked) {
+  const width = normalizeWidth(point?.width);
+  width.linked = linked === true;
+  point.width = width;
+}
+
+export function setSkeletonContourSingleSided(contour, sideOrNull) {
+  contour.singleSided = VALID_SINGLE_SIDED.has(sideOrNull) ? sideOrNull : null;
+}
+
+export function setSkeletonCapParameters(point, values, { round = null } = {}) {
+  if (!values || typeof values !== "object") {
+    return;
+  }
+  if (VALID_CAP_STYLES.has(values.capStyle)) {
+    point.capStyle = values.capStyle;
+  }
+  for (const field of ["capRadiusRatio", "capTension", "capAngle", "capDistance"]) {
+    if (field in values && Number.isFinite(values[field])) {
+      point[field] = round ? round(values[field]) : values[field];
+    }
+  }
+}
+
+export function setSkeletonCornerParameters(point, values, { round = null } = {}) {
+  if (!values || typeof values !== "object") {
+    return;
+  }
+  for (const field of ["roundnessStrength", "cornerAsymmetry"]) {
+    if (field in values && Number.isFinite(values[field])) {
+      point[field] = round ? round(values[field]) : values[field];
+    }
+  }
+}
+
+export function resetSkeletonEditableRibHandles(point, side) {
+  assertSkeletonRibSide(side);
+  const offsets = normalizeHandleOffsets(point?.handleOffsets);
+  for (const role of ["in", "out"]) {
+    delete offsets[getSkeletonHandleOffsetKey(side, role)];
+  }
+  point.handleOffsets = offsets;
+}
+
+export function resetSkeletonEditableRib(point, side) {
+  assertSkeletonRibSide(side);
+  const nudge = normalizeNudge(point?.nudge);
+  nudge[side] = 0;
+  point.nudge = nudge;
+  const editable = normalizeEditable(point?.editable);
+  editable[side] = false;
+  point.editable = editable;
+  resetSkeletonEditableRibHandles(point, side);
+}
+
+function clearCollapsedRibSides(point) {
+  for (const side of ["left", "right"]) {
+    if (getSkeletonPointHalfWidth(point, null, side) < 0.5) {
+      resetSkeletonEditableRib(point, side);
+    }
+  }
+}
+
 export function getSkeletonRibSidesForPoint(contour, point) {
   if (!point || point.type) {
     return [];

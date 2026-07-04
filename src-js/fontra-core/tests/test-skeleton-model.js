@@ -21,12 +21,20 @@ import {
   makeSkeletonPoint,
   normalizeSkeletonData,
   projectSkeletonRibPoint,
+  resetSkeletonEditableRib,
+  resetSkeletonEditableRibHandles,
+  setSkeletonCapParameters,
   setSkeletonContourDefaultWidth,
+  setSkeletonContourSingleSided,
+  setSkeletonCornerParameters,
   setSkeletonData,
   setSkeletonHandleDetached,
   setSkeletonHandleOffset,
   setSkeletonPointSideNudge,
   setSkeletonPointSideWidth,
+  setSkeletonPointTotalWidth,
+  setSkeletonPointWidthDistribution,
+  setSkeletonPointWidthLinked,
   updateSkeletonPoint,
 } from "@fontra/core/skeleton-model.js";
 import { expect } from "chai";
@@ -383,5 +391,158 @@ describe("skeleton-model id accessors and mutators", () => {
     expect(deleteSkeletonPoint(skeleton, contour.id, point.id)).to.equal(false);
     expect(appendSkeletonPoint(skeleton, 999, { x: 1, y: 2 })).to.equal(null);
     expect(updateSkeletonPoint(skeleton, 999, point.id, { x: 1 })).to.equal(null);
+  });
+});
+
+describe("skeleton-model panel-facing mutators", () => {
+  function makePoint(overrides = {}) {
+    return makeSkeletonPoint({ x: 0, y: 0, ...overrides });
+  }
+
+  it("total width preserves existing distribution", () => {
+    const point = makePoint({ width: { left: 30, right: 10, linked: false } });
+    setSkeletonPointTotalWidth(point, 80, 80);
+    expect(point.width.left).to.equal(60);
+    expect(point.width.right).to.equal(20);
+  });
+
+  it("side width with linked true mirrors the other side", () => {
+    const point = makePoint({ width: { left: 40, right: 40, linked: true } });
+    setSkeletonPointSideWidth(point, 80, "left", 30);
+    expect(point.width.left).to.equal(30);
+    expect(point.width.right).to.equal(30);
+  });
+
+  it("side width with linked false changes one side", () => {
+    const point = makePoint({ width: { left: 40, right: 40, linked: false } });
+    setSkeletonPointSideWidth(point, 80, "left", 30);
+    expect(point.width.left).to.equal(30);
+    expect(point.width.right).to.equal(40);
+  });
+
+  it("distribution -100 collapses left and preserves total", () => {
+    const point = makePoint({ width: { left: 40, right: 40, linked: false } });
+    setSkeletonPointWidthDistribution(point, 80, -100);
+    expect(point.width.left).to.equal(0);
+    expect(point.width.right).to.equal(80);
+  });
+
+  it("distribution 100 collapses right and preserves total", () => {
+    const point = makePoint({ width: { left: 40, right: 40, linked: false } });
+    setSkeletonPointWidthDistribution(point, 80, 100);
+    expect(point.width.left).to.equal(80);
+    expect(point.width.right).to.equal(0);
+  });
+
+  it("linked toggle preserves current effective widths", () => {
+    const point = makePoint({ width: { left: 30, right: 50, linked: false } });
+    setSkeletonPointWidthLinked(point, true);
+    expect(point.width.left).to.equal(30);
+    expect(point.width.right).to.equal(50);
+    expect(point.width.linked).to.equal(true);
+  });
+
+  it("collapsing a side clears its editable rib state", () => {
+    const point = makePoint({
+      width: { left: 40, right: 40, linked: false },
+      editable: { left: true, right: true },
+      nudge: { left: 5, right: 5 },
+      handleOffsets: { leftIn: { x: 1, y: 2, detached: true } },
+    });
+    setSkeletonPointWidthDistribution(point, 80, -100);
+    expect(point.editable.left).to.equal(false);
+    expect(point.nudge.left).to.equal(0);
+    expect(point.handleOffsets.leftIn).to.equal(undefined);
+    expect(point.editable.right).to.equal(true);
+  });
+
+  it("single-sided null/left/right normalizes contour.singleSided", () => {
+    const contour = makeSkeletonContour();
+    setSkeletonContourSingleSided(contour, "left");
+    expect(contour.singleSided).to.equal("left");
+    setSkeletonContourSingleSided(contour, "right");
+    expect(contour.singleSided).to.equal("right");
+    setSkeletonContourSingleSided(contour, "bogus");
+    expect(contour.singleSided).to.equal(null);
+  });
+
+  it("contour default width clamps and rounds", () => {
+    const contour = makeSkeletonContour();
+    setSkeletonContourDefaultWidth(contour, -10);
+    expect(contour.defaultWidth).to.equal(0);
+    setSkeletonContourDefaultWidth(contour, 42.4);
+    expect(contour.defaultWidth).to.equal(42);
+  });
+
+  it("cap round params write canonical cap fields only", () => {
+    const point = makePoint();
+    setSkeletonCapParameters(point, {
+      capStyle: "round",
+      capRadiusRatio: 0.25,
+      capTension: 0.6,
+      leftWidth: 99,
+    });
+    expect(point.capStyle).to.equal("round");
+    expect(point.capRadiusRatio).to.equal(0.25);
+    expect(point.capTension).to.equal(0.6);
+    expect(point.leftWidth).to.equal(undefined);
+  });
+
+  it("cap square params write canonical cap fields only", () => {
+    const point = makePoint();
+    setSkeletonCapParameters(point, {
+      capStyle: "square",
+      capAngle: 30,
+      capDistance: 12,
+    });
+    expect(point.capStyle).to.equal("square");
+    expect(point.capAngle).to.equal(30);
+    expect(point.capDistance).to.equal(12);
+  });
+
+  it("corner params write canonical corner fields only", () => {
+    const point = makePoint();
+    setSkeletonCornerParameters(point, {
+      roundnessStrength: 0.5,
+      cornerAsymmetry: -0.25,
+      cornerTrimRatio: 0.9,
+    });
+    expect(point.roundnessStrength).to.equal(0.5);
+    expect(point.cornerAsymmetry).to.equal(-0.25);
+    expect(point.cornerTrimRatio).to.equal(undefined);
+  });
+
+  it("reset rib removes nudge/editable/handle offsets for one side", () => {
+    const point = makePoint({
+      editable: { left: true, right: true },
+      nudge: { left: 5, right: 7 },
+      handleOffsets: {
+        leftIn: { x: 1, y: 2, detached: true },
+        rightOut: { x: 3, y: 4, detached: false },
+      },
+    });
+    resetSkeletonEditableRib(point, "left");
+    expect(point.editable.left).to.equal(false);
+    expect(point.nudge.left).to.equal(0);
+    expect(point.handleOffsets.leftIn).to.equal(undefined);
+    expect(point.editable.right).to.equal(true);
+    expect(point.nudge.right).to.equal(7);
+    expect(point.handleOffsets.rightOut).to.not.equal(undefined);
+  });
+
+  it("reset rib handles removes only handle offsets for one side", () => {
+    const point = makePoint({
+      editable: { left: true, right: true },
+      nudge: { left: 5, right: 7 },
+      handleOffsets: {
+        leftIn: { x: 1, y: 2, detached: true },
+        rightOut: { x: 3, y: 4, detached: false },
+      },
+    });
+    resetSkeletonEditableRibHandles(point, "left");
+    expect(point.handleOffsets.leftIn).to.equal(undefined);
+    expect(point.editable.left).to.equal(true);
+    expect(point.nudge.left).to.equal(5);
+    expect(point.handleOffsets.rightOut).to.not.equal(undefined);
   });
 });
