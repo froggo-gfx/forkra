@@ -86,12 +86,12 @@ function getRibPoints(contour, pointIndex) {
       activeSingleSide === "right"
         ? point
         : getSkeletonRibPosition(contour, point, "left"),
-    leftEditable: activeSingleSide === "right" ? false : point.editable?.left === true,
+    editableLeft: activeSingleSide === "right" ? false : point.editable?.left === true,
     right:
       activeSingleSide === "left"
         ? point
         : getSkeletonRibPosition(contour, point, "right"),
-    rightEditable: activeSingleSide === "left" ? false : point.editable?.right === true,
+    editableRight: activeSingleSide === "left" ? false : point.editable?.right === true,
   };
 }
 
@@ -378,10 +378,10 @@ registerVisualizationLayerDefinition({
     forEachSkeletonContour(positionedGlyph, model, (contour) => {
       for (const pointIndex of getOnCurvePointIndices(contour)) {
         const rib = getRibPoints(contour, pointIndex);
-        if (rib.leftEditable) {
+        if (rib.editableLeft) {
           drawDiamondNode(context, rib.left, parameters.pointSize, true);
         }
-        if (rib.rightEditable) {
+        if (rib.editableRight) {
           drawDiamondNode(context, rib.right, parameters.pointSize, true);
         }
       }
