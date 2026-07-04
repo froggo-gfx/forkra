@@ -13,6 +13,7 @@ import {
 } from "@fontra/core/vector.js";
 import {
   createSkeletonRibTargetEntries,
+  editSkeleton,
   makeEditSkeletonChange,
 } from "./skeleton-editing.js";
 import { getSkeletonRibAddress, makeSkeletonRibKey } from "./skeleton-ribs.js";
@@ -318,6 +319,56 @@ export function createEditableGeneratedHandleTargetEntries(
       },
     },
   ];
+}
+
+export function toggleEditableGeneratedHandleDetached(layerGlyph, selection) {
+  const skeletonData = getSkeletonData(layerGlyph);
+  if (!skeletonData) {
+    return null;
+  }
+  const handles = parseSelection([...selection]).editableGeneratedHandle || [];
+  if (!handles.length) {
+    return null;
+  }
+  const firstHandle = parseEditableGeneratedHandleKey(handles[0]);
+  const current = resolveEditableGeneratedHandleAddressAcrossLayers(
+    skeletonData,
+    skeletonData,
+    firstHandle.contourId,
+    firstHandle.pointId,
+    firstHandle.side,
+    firstHandle.role
+  );
+  if (!current) {
+    return null;
+  }
+  const currentOffset = getSkeletonHandleOffset(
+    current.point,
+    current.side,
+    current.role
+  );
+  const detached = !currentOffset.detached;
+  return editSkeleton(layerGlyph, (working) => {
+    for (const item of handles) {
+      const { contourId, pointId, side, role } = parseEditableGeneratedHandleKey(item);
+      const target = resolveEditableGeneratedHandleAddressAcrossLayers(
+        skeletonData,
+        working,
+        contourId,
+        pointId,
+        side,
+        role
+      );
+      if (!target) {
+        continue;
+      }
+      const offset = getSkeletonHandleOffset(target.point, side, role);
+      setSkeletonHandleOffset(target.point, side, role, {
+        ...offset,
+        detached,
+      });
+    }
+  });
 }
 
 function createEditableGeneratedHandleExecutor(address) {

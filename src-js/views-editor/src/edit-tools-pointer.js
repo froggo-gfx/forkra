@@ -46,7 +46,11 @@ import {
   makeSkeletonPointTargetEntry,
   toggleSkeletonSmooth,
 } from "./skeleton-editing.js";
-import { createEditableGeneratedPointTargetEntries } from "./skeleton-generated.js";
+import {
+  createEditableGeneratedHandleTargetEntries,
+  createEditableGeneratedPointTargetEntries,
+  toggleEditableGeneratedHandleDetached,
+} from "./skeleton-generated.js";
 import {
   getSkeletonRibBehaviorName,
   isSkeletonRibDragAllowed,
@@ -402,6 +406,11 @@ export class PointerTool extends BaseTool {
       }
     } else {
       const instance = this.sceneModel.getSelectedPositionedGlyph().glyph.instance;
+      const clickedSelection = parseSelection(selection || []);
+      if (clickedSelection.editableGeneratedHandle?.length) {
+        await this.handleEditableGeneratedHandlesDoubleClick(selection);
+        return;
+      }
       if (hasSkeletonPointSelection(sceneController.selection)) {
         await this.handleSkeletonPointsDoubleClick();
       }
@@ -462,6 +471,16 @@ export class PointerTool extends BaseTool {
       }
       return translate("edit-tools-pointer.undo.toggle-smooth");
     });
+  }
+
+  async handleEditableGeneratedHandlesDoubleClick(selection) {
+    await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        toggleEditableGeneratedHandleDetached(layerGlyph, selection);
+      }
+      return translate("edit-tools-pointer.undo.toggle-smooth");
+    });
+    this.sceneController.selection = new Set(selection);
   }
 
   async handlePointsDoubleClick(pointIndices) {
@@ -532,6 +551,16 @@ export class PointerTool extends BaseTool {
         editingLayers[editLayerName] || Object.values(editingLayers)[0]
       );
       const makeSkeletonTargetEntries = (layerGlyph, name) => {
+        if (hasEditableGeneratedHandleSelection(sceneController.selection)) {
+          return createEditableGeneratedHandleTargetEntries(
+            layerGlyph,
+            sceneController.selection,
+            name,
+            {
+              referenceSkeletonData,
+            }
+          );
+        }
         if (hasRibLikeSelection(sceneController.selection)) {
           const targetEntries = [];
           if (
@@ -1055,6 +1084,10 @@ function hasSkeletonRibSelection(selection) {
 
 function hasEditableGeneratedPointSelection(selection) {
   return !!parseSelection([...selection]).editableGeneratedPoint?.length;
+}
+
+function hasEditableGeneratedHandleSelection(selection) {
+  return !!parseSelection([...selection]).editableGeneratedHandle?.length;
 }
 
 function hasRibLikeSelection(selection) {
