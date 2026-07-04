@@ -1,8 +1,11 @@
 import {
   calculateNormalAtSkeletonPoint,
+  getSkeletonHandleOffset,
   getSkeletonPointHalfWidth,
+  setSkeletonHandleOffset,
   setSkeletonPointSideWidth,
 } from "./skeleton-model.js";
+import { dotVector, normalizeVector, vectorLength } from "./vector.js";
 
 export function applyFixedRibDelta(
   originalSkeletonData,
@@ -161,6 +164,198 @@ function getControlPointIndicesBetween(points, startIndex, endIndex, closed) {
 
 function interpolateDelta(a, b, t) {
   return a + (b - a) * t;
+}
+
+export function getSkeletonHandleEqualizeInfo(contour, pointIdOrIndex) {
+  const points = contour?.points || [];
+  const handleIndex = resolvePointIndex(contour, pointIdOrIndex);
+  const handle = points[handleIndex];
+  if (!handle?.type) {
+    return null;
+  }
+  const previousIndex = getPreviousPointIndex(contour, handleIndex);
+  const nextIndex = getNextPointIndex(contour, handleIndex);
+  const previous = points[previousIndex];
+  const next = points[nextIndex];
+  let smoothIndex;
+  let oppositeIndex;
+  if (previous && !previous.type && previous.smooth) {
+    smoothIndex = previousIndex;
+    oppositeIndex = getNextPointIndex(contour, handleIndex);
+  } else if (next && !next.type && next.smooth) {
+    smoothIndex = nextIndex;
+    oppositeIndex = getPreviousPointIndex(contour, handleIndex);
+  } else {
+    return null;
+  }
+  const smoothPoint = points[smoothIndex];
+  const oppositePoint = points[oppositeIndex];
+  if (!smoothPoint || !oppositePoint?.type) {
+    return null;
+  }
+  return {
+    smoothPointId: smoothPoint.id,
+    oppositePointId: oppositePoint.id,
+    smoothIndex,
+    oppositeIndex,
+  };
+}
+
+export function equalizeSkeletonHandleToPoint(
+  contour,
+  pointId,
+  currentPoint,
+  { constrain = false, round = Math.round } = {}
+) {
+  const handleIndex = resolvePointIndex(contour, pointId);
+  const handle = contour?.points?.[handleIndex];
+  const info = getSkeletonHandleEqualizeInfo(contour, handleIndex);
+  if (!handle || !info) {
+    return false;
+  }
+  const smooth = contour.points[info.smoothIndex];
+  const vector = constrainVector(
+    {
+      x: currentPoint.x - smooth.x,
+      y: currentPoint.y - smooth.y,
+    },
+    constrain
+  );
+  handle.x = round(smooth.x + vector.x);
+  handle.y = round(smooth.y + vector.y);
+  const opposite = contour.points[info.oppositeIndex];
+  opposite.x = round(smooth.x - vector.x);
+  opposite.y = round(smooth.y - vector.y);
+  return true;
+}
+
+export function equalizeSkeletonHandleFromDelta(
+  contour,
+  pointId,
+  delta,
+  { constrain = false, round = Math.round } = {}
+) {
+  const handleIndex = resolvePointIndex(contour, pointId);
+  const handle = contour?.points?.[handleIndex];
+  const info = getSkeletonHandleEqualizeInfo(contour, handleIndex);
+  if (!handle || !info) {
+    return false;
+  }
+  const movedPoint = {
+    x: handle.x + delta.x,
+    y: handle.y + delta.y,
+  };
+  if (constrain) {
+    return equalizeSkeletonHandleToPoint(contour, handleIndex, movedPoint, {
+      constrain,
+      round,
+    });
+  }
+  const smooth = contour.points[info.smoothIndex];
+  handle.x = round(movedPoint.x);
+  handle.y = round(movedPoint.y);
+  const draggedVector = {
+    x: handle.x - smooth.x,
+    y: handle.y - smooth.y,
+  };
+  const draggedLength = vectorLength(draggedVector);
+  const opposite = contour.points[info.oppositeIndex];
+  const oppositeVector = {
+    x: opposite.x - smooth.x,
+    y: opposite.y - smooth.y,
+  };
+  const oppositeDirection = normalizeVector(oppositeVector);
+  if (!vectorLength(oppositeDirection)) {
+    opposite.x = round(smooth.x - draggedVector.x);
+    opposite.y = round(smooth.y - draggedVector.y);
+  } else {
+    opposite.x = round(smooth.x + oppositeDirection.x * draggedLength);
+    opposite.y = round(smooth.y + oppositeDirection.y * draggedLength);
+  }
+  return true;
+}
+
+export function equalizeEditableGeneratedHandleOffsets(
+  point,
+  side,
+  role,
+  delta,
+  geometry,
+  { round = Math.round } = {}
+) {
+  const oppositeRole = role === "in" ? "out" : "in";
+  const draggedOffset = getSkeletonHandleOffset(point, side, role);
+  const oppositeOffset = getSkeletonHandleOffset(point, side, oppositeRole);
+  const draggedDirection = normalizeVector(geometry.draggedDirection || { x: 0, y: 0 });
+  const oppositeDirection = normalizeVector(
+    geometry.oppositeDirection || { x: 0, y: 0 }
+  );
+  if (!vectorLength(draggedDirection) || !vectorLength(oppositeDirection)) {
+    return false;
+  }
+  const draggedLength = Math.max(
+    0,
+    (geometry.originalDraggedLength ?? vectorLength(draggedOffset)) +
+      dotVector(delta, draggedDirection)
+  );
+  const detached =
+    geometry.detached === true ||
+    draggedOffset.detached === true ||
+    oppositeOffset.detached === true;
+  setSkeletonHandleOffset(point, side, role, {
+    x: round(draggedDirection.x * draggedLength),
+    y: round(draggedDirection.y * draggedLength),
+    detached,
+  });
+  setSkeletonHandleOffset(point, side, oppositeRole, {
+    x: round(oppositeDirection.x * draggedLength),
+    y: round(oppositeDirection.y * draggedLength),
+    detached,
+  });
+  return true;
+}
+
+function resolvePointIndex(contour, pointIdOrIndex) {
+  const points = contour?.points || [];
+  if (
+    Number.isInteger(pointIdOrIndex) &&
+    pointIdOrIndex >= 0 &&
+    pointIdOrIndex < points.length
+  ) {
+    return pointIdOrIndex;
+  }
+  return points.findIndex((point) => point.id === pointIdOrIndex);
+}
+
+function getPreviousPointIndex(contour, pointIndex) {
+  if (pointIndex > 0) {
+    return pointIndex - 1;
+  }
+  return contour?.closed ? (contour.points || []).length - 1 : -1;
+}
+
+function getNextPointIndex(contour, pointIndex) {
+  if (pointIndex < (contour?.points || []).length - 1) {
+    return pointIndex + 1;
+  }
+  return contour?.closed ? 0 : -1;
+}
+
+function constrainVector(vector, constrain) {
+  if (!constrain) {
+    return vector;
+  }
+  const length = vectorLength(vector);
+  if (!length) {
+    return vector;
+  }
+  const angle = Math.atan2(vector.y, vector.x);
+  const step = Math.PI / 4;
+  const constrainedAngle = Math.round(angle / step) * step;
+  return {
+    x: Math.cos(constrainedAngle) * length,
+    y: Math.sin(constrainedAngle) * length,
+  };
 }
 
 function applyFixedRibWidthDelta(

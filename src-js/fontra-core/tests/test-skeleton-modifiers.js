@@ -3,7 +3,13 @@ import {
   makeSkeletonPoint,
   normalizeSkeletonData,
 } from "@fontra/core/skeleton-model.js";
-import { applyFixedRibDelta } from "@fontra/core/skeleton-modifiers.js";
+import {
+  applyFixedRibDelta,
+  equalizeEditableGeneratedHandleOffsets,
+  equalizeSkeletonHandleFromDelta,
+  equalizeSkeletonHandleToPoint,
+  getSkeletonHandleEqualizeInfo,
+} from "@fontra/core/skeleton-modifiers.js";
 import { expect } from "chai";
 
 describe("skeleton modifier fixed-rib helpers", () => {
@@ -117,6 +123,74 @@ describe("skeleton modifier fixed-rib helpers", () => {
   });
 });
 
+describe("skeleton modifier equalize helpers", () => {
+  it("finds the smooth on-curve and opposite handle for a cubic off-curve", () => {
+    const contour = makeSmoothHandleContour();
+
+    expect(getSkeletonHandleEqualizeInfo(contour, 2)).to.deep.equal({
+      smoothPointId: 1,
+      oppositePointId: 3,
+      smoothIndex: 1,
+      oppositeIndex: 3,
+    });
+  });
+
+  it("equalizes skeleton handle drag around the smooth point", () => {
+    const contour = makeSmoothHandleContour();
+
+    const changed = equalizeSkeletonHandleToPoint(contour, 2, { x: 80, y: 0 });
+
+    expect(changed).to.equal(true);
+    expect(contour.points[2]).to.include({ x: 80, y: 0 });
+    expect(contour.points[3]).to.include({ x: 20, y: 0 });
+  });
+
+  it("equalizes skeleton handle arrow nudge while preserving opposite direction", () => {
+    const contour = makeSmoothHandleContour();
+
+    const changed = equalizeSkeletonHandleFromDelta(contour, 2, { x: 20, y: 0 });
+
+    expect(changed).to.equal(true);
+    expect(contour.points[2]).to.include({ x: 80, y: 0 });
+    expect(contour.points[3]).to.include({ x: 20, y: 0 });
+  });
+
+  it("equalizes editable generated handle offsets for the same side", () => {
+    const point = makeSkeletonPoint({
+      handleOffsets: {
+        leftIn: { x: -5, y: 0, detached: true },
+        leftOut: { x: 10, y: 0, detached: true },
+      },
+    });
+
+    const changed = equalizeEditableGeneratedHandleOffsets(
+      point,
+      "left",
+      "out",
+      { x: 5, y: 0 },
+      {
+        draggedDirection: { x: 1, y: 0 },
+        oppositeDirection: { x: -1, y: 0 },
+        detached: true,
+        originalDraggedLength: 10,
+        originalOppositeLength: 5,
+      }
+    );
+
+    expect(changed).to.equal(true);
+    expect(point.handleOffsets.leftOut).to.deep.equal({
+      x: 15,
+      y: 0,
+      detached: true,
+    });
+    expect(point.handleOffsets.leftIn).to.deep.equal({
+      x: -15,
+      y: 0,
+      detached: true,
+    });
+  });
+});
+
 function makeLineSkeleton() {
   return normalizeSkeletonData({
     contours: [
@@ -138,6 +212,19 @@ function makeLineSkeleton() {
           }),
         ],
       }),
+    ],
+  });
+}
+
+function makeSmoothHandleContour() {
+  return makeSkeletonContour({
+    id: 40,
+    points: [
+      makeSkeletonPoint({ id: 4, x: 0, y: 0 }),
+      makeSkeletonPoint({ id: 1, x: 50, y: 0, smooth: true }),
+      makeSkeletonPoint({ id: 2, x: 60, y: 0, type: "cubic" }),
+      makeSkeletonPoint({ id: 3, x: 40, y: 0, type: "cubic" }),
+      makeSkeletonPoint({ id: 5, x: 100, y: 0 }),
     ],
   });
 }
