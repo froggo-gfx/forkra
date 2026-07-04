@@ -1,5 +1,6 @@
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { applyChange } from "@fontra/core/changes.js";
+import { alignHandle, alignHandles } from "@fontra/core/path-functions.js";
 import {
   generateFromSkeleton,
   outlineContourToPackedPath,
@@ -220,12 +221,67 @@ export function toggleSkeletonSmooth(layer, selection, forceValue = null) {
       const { contourId, pointId } = parseSkeletonPointKey(item);
       const address = getSkeletonPointAddress(working, contourId, pointId);
       if (!address || address.point.type) continue;
+      const [prevPoint, nextPoint] = skeletonNeighborPoints(
+        address.contour,
+        address.pointIndex
+      );
+      // Matches toggleSmooth's guard: a corner between two straight segments
+      // (or an open-contour endpoint) cannot become smooth.
+      if (
+        (!prevPoint || !nextPoint || (!prevPoint.type && !nextPoint.type)) &&
+        !address.point.smooth
+      ) {
+        continue;
+      }
       if (newValue === null) {
         newValue = !address.point.smooth;
       }
       address.point.smooth = newValue;
+      if (newValue) {
+        snapSkeletonHandlesCollinear(address.point, prevPoint, nextPoint);
+      }
     }
   });
+}
+
+function skeletonNeighborPoints(contour, pointIndex) {
+  const points = contour.points;
+  const numPoints = points.length;
+  let prevIndex = pointIndex - 1;
+  let nextIndex = pointIndex + 1;
+  if (contour.closed) {
+    prevIndex = (prevIndex + numPoints) % numPoints;
+    nextIndex = nextIndex % numPoints;
+  }
+  const prevPoint =
+    prevIndex >= 0 && prevIndex !== pointIndex ? points[prevIndex] : undefined;
+  const nextPoint =
+    nextIndex < numPoints && nextIndex !== pointIndex ? points[nextIndex] : undefined;
+  return [prevPoint, nextPoint];
+}
+
+// Snap the off-curve neighbors of a freshly-smoothed skeleton point into a
+// collinear position, mirroring toggleSmooth's handle fix-up on regular paths.
+function snapSkeletonHandlesCollinear(anchorPoint, prevPoint, nextPoint) {
+  if (prevPoint?.type && nextPoint?.type) {
+    const [newPrevPoint, newNextPoint] = alignHandles(
+      prevPoint,
+      anchorPoint,
+      nextPoint
+    );
+    prevPoint.x = newPrevPoint.x;
+    prevPoint.y = newPrevPoint.y;
+    nextPoint.x = newNextPoint.x;
+    nextPoint.y = newNextPoint.y;
+  } else if (prevPoint?.type) {
+    const newPrevPoint = alignHandle(nextPoint, anchorPoint, prevPoint);
+    prevPoint.x = newPrevPoint.x;
+    prevPoint.y = newPrevPoint.y;
+  } else if (nextPoint?.type) {
+    const newNextPoint = alignHandle(prevPoint, anchorPoint, nextPoint);
+    nextPoint.x = newNextPoint.x;
+    nextPoint.y = newNextPoint.y;
+  }
 }
 
 // Shift generated-contour path indices when a non-skeleton structural path edit
