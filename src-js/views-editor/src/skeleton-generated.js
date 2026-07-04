@@ -3,6 +3,7 @@ import {
   getSkeletonHandleOffset,
   setSkeletonHandleOffset,
 } from "@fontra/core/skeleton-model.js";
+import { equalizeEditableGeneratedHandleOffsets } from "@fontra/core/skeleton-modifiers.js";
 import { parseSelection } from "@fontra/core/utils.ts";
 import {
   dotVector,
@@ -280,7 +281,7 @@ export function createEditableGeneratedHandleTargetEntries(
       side: address.reference.side,
       role: address.reference.role,
     },
-    executor: createEditableGeneratedHandleExecutor(address.target),
+    executor: createEditableGeneratedHandleExecutor(address.target, behaviorName),
   }));
 
   let rollbackChange = null;
@@ -303,12 +304,7 @@ export function createEditableGeneratedHandleTargetEntries(
             if (!target) {
               continue;
             }
-            setSkeletonHandleOffset(
-              target.point,
-              target.side,
-              target.role,
-              executor.applyDelta(delta)
-            );
+            executor.applyDelta(target, delta);
           }
         });
         rollbackChange = changes.rollbackChange;
@@ -371,30 +367,83 @@ export function toggleEditableGeneratedHandleDetached(layerGlyph, selection) {
   });
 }
 
-function createEditableGeneratedHandleExecutor(address) {
+function createEditableGeneratedHandleExecutor(address, behaviorName) {
   const originalOffset = getSkeletonHandleOffset(
     address.point,
     address.side,
     address.role
   );
   const direction = address.direction;
+  const equalize = behaviorName?.startsWith("equalize") === true;
+  const equalizeGeometry = equalize
+    ? makeEditableGeneratedHandleEqualizeGeometry(address, originalOffset)
+    : null;
   return {
-    applyDelta(delta, { round = Math.round } = {}) {
-      if (originalOffset.detached) {
-        return {
-          x: round(originalOffset.x + delta.x),
-          y: round(originalOffset.y + delta.y),
-          detached: true,
-        };
+    applyDelta(target, delta, { round = Math.round } = {}) {
+      if (equalize && equalizeGeometry) {
+        equalizeEditableGeneratedHandleOffsets(
+          target.point,
+          target.side,
+          target.role,
+          delta,
+          equalizeGeometry,
+          { round }
+        );
+        return;
       }
-      const projectedDelta = dotVector(delta, direction);
-      const offsetDelta = mulVectorScalar(direction, projectedDelta);
-      return {
-        x: round(originalOffset.x + offsetDelta.x),
-        y: round(originalOffset.y + offsetDelta.y),
-        detached: false,
-      };
+      setSkeletonHandleOffset(
+        target.point,
+        target.side,
+        target.role,
+        makeEditableGeneratedHandleOffset(originalOffset, direction, delta, round)
+      );
     },
+  };
+}
+
+function makeEditableGeneratedHandleOffset(
+  originalOffset,
+  direction,
+  delta,
+  round = Math.round
+) {
+  if (originalOffset.detached) {
+    return {
+      x: round(originalOffset.x + delta.x),
+      y: round(originalOffset.y + delta.y),
+      detached: true,
+    };
+  }
+  const projectedDelta = dotVector(delta, direction);
+  const offsetDelta = mulVectorScalar(direction, projectedDelta);
+  return {
+    x: round(originalOffset.x + offsetDelta.x),
+    y: round(originalOffset.y + offsetDelta.y),
+    detached: false,
+  };
+}
+
+function makeEditableGeneratedHandleEqualizeGeometry(address, originalOffset) {
+  const oppositeRole = address.role === "in" ? "out" : "in";
+  const oppositeDirection = getSkeletonHandleDirectionForPoint(
+    address.contour,
+    address.pointIndex,
+    oppositeRole
+  );
+  if (!oppositeDirection) {
+    return null;
+  }
+  const oppositeOffset = getSkeletonHandleOffset(
+    address.point,
+    address.side,
+    oppositeRole
+  );
+  return {
+    draggedDirection: address.direction,
+    oppositeDirection,
+    detached: originalOffset.detached || oppositeOffset.detached,
+    originalDraggedLength: vectorLength(originalOffset),
+    originalOppositeLength: vectorLength(oppositeOffset),
   };
 }
 

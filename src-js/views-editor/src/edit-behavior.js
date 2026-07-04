@@ -1402,4 +1402,25 @@ const behaviorTypes = {
     actions: actionFactories,
     constrainDelta: constrainHorVerDiag,
   },
+
+  "fixed-rib": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
+
+  "fixed-rib-compress": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
+
+  "equalize": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
+
+  "equalize-constrain": {
+    matchTree: buildPointMatchTree(constrainRules),
+    actions: actionFactories,
+    constrainDelta: constrainHorVerDiag,
+  },
 };

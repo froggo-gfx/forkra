@@ -10,6 +10,12 @@ import {
   normalizeSkeletonData,
   setSkeletonData,
 } from "@fontra/core/skeleton-model.js";
+import {
+  applyFixedRibDelta,
+  equalizeSkeletonHandleFromDelta,
+  equalizeSkeletonHandleToPoint,
+  getSkeletonHandleEqualizeInfo,
+} from "@fontra/core/skeleton-modifiers.js";
 import { parseSelection } from "@fontra/core/utils.ts";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
@@ -274,7 +280,8 @@ export function makeSkeletonPointTargetEntry(
   layer,
   selection,
   behaviorName,
-  referenceSkeletonData = null
+  referenceSkeletonData = null,
+  options = {}
 ) {
   const skeletonData = getSkeletonData(layer);
   if (!skeletonData) return null;
@@ -283,6 +290,27 @@ export function makeSkeletonPointTargetEntry(
   const reference = referenceSkeletonData || skeletonData;
   const selected = collectSkeletonPointSelection(selection, reference, skeletonData);
   if (!selected.length) return null;
+
+  if (behaviorName === "fixed-rib" || behaviorName === "fixed-rib-compress") {
+    return makeFixedRibSkeletonPointTargetEntry(
+      layer,
+      skeletonData,
+      reference,
+      selected,
+      behaviorName,
+      options
+    );
+  }
+
+  if (behaviorName === "equalize" || behaviorName === "equalize-constrain") {
+    return makeEqualizeSkeletonHandleTargetEntry(
+      layer,
+      skeletonData,
+      reference,
+      selected,
+      behaviorName
+    );
+  }
 
   const originalLayerGlyph = cloneLayerGlyphForSkeletonEdit(layer);
   const synthetic = makeSyntheticSkeletonPathInstance(skeletonData, selected);
@@ -328,6 +356,140 @@ export function makeSkeletonPointTargetEntry(
     },
     makeChangeForTransformation(transformation) {
       return makeChange("makeChangeForTransformation", transformation);
+    },
+  };
+}
+
+function makeFixedRibSkeletonPointTargetEntry(
+  layer,
+  skeletonData,
+  referenceSkeletonData,
+  selected,
+  behaviorName,
+  options
+) {
+  const originalLayerGlyph = cloneLayerGlyphForSkeletonEdit(layer);
+  const selectedPointKeys = selected.map((item) =>
+    makeSkeletonPointKey(item.contourId, item.pointId)
+  );
+  const clickedPointKey =
+    resolveClickedSkeletonPointKey(
+      skeletonData,
+      referenceSkeletonData,
+      options.clickedSkeletonPointKey
+    ) || selectedPointKeys[0];
+  let rollbackChange = null;
+  return {
+    get rollbackChange() {
+      return rollbackChange;
+    },
+    makeChangeForDelta(delta) {
+      const changes = makeEditSkeletonChange(originalLayerGlyph, (working) => {
+        applyFixedRibDelta(
+          skeletonData,
+          working,
+          selectedPointKeys,
+          clickedPointKey,
+          delta,
+          {
+            compress: behaviorName === "fixed-rib-compress",
+            scaleControlPoints: true,
+          }
+        );
+      });
+      rollbackChange = changes.rollbackChange;
+      return changes.change;
+    },
+    makeChangeForTransformation() {
+      return null;
+    },
+  };
+}
+
+function makeEqualizeSkeletonHandleTargetEntry(
+  layer,
+  skeletonData,
+  referenceSkeletonData,
+  selected,
+  behaviorName
+) {
+  const originalLayerGlyph = cloneLayerGlyphForSkeletonEdit(layer);
+  const handles = selected
+    .map((item) => {
+      const reference = getSkeletonPointAddress(
+        referenceSkeletonData,
+        item.referenceContourId,
+        item.referencePointId
+      );
+      const target = reference
+        ? skeletonData === referenceSkeletonData
+          ? reference
+          : {
+              contour: skeletonData?.contours?.[reference.contourIndex],
+              contourIndex: reference.contourIndex,
+              point:
+                skeletonData?.contours?.[reference.contourIndex]?.points?.[
+                  reference.pointIndex
+                ],
+              pointIndex: reference.pointIndex,
+            }
+        : null;
+      if (
+        !reference?.point?.type ||
+        !target?.point?.type ||
+        target.point.type !== reference.point.type ||
+        !getSkeletonHandleEqualizeInfo(reference.contour, reference.pointIndex)
+      ) {
+        return null;
+      }
+      return {
+        contourId: target.contour.id,
+        pointId: target.point.id,
+        originalPoint: { x: target.point.x, y: target.point.y },
+      };
+    })
+    .filter((item) => item);
+  if (!handles.length) {
+    return null;
+  }
+  const constrain = behaviorName === "equalize-constrain";
+  let rollbackChange = null;
+  return {
+    get rollbackChange() {
+      return rollbackChange;
+    },
+    makeChangeForDelta(delta) {
+      const changes = makeEditSkeletonChange(originalLayerGlyph, (working) => {
+        for (const handle of handles) {
+          const target = resolveSkeletonAddressAcrossLayers(
+            skeletonData,
+            working,
+            handle.contourId,
+            handle.pointId
+          );
+          if (!target) {
+            continue;
+          }
+          if (constrain) {
+            equalizeSkeletonHandleToPoint(
+              target.contour,
+              target.pointIndex,
+              {
+                x: handle.originalPoint.x + delta.x,
+                y: handle.originalPoint.y + delta.y,
+              },
+              { constrain: true }
+            );
+          } else {
+            equalizeSkeletonHandleFromDelta(target.contour, target.pointIndex, delta);
+          }
+        }
+      });
+      rollbackChange = changes.rollbackChange;
+      return changes.change;
+    },
+    makeChangeForTransformation() {
+      return null;
     },
   };
 }
@@ -407,10 +569,36 @@ function collectSkeletonPointSelection(
       pointId
     );
     if (address) {
-      selected.push({ contourId: address.contour.id, pointId: address.point.id });
+      selected.push({
+        contourId: address.contour.id,
+        pointId: address.point.id,
+        referenceContourId: contourId,
+        referencePointId: pointId,
+      });
     }
   }
   return selected;
+}
+
+function resolveClickedSkeletonPointKey(
+  targetSkeletonData,
+  referenceSkeletonData,
+  clickedSkeletonPointKey
+) {
+  if (!clickedSkeletonPointKey) {
+    return null;
+  }
+  const { contourId, pointId } = parseSkeletonPointKey(clickedSkeletonPointKey);
+  const reference = getSkeletonPointAddress(referenceSkeletonData, contourId, pointId);
+  if (!reference) {
+    return null;
+  }
+  const contour = targetSkeletonData?.contours?.[reference.contourIndex];
+  const point = contour?.points?.[reference.pointIndex];
+  if (!contour || !point || point.type) {
+    return null;
+  }
+  return makeSkeletonPointKey(contour.id, point.id);
 }
 
 function collectSkeletonRibSelection(
