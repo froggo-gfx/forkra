@@ -1,11 +1,7 @@
-import {
-  calculateNormalAtSkeletonPoint,
-  getSkeletonData,
-  getSkeletonPointHalfWidth,
-  getSkeletonPointNudge,
-  projectSkeletonRibPoint,
-} from "@fontra/core/skeleton-model.js";
+import { getSkeletonData } from "@fontra/core/skeleton-model.js";
+import { parseSelection } from "@fontra/core/utils.ts";
 
+import { getSkeletonRibPosition, makeSkeletonRibKey } from "./skeleton-ribs.js";
 import {
   fillRoundNode,
   glyphSelector,
@@ -78,61 +74,39 @@ function skeletonContourToPath2d(contour) {
   return path;
 }
 
-function getEditableSide(point, side) {
-  if (point.editable && typeof point.editable === "object") {
-    return point.editable[side] === true;
-  }
-  return point[`${side}Editable`] === true;
-}
-
 function getRibPoints(contour, pointIndex) {
   const point = contour.points[pointIndex];
-  const normal = calculateNormalAtSkeletonPoint(contour, pointIndex);
-  const defaultWidth = contour.defaultWidth;
-  const leftHalfWidth = getSkeletonPointHalfWidth(point, defaultWidth, "left");
-  const rightHalfWidth = getSkeletonPointHalfWidth(point, defaultWidth, "right");
-  const isSingleSided =
-    contour.singleSided === "left" || contour.singleSided === "right";
-
-  if (isSingleSided) {
-    const side = contour.singleSided;
-    const totalWidth = leftHalfWidth + rightHalfWidth;
-    const editable = getEditableSide(point, side);
-    const nudge =
-      editable && totalWidth >= 0.5
-        ? getSkeletonPointNudge(point, side, defaultWidth)
-        : 0;
-    return {
-      center: point,
-      left:
-        side === "left"
-          ? projectSkeletonRibPoint(point, normal, totalWidth, "left", nudge)
-          : point,
-      leftEditable: side === "left" && editable,
-      right:
-        side === "right"
-          ? projectSkeletonRibPoint(point, normal, totalWidth, "right", nudge)
-          : point,
-      rightEditable: side === "right" && editable,
-    };
-  }
-
-  const leftEditable = getEditableSide(point, "left");
-  const rightEditable = getEditableSide(point, "right");
-  const leftNudge =
-    leftEditable && leftHalfWidth >= 0.5
-      ? getSkeletonPointNudge(point, "left", defaultWidth)
-      : 0;
-  const rightNudge =
-    rightEditable && rightHalfWidth >= 0.5
-      ? getSkeletonPointNudge(point, "right", defaultWidth)
-      : 0;
+  const activeSingleSide =
+    contour.singleSided === "left" || contour.singleSided === "right"
+      ? contour.singleSided
+      : null;
   return {
     center: point,
-    left: projectSkeletonRibPoint(point, normal, leftHalfWidth, "left", leftNudge),
-    leftEditable,
-    right: projectSkeletonRibPoint(point, normal, rightHalfWidth, "right", rightNudge),
-    rightEditable,
+    left:
+      activeSingleSide === "right"
+        ? point
+        : getSkeletonRibPosition(contour, point, "left"),
+    leftEditable: activeSingleSide === "right" ? false : point.editable?.left === true,
+    right:
+      activeSingleSide === "left"
+        ? point
+        : getSkeletonRibPosition(contour, point, "right"),
+    rightEditable: activeSingleSide === "left" ? false : point.editable?.right === true,
+  };
+}
+
+function getSkeletonRibSelectionSets(model) {
+  return {
+    selected: new Set(
+      (parseSelection(model.selection).skeletonRib || []).map(
+        (item) => `skeletonRib/${item}`
+      )
+    ),
+    hovered: new Set(
+      (parseSelection(model.hoverSelection).skeletonRib || []).map(
+        (item) => `skeletonRib/${item}`
+      )
+    ),
   };
 }
 
@@ -217,22 +191,37 @@ registerVisualizationLayerDefinition({
   },
   colors: {
     endpointColor: "rgba(34, 121, 210, 0.65)",
+    endpointHoverColor: "rgba(34, 121, 210, 0.95)",
+    endpointSelectedColor: "rgba(255, 128, 0, 0.95)",
     strokeColor: "rgba(34, 121, 210, 0.45)",
   },
   colorsDarkMode: {
     endpointColor: "rgba(95, 178, 255, 0.75)",
+    endpointHoverColor: "rgba(95, 178, 255, 1)",
+    endpointSelectedColor: "rgba(255, 174, 68, 1)",
     strokeColor: "rgba(95, 178, 255, 0.55)",
   },
   draw: (context, positionedGlyph, parameters, model) => {
     context.lineWidth = parameters.strokeWidth;
     context.strokeStyle = parameters.strokeColor;
-    context.fillStyle = parameters.endpointColor;
+    const ribSelection = getSkeletonRibSelectionSets(model);
     forEachSkeletonContour(positionedGlyph, model, (contour) => {
       for (const pointIndex of getOnCurvePointIndices(contour)) {
+        const point = contour.points[pointIndex];
         const rib = getRibPoints(contour, pointIndex);
         strokeLine(context, rib.left.x, rib.left.y, rib.right.x, rib.right.y);
-        fillRoundNode(context, rib.left, parameters.endpointSize);
-        fillRoundNode(context, rib.right, parameters.endpointSize);
+        for (const side of ["left", "right"]) {
+          if (contour.singleSided && contour.singleSided !== side) {
+            continue;
+          }
+          const key = makeSkeletonRibKey(contour.id, point.id, side);
+          context.fillStyle = ribSelection.selected.has(key)
+            ? parameters.endpointSelectedColor
+            : ribSelection.hovered.has(key)
+              ? parameters.endpointHoverColor
+              : parameters.endpointColor;
+          fillRoundNode(context, rib[side], parameters.endpointSize);
+        }
       }
     });
   },
