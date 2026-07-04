@@ -71,6 +71,7 @@ import {
   makeSkeletonPointTargetEntry,
   recordSkeletonContourIndexShift,
 } from "./skeleton-editing.js";
+import { createEditableGeneratedHandleTargetEntries } from "./skeleton-generated.js";
 //// grid
 import { toggleMagneticSnap } from "./edit-behavior.js";
 
@@ -1054,7 +1055,10 @@ export class SceneController {
       dy *= 10;
     }
     const delta = { x: dx, y: dy };
-    const hasRibSelection = !!parseSelection(this.selection).skeletonRib?.length;
+    const parsedSelection = parseSelection(this.selection);
+    const hasGeneratedHandleSelection =
+      !!parsedSelection.editableGeneratedHandle?.length;
+    const hasRibSelection = !!parsedSelection.skeletonRib?.length;
     const behaviorName = hasRibSelection
       ? "rib-default"
       : event.altKey
@@ -1069,18 +1073,25 @@ export class SceneController {
       const layerInfo = Object.entries(editingLayers).map(([layerName, layerGlyph]) => {
         //// grid
         window._sceneController = this; // <-- add this
-        const targetEntries = hasRibSelection
-          ? createSkeletonRibTargetEntries(layerGlyph, this.selection, behaviorName, {
-              referenceSkeletonData,
-            })
-          : [
-              makeSkeletonPointTargetEntry(
-                layerGlyph,
-                this.selection,
-                behaviorName,
-                referenceSkeletonData
-              ),
-            ].filter((entry) => entry);
+        const targetEntries = hasGeneratedHandleSelection
+          ? createEditableGeneratedHandleTargetEntries(
+              layerGlyph,
+              this.selection,
+              behaviorName,
+              { referenceSkeletonData }
+            )
+          : hasRibSelection
+            ? createSkeletonRibTargetEntries(layerGlyph, this.selection, behaviorName, {
+                referenceSkeletonData,
+              })
+            : [
+                makeSkeletonPointTargetEntry(
+                  layerGlyph,
+                  this.selection,
+                  behaviorName,
+                  referenceSkeletonData
+                ),
+              ].filter((entry) => entry);
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           this.selection,
