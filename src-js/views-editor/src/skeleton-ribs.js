@@ -2,11 +2,15 @@ import {
   calculateNormalAtSkeletonPoint,
   getSkeletonPointHalfWidth,
   getSkeletonPointNudge,
+  getSkeletonRibPosition,
   getSkeletonRibSidesForPoint,
-  projectSkeletonRibPoint,
   setSkeletonPointSideNudge,
   setSkeletonPointSideWidth,
 } from "@fontra/core/skeleton-model.js";
+
+// getSkeletonRibPosition now lives in fontra-core (single shared forward
+// projection, WS-16 Task 2); re-exported here for existing WS-8/11 call sites.
+export { getSkeletonRibPosition };
 
 const SKELETON_RIB_KEY_KIND = "skeletonRib";
 const VALID_RIB_SIDES = new Set(["left", "right"]);
@@ -73,27 +77,6 @@ export function getSkeletonRibAddress(skeletonData, contourId, pointId, side) {
     defaultWidth: contour.defaultWidth,
     normal: calculateNormalAtSkeletonPoint(contour, pointIndex),
   };
-}
-
-export function getSkeletonRibPosition(contour, point, side) {
-  assertSkeletonRibSide(side);
-  if (!getSkeletonRibSidesForPoint(contour, point).includes(side)) {
-    return null;
-  }
-  const pointIndex = (contour.points || []).indexOf(point);
-  const normal = calculateNormalAtSkeletonPoint(
-    contour,
-    pointIndex >= 0 ? pointIndex : point.id
-  );
-  const defaultWidth = contour.defaultWidth;
-  const leftHalfWidth = getSkeletonPointHalfWidth(point, defaultWidth, "left");
-  const rightHalfWidth = getSkeletonPointHalfWidth(point, defaultWidth, "right");
-  const halfWidth =
-    contour.singleSided === "left" || contour.singleSided === "right"
-      ? leftHalfWidth + rightHalfWidth
-      : getSkeletonPointHalfWidth(point, defaultWidth, side);
-  const nudge = getSkeletonPointNudge(point, side, defaultWidth);
-  return projectSkeletonRibPoint(point, normal, halfWidth, side, nudge);
 }
 
 export function createSkeletonRibExecutor(address, behaviorName = "rib-default") {

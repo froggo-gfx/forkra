@@ -514,6 +514,30 @@ export function getSkeletonRibSidesForPoint(contour, point) {
   return ["left", "right"];
 }
 
+// Forward projection of a rib endpoint in glyph space (the C4 gizmo position).
+// This is the single shared source used by rendering (WS-8), hit-testing
+// (WS-11) and selection bounds (WS-16); never re-derive it locally.
+export function getSkeletonRibPosition(contour, point, side) {
+  assertSkeletonRibSide(side);
+  if (!getSkeletonRibSidesForPoint(contour, point).includes(side)) {
+    return null;
+  }
+  const pointIndex = (contour.points || []).indexOf(point);
+  const normal = calculateNormalAtSkeletonPoint(
+    contour,
+    pointIndex >= 0 ? pointIndex : point.id
+  );
+  const defaultWidth = contour.defaultWidth;
+  const leftHalfWidth = getSkeletonPointHalfWidth(point, defaultWidth, "left");
+  const rightHalfWidth = getSkeletonPointHalfWidth(point, defaultWidth, "right");
+  const halfWidth =
+    contour.singleSided === "left" || contour.singleSided === "right"
+      ? leftHalfWidth + rightHalfWidth
+      : getSkeletonPointHalfWidth(point, defaultWidth, side);
+  const nudge = getSkeletonPointNudge(point, side, defaultWidth);
+  return projectSkeletonRibPoint(point, normal, halfWidth, side, nudge);
+}
+
 export function buildSegmentsFromSkeletonPoints(points, closed) {
   const segments = [];
   const onCurveIndices = [];
