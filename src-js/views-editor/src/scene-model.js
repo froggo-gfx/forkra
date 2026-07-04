@@ -815,21 +815,71 @@ export class SceneModel {
       y: point.y - positionedGlyph.y,
     };
 
+    // Skeleton-generated contour points are never regular point/N selections:
+    // they are only reachable through the editable-generated hit test, which
+    // requires the per-point editable flag.
+    const generatedPointIndices = this._getGeneratedPointIndices(positionedGlyph);
+    const path = positionedGlyph.glyph.path;
     let pointIndex;
     if (parsedCurrentSelection) {
-      pointIndex = positionedGlyph.glyph.path.pointIndexNearPointFromPointIndices(
+      const currentPointIndices = generatedPointIndices
+        ? (parsedCurrentSelection.point || []).filter(
+            (index) => !generatedPointIndices.has(index)
+          )
+        : parsedCurrentSelection.point || [];
+      pointIndex = path.pointIndexNearPointFromPointIndices(
         glyphPoint,
         size,
-        parsedCurrentSelection.point || []
+        currentPointIndices
       );
+    } else if (!generatedPointIndices) {
+      pointIndex = path.pointIndexNearPoint(glyphPoint, size);
     } else {
-      pointIndex = positionedGlyph.glyph.path.pointIndexNearPoint(glyphPoint, size);
+      const candidateIndices = [];
+      for (let i = 0; i < path.numPoints; i++) {
+        if (!generatedPointIndices.has(i)) {
+          candidateIndices.push(i);
+        }
+      }
+      pointIndex = path.pointIndexNearPointFromPointIndices(
+        glyphPoint,
+        size,
+        candidateIndices
+      );
     }
     if (pointIndex !== undefined) {
       return new Set([`point/${pointIndex}`]);
     }
 
     return new Set();
+  }
+
+  // Absolute path point indices of all skeleton-generated contours, or null
+  // when the glyph has none. Generated geometry is derived data: it must not
+  // be selectable or editable as regular path points.
+  _getGeneratedPointIndices(positionedGlyph) {
+    const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+    if (!skeletonData?.generated?.length) {
+      return null;
+    }
+    const path = positionedGlyph.glyph.path;
+    const indices = new Set();
+    for (const entry of skeletonData.generated) {
+      const contourIndex = entry.pathContourIndex;
+      if (
+        !Number.isInteger(contourIndex) ||
+        contourIndex < 0 ||
+        contourIndex >= path.numContours
+      ) {
+        continue;
+      }
+      const startIndex = path.getAbsolutePointIndex(contourIndex, 0);
+      const numPoints = path.getNumPointsOfContour(contourIndex);
+      for (let i = 0; i < numPoints; i++) {
+        indices.add(startIndex + i);
+      }
+    }
+    return indices.size ? indices : null;
   }
 
   _getEditLayerSkeletonData(positionedGlyph) {
@@ -1293,7 +1343,11 @@ export class SceneModel {
       return selection;
     }
     selRect = offsetRect(selRect, -positionedGlyph.x, -positionedGlyph.y);
+    const generatedPointIndices = this._getGeneratedPointIndices(positionedGlyph);
     for (const hit of positionedGlyph.glyph.path.iterPointsInRect(selRect)) {
+      if (generatedPointIndices?.has(hit.pointIndex)) {
+        continue;
+      }
       if (!pointFilterFunc || pointFilterFunc(hit)) {
         selection.add(`point/${hit.pointIndex}`);
       }
