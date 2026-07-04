@@ -67,6 +67,7 @@ import { dialog, message } from "@fontra/web-components/modal-dialog.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import { SceneModel } from "./scene-model.js";
 import {
+  createSkeletonRibTargetEntries,
   makeSkeletonPointTargetEntry,
   recordSkeletonContourIndexShift,
 } from "./skeleton-editing.js";
@@ -1053,7 +1054,12 @@ export class SceneController {
       dy *= 10;
     }
     const delta = { x: dx, y: dy };
-    const behaviorName = event.altKey ? "alternate" : "default";
+    const hasRibSelection = !!parseSelection(this.selection).skeletonRib?.length;
+    const behaviorName = hasRibSelection
+      ? "rib-default"
+      : event.altKey
+        ? "alternate"
+        : "default";
     await this.editGlyph((sendIncrementalChange, glyph) => {
       const editingLayers = this.getEditingLayerFromGlyphLayers(glyph.layers);
       const editLayerName = this.sceneSettings.editLayerName;
@@ -1063,17 +1069,23 @@ export class SceneController {
       const layerInfo = Object.entries(editingLayers).map(([layerName, layerGlyph]) => {
         //// grid
         window._sceneController = this; // <-- add this
-        const skeletonEntry = makeSkeletonPointTargetEntry(
-          layerGlyph,
-          this.selection,
-          behaviorName,
-          referenceSkeletonData
-        );
+        const targetEntries = hasRibSelection
+          ? createSkeletonRibTargetEntries(layerGlyph, this.selection, behaviorName, {
+              referenceSkeletonData,
+            })
+          : [
+              makeSkeletonPointTargetEntry(
+                layerGlyph,
+                this.selection,
+                behaviorName,
+                referenceSkeletonData
+              ),
+            ].filter((entry) => entry);
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           this.selection,
           this.selectedTool.scalingEditBehavior,
-          { targetEntries: skeletonEntry ? [skeletonEntry] : [] }
+          { targetEntries }
         );
         return {
           layerName,
