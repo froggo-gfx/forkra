@@ -681,6 +681,21 @@ export class EditorController extends ViewController {
         titleKey: "shortcuts.realtime.rib-tangent",
         defaultShortCuts: [{ baseKey: "z" }],
       });
+      registerActionInfo("action.realtime.equalize", {
+        topic,
+        titleKey: "shortcuts.realtime.equalize",
+        defaultShortCuts: [{ baseKey: "x" }],
+      });
+      registerActionInfo("action.realtime.fixed-rib", {
+        topic,
+        titleKey: "shortcuts.realtime.fixed-rib",
+        defaultShortCuts: [{ baseKey: "d" }],
+      });
+      registerActionInfo("action.realtime.fixed-rib-compress", {
+        topic,
+        titleKey: "shortcuts.realtime.fixed-rib-compress",
+        defaultShortCuts: [{ baseKey: "s" }],
+      });
     }
 
     {
