@@ -1036,6 +1036,10 @@ git commit -m "fix(skeleton): complete parameters panel checks"
 - Donor flat fields are mapped to canonical schema fields from WS-6/11/12.
 - Transformation buttons may be displayed only if earlier workstreams already implemented the corresponding actions; transformation parity itself remains WS-16.
 - Donor debug corner fields land as canonical contour-level fields (`cornerTrimRatio`, `cornerRadiusBoost`) per WS-6's schema; the donor's `…DebugPercent` UI keys are not reused.
+- `bone.svg` was vendored as a hand-drawn Tabler-style outline icon (matching the neighboring icons' stroke conventions); the official Tabler `bone` SVG was not available offline, so a custom equivalent was created rather than an existing-icon substitution.
+- Width/cap/corner profile apply/revert and the "Set Global" arming flow (donor width/cap profile dropdowns) are not implemented in this pass: the panel edits source defaults and per-point/contour/rib parameters directly. Profiles remain available as source-default arrays in the schema for a follow-up.
+- Slider drags apply the committed (final) stream value as one atomic `editSkeleton` edit (one undo record) rather than streaming per-frame previews, avoiding per-frame regeneration undo entries while keeping final geometry correct.
+- Width anchor (L/Center/R segmented control) is not implemented in this pass; side/total/distribution edits keep the skeleton point centered.
 
 ---
 

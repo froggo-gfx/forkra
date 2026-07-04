@@ -5,7 +5,6 @@ import { getSkeletonData } from "@fontra/core/skeleton-model.js";
 import {
   SKELETON_SOURCE_DEFAULT_FALLBACKS,
   SKELETON_SOURCE_DEFAULT_KEYS,
-  getDefaultSkeletonWidthKeyForGlyphName,
   getSkeletonGlyphCase,
   getSourceSkeletonDefaultsValue,
   setSourceSkeletonDefaultsValues,
