@@ -314,19 +314,25 @@ export function makeSkeletonPointTargetEntry(
 
   const originalLayerGlyph = cloneLayerGlyphForSkeletonEdit(layer);
   const synthetic = makeSyntheticSkeletonPathInstance(skeletonData, selected);
-  const behaviorFactory = new EditBehaviorFactory(
+  // Separate factories for delta vs transform: EditBehaviorFactory caches
+  // behaviors under behaviorName regardless of doFullTransform, so sharing one
+  // factory would hand back the delta behavior for the transform path too.
+  const deltaFactory = new EditBehaviorFactory(synthetic.instance, synthetic.selection);
+  const transformFactory = new EditBehaviorFactory(
     synthetic.instance,
     synthetic.selection
   );
-  const syntheticBehavior = behaviorFactory.getBehavior(behaviorName);
+  const syntheticDeltaBehavior = deltaFactory.getBehavior(behaviorName);
+  const syntheticTransformBehavior =
+    transformFactory.getTransformBehavior(behaviorName);
 
   let rollbackChange = null;
-  const makeChange = (method, argument) => {
+  const makeChange = (behavior, method, argument) => {
     // 1. Run the regular point-behavior rules on the synthetic path. The
     //    behavior computes absolute coordinates from the captured originals,
     //    so applying its change to the synthetic instance per frame yields
     //    current-frame positions.
-    applyChange(synthetic.instance, syntheticBehavior[method](argument));
+    applyChange(synthetic.instance, behavior[method](argument));
     // 2. Copy EVERY mapped point position back onto the skeleton working copy
     //    (not only selected points — the rules move unselected neighbors too).
     const changes = makeEditSkeletonChange(originalLayerGlyph, (working) => {
@@ -352,10 +358,14 @@ export function makeSkeletonPointTargetEntry(
       return rollbackChange;
     },
     makeChangeForDelta(delta) {
-      return makeChange("makeChangeForDelta", delta);
+      return makeChange(syntheticDeltaBehavior, "makeChangeForDelta", delta);
     },
     makeChangeForTransformation(transformation) {
-      return makeChange("makeChangeForTransformation", transformation);
+      return makeChange(
+        syntheticTransformBehavior,
+        "makeChangeForTransformation",
+        transformation
+      );
     },
   };
 }
