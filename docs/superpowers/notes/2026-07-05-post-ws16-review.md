@@ -325,3 +325,71 @@ panel/controller listeners are constructor-only). Two real cost centers:
 3. Per-frame websocket `editIncremental` ships the whole skeleton customData
    (throttled 50ms, mayDrop) — constant per frame, adds base cost with big
    skeletons, watch alongside C7.
+
+---
+
+## F. Fourth pass — closing the contour-index bookkeeping class (C1/C2/C3/C5)
+
+Commissioned after re-reviewing the roadmap's §10 recommendations: the
+"path-contour identity" risk (the roadmap's #1) was only wired into
+join-contours. This pass closes the class.
+
+### F1. C5 — in-place pairing hardened (FIXED)
+`canUpdateGeneratedContoursInPlace` now also requires
+`previous[i].skeletonContourId === generated.provenance[i].skeletonContourId`,
+so a delete+add with matching point structure can no longer mispair
+skeletonContourId ↔ pathContourIndex.
+
+### F2. C2 — select-all no longer leaks generated points (FIXED)
+`doSelectAllNone` filters `_getGeneratedPointIndices` out of its on-curve
+enumeration, consistent with the click/marquee hit tests.
+
+### F3. C3 — pen and knife gated off generated contours (FIXED)
+- scene-model gained `isGeneratedPathContour(contourIndex)`.
+- Pen (cubic + quad): hovering a generated segment no longer offers
+  insert-point / alt-insert-handles; treated as empty canvas. (Hover over
+  generated *points* was already impossible via the gated point hit test.)
+- Knife: intersections on generated contours are filtered out live during
+  the drag (markers not drawn) and never sliced.
+- Pointer alt-insert-handles was already covered by the E4 segment gating.
+
+### F4. C1 — generated-index bookkeeping wired into every structural op (FIXED)
+Two mechanisms, chosen per site:
+
+*Simple shift* (`recordSkeletonContourIndexShift`): pen contour merge
+(`connectToContour` — net −1 contour; shift start = targetContourIndex in
+both merge directions, recorded by `_handleAddPoints` where the layer glyph
+is in scope). This closes the WS-9 documented deviation.
+
+*Marker remap* (new in `skeleton-editing.js`:
+`markGeneratedContoursForRemap` / `readGeneratedContourRemap` /
+`remapGeneratedEntries` / `computeGeneratedContourRemap` /
+`applyGeneratedContourRemap`): for edits whose effect on contour order is not
+a simple shift, tag the first point of every generated contour with a temp
+point attribute, dry-run the edit on a scratch copy of the path, read the
+markers back, rewrite `pathContourIndex`. Explicit identity bookkeeping —
+not geometric recovery (rail C3 respected: generated contours are never
+restructured by these edits, only moved). Wired into:
+- delete selection (`editor._deleteSelection` → `deleteSelectedPoints`,
+  which deletes fully-selected contours)
+- cut / alt-delete (`editor._prepareCopyOrCut` → `filterPathByPointIndices`
+  with doCut)
+- break contour (`scene-controller.doBreakSelectedContours` →
+  `splitPathAtPointIndices`)
+- knife slice (`edit-tools-knife.doSliceGlyph` → `slicePaths`; markers
+  applied to the detached layer path copies directly)
+- transformation panel union-with-selection (delete selected contours +
+  appendPath)
+
+Audited as already safe (append-at-end or net-zero, comments in place):
+paste (`appendPath`), shape tool, decompose, reverse-contour, set-start-point,
+close-contour, add-overlap (no contour-count change).
+
+Remaining documented limitation (unchanged): whole-path boolean ops
+(union-all, subtract/intersect/exclude) consume generated contours by
+construction; comment clarified in panel-transformation.js. Proper handling
+(strip generated before the op, regenerate after) is future work, noted in
+ws16-parity-audit.md's spirit as an explicit exclusion.
+
+Verification: 1352 fontra-core tests pass, bundle green, node --check +
+prettier on all seven touched files.

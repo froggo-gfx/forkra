@@ -21,7 +21,10 @@ import {
 } from "@fontra/core/rectangle.ts";
 import { difference, isEqualSet, union, updateSet } from "@fontra/core/set-ops.js";
 import { MAX_UNICODE } from "@fontra/core/shaper.js";
-import { getSkeletonData } from "@fontra/core/skeleton-model.js";
+import {
+  getGeneratedPathContourIndices,
+  getSkeletonData,
+} from "@fontra/core/skeleton-model.js";
 import { skeletonTunniHitTest } from "@fontra/core/skeleton-tunni.js";
 import { decomposedToTransform } from "@fontra/core/transform.js";
 import {
@@ -896,6 +899,21 @@ export class SceneModel {
     const layerGlyph =
       editLayerName && positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName]?.glyph;
     return getSkeletonData(layerGlyph || positionedGlyph.glyph);
+  }
+
+  // Whether the given path contour index belongs to a skeleton-generated
+  // contour of the selected glyph. Tools that insert/slice path geometry
+  // (pen, knife) use this to keep derived contours untouchable.
+  isGeneratedPathContour(contourIndex) {
+    if (!Number.isInteger(contourIndex)) {
+      return false;
+    }
+    const positionedGlyph = this.getSelectedPositionedGlyph();
+    if (!positionedGlyph) {
+      return false;
+    }
+    const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+    return getGeneratedPathContourIndices(skeletonData).has(contourIndex);
   }
 
   skeletonPointAtPoint(point, size, parsedCurrentSelection) {

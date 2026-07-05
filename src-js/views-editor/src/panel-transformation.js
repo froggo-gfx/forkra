@@ -28,6 +28,8 @@ import { Form } from "@fontra/web-components/ui-form.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import Panel from "./panel.js";
 import {
+  applyGeneratedContourRemap,
+  computeGeneratedContourRemap,
   getSkeletonSelectionBounds,
   makeSkeletonPointTargetEntry,
 } from "./skeleton-editing.js";
@@ -924,19 +926,26 @@ export default class TransformationPanel extends Panel {
       (glyph) => {
         for (const [layerName, layerPath] of Object.entries(layerPaths)) {
           if (doUnion && pointIndices.length) {
-            // Path boolean operations rewrite outline contours wholesale and are
-            // not skeleton-aware: they operate on outline point selections, never
-            // on skeletonPoint selections, so they don't run against generated
-            // contours in the WS-9 flow. Combining a boolean op with an active
-            // skeleton is a documented WS-9 limitation (Deviations): generated
-            // indices are not maintained here and the skeleton should be
-            // regenerated via editSkeleton afterwards.
-            const path = glyph.layers[layerName].glyph.path;
-            for (const contourIndex of reversed(selectedContourIndices)) {
-              path.deleteContour(contourIndex);
-            }
-            path.appendPath(layerPath);
+            // Union of selected contours: the selected contours (never
+            // generated ones — those are unselectable) are deleted and the
+            // boolean result is appended, so the surviving generated contours
+            // only move; re-derive their indices via a marked dry run.
+            const layerGlyph = glyph.layers[layerName].glyph;
+            const structuralEdit = (path) => {
+              for (const contourIndex of reversed(selectedContourIndices)) {
+                path.deleteContour(contourIndex);
+              }
+              path.appendPath(layerPath);
+            };
+            const remap = computeGeneratedContourRemap(layerGlyph, structuralEdit);
+            structuralEdit(layerGlyph.path);
+            applyGeneratedContourRemap(layerGlyph, remap);
           } else {
+            // Whole-path boolean ops (union-all, subtract/intersect/exclude)
+            // consume every contour, generated ones included: the result no
+            // longer corresponds to the skeleton's generated bookkeeping.
+            // Documented WS-9 limitation (Deviations): with an active skeleton
+            // these ops are destructive to the generated linkage.
             glyph.layers[layerName].glyph.path = layerPath;
           }
         }

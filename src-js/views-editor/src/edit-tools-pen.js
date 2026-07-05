@@ -12,6 +12,7 @@ import { VarPackedPath } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
 import { constrainHorVerDiag } from "./edit-behavior.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
+import { recordSkeletonContourIndexShift } from "./skeleton-editing.js";
 
 export class PenTool {
   identifier = "pen-tool";
@@ -98,7 +99,12 @@ export class PenToolCubic extends BaseTool {
       // artifact caused by bezier-js: Bezier.project() returns t values
       // with a max precision of 0.001.
       const size = Math.max(1, this.sceneController.mouseClickMargin);
-      const hit = this.sceneModel.pathHitAtPoint(point, size);
+      let hit = this.sceneModel.pathHitAtPoint(point, size);
+      if (this.sceneModel.isGeneratedPathContour(hit.contourIndex)) {
+        // Skeleton-generated contours are derived geometry: the pen must not
+        // insert points or handles into them. Treat the hover as empty canvas.
+        hit = {};
+      }
       if (event.altKey && hit.segment?.points?.length === 2) {
         return this.getInsertHandlesFromPathHit(hit);
       } else {
@@ -231,6 +237,10 @@ export class PenToolCubic extends BaseTool {
 
       const initialChanges = recordLayerChanges(layerInfo, (behavior, layerGlyph) => {
         behavior.initialChanges(layerGlyph.path, initialEvent);
+        if (behavior.context.generatedIndexShift) {
+          const { startIndex, delta } = behavior.context.generatedIndexShift;
+          recordSkeletonContourIndexShift(layerGlyph, startIndex, delta);
+        }
       });
       this.sceneController.selection = primaryBehavior.selection;
       await sendIncrementalChange(initialChanges.change);
@@ -300,7 +310,12 @@ export class PenToolQuad extends PenToolCubic {
       // artifact caused by bezier-js: Bezier.project() returns t values
       // with a max precision of 0.001.
       const size = Math.max(1, this.sceneController.mouseClickMargin);
-      const hit = this.sceneModel.pathHitAtPoint(point, size);
+      let hit = this.sceneModel.pathHitAtPoint(point, size);
+      if (this.sceneModel.isGeneratedPathContour(hit.contourIndex)) {
+        // Skeleton-generated contours are derived geometry: the pen must not
+        // insert points or handles into them. Treat the hover as empty canvas.
+        hit = {};
+      }
       if (event.altKey && hit.segment?.points?.length === 2) {
         const pt1 = hit.segment.points[0];
         const pt2 = hit.segment.points[1];
@@ -501,9 +516,8 @@ class PenToolBehavior {
 function insertContourAndSetupAnchorPoint(context, path, point, shiftKey) {
   // A brand-new pen contour is inserted at context.contourIndex (= path end),
   // i.e. after any skeleton-generated block; existing generated indices are
-  // unaffected. WS-9 limitation: pen contour merges (mergeAppendContours, below)
-  // reduce the contour count on the bare path and do not update generated
-  // indices — see Deviations in the WS-9 plan.
+  // unaffected. Pen contour merges (connectToContour, below) do change the
+  // contour count and record a generated-index shift via context.
   path.insertContour(context.contourIndex, emptyContour());
   context.anchorIndex = context.contourPointIndex;
 }
@@ -658,10 +672,15 @@ function connectToContour(context, path, point, shiftKey) {
   if (targetContourBefore) {
     deleteIndices.reverse();
   }
-  // WS-9 limitation: merging pen contours changes the contour count on the bare
-  // path (no layer glyph / skeleton data in scope here). Combining live pen
-  // contour merges with an active skeleton can drift generated-contour indices;
-  // documented in the WS-9 plan Deviations rather than recovered geometrically.
+  // Merging two pen contours nets one contour fewer. Generated contours above
+  // targetContourIndex shift by -1 in both merge directions (target-before:
+  // everything above the removed target slot; target-after: everything above
+  // the removed target). The bare path has no skeleton data in scope, so the
+  // caller (_handleAddPoints) records the shift on the layer glyph.
+  context.generatedIndexShift = {
+    startIndex: context.targetContourIndex,
+    delta: -1,
+  };
   for (const index of deleteIndices) {
     path.deleteContour(index);
   }

@@ -17,7 +17,7 @@ import {
   equalizeSkeletonHandleToPoint,
   getSkeletonHandleEqualizeInfo,
 } from "@fontra/core/skeleton-modifiers.js";
-import { parseSelection } from "@fontra/core/utils.ts";
+import { isObjectEmpty, parseSelection, range } from "@fontra/core/utils.ts";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import {
@@ -185,6 +185,13 @@ function canUpdateGeneratedContoursInPlace(path, previousEntries, generated) {
   }
   return previousEntries.every((entry, i) => {
     const contour = generated.contours[i];
+    // Positional pairing is only valid when both sides agree on which
+    // skeleton contour position i belongs to; otherwise a delete+add with
+    // matching point structure could mispair skeletonContourId with
+    // pathContourIndex across designspace sources.
+    if (entry.skeletonContourId !== generated.provenance[i].skeletonContourId) {
+      return false;
+    }
     if (path.getNumPointsOfContour(entry.pathContourIndex) !== contour.points.length) {
       return false;
     }
@@ -307,6 +314,100 @@ export function recordSkeletonContourIndexShift(layerGlyph, startIndex, delta) {
   const updated = structuredClone(skeletonData);
   shiftGeneratedContourIndices(updated, startIndex, delta);
   setSkeletonData(layerGlyph, updated);
+}
+
+// --- Generated-contour index remapping across arbitrary structural edits ----
+//
+// Structural path edits that can't be expressed as a simple index shift
+// (slicing, splitting, whole-contour deletion) maintain the
+// skeleton.generated[*].pathContourIndex bookkeeping via explicit markers:
+// tag the first point of every generated contour, run the edit, read the
+// markers back. This is forward bookkeeping through identity markers, not
+// geometric recovery — generated contours are never themselves restructured
+// by these edits (they are unselectable and gated out of pen/knife targets).
+
+const GENERATED_MARKER_ATTR = "fontra.skeleton.tmp.generated-contour";
+
+// Tag the first point of each generated contour on `path` (mutates `path`;
+// only call on detached copies, never on a change-recorded path).
+export function markGeneratedContoursForRemap(path, skeletonData) {
+  for (const [ordinal, entry] of (skeletonData?.generated || []).entries()) {
+    const contourIndex = entry.pathContourIndex;
+    if (
+      !Number.isInteger(contourIndex) ||
+      contourIndex < 0 ||
+      contourIndex >= path.numContours ||
+      !path.getNumPointsOfContour(contourIndex)
+    ) {
+      continue;
+    }
+    const pointIndex = path.getAbsolutePointIndex(contourIndex, 0);
+    const point = path.getPoint(pointIndex);
+    point.attrs = { ...point.attrs, [GENERATED_MARKER_ATTR]: ordinal };
+    path.setPoint(pointIndex, point);
+  }
+}
+
+// Find the markers after the structural edit, strip them from the path, and
+// return a Map of generated-array ordinal → new pathContourIndex.
+export function readGeneratedContourRemap(path) {
+  const remap = new Map();
+  for (const pointIndex of range(path.numPoints)) {
+    const point = path.getPoint(pointIndex);
+    const ordinal = point.attrs?.[GENERATED_MARKER_ATTR];
+    if (ordinal === undefined) {
+      continue;
+    }
+    const [contourIndex] = path.getContourAndPointIndex(pointIndex);
+    remap.set(ordinal, contourIndex);
+    point.attrs = { ...point.attrs };
+    delete point.attrs[GENERATED_MARKER_ATTR];
+    path.setPoint(pointIndex, point);
+  }
+  if (
+    path.pointAttributes &&
+    !path.pointAttributes.some((attrs) => attrs && !isObjectEmpty(attrs))
+  ) {
+    path.pointAttributes = null;
+  }
+  return remap;
+}
+
+// Clone of `skeletonData` with pathContourIndex rewritten per `remap`.
+export function remapGeneratedEntries(skeletonData, remap) {
+  const updated = structuredClone(skeletonData);
+  for (const [ordinal, entry] of updated.generated.entries()) {
+    if (remap.has(ordinal)) {
+      entry.pathContourIndex = remap.get(ordinal);
+    }
+  }
+  return updated;
+}
+
+// For in-place structural edits on a (proxied) layer glyph: dry-run the edit
+// on a marked scratch copy of the path to learn where the generated contours
+// land. Run this BEFORE the real edit; apply with applyGeneratedContourRemap
+// AFTER it. Returns null when the layer has no generated contours.
+export function computeGeneratedContourRemap(layerGlyph, structuralEditFn) {
+  const skeletonData = getSkeletonData(layerGlyph);
+  if (!skeletonData?.generated?.length) {
+    return null;
+  }
+  const scratch = layerGlyph.path.copy();
+  markGeneratedContoursForRemap(scratch, skeletonData);
+  structuralEditFn(scratch);
+  return readGeneratedContourRemap(scratch);
+}
+
+export function applyGeneratedContourRemap(layerGlyph, remap) {
+  if (!remap) {
+    return;
+  }
+  const skeletonData = getSkeletonData(layerGlyph);
+  if (!skeletonData?.generated?.length) {
+    return;
+  }
+  setSkeletonData(layerGlyph, remapGeneratedEntries(skeletonData, remap));
 }
 
 // Bounding box of the selected skeleton points in glyph space, or undefined.

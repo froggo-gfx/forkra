@@ -67,6 +67,8 @@ import { dialog, message } from "@fontra/web-components/modal-dialog.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import { SceneModel } from "./scene-model.js";
 import {
+  applyGeneratedContourRemap,
+  computeGeneratedContourRemap,
   createSkeletonRibTargetEntries,
   makeSkeletonPointTargetEntry,
   recordSkeletonContourIndexShift,
@@ -1858,7 +1860,13 @@ export class SceneController {
     await this.editLayersAndRecordChanges((layerGlyphs) => {
       let numSplits;
       for (const layerGlyph of Object.values(layerGlyphs)) {
+        // Splitting inserts contours, shifting skeleton-generated contour
+        // indices; dry-run on a marked scratch copy to learn where they land.
+        const remap = computeGeneratedContourRemap(layerGlyph, (scratchPath) =>
+          splitPathAtPointIndices(scratchPath, pointIndices)
+        );
         numSplits = splitPathAtPointIndices(layerGlyph.path, pointIndices);
+        applyGeneratedContourRemap(layerGlyph, remap);
       }
       this.selection = new Set();
       return translatePlural("action.break-contour", numSplits);

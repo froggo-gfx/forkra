@@ -85,6 +85,8 @@ import {
 } from "./scene-controller.js";
 import { MIN_SIDEBAR_WIDTH, Sidebar } from "./sidebar.js";
 import {
+  applyGeneratedContourRemap,
+  computeGeneratedContourRemap,
   editSkeleton,
   parseSkeletonPointKey,
   resolveSkeletonAddressAcrossLayers,
@@ -1872,7 +1874,15 @@ export class EditorController extends ViewController {
     let backgroundImage;
     const flattenedPathList = wantFlattenedPath ? [] : undefined;
     if (pointIndices) {
+      // Cutting can delete whole contours, shifting skeleton-generated
+      // contour indices; dry-run on a marked scratch copy first.
+      const remap = doCut
+        ? computeGeneratedContourRemap(editInstance, (scratchPath) =>
+            filterPathByPointIndices(scratchPath, pointIndices, true)
+          )
+        : null;
       path = filterPathByPointIndices(editInstance.path, pointIndices, doCut);
+      applyGeneratedContourRemap(editInstance, remap);
       flattenedPathList?.push(path);
     }
     if (componentIndices) {
@@ -2344,7 +2354,14 @@ export class EditorController extends ViewController {
           this._prepareCopyOrCut(layerGlyph, true, false);
         } else {
           if (pointSelection) {
+            // Deleting all points of a contour deletes the contour, which
+            // shifts skeleton-generated contour indices; dry-run on a marked
+            // scratch copy to learn where the generated contours land.
+            const remap = computeGeneratedContourRemap(layerGlyph, (scratchPath) =>
+              deleteSelectedPoints(scratchPath, pointSelection)
+            );
             deleteSelectedPoints(layerGlyph.path, pointSelection);
+            applyGeneratedContourRemap(layerGlyph, remap);
           }
           if (componentSelection) {
             for (const componentIndex of reversed(componentSelection)) {
@@ -2960,8 +2977,16 @@ export class EditorController extends ViewController {
     const hasGuidelines = instance.guidelines.length > 0;
 
     const glyphPath = positionedGlyph.glyph.path;
+    // Skeleton-generated contour points are derived geometry and never
+    // regular point/N selections; keep select-all consistent with the
+    // click/marquee hit tests.
+    const generatedPointIndices =
+      this.sceneModel._getGeneratedPointIndices(positionedGlyph);
     let onCurvePoints = [];
     for (const [pointIndex, pointType] of enumerate(glyphPath.pointTypes)) {
+      if (generatedPointIndices?.has(pointIndex)) {
+        continue;
+      }
       if ((pointType & VarPackedPath.POINT_TYPE_MASK) === VarPackedPath.ON_CURVE) {
         onCurvePoints.push(pointIndex);
       }
