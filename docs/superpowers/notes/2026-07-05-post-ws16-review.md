@@ -244,3 +244,84 @@ internals (`skeleton-generator.js`, 3.8k lines) beyond C4, `skeleton-model.js`
 mutators, `skeleton-modifiers.js` (D/S/X math), `skeleton-tunni.js`,
 `edit-tools-skeleton.js` interaction details, and the parameters panel
 internals.
+
+---
+
+## E. Third pass — user-reported parity gaps (2026-07-05, later same day)
+
+User report after the section-B fixes: (1) no selection indication for
+skeleton curves, (2) no segment selection for skeleton curves, (3) z-drag
+dead + `invalid behavior name: "rib-tangent"`, (4) panel crash
+`Unknown field type: checkbox`, (5) editing bogs down over the session.
+
+### E1. `checkbox` field type missing from ui-form (FIXED)
+`panel-skeleton-parameters.js` pushes four `type: "checkbox"` descriptors
+(width:linked, contour:single-sided, contour:single-sided-right,
+rib:editable), but `ui-form.js` had no `_addCheckbox` — the form's
+`setFieldDescriptions` threw, killing the whole panel whenever a skeleton
+point/contour/rib selection produced one of those sections. Added
+`_addCheckbox` (checked/disabled/indeterminate, getter/setter, routes through
+`_fieldChanging`). The donor never hit this because its panel is raw
+`html.input` DOM, not ui-form descriptors.
+
+### E2. `rib-tangent` / `rib-tangent-interpolate` not registered (FIXED)
+Same class as the B-pass rib-default/rib-interpolate fix:
+`getSkeletonRibBehaviorName` returns four names, only two were registered in
+`edit-behavior.js` behaviorTypes. Added the two tangent entries (defaultRules;
+tangent semantics live in the rib executors' `forceTangent`, not the point
+rules). Note the z-drag interlock with E1: tangent drag only moves the nudge
+of ribs flagged `editable`, and the only UI that sets `editable` is the
+panel's rib checkbox — which E1 had broken. Same donor behavior (nudge
+requires editable), so with both fixes z-drag has parity.
+
+### E3. No selection/hover indication for skeleton points (FIXED)
+`fontra.skeleton.nodes` drew every node in one color and never consulted
+`model.selection` / `model.hoverSelection` (ribs and editable-generated
+markers did, skeleton points didn't). Added layer
+`fontra.skeleton.selected-nodes` (zIndex 552): selected points get an
+underlay + orange fill, hovered points a blue outline ring, shapes matching
+the base nodes layer (square corner / round smooth / small round handle).
+Keys are id-based (`contourId/pointId` parseSelection remainders), unlike the
+donor's index-based keys.
+
+### E4. No segment selection on the skeleton centerline (FIXED)
+The donor has a whole `skeletonSegment/<contourIdx>/<segmentIdx>` selection
+kind (hit test, viz layer, drag conversion, context-menu plumbing). Ported to
+the upstream idiom instead: upstream segment clicks select the segment's two
+parent `point/N` keys, so `scene-model.js` got
+`skeletonSegmentSelectionAtPoint` which hit-tests the centerline (line
+projection + 24-sample bezier distance) and returns the two endpoint
+`skeletonPoint/<contourId>/<pointId>` keys. Runs just before regular segment
+selection in `selectionAtPoint`. Drag/undo/arrow keys/indication all come for
+free via the existing skeletonPoint machinery; no new selection kind, no
+parseSelection changes. Bonus gating fix in the same function:
+`segmentSelectionAtPoint` now refuses segments of skeleton-generated contours
+(previously a click on a generated outline segment selected two generated
+points as regular `point/N` — the segment-shaped sibling of the B-pass point
+gating).
+
+### E5. Progressive slowdown (PARTIALLY ADDRESSED + hypotheses)
+No per-edit listener leaks found (realtime modifier key handlers clean up;
+panel/controller listeners are constructor-only). Two real cost centers:
+
+1. **`getSkeletonData` rebuilt the full normalized skeleton on every call**
+   (~8 viz layers × every rendered frame, plus every mousemove hit test,
+   each allocating contours+points+pointMap deep copies). Cost scales with
+   skeleton size, so it *feels* progressive as the glyph grows during a
+   session. FIXED: memoized per stored-section object via WeakMap —
+   invalidation is automatic because every skeleton write replaces the
+   section object (`setSkeletonData` / `"="` change ops). The returned object
+   is now shared: callers must treat it read-only (all mutation paths
+   already structuredClone; comment added at the cache).
+2. **Unbounded undo stacks with full-skeleton payloads** (OPEN, primary
+   session-growth suspect). Every skeleton drag pushes change + rollback
+   each containing the complete skeleton customData JSON (upstream undo
+   records are tiny point deltas; ours are ~100× bigger). `UndoStack` has no
+   cap, so hours of editing retain hundreds of MB → GC pressure → sluggish
+   UI that resets on refresh. Discriminator for the user: if a page refresh
+   on the same glyph restores speed, this is it; if not, it was (1)/skeleton
+   size. Candidate fixes when commissioned: cap `UndoStack` length, or
+   record granular skeleton ops instead of whole-object replacement.
+3. Per-frame websocket `editIncremental` ships the whole skeleton customData
+   (throttled 50ms, mayDrop) — constant per frame, adds base cost with big
+   skeletons, watch alongside C7.

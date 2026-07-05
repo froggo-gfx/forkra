@@ -1436,4 +1436,14 @@ const behaviorTypes = {
     matchTree: buildPointMatchTree(defaultRules),
     actions: actionFactories,
   },
+
+  "rib-tangent": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
+
+  "rib-tangent-interpolate": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
 };

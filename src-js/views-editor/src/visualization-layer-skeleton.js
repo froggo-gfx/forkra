@@ -147,6 +147,23 @@ function getEditableGeneratedSelectionSets(model) {
   };
 }
 
+function getSkeletonPointSelectionSets(model) {
+  return {
+    selected: new Set(parseSelection(model.selection).skeletonPoint || []),
+    hovered: new Set(parseSelection(model.hoverSelection).skeletonPoint || []),
+  };
+}
+
+function strokeRoundNode(context, point, size) {
+  context.beginPath();
+  context.arc(point.x, point.y, size / 2, 0, 2 * Math.PI);
+  context.stroke();
+}
+
+function strokeSquareNode(context, point, size) {
+  context.strokeRect(point.x - size / 2, point.y - size / 2, size, size);
+}
+
 function drawDiamondNode(context, point, size, fill) {
   const half = size / 2;
   context.beginPath();
@@ -413,6 +430,77 @@ registerVisualizationLayerDefinition({
           fillRoundNode(context, point, parameters.smoothSize);
         } else {
           fillSquareNode(context, point, parameters.cornerSize);
+        }
+      }
+    });
+  },
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.selected-nodes",
+  name: "Selected skeleton nodes",
+  selectionFunc: glyphSelector("editing"),
+  zIndex: 552,
+  screenParameters: {
+    cornerSize: 8,
+    handleSize: 6,
+    smoothSize: 8,
+    strokeWidth: 1.5,
+    hoverStrokeOffset: 4,
+    underlayOffset: 2,
+  },
+  colors: {
+    hoveredColor: "rgba(34, 121, 210, 0.95)",
+    selectedColor: "rgba(255, 128, 0, 0.95)",
+    underColor: "#FFFA",
+  },
+  colorsDarkMode: {
+    hoveredColor: "rgba(95, 178, 255, 1)",
+    selectedColor: "rgba(255, 174, 68, 1)",
+    underColor: "#0008",
+  },
+  draw: (context, positionedGlyph, parameters, model) => {
+    const { selected, hovered } = getSkeletonPointSelectionSets(model);
+    if (!selected.size && !hovered.size) {
+      return;
+    }
+    const nodeSize = (point, offset = 0) =>
+      point.type
+        ? parameters.handleSize + offset
+        : point.smooth
+          ? parameters.smoothSize + offset
+          : parameters.cornerSize + offset;
+    const fillNode = (point, offset = 0) => {
+      if (!point.type && !point.smooth) {
+        fillSquareNode(context, point, nodeSize(point, offset));
+      } else {
+        fillRoundNode(context, point, nodeSize(point, offset));
+      }
+    };
+    const strokeNode = (point, offset = 0) => {
+      if (!point.type && !point.smooth) {
+        strokeSquareNode(context, point, nodeSize(point, offset));
+      } else {
+        strokeRoundNode(context, point, nodeSize(point, offset));
+      }
+    };
+    forEachSkeletonContour(positionedGlyph, model, (contour) => {
+      for (const point of contour.points) {
+        const key = `${contour.id}/${point.id}`;
+        const isSelected = selected.has(key);
+        const isHovered = hovered.has(key);
+        if (!isSelected && !isHovered) {
+          continue;
+        }
+        if (isSelected) {
+          context.fillStyle = parameters.underColor;
+          fillNode(point, parameters.underlayOffset);
+          context.fillStyle = parameters.selectedColor;
+          fillNode(point);
+        } else {
+          context.strokeStyle = parameters.hoveredColor;
+          context.lineWidth = parameters.strokeWidth;
+          strokeNode(point, parameters.hoverStrokeOffset);
         }
       }
     });

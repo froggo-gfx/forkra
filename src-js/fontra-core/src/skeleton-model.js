@@ -635,18 +635,42 @@ export function projectSkeletonRibPoint(point, normal, halfWidth, side, nudge = 
   };
 }
 
+// getSkeletonData is called from every visualization layer per rendered frame
+// and from every hit test per mousemove, so the normalized result is memoized
+// per stored-section object. All skeleton writes replace the section object
+// wholesale (setSkeletonData / "=" change ops), which invalidates the cache by
+// identity. The returned object is shared between callers: treat it as
+// read-only — every mutation path must structuredClone first (they all do:
+// applySkeletonMutation, makeEditSkeletonChange, recordSkeletonContourIndexShift).
+const _normalizedSkeletonCache = new WeakMap();
+
+function _getNormalizedSkeleton(rawSection) {
+  if (!rawSection) {
+    return null;
+  }
+  if (typeof rawSection !== "object") {
+    return normalizeSkeletonData(rawSection);
+  }
+  let normalized = _normalizedSkeletonCache.get(rawSection);
+  if (!normalized) {
+    normalized = normalizeSkeletonData(rawSection);
+    _normalizedSkeletonCache.set(rawSection, normalized);
+  }
+  return normalized;
+}
+
 export function getSkeletonData(layerOrCustomData) {
   if (layerOrCustomData?.customData) {
     const internalSkeleton = getFontraInternalSection(
       layerOrCustomData,
       FONTRA_INTERNAL_SECTIONS.SKELETON
     );
-    return internalSkeleton ? normalizeSkeletonData(internalSkeleton) : null;
+    return _getNormalizedSkeleton(internalSkeleton);
   }
   const customData = layerOrCustomData?.customData ?? layerOrCustomData;
   const internalSkeleton =
     customData?.[FONTRA_INTERNAL_KEY]?.[FONTRA_INTERNAL_SECTIONS.SKELETON];
-  return internalSkeleton ? normalizeSkeletonData(internalSkeleton) : null;
+  return _getNormalizedSkeleton(internalSkeleton);
 }
 
 export function setSkeletonData(layer, skeletonData) {

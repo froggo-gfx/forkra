@@ -558,6 +558,23 @@ export class Form extends SimpleElement {
     }
   }
 
+  _addCheckbox(valueElement, fieldItem) {
+    const inputElement = html.input({
+      type: "checkbox",
+      checked: !!fieldItem.value,
+      disabled: !!fieldItem.disabled,
+      onchange: (event) => {
+        this._fieldChanging(fieldItem, inputElement.checked, undefined);
+      },
+    });
+    if (fieldItem.indeterminate) {
+      inputElement.indeterminate = true;
+    }
+    this._fieldGetters[fieldItem.key] = () => inputElement.checked;
+    this._fieldSetters[fieldItem.key] = (value) => (inputElement.checked = !!value);
+    valueElement.appendChild(inputElement);
+  }
+
   _addColorPicker(valueElement, fieldItem) {
     const parseColor = fieldItem.parseColor || ((v) => v);
     const formatColor = fieldItem.formatColor || ((v) => v);

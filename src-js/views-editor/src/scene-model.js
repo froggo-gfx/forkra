@@ -713,7 +713,15 @@ export class SceneModel {
     }
 
     // Then, look for segment selection (they should *not* participate in the
-    // "prefer if it's in the current selection" logic)
+    // "prefer if it's in the current selection" logic). Skeleton segments
+    // first: the centerline is the primary editing target while a skeleton
+    // is present, and clicking it selects the segment's two skeleton points,
+    // mirroring how regular segment clicks select the two parent points.
+    const skeletonSegmentSelection = this.skeletonSegmentSelectionAtPoint(point, size);
+    if (skeletonSegmentSelection.size) {
+      return { selection: skeletonSegmentSelection };
+    }
+
     selection = this.segmentSelectionAtPoint(point, size);
     if (selection.pathHit) {
       return selection;
@@ -1136,15 +1144,52 @@ export class SceneModel {
         (point) => vector.distance(pathHit, point) > size
       )
     ) {
-      const selection = new Set(
-        [
-          pathHit.segment.parentPointIndices[0],
-          pathHit.segment.parentPointIndices.at(-1),
-        ].map((i) => `point/${i}`)
+      const pointIndices = [
+        pathHit.segment.parentPointIndices[0],
+        pathHit.segment.parentPointIndices.at(-1),
+      ];
+      // Skeleton-generated contours are derived geometry: their segments are
+      // not selectable, just like their points.
+      const generatedPointIndices = this._getGeneratedPointIndices(
+        this.getSelectedPositionedGlyph()
       );
+      if (generatedPointIndices?.has(pointIndices[0])) {
+        return { selection: new Set() };
+      }
+      const selection = new Set(pointIndices.map((i) => `point/${i}`));
       return { selection, pathHit };
     }
     return { selection: new Set() };
+  }
+
+  // Hit-test the skeleton centerline. A hit selects the segment's two
+  // on-curve skeleton points (the skeleton counterpart of
+  // segmentSelectionAtPoint's `point/N` pair).
+  skeletonSegmentSelectionAtPoint(point, size) {
+    const positionedGlyph = this.getSelectedPositionedGlyph();
+    if (!positionedGlyph) {
+      return new Set();
+    }
+    const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+    if (!skeletonData?.contours?.length) {
+      return new Set();
+    }
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+    for (let ci = skeletonData.contours.length - 1; ci >= 0; ci--) {
+      const contour = skeletonData.contours[ci];
+      for (const segment of iterSkeletonCurveSegments(contour)) {
+        if (skeletonSegmentDistance(segment, glyphPoint) <= size) {
+          return new Set([
+            makeSkeletonPointKey(contour.id, segment.startPoint.id),
+            makeSkeletonPointKey(contour.id, segment.endPoint.id),
+          ]);
+        }
+      }
+    }
+    return new Set();
   }
 
   componentSelectionAtPoint(point, size, currentSelection, preferTCenter) {
@@ -1877,4 +1922,104 @@ function addBoundingBoxes(glyphs, descender, ascender) {
     item.bounds = offsetRect(bounds, item.x, item.y);
     item.unpositionedBounds = bounds;
   });
+}
+
+// Enumerate the on-curve-to-on-curve segments of a skeleton contour,
+// including the closing segment for closed contours.
+function* iterSkeletonCurveSegments(contour) {
+  const points = contour.points || [];
+  const onCurveIndices = [];
+  for (let i = 0; i < points.length; i++) {
+    if (!points[i].type) {
+      onCurveIndices.push(i);
+    }
+  }
+  if (onCurveIndices.length < 2) {
+    return;
+  }
+  const segmentCount = contour.closed
+    ? onCurveIndices.length
+    : onCurveIndices.length - 1;
+  for (let si = 0; si < segmentCount; si++) {
+    const startIndex = onCurveIndices[si];
+    const endIndex = onCurveIndices[(si + 1) % onCurveIndices.length];
+    const offCurvePoints = [];
+    let j = (startIndex + 1) % points.length;
+    while (j !== endIndex) {
+      if (points[j].type) {
+        offCurvePoints.push(points[j]);
+      }
+      j = (j + 1) % points.length;
+    }
+    yield {
+      startPoint: points[startIndex],
+      endPoint: points[endIndex],
+      offCurvePoints,
+    };
+  }
+}
+
+function distanceToLineSegment(a, b, p) {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const lengthSquared = abx * abx + aby * aby;
+  let t = 0;
+  if (lengthSquared > 0) {
+    t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / lengthSquared;
+    t = Math.max(0, Math.min(1, t));
+  }
+  return Math.hypot(p.x - (a.x + t * abx), p.y - (a.y + t * aby));
+}
+
+function skeletonSegmentDistance(segment, p) {
+  const { startPoint, endPoint, offCurvePoints } = segment;
+  if (!offCurvePoints.length) {
+    return distanceToLineSegment(startPoint, endPoint, p);
+  }
+  const evalPoint =
+    offCurvePoints.length === 1
+      ? (t) => {
+          const u = 1 - t;
+          const [c] = offCurvePoints;
+          return {
+            x: u * u * startPoint.x + 2 * u * t * c.x + t * t * endPoint.x,
+            y: u * u * startPoint.y + 2 * u * t * c.y + t * t * endPoint.y,
+          };
+        }
+      : offCurvePoints.length === 2
+        ? (t) => {
+            const u = 1 - t;
+            const [c1, c2] = offCurvePoints;
+            return {
+              x:
+                u * u * u * startPoint.x +
+                3 * u * u * t * c1.x +
+                3 * u * t * t * c2.x +
+                t * t * t * endPoint.x,
+              y:
+                u * u * u * startPoint.y +
+                3 * u * u * t * c1.y +
+                3 * u * t * t * c2.y +
+                t * t * t * endPoint.y,
+            };
+          }
+        : null;
+  if (!evalPoint) {
+    // Unexpected off-curve run: approximate with the control polygon
+    const polyline = [startPoint, ...offCurvePoints, endPoint];
+    let best = Infinity;
+    for (let i = 0; i < polyline.length - 1; i++) {
+      best = Math.min(best, distanceToLineSegment(polyline[i], polyline[i + 1], p));
+    }
+    return best;
+  }
+  const numSamples = 24;
+  let previous = startPoint;
+  let best = Infinity;
+  for (let i = 1; i <= numSamples; i++) {
+    const current = evalPoint(i / numSamples);
+    best = Math.min(best, distanceToLineSegment(previous, current, p));
+    previous = current;
+  }
+  return best;
 }
