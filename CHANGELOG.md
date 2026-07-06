@@ -9,6 +9,7 @@
 
 ### Improvements
 
+- [editor] Improve zoom in/out behavior when there is no selection. This used to use the scene center, and now uses the view port center, which behaves much better with larger texts. [Issue 2686](https://github.com/fontra/fontra/issues/2686), [PR 2687](https://github.com/fontra/fontra/pull/2687)
 - [font overview] Change the behavior of "Select All" to really select all, and not skip glyphs that aren't in the font (but are in the combined selected glyph sets) [PR 2681](https://github.com/fontra/fontra/pull/2681)
 - [glyphsets] Updated the Google Fonts glyphsets to 1.1.3. [Issue 2673](https://github.com/fontra/fontra/issues/2673), [PR 2675](https://github.com/fontra/fontra/pull/2675)
 - [languages] Some new strings and some improved strings for Simplified Chinese and Traditional Chinese, contributed by 湖远星（Lake桑）. [PR 2674](https://github.com/fontra/fontra/pull/2674)
