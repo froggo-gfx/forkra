@@ -79,14 +79,24 @@ apply-final-value behavior. Note: the other sliders (corner roundness/asymmetry 
 still apply on release only — same recipe can be extended to them if realtime matters
 there too.
 
-### 1.3 What even is "default caps" (panel)? — `open`
+### 1.3 What even is "default caps" (panel)? — `answered` (currently inert; decision pending)
 
 **Report:** The meaning of the "default caps" panel item is unclear.
 
-**Inferred context:** Open question, not necessarily a bug. Needs: (a) donor semantics
-(is it a font-/glyph-level fallback cap style that per-contour caps override?),
-(b) whether the ported panel wired it to anything, (c) a decision on labeling/UX once
-1.1 gives cap styles a working UI at all. Likely interacts with 1.1.
+**Answer:** The "Default caps" numbers (cap radius ratio, cap tension, cap angle, cap
+distance) are **per-master presets** stored in the source's customData
+(`capDefaults.round.{radiusRatio,tension}` / `capDefaults.square.{angle,distance}`,
+see skeleton-source-defaults.js). They are NOT live fallbacks: the generator's chain
+is `point.capX ?? contour.capX ?? hard-coded constant`
+(skeleton-generator.js:1685 etc.) — source defaults never enter generation. In the
+donor they exist to feed (a) the "Current Glyph" info line and (b) the **cap profile
+dropdown's "Base" preset**, which copies these values onto selected endpoints on
+demand. The fork hasn't ported cap profiles, so today the section is write-only
+storage: editable, persisted per source, consumed by nothing.
+
+**Decision needed:** either port the donor's cap-profile presets (then the section
+becomes their data source), or hide the section until then. Making the generator read
+them as a live fallback would deviate from donor semantics — not recommended.
 
 ### 1.4 Where are default stroke widths for masters set? — `open`
 
@@ -147,17 +157,29 @@ ported (or was ported without the editable/selected state styling). New visualiz
 layer(s) needed, keyed off `skeletonRib/<contourId>/<pointId>/<side>` selection keys
 and the rib `editable` flags.
 
-### 1.7 What happens on x-drag of the skeleton handle? — `open`
+### 1.7 What happens on x-drag of the skeleton handle? — `answered`
 
 **Report:** Open question — the X modifier's effect when dragging a skeleton handle is
 unknown/undefined.
 
-**Inferred context:** D/S/X/Z modifiers are behavior names inside the rules model
-(WS-13 modifier parity). X presumably maps to some donor behavior for handles;
-needs a check that (a) the behavior name is registered in `behaviorTypes` (Z's
-"rib-tangent" was missing until pass E2 — X may have the same gap; watch the console
-for `invalid behavior name:`), and (b) what the donor semantics actually are, so the
-answer can be documented.
+**Answer:** X is the **equalize** realtime modifier (`action.realtime.equalize`,
+default base key "x", editor.js:693; full map: Z = rib-tangent, X = equalize,
+D = fixed-rib, S = fixed-rib-compress, Q = measure). On a skeleton **handle** drag,
+X selects the "equalize" behavior (shift+X = "equalize-constrain"), implemented in
+`equalizeSkeletonHandleFromDelta` (skeleton-modifiers.js:232). It only engages when
+the handle sits next to a **smooth** on-curve point that has a handle on its other
+side (`getSkeletonHandleEqualizeInfo`); otherwise the drag is a normal handle move.
+Effect: the dragged handle moves freely, and the opposite handle of that smooth point
+keeps its own direction but is scaled to the **same length** — equalized tension
+around the joint. With shift the dragged vector is 45°-constrained and the opposite
+handle becomes the exact mirror. Related X effects on other target kinds: on editable
+generated points X routes to upstream's "alternate" behavior; on skeleton Tunni
+points X equalizes Tunni tensions.
+
+**No gap found:** unlike Z's missing "rib-tangent" (E2), the equalize behaviors are
+resolved via `getSkeletonModifierBehaviorName` and dedicated target entries
+(`makeEqualizeSkeletonHandleTargetEntry`), not via the point-match behavior registry,
+so there is no `invalid behavior name` risk here.
 
 ---
 
