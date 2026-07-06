@@ -1553,8 +1553,8 @@ export class SceneController {
     return addSourceChanges;
   }
 
-  getSelectionBounds() {
-    return this.sceneModel.getSelectionBounds();
+  getSelectionBounds(considerSceneBounds = true) {
+    return this.sceneModel.getSelectionBounds(considerSceneBounds);
   }
 
   getUndoRedoInfo(isRedo) {
