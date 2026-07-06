@@ -223,11 +223,16 @@ function setSingleSidedTotalWidth(point, defaultWidth, side, totalWidth) {
   const linked = point.width?.linked !== false;
   const value = Math.max(0, totalWidth);
   if (linked) {
+    // Single-sided stores the total as a symmetric split; set both halves
+    // explicitly (linked no longer mirrors, it applies equal deltas).
     const half = value / 2;
-    setSkeletonPointSideWidth(point, defaultWidth, side, half, {
-      linked: true,
-      round: (value) => value,
-    });
+    for (const s of ["left", "right"]) {
+      setSkeletonPointSideWidth(point, defaultWidth, s, half, {
+        linked: false,
+        round: (value) => value,
+      });
+    }
+    point.width.linked = true;
     return;
   }
   const oppositeSide = side === "left" ? "right" : "left";

@@ -260,17 +260,13 @@ export function setSkeletonPointSideWidth(
   assertSkeletonRibSide(side);
   const width = normalizeWidth(point?.width);
   const value = Math.max(0, round(halfWidth));
-  if (side === "left") {
-    width.left = value;
-    if (linked) {
-      width.right = value;
-    }
-  } else {
-    width.right = value;
-    if (linked) {
-      width.left = value;
-    }
+  const otherSide = side === "left" ? "right" : "left";
+  if (linked) {
+    // Linked means both sides move by the same delta, preserving the
+    // left/right distribution — it does NOT mean symmetrical (donor parity).
+    width[otherSide] = Math.max(0, round(width[otherSide] + value - width[side]));
   }
+  width[side] = value;
   width.linked = linked;
   point.width = width;
 }

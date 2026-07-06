@@ -13,42 +13,71 @@ proceeds.
 
 ## 1. Skeleton
 
-### 1.1 Cap style selection is missing completely — `open`
+### 1.1 Cap style selection is missing completely — `fixed`
 
 **Report:** No way to select a cap style anywhere in the UI. The feature is untestable
 in this state.
 
-**Inferred context:** The skeleton parameters panel (WS-15) was ported from the donor's
-raw-DOM implementation to upstream's `ui-form.js` field-descriptor idiom. The checkbox
-field type was missing from `ui-form.js` until the third pass (E1) — a cap-style picker
-(likely a dropdown/segmented control in the donor) may have been dropped or stubbed
-during the same translation, or may require another field type that `ui-form.js` lacks.
-Check donor `skeleton/src-js/views-editor/src/` panel implementation for how cap style
-is presented and where the value lives in the skeleton data model.
+**Root cause:** The donor's "Cap Styles" `<select>` (Flat/Square/Round, endpoint-gated)
+was never ported to the WS-15 panel; additionally `ui-form.js` had no select/dropdown
+field type at all (same translation gap as the E1 checkbox). Everything below the UI
+already existed: `setSkeletonCapParameters` accepts `capStyle`, the generator honors
+per-point cap style at open-contour endpoints (`skeleton-generator.js:1469`), and the
+panel model summarized `capStyle`.
+
+**Fix:** Added `_addSelect` field type to `ui-form.js`; added endpoint-gated
+`summarizeSkeletonCapStyleSelection` + `skeletonContourEndpointIndices` to
+`skeleton-panel-model.js`; added `setPanelCapStyle` to `skeleton-panel-edits.js`
+(endpoint check re-applied per layer; **round caps clear editable rib state on both
+sides**, donor parity); panel renders the select in Caps & corners (stored values
+`butt`/`square`/`round`, labels Flat/Square/Round, donor's UI value "flat" ==
+stored "butt"). Select is disabled unless every selected point is an endpoint of an
+open contour.
 
 ### 1.2 Distribution slider
 
-#### 1.2.1 Distribution doesn't persist when Linked is engaged — `open`
+#### 1.2.1 Distribution doesn't persist when Linked is engaged — `fixed`
 
 **Report:** With Linked engaged, the distribution slider value doesn't persist.
 **This reveals an incorrect model of "linked": linked does NOT mean symmetrical — it
 means an equal delta is applied to both sides.** (i.e. linked preserves the existing
 left/right difference while moving both by the same amount.)
 
-**Inferred context:** The ported panel presumably implements linked as "mirror/equalize
-both sides", which would clobber an asymmetric distribution on the next edit and look
-like a persistence failure. The fix is semantic (delta-based linking), not just a
-storage bug. Verify against donor behavior before changing.
+**Root cause:** Exactly as reported — `setSkeletonPointSideWidth` (skeleton-model.js)
+copied the edited value to the other side when linked ("mirror"). The distribution
+write itself was fine, but the next linked width edit (canvas rib drag via
+`applyFixedRibWidthDelta`, panel Left/Right fields) collapsed the sides back to equal.
+Donor proof: `skeleton/.../panel-skeleton-parameters.js:6362` — "Linked: update both
+sides by the same delta".
 
-#### 1.2.2 Distribution doesn't update on canvas in realtime with the slider — `open`
+**Fix:** `setSkeletonPointSideWidth` now applies the same delta to the opposite side
+when linked (clamped at 0), preserving distribution. `setSingleSidedTotalWidth`
+(skeleton-ribs.js) which *relied* on the mirroring for its symmetric split now sets
+both halves explicitly. Rib drags are unaffected compositionally: each drag tick
+rebuilds from a clone of the pre-drag layer glyph. Tests: renamed the "mirrors" test
+(same outcome for symmetric widths) and added asymmetric-preservation + clamp tests
+in test-skeleton-model.js.
+
+#### 1.2.2 Distribution doesn't update on canvas in realtime with the slider — `fixed`
 
 **Report:** Canvas only reflects the distribution after the slider is released (or not
 at all until some other refresh), not continuously during the drag.
 
-**Inferred context:** Panel field changes likely commit through a single `editSkeleton`
-write on change-complete rather than an incremental edit stream
-(`editBegin`/`editIncremental`/`editFinal`) during slider drag. Other numeric fields
-may share this; distribution is where it was noticed.
+**Root cause:** The ported panel's `_resolveStreamValue` drains every slider value
+stream and applies only the final value (one editSkeleton per commit). The donor
+consumes the stream incrementally (`_setPointDistributionStream`, 32ms throttle,
+`sendIncrementalChange(change, true)` per tick) and resets to the pre-drag baseline
+before recording the final change so the drag lands as ONE undo record.
+
+**Fix:** New `setPanelPointDistributionStream` in `skeleton-panel-edits.js`: snapshots
+each layer's path + skeleton before the drag, then per throttled tick restores the
+snapshot and re-applies the current value via `editSkeleton` (so every recorded change
+is original→value; the last one IS the undo record — no per-tick undo bloat, which
+also avoids feeding the suspected slowdown from bug #5's unbounded undo hypothesis).
+Panel routes `width:distribution` with a live stream to it; all other fields keep the
+apply-final-value behavior. Note: the other sliders (corner roundness/asymmetry etc.)
+still apply on release only — same recipe can be extended to them if realtime matters
+there too.
 
 ### 1.3 What even is "default caps" (panel)? — `open`
 

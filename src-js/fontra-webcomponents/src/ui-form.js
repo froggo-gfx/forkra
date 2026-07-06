@@ -575,6 +575,30 @@ export class Form extends SimpleElement {
     valueElement.appendChild(inputElement);
   }
 
+  _addSelect(valueElement, fieldItem) {
+    const selectElement = html.select(
+      {
+        disabled: !!fieldItem.disabled,
+        onchange: (event) => {
+          this._fieldChanging(fieldItem, selectElement.value, undefined);
+        },
+      },
+      (fieldItem.options || []).map((option) =>
+        html.option(
+          {
+            value: option.value,
+            selected: option.value === fieldItem.value,
+            disabled: !!option.disabled,
+          },
+          [option.label ?? option.value]
+        )
+      )
+    );
+    this._fieldGetters[fieldItem.key] = () => selectElement.value;
+    this._fieldSetters[fieldItem.key] = (value) => (selectElement.value = value);
+    valueElement.appendChild(selectElement);
+  }
+
   _addColorPicker(valueElement, fieldItem) {
     const parseColor = fieldItem.parseColor || ((v) => v);
     const formatColor = fieldItem.formatColor || ((v) => v);

@@ -144,6 +144,7 @@ export function collectWidthEditPoints(panelSelection) {
         pointId: entry.pointId,
         contour: entry.contour,
         point: entry.point,
+        pointIndex: entry.pointIndex,
       });
     }
   };
@@ -222,6 +223,49 @@ export function summarizeSkeletonContourSelection(contours) {
     ),
     defaultWidth: reduceValues(contours.map((entry) => entry.contour.defaultWidth)),
   };
+}
+
+// First/last on-curve point indices of an open skeleton contour, or null when
+// the contour is closed (or has no on-curve points). Cap styles only exist at
+// open-contour endpoints.
+export function skeletonContourEndpointIndices(contour) {
+  if (!contour || contour.closed) {
+    return null;
+  }
+  let first = -1;
+  let last = -1;
+  const points = contour.points || [];
+  for (let i = 0; i < points.length; i++) {
+    if (!points[i].type) {
+      if (first < 0) {
+        first = i;
+      }
+      last = i;
+    }
+  }
+  return first < 0 ? null : { first, last };
+}
+
+// Cap style state for the selected points: editable only when EVERY selected
+// point is an endpoint of an open contour (donor parity). The effective style
+// falls back point -> contour -> "butt".
+export function summarizeSkeletonCapStyleSelection(selectedPoints) {
+  if (!selectedPoints.length) {
+    return { canEdit: false, mixed: false, value: null };
+  }
+  const styles = [];
+  for (const entry of selectedPoints) {
+    const endpoints = skeletonContourEndpointIndices(entry.contour);
+    if (
+      !endpoints ||
+      (entry.pointIndex !== endpoints.first && entry.pointIndex !== endpoints.last)
+    ) {
+      return { canEdit: false, mixed: false, value: null };
+    }
+    styles.push(entry.point.capStyle ?? entry.contour.capStyle ?? "butt");
+  }
+  const reduced = reduceValues(styles);
+  return { canEdit: true, mixed: reduced.mixed, value: reduced.value };
 }
 
 export function summarizeSkeletonCapSelection(selectedPoints) {

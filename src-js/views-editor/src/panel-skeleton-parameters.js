@@ -15,11 +15,13 @@ import {
   resetPanelRibs,
   scalePanelPointWidth,
   setPanelCapParameters,
+  setPanelCapStyle,
   setPanelContourCornerDebug,
   setPanelContourDefaultWidth,
   setPanelContourSingleSided,
   setPanelCornerParameters,
   setPanelPointDistribution,
+  setPanelPointDistributionStream,
   setPanelPointLinked,
   setPanelPointSideWidth,
   setPanelPointTotalWidth,
@@ -30,6 +32,7 @@ import {
   collectWidthEditPoints,
   makeSkeletonPanelStateSignature,
   summarizeSkeletonCapSelection,
+  summarizeSkeletonCapStyleSelection,
   summarizeSkeletonContourSelection,
   summarizeSkeletonCornerSelection,
   summarizeSkeletonPointWidths,
@@ -385,11 +388,34 @@ export default class SkeletonParametersPanel extends Panel {
 
   _buildCapCornerSection(formContents, widthPoints, contours) {
     const cap = summarizeSkeletonCapSelection(widthPoints);
+    const capStyle = summarizeSkeletonCapStyleSelection(widthPoints);
     const corner = summarizeSkeletonCornerSelection(widthPoints, contours);
     formContents.push({ type: "divider" });
     formContents.push({
       type: "header",
       label: translate("sidebar.skeleton-parameters.caps-corners"),
+    });
+    formContents.push({
+      type: "select",
+      key: "cap:style",
+      label: translate("sidebar.skeleton-parameters.cap-style"),
+      value: capStyle.mixed ? "" : (capStyle.value ?? "butt"),
+      disabled: !capStyle.canEdit,
+      options: [
+        ...(capStyle.mixed ? [{ value: "", label: "mixed", disabled: true }] : []),
+        {
+          value: "butt",
+          label: translate("sidebar.skeleton-parameters.cap-style.flat"),
+        },
+        {
+          value: "square",
+          label: translate("sidebar.skeleton-parameters.cap-style.square"),
+        },
+        {
+          value: "round",
+          label: translate("sidebar.skeleton-parameters.cap-style.round"),
+        },
+      ],
     });
     this._pushSummaryNumber(
       formContents,
@@ -527,9 +553,20 @@ export default class SkeletonParametersPanel extends Panel {
   // ---- Field change dispatch ------------------------------------------------
 
   async _onFieldChange(fieldItem, value, valueStream) {
-    const finalValue = await this._resolveStreamValue(value, valueStream);
     const [group, name] = String(fieldItem.key).split(":");
     try {
+      // The distribution slider streams onto the canvas while dragging (donor
+      // parity); all other fields apply the committed value once.
+      if (group === "width" && name === "distribution" && valueStream) {
+        await setPanelPointDistributionStream(
+          this.sceneController,
+          this._widthPoints(),
+          valueStream,
+          this._undo("set-distribution")
+        );
+        return;
+      }
+      const finalValue = await this._resolveStreamValue(value, valueStream);
       if (group === "default") {
         await this._onSourceDefaultChange(name, finalValue);
       } else if (group === "width") {
@@ -629,6 +666,18 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   async _onCapChange(name, value) {
+    if (name === "style") {
+      if (!["butt", "square", "round"].includes(value)) {
+        return;
+      }
+      await setPanelCapStyle(
+        this.sceneController,
+        this._widthPoints(),
+        value,
+        this._undo("set-cap")
+      );
+      return;
+    }
     const map = {
       radius: "capRadiusRatio",
       tension: "capTension",

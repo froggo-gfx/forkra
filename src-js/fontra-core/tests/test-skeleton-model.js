@@ -410,11 +410,25 @@ describe("skeleton-model panel-facing mutators", () => {
     expect(point.width.right).to.equal(20);
   });
 
-  it("side width with linked true mirrors the other side", () => {
+  it("side width with linked true applies the same delta to the other side", () => {
     const point = makePoint({ width: { left: 40, right: 40, linked: true } });
     setSkeletonPointSideWidth(point, 80, "left", 30);
     expect(point.width.left).to.equal(30);
     expect(point.width.right).to.equal(30);
+  });
+
+  it("linked side width preserves an asymmetric distribution", () => {
+    const point = makePoint({ width: { left: 60, right: 20, linked: true } });
+    setSkeletonPointSideWidth(point, 80, "left", 50);
+    expect(point.width.left).to.equal(50);
+    expect(point.width.right).to.equal(10);
+  });
+
+  it("linked side width clamps the other side at zero", () => {
+    const point = makePoint({ width: { left: 60, right: 20, linked: true } });
+    setSkeletonPointSideWidth(point, 80, "left", 10);
+    expect(point.width.left).to.equal(10);
+    expect(point.width.right).to.equal(0);
   });
 
   it("side width with linked false changes one side", () => {

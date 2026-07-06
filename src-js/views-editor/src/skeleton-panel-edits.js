@@ -13,6 +13,7 @@ import {
   setSkeletonContourDefaultWidth,
   setSkeletonContourSingleSided,
   setSkeletonCornerParameters,
+  setSkeletonData,
   setSkeletonPointSideWidth,
   setSkeletonPointTotalWidth,
   setSkeletonPointWidthDistribution,
@@ -22,6 +23,7 @@ import {
   editSkeleton,
   resolveSkeletonAddressAcrossLayers,
 } from "./skeleton-editing.js";
+import { skeletonContourEndpointIndices } from "./skeleton-panel-model.js";
 
 // Resolve a target skeleton contour in `target` layer from a reference-layer
 // contour id, by structural ordinal (cross-layer addressing, WS-9). Returns the
@@ -185,6 +187,99 @@ export async function setPanelPointDistribution(
   );
 }
 
+// Streaming variant of setPanelPointDistribution: applies slider values to the
+// canvas as they arrive (throttled), while producing exactly ONE undo record
+// spanning the whole drag. Every tick restores the pre-drag layer state and
+// re-applies from there, so the last recorded change IS original -> final.
+export async function setPanelPointDistributionStream(
+  sceneController,
+  pointAddresses,
+  valueStream,
+  undoLabel
+) {
+  if (!pointAddresses.length) {
+    return null;
+  }
+  const THROTTLE_MS = 32;
+  return await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const editingLayers = sceneController.getEditingLayerFromGlyphLayers(glyph.layers);
+    const entries = Object.entries(editingLayers);
+    if (!entries.length) {
+      return;
+    }
+    const editLayerName = sceneController.sceneSettings?.editLayerName;
+    const editLayerGlyph = editingLayers[editLayerName] || entries[0][1];
+    const referenceSkeletonData = getSkeletonData(editLayerGlyph);
+
+    const originals = entries.map(([layerName, layerGlyph]) => ({
+      layerName,
+      layerGlyph,
+      path: layerGlyph.path.copy(),
+      skeleton: structuredClone(getSkeletonData(layerGlyph)),
+    }));
+
+    const restoreOriginals = () => {
+      for (const original of originals) {
+        original.layerGlyph.path = original.path.copy();
+        setSkeletonData(original.layerGlyph, structuredClone(original.skeleton));
+      }
+    };
+
+    const applyValue = (value) => {
+      const allChanges = [];
+      for (const [layerName, layerGlyph] of entries) {
+        const changes = editSkeleton(layerGlyph, (working) => {
+          for (const address of pointAddresses) {
+            const resolved = resolveSkeletonAddressAcrossLayers(
+              referenceSkeletonData,
+              working,
+              address.contourId,
+              address.pointId
+            );
+            if (!resolved || resolved.point.type) {
+              continue;
+            }
+            setSkeletonPointWidthDistribution(
+              resolved.point,
+              resolved.contour.defaultWidth,
+              value
+            );
+          }
+        });
+        allChanges.push(changes.prefixed(["layers", layerName, "glyph"]));
+      }
+      return new ChangeCollector().concat(...allChanges);
+    };
+
+    let lastValue = null;
+    let lastApplied = null;
+    let lastCollector = null;
+    let lastTime = 0;
+    for await (const value of valueStream) {
+      lastValue = value;
+      const now = Date.now();
+      if (now - lastTime < THROTTLE_MS) {
+        continue;
+      }
+      lastTime = now;
+      restoreOriginals();
+      lastCollector = applyValue(value);
+      lastApplied = value;
+      await sendIncrementalChange(lastCollector.change, true);
+    }
+
+    if (lastValue === null) {
+      return;
+    }
+    if (lastApplied !== lastValue || !lastCollector) {
+      restoreOriginals();
+      lastCollector = applyValue(lastValue);
+    }
+    await sendIncrementalChange(lastCollector.change);
+    return { changes: lastCollector, undoLabel, broadcast: true };
+  });
+}
+
 export async function setPanelPointLinked(
   sceneController,
   pointAddresses,
@@ -299,6 +394,38 @@ export async function setPanelCapParameters(
     pointAddresses,
     (point) => {
       setSkeletonCapParameters(point, values);
+    },
+    undoLabel
+  );
+}
+
+// Set the cap style on selected open-contour endpoints. Non-endpoint points
+// are skipped per layer (cross-layer structures may differ). Round caps clear
+// editable rib state on both sides (donor parity: round cap endpoints must
+// not keep editable ribs).
+export async function setPanelCapStyle(
+  sceneController,
+  pointAddresses,
+  capStyle,
+  undoLabel
+) {
+  return editSelectedSkeletonPoints(
+    sceneController,
+    pointAddresses,
+    (point, _address, { contour }) => {
+      const endpoints = skeletonContourEndpointIndices(contour);
+      if (!endpoints) {
+        return;
+      }
+      const pointIndex = contour.points.indexOf(point);
+      if (pointIndex !== endpoints.first && pointIndex !== endpoints.last) {
+        return;
+      }
+      setSkeletonCapParameters(point, { capStyle });
+      if (capStyle === "round") {
+        resetSkeletonEditableRib(point, "left");
+        resetSkeletonEditableRib(point, "right");
+      }
     },
     undoLabel
   );
