@@ -1204,9 +1204,9 @@ export class SceneModel {
     return bounds;
   }
 
-  getSelectionBounds() {
+  getSelectionBounds(considerSceneBounds = true) {
     if (!this.selectedGlyph) {
-      return this.getSceneBounds();
+      return considerSceneBounds ? this.getSceneBounds() : null;
     }
 
     let bounds;

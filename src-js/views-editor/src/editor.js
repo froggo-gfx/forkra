@@ -3425,7 +3425,7 @@ export class EditorController extends ViewController {
 
   _zoom(factor) {
     let viewBox = this.sceneSettings.viewBox;
-    const selBox = this.sceneController.getSelectionBounds();
+    const selBox = this.sceneController.getSelectionBounds(false);
     const center = rectCenter(selBox || viewBox);
     viewBox = rectScaleAroundCenter(viewBox, factor, center);
 
