@@ -118,51 +118,80 @@ rather than code.
 
 ### 1.5 Generated contours (editable ribs)
 
-#### 1.5.1 Editable ribs move freely; editable flag must ONLY enable z-tangent-drag — `open`
+#### 1.5.1 Editable ribs move freely; editable flag must ONLY enable z-tangent-drag — `fixed`
 
 **Report:** Marking a rib editable currently lets its points move freely. For ribs, the
 editable flag must gate *only* the z-tangent-drag — nothing else.
 
-**Inferred context:** Third pass (E2) established donor parity as "nudge follows tangent
-only when constrained" and that tangent nudge requires `point.editable[side] === true`.
-The inverse constraint was apparently not enforced: the ported code lets editable rib
-points take the default free-move behavior too. Donor reference:
-`skeleton/src-js/views-editor/src/skeleton-edit-behavior.js` (`EditableRibBehavior`)
-and the pointer tool's `constrainMode: "tangent"` / `forceTangent` handling in
-`skeleton/src-js/views-editor/src/edit-tools-pointer.js`.
+**Root cause:** `createSkeletonRibExecutor.applyDelta` (skeleton-ribs.js) applied the
+tangent nudge on every non-rib-tangent drag of an editable rib
+(`editable && (tangentOnly || !forceTangent)`). Donor `EditableRibBehavior`: free
+movement = width only; "Nudge follows tangent only when constrained".
 
-#### 1.5.2 Editable ribs' handles aren't mouse-selectable/movable — `open`
+**Fix:** nudge condition tightened to `editable && tangentOnly` (rib-tangent behavior
+or Z constrain mode). New executor tests in test-skeleton-ribs.js cover free /
+tangent / non-editable cases.
+
+#### 1.5.2 Editable ribs' handles aren't mouse-selectable/movable — `fixed`
 
 **Report:** The off-curve handles belonging to editable ribs can't be clicked or
 dragged.
 
-**Inferred context:** An `editableGeneratedHandle/…` selection kind exists in the ported
-selection model, so the vocabulary is there — likely the scene-model hit-testing never
-returns it (possibly because the fourth-pass C3 gating treats *all* generated-contour
-geometry as untouchable, without carving out the editable-rib exception), or the
-pointer tool doesn't map it to a drag behavior.
+**Root cause (deeper than expected):** the entire editable-generated selection surface
+was dead at runtime. All the machinery existed (hit test `editableGeneratedAtPoint`,
+target entries, drag pipeline, markers layer) but it keys off side-bearing provenance
+in `generated[].pointMap` — and the generator NEVER emitted it. The only annotation
+was the fallback `annotateGeneratedContourProvenance`, which ratio-guesses skeleton
+point ids and writes `side: null`, which every consumer rejects. The existing
+provenance tests only passed because they asserted ids/roles, never `side`; the
+target-entry tests hand-crafted their pointMap.
 
-#### 1.5.3 Alt-drag should engage interpolation for editable ribs — currently n/a — `open`
+**Fix:** the generator now attaches real `_provenance` at emission:
+`buildGeneratedOnCurve` gained a `side` parameter (all rib on-curve emission sites),
+and the handles adjacent to skeleton on-curves get `{skeletonPointId, side, role:
+"in"/"out"}` in both the simplified-cubic and multi-curve branches. Provenance
+survives all post-processing stages (they spread or mutate points in place; corner
+rounding / caps that REPLACE points drop it — those aren't editable targets anyway)
+and is collected into pointMap then stripped. Geometry unchanged: golden masters
+still pass. New tests assert side-bearing on-curve and handle provenance.
+
+#### 1.5.3 Alt-drag should engage interpolation for editable ribs — currently n/a — `fixed`
 
 **Report:** Alt-dragging an editable rib should switch to the interpolation behavior;
 right now nothing happens.
 
-**Inferred context:** `"rib-interpolate"` and `"rib-tangent-interpolate"` behavior names
-exist in `behaviorTypes` (added in pass E2), but the pointer tool's modifier→behavior
-mapping evidently never selects them for rib drags. Check how the donor picks the
-behavior name from event modifiers vs. the ported `_getBehaviorName` equivalent.
+**Root cause:** the behavior names (`rib-interpolate`, `rib-tangent-interpolate`)
+reached the rib executor, but it had no interpolation branch — they degraded to a
+plain width drag. Donor `InterpolatingRibBehavior`: the rib point slides along the
+axis between its generated handles (single handle: rib→handle; none: tangent), width
+stays fixed, nudge absorbs the tangent component, and the handle offsets are
+compensated by −tangent·Δnudge so the handles stay put on canvas.
 
-### 1.6 No visualization for ribs — `open`
+**Fix:** `createSkeletonRibExecutor` gained an interpolation mode (editable ribs
+only; non-editable alt-drag still behaves as a plain width drag, donor parity) fed by
+`makeRibInterpolationAxis` in skeleton-editing.js, which resolves the generated
+handle positions from the pre-drag path via `findGeneratedPathAddress` (requires the
+1.5.2 provenance). `applySkeletonRibExecutorResult` persists the compensated 2D
+handle offsets (preserving `detached`). Executor-level tests cover axis slide,
+tangent fallback, non-editable fallback and offset persistence.
+
+### 1.6 No visualization for ribs — `fixed`
 
 **Report:** Ribs have no dedicated visualization. Both distinctions must be visible:
 selected vs. unselected, and editable vs. non-editable.
 
-**Inferred context:** The third pass (E3) added `fontra.skeleton.selected-nodes` for
-skeleton *points* only. The donor has rib drawing in
-`skeleton/src-js/views-editor/src/skeleton-visualization-layers.js` — that part wasn't
-ported (or was ported without the editable/selected state styling). New visualization
-layer(s) needed, keyed off `skeletonRib/<contourId>/<pointId>/<side>` selection keys
-and the rib `editable` flags.
+**Root cause:** two layers existed but underdelivered: `fontra.skeleton.ribs` drew
+5px filled dots with color-only selection states (easy to miss, no editable
+distinction), and `fontra.skeleton.editable-markers` drew editable diamonds on a
+separate layer — plus its generated-target half was dead via the 1.5.2 provenance
+bug. Donor draws rib endpoints as stroked diamonds: larger + purple when editable,
+filled when selected.
+
+**Fix:** `fontra.skeleton.ribs` endpoints are now donor-style diamonds (8px, 12px
+when editable; purple palette for editable sides, orange for selected non-editable,
+purple-filled for selected editable; hover variants). The duplicate rib-diamond
+drawing was removed from `fontra.skeleton.editable-markers`, which now only marks
+editable generated targets on the outline (alive again thanks to 1.5.2).
 
 ### 1.7 What happens on x-drag of the skeleton handle? — `deprecated` (X binding removed)
 

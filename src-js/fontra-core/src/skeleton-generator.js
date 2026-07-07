@@ -288,18 +288,36 @@ function getCornerAsymmetry(point) {
   return clampCornerAsymmetry(point?.cornerAsymmetry ?? DEFAULT_CORNER_ASYMMETRY);
 }
 
+// Forward provenance for a generated point: which skeleton point/side/role it
+// was emitted for. Attached at emission, carried through the post-processing
+// stages (which spread or mutate points in place), collected into the
+// generated[].pointMap and stripped from the output points. Points that get
+// replaced by later stages (corner rounding, caps) simply lose provenance and
+// fall back to the side-less annotator — they are not editable targets.
+function pointProvenance(sourcePoint, side, role) {
+  if (!sourcePoint?._sourcePointId || (side !== "left" && side !== "right")) {
+    return undefined;
+  }
+  return { skeletonPointId: sourcePoint._sourcePointId, side, role };
+}
+
 function buildGeneratedOnCurve(
   basePoint,
   smooth,
   skeletonPoint,
   halfWidth,
-  cornerRoundBaseOverride = undefined
+  cornerRoundBaseOverride = undefined,
+  side = null
 ) {
   const generatedPoint = {
     x: basePoint.x,
     y: basePoint.y,
     smooth,
   };
+  const provenance = pointProvenance(skeletonPoint, side, "onCurve");
+  if (provenance) {
+    generatedPoint._provenance = provenance;
+  }
   const cornerRoundness = getCornerRoundness(skeletonPoint);
   const cornerAsymmetry = getCornerAsymmetry(skeletonPoint);
   const cornerReach = skeletonPoint?.cornerReach;
@@ -2631,7 +2649,8 @@ function generateOffsetPointsForSegment(
           segment.startPoint.smooth,
           segment.startPoint,
           startLeftHW,
-          startLeftRoundBase
+          startLeftRoundBase,
+          "left"
         )
       );
 
@@ -2654,7 +2673,8 @@ function generateOffsetPointsForSegment(
           segment.startPoint.smooth,
           segment.startPoint,
           startRightHW,
-          startRightRoundBase
+          startRightRoundBase,
+          "right"
         )
       );
     }
@@ -2688,7 +2708,8 @@ function generateOffsetPointsForSegment(
           segment.endPoint.smooth,
           segment.endPoint,
           endLeftHW,
-          endLeftRoundBase
+          endLeftRoundBase,
+          "left"
         )
       );
 
@@ -2706,7 +2727,8 @@ function generateOffsetPointsForSegment(
           segment.endPoint.smooth,
           segment.endPoint,
           endRightHW,
-          endRightRoundBase
+          endRightRoundBase,
+          "right"
         )
       );
     }
@@ -2826,7 +2848,8 @@ function generateOffsetPointsForSegment(
               smoothStart,
               segment.startPoint,
               startHalfWidth,
-              startRoundBase
+              startRoundBase,
+              side
             )
           );
         }
@@ -2841,7 +2864,8 @@ function generateOffsetPointsForSegment(
               smoothEnd,
               segment.endPoint,
               endHalfWidth,
-              endRoundBase
+              endRoundBase,
+              side
             )
           );
         }
@@ -2857,7 +2881,8 @@ function generateOffsetPointsForSegment(
               smoothStart,
               segment.startPoint,
               startHalfWidth,
-              startRoundBase
+              startRoundBase,
+              side
             )
           );
         }
@@ -2868,7 +2893,8 @@ function generateOffsetPointsForSegment(
               smoothEnd,
               segment.endPoint,
               endHalfWidth,
-              endRoundBase
+              endRoundBase,
+              side
             )
           );
         }
@@ -2890,7 +2916,8 @@ function generateOffsetPointsForSegment(
               smoothStart,
               segment.startPoint,
               startHalfWidth,
-              startRoundBase
+              startRoundBase,
+              side
             )
           );
         }
@@ -3079,8 +3106,26 @@ function generateOffsetPointsForSegment(
           }
         );
 
-        output.push({ x: adjustedHandle1.x, y: adjustedHandle1.y, type: "cubic" });
-        output.push({ x: adjustedHandle2.x, y: adjustedHandle2.y, type: "cubic" });
+        const handle1Point = {
+          x: adjustedHandle1.x,
+          y: adjustedHandle1.y,
+          type: "cubic",
+        };
+        const handle1Provenance = pointProvenance(segment.startPoint, side, "out");
+        if (handle1Provenance) {
+          handle1Point._provenance = handle1Provenance;
+        }
+        const handle2Point = {
+          x: adjustedHandle2.x,
+          y: adjustedHandle2.y,
+          type: "cubic",
+        };
+        const handle2Provenance = pointProvenance(segment.endPoint, side, "in");
+        if (handle2Provenance) {
+          handle2Point._provenance = handle2Provenance;
+        }
+        output.push(handle1Point);
+        output.push(handle2Point);
         if (shouldAddEnd) {
           output.push(
             buildGeneratedOnCurve(
@@ -3088,7 +3133,8 @@ function generateOffsetPointsForSegment(
               smoothEnd,
               segment.endPoint,
               endHalfWidth,
-              endRoundBase
+              endRoundBase,
+              side
             )
           );
         }
@@ -3132,7 +3178,8 @@ function generateOffsetPointsForSegment(
               smoothStart,
               segment.startPoint,
               startHalfWidth,
-              startRoundBase
+              startRoundBase,
+              side
             )
           );
         }
@@ -3188,16 +3235,22 @@ function generateOffsetPointsForSegment(
             }
           }
 
-          output.push({
-            x: adjustedH1.x,
-            y: adjustedH1.y,
-            type: "cubic",
-          });
-          output.push({
-            x: adjustedH2.x,
-            y: adjustedH2.y,
-            type: "cubic",
-          });
+          const handle1Point = { x: adjustedH1.x, y: adjustedH1.y, type: "cubic" };
+          if (isFirstCurve) {
+            const provenance = pointProvenance(segment.startPoint, side, "out");
+            if (provenance) {
+              handle1Point._provenance = provenance;
+            }
+          }
+          const handle2Point = { x: adjustedH2.x, y: adjustedH2.y, type: "cubic" };
+          if (isLastCurve) {
+            const provenance = pointProvenance(segment.endPoint, side, "in");
+            if (provenance) {
+              handle2Point._provenance = provenance;
+            }
+          }
+          output.push(handle1Point);
+          output.push(handle2Point);
         } else if (pts.length === 3) {
           // Quadratic bezier - adjust handle relative to midpoint
           const origStart = pts[0];

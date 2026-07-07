@@ -1,9 +1,11 @@
 import {
   calculateNormalAtSkeletonPoint,
+  getSkeletonHandleOffset,
   getSkeletonPointHalfWidth,
   getSkeletonPointNudge,
   getSkeletonRibPosition,
   getSkeletonRibSidesForPoint,
+  setSkeletonHandleOffset,
   setSkeletonPointSideNudge,
   setSkeletonPointSideWidth,
 } from "@fontra/core/skeleton-model.js";
@@ -79,7 +81,11 @@ export function getSkeletonRibAddress(skeletonData, contourId, pointId, side) {
   };
 }
 
-export function createSkeletonRibExecutor(address, behaviorName = "rib-default") {
+export function createSkeletonRibExecutor(
+  address,
+  behaviorName = "rib-default",
+  { interpolationAxis = null } = {}
+) {
   const { contour, point, side, defaultWidth, normal } = address;
   const leftHalfWidth = getSkeletonPointHalfWidth(point, defaultWidth, "left");
   const rightHalfWidth = getSkeletonPointHalfWidth(point, defaultWidth, "right");
@@ -93,12 +99,52 @@ export function createSkeletonRibExecutor(address, behaviorName = "rib-default")
   const editable = point.editable?.[side] === true;
   const forceTangent =
     behaviorName === "rib-tangent" || behaviorName === "rib-tangent-interpolate";
+  // Alt-drag interpolation (editable ribs only): the rib point slides along
+  // the axis between its generated handles; width stays fixed and the handle
+  // offsets are compensated so the handles stay put on canvas (donor
+  // InterpolatingRibBehavior). Without handles the axis degrades to the
+  // tangent, i.e. a pure nudge.
+  const interpolate =
+    editable &&
+    (behaviorName === "rib-interpolate" || behaviorName === "rib-tangent-interpolate");
+  const axis = interpolate
+    ? interpolationAxis || { dir: tangent, hasHandle: {} }
+    : null;
+  const originalOffsets = interpolate
+    ? {
+        in: getSkeletonHandleOffset(point, side, "in"),
+        out: getSkeletonHandleOffset(point, side, "out"),
+      }
+    : null;
 
   return {
     contourId: contour.id,
     pointId: point.id,
     side,
     applyDelta(delta, { constrainMode = null, round = Math.round } = {}) {
+      if (axis) {
+        const deltaAlongAxis = delta.x * axis.dir.x + delta.y * axis.dir.y;
+        const axisDotTangent = axis.dir.x * tangent.x + axis.dir.y * tangent.y;
+        const deltaNudge = axisDotTangent * deltaAlongAxis;
+        const handleOffsets = {};
+        for (const role of ["in", "out"]) {
+          if (!axis.hasHandle?.[role]) {
+            continue;
+          }
+          const original = originalOffsets[role];
+          handleOffsets[role] = {
+            x: round(original.x - tangent.x * deltaNudge),
+            y: round(original.y - tangent.y * deltaNudge),
+            detached: original.detached,
+          };
+        }
+        return {
+          halfWidth: originalHalfWidth,
+          nudge: round(originalNudge + deltaNudge),
+          side,
+          handleOffsets,
+        };
+      }
       const normalSign = side === "left" ? 1 : -1;
       const normalDelta = normalSign * (delta.x * normal.x + delta.y * normal.y);
       const tangentDelta = delta.x * tangent.x + delta.y * tangent.y;
@@ -106,10 +152,10 @@ export function createSkeletonRibExecutor(address, behaviorName = "rib-default")
       const halfWidth = tangentOnly
         ? originalHalfWidth
         : Math.max(0, round(originalHalfWidth + normalDelta));
+      // Free drag changes width only; the tangent nudge is exclusively the
+      // Z-drag (donor parity: "Nudge follows tangent only when constrained").
       const nudge =
-        editable && (tangentOnly || !forceTangent)
-          ? round(originalNudge + tangentDelta)
-          : originalNudge;
+        editable && tangentOnly ? round(originalNudge + tangentDelta) : originalNudge;
       return { halfWidth, nudge, side };
     },
   };
@@ -124,6 +170,9 @@ export function applySkeletonRibExecutorResult(address, result) {
   }
   if (point.editable?.[side] === true) {
     setSkeletonPointSideNudge(point, side, result.nudge);
+    for (const [role, offset] of Object.entries(result.handleOffsets || {})) {
+      setSkeletonHandleOffset(point, side, role, offset, { round: (value) => value });
+    }
   }
 }
 

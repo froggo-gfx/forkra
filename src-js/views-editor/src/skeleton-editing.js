@@ -7,6 +7,7 @@ import {
 } from "@fontra/core/skeleton-generator.js";
 import {
   getSkeletonData,
+  getSkeletonRibPosition,
   makeEmptySkeletonData,
   normalizeSkeletonData,
   setSkeletonData,
@@ -20,6 +21,9 @@ import {
 import { isObjectEmpty, parseSelection, range } from "@fontra/core/utils.ts";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
+// Runtime-only circular import (skeleton-generated.js also imports from this
+// module); all uses are inside functions, never at module evaluation time.
+import { findGeneratedPathAddress } from "./skeleton-generated.js";
 import {
   applySkeletonRibExecutorResult,
   createSkeletonRibExecutor,
@@ -678,13 +682,19 @@ export function createSkeletonRibTargetEntries(
   }
 
   const originalLayerGlyph = cloneLayerGlyphForSkeletonEdit(layer);
+  const wantsInterpolation =
+    behaviorName === "rib-interpolate" || behaviorName === "rib-tangent-interpolate";
   const executors = selected.map((address) => ({
     reference: {
       contourId: address.reference.contour.id,
       pointId: address.reference.point.id,
       side: address.reference.side,
     },
-    executor: createSkeletonRibExecutor(address.target, behaviorName),
+    executor: createSkeletonRibExecutor(address.target, behaviorName, {
+      interpolationAxis: wantsInterpolation
+        ? makeRibInterpolationAxis(originalLayerGlyph, skeletonData, address.target)
+        : null,
+    }),
   }));
 
   let rollbackChange = null;
@@ -718,6 +728,64 @@ export function createSkeletonRibTargetEntries(
       },
     },
   ];
+}
+
+// Interpolation axis for alt-drag on an editable rib (donor
+// InterpolatingRibBehavior): the line between the rib point's generated
+// handles as they sit on the pre-drag path; with a single handle the axis
+// runs from the rib position to that handle. Null (pure-tangent fallback in
+// the executor) when the rib has no generated handles or they can't be
+// resolved.
+function makeRibInterpolationAxis(originalLayerGlyph, skeletonData, address) {
+  const { contour, point, side } = address;
+  if (point.editable?.[side] !== true) {
+    return null;
+  }
+  const handlePositions = {};
+  for (const role of ["in", "out"]) {
+    const pathAddress = findGeneratedPathAddress(
+      skeletonData,
+      contour.id,
+      point.id,
+      side,
+      role
+    );
+    if (!pathAddress) {
+      continue;
+    }
+    try {
+      const pointIndex = originalLayerGlyph.path.getAbsolutePointIndex(
+        pathAddress.pathContourIndex,
+        pathAddress.contourPointIndex
+      );
+      handlePositions[role] = originalLayerGlyph.path.getPoint(pointIndex);
+    } catch {
+      continue;
+    }
+  }
+  let lineStart;
+  let lineEnd;
+  if (handlePositions.in && handlePositions.out) {
+    lineStart = handlePositions.in;
+    lineEnd = handlePositions.out;
+  } else if (handlePositions.in || handlePositions.out) {
+    lineStart = getSkeletonRibPosition(contour, point, side);
+    lineEnd = handlePositions.in || handlePositions.out;
+  } else {
+    return null;
+  }
+  if (!lineStart || !lineEnd) {
+    return null;
+  }
+  const direction = { x: lineEnd.x - lineStart.x, y: lineEnd.y - lineStart.y };
+  const length = Math.hypot(direction.x, direction.y);
+  if (!length) {
+    return null;
+  }
+  return {
+    dir: { x: direction.x / length, y: direction.y / length },
+    hasHandle: { in: !!handlePositions.in, out: !!handlePositions.out },
+  };
 }
 
 function collectSkeletonPointSelection(

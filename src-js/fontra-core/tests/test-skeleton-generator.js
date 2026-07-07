@@ -59,6 +59,47 @@ describe("skeleton-generator provenance", () => {
       )
     ).to.equal(false);
   });
+
+  it("emits side-bearing on-curve provenance for every rib point", () => {
+    const fixture = fixtures.find((item) => item.name === "open-line-butt-cap");
+    const result = generateFromSkeleton(fixture.canonical);
+    const pointMaps = result.provenance.flatMap((entry) => entry.pointMap);
+    for (const skeletonPointId of [2, 3]) {
+      for (const side of ["left", "right"]) {
+        expect(
+          pointMaps.some(
+            (entry) =>
+              entry?.skeletonPointId === skeletonPointId &&
+              entry.side === side &&
+              entry.role === "onCurve"
+          ),
+          `onCurve ${skeletonPointId}/${side}`
+        ).to.equal(true);
+      }
+    }
+  });
+
+  it("emits side-bearing handle provenance adjacent to skeleton on-curves", () => {
+    const fixture = fixtures.find((item) => item.name === "open-cubic-round-cap");
+    const result = generateFromSkeleton(fixture.canonical);
+    const pointMaps = result.provenance.flatMap((entry) => entry.pointMap);
+    for (const side of ["left", "right"]) {
+      expect(
+        pointMaps.some(
+          (entry) =>
+            entry?.skeletonPointId === 2 && entry.side === side && entry.role === "out"
+        ),
+        `out handle 2/${side}`
+      ).to.equal(true);
+      expect(
+        pointMaps.some(
+          (entry) =>
+            entry?.skeletonPointId === 5 && entry.side === side && entry.role === "in"
+        ),
+        `in handle 5/${side}`
+      ).to.equal(true);
+    }
+  });
 });
 
 describe("skeleton-generator near-zero handle stabilization", () => {

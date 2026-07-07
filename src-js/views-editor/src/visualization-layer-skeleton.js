@@ -296,41 +296,68 @@ registerVisualizationLayerDefinition({
   defaultOn: true,
   zIndex: 452,
   screenParameters: {
-    endpointSize: 5,
-    strokeWidth: 1,
+    endpointSize: 8,
+    editableEndpointSize: 12,
+    strokeWidth: 1.5,
+    lineWidth: 1,
   },
   colors: {
     endpointColor: "rgba(34, 121, 210, 0.65)",
     endpointHoverColor: "rgba(34, 121, 210, 0.95)",
     endpointSelectedColor: "rgba(255, 128, 0, 0.95)",
+    editableColor: "rgba(161, 73, 184, 0.9)",
+    editableHoverColor: "rgba(161, 73, 184, 1)",
+    editableSelectedColor: "rgba(161, 73, 184, 1)",
     strokeColor: "rgba(34, 121, 210, 0.45)",
   },
   colorsDarkMode: {
     endpointColor: "rgba(95, 178, 255, 0.75)",
     endpointHoverColor: "rgba(95, 178, 255, 1)",
     endpointSelectedColor: "rgba(255, 174, 68, 1)",
+    editableColor: "rgba(199, 119, 221, 0.9)",
+    editableHoverColor: "rgba(199, 119, 221, 1)",
+    editableSelectedColor: "rgba(199, 119, 221, 1)",
     strokeColor: "rgba(95, 178, 255, 0.55)",
   },
+  // Donor parity (skeleton rib points layer): rib endpoints are stroked
+  // diamonds; editable sides are larger and purple; selected diamonds are
+  // filled. Both distinctions (selected/unselected, editable/non-editable)
+  // must be readable at a glance.
   draw: (context, positionedGlyph, parameters, model) => {
-    context.lineWidth = parameters.strokeWidth;
-    context.strokeStyle = parameters.strokeColor;
     const ribSelection = getSkeletonRibSelectionSets(model);
     forEachSkeletonContour(positionedGlyph, model, (contour) => {
       for (const pointIndex of getOnCurvePointIndices(contour)) {
         const point = contour.points[pointIndex];
         const rib = getRibPoints(contour, pointIndex);
+        context.lineWidth = parameters.lineWidth;
+        context.strokeStyle = parameters.strokeColor;
         strokeLine(context, rib.left.x, rib.left.y, rib.right.x, rib.right.y);
+        context.lineWidth = parameters.strokeWidth;
         for (const side of ["left", "right"]) {
           if (contour.singleSided && contour.singleSided !== side) {
             continue;
           }
           const key = makeSkeletonRibKey(contour.id, point.id, side);
-          context.fillStyle = ribSelection.selected.has(key)
-            ? parameters.endpointSelectedColor
-            : ribSelection.hovered.has(key)
-              ? parameters.endpointHoverColor
-              : parameters.endpointColor;
-          fillRoundNode(context, rib[side], parameters.endpointSize);
+          const editable = side === "left" ? rib.editableLeft : rib.editableRight;
+          const selected = ribSelection.selected.has(key);
+          const hovered = ribSelection.hovered.has(key);
+          const color = selected
+            ? editable
+              ? parameters.editableSelectedColor
+              : parameters.endpointSelectedColor
+            : hovered
+              ? editable
+                ? parameters.editableHoverColor
+                : parameters.endpointHoverColor
+              : editable
+                ? parameters.editableColor
+                : parameters.endpointColor;
+          context.strokeStyle = color;
+          context.fillStyle = color;
+          const size = editable
+            ? parameters.editableEndpointSize
+            : parameters.endpointSize;
+          drawDiamondNode(context, rib[side], size, selected);
         }
       }
     });
@@ -634,21 +661,12 @@ registerVisualizationLayerDefinition({
     hoverStrokeColor: "rgba(199, 119, 221, 1)",
     selectedStrokeColor: "rgba(255, 174, 68, 1)",
   },
+  // Editable rib endpoints are drawn (purple, larger) by the ribs layer;
+  // this layer marks the editable GENERATED targets on the outline.
   draw: (context, positionedGlyph, parameters, model) => {
     context.lineWidth = parameters.strokeWidth;
     context.strokeStyle = parameters.strokeColor;
     context.fillStyle = parameters.fillColor;
-    forEachSkeletonContour(positionedGlyph, model, (contour) => {
-      for (const pointIndex of getOnCurvePointIndices(contour)) {
-        const rib = getRibPoints(contour, pointIndex);
-        if (rib.editableLeft) {
-          drawDiamondNode(context, rib.left, parameters.pointSize, true);
-        }
-        if (rib.editableRight) {
-          drawDiamondNode(context, rib.right, parameters.pointSize, true);
-        }
-      }
-    });
     const generatedSelection = getEditableGeneratedSelectionSets(model);
     forEachEditableGeneratedTarget(positionedGlyph, model, (target) => {
       const isHandle = target.role === "in" || target.role === "out";
