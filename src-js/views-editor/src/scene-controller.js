@@ -20,6 +20,7 @@ import {
   readProjectGlyphSets,
 } from "@fontra/core/glyphsets-controller.js";
 import { translate, translatePlural } from "@fontra/core/localization.js";
+import { setupLocationDependencies } from "@fontra/core/location-tools.js";
 import { MouseTracker } from "@fontra/core/mouse-tracker.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import {
@@ -204,86 +205,7 @@ export class SceneController {
       true
     );
 
-    // Set up the dependencies between fontLocationUser, fontLocationSource and
-    // fontLocationSourceMapped
-    const locationDependencies = [
-      [
-        "fontLocationUser",
-        "fontLocationSource",
-        "mapUserLocationToSourceLocation",
-        false,
-      ],
-      [
-        "fontLocationSource",
-        "fontLocationUser",
-        "mapSourceLocationToUserLocation",
-        false,
-      ],
-      [
-        "fontLocationSource",
-        "fontLocationSourceMapped",
-        "mapSourceLocationToMappedSourceLocation",
-        true,
-      ],
-      [
-        "fontLocationSourceMapped",
-        "fontLocationSource",
-        "mapMappedSourceLocationToSourceLocation",
-        true,
-      ],
-    ];
-
-    for (const [
-      sourceKey,
-      destinationKey,
-      mapMethodName,
-      maySkip,
-    ] of locationDependencies) {
-      const mapMethod = this.fontController[mapMethodName].bind(this.fontController);
-
-      this.sceneSettingsController.addKeyListener(
-        sourceKey,
-        (event) => {
-          if (event.senderInfo?.senderStack?.includes(destinationKey)) {
-            return;
-          }
-
-          const mapFunc =
-            maySkip && this.sceneSettings.fontAxesSkipMapping
-              ? (loc) => loc
-              : mapMethod;
-
-          this.sceneSettingsController.setItem(
-            destinationKey,
-            mapFunc(event.newValue),
-            {
-              senderStack: (event.senderInfo?.senderStack || []).concat([
-                sourceKey,
-                destinationKey,
-              ]),
-            }
-          );
-        },
-        true
-      );
-    }
-
-    // Trigger recalculating the mapped location
-    this.sceneSettingsController.addKeyListener("fontAxesSkipMapping", (event) => {
-      this.sceneSettings.fontLocationSource = {
-        ...this.sceneSettings.fontLocationSource,
-      };
-    });
-
-    this.fontController.addChangeListener(
-      { axes: null },
-      (change, isExternalChange) => {
-        // the CrossAxisMapping may have changed, force to re-sync the location
-        this.sceneSettings.fontLocationSource = {
-          ...this.sceneSettings.fontLocationSource,
-        };
-      }
-    );
+    setupLocationDependencies(this.fontController, this.sceneSettingsController);
 
     // Set up convenience property "selectedGlyphName"
     this.sceneSettingsController.addKeyListener(
