@@ -94,9 +94,16 @@ dropdown's "Base" preset**, which copies these values onto selected endpoints on
 demand. The fork hasn't ported cap profiles, so today the section is write-only
 storage: editable, persisted per source, consumed by nothing.
 
-**Decision needed:** either port the donor's cap-profile presets (then the section
-becomes their data source), or hide the section until then. Making the generator read
-them as a live fallback would deviate from donor semantics — not recommended.
+**Decision (2026-07-07):** base widths and cap parameters should be **master-wide and
+editable** — the panel's per-source storage is the right home; they need to actually
+mean something, not remain write-only.
+
+Additionally (idea, documented only — no planning or research done): rib widths could
+be expressed **relative to the master width** rather than as absolute values. Example:
+master width 60, rib width 80 = mw + 20; when the master width changes to 40, offer
+the option to recalculate that rib to 60 (keep the +20 offset). I.e. an opt-in
+"follow master width" recalculation when master-wide defaults change, not a live
+binding.
 
 ### 1.4 Where are default stroke widths for masters set? — `open`
 
@@ -157,7 +164,7 @@ ported (or was ported without the editable/selected state styling). New visualiz
 layer(s) needed, keyed off `skeletonRib/<contourId>/<pointId>/<side>` selection keys
 and the rib `editable` flags.
 
-### 1.7 What happens on x-drag of the skeleton handle? — `answered`
+### 1.7 What happens on x-drag of the skeleton handle? — `answered` → `deprecate`
 
 **Report:** Open question — the X modifier's effect when dragging a skeleton handle is
 unknown/undefined.
@@ -180,6 +187,14 @@ points X equalizes Tunni tensions.
 resolved via `getSkeletonModifierBehaviorName` and dedicated target entries
 (`makeEqualizeSkeletonHandleTargetEntry`), not via the point-match behavior registry,
 so there is no `invalid behavior name` risk here.
+
+**Decision (2026-07-07): deprecate X-drag equalize.** Alt-drag already covers the
+equalize use case, and user testing shows X-drag doesn't work at runtime anyway (not
+investigated — moot if deprecated). When acted on: remove the
+`action.realtime.equalize` registration + `equalizeMode` plumbing in
+edit-tools-pointer.js / skeleton-modifiers.js (keep the shared equalize helpers used
+by the alt-drag path), and note the deviation from donor in the parity docs. The
+Tunni-tension X interaction should be reviewed separately before removal.
 
 ---
 
