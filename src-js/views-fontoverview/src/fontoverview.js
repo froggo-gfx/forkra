@@ -50,7 +50,7 @@ import { FontOverviewNavigation } from "./panel-navigation.js";
 
 const persistentSettings = [
   { key: "searchString" },
-  { key: "fontLocationUser" },
+  { key: "fontLocationUser", infoKey: "location" },
   { key: "glyphSelection", toJSON: (v) => [...v], fromJSON: (v) => new Set(v) },
   { key: "closedGlyphSections", toJSON: (v) => [...v], fromJSON: (v) => new Set(v) },
   {
@@ -307,8 +307,8 @@ export class FontOverviewController extends ViewController {
     }
     const defaultSettings = getDefaultFontOverviewSettings();
     this.fontOverviewSettingsController.withSenderInfo({ senderID: this }, () => {
-      for (const { key, fromJSON } of persistentSettings) {
-        const value = viewInfo[key];
+      for (const { key, infoKey, fromJSON } of persistentSettings) {
+        const value = viewInfo[infoKey ?? key];
         if (value !== undefined) {
           this.fontOverviewSettings[key] = fromJSON?.(value) || value;
         } else {
@@ -331,8 +331,8 @@ export class FontOverviewController extends ViewController {
 
   _updateWindowLocation() {
     const viewInfo = Object.fromEntries(
-      persistentSettings.map(({ key, toJSON }) => [
-        key,
+      persistentSettings.map(({ key, infoKey, toJSON }) => [
+        infoKey ?? key,
         toJSON?.(this.fontOverviewSettings[key]) || this.fontOverviewSettings[key],
       ])
     );
