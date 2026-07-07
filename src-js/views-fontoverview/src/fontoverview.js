@@ -70,6 +70,7 @@ function getDefaultFontOverviewSettings() {
     searchString: "",
     fontLocationUser: {},
     fontLocationSource: {},
+    fontLocationSourceMapped: {},
     glyphSelection: new Set(),
     closedGlyphSections: new Set(),
     closedNavigationSections: new Set(),
