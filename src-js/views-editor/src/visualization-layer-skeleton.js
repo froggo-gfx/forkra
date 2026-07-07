@@ -296,43 +296,66 @@ registerVisualizationLayerDefinition({
   defaultOn: true,
   zIndex: 452,
   screenParameters: {
-    endpointSize: 8,
-    editableEndpointSize: 12,
-    strokeWidth: 1.5,
     lineWidth: 1,
   },
   colors: {
-    endpointColor: "rgba(34, 121, 210, 0.65)",
-    endpointHoverColor: "rgba(34, 121, 210, 0.95)",
-    endpointSelectedColor: "rgba(255, 128, 0, 0.95)",
-    editableColor: "rgba(161, 73, 184, 0.9)",
-    editableHoverColor: "rgba(161, 73, 184, 1)",
-    editableSelectedColor: "rgba(161, 73, 184, 1)",
     strokeColor: "rgba(34, 121, 210, 0.45)",
   },
   colorsDarkMode: {
-    endpointColor: "rgba(95, 178, 255, 0.75)",
-    endpointHoverColor: "rgba(95, 178, 255, 1)",
-    endpointSelectedColor: "rgba(255, 174, 68, 1)",
-    editableColor: "rgba(199, 119, 221, 0.9)",
-    editableHoverColor: "rgba(199, 119, 221, 1)",
-    editableSelectedColor: "rgba(199, 119, 221, 1)",
     strokeColor: "rgba(95, 178, 255, 0.55)",
   },
-  // Donor parity (skeleton rib points layer): rib endpoints are stroked
-  // diamonds; editable sides are larger and purple; selected diamonds are
-  // filled. Both distinctions (selected/unselected, editable/non-editable)
-  // must be readable at a glance.
+  draw: (context, positionedGlyph, parameters, model) => {
+    context.lineWidth = parameters.lineWidth;
+    context.strokeStyle = parameters.strokeColor;
+    forEachSkeletonContour(positionedGlyph, model, (contour) => {
+      for (const pointIndex of getOnCurvePointIndices(contour)) {
+        const rib = getRibPoints(contour, pointIndex);
+        strokeLine(context, rib.left.x, rib.left.y, rib.right.x, rib.right.y);
+      }
+    });
+  },
+});
+
+// Donor parity (donor "fontra.skeleton.rib.points", zIndex 560): rib endpoints
+// are stroked diamonds drawn ABOVE the other skeleton layers so they stay
+// visible; editable sides are larger and purple, non-editable pink; selected
+// diamonds are filled. Both distinctions (selected/unselected,
+// editable/non-editable) must be readable at a glance.
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.rib-points",
+  name: "Skeleton rib points",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 560,
+  screenParameters: {
+    endpointSize: 10,
+    editableEndpointSize: 12,
+    strokeWidth: 2,
+  },
+  colors: {
+    endpointColor: "rgba(220, 60, 120, 0.7)",
+    endpointHoverColor: "rgba(220, 60, 120, 1)",
+    endpointSelectedColor: "rgba(255, 64, 0, 0.9)",
+    editableColor: "rgba(160, 40, 180, 0.9)",
+    editableHoverColor: "rgba(160, 40, 180, 1)",
+    editableSelectedColor: "rgba(160, 40, 180, 1)",
+  },
+  colorsDarkMode: {
+    endpointColor: "rgba(220, 100, 140, 0.7)",
+    endpointHoverColor: "rgba(220, 100, 140, 1)",
+    endpointSelectedColor: "rgba(255, 96, 64, 0.9)",
+    editableColor: "rgba(180, 80, 200, 0.9)",
+    editableHoverColor: "rgba(180, 80, 200, 1)",
+    editableSelectedColor: "rgba(180, 80, 200, 1)",
+  },
   draw: (context, positionedGlyph, parameters, model) => {
     const ribSelection = getSkeletonRibSelectionSets(model);
+    context.lineWidth = parameters.strokeWidth;
     forEachSkeletonContour(positionedGlyph, model, (contour) => {
       for (const pointIndex of getOnCurvePointIndices(contour)) {
         const point = contour.points[pointIndex];
         const rib = getRibPoints(contour, pointIndex);
-        context.lineWidth = parameters.lineWidth;
-        context.strokeStyle = parameters.strokeColor;
-        strokeLine(context, rib.left.x, rib.left.y, rib.right.x, rib.right.y);
-        context.lineWidth = parameters.strokeWidth;
         for (const side of ["left", "right"]) {
           if (contour.singleSided && contour.singleSided !== side) {
             continue;

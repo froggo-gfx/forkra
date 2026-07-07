@@ -193,6 +193,31 @@ purple-filled for selected editable; hover variants). The duplicate rib-diamond
 drawing was removed from `fontra.skeleton.editable-markers`, which now only marks
 editable generated targets on the outline (alive again thanks to 1.5.2).
 
+**Follow-up (sixth pass, after runtime testing):** the diamonds were still invisible
+for non-editable ribs — they sat at zIndex 452 (under the other skeleton layers) in a
+faint 0.65-alpha blue at strokeWidth 1.5, while the donor draws its rib points at
+**zIndex 560** in pink at strokeWidth 2 (donor `fontra.skeleton.rib.points`). The rib
+endpoints now live in their own `fontra.skeleton.rib-points` layer (zIndex 560, donor
+palette: pink 10px non-editable, purple 12px editable, orange/purple filled when
+selected); `fontra.skeleton.ribs` keeps only the connecting line.
+
+### 1.5.4 (follow-up) Alt-drag equalize for editable rib handles — `fixed`
+
+Alt-dragging an editable generated handle now equalizes the opposite handle of the
+same rib side (`createEditableGeneratedHandleExecutor` treats
+`alternate`/`alternate-constrain` as equalize). Previously only the `equalize*`
+behavior names triggered it, and after the X-binding removal nothing produced those.
+
+### 1.5.5 (follow-up) Detach flag for ribs — `fixed`
+
+The detach machinery existed end-to-end (2D `handleOffsets` with `detached`,
+`setSkeletonHandleDetached`, panel summary) but was never surfaced in the UI. Added a
+"Detach" checkbox to the panel's rib section (shown when the selection has editable
+sides), backed by `setPanelRibDetached`. Also fixed a latent core bug found via TDD:
+`setSkeletonHandleDetached(point, side, false)` could never re-attach, because
+`setSkeletonHandleOffset` ORs the detached flag with the existing state (by design —
+drags must not silently re-attach); the setter now writes the flag directly.
+
 ### 1.7 What happens on x-drag of the skeleton handle? — `deprecated` (X binding removed)
 
 **Report:** Open question — the X modifier's effect when dragging a skeleton handle is

@@ -328,16 +328,16 @@ export function setSkeletonHandleOffset(
 
 export function setSkeletonHandleDetached(point, side, detached) {
   assertSkeletonRibSide(side);
+  // Write the flag directly: setSkeletonHandleOffset ORs `detached` with the
+  // existing state (a drag must never silently re-attach), which would make
+  // un-detaching impossible through it.
+  const handleOffsets = normalizeHandleOffsets(point?.handleOffsets);
   for (const role of ["in", "out"]) {
+    const key = getSkeletonHandleOffsetKey(side, role);
     const offset = getSkeletonHandleOffset(point, side, role);
-    setSkeletonHandleOffset(
-      point,
-      side,
-      role,
-      { ...offset, detached: detached === true },
-      { round: (value) => value }
-    );
+    handleOffsets[key] = { x: offset.x, y: offset.y, detached: detached === true };
   }
+  point.handleOffsets = handleOffsets;
 }
 
 export function setSkeletonPointTotalWidth(

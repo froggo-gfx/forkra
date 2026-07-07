@@ -345,6 +345,28 @@ describe("skeleton-model handle offset helpers", () => {
     });
   });
 
+  it("clears detached state again (un-detach)", () => {
+    const point = makeSkeletonPoint({
+      handleOffsets: {
+        rightIn: { x: 5, y: 6, detached: true },
+        rightOut: { x: -5, y: -6, detached: true },
+      },
+    });
+
+    setSkeletonHandleDetached(point, "right", false);
+
+    expect(point.handleOffsets.rightIn).to.deep.equal({
+      x: 5,
+      y: 6,
+      detached: false,
+    });
+    expect(point.handleOffsets.rightOut).to.deep.equal({
+      x: -5,
+      y: -6,
+      detached: false,
+    });
+  });
+
   it("rejects invalid handle sides and roles", () => {
     expect(() => getSkeletonHandleOffsetKey("center", "in")).to.throw(
       "invalid skeleton rib side"

@@ -14,6 +14,7 @@ import {
   setSkeletonContourSingleSided,
   setSkeletonCornerParameters,
   setSkeletonData,
+  setSkeletonHandleDetached,
   setSkeletonPointSideWidth,
   setSkeletonPointTotalWidth,
   setSkeletonPointWidthDistribution,
@@ -484,6 +485,27 @@ export async function resetPanelRibs(
         resetSkeletonEditableRibHandles(point, address.side);
       } else {
         resetSkeletonEditableRib(point, address.side);
+      }
+    },
+    undoLabel
+  );
+}
+
+// Detach the handle offsets of the selected rib sides from the skeleton
+// (absolute 2D positioning) or re-attach them (projected along the skeleton
+// handle direction).
+export async function setPanelRibDetached(
+  sceneController,
+  ribAddresses,
+  detached,
+  undoLabel
+) {
+  return editSelectedSkeletonPoints(
+    sceneController,
+    ribAddresses,
+    (point, address) => {
+      if (point.editable?.[address.side] === true) {
+        setSkeletonHandleDetached(point, address.side, detached);
       }
     },
     undoLabel

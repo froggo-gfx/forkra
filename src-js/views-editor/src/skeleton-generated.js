@@ -374,7 +374,12 @@ function createEditableGeneratedHandleExecutor(address, behaviorName) {
     address.role
   );
   const direction = address.direction;
-  const equalize = behaviorName?.startsWith("equalize") === true;
+  // Alt-drag equalizes the opposite handle of the same rib side (the
+  // "equalize" names remain for programmatic use; the X binding is gone).
+  const equalize =
+    behaviorName?.startsWith("equalize") === true ||
+    behaviorName === "alternate" ||
+    behaviorName === "alternate-constrain";
   const equalizeGeometry = equalize
     ? makeEditableGeneratedHandleEqualizeGeometry(address, originalOffset)
     : null;

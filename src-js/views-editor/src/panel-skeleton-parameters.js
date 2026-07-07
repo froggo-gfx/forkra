@@ -25,6 +25,7 @@ import {
   setPanelPointLinked,
   setPanelPointSideWidth,
   setPanelPointTotalWidth,
+  setPanelRibDetached,
   setPanelRibEditable,
 } from "./skeleton-panel-edits.js";
 import {
@@ -482,6 +483,14 @@ export default class SkeletonParametersPanel extends Panel {
       label: translate("sidebar.skeleton-parameters.editable"),
       value: summary.editable.mixed ? false : summary.editable.value,
     });
+    if (summary.editable.value === true || summary.editable.mixed) {
+      formContents.push({
+        type: "checkbox",
+        key: "rib:detached",
+        label: translate("sidebar.skeleton-parameters.detached"),
+        value: summary.detached.mixed ? false : summary.detached.value,
+      });
+    }
     formContents.push({
       type: "single-icon",
       element: html.div({ style: "display:flex; gap:0.5rem; flex-wrap:wrap;" }, [
@@ -736,6 +745,13 @@ export default class SkeletonParametersPanel extends Panel {
         this._panelSelection.ribs,
         value === true,
         this._undo("set-rib-editable")
+      );
+    } else if (name === "detached") {
+      await setPanelRibDetached(
+        this.sceneController,
+        this._panelSelection.ribs,
+        value === true,
+        this._undo("set-rib-detached")
       );
     }
   }
