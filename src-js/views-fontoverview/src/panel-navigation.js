@@ -196,13 +196,13 @@ export class FontOverviewNavigation extends HTMLElement {
       (axis) => !!axis.hidden === forHiddenAxes
     );
 
+    const locationKey = "fontLocationUser";
+
     locationElement.axes = axes;
     locationElement.values = filterLocation(
-      this.fontOverviewSettings.fontLocationUser,
+      this.fontOverviewSettings[locationKey],
       axes
     );
-
-    const locationKey = "fontLocationUser";
 
     this.fontOverviewSettingsController.addKeyListener(locationKey, (event) => {
       if (!event.senderInfo?.sentFromSliders) {
@@ -225,7 +225,7 @@ export class FontOverviewNavigation extends HTMLElement {
       { axes: null },
       (change, isExternalChange) => {
         locationElement.axes = axes;
-        locationElement.values = { ...this.fontOverviewSettings.fontLocationUser };
+        locationElement.values = { ...this.fontOverviewSettings[locationKey] };
       }
     );
 
