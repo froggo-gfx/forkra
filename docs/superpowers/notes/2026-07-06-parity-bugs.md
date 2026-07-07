@@ -164,7 +164,7 @@ ported (or was ported without the editable/selected state styling). New visualiz
 layer(s) needed, keyed off `skeletonRib/<contourId>/<pointId>/<side>` selection keys
 and the rib `editable` flags.
 
-### 1.7 What happens on x-drag of the skeleton handle? — `answered` → `deprecate`
+### 1.7 What happens on x-drag of the skeleton handle? — `deprecated` (X binding removed)
 
 **Report:** Open question — the X modifier's effect when dragging a skeleton handle is
 unknown/undefined.
@@ -190,11 +190,18 @@ so there is no `invalid behavior name` risk here.
 
 **Decision (2026-07-07): deprecate X-drag equalize.** Alt-drag already covers the
 equalize use case, and user testing shows X-drag doesn't work at runtime anyway (not
-investigated — moot if deprecated). When acted on: remove the
-`action.realtime.equalize` registration + `equalizeMode` plumbing in
-edit-tools-pointer.js / skeleton-modifiers.js (keep the shared equalize helpers used
-by the alt-drag path), and note the deviation from donor in the parity docs. The
-Tunni-tension X interaction should be reviewed separately before removal.
+investigated — moot once deprecated).
+
+**Done (2026-07-07):** removed the `action.realtime.equalize` registration
+(editor.js), the `equalizeMode` tool plumbing (edit-tools-pointer.js,
+scene-controller.js), the equalize branches in `getSkeletonModifierBehaviorName`
+(views-editor skeleton-modifiers.js), the shortcut label (en.js), and the one test
+asserting X-routing. Deliberately KEPT: the `"equalize"`/`"equalize-constrain"`
+behavior definitions, `makeEqualizeSkeletonHandleTargetEntry`, the fontra-core
+equalize helpers and their tests — the machinery is intact, only the X key binding
+and its dispatch are gone. Tunni equalize is untouched (it triggers on
+ctrl+shift+click of a Tunni midpoint, not the X key). This is a deliberate deviation
+from the donor.
 
 ---
 

@@ -1073,7 +1073,6 @@ export class SceneController {
     const hasGeneratedPointSelection = !!parsedSelection.editableGeneratedPoint?.length;
     const hasRibLikeSelection = hasRibSelection || hasGeneratedPointSelection;
     const modifiers = {
-      equalizeMode: this.selectedTool?.equalizeMode === true,
       fixedRibMode: this.selectedTool?.fixedRibMode === true,
       fixedRibCompressMode: this.selectedTool?.fixedRibCompressMode === true,
       tangentRibMode: this.selectedTool?.tangentRibMode === true,

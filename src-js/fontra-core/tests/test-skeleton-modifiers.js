@@ -21,10 +21,6 @@ import {
   makeSkeletonPointTargetEntry,
 } from "../../views-editor/src/skeleton-editing.js";
 import { createEditableGeneratedHandleTargetEntries } from "../../views-editor/src/skeleton-generated.js";
-import {
-  getSelectionTargetKinds,
-  getSkeletonModifierBehaviorName,
-} from "../../views-editor/src/skeleton-modifiers.js";
 
 before(() => {
   globalThis.window = {
@@ -325,22 +321,6 @@ describe("skeleton modifier target-entry parity fixtures", () => {
       y: 0,
       detached: true,
     });
-  });
-
-  it("routes editable generated point X equalize through alternate behavior", () => {
-    const selection = new Set(["editableGeneratedPoint/10/1/left"]);
-    const targetKinds = getSelectionTargetKinds(selection);
-
-    expect(
-      getSkeletonModifierBehaviorName({}, { equalizeMode: true }, targetKinds)
-    ).to.equal("alternate");
-    expect(
-      getSkeletonModifierBehaviorName(
-        { shiftKey: true },
-        { equalizeMode: true },
-        targetKinds
-      )
-    ).to.equal("alternate-constrain");
   });
 });
 

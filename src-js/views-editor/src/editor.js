@@ -690,11 +690,8 @@ export class EditorController extends ViewController {
         titleKey: "shortcuts.realtime.rib-tangent",
         defaultShortCuts: [{ baseKey: "z" }],
       });
-      registerActionInfo("action.realtime.equalize", {
-        topic,
-        titleKey: "shortcuts.realtime.equalize",
-        defaultShortCuts: [{ baseKey: "x" }],
-      });
+      // X-drag equalize was deprecated 2026-07-07 (alt-drag covers equalize);
+      // see docs/superpowers/notes/2026-07-06-parity-bugs.md item 1.7.
       registerActionInfo("action.realtime.fixed-rib", {
         topic,
         titleKey: "shortcuts.realtime.fixed-rib",

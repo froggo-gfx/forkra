@@ -81,7 +81,6 @@ const transformHandleMargin = 6;
 const transformHandleSize = 8;
 const rotationHandleSizeFactor = 1.2;
 const REALTIME_RIB_TANGENT_ACTION = "action.realtime.rib-tangent";
-const REALTIME_EQUALIZE_ACTION = "action.realtime.equalize";
 const REALTIME_FIXED_RIB_ACTION = "action.realtime.fixed-rib";
 const REALTIME_FIXED_RIB_COMPRESS_ACTION = "action.realtime.fixed-rib-compress";
 
@@ -89,10 +88,6 @@ const REALTIME_MODIFIER_ACTIONS = [
   {
     action: REALTIME_RIB_TANGENT_ACTION,
     modeProperty: "tangentRibMode",
-  },
-  {
-    action: REALTIME_EQUALIZE_ACTION,
-    modeProperty: "equalizeMode",
   },
   {
     action: REALTIME_FIXED_RIB_ACTION,
@@ -147,7 +142,6 @@ export class PointerTool extends BaseTool {
     super(...args);
     this.measureInteraction = new MeasureInteraction(this);
     this.tangentRibMode = false;
-    this.equalizeMode = false;
     this.fixedRibMode = false;
     this.fixedRibCompressMode = false;
     this._realtimeModifierKeyUpHandlers = new Map();
@@ -619,7 +613,6 @@ export class PointerTool extends BaseTool {
       const initialPoint = sceneController.selectedGlyphPoint(initialEvent);
       const targetKinds = getSelectionTargetKinds(sceneController.selection);
       const getRealtimeModifiers = () => ({
-        equalizeMode: this.equalizeMode,
         fixedRibMode: this.fixedRibMode,
         fixedRibCompressMode: this.fixedRibCompressMode,
         tangentRibMode: this.tangentRibMode,

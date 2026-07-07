@@ -7,12 +7,9 @@ export function getSkeletonModifierBehaviorName(event, modifiers = {}, targetKin
   if (modifiers.fixedRibMode && targetKinds.has("skeletonPoint")) {
     return "fixed-rib";
   }
-  if (modifiers.equalizeMode && targetKinds.has("editableGeneratedPoint")) {
-    return event?.shiftKey ? "alternate-constrain" : "alternate";
-  }
-  if (modifiers.equalizeMode) {
-    return event?.shiftKey ? "equalize-constrain" : "equalize";
-  }
+  // X-drag equalize was deprecated 2026-07-07 (alt-drag covers equalize); the
+  // "equalize"/"equalize-constrain" behaviors and their handlers remain for
+  // programmatic use. See docs/superpowers/notes/2026-07-06-parity-bugs.md 1.7.
   return null;
 }
 
