@@ -190,11 +190,15 @@ export class FontOverviewNavigation extends HTMLElement {
   }
 
   _makeFontSourceSliders(forHiddenAxes = false) {
+    const filteredAxes = () => {
+      return this.fontController.axes.axes.filter(
+        (axis) => !!axis.hidden === forHiddenAxes
+      );
+    };
+
     const locationElement = new DesignspaceLocation();
 
-    const axes = this.fontController.axes.axes.filter(
-      (axis) => !!axis.hidden === forHiddenAxes
-    );
+    let axes = filteredAxes();
 
     const locationKey = "fontLocationUser";
 
@@ -206,7 +210,7 @@ export class FontOverviewNavigation extends HTMLElement {
 
     this.fontOverviewSettingsController.addKeyListener(locationKey, (event) => {
       if (!event.senderInfo?.sentFromSliders) {
-        locationElement.values = { ...event.newValue };
+        locationElement.values = filterLocation(event.newValue, axes);
       }
     });
 
@@ -224,8 +228,12 @@ export class FontOverviewNavigation extends HTMLElement {
     this.fontController.addChangeListener(
       { axes: null },
       (change, isExternalChange) => {
+        axes = filteredAxes();
         locationElement.axes = axes;
-        locationElement.values = { ...this.fontOverviewSettings[locationKey] };
+        locationElement.values = filterLocation(
+          this.fontOverviewSettings[locationKey],
+          axes
+        );
       }
     );
 
