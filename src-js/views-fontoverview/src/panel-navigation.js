@@ -6,6 +6,7 @@ import {
 } from "@fontra/core/glyphsets-ui.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
+import { filterLocation } from "@fontra/core/location-tools.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import { difference, symmetricDifference, union } from "@fontra/core/set-ops.js";
 import { popupSelect } from "@fontra/core/ui-utils.js";
@@ -51,7 +52,7 @@ export class FontOverviewNavigation extends HTMLElement {
 
     accordion.appendStyle(
       `
-      .font-source-location-container {
+      #font-source-location-container {
         display: grid;
         gap: 0.5em;
       }
@@ -82,11 +83,24 @@ export class FontOverviewNavigation extends HTMLElement {
 
     const accordionItems = [
       {
-        label: translate("sources.labels.location"),
+        label: "Source",
         id: "location",
-        content: html.div({ class: "font-source-location-container" }, [
+        content: html.div({ id: "font-source-location-container" }, [
           await this._makeFontSourcePopup(),
-          this._makeFontSourceSliders(),
+        ]),
+      },
+      {
+        label: "Axes",
+        id: "font-axes",
+        content: html.div({ id: "font-axes-container" }, [
+          this._makeFontSourceSliders(false),
+        ]),
+      },
+      {
+        label: "Hidden Axes",
+        id: "hidden-font-axes",
+        content: html.div({ id: "hidden-font-axes-container" }, [
+          this._makeFontSourceSliders(true),
         ]),
       },
       {
@@ -175,12 +189,22 @@ export class FontOverviewNavigation extends HTMLElement {
     return popupSelect(controller, "value", popupItems);
   }
 
-  _makeFontSourceSliders() {
+  _makeFontSourceSliders(forHiddenAxes = false) {
     const locationElement = new DesignspaceLocation();
-    locationElement.axes = this.fontController.axes.axes;
-    locationElement.values = { ...this.fontOverviewSettings.fontLocationUser };
 
-    this.fontOverviewSettingsController.addKeyListener("fontLocationUser", (event) => {
+    const axes = this.fontController.axes.axes.filter(
+      (axis) => !!axis.hidden === forHiddenAxes
+    );
+
+    locationElement.axes = axes;
+    locationElement.values = filterLocation(
+      this.fontOverviewSettings.fontLocationUser,
+      axes
+    );
+
+    const locationKey = "fontLocationUser";
+
+    this.fontOverviewSettingsController.addKeyListener(locationKey, (event) => {
       if (!event.senderInfo?.sentFromSliders) {
         locationElement.values = { ...event.newValue };
       }
@@ -190,8 +214,8 @@ export class FontOverviewNavigation extends HTMLElement {
       "locationChanged",
       scheduleCalls((event) => {
         this.fontOverviewSettingsController.setItem(
-          "fontLocationUser",
-          { ...locationElement.values },
+          locationKey,
+          { ...this.fontOverviewSettings[locationKey], ...locationElement.values },
           { sentFromSliders: true }
         );
       })
@@ -200,7 +224,7 @@ export class FontOverviewNavigation extends HTMLElement {
     this.fontController.addChangeListener(
       { axes: null },
       (change, isExternalChange) => {
-        locationElement.axes = this.fontController.axes.axes;
+        locationElement.axes = axes;
         locationElement.values = { ...this.fontOverviewSettings.fontLocationUser };
       }
     );

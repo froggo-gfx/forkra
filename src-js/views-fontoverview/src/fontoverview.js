@@ -21,6 +21,7 @@ import {
 import * as html from "@fontra/core/html-utils.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
 import { translate, translatePlural } from "@fontra/core/localization.js";
+import { setupLocationDependencies } from "@fontra/core/location-tools.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import { labeledTextInput } from "@fontra/core/ui-utils.js";
 import {
@@ -202,7 +203,7 @@ export class FontOverviewController extends ViewController {
       }
     );
 
-    this._setupLocationDependencies();
+    setupLocationDependencies(this.fontController, this.fontOverviewSettingsController);
 
     this._updateFromWindowLocation();
 
@@ -265,38 +266,6 @@ export class FontOverviewController extends ViewController {
   async externalChange(change, isLiveChange) {
     await super.externalChange(change, isLiveChange);
     this.undoStack.clear();
-  }
-
-  _setupLocationDependencies() {
-    // TODO: This currently does *not* do avar-2 / cross-axis-mapping
-    // - We need the "user location" to send to the editor
-    // - We would need the "mapped source location" for the glyph cells
-    // - We use the "user location" to store in the fontoverview URL fragment
-    // - Mapping from "user" to "source" to "mapped source" is easy
-    // - The reverse is not: see CrossAxisMapping.unmapLocation()
-
-    this.fontOverviewSettingsController.addKeyListener(
-      "fontLocationSource",
-      (event) => {
-        if (!event.senderInfo?.fromFontLocationUser) {
-          this.fontOverviewSettingsController.setItem(
-            "fontLocationUser",
-            this.fontController.mapSourceLocationToUserLocation(event.newValue),
-            { fromFontLocationSource: true }
-          );
-        }
-      }
-    );
-
-    this.fontOverviewSettingsController.addKeyListener("fontLocationUser", (event) => {
-      if (!event.senderInfo?.fromFontLocationSource) {
-        this.fontOverviewSettingsController.setItem(
-          "fontLocationSource",
-          this.fontController.mapUserLocationToSourceLocation(event.newValue),
-          { fromFontLocationUser: true }
-        );
-      }
-    });
   }
 
   _updateFromWindowLocation() {
