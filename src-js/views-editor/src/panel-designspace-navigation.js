@@ -9,6 +9,7 @@ import {
 import * as html from "@fontra/core/html-utils.js";
 import { htmlToElement } from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
+import { filterLocation } from "@fontra/core/location-tools.js";
 import { ObservableController, controllerKey } from "@fontra/core/observable-object.ts";
 import {
   labeledCheckbox,
@@ -2443,16 +2444,4 @@ function getSourceCompareFunc(locationProperty, axisNames) {
   };
 }
 
-function filterLocation(location, axes) {
-  const filteredLocation = {};
-
-  for (const axis of axes) {
-    const value = location[axis.name];
-    if (value !== undefined) {
-      filteredLocation[axis.name] = value;
-    }
-  }
-
-  return filteredLocation;
-}
 customElements.define("panel-designspace-navigation", DesignspaceNavigationPanel);

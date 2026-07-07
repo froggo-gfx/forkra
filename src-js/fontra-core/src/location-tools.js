@@ -1,6 +1,6 @@
 /*
- * Automatic location space conversion for settings objects; shared between
- * the font overview and the glyph editor
+ * Automatic location space conversion for settings objects and other location logic
+ * that is shared between the font overview and the glyph editor.
  */
 
 export function setupLocationDependencies(fontController, settingsController) {
@@ -78,4 +78,17 @@ export function setupLocationDependencies(fontController, settingsController) {
       ...settings.fontLocationSource,
     };
   });
+}
+
+export function filterLocation(location, axes) {
+  const filteredLocation = {};
+
+  for (const axis of axes) {
+    const value = location[axis.name];
+    if (value !== undefined) {
+      filteredLocation[axis.name] = value;
+    }
+  }
+
+  return filteredLocation;
 }
