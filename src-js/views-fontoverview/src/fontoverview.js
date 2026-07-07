@@ -223,8 +223,7 @@ export class FontOverviewController extends ViewController {
 
     this.glyphCellView = new GlyphCellView(
       this.fontController,
-      this.fontOverviewSettingsController,
-      { locationKey: "fontLocationSource" }
+      this.fontOverviewSettingsController
     );
 
     this.fontOverviewSettingsController.addKeyListener("cellMagnification", (event) => {
