@@ -17,10 +17,14 @@ import { VarPackedPath } from "@fontra/core/var-path.js";
 import { expect } from "chai";
 import { EditBehaviorFactory } from "../../views-editor/src/edit-behavior.js";
 import {
+  editSkeleton,
   makeSkeletonPointKey,
   makeSkeletonPointTargetEntry,
 } from "../../views-editor/src/skeleton-editing.js";
-import { createEditableGeneratedHandleTargetEntries } from "../../views-editor/src/skeleton-generated.js";
+import {
+  createEditableGeneratedHandleTargetEntries,
+  findGeneratedPathAddress,
+} from "../../views-editor/src/skeleton-generated.js";
 
 before(() => {
   globalThis.window = {
@@ -172,38 +176,90 @@ describe("skeleton modifier equalize helpers", () => {
     expect(contour.points[3]).to.include({ x: 20, y: 0 });
   });
 
-  it("equalizes editable generated handle offsets for the same side", () => {
+  it("equalizes editable generated handle lengths around the rib point", () => {
     const point = makeSkeletonPoint({
       handleOffsets: {
-        leftIn: { x: -5, y: 0, detached: true },
-        leftOut: { x: 10, y: 0, detached: true },
+        leftIn: { x: 0, y: 0, detached: false },
+        leftOut: { x: 5, y: 0, detached: false },
       },
     });
+    // Rib point at origin; dragged (out) handle at (25, 0) with base (20, 0);
+    // opposite (in) handle at (-10, 0) with base (-10, 0).
+    const geometry = {
+      ribPos: { x: 0, y: 0 },
+      draggedPos: { x: 25, y: 0 },
+      oppositePos: { x: -10, y: 0 },
+      draggedBase: { x: 20, y: 0 },
+      oppositeBase: { x: -10, y: 0 },
+      draggedDirection: { x: 1, y: 0 },
+      draggedDetached: false,
+      oppositeDetached: false,
+    };
 
     const changed = equalizeEditableGeneratedHandleOffsets(
       point,
       "left",
       "out",
-      { x: 5, y: 0 },
-      {
-        draggedDirection: { x: 1, y: 0 },
-        oppositeDirection: { x: -1, y: 0 },
-        detached: true,
-        originalDraggedLength: 10,
-        originalOppositeLength: 5,
-      }
+      { x: 15, y: 0 },
+      geometry
+    );
+
+    // Dragged handle lands at (40, 0): length 40 from the rib point. The
+    // opposite handle must take the SAME length along its own direction:
+    // (-40, 0), i.e. offset (-30, 0) from its base — true equalization of
+    // handle lengths, not equal offset deltas.
+    expect(changed).to.equal(true);
+    expect(point.handleOffsets.leftOut).to.deep.equal({
+      x: 20,
+      y: 0,
+      detached: false,
+    });
+    expect(point.handleOffsets.leftIn).to.deep.equal({
+      x: -30,
+      y: 0,
+      detached: false,
+    });
+  });
+
+  it("equalize can move the dragged handle inside its base position", () => {
+    const point = makeSkeletonPoint({
+      handleOffsets: {
+        leftIn: { x: 0, y: 0, detached: false },
+        leftOut: { x: 0, y: 0, detached: false },
+      },
+    });
+    const geometry = {
+      ribPos: { x: 0, y: 0 },
+      draggedPos: { x: 20, y: 0 },
+      oppositePos: { x: -20, y: 0 },
+      draggedBase: { x: 20, y: 0 },
+      oppositeBase: { x: -20, y: 0 },
+      draggedDirection: { x: 1, y: 0 },
+      draggedDetached: false,
+      oppositeDetached: false,
+    };
+
+    // Drag toward the rib point, well past the old zero-offset floor.
+    const changed = equalizeEditableGeneratedHandleOffsets(
+      point,
+      "left",
+      "out",
+      { x: -15, y: 0 },
+      geometry
     );
 
     expect(changed).to.equal(true);
+    // Dragged handle at (5, 0): offset (-15, 0). Opposite matches length 5:
+    // (-5, 0), offset (15, 0).
     expect(point.handleOffsets.leftOut).to.deep.equal({
-      x: 15,
-      y: 0,
-      detached: true,
-    });
-    expect(point.handleOffsets.leftIn).to.deep.equal({
       x: -15,
       y: 0,
-      detached: true,
+      detached: false,
+    });
+    expect(point.handleOffsets.leftIn).to.deep.equal({
+      x: 15,
+      y: 0,
+      detached: false,
     });
   });
 });
@@ -297,30 +353,53 @@ describe("skeleton modifier target-entry parity fixtures", () => {
 
   it("equalizes editable generated handles through the live target-entry path", () => {
     const layer = makeLayerGlyph(makeEditableGeneratedHandleSkeleton());
-    const selection = new Set(["editableGeneratedHandle/80/2/left/out"]);
+    // Materialize the generated path + provenance-based pointMap.
+    editSkeleton(layer, () => {});
+    const selection = new Set(["editableGeneratedHandle/80/4/left/out"]);
     const targetEntries = createEditableGeneratedHandleTargetEntries(
       layer,
       selection,
-      "equalize",
+      "alternate",
       { referenceSkeletonData: getSkeletonData(layer) }
     );
     const behavior = new EditBehaviorFactory(layer, selection, false, {
       targetEntries,
-    }).getBehavior("equalize");
+    }).getBehavior("alternate");
 
-    applyChange(layer, behavior.makeChangeForDelta({ x: 5, y: 0 }));
+    const positionOf = (role) => {
+      const pathAddress = findGeneratedPathAddress(
+        getSkeletonData(layer),
+        80,
+        4,
+        "left",
+        role
+      );
+      return layer.path.getPoint(
+        layer.path.getAbsolutePointIndex(
+          pathAddress.pathContourIndex,
+          pathAddress.contourPointIndex
+        )
+      );
+    };
+    const distance = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+    const ribBefore = positionOf("onCurve");
+    const outBefore = positionOf("out");
+    const baseOutLength = distance(outBefore, ribBefore);
+    // Drag straight toward the rib point, past the old zero-offset floor.
+    const inward = {
+      x: ((ribBefore.x - outBefore.x) / baseOutLength) * 10,
+      y: ((ribBefore.y - outBefore.y) / baseOutLength) * 10,
+    };
 
-    const point = getSkeletonData(layer).contours[0].points[1];
-    expect(point.handleOffsets.leftOut).to.deep.equal({
-      x: 15,
-      y: 0,
-      detached: true,
-    });
-    expect(point.handleOffsets.leftIn).to.deep.equal({
-      x: -15,
-      y: 0,
-      detached: true,
-    });
+    applyChange(layer, behavior.makeChangeForDelta(inward));
+
+    const rib = positionOf("onCurve");
+    const outLength = distance(positionOf("out"), rib);
+    const inLength = distance(positionOf("in"), rib);
+    // True equalization: both handles at the same distance from the rib point.
+    expect(Math.abs(outLength - inLength)).to.be.at.most(2);
+    // No minimum-distance floor: the handle went inside its base position.
+    expect(outLength).to.be.lessThan(baseOutLength);
   });
 });
 
@@ -376,6 +455,9 @@ function makeLayerGlyph(skeletonData = null) {
   return layer;
 }
 
+// A middle smooth on-curve (id 4) between two curve segments, editable on the
+// left: its generated left contour carries onCurve/in/out provenance so the
+// editable-handle machinery can run against a REAL generated path.
 function makeEditableGeneratedHandleSkeleton() {
   return normalizeSkeletonData({
     contours: [
@@ -383,32 +465,21 @@ function makeEditableGeneratedHandleSkeleton() {
         id: 80,
         defaultWidth: 80,
         points: [
-          makeSkeletonPoint({ id: 1, x: 40, y: 0, type: "cubic" }),
+          makeSkeletonPoint({ id: 1, x: 0, y: 0 }),
+          makeSkeletonPoint({ id: 2, x: 30, y: 40, type: "cubic" }),
+          makeSkeletonPoint({ id: 3, x: 70, y: 40, type: "cubic" }),
           makeSkeletonPoint({
-            id: 2,
-            x: 50,
+            id: 4,
+            x: 100,
             y: 0,
+            smooth: true,
             editable: { left: true },
-            handleOffsets: {
-              leftIn: { x: -5, y: 0, detached: true },
-              leftOut: { x: 10, y: 0, detached: true },
-            },
           }),
-          makeSkeletonPoint({ id: 3, x: 60, y: 0, type: "cubic" }),
+          makeSkeletonPoint({ id: 5, x: 130, y: -40, type: "cubic" }),
+          makeSkeletonPoint({ id: 6, x: 170, y: -40, type: "cubic" }),
+          makeSkeletonPoint({ id: 7, x: 200, y: 0 }),
         ],
-        generated: undefined,
       }),
-    ],
-    generated: [
-      {
-        skeletonContourId: 80,
-        pathContourIndex: 0,
-        pointMap: [
-          { skeletonPointId: 2, side: "left", role: "in" },
-          { skeletonPointId: 2, side: "left", role: "onCurve" },
-          { skeletonPointId: 2, side: "left", role: "out" },
-        ],
-      },
     ],
   });
 }

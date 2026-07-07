@@ -472,27 +472,16 @@ function applyHandleOffsetToControlPoint(
     return controlPoint;
   }
 
-  // Check if handles are detached (absolute positioning)
-  const detachedKey = side === "left" ? "leftHandleDetached" : "rightHandleDetached";
-  const isDetached = skeletonPoint[detachedKey];
+  const keyPrefix = `${side}Handle${handleType === "in" ? "In" : "Out"}`;
+
+  // Check if this handle is detached (absolute positioning relative to the
+  // rib point). The flag is per handle (per side+role), matching the
+  // canonical handleOffsets model — NOT the donor's per-side key.
+  const isDetached = skeletonPoint[`${keyPrefix}Detached`] === true;
 
   // 2D offset keys (new format for precise interpolation)
-  const offsetKeyX =
-    side === "left"
-      ? handleType === "in"
-        ? "leftHandleInOffsetX"
-        : "leftHandleOutOffsetX"
-      : handleType === "in"
-        ? "rightHandleInOffsetX"
-        : "rightHandleOutOffsetX";
-  const offsetKeyY =
-    side === "left"
-      ? handleType === "in"
-        ? "leftHandleInOffsetY"
-        : "leftHandleOutOffsetY"
-      : handleType === "in"
-        ? "rightHandleInOffsetY"
-        : "rightHandleOutOffsetY";
+  const offsetKeyX = `${keyPrefix}OffsetX`;
+  const offsetKeyY = `${keyPrefix}OffsetY`;
 
   // Legacy 1D offset key (backwards compatibility)
   const offset1DKey =

@@ -5,7 +5,7 @@ import {
   setSkeletonHandleOffset,
   setSkeletonPointSideWidth,
 } from "./skeleton-model.js";
-import { dotVector, normalizeVector, vectorLength } from "./vector.js";
+import { dotVector, normalizeVector, subVectors, vectorLength } from "./vector.js";
 
 export function applyFixedRibDelta(
   originalSkeletonData,
@@ -275,6 +275,14 @@ export function equalizeSkeletonHandleFromDelta(
   return true;
 }
 
+// Equalize the two generated handles of one rib side around the rib point
+// (parity with the skeleton-point handle equalize around a smooth point): the
+// dragged handle moves (projected along the skeleton handle direction, or
+// freely when detached) and the opposite handle takes the SAME distance from
+// the rib point along its own direction. Works in absolute positions from
+// `geometry` (captured from the pre-drag path) — offsets alone can't
+// equalize, because the on-canvas handle length is |base + offset| and the
+// two bases differ.
 export function equalizeEditableGeneratedHandleOffsets(
   point,
   side,
@@ -284,33 +292,44 @@ export function equalizeEditableGeneratedHandleOffsets(
   { round = Math.round } = {}
 ) {
   const oppositeRole = role === "in" ? "out" : "in";
-  const draggedOffset = getSkeletonHandleOffset(point, side, role);
-  const oppositeOffset = getSkeletonHandleOffset(point, side, oppositeRole);
-  const draggedDirection = normalizeVector(geometry.draggedDirection || { x: 0, y: 0 });
-  const oppositeDirection = normalizeVector(
-    geometry.oppositeDirection || { x: 0, y: 0 }
-  );
-  if (!vectorLength(draggedDirection) || !vectorLength(oppositeDirection)) {
+  const { ribPos, draggedPos, oppositePos, draggedBase, oppositeBase } = geometry;
+  if (!ribPos || !draggedPos || !oppositePos || !draggedBase || !oppositeBase) {
     return false;
   }
-  const draggedLength = Math.max(
-    0,
-    (geometry.originalDraggedLength ?? vectorLength(draggedOffset)) +
-      dotVector(delta, draggedDirection)
-  );
-  const detached =
-    geometry.detached === true ||
-    draggedOffset.detached === true ||
-    oppositeOffset.detached === true;
+  let moved;
+  if (geometry.draggedDetached === true) {
+    moved = { x: draggedPos.x + delta.x, y: draggedPos.y + delta.y };
+  } else {
+    const draggedDirection = normalizeVector(
+      geometry.draggedDirection || { x: 0, y: 0 }
+    );
+    if (!vectorLength(draggedDirection)) {
+      return false;
+    }
+    const projected = dotVector(delta, draggedDirection);
+    moved = {
+      x: draggedPos.x + draggedDirection.x * projected,
+      y: draggedPos.y + draggedDirection.y * projected,
+    };
+  }
+  const length = vectorLength(subVectors(moved, ribPos));
+  const oppositeDirection = normalizeVector(subVectors(oppositePos, ribPos));
+  if (!vectorLength(oppositeDirection)) {
+    return false;
+  }
+  const newOpposite = {
+    x: ribPos.x + oppositeDirection.x * length,
+    y: ribPos.y + oppositeDirection.y * length,
+  };
   setSkeletonHandleOffset(point, side, role, {
-    x: round(draggedDirection.x * draggedLength),
-    y: round(draggedDirection.y * draggedLength),
-    detached,
+    x: round(moved.x - draggedBase.x),
+    y: round(moved.y - draggedBase.y),
+    detached: geometry.draggedDetached === true,
   });
   setSkeletonHandleOffset(point, side, oppositeRole, {
-    x: round(oppositeDirection.x * draggedLength),
-    y: round(oppositeDirection.y * draggedLength),
-    detached,
+    x: round(newOpposite.x - oppositeBase.x),
+    y: round(newOpposite.y - oppositeBase.y),
+    detached: geometry.oppositeDetached === true,
   });
   return true;
 }

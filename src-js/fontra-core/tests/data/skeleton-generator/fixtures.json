@@ -917,9 +917,11 @@
               "leftHandleOutOffsetX": -12,
               "leftHandleOutOffsetY": 20,
               "leftHandleOutDetached": true,
+              "leftHandleDetached": true,
               "rightHandleOutOffsetX": 12,
               "rightHandleOutOffsetY": -16,
-              "rightHandleOutDetached": true
+              "rightHandleOutDetached": true,
+              "rightHandleDetached": true
             },
             {
               "x": 40,
@@ -946,9 +948,11 @@
               "leftHandleInOffsetX": 10,
               "leftHandleInOffsetY": 22,
               "leftHandleInDetached": true,
+              "leftHandleDetached": true,
               "rightHandleInOffsetX": -10,
               "rightHandleInOffsetY": -18,
-              "rightHandleInDetached": true
+              "rightHandleInDetached": true,
+              "rightHandleDetached": true
             }
           ]
         }
@@ -963,13 +967,13 @@
             "smooth": false
           },
           {
-            "x": 70,
-            "y": 57,
+            "x": 42,
+            "y": -4,
             "type": "cubic"
           },
           {
-            "x": 72,
-            "y": 53,
+            "x": 96,
+            "y": -1,
             "type": "cubic"
           },
           {
@@ -983,13 +987,13 @@
             "smooth": false
           },
           {
-            "x": 129,
-            "y": 125,
+            "x": 177,
+            "y": 17,
             "type": "cubic"
           },
           {
-            "x": 14,
-            "y": 130,
+            "x": -37,
+            "y": 17,
             "type": "cubic"
           },
           {

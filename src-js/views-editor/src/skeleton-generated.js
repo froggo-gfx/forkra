@@ -281,7 +281,12 @@ export function createEditableGeneratedHandleTargetEntries(
       side: address.reference.side,
       role: address.reference.role,
     },
-    executor: createEditableGeneratedHandleExecutor(address.target, behaviorName),
+    executor: createEditableGeneratedHandleExecutor(
+      address.target,
+      behaviorName,
+      originalLayerGlyph.path,
+      skeletonData
+    ),
   }));
 
   let rollbackChange = null;
@@ -367,7 +372,12 @@ export function toggleEditableGeneratedHandleDetached(layerGlyph, selection) {
   });
 }
 
-function createEditableGeneratedHandleExecutor(address, behaviorName) {
+function createEditableGeneratedHandleExecutor(
+  address,
+  behaviorName,
+  originalPath = null,
+  skeletonData = null
+) {
   const originalOffset = getSkeletonHandleOffset(
     address.point,
     address.side,
@@ -380,9 +390,10 @@ function createEditableGeneratedHandleExecutor(address, behaviorName) {
     behaviorName?.startsWith("equalize") === true ||
     behaviorName === "alternate" ||
     behaviorName === "alternate-constrain";
-  const equalizeGeometry = equalize
-    ? makeEditableGeneratedHandleEqualizeGeometry(address, originalOffset)
-    : null;
+  const equalizeGeometry =
+    equalize && originalPath && skeletonData
+      ? makeEditableGeneratedHandleEqualizeGeometry(address, originalPath, skeletonData)
+      : null;
   return {
     applyDelta(target, delta, { round = Math.round } = {}) {
       if (equalize && equalizeGeometry) {
@@ -428,27 +439,63 @@ function makeEditableGeneratedHandleOffset(
   };
 }
 
-function makeEditableGeneratedHandleEqualizeGeometry(address, originalOffset) {
+// Equalization needs absolute positions: the on-canvas handle length is
+// |base + offset|, so equal offsets are NOT equal handles. Capture the
+// pre-drag path positions of the dragged handle, the opposite handle and the
+// rib on-curve, plus each handle's base (position minus its applied offset;
+// for detached offsets the base IS the rib point).
+function makeEditableGeneratedHandleEqualizeGeometry(
+  address,
+  originalPath,
+  skeletonData
+) {
   const oppositeRole = address.role === "in" ? "out" : "in";
-  const oppositeDirection = getSkeletonHandleDirectionForPoint(
-    address.contour,
-    address.pointIndex,
-    oppositeRole
-  );
-  if (!oppositeDirection) {
-    return null;
+  const positions = {};
+  for (const role of [address.role, oppositeRole, "onCurve"]) {
+    const pathAddress = findGeneratedPathAddress(
+      skeletonData,
+      address.contour.id,
+      address.point.id,
+      address.side,
+      role
+    );
+    if (!pathAddress) {
+      return null;
+    }
+    try {
+      const pointIndex = originalPath.getAbsolutePointIndex(
+        pathAddress.pathContourIndex,
+        pathAddress.contourPointIndex
+      );
+      positions[role] = originalPath.getPoint(pointIndex);
+    } catch {
+      return null;
+    }
   }
+  const draggedOffset = getSkeletonHandleOffset(
+    address.point,
+    address.side,
+    address.role
+  );
   const oppositeOffset = getSkeletonHandleOffset(
     address.point,
     address.side,
     oppositeRole
   );
+  const ribPos = positions.onCurve;
+  const draggedPos = positions[address.role];
+  const oppositePos = positions[oppositeRole];
+  const baseFor = (position, offset) =>
+    offset.detached ? ribPos : { x: position.x - offset.x, y: position.y - offset.y };
   return {
+    ribPos,
+    draggedPos,
+    oppositePos,
+    draggedBase: baseFor(draggedPos, draggedOffset),
+    oppositeBase: baseFor(oppositePos, oppositeOffset),
     draggedDirection: address.direction,
-    oppositeDirection,
-    detached: originalOffset.detached || oppositeOffset.detached,
-    originalDraggedLength: vectorLength(originalOffset),
-    originalOppositeLength: vectorLength(oppositeOffset),
+    draggedDetached: draggedOffset.detached === true,
+    oppositeDetached: oppositeOffset.detached === true,
   };
 }
 

@@ -1,9 +1,17 @@
 import {
+  getSkeletonData,
   makeSkeletonContour,
   makeSkeletonPoint,
   normalizeSkeletonData,
+  setSkeletonData,
+  setSkeletonHandleDetached,
+  setSkeletonHandleOffset,
 } from "@fontra/core/skeleton-model.js";
+import { VarPackedPath } from "@fontra/core/var-path.js";
 import { expect } from "chai";
+import { editSkeleton } from "../../views-editor/src/skeleton-editing.js";
+import { findGeneratedPathAddress } from "../../views-editor/src/skeleton-generated.js";
+import { computeRibDetachConversions } from "../../views-editor/src/skeleton-panel-edits.js";
 import {
   applySkeletonRibExecutorResult,
   createSkeletonRibExecutor,
@@ -174,5 +182,117 @@ describe("skeleton rib executor", () => {
 
     expect(address.point.nudge.right).to.equal(-5);
     expect(address.point.width.right).to.equal(40);
+  });
+});
+
+describe("rib detach toggle", () => {
+  const makeCurveLayer = () => {
+    const layer = {
+      path: new VarPackedPath(),
+      components: [],
+      anchors: [],
+      guidelines: [],
+      customData: {},
+    };
+    setSkeletonData(
+      layer,
+      normalizeSkeletonData({
+        contours: [
+          makeSkeletonContour({
+            id: 80,
+            defaultWidth: 80,
+            points: [
+              makeSkeletonPoint({ id: 1, x: 0, y: 0 }),
+              makeSkeletonPoint({ id: 2, x: 30, y: 40, type: "cubic" }),
+              makeSkeletonPoint({ id: 3, x: 70, y: 40, type: "cubic" }),
+              makeSkeletonPoint({
+                id: 4,
+                x: 100,
+                y: 0,
+                smooth: true,
+                editable: { left: true },
+                handleOffsets: { leftOut: { x: 6, y: 4, detached: false } },
+              }),
+              makeSkeletonPoint({ id: 5, x: 130, y: -40, type: "cubic" }),
+              makeSkeletonPoint({ id: 6, x: 170, y: -40, type: "cubic" }),
+              makeSkeletonPoint({ id: 7, x: 200, y: 0 }),
+            ],
+          }),
+        ],
+      })
+    );
+    editSkeleton(layer, () => {});
+    return layer;
+  };
+
+  const positionOf = (layer, role) => {
+    const pathAddress = findGeneratedPathAddress(
+      getSkeletonData(layer),
+      80,
+      4,
+      "left",
+      role
+    );
+    return layer.path.getPoint(
+      layer.path.getAbsolutePointIndex(
+        pathAddress.pathContourIndex,
+        pathAddress.contourPointIndex
+      )
+    );
+  };
+
+  const applyConversions = (layer, conversions, detached) => {
+    editSkeleton(layer, (working) => {
+      const point = working.contours[0].points[3];
+      for (const conversion of conversions) {
+        for (const [role, offset] of Object.entries(conversion.offsets)) {
+          setSkeletonHandleOffset(point, "left", role, offset);
+        }
+        setSkeletonHandleDetached(point, "left", detached);
+      }
+    });
+  };
+
+  it("toggling detach on and off keeps the handles in place", () => {
+    const layer = makeCurveLayer();
+    const addresses = [{ contourId: 80, pointId: 4, side: "left" }];
+    const before = {
+      in: positionOf(layer, "in"),
+      out: positionOf(layer, "out"),
+    };
+
+    const detachConversions = computeRibDetachConversions(
+      layer,
+      getSkeletonData(layer),
+      addresses,
+      true
+    );
+    expect(detachConversions).to.have.length(1);
+    applyConversions(layer, detachConversions, true);
+
+    const detachedPoint = getSkeletonData(layer).contours[0].points[3];
+    expect(detachedPoint.handleOffsets.leftOut.detached).to.equal(true);
+    for (const role of ["in", "out"]) {
+      const position = positionOf(layer, role);
+      expect(Math.abs(position.x - before[role].x), `${role} x`).to.be.at.most(1);
+      expect(Math.abs(position.y - before[role].y), `${role} y`).to.be.at.most(1);
+    }
+
+    const attachConversions = computeRibDetachConversions(
+      layer,
+      getSkeletonData(layer),
+      addresses,
+      false
+    );
+    expect(attachConversions).to.have.length(1);
+    applyConversions(layer, attachConversions, false);
+
+    const attachedPoint = getSkeletonData(layer).contours[0].points[3];
+    expect(attachedPoint.handleOffsets.leftOut.detached).to.equal(false);
+    for (const role of ["in", "out"]) {
+      const position = positionOf(layer, role);
+      expect(Math.abs(position.x - before[role].x), `${role} x`).to.be.at.most(2);
+      expect(Math.abs(position.y - before[role].y), `${role} y`).to.be.at.most(2);
+    }
   });
 });

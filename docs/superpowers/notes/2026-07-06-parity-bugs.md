@@ -208,6 +208,19 @@ same rib side (`createEditableGeneratedHandleExecutor` treats
 `alternate`/`alternate-constrain` as equalize). Previously only the `equalize*`
 behavior names triggered it, and after the X-binding removal nothing produced those.
 
+**Second follow-up (runtime testing found two defects in the equalize math):**
+(a) it clamped the OFFSET length at ≥ 0 and forced it along +direction, so the
+handle could never move inside its generated base position (the reported "minimum
+distance"); (b) it equalized offset lengths, but the on-canvas handle length is
+|base + offset| and the two bases differ, so it degraded to "equal deltas", not
+equalization. Rewritten position-based (parity with the skeleton smooth-point
+equalize): geometry is captured from the pre-drag path (rib on-curve, both handle
+positions, per-handle bases; a detached handle's base is the rib point), the dragged
+handle moves (projected along the skeleton handle direction, free when detached) and
+the opposite handle takes the SAME distance from the rib point along its own
+direction. No clamps. Unit tests plus a live target-entry invariant test
+(equal lengths, drag inside the base allowed).
+
 ### 1.5.5 (follow-up) Detach flag for ribs — `fixed`
 
 The detach machinery existed end-to-end (2D `handleOffsets` with `detached`,
@@ -217,6 +230,23 @@ sides), backed by `setPanelRibDetached`. Also fixed a latent core bug found via 
 `setSkeletonHandleDetached(point, side, false)` could never re-attach, because
 `setSkeletonHandleOffset` ORs the detached flag with the existing state (by design —
 drags must not silently re-attach); the setter now writes the flag directly.
+
+**Second follow-up ("detach does nothing"):** two more defects. (a) The generator's
+detached branch read the donor's per-SIDE flag (`leftHandleDetached`) which the fork's
+canonical converter never writes — it writes per-role flags
+(`leftHandleInDetached`/`leftHandleOutDetached`) — so absolute positioning never
+engaged during regeneration; fixed to per-role (matching the canonical model). The
+`detached-handle-offsets` golden fixture had been captured with the donor ALSO
+ignoring detach (its converter had the same key gap); the fixture script now sets the
+donor's per-side key and the fixture was regenerated — fork output matches the donor
+with detach actually engaged. (b) The panel toggle was a naive flag flip, which
+reinterprets stored offsets in a different space (handles jump / behave wrong).
+Now position-preserving both ways (donor parity): detaching rewrites offsets into
+rib-point space from the current path; re-attaching rewrites them against base
+handle positions from a scratch regeneration without that side's offsets
+(`computeRibDetachConversions`, with a round-trip invariant test). What detach
+MEANS: a detached handle is absolutely positioned relative to the rib point and
+stops following the skeleton handle geometry; drags move it freely in 2D.
 
 ### 1.7 What happens on x-drag of the skeleton handle? — `deprecated` (X binding removed)
 

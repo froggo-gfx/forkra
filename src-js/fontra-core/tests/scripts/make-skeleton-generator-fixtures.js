@@ -245,4 +245,10 @@ function copyHandleOffsetsToDonor(donorPoint, side, offset, inOut) {
   donorPoint[`${prefix}OffsetX`] = offset.x ?? 0;
   donorPoint[`${prefix}OffsetY`] = offset.y ?? 0;
   donorPoint[`${prefix}Detached`] = offset.detached === true;
+  // The donor generator gates detached positioning on a per-SIDE flag; the
+  // canonical model is per handle. Without this the donor silently ignores
+  // detached offsets and the fixture captures attached behavior.
+  if (offset.detached === true) {
+    donorPoint[`${side}HandleDetached`] = true;
+  }
 }
