@@ -73,7 +73,7 @@ function getDefaultFontOverviewSettings() {
     fontLocationSourceMapped: {},
     glyphSelection: new Set(),
     closedGlyphSections: new Set(),
-    closedNavigationSections: new Set(),
+    closedNavigationSections: new Set(["hidden-font-axes"]),
     groupByKeys: [],
     projectGlyphSets: {},
     myGlyphSets: {},
