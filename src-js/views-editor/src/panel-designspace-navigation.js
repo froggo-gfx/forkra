@@ -9,7 +9,11 @@ import {
 import * as html from "@fontra/core/html-utils.js";
 import { htmlToElement } from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import { filterLocation } from "@fontra/core/location-tools.js";
+import {
+  ShowLocationSettings,
+  filterLocation,
+  getAxisOptionsMenuItems,
+} from "@fontra/core/location-tools.js";
 import { ObservableController, controllerKey } from "@fontra/core/observable-object.ts";
 import {
   labeledCheckbox,
@@ -56,7 +60,6 @@ import {
 
 import { NumberFormatter } from "@fontra/core/formatters.js";
 import Panel from "./panel.js";
-import { ShowLocationSettings } from "./scene-controller.js";
 
 const FONTRA_STATUS_KEY = "fontra.development.status";
 const FONTRA_STATUS_DEFINITIONS_KEY = "fontra.sourceStatusFieldDefinitions";
@@ -760,72 +763,15 @@ export default class DesignspaceNavigationPanel extends Panel {
   }
 
   showFontAxesViewOptionsMenu(event, forHiddenAxes) {
-    const effectiveLocationKey = forHiddenAxes
-      ? "hiddenFontAxesShowEffectiveLocation"
-      : "fontAxesShowEffectiveLocation";
-    const menuItems = [
-      {
-        title: translate(
-          "sidebar.designspace-navigation.font-axes-view-options-menu.apply-single-axis-mapping"
-        ),
-        callback: () => {
-          this.sceneSettings.fontAxesUseSourceCoordinates =
-            !this.sceneSettings.fontAxesUseSourceCoordinates;
-        },
-        checked: !this.sceneSettings.fontAxesUseSourceCoordinates,
-      },
-      {
-        title: translate(
-          "sidebar.designspace-navigation.font-axes-view-options-menu.apply-cross-axis-mapping"
-        ),
-        callback: () => {
-          this.sceneSettings.fontAxesSkipMapping =
-            !this.sceneSettings.fontAxesSkipMapping;
-        },
-        checked: !this.sceneSettings.fontAxesSkipMapping,
-      },
-      { title: "-" },
-      {
-        title: translate(
-          "sidebar.designspace-navigation.font-axes-view-options-menu.show-effective-location"
-        ),
-        callback: () => {
-          this.sceneSettings[effectiveLocationKey] =
-            this.sceneSettings[effectiveLocationKey] ==
-            ShowLocationSettings.ShowEffectiveLocation
-              ? ShowLocationSettings.DontShowEffectiveLocation
-              : ShowLocationSettings.ShowEffectiveLocation;
-        },
-        checked:
-          this.sceneSettings[effectiveLocationKey] ==
-          ShowLocationSettings.ShowEffectiveLocation,
-      },
-    ];
-
-    if (forHiddenAxes) {
-      menuItems.push({
-        title: translate(
-          "sidebar.designspace-navigation.font-axes-view-options-menu.show-only-effective-location"
-        ),
-        callback: () => {
-          this.sceneSettings[effectiveLocationKey] =
-            this.sceneSettings[effectiveLocationKey] ==
-            ShowLocationSettings.OnlyShowEffectiveLocation
-              ? ShowLocationSettings.DontShowEffectiveLocation
-              : ShowLocationSettings.OnlyShowEffectiveLocation;
-        },
-        checked:
-          this.sceneSettings[effectiveLocationKey] ==
-          ShowLocationSettings.OnlyShowEffectiveLocation,
-      });
-    }
-
     const button = this.accordion.querySelector(
       forHiddenAxes
         ? "#hidden-font-axes-view-options-button"
         : "#font-axes-view-options-button"
     );
     const buttonRect = button.getBoundingClientRect();
+
+    const menuItems = getAxisOptionsMenuItems(this.sceneSettings, forHiddenAxes);
+
     showMenu(menuItems, { x: buttonRect.left, y: buttonRect.bottom });
   }
 

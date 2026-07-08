@@ -20,7 +20,10 @@ import {
   readProjectGlyphSets,
 } from "@fontra/core/glyphsets-controller.js";
 import { translate, translatePlural } from "@fontra/core/localization.js";
-import { setupLocationDependencies } from "@fontra/core/location-tools.js";
+import {
+  ShowLocationSettings,
+  setupLocationDependencies,
+} from "@fontra/core/location-tools.js";
 import { MouseTracker } from "@fontra/core/mouse-tracker.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import {
@@ -65,12 +68,6 @@ import * as vector from "@fontra/core/vector.js";
 import { dialog, message } from "@fontra/web-components/modal-dialog.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import { SceneModel } from "./scene-model.js";
-
-export const ShowLocationSettings = Object.freeze({
-  DontShowEffectiveLocation: 0,
-  ShowEffectiveLocation: 1,
-  OnlyShowEffectiveLocation: 2,
-});
 
 // Minimum pixels per em and maximum pixels per unit for zooming out and in.
 //
