@@ -13,7 +13,7 @@ import {
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import { difference, symmetricDifference, union } from "@fontra/core/set-ops.js";
 import { popupSelect } from "@fontra/core/ui-utils.js";
-import { scheduleCalls } from "@fontra/core/utils.ts";
+import { scheduleCalls, sleepAsync } from "@fontra/core/utils.ts";
 import { DesignspaceLocation } from "@fontra/web-components/designspace-location.js";
 import { GlyphSearchField } from "@fontra/web-components/glyph-search-field.js";
 import { showMenu } from "@fontra/web-components/menu-panel.js";
@@ -191,6 +191,9 @@ export class FontOverviewNavigation extends HTMLElement {
     this.appendChild(
       html.div({ class: "font-overview-navigation-section" }, [accordion])
     );
+
+    await sleepAsync(0);
+    this._updateHiddenAxisSectionVisibility();
   }
 
   async _makeFontSourcePopup() {
@@ -303,10 +306,19 @@ export class FontOverviewNavigation extends HTMLElement {
           this.fontOverviewSettings[locationKey],
           axes
         );
+
+        this._updateHiddenAxisSectionVisibility();
       }
     );
 
     return locationElement;
+  }
+
+  _updateHiddenAxisSectionVisibility() {
+    const hiddenAxesAccordionItem = this.accordion.querySelector("#hidden-font-axes");
+    hiddenAxesAccordionItem.hidden = !this.fontController.axes.axes.some(
+      (axis) => axis.hidden
+    );
   }
 
   showFontAxesViewOptionsMenu(event, forHiddenAxes) {
