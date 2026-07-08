@@ -6,13 +6,17 @@ import {
 } from "@fontra/core/glyphsets-ui.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import { filterLocation } from "@fontra/core/location-tools.js";
+import {
+  filterLocation,
+  getAxisOptionsMenuItems,
+} from "@fontra/core/location-tools.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import { difference, symmetricDifference, union } from "@fontra/core/set-ops.js";
 import { popupSelect } from "@fontra/core/ui-utils.js";
 import { scheduleCalls } from "@fontra/core/utils.ts";
 import { DesignspaceLocation } from "@fontra/web-components/designspace-location.js";
 import { GlyphSearchField } from "@fontra/web-components/glyph-search-field.js";
+import { showMenu } from "@fontra/web-components/menu-panel.js";
 import {
   Accordion,
   groupAccordionHeaderButtons,
@@ -303,6 +307,19 @@ export class FontOverviewNavigation extends HTMLElement {
     );
 
     return locationElement;
+  }
+
+  showFontAxesViewOptionsMenu(event, forHiddenAxes) {
+    const button = this.accordion.querySelector(
+      forHiddenAxes
+        ? "#hidden-font-axes-view-options-button"
+        : "#font-axes-view-options-button"
+    );
+    const buttonRect = button.getBoundingClientRect();
+
+    const menuItems = getAxisOptionsMenuItems(this.fontOverviewSettings, forHiddenAxes);
+
+    showMenu(menuItems, { x: buttonRect.left, y: buttonRect.bottom });
   }
 }
 
