@@ -13,7 +13,11 @@ import { popupSelect } from "@fontra/core/ui-utils.js";
 import { scheduleCalls } from "@fontra/core/utils.ts";
 import { DesignspaceLocation } from "@fontra/web-components/designspace-location.js";
 import { GlyphSearchField } from "@fontra/web-components/glyph-search-field.js";
-import { Accordion } from "@fontra/web-components/ui-accordion.js";
+import {
+  Accordion,
+  groupAccordionHeaderButtons,
+  makeAccordionHeaderButton,
+} from "@fontra/web-components/ui-accordion.js";
 
 export class FontOverviewNavigation extends HTMLElement {
   constructor(fontOverviewController) {
@@ -23,6 +27,8 @@ export class FontOverviewNavigation extends HTMLElement {
     this.fontOverviewSettingsController =
       fontOverviewController.fontOverviewSettingsController;
     this.fontOverviewSettings = this.fontOverviewSettingsController.model;
+
+    this.projectIdentifier = fontOverviewController.projectIdentifier;
 
     this._setupUI();
   }
@@ -95,6 +101,35 @@ export class FontOverviewNavigation extends HTMLElement {
         content: html.div({ id: "font-axes-container" }, [
           this._makeFontSourceSliders(false),
         ]),
+        auxiliaryHeaderElement: groupAccordionHeaderButtons([
+          makeAccordionHeaderButton({
+            icon: "menu-2",
+            id: "font-axes-view-options-button",
+            tooltip: translate(
+              "sidebar.designspace-navigation.font-axes-view-options-button.tooltip"
+            ),
+            onclick: (event) => this.showFontAxesViewOptionsMenu(event, false),
+          }),
+          makeAccordionHeaderButton({
+            icon: "tool",
+            tooltip: translate("sidebar.designspace-navigation.font-axes.edit"),
+            onclick: (event) => {
+              const url = new URL(window.location);
+              url.pathname = url.pathname.replace(
+                "/fontoverview.html",
+                "/fontinfo.html"
+              );
+              url.hash = "#axes-panel";
+              window.open(url.toString(), `fontra.fontinfo.${this.projectIdentifier}`);
+            },
+          }),
+          makeAccordionHeaderButton({
+            icon: "refresh",
+            id: "reset-font-axes-button",
+            tooltip: translate("sidebar.designspace-navigation.font-axes.reset"),
+            onclick: (event) => this.resetFontAxesToDefault(),
+          }),
+        ]),
       },
       {
         label: "Hidden Axes",
@@ -102,6 +137,35 @@ export class FontOverviewNavigation extends HTMLElement {
         open: false,
         content: html.div({ id: "hidden-font-axes-container" }, [
           this._makeFontSourceSliders(true),
+        ]),
+        auxiliaryHeaderElement: groupAccordionHeaderButtons([
+          makeAccordionHeaderButton({
+            icon: "menu-2",
+            id: "hidden-font-axes-view-options-button",
+            tooltip: translate(
+              "sidebar.designspace-navigation.font-axes-view-options-button.tooltip"
+            ),
+            onclick: (event) => this.showFontAxesViewOptionsMenu(event, true),
+          }),
+          makeAccordionHeaderButton({
+            icon: "tool",
+            tooltip: translate("sidebar.designspace-navigation.font-axes.edit"),
+            onclick: (event) => {
+              const url = new URL(window.location);
+              url.pathname = url.pathname.replace(
+                "/fontoverview.html",
+                "/fontinfo.html"
+              );
+              url.hash = "#axes-panel";
+              window.open(url.toString(), `fontra.fontinfo.${this.projectIdentifier}`);
+            },
+          }),
+          makeAccordionHeaderButton({
+            icon: "refresh",
+            id: "reset-hidden-font-axes-button",
+            tooltip: translate("sidebar.designspace-navigation.font-axes.reset"),
+            onclick: (event) => this.resetHiddenFontAxesToDefault(),
+          }),
         ]),
       },
       {
