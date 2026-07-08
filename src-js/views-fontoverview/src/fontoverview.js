@@ -21,7 +21,10 @@ import {
 import * as html from "@fontra/core/html-utils.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
 import { translate, translatePlural } from "@fontra/core/localization.js";
-import { setupLocationDependencies } from "@fontra/core/location-tools.js";
+import {
+  setupLocationDependencies,
+  ShowLocationSettings,
+} from "@fontra/core/location-tools.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import { labeledTextInput } from "@fontra/core/ui-utils.js";
 import {
@@ -52,6 +55,10 @@ import { FontOverviewNavigation } from "./panel-navigation.js";
 const persistentSettings = [
   { key: "searchString" },
   { key: "fontLocationUser", infoKey: "location" },
+  { key: "fontAxesUseSourceCoordinates" },
+  { key: "fontAxesShowEffectiveLocation" },
+  { key: "hiddenFontAxesShowEffectiveLocation" },
+  { key: "fontAxesSkipMapping" },
   { key: "glyphSelection", toJSON: (v) => [...v], fromJSON: (v) => new Set(v) },
   { key: "closedGlyphSections", toJSON: (v) => [...v], fromJSON: (v) => new Set(v) },
   {
@@ -71,6 +78,10 @@ function getDefaultFontOverviewSettings() {
     fontLocationUser: {},
     fontLocationSource: {},
     fontLocationSourceMapped: {},
+    fontAxesUseSourceCoordinates: false,
+    fontAxesShowEffectiveLocation: ShowLocationSettings.DontShowEffectiveLocation,
+    hiddenFontAxesShowEffectiveLocation: ShowLocationSettings.DontShowEffectiveLocation,
+    fontAxesSkipMapping: false,
     glyphSelection: new Set(),
     closedGlyphSections: new Set(),
     closedNavigationSections: new Set(["hidden-font-axes"]),
