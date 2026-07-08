@@ -321,6 +321,20 @@ export class FontOverviewNavigation extends HTMLElement {
 
     showMenu(menuItems, { x: buttonRect.left, y: buttonRect.bottom });
   }
+
+  resetFontAxesToDefault(event) {
+    this.fontOverviewSettings.fontLocationUser = filterLocation(
+      this.fontOverviewSettings.fontLocationUser,
+      this.fontController.axes.axes.filter((axis) => axis.hidden)
+    );
+  }
+
+  resetHiddenFontAxesToDefault(event) {
+    this.fontOverviewSettings.fontLocationUser = filterLocation(
+      this.fontOverviewSettings.fontLocationUser,
+      this.fontController.axes.axes.filter((axis) => !axis.hidden)
+    );
+  }
 }
 
 customElements.define("font-overview-navigation", FontOverviewNavigation);
