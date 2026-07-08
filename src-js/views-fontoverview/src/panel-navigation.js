@@ -99,6 +99,7 @@ export class FontOverviewNavigation extends HTMLElement {
       {
         label: "Hidden Axes",
         id: "hidden-font-axes",
+        open: false,
         content: html.div({ id: "hidden-font-axes-container" }, [
           this._makeFontSourceSliders(true),
         ]),
