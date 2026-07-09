@@ -304,6 +304,118 @@ letterspacer panel.
 
 ---
 
+## 3. Sixth pass (2026-07-07)
+
+### 3.1 Slider polish — `fixed`
+
+**Report:** Sliders are poorly done overall. (a) Check increments, e.g. for the scale
+and distribution sliders. (b) Double-click on the slider thumb should reset the value
+to its default. (c) The distribution slider is sometimes only slideable in a single
+direction at a time — while increasing you can't reverse into decreasing — but not
+reproducibly always.
+
+**Inferred context:** All panel sliders go through
+`fontra-webcomponents/src/range-slider.js`. (c) smells like the realtime streaming
+path added for 1.2.2 (snapshot-restore per tick) fighting the slider's own value
+updates — if the panel repopulates the field from a stale glyph state mid-drag, the
+thumb snaps back and drags feel one-directional. (a)/(b) are widget-level features to
+compare against the donor's slider.
+
+**Root causes (2026-07-09):**
+
+- (a) *Increments*: no skeleton-panel slider passed a `step`, and even if one had,
+  `ui-form.js _addEditNumberSlider` never forwarded `step` (or `displayValue` /
+  `values` / `allowInputBeyondRange`) to the RangeSlider — sliders always ran with
+  `step="any"` and produced arbitrary fractional values. The donor's RangeSlider also
+  derives display decimal places from the step; ours used a range-based heuristic
+  only.
+- (b) *Double-click reset*: the donor RangeSlider has an `ondblclick` → `reset()`
+  handler; our upstream-based copy only had alt-click reset.
+- (c) *Direction lock*: in `_pushSummarySlider`, a mixed or absent summary value put
+  the thumb at `minValue` (distribution: −100, hard left) — from the end stop the
+  slider is literally draggable in only one direction. After one committed drag the
+  selection has a uniform value and the slider behaves again, hence "not all the
+  time". (Any fresh multi-point selection with differing or unset distributions
+  triggered it.)
+
+**Fix:** ported the donor slider features into `range-slider.js` (step-derived
+decimals, `displayValue` placeholder, `allowInputBeyondRange`, dblclick reset,
+`source` on change events), forwarded the new field properties in
+`ui-form.js _addEditNumberSlider` (incl. `disabled`), and set donor-equivalent steps
+in the panel: distribution ±100 step 10 (donor ±1 step 0.1), scale 20–200% step 20
+with input-beyond-range (donor 0.2–2.0 step 0.2), corner roundness/trim/boost step
+0.01, asymmetry step 0.1 (donor edits these as percent with step 1). Mixed/absent
+summaries now park the thumb at the default and show a "mixed" placeholder.
+
+### 3.2 Skeleton contours aren't copiable — `fixed`
+
+**Report:** Copying a skeleton contour does not work.
+
+**Inferred context:** Clipboard serialization operates on the path + selected point
+indices; skeleton data lives in layer `customData["fontra.internal"]`, which the
+copy/paste path presumably never touches. Donor behavior to check: how does the donor
+carry skeleton point data through copy/paste (its model stores per-point fields on
+the path points themselves, which copy for free — our canonical sidecar doesn't).
+
+**Root cause (2026-07-09):** the donor ships a full implementation — copy embeds a
+`skeletonDataByLayer` sidecar in the `fontra-json` clipboard payload (selected
+skeleton points mark their contours, per layer), paste appends those contours to the
+target layer's skeleton and regenerates. Our fork even had the paste-side id helper
+ready (`allocateSkeletonIds` in skeleton-model.js, with tests, comment "Used on
+paste") but none of the editor.js plumbing was ever wired.
+
+**Fix:** donor-pattern port adapted to our canonical model.
+*Copy* (`_prepareCopyOrCutLayers`): skeletonPoint selection keys (edit-layer
+canonical ids, WS-9) resolve per layer via `resolveSkeletonAddressAcrossLayers`;
+selected contours are deep-cloned into `skeletonDataByLayer[layerName]`, which
+`_writeLayersToClipboard` embeds in the JSON payload.
+*Paste* (`_pasteLayerGlyphs`): per editing layer, contours are appended through
+`editSkeleton` (the one write path — regenerates generated contours), with ids
+re-minted by `allocateSkeletonIds` from the target's `nextId`; pasted on-curve
+points are added to the selection using the edit layer's new ids.
+Caveats (donor-parity scope): cut copies the skeleton sidecar but only deletes path
+points, not the skeleton contours; whole-glyph copy (select mode) carries skeleton
+data automatically inside layer `customData`, no sidecar needed.
+
+### 3.3 Cap style parameters should be sliders — `fixed`
+
+**Report:** Check the cap style parameters: those should be sliders.
+
+**Inferred context:** The donor panel exposes round-cap radius as a 20-position
+logarithmic slider (CAP_RADIUS_MIN 1/128 → CAP_RADIUS_MAX 1/4) plus a tension
+slider; square caps have angle/distance. Our panel currently renders these as
+number-edit fields. Convert to sliders with donor ranges/mappings.
+
+**Fix (2026-07-09):** cap parameters are now style-gated donor-style sliders in the
+Caps & corners section. Round → radius slider (positions 1–20, step 1, mapped
+logarithmically onto ratio [1/128, 1/4] via ported `capRadiusRatioFromIndex` /
+`capRadiusIndexFromRatio`; default 1/8) and tension slider (0–100%, step 5, default
+55%); square → angle slider (−85…85°, step 1) plus distance number field (donor
+keeps distance as a number too); butt/mixed → no parameter fields.
+`_onCapChange` converts slider units back to model units (index→ratio,
+percent→fraction). The per-source "Default caps" number fields are untouched (cap
+defaults aren't consumed by the generator — see 1.3/1.4 notes).
+
+### 3.4 Adapt round-cap approach from `test/cap-rounding-rewamp` — `open`
+
+**Report:** Check how rounding is done in `test/cap-rounding-rewamp` and adapt the
+approach here.
+
+**Inferred context:** That branch (old codebase lineage, diverged at `030a97468`)
+reworked round caps to *split-outline geometry*: instead of the projected-scaffold
+`generateCap` path, each side outline is split inward from the endpoint
+(`splitTerminalSideForRoundCap`), then the cap is rebuilt locally
+(`buildRoundCapGeometry`, `getRoundCapFrame`, `assembleOpenOutlineWithRoundCaps`)
+with Tunni handle lengths and stable max-roundness topology (coincident endpoints
+preserved, `skipColinear` flags). The branch carries its own map doc:
+`docs/superpowers/cap-logic-overview.md` (commit `7719b68f4`). The donor pin
+`fd76d3abe` predates all of this and forkra's `skeleton-generator.js` only has the
+legacy `generateCap` path — so this is a forward-port of donor-side improvements that
+never landed in the pinned donor. Significant geometry work; golden-master fixtures
+will change by design (they pin the legacy cap output).
+
+---
+
 ## Process
 
 Per the standing directive: fix what's worth fixing in real time, write down what needs

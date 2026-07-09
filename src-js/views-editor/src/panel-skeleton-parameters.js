@@ -40,6 +40,34 @@ import {
   summarizeSkeletonRibSelection,
 } from "./skeleton-panel-model.js";
 
+// Cap parameter UI constants (donor parity: panel-skeleton-parameters.js).
+// The round-cap radius slider works in 20 discrete positions mapped
+// logarithmically onto the [CAP_RADIUS_MIN, CAP_RADIUS_MAX] ratio range.
+const DEFAULT_CAP_RADIUS_RATIO = 1 / 8;
+const DEFAULT_CAP_TENSION = 0.55;
+const DEFAULT_CAP_ANGLE = 0;
+const CAP_RADIUS_MIN = 1 / 128;
+const CAP_RADIUS_MAX = 1 / 4;
+const CAP_RADIUS_POSITIONS = 20;
+const CAP_ANGLE_MIN = -85;
+const CAP_ANGLE_MAX = 85;
+
+function capRadiusRatioFromIndex(index) {
+  const clampedIndex = Math.min(Math.max(index, 0), CAP_RADIUS_POSITIONS - 1);
+  const t = clampedIndex / (CAP_RADIUS_POSITIONS - 1);
+  const minLog = Math.log2(CAP_RADIUS_MIN);
+  const maxLog = Math.log2(CAP_RADIUS_MAX);
+  return 2 ** (minLog + t * (maxLog - minLog));
+}
+
+function capRadiusIndexFromRatio(ratio) {
+  const clampedRatio = Math.min(Math.max(ratio, CAP_RADIUS_MIN), CAP_RADIUS_MAX);
+  const minLog = Math.log2(CAP_RADIUS_MIN);
+  const maxLog = Math.log2(CAP_RADIUS_MAX);
+  const t = (Math.log2(clampedRatio) - minLog) / (maxLog - minLog);
+  return Math.round(t * (CAP_RADIUS_POSITIONS - 1));
+}
+
 export default class SkeletonParametersPanel extends Panel {
   identifier = "skeleton-parameters";
   iconPath = "/tabler-icons/bone.svg";
@@ -300,7 +328,8 @@ export default class SkeletonParametersPanel extends Panel {
       () => this._sourceDefault(distKey),
       -100,
       100,
-      0
+      0,
+      { step: 10 }
     );
     formContents.push({ type: "divider" });
     formContents.push({
@@ -344,16 +373,21 @@ export default class SkeletonParametersPanel extends Panel {
       summary.distribution,
       -100,
       100,
-      0
+      0,
+      { step: 10 }
     );
+    // Donor: scale 0.2–2.0 in 0.2 steps, shown here in percent; the number
+    // input accepts values beyond the slider range.
     formContents.push({
       type: "edit-number-slider",
       key: "width:scale",
       label: translate("sidebar.skeleton-parameters.scale"),
       value: 100,
-      minValue: 10,
+      minValue: 20,
       defaultValue: 100,
-      maxValue: 300,
+      maxValue: 200,
+      step: 20,
+      allowInputBeyondRange: true,
     });
   }
 
@@ -418,20 +452,67 @@ export default class SkeletonParametersPanel extends Panel {
         },
       ],
     });
-    this._pushSummaryNumber(
-      formContents,
-      "cap:radius",
-      "cap-radius",
-      cap.capRadiusRatio
-    );
-    this._pushSummaryNumber(formContents, "cap:tension", "cap-tension", cap.capTension);
-    this._pushSummaryNumber(formContents, "cap:angle", "cap-angle", cap.capAngle);
-    this._pushSummaryNumber(
-      formContents,
-      "cap:distance",
-      "cap-distance",
-      cap.capDistance
-    );
+    // Donor parity: cap parameters appear as sliders, only for the styles
+    // they apply to. Radius maps 20 discrete slider positions logarithmically
+    // onto the [1/128, 1/4] ratio range; tension is edited in percent. Both
+    // are converted back in _onCapChange.
+    const styleValue = capStyle.mixed ? null : (capStyle.value ?? "butt");
+    if (styleValue === "round") {
+      const radiusSummary = {
+        value:
+          capRadiusIndexFromRatio(
+            cap.capRadiusRatio.value ?? DEFAULT_CAP_RADIUS_RATIO
+          ) + 1,
+        mixed: cap.capRadiusRatio.mixed,
+      };
+      this._pushSummarySlider(
+        formContents,
+        "cap:radius",
+        "cap-radius",
+        radiusSummary,
+        1,
+        CAP_RADIUS_POSITIONS,
+        capRadiusIndexFromRatio(DEFAULT_CAP_RADIUS_RATIO) + 1,
+        { step: 1 }
+      );
+      const tensionSummary = {
+        value: Math.round((cap.capTension.value ?? DEFAULT_CAP_TENSION) * 100),
+        mixed: cap.capTension.mixed,
+      };
+      this._pushSummarySlider(
+        formContents,
+        "cap:tension",
+        "cap-tension",
+        tensionSummary,
+        0,
+        100,
+        Math.round(DEFAULT_CAP_TENSION * 100),
+        { step: 5 }
+      );
+    } else if (styleValue === "square") {
+      const angleSummary = {
+        value: Math.round(cap.capAngle.value ?? DEFAULT_CAP_ANGLE),
+        mixed: cap.capAngle.mixed,
+      };
+      this._pushSummarySlider(
+        formContents,
+        "cap:angle",
+        "cap-angle",
+        angleSummary,
+        CAP_ANGLE_MIN,
+        CAP_ANGLE_MAX,
+        DEFAULT_CAP_ANGLE,
+        { step: 1 }
+      );
+      this._pushSummaryNumber(
+        formContents,
+        "cap:distance",
+        "cap-distance",
+        cap.capDistance
+      );
+    }
+    // Steps mirror the donor's percent-based sliders (step 1% / 0.1)
+    // expressed in our unit ranges.
     this._pushSummarySlider(
       formContents,
       "corner:roundness",
@@ -439,7 +520,8 @@ export default class SkeletonParametersPanel extends Panel {
       corner.roundnessStrength,
       0,
       1,
-      0
+      0,
+      { step: 0.01 }
     );
     this._pushSummarySlider(
       formContents,
@@ -448,7 +530,8 @@ export default class SkeletonParametersPanel extends Panel {
       corner.cornerAsymmetry,
       -1,
       1,
-      0
+      0,
+      { step: 0.1 }
     );
     this._pushSummarySlider(
       formContents,
@@ -457,7 +540,8 @@ export default class SkeletonParametersPanel extends Panel {
       corner.cornerTrimRatio,
       0.05,
       0.99,
-      0.5
+      0.5,
+      { step: 0.01 }
     );
     this._pushSummarySlider(
       formContents,
@@ -466,7 +550,8 @@ export default class SkeletonParametersPanel extends Panel {
       corner.cornerRadiusBoost,
       0.1,
       4,
-      1
+      1,
+      { step: 0.01 }
     );
   }
 
@@ -515,7 +600,16 @@ export default class SkeletonParametersPanel extends Panel {
     });
   }
 
-  _pushSlider(formContents, key, labelKey, getValue, minValue, maxValue, defaultValue) {
+  _pushSlider(
+    formContents,
+    key,
+    labelKey,
+    getValue,
+    minValue,
+    maxValue,
+    defaultValue,
+    options = {}
+  ) {
     formContents.push({
       type: "edit-number-slider",
       key,
@@ -525,6 +619,7 @@ export default class SkeletonParametersPanel extends Panel {
       // The RangeSlider web component requires a numeric defaultValue
       defaultValue: defaultValue ?? minValue,
       maxValue,
+      ...options,
     });
   }
 
@@ -545,17 +640,24 @@ export default class SkeletonParametersPanel extends Panel {
     summary,
     minValue,
     maxValue,
-    defaultValue
+    defaultValue,
+    options = {}
   ) {
+    // A mixed or absent value must NOT pin the thumb to minValue: that makes
+    // the slider draggable in only one direction. Park it at the default and
+    // show "mixed" as a placeholder instead (donor parity).
+    const noValue = summary.mixed || summary.value == null;
     formContents.push({
       type: "edit-number-slider",
       key,
       label: translate(`sidebar.skeleton-parameters.${labelKey}`),
-      value: summary.mixed || summary.value == null ? minValue : summary.value,
+      value: noValue ? (defaultValue ?? minValue) : summary.value,
+      displayValue: summary.mixed ? "mixed" : undefined,
       minValue,
       // The RangeSlider web component requires a numeric defaultValue
       defaultValue: defaultValue ?? minValue,
       maxValue,
+      ...options,
     });
   }
 
@@ -696,6 +798,13 @@ export default class SkeletonParametersPanel extends Panel {
     const field = map[name];
     if (!field) {
       return;
+    }
+    // The radius slider edits a 1-based log-scale position, the tension
+    // slider edits percent — convert back to model units (ratio / fraction).
+    if (name === "radius") {
+      value = capRadiusRatioFromIndex(Number(value) - 1);
+    } else if (name === "tension") {
+      value = Number(value) / 100;
     }
     await setPanelCapParameters(
       this.sceneController,

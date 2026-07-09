@@ -508,6 +508,21 @@ export class Form extends SimpleElement {
     rangeElement.minValue = fieldItem.minValue;
     rangeElement.defaultValue = fieldItem.defaultValue;
     rangeElement.maxValue = fieldItem.maxValue;
+    if (fieldItem.displayValue !== undefined) {
+      rangeElement.displayValue = fieldItem.displayValue;
+    }
+    if (fieldItem.values !== undefined) {
+      rangeElement.values = fieldItem.values;
+    }
+    if (fieldItem.step !== undefined) {
+      rangeElement.step = fieldItem.step;
+    }
+    if (fieldItem.allowInputBeyondRange) {
+      rangeElement.allowInputBeyondRange = true;
+    }
+    if (fieldItem.disabled) {
+      rangeElement.disabled = true;
+    }
 
     let checkboxElement;
     if (fieldItem.hasCheckBox) {

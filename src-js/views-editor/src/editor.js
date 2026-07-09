@@ -34,7 +34,11 @@ import {
 } from "@fontra/core/rectangle.ts";
 import { SceneView } from "@fontra/core/scene-view.js";
 import { isSuperset } from "@fontra/core/set-ops.js";
-import { deleteSkeletonPoint, getSkeletonData } from "@fontra/core/skeleton-model.js";
+import {
+  allocateSkeletonIds,
+  deleteSkeletonPoint,
+  getSkeletonData,
+} from "@fontra/core/skeleton-model.js";
 import { themeController } from "@fontra/core/theme-settings.js";
 import { getDecomposedIdentity } from "@fontra/core/transform.js";
 import { labeledCheckbox, labeledTextInput, pickFile } from "@fontra/core/ui-utils.js";
@@ -1629,12 +1633,14 @@ export class EditorController extends ViewController {
     );
 
     if (copyResult) {
-      const { layerGlyphs, flattenedPath, backgroundImageData } = copyResult;
+      const { layerGlyphs, flattenedPath, backgroundImageData, skeletonDataByLayer } =
+        copyResult;
       await this._writeLayersToClipboard(
         null,
         layerGlyphs,
         flattenedPath,
-        backgroundImageData
+        backgroundImageData,
+        skeletonDataByLayer
       );
     }
   }
@@ -1649,14 +1655,15 @@ export class EditorController extends ViewController {
     }
 
     if (this.sceneSettings.selectedGlyph.isEditing) {
-      const { layerGlyphs, flattenedPath, backgroundImageData } =
+      const { layerGlyphs, flattenedPath, backgroundImageData, skeletonDataByLayer } =
         this._prepareCopyOrCutLayers(undefined, false);
 
       await this._writeLayersToClipboard(
         null,
         layerGlyphs,
         flattenedPath,
-        backgroundImageData
+        backgroundImageData,
+        skeletonDataByLayer
       );
     } else {
       const positionedGlyph = this.sceneModel.getSelectedPositionedGlyph();
@@ -1677,7 +1684,8 @@ export class EditorController extends ViewController {
     varGlyph,
     layerGlyphs,
     flattenedPath,
-    backgroundImageData
+    backgroundImageData,
+    skeletonDataByLayer
   ) {
     if (!layerGlyphs?.length) {
       // nothing to do
@@ -1708,6 +1716,9 @@ export class EditorController extends ViewController {
       const resolvedImageData = await backgroundImageData;
       if (resolvedImageData && !isObjectEmpty(resolvedImageData)) {
         jsonObject.data.backgroundImageData = resolvedImageData;
+      }
+      if (skeletonDataByLayer && !isObjectEmpty(skeletonDataByLayer)) {
+        jsonObject.data.skeletonDataByLayer = skeletonDataByLayer;
       }
       return JSON.stringify(jsonObject);
     };
@@ -1783,13 +1794,27 @@ export class EditorController extends ViewController {
       }
     }
 
+    // Skeleton contours travel through the clipboard as a JSON sidecar:
+    // selected skeleton points mark their contours for copying, per layer.
+    // Selection ids are canonical in the edit layer; other layers resolve by
+    // structural ordinal (WS-9).
+    const { skeletonPoint: skeletonPointKeys } = parseSelection(
+      this.sceneController.selection
+    );
+    const editingLayers = this.sceneController.getEditingLayerFromGlyphLayers(
+      varGlyph.layers
+    );
+    const editLayerName = this.sceneController.sceneSettings.editLayerName;
+    const referenceSkeletonData = skeletonPointKeys?.length
+      ? getSkeletonData(editingLayers[editLayerName] || Object.values(editingLayers)[0])
+      : null;
+
     const layerGlyphs = [];
     let flattenedPath;
     const backgroundImageData = {};
+    const skeletonDataByLayer = {};
 
-    for (const [layerName, layerGlyph] of Object.entries(
-      this.sceneController.getEditingLayerFromGlyphLayers(varGlyph.layers)
-    )) {
+    for (const [layerName, layerGlyph] of Object.entries(editingLayers)) {
       const copyResult = this._prepareCopyOrCut(layerGlyph, doCut, !flattenedPath);
       if (!copyResult.instance) {
         return;
@@ -1809,6 +1834,31 @@ export class EditorController extends ViewController {
           backgroundImageData[imageIdentifier] = bgImage.src;
         }
       }
+
+      if (referenceSkeletonData) {
+        const skeletonData = getSkeletonData(layerGlyph);
+        if (skeletonData?.contours?.length) {
+          const contourIds = new Set();
+          for (const key of skeletonPointKeys) {
+            const { contourId, pointId } = parseSkeletonPointKey(key);
+            const address = resolveSkeletonAddressAcrossLayers(
+              referenceSkeletonData,
+              skeletonData,
+              contourId,
+              pointId
+            );
+            if (address) {
+              contourIds.add(address.contour.id);
+            }
+          }
+          const copiedContours = skeletonData.contours
+            .filter((contour) => contourIds.has(contour.id))
+            .map((contour) => structuredClone(contour));
+          if (copiedContours.length) {
+            skeletonDataByLayer[layerName] = { contours: copiedContours };
+          }
+        }
+      }
     }
     if (!layerGlyphs.length && !doCut) {
       const { instance, flattenedPath: instancePath } = this._prepareCopyOrCut(
@@ -1822,7 +1872,14 @@ export class EditorController extends ViewController {
       }
       layerGlyphs.push({ glyph: instance });
     }
-    return { layerGlyphs, flattenedPath, backgroundImageData };
+    return {
+      layerGlyphs,
+      flattenedPath,
+      backgroundImageData,
+      skeletonDataByLayer: isObjectEmpty(skeletonDataByLayer)
+        ? undefined
+        : skeletonDataByLayer,
+    };
   }
 
   _prepareCopyOrCut(editInstance, doCut = false, wantFlattenedPath = false) {
@@ -1944,8 +2001,13 @@ export class EditorController extends ViewController {
       return;
     }
 
-    let { pasteVarGlyph, pasteLayerGlyphs, sourceLocations, backgroundImageData } =
-      await this._unpackClipboard();
+    let {
+      pasteVarGlyph,
+      pasteLayerGlyphs,
+      sourceLocations,
+      backgroundImageData,
+      skeletonDataByLayer,
+    } = await this._unpackClipboard();
     if (!pasteVarGlyph && !pasteLayerGlyphs?.length) {
       await this._pasteClipboardImage();
       return;
@@ -2050,7 +2112,7 @@ export class EditorController extends ViewController {
       }
       backgroundImageData = adjustedBackgroundImageData;
 
-      await this._pasteLayerGlyphs(pasteLayerGlyphs);
+      await this._pasteLayerGlyphs(pasteLayerGlyphs, skeletonDataByLayer);
     }
 
     await this.fontController.writeBackgroundImages(backgroundImageData);
@@ -2083,6 +2145,7 @@ export class EditorController extends ViewController {
     let pasteVarGlyph;
     let sourceLocations;
     let backgroundImageData;
+    let skeletonDataByLayer;
 
     if (jsonString) {
       try {
@@ -2096,6 +2159,7 @@ export class EditorController extends ViewController {
             };
           });
           backgroundImageData = clipboardObject.data.backgroundImageData;
+          skeletonDataByLayer = clipboardObject.data.skeletonDataByLayer;
         } else if (clipboardObject.type === "fontra-variable-glyph") {
           pasteVarGlyph = VariableGlyph.fromObject(clipboardObject.data.variableGlyph);
           sourceLocations = clipboardObject.data.sourceLocations;
@@ -2116,7 +2180,13 @@ export class EditorController extends ViewController {
         pasteLayerGlyphs = [{ glyph }];
       }
     }
-    return { pasteVarGlyph, pasteLayerGlyphs, sourceLocations, backgroundImageData };
+    return {
+      pasteVarGlyph,
+      pasteLayerGlyphs,
+      sourceLocations,
+      backgroundImageData,
+      skeletonDataByLayer,
+    };
   }
 
   async _pasteClipboardImage() {
@@ -2186,8 +2256,13 @@ export class EditorController extends ViewController {
     );
   }
 
-  async _pasteLayerGlyphs(pasteLayerGlyphs) {
+  async _pasteLayerGlyphs(pasteLayerGlyphs, skeletonDataByLayer) {
     const defaultPasteGlyph = pasteLayerGlyphs[0].glyph;
+    // Skeleton clipboard sidecar: fall back to the first copied layer's
+    // skeleton contours for layers that have no entry of their own.
+    const defaultSkeletonPaste = skeletonDataByLayer
+      ? Object.values(skeletonDataByLayer)[0]
+      : null;
     const pasteLayerGlyphsByLayerName = Object.fromEntries(
       pasteLayerGlyphs.map((layer) => [layer.layerName, layer.glyph])
     );
@@ -2246,6 +2321,12 @@ export class EditorController extends ViewController {
           selection.add(`guideline/${guidelineIndex}`);
         }
 
+        const editLayerName = this.sceneController.sceneSettings.editLayerName;
+        const selectionLayerName =
+          editLayerName in editLayerGlyphs
+            ? editLayerName
+            : Object.keys(editLayerGlyphs)[0];
+
         for (const [layerName, layerGlyph] of Object.entries(editLayerGlyphs)) {
           const pasteGlyph =
             pasteLayerGlyphsByLayerName[layerName] ||
@@ -2265,6 +2346,33 @@ export class EditorController extends ViewController {
             if (!this.sceneSettings.backgroundImagesAreLocked) {
               selection.add("backgroundImage/0");
             }
+          }
+
+          // Append pasted skeleton contours through the one write path
+          // (editSkeleton), which regenerates the generated contours. Ids are
+          // re-minted so they never collide with the target's skeleton ids.
+          const pasteSkeleton =
+            (skeletonDataByLayer && skeletonDataByLayer[layerName]) ||
+            defaultSkeletonPaste;
+          if (pasteSkeleton?.contours?.length) {
+            editSkeleton(layerGlyph, (working) => {
+              const { data, nextId } = allocateSkeletonIds(
+                { contours: structuredClone(pasteSkeleton.contours), generated: [] },
+                working.nextId
+              );
+              working.contours.push(...data.contours);
+              working.nextId = nextId;
+              if (layerName === selectionLayerName) {
+                // Selection ids are canonical in the edit layer (WS-9).
+                for (const contour of data.contours) {
+                  for (const point of contour.points || []) {
+                    if (!point.type) {
+                      selection.add(`skeletonPoint/${contour.id}/${point.id}`);
+                    }
+                  }
+                }
+              }
+            });
           }
         }
         this.sceneController.selection = selection;
