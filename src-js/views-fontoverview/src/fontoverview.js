@@ -4,6 +4,10 @@ import {
   registerActionCallbacks,
 } from "@fontra/core/actions.js";
 import { applicationSettingsController } from "@fontra/core/application-settings.js";
+import {
+  setupLocationDependencies,
+  ShowLocationSettings,
+} from "@fontra/core/axis-ui.js";
 import { Backend } from "@fontra/core/backend-api.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { reverseUndoRecord, UndoStack } from "@fontra/core/font-controller.js";
@@ -21,10 +25,6 @@ import {
 import * as html from "@fontra/core/html-utils.js";
 import { loaderSpinner } from "@fontra/core/loader-spinner.js";
 import { translate, translatePlural } from "@fontra/core/localization.js";
-import {
-  setupLocationDependencies,
-  ShowLocationSettings,
-} from "@fontra/core/location-tools.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import { labeledTextInput } from "@fontra/core/ui-utils.js";
 import {

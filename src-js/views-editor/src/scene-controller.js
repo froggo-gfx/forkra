@@ -1,4 +1,9 @@
 import { registerAction } from "@fontra/core/actions.js";
+import {
+  ShowLocationSettings,
+  setShowEffectiveLocationDefaults,
+  setupLocationDependencies,
+} from "@fontra/core/axis-ui.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import {
   ChangeCollector,
@@ -20,11 +25,6 @@ import {
   readProjectGlyphSets,
 } from "@fontra/core/glyphsets-controller.js";
 import { translate, translatePlural } from "@fontra/core/localization.js";
-import {
-  ShowLocationSettings,
-  setShowEffectiveLocationDefaults,
-  setupLocationDependencies,
-} from "@fontra/core/location-tools.js";
 import { MouseTracker } from "@fontra/core/mouse-tracker.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import {

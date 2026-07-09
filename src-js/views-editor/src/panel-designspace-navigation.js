@@ -1,5 +1,6 @@
 import { registerAction } from "@fontra/core/actions.js";
 import { applicationSettingsController } from "@fontra/core/application-settings.js";
+import { makeFontAxisAccordionItems } from "@fontra/core/axis-ui.js";
 import { findNearestLocationIndex } from "@fontra/core/discrete-variation-model.js";
 import {
   BACKGROUND_LAYER_SEPARATOR,
@@ -9,7 +10,6 @@ import {
 import * as html from "@fontra/core/html-utils.js";
 import { htmlToElement } from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import { makeFontAxisAccordionItems } from "@fontra/core/location-tools.js";
 import { ObservableController, controllerKey } from "@fontra/core/observable-object.ts";
 import {
   labeledCheckbox,
@@ -309,7 +309,7 @@ export default class DesignspaceNavigationPanel extends Panel {
         if (event.key === "glyphLocation") {
           this.glyphAxesElement.values = event.newValue;
         } else {
-          // Handled by location-tools.js
+          // Handled by axis-ui.js
         }
       },
       true
