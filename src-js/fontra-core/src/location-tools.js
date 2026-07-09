@@ -25,12 +25,12 @@ export function makeFontAxisAccordionItems(
   const settings = settingsController.model;
 
   const fontAxesAccordionItem = {
-    id: "font-axes-accordion-item",
+    id: "font-axes",
     label: translate("sidebar.designspace-navigation.font-axes"),
     open: true,
     content: html.createDomElement(
       "designspace-location",
-      { id: "font-axes", style: "height: 100%;" },
+      { id: "font-axes-ds-location", style: "height: 100%;" },
       []
     ),
     auxiliaryHeaderElement: groupAccordionHeaderButtons([
@@ -57,12 +57,12 @@ export function makeFontAxisAccordionItems(
   };
 
   const hiddenFontAxesAccordionItem = {
-    id: "hidden-font-axes-accordion-item",
+    id: "hidden-font-axes",
     label: "Hidden font axes", // translate("sidebar.designspace-navigation.font-axes"),
     open: false,
     content: html.createDomElement(
       "designspace-location",
-      { id: "hidden-font-axes", style: "height: 100%;" },
+      { id: "hidden-font-axes-ds-location", style: "height: 100%;" },
       []
     ),
     auxiliaryHeaderElement: groupAccordionHeaderButtons([
@@ -136,7 +136,7 @@ function setupFontAxisSliders(
 ) {
   const settings = settingsController.model;
   const locationElement = accordion.querySelector(
-    forHiddenAxes ? "#hidden-font-axes" : "#font-axes"
+    forHiddenAxes ? "#hidden-font-axes-ds-location" : "#font-axes-ds-location"
   );
 
   const filteredAxes = () => {
@@ -183,9 +183,7 @@ function setupFontAxisSliders(
 
     updateResetButtonState();
     if (forHiddenAxes) {
-      const hiddenAxesAccordionItem = accordion.querySelector(
-        "#hidden-font-axes-accordion-item"
-      );
+      const hiddenAxesAccordionItem = accordion.querySelector("#hidden-font-axes");
       hiddenAxesAccordionItem.hidden = !axes.length;
     }
   };
@@ -405,4 +403,27 @@ function editFontAxes(projectIdentifier) {
   url.pathname = url.pathname.replace(/\/[^.]+\.html/, "/fontinfo.html");
   url.hash = "#axes-panel";
   window.open(url.toString(), `fontra.fontinfo.${projectIdentifier}`);
+}
+
+export function setShowEffectiveLocationDefaults(fontController, settings) {
+  // If for each of the sets of non-hidden and hidden axes there exists a
+  // cross-axis mapping that influences it, activate "ShowEffectiveLocation"
+  // by default (used in panel-designspace-navigation.js)
+  for (const [key, hidden] of [
+    ["fontAxesShowEffectiveLocation", false],
+    ["hiddenFontAxesShowEffectiveLocation", true],
+  ]) {
+    const axisNames = new Set(
+      fontController.fontAxes
+        .filter((axis) => !!axis.hidden == hidden)
+        .map((axis) => axis.name)
+    );
+    if (
+      fontController.axes.mappings.some(({ outputLocation }) =>
+        Object.keys(outputLocation).some((key) => axisNames.has(key))
+      )
+    ) {
+      settings[key] = ShowLocationSettings.ShowEffectiveLocation;
+    }
+  }
 }
