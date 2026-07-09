@@ -27,6 +27,7 @@ font-overview-navigation {
 
 .font-overview-navigation-section {
   flex: 1;
+  overflow: hidden;
 }
 
 #glyph-cell-view-container {
