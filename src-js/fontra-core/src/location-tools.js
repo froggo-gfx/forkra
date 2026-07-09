@@ -192,6 +192,12 @@ function setupFontAxisSliders(
     locationElement.phantomValues = settings.fontLocationSourceMapped;
 
     updateResetButtonState();
+    if (forHiddenAxes) {
+      const hiddenAxesAccordionItem = accordion.querySelector(
+        "#hidden-font-axes-accordion-item"
+      );
+      hiddenAxesAccordionItem.hidden = !axes.length;
+    }
   };
 
   settingsController.addKeyListener(
