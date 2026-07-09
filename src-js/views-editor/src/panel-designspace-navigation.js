@@ -242,10 +242,6 @@ export default class DesignspaceNavigationPanel extends Panel {
     return this.accordion.querySelector("#glyph-axes");
   }
 
-  get hiddenFontAxesAccordionItem() {
-    return this.accordion.querySelector("#hidden-font-axes-accordion-item");
-  }
-
   get glyphAxesAccordionItem() {
     return this.accordion.querySelector("#glyph-axes-accordion-item");
   }
