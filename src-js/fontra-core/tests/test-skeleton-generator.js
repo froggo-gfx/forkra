@@ -80,7 +80,10 @@ describe("skeleton-generator provenance", () => {
   });
 
   it("emits side-bearing handle provenance adjacent to skeleton on-curves", () => {
-    const fixture = fixtures.find((item) => item.name === "open-cubic-round-cap");
+    // Butt-cap variant: split-outline round caps (3.4) consume the terminal
+    // side segment, so terminal handle provenance only survives on cap styles
+    // that keep the side outline intact.
+    const fixture = fixtures.find((item) => item.name === "open-cubic-butt-cap");
     const result = generateFromSkeleton(fixture.canonical);
     const pointMaps = result.provenance.flatMap((entry) => entry.pointMap);
     for (const side of ["left", "right"]) {

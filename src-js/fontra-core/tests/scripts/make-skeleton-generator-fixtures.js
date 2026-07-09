@@ -1,6 +1,7 @@
+import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 
 // Four levels up from tests/scripts/ reaches the repo root; the donor checkout
 // lives at <repo>/skeleton.
@@ -15,6 +16,37 @@ const outputPath = path.join(
   "skeleton-generator",
   "fixtures.json"
 );
+
+// Round caps were reworked (split-outline geometry) on test/cap-rounding-rewamp,
+// AFTER the pinned donor commit — so round-cap fixtures pin THAT branch's output
+// instead of the pinned donor's (`capReference: true` per fixture). The reference
+// generator is extracted from git at regen time (no vendored blob); if the ref
+// ever disappears, the committed fixtures.json still works — only regeneration
+// would need a new reference.
+const CAP_REFERENCE_COMMIT = "7719b68f4f92e9389f5c10faf6f09630779fe91d"; // test/cap-rounding-rewamp tip
+const capReferenceDir = path.join(__dirname, "..", ".cap-reference-tmp");
+
+async function loadCapReferenceGenerator() {
+  fs.rmSync(capReferenceDir, { recursive: true, force: true });
+  fs.mkdirSync(capReferenceDir, { recursive: true });
+  const repoRoot = path.join(__dirname, "..", "..", "..", "..");
+  const tarPath = path.join(capReferenceDir, "capref.tar");
+  execSync(
+    `git archive ${CAP_REFERENCE_COMMIT} src-js/fontra-core/src -o "${tarPath}"`,
+    { cwd: repoRoot }
+  );
+  // Relative paths: Windows tar can misread "C:\..." as a remote host.
+  execSync(`tar -xf capref.tar`, { cwd: capReferenceDir });
+  const generatorPath = path.join(
+    capReferenceDir,
+    "src-js",
+    "fontra-core",
+    "src",
+    "skeleton-contour-generator.js"
+  );
+  const module = await import(pathToFileURL(generatorPath).href);
+  return module.generateContoursFromSkeleton;
+}
 
 const CAP_CORNER_POINT_FIELDS = [
   "capStyle",
@@ -63,6 +95,7 @@ const fixtures = [
   },
   {
     name: "open-cubic-round-cap",
+    capReference: true,
     canonical: {
       version: 1,
       nextId: 6,
@@ -77,6 +110,31 @@ const fixtures = [
             offCurve(3, 40, 120),
             offCurve(4, 120, 120),
             point(5, 160, 0, { capStyle: "round" }),
+          ],
+        },
+      ],
+      generated: [],
+    },
+  },
+  {
+    // Same geometry as open-cubic-round-cap with default (butt) caps: rib and
+    // handle provenance stays fully observable because no cap consumes the
+    // terminal side geometry.
+    name: "open-cubic-butt-cap",
+    canonical: {
+      version: 1,
+      nextId: 6,
+      contours: [
+        {
+          id: 1,
+          closed: false,
+          defaultWidth: 70,
+          singleSided: null,
+          points: [
+            point(2, 0, 0),
+            offCurve(3, 40, 120),
+            offCurve(4, 120, 120),
+            point(5, 160, 0),
           ],
         },
       ],
@@ -164,13 +222,21 @@ const fixtures = [
   },
 ];
 
+const generateCapReferenceContours = fixtures.some((fixture) => fixture.capReference)
+  ? await loadCapReferenceGenerator()
+  : null;
+
 for (const fixture of fixtures) {
   fixture.donorInput = canonicalToDonor(fixture.canonical);
-  fixture.expectedContours = generateDonorContours(fixture.donorInput);
+  const generate = fixture.capReference
+    ? generateCapReferenceContours
+    : generateDonorContours;
+  fixture.expectedContours = generate(fixture.donorInput);
 }
 
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${JSON.stringify(fixtures, null, 2)}\n`);
+fs.rmSync(capReferenceDir, { recursive: true, force: true });
 
 function point(id, x, y, extra = {}) {
   return {

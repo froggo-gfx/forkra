@@ -294,6 +294,7 @@
   },
   {
     "name": "open-cubic-round-cap",
+    "capReference": true,
     "canonical": {
       "version": 1,
       "nextId": 6,
@@ -421,132 +422,287 @@
       {
         "points": [
           {
-            "x": 38,
-            "y": -13,
+            "x": 44.66193574666977,
+            "y": 5.513138771057129,
             "smooth": true
           },
           {
-            "x": 66.85366536573444,
-            "y": 78.36994032482573,
+            "x": 69.69321149028838,
+            "y": 68.75748452544212,
             "type": "cubic"
           },
           {
-            "x": 98.1934750599143,
-            "y": 62.38732897693802,
+            "x": 93.46894303482019,
+            "y": 59.03275747066848,
+            "type": "cubic"
+          },
+          {
+            "x": 115.40216776019406,
+            "y": 5.163501838076627,
+            "smooth": true
+          },
+          {
+            "x": 119.60873981507717,
+            "y": -5.168079960712095,
+            "type": "cubic"
+          },
+          {
+            "x": 131,
+            "y": -11,
+            "type": "cubic"
+          },
+          {
+            "x": 141,
+            "y": -7,
+            "smooth": true,
+            "skipColinear": true
+          },
+          {
+            "x": 179,
+            "y": 7,
+            "smooth": true,
+            "skipColinear": true
+          },
+          {
+            "x": 190,
+            "y": 11,
+            "type": "cubic"
+          },
+          {
+            "x": 195,
+            "y": 22,
+            "type": "cubic"
+          },
+          {
+            "x": 191.28446573312854,
+            "y": 31.09507173595094,
+            "smooth": true
+          },
+          {
+            "x": 191.28446573312854,
+            "y": 31.09507173595094,
+            "smooth": true
+          },
+          {
+            "x": 138.553018152008,
+            "y": 159.97898223104858,
+            "type": "cubic"
+          },
+          {
+            "x": 23.64413415826857,
+            "y": 166.97762418724597,
+            "type": "cubic"
+          },
+          {
+            "x": -31.328754901885986,
+            "y": 31.090598583221436,
+            "smooth": true
+          },
+          {
+            "x": -35,
+            "y": 22,
+            "type": "cubic"
+          },
+          {
+            "x": -30,
+            "y": 11,
+            "type": "cubic"
+          },
+          {
+            "x": -19,
+            "y": 7,
+            "smooth": true,
+            "skipColinear": true
+          },
+          {
+            "x": 19,
+            "y": -7,
+            "smooth": true,
+            "skipColinear": true
+          },
+          {
+            "x": 29,
+            "y": -11,
+            "type": "cubic"
+          },
+          {
+            "x": 40,
+            "y": -5,
+            "type": "cubic"
+          },
+          {
+            "x": 44.66193574666977,
+            "y": 5.513138771057129,
+            "smooth": true
+          }
+        ],
+        "isClosed": true
+      }
+    ]
+  },
+  {
+    "name": "open-cubic-butt-cap",
+    "canonical": {
+      "version": 1,
+      "nextId": 6,
+      "contours": [
+        {
+          "id": 1,
+          "closed": false,
+          "defaultWidth": 70,
+          "singleSided": null,
+          "points": [
+            {
+              "id": 2,
+              "x": 0,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 40,
+                "right": 40,
+                "linked": true
+              },
+              "nudge": {
+                "left": 0,
+                "right": 0
+              },
+              "editable": {
+                "left": false,
+                "right": false
+              },
+              "handleOffsets": {}
+            },
+            {
+              "id": 3,
+              "x": 40,
+              "y": 120,
+              "type": "cubic",
+              "smooth": false
+            },
+            {
+              "id": 4,
+              "x": 120,
+              "y": 120,
+              "type": "cubic",
+              "smooth": false
+            },
+            {
+              "id": 5,
+              "x": 160,
+              "y": 0,
+              "type": null,
+              "smooth": false,
+              "width": {
+                "left": 40,
+                "right": 40,
+                "linked": true
+              },
+              "nudge": {
+                "left": 0,
+                "right": 0
+              },
+              "editable": {
+                "left": false,
+                "right": false
+              },
+              "handleOffsets": {}
+            }
+          ]
+        }
+      ],
+      "generated": []
+    },
+    "donorInput": {
+      "contours": [
+        {
+          "isClosed": false,
+          "defaultWidth": 70,
+          "singleSided": false,
+          "singleSidedDirection": "left",
+          "capStyle": "butt",
+          "reversed": false,
+          "points": [
+            {
+              "x": 0,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 40,
+              "rightWidth": 40,
+              "leftNudge": 0,
+              "rightNudge": 0,
+              "leftEditable": false,
+              "rightEditable": false
+            },
+            {
+              "x": 40,
+              "y": 120,
+              "smooth": false,
+              "type": "cubic"
+            },
+            {
+              "x": 120,
+              "y": 120,
+              "smooth": false,
+              "type": "cubic"
+            },
+            {
+              "x": 160,
+              "y": 0,
+              "smooth": false,
+              "leftWidth": 40,
+              "rightWidth": 40,
+              "leftNudge": 0,
+              "rightNudge": 0,
+              "leftEditable": false,
+              "rightEditable": false
+            }
+          ]
+        }
+      ]
+    },
+    "expectedContours": [
+      {
+        "points": [
+          {
+            "x": 38,
+            "y": -13,
+            "smooth": false
+          },
+          {
+            "x": 68,
+            "y": 78,
+            "type": "cubic"
+          },
+          {
+            "x": 97,
+            "y": 62,
             "type": "cubic"
           },
           {
             "x": 122,
             "y": -13,
-            "smooth": true
-          },
-          {
-            "x": 128,
-            "y": -32,
-            "smooth": true,
-            "skipColinear": true
-          },
-          {
-            "x": 131,
-            "y": -42,
-            "type": "cubic"
-          },
-          {
-            "x": 143,
-            "y": -47,
-            "type": "cubic"
-          },
-          {
-            "x": 153,
-            "y": -44,
-            "smooth": true,
-            "skipColinear": true
-          },
-          {
-            "x": 191,
-            "y": -31,
-            "smooth": true,
-            "skipColinear": true
-          },
-          {
-            "x": 202,
-            "y": -27,
-            "type": "cubic"
-          },
-          {
-            "x": 207,
-            "y": -16,
-            "type": "cubic"
-          },
-          {
-            "x": 204,
-            "y": -6,
-            "smooth": true,
-            "skipColinear": true
+            "smooth": false
           },
           {
             "x": 198,
             "y": 13,
-            "smooth": true
+            "smooth": false
           },
           {
-            "x": 149.72027351025656,
-            "y": 165.88580055085416,
+            "x": 147,
+            "y": 165,
             "type": "cubic"
           },
           {
-            "x": 13.136504236124544,
-            "y": 174.93226341439438,
+            "x": 16,
+            "y": 174,
             "type": "cubic"
           },
           {
             "x": -38,
             "y": 13,
-            "smooth": true
-          },
-          {
-            "x": -44,
-            "y": -6,
-            "smooth": true,
-            "skipColinear": true
-          },
-          {
-            "x": -47,
-            "y": -16,
-            "type": "cubic"
-          },
-          {
-            "x": -42,
-            "y": -27,
-            "type": "cubic"
-          },
-          {
-            "x": -31,
-            "y": -31,
-            "smooth": true,
-            "skipColinear": true
-          },
-          {
-            "x": 7,
-            "y": -44,
-            "smooth": true,
-            "skipColinear": true
-          },
-          {
-            "x": 17,
-            "y": -47,
-            "type": "cubic"
-          },
-          {
-            "x": 29,
-            "y": -42,
-            "type": "cubic"
-          },
-          {
-            "x": 32,
-            "y": -32,
-            "smooth": true,
-            "skipColinear": true
+            "smooth": false
           }
         ],
         "isClosed": true

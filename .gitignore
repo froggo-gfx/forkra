@@ -270,3 +270,5 @@ src/fontra/client
 skeleton/
 letterspacer/
 .claude/
+
+src-js/fontra-core/tests/.cap-reference-tmp/
