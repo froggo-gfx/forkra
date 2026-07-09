@@ -82,8 +82,8 @@ export default class DesignspaceNavigationPanel extends Panel {
     this.sceneSettings = this.editorController.sceneSettingsController.model;
     this.sceneModel = this.editorController.sceneController.sceneModel;
     this.sceneController = this.editorController.sceneController;
-    this.updateResetAllAxesButtonState = throttleCalls(
-      () => this._updateResetAllAxesButtonState(),
+    this.updateResetGlyphAxesButtonState = throttleCalls(
+      () => this._updateResetGlyphAxesButtonState(),
       100
     );
 
@@ -303,7 +303,7 @@ export default class DesignspaceNavigationPanel extends Panel {
         await this._updateEditingStatus();
         await this._updateSourceLayersList();
 
-        this.updateResetAllAxesButtonState();
+        this.updateResetGlyphAxesButtonState();
         this.updateInterpolationContributions();
         this._updateInterpolationErrorInfo();
         if (event.senderInfo?.senderID === this) {
@@ -668,7 +668,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     this.sceneSettings.glyphLocation = {};
   }
 
-  _updateResetAllAxesButtonState() {
+  _updateResetGlyphAxesButtonState() {
     const button = this.accordion.querySelector("#reset-glyph-axes-button");
     button.disabled = isLocationAtDefault(
       this.sceneSettings.glyphLocation,
@@ -758,7 +758,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     this.glyphAxesElement.axes = glyphAxes;
     this.glyphAxesAccordionItem.hidden = !varGlyphController;
 
-    this._updateResetAllAxesButtonState();
+    this._updateResetGlyphAxesButtonState();
   }
 
   async _updateSources() {
