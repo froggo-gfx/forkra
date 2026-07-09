@@ -1,3 +1,4 @@
+import { getActionIdentifierFromKeyEvent } from "@fontra/core/actions.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import {
@@ -705,7 +706,8 @@ export class GlyphCellView extends HTMLElement {
       this.onOpenSelectedGlyphs?.(event);
     } else if (
       !(event.metaKey || event.ctrlKey) &&
-      event.target !== this.hiddenTextEntry
+      event.target !== this.hiddenTextEntry &&
+      !getActionIdentifierFromKeyEvent(event)
     ) {
       event.stopImmediatePropagation();
       const keyEvent = new event.constructor(event.type, event);
