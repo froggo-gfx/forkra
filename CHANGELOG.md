@@ -17,6 +17,7 @@
 
 ### Fixes
 
+- Fix bug with font source interpolation after toggling the "Is Sparse" flag. [PR 2693](https://github.com/fontra/fontra/pull/2693)
 - [font overview, Firefox] Prevent opening two tabs instead of one when typing Enter to open the selection in the glyph editor. [Issue 2678](https://github.com/fontra/fontra/issues/2678) [PR 2680](https://github.com/fontra/fontra/pull/2680)
 
 ## 2026-06-28 [version 2026.6.5]
