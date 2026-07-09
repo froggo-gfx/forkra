@@ -4,6 +4,10 @@ import {
   registerActionCallbacks,
 } from "@fontra/core/actions.js";
 import { applicationSettingsController } from "@fontra/core/application-settings.js";
+import {
+  setupLocationDependencies,
+  ShowLocationSettings,
+} from "@fontra/core/axis-ui.js";
 import { Backend } from "@fontra/core/backend-api.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { reverseUndoRecord, UndoStack } from "@fontra/core/font-controller.js";
@@ -50,7 +54,11 @@ import { FontOverviewNavigation } from "./panel-navigation.js";
 
 const persistentSettings = [
   { key: "searchString" },
-  { key: "fontLocationUser" },
+  { key: "fontLocationUser", infoKey: "location" },
+  { key: "fontAxesUseSourceCoordinates" },
+  { key: "fontAxesShowEffectiveLocation" },
+  { key: "hiddenFontAxesShowEffectiveLocation" },
+  { key: "fontAxesSkipMapping" },
   { key: "glyphSelection", toJSON: (v) => [...v], fromJSON: (v) => new Set(v) },
   { key: "closedGlyphSections", toJSON: (v) => [...v], fromJSON: (v) => new Set(v) },
   {
@@ -69,9 +77,14 @@ function getDefaultFontOverviewSettings() {
     searchString: "",
     fontLocationUser: {},
     fontLocationSource: {},
+    fontLocationSourceMapped: {},
+    fontAxesUseSourceCoordinates: false,
+    fontAxesShowEffectiveLocation: ShowLocationSettings.DontShowEffectiveLocation,
+    hiddenFontAxesShowEffectiveLocation: ShowLocationSettings.DontShowEffectiveLocation,
+    fontAxesSkipMapping: false,
     glyphSelection: new Set(),
     closedGlyphSections: new Set(),
-    closedNavigationSections: new Set(),
+    closedNavigationSections: new Set(["hidden-font-axes"]),
     groupByKeys: [],
     projectGlyphSets: {},
     myGlyphSets: {},
@@ -202,7 +215,7 @@ export class FontOverviewController extends ViewController {
       }
     );
 
-    this._setupLocationDependencies();
+    setupLocationDependencies(this.fontController, this.fontOverviewSettingsController);
 
     this._updateFromWindowLocation();
 
@@ -222,8 +235,7 @@ export class FontOverviewController extends ViewController {
 
     this.glyphCellView = new GlyphCellView(
       this.fontController,
-      this.fontOverviewSettingsController,
-      { locationKey: "fontLocationSource" }
+      this.fontOverviewSettingsController
     );
 
     this.fontOverviewSettingsController.addKeyListener("cellMagnification", (event) => {
@@ -267,38 +279,6 @@ export class FontOverviewController extends ViewController {
     this.undoStack.clear();
   }
 
-  _setupLocationDependencies() {
-    // TODO: This currently does *not* do avar-2 / cross-axis-mapping
-    // - We need the "user location" to send to the editor
-    // - We would need the "mapped source location" for the glyph cells
-    // - We use the "user location" to store in the fontoverview URL fragment
-    // - Mapping from "user" to "source" to "mapped source" is easy
-    // - The reverse is not: see CrossAxisMapping.unmapLocation()
-
-    this.fontOverviewSettingsController.addKeyListener(
-      "fontLocationSource",
-      (event) => {
-        if (!event.senderInfo?.fromFontLocationUser) {
-          this.fontOverviewSettingsController.setItem(
-            "fontLocationUser",
-            this.fontController.mapSourceLocationToUserLocation(event.newValue),
-            { fromFontLocationSource: true }
-          );
-        }
-      }
-    );
-
-    this.fontOverviewSettingsController.addKeyListener("fontLocationUser", (event) => {
-      if (!event.senderInfo?.fromFontLocationSource) {
-        this.fontOverviewSettingsController.setItem(
-          "fontLocationSource",
-          this.fontController.mapUserLocationToSourceLocation(event.newValue),
-          { fromFontLocationUser: true }
-        );
-      }
-    });
-  }
-
   _updateFromWindowLocation() {
     const viewInfo = readObjectFromURLFragment();
     if (!viewInfo) {
@@ -307,8 +287,8 @@ export class FontOverviewController extends ViewController {
     }
     const defaultSettings = getDefaultFontOverviewSettings();
     this.fontOverviewSettingsController.withSenderInfo({ senderID: this }, () => {
-      for (const { key, fromJSON } of persistentSettings) {
-        const value = viewInfo[key];
+      for (const { key, infoKey, fromJSON } of persistentSettings) {
+        const value = viewInfo[infoKey ?? key];
         if (value !== undefined) {
           this.fontOverviewSettings[key] = fromJSON?.(value) || value;
         } else {
@@ -331,8 +311,8 @@ export class FontOverviewController extends ViewController {
 
   _updateWindowLocation() {
     const viewInfo = Object.fromEntries(
-      persistentSettings.map(({ key, toJSON }) => [
-        key,
+      persistentSettings.map(({ key, infoKey, toJSON }) => [
+        infoKey ?? key,
         toJSON?.(this.fontOverviewSettings[key]) || this.fontOverviewSettings[key],
       ])
     );

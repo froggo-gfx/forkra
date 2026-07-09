@@ -177,7 +177,6 @@ const fontOverviewInfoKeys = [
   "projectGlyphSetSelection",
   "myGlyphSetSelection",
   "location",
-  "fontLocationUser",
 ];
 
 function getFontMenuItems(viewController) {
@@ -207,9 +206,7 @@ function getFontMenuItems(viewController) {
                 for (const key of fontOverviewInfoKeys) {
                   const value = viewInfo[key];
                   if (value) {
-                    // TODO: fix location vs fontLocationUser (editor vs fontoverview)
-                    fontOverviewInfo[key == "location" ? "fontLocationUser" : key] =
-                      value;
+                    fontOverviewInfo[key] = value;
                   }
                 }
                 if (!isObjectEmpty(fontOverviewInfo)) {
