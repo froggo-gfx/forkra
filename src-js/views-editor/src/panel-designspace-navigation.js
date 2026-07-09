@@ -9,12 +9,7 @@ import {
 import * as html from "@fontra/core/html-utils.js";
 import { htmlToElement } from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import {
-  ShowLocationSettings,
-  filterLocation,
-  getAxisOptionsMenuItems,
-  makeFontAxisAccordionItems,
-} from "@fontra/core/location-tools.js";
+import { makeFontAxisAccordionItems } from "@fontra/core/location-tools.js";
 import { ObservableController, controllerKey } from "@fontra/core/observable-object.ts";
 import {
   labeledCheckbox,
@@ -638,19 +633,6 @@ export default class DesignspaceNavigationPanel extends Panel {
     } else {
       this.sourcesList.setSelectedItemIndex(undefined);
     }
-  }
-
-  showFontAxesViewOptionsMenu(event, forHiddenAxes) {
-    const button = this.accordion.querySelector(
-      forHiddenAxes
-        ? "#hidden-font-axes-view-options-button"
-        : "#font-axes-view-options-button"
-    );
-    const buttonRect = button.getBoundingClientRect();
-
-    const menuItems = getAxisOptionsMenuItems(this.sceneSettings, forHiddenAxes);
-
-    showMenu(menuItems, { x: buttonRect.left, y: buttonRect.bottom });
   }
 
   showGlyphSourcesSortOptionsMenu(event) {
