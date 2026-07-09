@@ -315,6 +315,7 @@ export const strings = {
   "sidebar.designspace-navigation.glyph-sources-sort-options.no-sorting": "不排序",
   "sidebar.designspace-navigation.glyph-sources.name": "源名稱",
   "sidebar.designspace-navigation.glyph-sources.status": "標籤",
+  "sidebar.designspace-navigation.hidden-font-axes": "Hidden font axes",
   "sidebar.designspace-navigation.source-properties.undo": "編輯源屬性",
   "sidebar.designspace-navigation.source.activate": "啟用 %0",
   "sidebar.designspace-navigation.source.deactivate": "停用 %0",

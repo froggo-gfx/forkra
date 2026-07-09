@@ -329,6 +329,7 @@ export const strings = {
   "sidebar.designspace-navigation.glyph-sources-sort-options.no-sorting": "Do not sort",
   "sidebar.designspace-navigation.glyph-sources.name": "source name",
   "sidebar.designspace-navigation.glyph-sources.status": "status",
+  "sidebar.designspace-navigation.hidden-font-axes": "Hidden font axes",
   "sidebar.designspace-navigation.source-properties.undo": "edit source properties",
   "sidebar.designspace-navigation.source.activate": "activate %0",
   "sidebar.designspace-navigation.source.deactivate": "deactivate %0",

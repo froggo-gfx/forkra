@@ -58,7 +58,7 @@ export function makeFontAxisAccordionItems(
 
   const hiddenFontAxesAccordionItem = {
     id: "hidden-font-axes",
-    label: "Hidden font axes", // translate("sidebar.designspace-navigation.font-axes"),
+    label: translate("sidebar.designspace-navigation.hidden-font-axes"),
     open: false,
     content: html.createDomElement(
       "designspace-location",
