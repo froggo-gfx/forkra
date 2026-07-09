@@ -4,6 +4,7 @@
 
 ### New features
 
+- [font overview] Support cross-axis mappings, put hidden axes in a separate section, and in general bring the axes UI in line with the glyph editor. [Issue 2652](https://github.com/fontra/fontra/issues/2652), [PR 2691](https://github.com/fontra/fontra/pull/2691)
 - [font overview] Allow quick glyph selection by typing a glyph name or a character. [Issue 2677](https://github.com/fontra/fontra/issues/2677), [PR 2682](https://github.com/fontra/fontra/pull/2682)
 - [font overview] Add "Copy Glyph Name(s) and "Copy Character(s)" context menus. [Issue 2676](https://github.com/fontra/fontra/issues/2676), [PR 2681](https://github.com/fontra/fontra/pull/2681)
 
