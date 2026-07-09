@@ -319,7 +319,7 @@ export function setupLocationDependencies(fontController, settingsController) {
   });
 }
 
-export function filterLocation(location, axes) {
+function filterLocation(location, axes) {
   const filteredLocation = {};
 
   for (const axis of axes) {
@@ -338,7 +338,7 @@ export const ShowLocationSettings = Object.freeze({
   OnlyShowEffectiveLocation: 2,
 });
 
-export function getAxisOptionsMenuItems(settings, forHiddenAxes) {
+function getAxisOptionsMenuItems(settings, forHiddenAxes) {
   const effectiveLocationKey = forHiddenAxes
     ? "hiddenFontAxesShowEffectiveLocation"
     : "fontAxesShowEffectiveLocation";
