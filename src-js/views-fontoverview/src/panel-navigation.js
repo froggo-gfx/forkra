@@ -6,10 +6,7 @@ import {
 } from "@fontra/core/glyphsets-ui.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import {
-  filterLocation,
-  getAxisOptionsMenuItems,
-} from "@fontra/core/location-tools.js";
+import { makeFontAxisAccordionItems } from "@fontra/core/location-tools.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import { difference, symmetricDifference, union } from "@fontra/core/set-ops.js";
 import { popupSelect } from "@fontra/core/ui-utils.js";
@@ -91,6 +88,14 @@ export class FontOverviewNavigation extends HTMLElement {
       }
     );
 
+    const { updateFontAxes, fontAxesAccordionItem, hiddenFontAxesAccordionItem } =
+      makeFontAxisAccordionItems(
+        this.projectIdentifier,
+        this.fontController,
+        this.fontOverviewSettingsController,
+        accordion
+      );
+
     const accordionItems = [
       {
         label: "Source",
@@ -99,79 +104,8 @@ export class FontOverviewNavigation extends HTMLElement {
           await this._makeFontSourcePopup(),
         ]),
       },
-      {
-        label: "Axes",
-        id: "font-axes",
-        content: html.div({ id: "font-axes-container" }, [
-          this._makeFontSourceSliders(false),
-        ]),
-        auxiliaryHeaderElement: groupAccordionHeaderButtons([
-          makeAccordionHeaderButton({
-            icon: "menu-2",
-            id: "font-axes-view-options-button",
-            tooltip: translate(
-              "sidebar.designspace-navigation.font-axes-view-options-button.tooltip"
-            ),
-            onclick: (event) => this.showFontAxesViewOptionsMenu(event, false),
-          }),
-          makeAccordionHeaderButton({
-            icon: "tool",
-            tooltip: translate("sidebar.designspace-navigation.font-axes.edit"),
-            onclick: (event) => {
-              const url = new URL(window.location);
-              url.pathname = url.pathname.replace(
-                "/fontoverview.html",
-                "/fontinfo.html"
-              );
-              url.hash = "#axes-panel";
-              window.open(url.toString(), `fontra.fontinfo.${this.projectIdentifier}`);
-            },
-          }),
-          makeAccordionHeaderButton({
-            icon: "refresh",
-            id: "reset-font-axes-button",
-            tooltip: translate("sidebar.designspace-navigation.font-axes.reset"),
-            onclick: (event) => this.resetFontAxesToDefault(),
-          }),
-        ]),
-      },
-      {
-        label: "Hidden Axes",
-        id: "hidden-font-axes",
-        open: false,
-        content: html.div({ id: "hidden-font-axes-container" }, [
-          this._makeFontSourceSliders(true),
-        ]),
-        auxiliaryHeaderElement: groupAccordionHeaderButtons([
-          makeAccordionHeaderButton({
-            icon: "menu-2",
-            id: "hidden-font-axes-view-options-button",
-            tooltip: translate(
-              "sidebar.designspace-navigation.font-axes-view-options-button.tooltip"
-            ),
-            onclick: (event) => this.showFontAxesViewOptionsMenu(event, true),
-          }),
-          makeAccordionHeaderButton({
-            icon: "tool",
-            tooltip: translate("sidebar.designspace-navigation.font-axes.edit"),
-            onclick: (event) => {
-              const url = new URL(window.location);
-              url.pathname = url.pathname.replace(
-                "/fontoverview.html",
-                "/fontinfo.html"
-              );
-              url.hash = "#axes-panel";
-              window.open(url.toString(), `fontra.fontinfo.${this.projectIdentifier}`);
-            },
-          }),
-          makeAccordionHeaderButton({
-            icon: "refresh",
-            id: "reset-hidden-font-axes-button",
-            tooltip: translate("sidebar.designspace-navigation.font-axes.reset"),
-            onclick: (event) => this.resetHiddenFontAxesToDefault(),
-          }),
-        ]),
-      },
+      fontAxesAccordionItem,
+      hiddenFontAxesAccordionItem,
       {
         label: "Group by", // TODO: translate
         id: "group-by",
@@ -193,7 +127,7 @@ export class FontOverviewNavigation extends HTMLElement {
     );
 
     await sleepAsync(0);
-    this._updateHiddenAxisSectionVisibility();
+    updateFontAxes();
   }
 
   async _makeFontSourcePopup() {
@@ -259,93 +193,6 @@ export class FontOverviewNavigation extends HTMLElement {
     );
 
     return popupSelect(controller, "value", popupItems);
-  }
-
-  _makeFontSourceSliders(forHiddenAxes = false) {
-    const filteredAxes = () => {
-      return this.fontController.axes.axes.filter(
-        (axis) => !!axis.hidden === forHiddenAxes
-      );
-    };
-
-    const locationElement = new DesignspaceLocation();
-
-    let axes = filteredAxes();
-
-    const locationKey = "fontLocationUser";
-
-    locationElement.axes = axes;
-    locationElement.values = filterLocation(
-      this.fontOverviewSettings[locationKey],
-      axes
-    );
-
-    this.fontOverviewSettingsController.addKeyListener(locationKey, (event) => {
-      if (!event.senderInfo?.sentFromSliders) {
-        locationElement.values = filterLocation(event.newValue, axes);
-      }
-    });
-
-    locationElement.addEventListener(
-      "locationChanged",
-      scheduleCalls((event) => {
-        this.fontOverviewSettingsController.setItem(
-          locationKey,
-          { ...this.fontOverviewSettings[locationKey], ...locationElement.values },
-          { sentFromSliders: true }
-        );
-      })
-    );
-
-    this.fontController.addChangeListener(
-      { axes: null },
-      (change, isExternalChange) => {
-        axes = filteredAxes();
-        locationElement.axes = axes;
-        locationElement.values = filterLocation(
-          this.fontOverviewSettings[locationKey],
-          axes
-        );
-
-        this._updateHiddenAxisSectionVisibility();
-      }
-    );
-
-    return locationElement;
-  }
-
-  _updateHiddenAxisSectionVisibility() {
-    const hiddenAxesAccordionItem = this.accordion.querySelector("#hidden-font-axes");
-    hiddenAxesAccordionItem.hidden = !this.fontController.axes.axes.some(
-      (axis) => axis.hidden
-    );
-  }
-
-  showFontAxesViewOptionsMenu(event, forHiddenAxes) {
-    const button = this.accordion.querySelector(
-      forHiddenAxes
-        ? "#hidden-font-axes-view-options-button"
-        : "#font-axes-view-options-button"
-    );
-    const buttonRect = button.getBoundingClientRect();
-
-    const menuItems = getAxisOptionsMenuItems(this.fontOverviewSettings, forHiddenAxes);
-
-    showMenu(menuItems, { x: buttonRect.left, y: buttonRect.bottom });
-  }
-
-  resetFontAxesToDefault(event) {
-    this.fontOverviewSettings.fontLocationUser = filterLocation(
-      this.fontOverviewSettings.fontLocationUser,
-      this.fontController.axes.axes.filter((axis) => axis.hidden)
-    );
-  }
-
-  resetHiddenFontAxesToDefault(event) {
-    this.fontOverviewSettings.fontLocationUser = filterLocation(
-      this.fontOverviewSettings.fontLocationUser,
-      this.fontController.axes.axes.filter((axis) => !axis.hidden)
-    );
   }
 }
 
