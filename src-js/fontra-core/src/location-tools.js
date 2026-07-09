@@ -45,12 +45,7 @@ export function makeFontAxisAccordionItems(
       makeAccordionHeaderButton({
         icon: "tool",
         tooltip: translate("sidebar.designspace-navigation.font-axes.edit"),
-        onclick: (event) => {
-          const url = new URL(window.location);
-          url.pathname = url.pathname.replace(/\/[^.]+\.html/, "/fontinfo.html");
-          url.hash = "#axes-panel";
-          window.open(url.toString(), `fontra.fontinfo.${projectIdentifier}`);
-        },
+        onclick: (event) => editFontAxes(projectIdentifier),
       }),
       makeAccordionHeaderButton({
         icon: "refresh",
@@ -82,12 +77,7 @@ export function makeFontAxisAccordionItems(
       makeAccordionHeaderButton({
         icon: "tool",
         tooltip: translate("sidebar.designspace-navigation.font-axes.edit"),
-        onclick: (event) => {
-          const url = new URL(window.location);
-          url.pathname = url.pathname.replace("/editor.html", "/fontinfo.html");
-          url.hash = "#axes-panel";
-          window.open(url.toString(), `fontra.fontinfo.${projectIdentifier}`);
-        },
+        onclick: (event) => editFontAxes(projectIdentifier),
       }),
       makeAccordionHeaderButton({
         icon: "refresh",
@@ -408,4 +398,11 @@ export function getAxisOptionsMenuItems(settings, forHiddenAxes) {
   }
 
   return menuItems;
+}
+
+function editFontAxes(projectIdentifier) {
+  const url = new URL(window.location);
+  url.pathname = url.pathname.replace(/\/[^.]+\.html/, "/fontinfo.html");
+  url.hash = "#axes-panel";
+  window.open(url.toString(), `fontra.fontinfo.${projectIdentifier}`);
 }
