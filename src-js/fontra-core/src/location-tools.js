@@ -47,7 +47,7 @@ export function makeFontAxisAccordionItems(
         tooltip: translate("sidebar.designspace-navigation.font-axes.edit"),
         onclick: (event) => {
           const url = new URL(window.location);
-          url.pathname = url.pathname.replace("/editor.html", "/fontinfo.html");
+          url.pathname = url.pathname.replace(/\/[^.]+\.html/, "/fontinfo.html");
           url.hash = "#axes-panel";
           window.open(url.toString(), `fontra.fontinfo.${projectIdentifier}`);
         },
