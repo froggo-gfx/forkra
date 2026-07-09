@@ -22,6 +22,7 @@ import {
 import { translate, translatePlural } from "@fontra/core/localization.js";
 import {
   ShowLocationSettings,
+  setShowEffectiveLocationDefaults,
   setupLocationDependencies,
 } from "@fontra/core/location-tools.js";
 import { MouseTracker } from "@fontra/core/mouse-tracker.js";
@@ -140,7 +141,7 @@ export class SceneController {
     this.sceneSettings.myGlyphSets = getMyGlyphSets();
 
     this.fontController.ensureInitialized.then(() => {
-      this._setShowEffectiveLocationDefaults();
+      setShowEffectiveLocationDefaults(this.fontController, this.sceneSettings);
 
       this.sceneSettingsController.setItem(
         "projectGlyphSets",
@@ -300,29 +301,6 @@ export class SceneController {
     this.fontController.addChangeListener({ unitsPerEm: null }, (change) =>
       this.setCanvasMagnificationLimits()
     );
-  }
-
-  _setShowEffectiveLocationDefaults() {
-    // If for each of the sets of non-hidden and hidden axes there exists a
-    // cross-axis mapping that influences it, activate "ShowEffectiveLocation"
-    // by default (used in panel-designspace-navigation.js)
-    for (const [key, hidden] of [
-      ["fontAxesShowEffectiveLocation", false],
-      ["hiddenFontAxesShowEffectiveLocation", true],
-    ]) {
-      const axisNames = new Set(
-        this.fontController.fontAxes
-          .filter((axis) => !!axis.hidden == hidden)
-          .map((axis) => axis.name)
-      );
-      if (
-        this.fontController.axes.mappings.some(({ outputLocation }) =>
-          Object.keys(outputLocation).some((key) => axisNames.has(key))
-        )
-      ) {
-        this.sceneSettings[key] = ShowLocationSettings.ShowEffectiveLocation;
-      }
-    }
   }
 
   setCanvasMagnificationLimits() {

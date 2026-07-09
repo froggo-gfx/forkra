@@ -6,7 +6,10 @@ import {
 } from "@fontra/core/glyphsets-ui.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import { makeFontAxisAccordionItems } from "@fontra/core/location-tools.js";
+import {
+  makeFontAxisAccordionItems,
+  setShowEffectiveLocationDefaults,
+} from "@fontra/core/location-tools.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import { difference, symmetricDifference, union } from "@fontra/core/set-ops.js";
 import { popupSelect } from "@fontra/core/ui-utils.js";
@@ -35,6 +38,7 @@ export class FontOverviewNavigation extends HTMLElement {
   }
 
   async _setupUI() {
+    setShowEffectiveLocationDefaults(this.fontController, this.fontOverviewSettings);
     this.appendChild(
       new GlyphSearchField({
         settingsController: this.fontOverviewSettingsController,
