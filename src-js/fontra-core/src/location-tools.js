@@ -1,9 +1,252 @@
+import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
+import { scheduleCalls } from "@fontra/core/utils.js";
+import {
+  isLocationAtDefault,
+  mapAxesFromUserSpaceToSourceSpace,
+} from "@fontra/core/var-model.js";
+import { showMenu } from "@fontra/web-components/menu-panel.js";
+import {
+  groupAccordionHeaderButtons,
+  makeAccordionHeaderButton,
+} from "@fontra/web-components/ui-accordion.js";
 
 /*
- * Automatic location space conversion for settings objects and other location logic
- * that is shared between the font overview and the glyph editor.
+ * Axis UI logic that is common between the editor view and the font overview.
  */
+
+export function makeFontAxisAccordionItems(
+  projectIdentifier,
+  fontController,
+  settingsController,
+  accordion,
+  sliderChangeHook
+) {
+  const settings = settingsController.model;
+
+  const fontAxesAccordionItem = {
+    id: "font-axes-accordion-item",
+    label: translate("sidebar.designspace-navigation.font-axes"),
+    open: true,
+    content: html.createDomElement(
+      "designspace-location",
+      { id: "font-axes", style: "height: 100%;" },
+      []
+    ),
+    auxiliaryHeaderElement: groupAccordionHeaderButtons([
+      makeAccordionHeaderButton({
+        icon: "menu-2",
+        id: "font-axes-view-options-button",
+        tooltip: translate(
+          "sidebar.designspace-navigation.font-axes-view-options-button.tooltip"
+        ),
+        onclick: (event) => showFontAxesViewOptionsMenu(settings, accordion, false),
+      }),
+      makeAccordionHeaderButton({
+        icon: "tool",
+        tooltip: translate("sidebar.designspace-navigation.font-axes.edit"),
+        onclick: (event) => {
+          const url = new URL(window.location);
+          url.pathname = url.pathname.replace("/editor.html", "/fontinfo.html");
+          url.hash = "#axes-panel";
+          window.open(url.toString(), `fontra.fontinfo.${projectIdentifier}`);
+        },
+      }),
+      makeAccordionHeaderButton({
+        icon: "refresh",
+        id: "reset-font-axes-button",
+        tooltip: translate("sidebar.designspace-navigation.font-axes.reset"),
+        onclick: (event) => resetAxes(fontController.axes.axes, settings, false),
+      }),
+    ]),
+  };
+
+  const hiddenFontAxesAccordionItem = {
+    id: "hidden-font-axes-accordion-item",
+    label: "Hidden font axes", // translate("sidebar.designspace-navigation.font-axes"),
+    open: false,
+    content: html.createDomElement(
+      "designspace-location",
+      { id: "hidden-font-axes", style: "height: 100%;" },
+      []
+    ),
+    auxiliaryHeaderElement: groupAccordionHeaderButtons([
+      makeAccordionHeaderButton({
+        icon: "menu-2",
+        id: "hidden-font-axes-view-options-button",
+        tooltip: translate(
+          "sidebar.designspace-navigation.font-axes-view-options-button.tooltip"
+        ),
+        onclick: (event) => showFontAxesViewOptionsMenu(settings, accordion, true),
+      }),
+      makeAccordionHeaderButton({
+        icon: "tool",
+        tooltip: translate("sidebar.designspace-navigation.font-axes.edit"),
+        onclick: (event) => {
+          const url = new URL(window.location);
+          url.pathname = url.pathname.replace("/editor.html", "/fontinfo.html");
+          url.hash = "#axes-panel";
+          window.open(url.toString(), `fontra.fontinfo.${projectIdentifier}`);
+        },
+      }),
+      makeAccordionHeaderButton({
+        icon: "refresh",
+        id: "reset-hidden-font-axes-button",
+        tooltip: translate("sidebar.designspace-navigation.font-axes.reset"),
+        onclick: (event) => resetAxes(fontController.axes.axes, settings, true),
+      }),
+    ]),
+  };
+
+  let updateVisibleFontAxes, updateHiddenFontAxes;
+
+  const updateFontAxes = () => {
+    if (!updateVisibleFontAxes) {
+      updateVisibleFontAxes = setupFontAxisSliders(
+        fontController,
+        settingsController,
+        accordion,
+        sliderChangeHook,
+        false
+      );
+
+      updateHiddenFontAxes = setupFontAxisSliders(
+        fontController,
+        settingsController,
+        accordion,
+        sliderChangeHook,
+        true
+      );
+    }
+
+    updateVisibleFontAxes();
+    updateHiddenFontAxes();
+  };
+
+  settingsController.addKeyListener(
+    [
+      "fontAxesUseSourceCoordinates",
+      "fontAxesShowEffectiveLocation",
+      "hiddenFontAxesShowEffectiveLocation",
+      "fontAxesShowHidden",
+      "fontAxesSkipMapping",
+    ],
+    (event) => updateFontAxes()
+  );
+
+  return { updateFontAxes, fontAxesAccordionItem, hiddenFontAxesAccordionItem };
+}
+
+function setupFontAxisSliders(
+  fontController,
+  settingsController,
+  accordion,
+  sliderChangeHook,
+  forHiddenAxes = false
+) {
+  const settings = settingsController.model;
+  const locationElement = accordion.querySelector(
+    forHiddenAxes ? "#hidden-font-axes" : "#font-axes"
+  );
+
+  const filteredAxes = () => {
+    return fontController.axes.axes.filter((axis) => !!axis.hidden === forHiddenAxes);
+  };
+
+  const locationKey = () =>
+    settings.fontAxesUseSourceCoordinates ? "fontLocationSource" : "fontLocationUser";
+
+  let axes, axesSourceSpace;
+
+  const updateResetButtonState = scheduleCalls(() => {
+    const button = accordion.querySelector(
+      forHiddenAxes ? "#reset-hidden-font-axes-button" : "#reset-font-axes-button"
+    );
+    button.disabled = isLocationAtDefault(
+      settings.fontLocationSourceMapped,
+      axesSourceSpace
+    );
+  });
+
+  const update = () => {
+    axes = filteredAxes();
+    axesSourceSpace = mapAxesFromUserSpaceToSourceSpace(axes);
+    locationElement.axes = settings.fontAxesUseSourceCoordinates
+      ? axesSourceSpace
+      : axes;
+    locationElement.phantomAxes = (
+      forHiddenAxes
+        ? settings.hiddenFontAxesShowEffectiveLocation
+        : settings.fontAxesShowEffectiveLocation
+    )
+      ? axesSourceSpace
+      : [];
+
+    if (forHiddenAxes) {
+      locationElement.onlyShowPhantomAxes =
+        settings.hiddenFontAxesShowEffectiveLocation ==
+        ShowLocationSettings.OnlyShowEffectiveLocation;
+    }
+
+    locationElement.values = filterLocation(settings[locationKey()], axes);
+    locationElement.phantomValues = settings.fontLocationSourceMapped;
+
+    updateResetButtonState();
+  };
+
+  settingsController.addKeyListener(
+    ["fontLocationUser", "fontLocationSource"],
+    (event) => {
+      if (!axes) {
+        // called too early, initialisation not finished
+        return;
+      }
+      if (!event.senderInfo?.sentFromSliders && event.key === locationKey()) {
+        locationElement.values = filterLocation(event.newValue, axes);
+      }
+      locationElement.phantomValues = settings.fontLocationSourceMapped;
+      updateResetButtonState();
+    }
+  );
+
+  locationElement.addEventListener(
+    "locationChanged",
+    scheduleCalls((event) => {
+      sliderChangeHook?.();
+      settingsController.setItem(
+        locationKey(),
+        { ...settings[locationKey()], ...locationElement.values },
+        { sentFromSliders: true }
+      );
+    })
+  );
+
+  fontController.addChangeListener({ axes: null }, (change, isExternalChange) => {
+    update();
+  });
+
+  return update;
+}
+
+function showFontAxesViewOptionsMenu(settings, accordion, forHiddenAxes) {
+  const button = accordion.querySelector(
+    forHiddenAxes
+      ? "#hidden-font-axes-view-options-button"
+      : "#font-axes-view-options-button"
+  );
+  const buttonRect = button.getBoundingClientRect();
+
+  const menuItems = getAxisOptionsMenuItems(settings, forHiddenAxes);
+
+  showMenu(menuItems, { x: buttonRect.left, y: buttonRect.bottom });
+}
+
+function resetAxes(axes, settings, hiddenAxes) {
+  settings.fontLocationUser = filterLocation(
+    settings.fontLocationUser,
+    axes.filter((axis) => !axis.hidden === hiddenAxes)
+  );
+}
 
 export function setupLocationDependencies(fontController, settingsController) {
   // Set up the dependencies between fontLocationUser, fontLocationSource and
