@@ -733,14 +733,6 @@ export default class DesignspaceNavigationPanel extends Panel {
     }
   }
 
-  get fontAxes() {
-    return this.fontController.fontAxes.filter((axis) => !axis.hidden);
-  }
-
-  get hiddenFontAxes() {
-    return this.fontController.fontAxes.filter((axis) => axis.hidden);
-  }
-
   async _updateAxes() {
     await this._updateFontAxes();
     await this._updateGlyphAxes();
