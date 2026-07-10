@@ -75,7 +75,7 @@ class SubstitutionConditionSet:
 
 
 @dataclass(kw_only=True)
-class SubstitionRule:
+class SubstitutionRule:
     name: Optional[str] = None
     conditionSets: list[SubstitutionConditionSet]
     substitutions: dict[str, str]
@@ -86,7 +86,7 @@ class ConditionalSubstitutions:
     # processing="first": ["rvrn"]
     # processing="last": ["rclt"]
     featureTags: list[str] = field(default_factory=lambda: ["rclt"])
-    rules: list[SubstitionRule] = field(default_factory=list)
+    rules: list[SubstitutionRule] = field(default_factory=list)
 
 
 @dataclass(kw_only=True)

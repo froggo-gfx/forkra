@@ -64,9 +64,9 @@ from ..core.classes import (
     OpenTypeFeatures,
     RGBAColor,
     StaticGlyph,
-    SubstitionRule,
     SubstitutionCondition,
     SubstitutionConditionSet,
+    SubstitutionRule,
     VariableGlyph,
 )
 from ..core.glyphdependencies import GlyphDependencies
@@ -1901,12 +1901,12 @@ def packAxisLabels(valueLabels):
     ]
 
 
-def unpackRules(dsRules: list[RuleDescriptor]) -> list[SubstitionRule]:
+def unpackRules(dsRules: list[RuleDescriptor]) -> list[SubstitutionRule]:
     return [unpackRule(dsRule) for dsRule in dsRules]
 
 
-def unpackRule(dsRule: RuleDescriptor) -> SubstitionRule:
-    return SubstitionRule(
+def unpackRule(dsRule: RuleDescriptor) -> SubstitutionRule:
+    return SubstitutionRule(
         name=dsRule.name,
         conditionSets=[
             SubstitutionConditionSet(
@@ -1928,11 +1928,11 @@ def unpackCondition(dsCondition: dict) -> SubstitutionCondition:
     )
 
 
-def packRules(rules: list[SubstitionRule]) -> list[RuleDescriptor]:
+def packRules(rules: list[SubstitutionRule]) -> list[RuleDescriptor]:
     return [packRule(rule) for rule in rules]
 
 
-def packRule(rule: SubstitionRule) -> RuleDescriptor:
+def packRule(rule: SubstitutionRule) -> RuleDescriptor:
     return RuleDescriptor(
         name=rule.name,
         conditionSets=[
