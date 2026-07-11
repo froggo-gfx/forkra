@@ -37,9 +37,9 @@ from fontra.core.classes import (
     LineMetric,
     OpenTypeFeatures,
     StaticGlyph,
-    SubstitionRule,
     SubstitutionCondition,
     SubstitutionConditionSet,
+    SubstitutionRule,
     unstructure,
 )
 
@@ -1757,7 +1757,7 @@ async def test_noWriteOnRead(writableTestFont):
 expectedConditionalSubstitutions = ConditionalSubstitutions(
     featureTags=["rclt"],
     rules=[
-        SubstitionRule(
+        SubstitutionRule(
             name="fold_I_serifs",
             conditionSets=[
                 SubstitutionConditionSet(
@@ -1770,7 +1770,7 @@ expectedConditionalSubstitutions = ConditionalSubstitutions(
             ],
             substitutions={"I": "I.narrow"},
         ),
-        SubstitionRule(
+        SubstitutionRule(
             name="fold_S_terminals",
             conditionSets=[
                 SubstitutionConditionSet(
