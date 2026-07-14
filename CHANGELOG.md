@@ -1,5 +1,11 @@
 # Changelog for Fontra
 
+## 2026-07-?? [version 2026.7.1]
+
+### Fixes
+
+- [menu bar] Fixes regression with submenus. [PR 2696](https://github.com/fontra/fontra/pull/2696)
+
 ## 2026-07-10 [version 2026.7.0]
 
 ### New features
