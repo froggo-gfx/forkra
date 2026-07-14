@@ -1524,11 +1524,9 @@ class DesignspaceBackend(WatchableBackend, WritableBaseBackend):
             return
 
         paths = sorted(set(self.ufoLayers.iterAttrs("path")))
-        defaultPath = self.defaultUFOLayer.path if paths else None
         for path in paths:
             writer = self.ufoManager.getWriter(path)
-            featureText = features.text if path == defaultPath else ""
-            writer.writeFeatures(featureText)
+            writer.writeFeatures(features.text)
             self.fileWatcherIgnoreNextChange(os.path.join(path, FEATURES_FILENAME))
 
         self.resetGlyphDirections()
