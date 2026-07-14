@@ -5,6 +5,7 @@
 ### Fixes
 
 - [menu bar] Fixes regression with submenus. [PR 2696](https://github.com/fontra/fontra/pull/2696)
+- [Fontra Pak export/designspace] Fix/work around TTF/OTF export problem by writing features to all source UFOs. [PR 2697](https://github.com/fontra/fontra/pull/2697)
 
 ## 2026-07-10 [version 2026.7.0]
 
