@@ -338,7 +338,7 @@ export class MenuPanel extends SimpleElement {
     }
 
     if (item) {
-      for (const panel of MenuPanel.openMenuPanels) {
+      for (const panel of Array.from(MenuPanel.openMenuPanels)) {
         panel.setActive(panel === this);
         if (panel.childOf === this) {
           panel.dismiss();
