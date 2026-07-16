@@ -2,6 +2,10 @@
 
 ## 2026-07-?? [version 2026.7.1]
 
+### Improvements
+
+- [designspace] Respond to external changes to include()'d feature files. [PR 2703](https://github.com/fontra/fontra/pull/2703)
+
 ### Fixes
 
 - [menu bar] Fixes regression with submenus. [PR 2696](https://github.com/fontra/fontra/pull/2696)
