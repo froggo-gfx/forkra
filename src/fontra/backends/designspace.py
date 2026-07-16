@@ -76,6 +76,7 @@ from ..core.subprocess import runInSubProcess
 from ..core.varutils import locationToTuple, makeDenseLocation, makeSparseLocation
 from .base import WritableBaseBackend
 from .filewatcher import Change
+from .includedfeaturefiles import extractIncludedFeatureFiles
 from .ufo_utils import extractGlyphNameAndCodePoints
 from .watchable import WatchableBackend
 
@@ -331,6 +332,7 @@ class DesignspaceBackend(WatchableBackend, WritableBaseBackend):
         self.setOverlapSimpleFlag = False
         self._familyName: str | None = None
         self._defaultFontInfo: UFOFontInfo | None = None
+        self._includedFeaturePaths: list[pathlib.Path] = []
         self._initialize(dsDoc)
         self._implicitDefaultLocationBase: str | None = None
 
@@ -1505,6 +1507,9 @@ class DesignspaceBackend(WatchableBackend, WritableBaseBackend):
 
     def _getFeaturesSync(self) -> OpenTypeFeatures:
         featureText = self.defaultReader.readFeatures()
+
+        self._updateIncludedFeaturePaths(featureText)
+
         try:
             resolvedFeatureText = resolveFeatureIncludes(
                 featureText, self.ufoDir, set(self.glyphMap)
@@ -1514,7 +1519,17 @@ class DesignspaceBackend(WatchableBackend, WritableBaseBackend):
         else:
             if resolvedFeatureText != featureText:
                 featureText = featuresWarning + resolvedFeatureText
+
         return OpenTypeFeatures(language="fea", text=featureText)
+
+    def updateIncludedFeaturePaths(self) -> None:
+        self._updateIncludedFeaturePaths(self.defaultReader.readFeatures())
+
+    def _updateIncludedFeaturePaths(self, featureText: str) -> None:
+        self._includedFeaturePaths = extractIncludedFeatureFiles(
+            featureText, pathlib.Path(self.defaultUFOLayer.path).parent
+        )
+        self._updatePathsToWatch()
 
     async def putFeatures(self, features: OpenTypeFeatures) -> None:
         if features.language != "fea":
@@ -1671,7 +1686,7 @@ class DesignspaceBackend(WatchableBackend, WritableBaseBackend):
         if self.dsDoc.path:
             paths.append(self.dsDoc.path)
 
-        self.fileWatcherSetPaths(paths)
+        self.fileWatcherSetPaths(paths + self._includedFeaturePaths)
 
     async def fileWatcherProcessChanges(
         self, changes: set[tuple[Change, str]]
@@ -1746,9 +1761,10 @@ class DesignspaceBackend(WatchableBackend, WritableBaseBackend):
             if fileName in {KERNING_FILENAME, GROUPS_FILENAME}:
                 changedItems.reloadPattern["kerning"] = None
 
-            if fileName == FEATURES_FILENAME:
+            if fileSuffix == ".fea":
                 changedItems.reloadPattern["features"] = None
                 self.resetGlyphDirections()
+                self.updateIncludedFeaturePaths()
 
         if changedItems.rebuildGlyphSetContents:
             #

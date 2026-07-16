@@ -70,7 +70,7 @@ def testFontSingleUFO():
 def writableTestFont(tmpdir):
     mutatorPath = dataDir / "mutatorsans"
     for sourcePath in mutatorPath.iterdir():
-        if sourcePath.suffix not in {".designspace", ".ufo"}:
+        if sourcePath.suffix not in {".designspace", ".ufo", ".fea"}:
             continue
         destPath = tmpdir / sourcePath.name
         if sourcePath.is_dir():
