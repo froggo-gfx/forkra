@@ -11,14 +11,18 @@ from fontTools.feaLib.parser import Parser
 def extractIncludedFeatureFiles(
     featureText: str, includeDir: pathlib.Path
 ) -> list[pathlib.Path]:
-    return sorted(set(_extractIncludedFeatureFiles(featureText, [includeDir])))
+    return sorted(set(_extractIncludedFeatureFiles(featureText, includeDir, None)))
 
 
 def _extractIncludedFeatureFiles(
-    featureText: str, includeDirs: list[pathlib.Path], recursionLevel: int = 0
+    featureText: str,
+    includeDir: pathlib.Path,
+    parentDir: pathlib.Path | None,
+    recursionLevel: int = 0,
 ) -> Generator[pathlib.Path, None, None]:
     if recursionLevel > 50:
         raise FeatureLibError("Too many recursive includes", None)
+    includeDirs = [includeDir] if parentDir is None else [includeDir, parentDir]
     for fileName in _parseFeaSource(featureText):
         for d in includeDirs:
             p = d / fileName
@@ -27,7 +31,8 @@ def _extractIncludedFeatureFiles(
                 yield p
                 yield from _extractIncludedFeatureFiles(
                     p.read_text("utf-8", "replace"),
-                    [includeDirs[0], p.parent],
+                    includeDir,
+                    p.parent,
                     recursionLevel + 1,
                 )
                 break
