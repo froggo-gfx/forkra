@@ -70,6 +70,9 @@ async def test_fontHandler_basic(testFontHandler):
 @pytest.mark.asyncio
 async def test_fontHandler_externalChange(testFontHandler):
     async with aclosing(testFontHandler):
+        # Fetch features before starting the background tasks, to avoid
+        # timing issue with restarting the watcher when the included .fea
+        # paths are added
         features = await testFontHandler.getFeatures()
         await testFontHandler.startTasks()
         glyph = await testFontHandler.getGlyph("A")
