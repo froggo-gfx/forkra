@@ -26,16 +26,17 @@ def _extractIncludedFeatureFiles(
     for fileName in _parseFeaSource(featureText):
         for d in includeDirs:
             p = d / fileName
-            if p.exists():
-                p = p.resolve()
-                yield p
-                yield from _extractIncludedFeatureFiles(
-                    p.read_text("utf-8", "replace"),
-                    includeDir,
-                    p.parent,
-                    recursionLevel + 1,
-                )
-                break
+            if not p.exists():
+                continue
+            p = p.resolve()
+            yield p
+            yield from _extractIncludedFeatureFiles(
+                p.read_text("utf-8", "replace"),
+                includeDir,
+                p.parent,
+                recursionLevel + 1,
+            )
+            break
 
 
 _feaIncludePat = re.compile(r"include\s*\(([^)]+)\)")
