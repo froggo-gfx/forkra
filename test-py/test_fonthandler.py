@@ -70,13 +70,13 @@ async def test_fontHandler_basic(testFontHandler):
 @pytest.mark.asyncio
 async def test_fontHandler_externalChange(testFontHandler):
     async with aclosing(testFontHandler):
+        features = await testFontHandler.getFeatures()
         await testFontHandler.startTasks()
         glyph = await testFontHandler.getGlyph("A")
         layerName, layer = firstLayerItem(glyph)
         assert 20 == layer.glyph.path.coordinates[0]
         fontInfo = await testFontHandler.getFontInfo()
         assert "License same as MutatorMath" in fontInfo.copyright
-        features = await testFontHandler.getFeatures()
         assert "# testing external write" not in features.text
 
         dsDoc = testFontHandler.backend.dsDoc
