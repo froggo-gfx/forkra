@@ -881,10 +881,15 @@ export default class LetterspacerPanel extends Panel {
           if (!source) {
             continue;
           }
+          // Sources with complete values keep them (2.1: falling back to
+          // DEFAULTS here silently reset the two keys not being edited —
+          // e.g. reverse persisting "area" wiped the stored depth); the
+          // `missing` fills only apply to sources that lacked values.
+          const existing = getSourceLetterspacerValues(source);
           const nextValues = {
-            area: missing[id]?.area ?? LETTERSPACER_DEFAULTS.area,
-            depth: missing[id]?.depth ?? LETTERSPACER_DEFAULTS.depth,
-            overshoot: missing[id]?.overshoot ?? LETTERSPACER_DEFAULTS.overshoot,
+            area: missing[id]?.area ?? existing.area,
+            depth: missing[id]?.depth ?? existing.depth,
+            overshoot: missing[id]?.overshoot ?? existing.overshoot,
           };
           if (id === effectiveSourceId) {
             nextValues[key] = valueToStore;

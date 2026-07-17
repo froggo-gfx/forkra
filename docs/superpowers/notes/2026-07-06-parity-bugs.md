@@ -291,7 +291,7 @@ from the donor.
 
 ## 2. Letterspacer
 
-### 2.1 Reverse resets the depth parameter — `open`
+### 2.1 Reverse resets the depth parameter — `fixed` (2026-07-18)
 
 **Report:** Running the reverse function resets the depth parameter in the UI. The
 calculation itself uses the value that was set — it just resets *afterwards*.
@@ -301,6 +301,20 @@ behavior, so this is a panel/UI state bug: the reverse action probably triggers 
 refresh that repopulates fields from defaults instead of the current in-panel values
 (or writes params back without the depth field). Purely a state-retention fix in the
 letterspacer panel.
+
+**Root cause:** `persistParam` (panel-letterspacer.js) rebuilt each target
+source's stored values from `LETTERSPACER_DEFAULTS`, overriding only the edited
+key — the `missing[id]` fills only exist for sources *lacking* values, so any
+already-complete source had its two non-edited keys silently reset in storage.
+Reverse persists "area" → stored depth wiped to 15 → the `update()` at the end
+of reverse reloads params → UI shows reset depth. (The reverse calculation ran
+before that, with the in-memory value — hence "calculation uses the value, it
+resets afterwards". Ordinary field edits corrupted storage the same way; it
+only became visible on the next full panel refresh.)
+
+**Fix:** complete sources now keep their existing stored values as the base
+(`getSourceLetterspacerValues(source)`); defaults/nearest-source fills still
+apply to genuinely missing sources only.
 
 ---
 
