@@ -38,6 +38,7 @@ import { getDecomposedIdentity } from "@fontra/core/transform.js";
 import { labeledCheckbox, labeledTextInput, pickFile } from "@fontra/core/ui-utils.js";
 import {
   commandKeyProperty,
+  deepCopyObject,
   enumerate,
   eventIsCausedByWritingURLFragment,
   fetchJSON,
@@ -2201,8 +2202,8 @@ export class EditorController extends ViewController {
             defaultPasteGlyph;
           layerGlyph.path.appendPath(pasteGlyph.path);
           layerGlyph.components.push(...pasteGlyph.components.map(copyComponent));
-          layerGlyph.anchors.push(...pasteGlyph.anchors);
-          layerGlyph.guidelines.push(...pasteGlyph.guidelines);
+          layerGlyph.anchors.push(...pasteGlyph.anchors.map(deepCopyObject));
+          layerGlyph.guidelines.push(...pasteGlyph.guidelines.map(deepCopyObject));
           if (pasteGlyph.backgroundImage) {
             layerGlyph.backgroundImage = pasteGlyph.backgroundImage;
             if (!this.sceneSettings.backgroundImagesAreLocked) {
