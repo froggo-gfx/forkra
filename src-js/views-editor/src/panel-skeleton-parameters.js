@@ -1,7 +1,11 @@
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import { getSkeletonData } from "@fontra/core/skeleton-model.js";
+import {
+  getSkeletonData,
+  setSkeletonCapParameters,
+  setSkeletonCornerParameters,
+} from "@fontra/core/skeleton-model.js";
 import {
   SKELETON_SOURCE_DEFAULT_FALLBACKS,
   SKELETON_SOURCE_DEFAULT_KEYS,
@@ -9,6 +13,7 @@ import {
   getSourceSkeletonDefaultsValue,
   setSourceSkeletonDefaultsValues,
 } from "@fontra/core/skeleton-source-defaults.js";
+import { throttleCalls } from "@fontra/core/utils.ts";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
 import {
@@ -24,6 +29,7 @@ import {
   setPanelPointLinked,
   setPanelPointSideWidth,
   setPanelPointTotalWidth,
+  setPanelPointValuesStream,
   setPanelRibDetached,
   setPanelRibEditable,
 } from "./skeleton-panel-edits.js";
@@ -67,6 +73,41 @@ function capRadiusIndexFromRatio(ratio) {
   return Math.round(t * (CAP_RADIUS_POSITIONS - 1));
 }
 
+// Slider-unit -> model-unit conversion, shared by the streaming and the
+// final-value paths. The radius slider edits a 1-based log-scale position,
+// tension/roundness/reach/strength edit percent.
+function capValuesFromField(name, value) {
+  if (name === "radius") {
+    return { capRadiusRatio: capRadiusRatioFromIndex(Number(value) - 1) };
+  }
+  if (name === "tension") {
+    return { capTension: Number(value) / 100 };
+  }
+  if (name === "angle") {
+    return { capAngle: Number(value) };
+  }
+  if (name === "distance") {
+    return { capDistance: Number(value) };
+  }
+  return null;
+}
+
+function cornerValuesFromField(name, value) {
+  if (name === "roundness") {
+    return { cornerRoundness: Number(value) / 100 };
+  }
+  if (name === "asymmetry") {
+    return { cornerAsymmetry: Number(value) };
+  }
+  if (name === "reach") {
+    return { cornerReach: Number(value) / 100 };
+  }
+  if (name === "strength") {
+    return { roundnessStrength: Number(value) / 100 };
+  }
+  return null;
+}
+
 export default class SkeletonParametersPanel extends Panel {
   identifier = "skeleton-parameters";
   iconPath = "/tabler-icons/bone.svg";
@@ -89,6 +130,19 @@ export default class SkeletonParametersPanel extends Panel {
     this._lastSignature = null;
 
     this.updateBound = this.update.bind(this);
+    // External glyph edits (e.g. dblclick smooth toggle) must refresh the
+    // panel's gates immediately; our own field edits already rebuild in
+    // _onFieldChange and must NOT trigger a rebuild mid-drag.
+    this._suppressGlyphChangeUpdate = false;
+    this._throttledGlyphChangeUpdate = throttleCalls(() => {
+      this._forceRebuild = true;
+      this.update();
+    }, 100);
+    this.sceneController.addCurrentGlyphChangeListener(() => {
+      if (!this._suppressGlyphChangeUpdate) {
+        this._throttledGlyphChangeUpdate();
+      }
+    });
     this.sceneSettingsController.addKeyListener(
       [
         "fontLocationSourceMapped",
@@ -679,9 +733,10 @@ export default class SkeletonParametersPanel extends Panel {
 
   async _onFieldChange(fieldItem, value, valueStream) {
     const [group, name] = String(fieldItem.key).split(":");
+    this._suppressGlyphChangeUpdate = true;
     try {
-      // The distribution slider streams onto the canvas while dragging (donor
-      // parity); all other fields apply the committed value once.
+      // Distribution, cap and corner sliders stream onto the canvas while
+      // dragging; all other fields apply the committed value once.
       if (group === "width" && name === "distribution" && valueStream) {
         await setPanelPointDistributionStream(
           this.sceneController,
@@ -690,6 +745,22 @@ export default class SkeletonParametersPanel extends Panel {
           this._undo("set-distribution")
         );
         return;
+      }
+      if (valueStream && (group === "cap" || group === "corner")) {
+        const makeValues = group === "cap" ? capValuesFromField : cornerValuesFromField;
+        const setter =
+          group === "cap" ? setSkeletonCapParameters : setSkeletonCornerParameters;
+        if (makeValues(name, value)) {
+          await setPanelPointValuesStream(
+            this.sceneController,
+            this._widthPoints(),
+            valueStream,
+            (point, contour, streamedValue) =>
+              setter(point, makeValues(name, streamedValue)),
+            this._undo(group === "cap" ? "set-cap" : "set-corner")
+          );
+          return;
+        }
       }
       const finalValue = await this._resolveStreamValue(value, valueStream);
       if (group === "default") {
@@ -706,6 +777,7 @@ export default class SkeletonParametersPanel extends Panel {
         await this._onRibChange(name, finalValue);
       }
     } finally {
+      this._suppressGlyphChangeUpdate = false;
       this._forceRebuild = true;
       await this.update();
     }
@@ -803,42 +875,21 @@ export default class SkeletonParametersPanel extends Panel {
       );
       return;
     }
-    const map = {
-      radius: "capRadiusRatio",
-      tension: "capTension",
-      angle: "capAngle",
-      distance: "capDistance",
-    };
-    const field = map[name];
-    if (!field) {
+    const values = capValuesFromField(name, value);
+    if (!values) {
       return;
-    }
-    // The radius slider edits a 1-based log-scale position, the tension
-    // slider edits percent — convert back to model units (ratio / fraction).
-    if (name === "radius") {
-      value = capRadiusRatioFromIndex(Number(value) - 1);
-    } else if (name === "tension") {
-      value = Number(value) / 100;
     }
     await setPanelCapParameters(
       this.sceneController,
       this._widthPoints(),
-      { [field]: value },
+      values,
       this._undo("set-cap")
     );
   }
 
   async _onCornerChange(name, value) {
-    let values;
-    if (name === "roundness") {
-      values = { cornerRoundness: Number(value) / 100 };
-    } else if (name === "asymmetry") {
-      values = { cornerAsymmetry: Number(value) };
-    } else if (name === "reach") {
-      values = { cornerReach: Number(value) / 100 };
-    } else if (name === "strength") {
-      values = { roundnessStrength: Number(value) / 100 };
-    } else {
+    const values = cornerValuesFromField(name, value);
+    if (!values) {
       return;
     }
     await setPanelCornerParameters(

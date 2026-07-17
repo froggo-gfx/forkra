@@ -196,10 +196,14 @@ export async function setPanelPointDistribution(
 // canvas as they arrive (throttled), while producing exactly ONE undo record
 // spanning the whole drag. Every tick restores the pre-drag layer state and
 // re-applies from there, so the last recorded change IS original -> final.
-export async function setPanelPointDistributionStream(
+// Stream a slider's values onto the selected points in realtime: snapshot the
+// layers, then per throttled tick restore the snapshot and re-apply the
+// current value, so the drag lands as ONE undo record (1.2.2 recipe).
+export async function setPanelPointValuesStream(
   sceneController,
   pointAddresses,
   valueStream,
+  applyToPoint,
   undoLabel
 ) {
   if (!pointAddresses.length) {
@@ -244,11 +248,7 @@ export async function setPanelPointDistributionStream(
             if (!resolved || resolved.point.type) {
               continue;
             }
-            setSkeletonPointWidthDistribution(
-              resolved.point,
-              resolved.contour.defaultWidth,
-              value
-            );
+            applyToPoint(resolved.point, resolved.contour, value);
           }
         });
         allChanges.push(changes.prefixed(["layers", layerName, "glyph"]));
@@ -283,6 +283,23 @@ export async function setPanelPointDistributionStream(
     await sendIncrementalChange(lastCollector.change);
     return { changes: lastCollector, undoLabel, broadcast: true };
   });
+}
+
+export async function setPanelPointDistributionStream(
+  sceneController,
+  pointAddresses,
+  valueStream,
+  undoLabel
+) {
+  return setPanelPointValuesStream(
+    sceneController,
+    pointAddresses,
+    valueStream,
+    (point, contour, value) => {
+      setSkeletonPointWidthDistribution(point, contour.defaultWidth, value);
+    },
+    undoLabel
+  );
 }
 
 export async function setPanelPointLinked(

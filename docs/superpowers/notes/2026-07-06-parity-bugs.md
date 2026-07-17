@@ -581,7 +581,14 @@ generator had its own conflated `CAP_CORNER_POINT_FIELDS` list which lacked
 canonical→generator boundary and never affected generated points — both model and
 generator now use separate `CAP_POINT_FIELDS` / `CORNER_POINT_FIELDS` lists and
 forward all corner fields (regression test: corner params must change the
-generated outline). 4 new tests; 1376 passing, bundle green. Runtime check owed: corner-round sweep on an angle
+generated outline). 4 new tests; 1376 passing, bundle green. Follow-up
+(realtime): cap sliders (radius/tension/angle) and all four corner sliders now
+stream onto the canvas while dragging via the generalized
+`setPanelPointValuesStream` (the 1.2.2 snapshot-restore recipe — one undo record
+per drag; distribution rides the same helper). The panel also listens to
+`addCurrentGlyphChangeListener` (throttled, suppressed during its own field
+edits) so gates refresh immediately — toggling a point smooth disables the
+corner sliders without clickaway. Runtime check owed: corner-round sweep on an angle
 point of a closed and an open contour, gating (smooth points and endpoints must
 disable the sliders), reach/strength/asymmetry effect on the generated outline.
 
