@@ -37,7 +37,9 @@ import { isSuperset } from "@fontra/core/set-ops.js";
 import {
   allocateSkeletonIds,
   deleteSkeletonPoints,
+  getSkeletonContour,
   getSkeletonData,
+  getSkeletonPoint,
 } from "@fontra/core/skeleton-model.js";
 import { themeController } from "@fontra/core/theme-settings.js";
 import { getDecomposedIdentity } from "@fontra/core/transform.js";
@@ -2498,10 +2500,17 @@ export class EditorController extends ViewController {
       // Skeleton points delete through the one write path (WS-9 editSkeleton),
       // which regenerates the generated contours. Selection ids are canonical in
       // the edit layer; other layers resolve by structural ordinal (WS-9).
+      let survivorSelection = null;
       if (skeletonPointKeys?.length && !event.altKey) {
         const editLayerName = this.sceneController.sceneSettings.editLayerName;
-        const referenceSkeletonData = getSkeletonData(
-          layerGlyphs[editLayerName] || Object.values(layerGlyphs)[0]
+        const selectionLayerGlyph =
+          layerGlyphs[editLayerName] || Object.values(layerGlyphs)[0];
+        const referenceSkeletonData = getSkeletonData(selectionLayerGlyph);
+        // The surviving on-curve neighbor of each deleted point stays selected;
+        // compute candidates against the pre-deletion reference data.
+        const survivorCandidates = collectSkeletonDeleteSurvivors(
+          referenceSkeletonData,
+          skeletonPointKeys.map(parseSkeletonPointKey)
         );
         for (const layerGlyph of Object.values(layerGlyphs)) {
           if (!getSkeletonData(layerGlyph)) {
@@ -2524,8 +2533,18 @@ export class EditorController extends ViewController {
             deleteSkeletonPoints(working, toDelete);
           });
         }
+        const postDeleteSkeletonData = getSkeletonData(selectionLayerGlyph);
+        survivorSelection = new Set(
+          survivorCandidates
+            .filter(([contourId, pointId]) =>
+              getSkeletonPoint(postDeleteSkeletonData, contourId, pointId)
+            )
+            .map(([contourId, pointId]) => `skeletonPoint/${contourId}/${pointId}`)
+        );
       }
-      this.sceneController.selection = new Set();
+      this.sceneController.selection = survivorSelection?.size
+        ? survivorSelection
+        : new Set();
       return translate("action.delete-selection");
     });
   }
@@ -3911,4 +3930,48 @@ function collapseSubTools(editToolsElement) {
 function noTimeout(func, dummy) {
   func();
   return null; // dummy timer value
+}
+
+// For each deleted skeleton point, the nearest surviving on-curve neighbor
+// (backward first, then forward) is a candidate to keep selected after deletion.
+function collectSkeletonDeleteSurvivors(skeletonData, deletedRefs) {
+  const deletedByContour = new Map();
+  for (const { contourId, pointId } of deletedRefs) {
+    if (!deletedByContour.has(contourId)) {
+      deletedByContour.set(contourId, new Set());
+    }
+    deletedByContour.get(contourId).add(pointId);
+  }
+
+  const survivors = [];
+  const seen = new Set();
+  for (const [contourId, deletedIds] of deletedByContour) {
+    const contour = getSkeletonContour(skeletonData, contourId);
+    if (!contour) {
+      continue;
+    }
+    const points = contour.points;
+    for (const pointId of deletedIds) {
+      const pointIndex = points.findIndex((point) => point.id === pointId);
+      if (pointIndex < 0) {
+        continue;
+      }
+      let neighbor = null;
+      for (let i = pointIndex - 1; i >= 0 && !neighbor; i--) {
+        if (!points[i].type && !deletedIds.has(points[i].id)) {
+          neighbor = points[i];
+        }
+      }
+      for (let i = pointIndex + 1; i < points.length && !neighbor; i++) {
+        if (!points[i].type && !deletedIds.has(points[i].id)) {
+          neighbor = points[i];
+        }
+      }
+      if (neighbor && !seen.has(`${contourId}/${neighbor.id}`)) {
+        seen.add(`${contourId}/${neighbor.id}`);
+        survivors.push([contourId, neighbor.id]);
+      }
+    }
+  }
+  return survivors;
 }

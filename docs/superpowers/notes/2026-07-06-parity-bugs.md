@@ -523,7 +523,7 @@ regenerate). Renderer hardened: open contours no longer wrap `next`/`afterNext`
 (mid-on-curve refit, paired-handle removal, endpoint cap inheritance, empty-contour
 removal, smooth-flag fixup); 1373 passing, bundle green. Runtime check owed:
 delete mid points / endpoints / handles on curved skeletons, multi-point delete,
-delete across layers.
+delete across layers. Follow-up (2026-07-17): after deletion the nearest surviving on-curve neighbor of each deleted point stays selected (survivor computed pre-delete, verified post-delete).
 
 ### 4.8 Parity miss: asymmetry / corner trim / corner radius misplaced as cap params — `open`
 
