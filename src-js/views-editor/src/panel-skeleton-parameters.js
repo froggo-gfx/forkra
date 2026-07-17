@@ -248,6 +248,11 @@ export default class SkeletonParametersPanel extends Panel {
   // ---- Panel rebuild --------------------------------------------------------
 
   async update() {
+    // A rebuild while a slider streams would replace the input mid-drag and
+    // lock its direction; _onFieldChange rebuilds once the edit completes.
+    if (this._suppressGlyphChangeUpdate) {
+      return;
+    }
     if (!this.infoForm.contentElement.offsetParent) {
       return;
     }

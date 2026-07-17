@@ -1064,10 +1064,10 @@ export function drawCubicHandleLabelPair(context, points, show = {}) {
   const [p1, p2, p3, p4] = points;
 
   // Calculate Tunni point for visualization (keep midpoint)
-  const visualPt = calculateControlHandlePoint(segment.points);
+  const visualPt = calculateControlHandlePoint(points);
 
   // Calculate true Tunni point for tension calculations
-  const truePt = calculateTunniPoint(segment.points);
+  const truePt = calculateTunniPoint(points);
 
   // Calculate tensions using the true intersection point (with fallback to midpoint)
   const tensionPt1 = truePt || visualPt;
