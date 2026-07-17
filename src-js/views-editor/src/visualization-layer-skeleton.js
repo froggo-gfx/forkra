@@ -1,3 +1,4 @@
+import { drawCubicHandleLabelPair } from "@fontra/core/distance-angle.js";
 import {
   getSkeletonData,
   getSkeletonHandleOffset,
@@ -731,5 +732,50 @@ registerVisualizationLayerDefinition({
         drawDiamondNode(context, target.point, parameters.pointSize, true);
       }
     });
+  },
+});
+
+// 4.1: skeleton centerline handle labels live on their own switchable layer;
+// basic and generated path points share the regular "Point labels" layer.
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.point-labels",
+  name: "Skeleton point labels",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: { strokeWidth: 1 },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
+    if (!skeletonData?.contours?.length) {
+      return;
+    }
+    const show = {
+      distance: model.sceneSettings?.showLabelsDistance ?? true,
+      tension: model.sceneSettings?.showLabelsTension ?? true,
+      angle: model.sceneSettings?.showLabelsAngle ?? true,
+    };
+    for (const contour of skeletonData.contours) {
+      const points = contour.points || [];
+      const numPoints = points.length;
+      for (let i = 0; i < numPoints; i++) {
+        const p1 = points[i];
+        if (!p1 || p1.type) {
+          continue;
+        }
+        const at = (offset) =>
+          contour.closed ? points[(i + offset) % numPoints] : points[i + offset];
+        const p2 = at(1);
+        const p3 = at(2);
+        const p4 = at(3);
+        if (p2?.type === "cubic" && p3?.type === "cubic" && p4 && !p4.type) {
+          try {
+            drawCubicHandleLabelPair(context, [p1, p2, p3, p4], show);
+          } catch (error) {
+            // Skip segments where tension calculation fails
+          }
+        }
+      }
+    }
   },
 });

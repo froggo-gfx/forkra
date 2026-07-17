@@ -458,11 +458,20 @@ Recorded verbatim per the user's instruction: list the problems, do not research
 code yet. Items may partially overlap earlier passes; overlaps to be reconciled when
 each item is picked up.
 
-### 4.1 Handle labels: layer separation for basic vs skeleton points — `open` (QoL)
+### 4.1 Handle labels: layer separation for basic vs skeleton points — `fixed` (2026-07-17)
 
 **Report:** Handle labels should be different layers for basic points and *skeleton*
 points. Generated points can share the same layer as basic points. Not a bug but
 quality-of-life.
+
+**Fix:** the distance/tension/angle badge rendering for a cubic handle pair was
+extracted from `drawPointLabels` into shared `drawCubicHandleLabelPair`
+(distance-angle.js). The existing "Point labels" layer keeps covering the path —
+basic AND generated contours. New user-switchable layer **"Skeleton point labels"**
+(`fontra.skeleton.point-labels`, visualization-layer-skeleton.js) draws the same
+badges for the skeleton centerline's cubic segments, honoring the same
+show-distance/tension/angle settings. Both layers toggle independently in the
+visualization menu.
 
 ### 4.2 Realize contours functionality fully missing — `open`
 
@@ -479,9 +488,15 @@ needing deep UX investment before implementation.
 **Report:** Multi-select across skeleton and basic contours needs a UX rework too
 (companion to 4.3).
 
-### 4.5 Double-click selects whole skeleton contour — `open`
+### 4.5 Double-click selects whole skeleton contour — `fixed` (2026-07-17)
 
 **Report:** Double-click on a skeleton contour must select the whole contour.
+
+**Fix:** in `handleDoubleClick` (edit-tools-pointer.js): when the double-click
+lands on the centerline itself (skeleton segment hit, no skeleton point directly
+under the cursor) all on-curve points of that skeleton contour are selected —
+mirroring the path behavior where double-clicking a curve selects its contour.
+Double-click on a skeleton *point* keeps its existing meaning (toggle smooth).
 
 ### 4.6 Ctrl+A must include skeleton contours — `open`
 

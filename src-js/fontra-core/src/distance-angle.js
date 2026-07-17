@@ -1054,6 +1054,120 @@ function drawRoundRect(context, x, y, width, height, radii) {
  * @param {Object} model - The model
  * @param {Object} controller - The controller
  */
+
+// Distance/tension/angle badges for one cubic segment's two handles.
+// Shared by the path "Point labels" layer and the skeleton point labels layer.
+export function drawCubicHandleLabelPair(context, points, show = {}) {
+  const showDistance = show.distance ?? true;
+  const showTension = show.tension ?? true;
+  const showAngle = show.angle ?? true;
+  const [p1, p2, p3, p4] = points;
+
+  // Calculate Tunni point for visualization (keep midpoint)
+  const visualPt = calculateControlHandlePoint(segment.points);
+
+  // Calculate true Tunni point for tension calculations
+  const truePt = calculateTunniPoint(segment.points);
+
+  // Calculate tensions using the true intersection point (with fallback to midpoint)
+  const tensionPt1 = truePt || visualPt;
+  const tensionPt2 = truePt || visualPt;
+  const tension1 = distance(p1, p2) / distance(p1, tensionPt1); // tension for p2
+  const tension2 = distance(p4, p3) / distance(p4, tensionPt2); // tension for p3
+
+  // Calculate distances from on-curve to off-curve points
+  const dist1 = distance(p1, p2); // distance for p2
+  const dist2 = distance(p4, p3); // distance for p3
+
+  // Calculate angles for off-curve points
+  const angle1 = calculateOffCurveAngle(p2, p1); // angle for p2
+  const angle2 = calculateOffCurveAngle(p3, p4); // angle for p3
+
+  // Format text based on visibility settings
+  const visibleComponents = [];
+  if (showDistance) visibleComponents.push(dist1.toFixed(1));
+  if (showTension) visibleComponents.push(tension1.toFixed(2));
+  if (showAngle) visibleComponents.push(`${angle1.toFixed(1)}°`);
+  const text1 = visibleComponents.join("\n");
+
+  // Same logic for text2
+  const visibleComponents2 = [];
+  if (showDistance) visibleComponents2.push(dist2.toFixed(1));
+  if (showTension) visibleComponents2.push(tension2.toFixed(2));
+  if (showAngle) visibleComponents2.push(`${angle2.toFixed(1)}°`);
+  const text2 = visibleComponents2.join("\n");
+
+  // Calculate badge dimensions for both labels
+  const badgeDimensions1 = calculateBadgeDimensions(text1, 6); // 6pt font
+  const badgeDimensions2 = calculateBadgeDimensions(text2, 6); // 6pt font
+
+  // Calculate unit vector from p1 to p2 for p2 label positioning
+  const unitVector1 = unitVectorFromTo(p1, p2);
+
+  // Calculate unit vector from p4 to p3 for p3 label positioning
+  const unitVector2 = unitVectorFromTo(p4, p3);
+
+  // Calculate badge positions for both labels and shift to the right of the off-curve point
+  const badgePosition1 = calculateBadgePosition(
+    { x: p2.x + 14, y: p2.y }, // Shift to the right
+    { x: -unitVector1.y, y: unitVector1.x },
+    badgeDimensions1.width,
+    badgeDimensions1.height
+  );
+
+  const badgePosition2 = calculateBadgePosition(
+    { x: p3.x + 14, y: p3.y }, // Shift to the right
+    { x: -unitVector2.y, y: unitVector2.x },
+    badgeDimensions2.width,
+    badgeDimensions2.height
+  );
+
+  // Draw text for p2 with distance, tension, angle (top to bottom)
+  context.save();
+  context.fillStyle = "rgba(4, 28, 44, 1)"; // New text color
+  context.font = `6px fontra-ui-regular, sans-serif`; // 6pt font, medium weight
+  context.textAlign = "left";
+  context.textBaseline = "middle";
+  context.scale(1, -1);
+
+  // Split the text into lines and draw each line
+  const lines1 = text1.split("\n");
+  const lineHeight = 6; // font size
+  const totalHeight = lines1.length * lineHeight;
+  const startY =
+    -(badgePosition1.y + badgeDimensions1.height / 2) -
+    totalHeight / 2 +
+    lineHeight / 2;
+
+  for (let i = 0; i < lines1.length; i++) {
+    context.fillText(lines1[i], badgePosition1.x, startY + i * lineHeight);
+  }
+
+  context.restore();
+
+  // Draw text for p3 with distance, tension, angle (top to bottom)
+  context.save();
+  context.fillStyle = "rgba(44, 28, 44, 1)"; // New text color
+  context.font = `6px fontra-ui-regular, sans-serif`; // 6pt font, medium weight
+  context.textAlign = "left";
+  context.textBaseline = "middle";
+  context.scale(1, -1);
+
+  // Split the text into lines and draw each line
+  const lines2 = text2.split("\n");
+  const totalHeight2 = lines2.length * lineHeight;
+  const startY2 =
+    -(badgePosition2.y + badgeDimensions2.height / 2) -
+    totalHeight2 / 2 +
+    lineHeight / 2;
+
+  for (let i = 0; i < lines2.length; i++) {
+    context.fillText(lines2[i], badgePosition2.x, startY2 + i * lineHeight);
+  }
+
+  context.restore();
+}
+
 export function drawPointLabels(
   context,
   positionedGlyph,
@@ -1089,115 +1203,11 @@ export function drawPointLabels(
         // Both control points must be cubic (type 2)
         if (pointTypes[1] === 2 && pointTypes[2] === 2) {
           try {
-            // Get all points
-            const p1 = segment.points[0]; // on-curve start point
-            const p2 = segment.points[1]; // off-curve control point 1
-            const p3 = segment.points[2]; // off-curve control point 2
-            const p4 = segment.points[3]; // on-curve end point
-
-            // Calculate Tunni point for visualization (keep midpoint)
-            const visualPt = calculateControlHandlePoint(segment.points);
-
-            // Calculate true Tunni point for tension calculations
-            const truePt = calculateTunniPoint(segment.points);
-
-            // Calculate tensions using the true intersection point (with fallback to midpoint)
-            const tensionPt1 = truePt || visualPt;
-            const tensionPt2 = truePt || visualPt;
-            const tension1 = distance(p1, p2) / distance(p1, tensionPt1); // tension for p2
-            const tension2 = distance(p4, p3) / distance(p4, tensionPt2); // tension for p3
-
-            // Calculate distances from on-curve to off-curve points
-            const dist1 = distance(p1, p2); // distance for p2
-            const dist2 = distance(p4, p3); // distance for p3
-
-            // Calculate angles for off-curve points
-            const angle1 = calculateOffCurveAngle(p2, p1); // angle for p2
-            const angle2 = calculateOffCurveAngle(p3, p4); // angle for p3
-
-            // Format text based on visibility settings
-            const visibleComponents = [];
-            if (showDistance) visibleComponents.push(dist1.toFixed(1));
-            if (showTension) visibleComponents.push(tension1.toFixed(2));
-            if (showAngle) visibleComponents.push(`${angle1.toFixed(1)}°`);
-            const text1 = visibleComponents.join("\n");
-
-            // Same logic for text2
-            const visibleComponents2 = [];
-            if (showDistance) visibleComponents2.push(dist2.toFixed(1));
-            if (showTension) visibleComponents2.push(tension2.toFixed(2));
-            if (showAngle) visibleComponents2.push(`${angle2.toFixed(1)}°`);
-            const text2 = visibleComponents2.join("\n");
-
-            // Calculate badge dimensions for both labels
-            const badgeDimensions1 = calculateBadgeDimensions(text1, 6); // 6pt font
-            const badgeDimensions2 = calculateBadgeDimensions(text2, 6); // 6pt font
-
-            // Calculate unit vector from p1 to p2 for p2 label positioning
-            const unitVector1 = unitVectorFromTo(p1, p2);
-
-            // Calculate unit vector from p4 to p3 for p3 label positioning
-            const unitVector2 = unitVectorFromTo(p4, p3);
-
-            // Calculate badge positions for both labels and shift to the right of the off-curve point
-            const badgePosition1 = calculateBadgePosition(
-              { x: p2.x + 14, y: p2.y }, // Shift to the right
-              { x: -unitVector1.y, y: unitVector1.x },
-              badgeDimensions1.width,
-              badgeDimensions1.height
-            );
-
-            const badgePosition2 = calculateBadgePosition(
-              { x: p3.x + 14, y: p3.y }, // Shift to the right
-              { x: -unitVector2.y, y: unitVector2.x },
-              badgeDimensions2.width,
-              badgeDimensions2.height
-            );
-
-            // Draw text for p2 with distance, tension, angle (top to bottom)
-            context.save();
-            context.fillStyle = "rgba(4, 28, 44, 1)"; // New text color
-            context.font = `6px fontra-ui-regular, sans-serif`; // 6pt font, medium weight
-            context.textAlign = "left";
-            context.textBaseline = "middle";
-            context.scale(1, -1);
-
-            // Split the text into lines and draw each line
-            const lines1 = text1.split("\n");
-            const lineHeight = 6; // font size
-            const totalHeight = lines1.length * lineHeight;
-            const startY =
-              -(badgePosition1.y + badgeDimensions1.height / 2) -
-              totalHeight / 2 +
-              lineHeight / 2;
-
-            for (let i = 0; i < lines1.length; i++) {
-              context.fillText(lines1[i], badgePosition1.x, startY + i * lineHeight);
-            }
-
-            context.restore();
-
-            // Draw text for p3 with distance, tension, angle (top to bottom)
-            context.save();
-            context.fillStyle = "rgba(44, 28, 44, 1)"; // New text color
-            context.font = `6px fontra-ui-regular, sans-serif`; // 6pt font, medium weight
-            context.textAlign = "left";
-            context.textBaseline = "middle";
-            context.scale(1, -1);
-
-            // Split the text into lines and draw each line
-            const lines2 = text2.split("\n");
-            const totalHeight2 = lines2.length * lineHeight;
-            const startY2 =
-              -(badgePosition2.y + badgeDimensions2.height / 2) -
-              totalHeight2 / 2 +
-              lineHeight / 2;
-
-            for (let i = 0; i < lines2.length; i++) {
-              context.fillText(lines2[i], badgePosition2.x, startY2 + i * lineHeight);
-            }
-
-            context.restore();
+            drawCubicHandleLabelPair(context, segment.points, {
+              distance: showDistance,
+              tension: showTension,
+              angle: showAngle,
+            });
           } catch (error) {
             // Skip segments where tension calculation fails
             console.warn("Failed to calculate handle tensions:", error);

@@ -45,6 +45,7 @@ import {
   hasSkeletonPointSelection,
   makeSkeletonPointKey,
   makeSkeletonPointTargetEntry,
+  parseSkeletonPointKey,
   toggleSkeletonSmooth,
 } from "./skeleton-editing.js";
 import {
@@ -491,6 +492,38 @@ export class PointerTool extends BaseTool {
         return;
       }
       if (hasSkeletonPointSelection(sceneController.selection)) {
+        // Double-click on the centerline itself (no point under the cursor)
+        // selects the whole skeleton contour; on a point it toggles smooth.
+        const size = sceneController.mouseClickMargin;
+        const directPointHit = this.sceneModel.skeletonPointAtPoint(point, size);
+        if (!directPointHit.size) {
+          const segmentHit = this.sceneModel.skeletonSegmentSelectionAtPoint(
+            point,
+            size
+          );
+          if (segmentHit.size) {
+            const skeletonData = this.sceneModel._getEditLayerSkeletonData(
+              this.sceneModel.getSelectedPositionedGlyph()
+            );
+            const newSelection = new Set();
+            for (const key of segmentHit) {
+              const { contourId } = parseSkeletonPointKey(key);
+              const contour = skeletonData?.contours?.find(
+                (candidate) => candidate.id === contourId
+              );
+              for (const contourPoint of contour?.points || []) {
+                if (!contourPoint.type) {
+                  newSelection.add(makeSkeletonPointKey(contourId, contourPoint.id));
+                }
+              }
+            }
+            if (newSelection.size) {
+              this._selectionBeforeSingleClick = undefined;
+              sceneController.selection = newSelection;
+              return;
+            }
+          }
+        }
         await this.handleSkeletonPointsDoubleClick();
       }
       const {
