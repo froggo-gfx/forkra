@@ -1,6 +1,11 @@
 import { Bezier } from "bezier-js";
 import { chordLengthParameterize, computeMaxError, fitCubic } from "./fit-cubic.js";
-import { DEFAULT_SKELETON_WIDTH, normalizeSkeletonData } from "./skeleton-model.js";
+import {
+  CAP_POINT_FIELDS,
+  CORNER_POINT_FIELDS,
+  DEFAULT_SKELETON_WIDTH,
+  normalizeSkeletonData,
+} from "./skeleton-model.js";
 import { packContour } from "./var-path.js";
 import * as vector from "./vector.js";
 
@@ -18,20 +23,6 @@ const MAX_HANDLE_TRIM_RATIO = 0.99;
 const DEFAULT_CORNER_RADIUS_BOOST = 1;
 const MIN_CORNER_RADIUS_BOOST = 0.1;
 const MAX_CORNER_RADIUS_BOOST = 4;
-const CAP_POINT_FIELDS = [
-  "capStyle",
-  "capRadiusRatio",
-  "capTension",
-  "capAngle",
-  "capDistance",
-];
-// Angle-point rounding engine parameters — not cap parameters
-const CORNER_POINT_FIELDS = [
-  "cornerRoundness",
-  "cornerReach",
-  "roundnessStrength",
-  "cornerAsymmetry",
-];
 
 export function generateFromSkeleton(skeletonData) {
   const normalized = normalizeSkeletonData(skeletonData);
@@ -175,7 +166,7 @@ function canonicalPointToGeneratorPoint(point) {
   generatorPoint.rightNudge = point.nudge?.right ?? 0;
   generatorPoint.leftEditable = point.editable?.left === true;
   generatorPoint.rightEditable = point.editable?.right === true;
-  for (const field of [...CAP_POINT_FIELDS, ...CORNER_POINT_FIELDS]) {
+  for (const field of ["capStyle", ...CAP_POINT_FIELDS, ...CORNER_POINT_FIELDS]) {
     if (point[field] !== null && point[field] !== undefined) {
       generatorPoint[field] = point[field];
     }

@@ -7,7 +7,6 @@ import {
   buildSegmentsFromSkeletonPoints,
   calculateNormalAtSkeletonPoint,
   clearSkeletonData,
-  deleteSkeletonPoint,
   deleteSkeletonPoints,
   getSkeletonContour,
   getSkeletonData,
@@ -440,9 +439,9 @@ describe("skeleton-model id accessors and mutators", () => {
     const contour = appendSkeletonContour(skeleton);
     const point = appendSkeletonPoint(skeleton, contour.id, { x: 10, y: 20 });
 
-    expect(deleteSkeletonPoint(skeleton, contour.id, point.id)).to.equal(true);
-    expect(getSkeletonPoint(skeleton, contour.id, point.id)).to.equal(null);
-    expect(deleteSkeletonPoint(skeleton, contour.id, point.id)).to.equal(false);
+    expect(deleteSkeletonPoints(skeleton, [[contour.id, point.id]])).to.equal(true);
+    expect(getSkeletonContour(skeleton, contour.id)).to.equal(null);
+    expect(deleteSkeletonPoints(skeleton, [[contour.id, point.id]])).to.equal(false);
     expect(appendSkeletonPoint(skeleton, 999, { x: 1, y: 2 })).to.equal(null);
     expect(updateSkeletonPoint(skeleton, 999, point.id, { x: 1 })).to.equal(null);
   });

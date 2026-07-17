@@ -18,10 +18,15 @@ export const DEFAULT_SKELETON_WIDTH = 80;
 const VALID_POINT_TYPES = new Set([null, "cubic"]);
 const VALID_SINGLE_SIDED = new Set([null, "left", "right"]);
 const VALID_CAP_STYLES = new Set(["butt", "round", "square"]);
-const CAP_POINT_FIELDS = ["capRadiusRatio", "capTension", "capAngle", "capDistance"];
+export const CAP_POINT_FIELDS = [
+  "capRadiusRatio",
+  "capTension",
+  "capAngle",
+  "capDistance",
+];
 // Corner rounding is the angle-point engine's parameter set — related to caps
 // only in that both live on on-curve points
-const CORNER_POINT_FIELDS = [
+export const CORNER_POINT_FIELDS = [
   "cornerRoundness",
   "cornerReach",
   "roundnessStrength",
@@ -185,19 +190,6 @@ export function updateSkeletonPoint(skeletonData, contourId, pointId, patch) {
   });
   contour.points[pointIndex] = updatedPoint;
   return updatedPoint;
-}
-
-export function deleteSkeletonPoint(skeletonData, contourId, pointId) {
-  const contour = getSkeletonContour(skeletonData, contourId);
-  if (!contour) {
-    return false;
-  }
-  const pointIndex = contour.points.findIndex((point) => point.id === pointId);
-  if (pointIndex < 0) {
-    return false;
-  }
-  contour.points.splice(pointIndex, 1);
-  return true;
 }
 
 // ---- Shape-preserving multi-point deletion ----
