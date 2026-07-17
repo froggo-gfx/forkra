@@ -57,6 +57,7 @@ export const strings = {
   "action.paste": "Paste",
   "action.redo": "Redo",
   "action.reverse-contour": "Reverse Contour Direction",
+  "action.realize-skeleton-contours": "Realize Skeleton Contours",
   "action.select-all": "Select All",
   "action.select-none": "Select None",
   "action.set-contour-start": "Set Start Point",

@@ -473,10 +473,25 @@ badges for the skeleton centerline's cubic segments, honoring the same
 show-distance/tension/angle settings. Both layers toggle independently in the
 visualization menu.
 
-### 4.2 Realize contours functionality fully missing — `open`
+### 4.2 Realize contours functionality fully missing — `fixed` (2026-07-18)
 
 **Report:** "Realize contours" functionality is fully missing (converting generated
 outline contours into plain editable contours, detaching them from the skeleton).
+
+**Donor:** context-menu action "Realize skeleton projection"
+(`doRealizeSkeletonProjection`, scene-controller): removes the selected skeleton
+contours and their generated-contour tracking; the outlines stay in the path
+untouched and become plain contours. No path change, no regeneration.
+
+**Fix (adapted):** `doRealizeSkeletonContours` in scene-controller.js — context
+menu "Realize Skeleton Contours", enabled when skeleton points are selected.
+Per editing layer (contours resolved by structural ordinal from the edit layer,
+WS-9): drop `generated` entries by `skeletonContourId` and the skeleton
+contours themselves; `clearSkeletonData` when nothing remains. Deliberately does
+NOT go through editSkeleton — regeneration would delete the orphaned outlines.
+The freed path contours automatically become fully editable everywhere, since
+all gates (selection, pen, knife, select-all) key off the `generated` entries.
+Skeleton keys are stripped from the selection afterwards.
 
 ### 4.3 Ribs multi-select missing — `open` (needs deep UX investment)
 

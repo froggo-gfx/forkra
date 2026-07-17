@@ -43,7 +43,11 @@ import {
   union,
 } from "@fontra/core/set-ops.js";
 import { ShaperController } from "@fontra/core/shaper-controller.js";
-import { getSkeletonData } from "@fontra/core/skeleton-model.js";
+import {
+  clearSkeletonData,
+  getSkeletonData,
+  setSkeletonData,
+} from "@fontra/core/skeleton-model.js";
 import {
   arrowKeyDeltas,
   assert,
@@ -71,6 +75,7 @@ import {
   computeGeneratedContourRemap,
   createSkeletonRibTargetEntries,
   makeSkeletonPointTargetEntry,
+  parseSkeletonPointKey,
   recordSkeletonContourIndexShift,
 } from "./skeleton-editing.js";
 import {
@@ -840,6 +845,13 @@ export class SceneController {
     );
 
     registerAction(
+      "action.realize-skeleton-contours",
+      { topic },
+      () => this.doRealizeSkeletonContours(),
+      () => this.contextMenuState.skeletonPointSelection?.length
+    );
+
+    registerAction(
       "action.decompose-component",
       {
         topic,
@@ -1231,10 +1243,14 @@ export class SceneController {
         relevantSelection = this.selection;
       }
     }
-    const { point: pointSelection, component: componentSelection } =
-      parseSelection(relevantSelection);
+    const {
+      point: pointSelection,
+      component: componentSelection,
+      skeletonPoint: skeletonPointSelection,
+    } = parseSelection(relevantSelection);
     this.contextMenuState.pointSelection = pointSelection;
     this.contextMenuState.componentSelection = componentSelection;
+    this.contextMenuState.skeletonPointSelection = skeletonPointSelection;
 
     const glyphController = this.sceneModel.getSelectedPositionedGlyph().glyph;
     this.contextMenuState.openContourSelection = glyphController.canEdit
@@ -1263,6 +1279,7 @@ export class SceneController {
       { actionIdentifier: "action.break-contour" },
       { actionIdentifier: "action.reverse-contour" },
       { actionIdentifier: "action.set-contour-start" },
+      { actionIdentifier: "action.realize-skeleton-contours" },
       {
         title: translate("action.glyph.convert-curves"),
         getItems: () => [
@@ -1292,6 +1309,71 @@ export class SceneController {
       },
     ];
     return contextMenuItems;
+  }
+
+  // 4.2 "Realize contours" (donor: realize skeleton projection): detach the
+  // selected skeleton contours, keeping their generated outlines in the path
+  // as plain editable contours. Pure skeleton-data edit — the path and the
+  // realized contours' geometry are untouched, so this must NOT go through
+  // editSkeleton (regeneration would drop the now-orphaned outlines).
+  async doRealizeSkeletonContours() {
+    const skeletonPointSelection = this.contextMenuState.skeletonPointSelection || [];
+    if (!skeletonPointSelection.length) {
+      return;
+    }
+    await this.editLayersAndRecordChanges((layerGlyphs) => {
+      const editLayerName = this.sceneSettings.editLayerName;
+      const referenceSkeletonData = getSkeletonData(
+        layerGlyphs[editLayerName] || Object.values(layerGlyphs)[0]
+      );
+      if (!referenceSkeletonData) {
+        return;
+      }
+      // Selection ids are canonical in the edit layer; other layers resolve
+      // the affected contours by structural ordinal (WS-9)
+      const contourIds = new Set(
+        skeletonPointSelection.map((item) => parseSkeletonPointKey(`${item}`).contourId)
+      );
+      const ordinals = [];
+      referenceSkeletonData.contours.forEach((contour, index) => {
+        if (contourIds.has(contour.id)) {
+          ordinals.push(index);
+        }
+      });
+      if (!ordinals.length) {
+        return;
+      }
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        const original = getSkeletonData(layerGlyph);
+        if (!original) {
+          continue;
+        }
+        const skeletonData = structuredClone(original);
+        const removeIds = new Set(
+          ordinals
+            .map((ordinal) => skeletonData.contours[ordinal]?.id)
+            .filter((id) => id !== undefined)
+        );
+        if (!removeIds.size) {
+          continue;
+        }
+        skeletonData.generated = (skeletonData.generated || []).filter(
+          (entry) => !removeIds.has(entry.skeletonContourId)
+        );
+        skeletonData.contours = skeletonData.contours.filter(
+          (contour) => !removeIds.has(contour.id)
+        );
+        if (!skeletonData.contours.length && !skeletonData.generated.length) {
+          clearSkeletonData(layerGlyph);
+        } else {
+          setSkeletonData(layerGlyph, skeletonData);
+        }
+      }
+      this.selection = new Set(
+        [...this.selection].filter((key) => !key.startsWith("skeletonPoint/"))
+      );
+      return translate("action.realize-skeleton-contours");
+    });
   }
 
   getSelectedGlyphName() {
