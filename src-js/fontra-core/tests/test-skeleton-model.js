@@ -149,6 +149,33 @@ describe("skeleton-model constructors and normalization", () => {
       cornerAsymmetry: -0.2,
     });
   });
+
+  it("preserves point-level corner-rounding fields through normalization", () => {
+    const normalized = normalizeSkeletonData({
+      nextId: 1,
+      contours: [
+        {
+          points: [
+            {
+              x: 0,
+              y: 0,
+              cornerRoundness: 0.4,
+              cornerReach: 0.6,
+              roundnessStrength: 1.5,
+              cornerAsymmetry: 0.25,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(normalized.contours[0].points[0]).to.include({
+      cornerRoundness: 0.4,
+      cornerReach: 0.6,
+      roundnessStrength: 1.5,
+      cornerAsymmetry: 0.25,
+    });
+  });
 });
 
 describe("skeleton-model layer persistence helpers", () => {
@@ -511,6 +538,31 @@ describe("skeleton-model shape-preserving multi-point deletion", () => {
     expect(points[0].capRadiusRatio).to.equal(0.125);
   });
 
+  it("moves cap fields to the new endpoint but not corner-rounding fields", () => {
+    const skeleton = makeEmptySkeletonData();
+    const { contour, a, b } = makeCurveContour(skeleton);
+    updateSkeletonPoint(skeleton, contour.id, a.id, {
+      capStyle: "square",
+      capAngle: 30,
+      cornerRoundness: 0.5,
+      cornerReach: 0.7,
+      roundnessStrength: 2,
+      cornerAsymmetry: 0.3,
+    });
+
+    deleteSkeletonPoints(skeleton, [[contour.id, a.id]]);
+
+    const newFirst = getSkeletonContour(skeleton, contour.id).points[0];
+    expect(newFirst.id).to.equal(b.id);
+    expect(newFirst.capStyle).to.equal("square");
+    expect(newFirst.capAngle).to.equal(30);
+    // corner rounding belongs to the angle-point engine, not to caps
+    expect(newFirst.cornerRoundness).to.equal(undefined);
+    expect(newFirst.cornerReach).to.equal(undefined);
+    expect(newFirst.roundnessStrength).to.equal(undefined);
+    expect(newFirst.cornerAsymmetry).to.equal(undefined);
+  });
+
   it("removes a contour once no on-curve points remain", () => {
     const skeleton = makeEmptySkeletonData();
     const { contour, a, b, c } = makeCurveContour(skeleton);
@@ -662,10 +714,14 @@ describe("skeleton-model panel-facing mutators", () => {
   it("corner params write canonical corner fields only", () => {
     const point = makePoint();
     setSkeletonCornerParameters(point, {
+      cornerRoundness: 0.4,
+      cornerReach: 0.6,
       roundnessStrength: 0.5,
       cornerAsymmetry: -0.25,
       cornerTrimRatio: 0.9,
     });
+    expect(point.cornerRoundness).to.equal(0.4);
+    expect(point.cornerReach).to.equal(0.6);
     expect(point.roundnessStrength).to.equal(0.5);
     expect(point.cornerAsymmetry).to.equal(-0.25);
     expect(point.cornerTrimRatio).to.equal(undefined);

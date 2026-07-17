@@ -284,19 +284,42 @@ export function summarizeSkeletonCapSelection(selectedPoints) {
   };
 }
 
-export function summarizeSkeletonCornerSelection(selectedPoints, contours) {
+// Corner rounding is the angle-point engine (donor "Corner Rounding" section):
+// all four parameters live on the point, and are editable only when EVERY
+// selected point is a non-smooth on-curve that is not an open-contour
+// endpoint — the inverse of the cap gate.
+export function summarizeSkeletonCornerSelection(selectedPoints) {
+  let canEdit = selectedPoints.length > 0;
+  for (const entry of selectedPoints) {
+    if (entry.point.smooth) {
+      canEdit = false;
+      break;
+    }
+    if (!entry.contour.closed) {
+      const endpoints = skeletonContourEndpointIndices(entry.contour);
+      if (
+        !endpoints ||
+        entry.pointIndex === endpoints.first ||
+        entry.pointIndex === endpoints.last
+      ) {
+        canEdit = false;
+        break;
+      }
+    }
+  }
   return {
-    roundnessStrength: reduceValues(
-      selectedPoints.map((entry) => entry.point.roundnessStrength ?? null)
+    canEdit,
+    cornerRoundness: reduceValues(
+      selectedPoints.map((entry) => entry.point.cornerRoundness ?? null)
     ),
     cornerAsymmetry: reduceValues(
       selectedPoints.map((entry) => entry.point.cornerAsymmetry ?? null)
     ),
-    cornerTrimRatio: reduceValues(
-      contours.map((entry) => entry.contour.cornerTrimRatio ?? null)
+    cornerReach: reduceValues(
+      selectedPoints.map((entry) => entry.point.cornerReach ?? null)
     ),
-    cornerRadiusBoost: reduceValues(
-      contours.map((entry) => entry.contour.cornerRadiusBoost ?? null)
+    roundnessStrength: reduceValues(
+      selectedPoints.map((entry) => entry.point.roundnessStrength ?? null)
     ),
   };
 }

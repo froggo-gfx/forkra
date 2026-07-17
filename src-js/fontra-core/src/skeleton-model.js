@@ -18,14 +18,16 @@ export const DEFAULT_SKELETON_WIDTH = 80;
 const VALID_POINT_TYPES = new Set([null, "cubic"]);
 const VALID_SINGLE_SIDED = new Set([null, "left", "right"]);
 const VALID_CAP_STYLES = new Set(["butt", "round", "square"]);
-const CAP_CORNER_POINT_FIELDS = [
-  "capRadiusRatio",
-  "capTension",
-  "capAngle",
-  "capDistance",
+const CAP_POINT_FIELDS = ["capRadiusRatio", "capTension", "capAngle", "capDistance"];
+// Corner rounding is the angle-point engine's parameter set — related to caps
+// only in that both live on on-curve points
+const CORNER_POINT_FIELDS = [
+  "cornerRoundness",
+  "cornerReach",
   "roundnessStrength",
   "cornerAsymmetry",
 ];
+const CAP_CORNER_POINT_FIELDS = [...CAP_POINT_FIELDS, ...CORNER_POINT_FIELDS];
 
 export function makeEmptySkeletonData() {
   return {
@@ -321,7 +323,7 @@ function copySkeletonCapData(sourcePoint, targetPoint) {
     return;
   }
   targetPoint.capStyle = sourcePoint.capStyle ?? null;
-  for (const field of CAP_CORNER_POINT_FIELDS) {
+  for (const field of CAP_POINT_FIELDS) {
     if (Number.isFinite(sourcePoint[field])) {
       targetPoint[field] = sourcePoint[field];
     } else {
@@ -809,7 +811,7 @@ export function setSkeletonCornerParameters(point, values, { round = null } = {}
   if (!values || typeof values !== "object") {
     return;
   }
-  for (const field of ["roundnessStrength", "cornerAsymmetry"]) {
+  for (const field of CORNER_POINT_FIELDS) {
     if (field in values && Number.isFinite(values[field])) {
       point[field] = round ? round(values[field]) : values[field];
     }

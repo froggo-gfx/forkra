@@ -452,27 +452,6 @@ export async function setPanelCornerParameters(
   );
 }
 
-// Contour-level corner debug fields (cornerTrimRatio, cornerRadiusBoost).
-export async function setPanelContourCornerDebug(
-  sceneController,
-  contourAddresses,
-  values,
-  undoLabel
-) {
-  return editSelectedSkeletonContours(
-    sceneController,
-    contourAddresses,
-    (contour) => {
-      for (const field of ["cornerTrimRatio", "cornerRadiusBoost"]) {
-        if (field in values && Number.isFinite(values[field])) {
-          contour[field] = values[field];
-        }
-      }
-    },
-    undoLabel
-  );
-}
-
 // ---- Rib / editable-generated handle operations -----------------------------
 
 export async function resetPanelRibs(

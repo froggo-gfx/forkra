@@ -525,12 +525,45 @@ removal, smooth-flag fixup); 1373 passing, bundle green. Runtime check owed:
 delete mid points / endpoints / handles on curved skeletons, multi-point delete,
 delete across layers. Follow-up (2026-07-17): after deletion the nearest surviving on-curve neighbor of each deleted point stays selected (survivor computed pre-delete, verified post-delete).
 
-### 4.8 Parity miss: asymmetry / corner trim / corner radius misplaced as cap params — `open`
+### 4.8 Parity miss: asymmetry / corner trim / corner radius misplaced as cap params — `fixed` (2026-07-17)
 
 **Report:** Asymmetry, corner trim and corner radius are *not* cap style parameters.
 They are parameters of the angle-point rounding engine (corner rounding at
 non-smooth skeleton points). Needs research from the donor and fixing — both where
 the panel surfaces them and how the generator consumes them.
+
+**Donor research:** the donor has a separate **"Corner Rounding"** panel section
+with four *point-level* sliders — Corner Round % (`cornerRoundness`, 0–100),
+Corner Asymmetry (`cornerAsymmetry`, −1..1), Corner Reach % (`cornerReach`,
+5–99), Roundness Strength % (`roundnessStrength`, 10–400) — all gated by
+`_isCornerRoundEditableForPoint`: on-curve, **non-smooth** (angle point), and for
+open contours **not an endpoint** (the exact inverse of the cap gate). The
+generator consumes those point fields; contour-level `cornerTrimRatio` /
+`cornerRadiusBoost` are only fallbacks.
+
+**Root causes in the fork (worse than misplacement):**
+
+- `normalizeSkeletonPoint` only preserved `roundnessStrength`/`cornerAsymmetry` —
+  `cornerRoundness` and `cornerReach` were **stripped on every normalize**, so the
+  master corner-rounding dial could never persist. The fork's generator was already
+  donor-faithful (reads all four point fields) but never saw them.
+- The panel's "roundness" slider wrote `roundnessStrength` (the strength/boost
+  param) instead of `cornerRoundness` (the main dial) — conflated keys.
+- Trim/boost sliders wrote the contour-level *debug fallback* fields instead of
+  point-level `cornerReach`/`roundnessStrength`.
+- All four sat inside "Caps & corners" with no angle-point gating.
+
+**Fix:** model — `CAP_POINT_FIELDS` and `CORNER_POINT_FIELDS` split (normalization
+keeps both; deletion cap-inheritance copies caps only; `setSkeletonCornerParameters`
+writes the four corner fields). Panel — new "Corner rounding" section with the
+donor's four percent-based sliders and angle-point gating
+(`summarizeSkeletonCornerSelection` rewritten point-level with `canEdit`); caps
+section renamed "Caps"; `_onCornerChange` converts % → ratios and routes everything
+through `setPanelCornerParameters`; dead `setPanelContourCornerDebug` removed
+(contour-level fallbacks remain supported in model/generator). 3 new model tests;
+1375 passing, bundle green. Runtime check owed: corner-round sweep on an angle
+point of a closed and an open contour, gating (smooth points and endpoints must
+disable the sliders), reach/strength/asymmetry effect on the generated outline.
 
 ---
 

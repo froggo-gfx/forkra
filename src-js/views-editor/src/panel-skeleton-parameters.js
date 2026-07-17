@@ -16,7 +16,6 @@ import {
   scalePanelPointWidth,
   setPanelCapParameters,
   setPanelCapStyle,
-  setPanelContourCornerDebug,
   setPanelContourDefaultWidth,
   setPanelContourSingleSided,
   setPanelCornerParameters,
@@ -246,7 +245,8 @@ export default class SkeletonParametersPanel extends Panel {
       this._buildContourSection(formContents, panelSelection.contours);
     }
     if (widthPoints.length) {
-      this._buildCapCornerSection(formContents, widthPoints, panelSelection.contours);
+      this._buildCapSection(formContents, widthPoints);
+      this._buildCornerSection(formContents, widthPoints);
     }
     if (panelSelection.ribs.length) {
       this._buildRibSection(formContents, panelSelection.ribs);
@@ -421,14 +421,13 @@ export default class SkeletonParametersPanel extends Panel {
     );
   }
 
-  _buildCapCornerSection(formContents, widthPoints, contours) {
+  _buildCapSection(formContents, widthPoints) {
     const cap = summarizeSkeletonCapSelection(widthPoints);
     const capStyle = summarizeSkeletonCapStyleSelection(widthPoints);
-    const corner = summarizeSkeletonCornerSelection(widthPoints, contours);
     formContents.push({ type: "divider" });
     formContents.push({
       type: "header",
-      label: translate("sidebar.skeleton-parameters.caps-corners"),
+      label: translate("sidebar.skeleton-parameters.caps"),
     });
     formContents.push({
       type: "select",
@@ -511,17 +510,32 @@ export default class SkeletonParametersPanel extends Panel {
         cap.capDistance
       );
     }
-    // Steps mirror the donor's percent-based sliders (step 1% / 0.1)
-    // expressed in our unit ranges.
+  }
+
+  // Donor "Corner Rounding" section: parameters of the angle-point rounding
+  // engine, NOT cap parameters. All four live on the point; edited in percent
+  // (except asymmetry) and gated to angle points (non-smooth, non-endpoint).
+  _buildCornerSection(formContents, widthPoints) {
+    const corner = summarizeSkeletonCornerSelection(widthPoints);
+    formContents.push({ type: "divider" });
+    formContents.push({
+      type: "header",
+      label: translate("sidebar.skeleton-parameters.corner-rounding"),
+    });
+    const gate = { disabled: !corner.canEdit };
+    const asPercent = (summary) => ({
+      value: summary.value == null ? null : Math.round(summary.value * 100),
+      mixed: summary.mixed,
+    });
     this._pushSummarySlider(
       formContents,
       "corner:roundness",
       "corner-roundness",
-      corner.roundnessStrength,
+      asPercent(corner.cornerRoundness),
       0,
-      1,
+      100,
       0,
-      { step: 0.01 }
+      { step: 1, ...gate }
     );
     this._pushSummarySlider(
       formContents,
@@ -531,27 +545,27 @@ export default class SkeletonParametersPanel extends Panel {
       -1,
       1,
       0,
-      { step: 0.1 }
+      { step: 0.1, ...gate }
     );
     this._pushSummarySlider(
       formContents,
-      "corner:trim-ratio",
-      "corner-trim-ratio",
-      corner.cornerTrimRatio,
-      0.05,
-      0.99,
-      0.5,
-      { step: 0.01 }
+      "corner:reach",
+      "corner-reach",
+      asPercent(corner.cornerReach),
+      5,
+      99,
+      50,
+      { step: 1, ...gate }
     );
     this._pushSummarySlider(
       formContents,
-      "corner:radius-boost",
-      "corner-radius-boost",
-      corner.cornerRadiusBoost,
-      0.1,
-      4,
-      1,
-      { step: 0.01 }
+      "corner:strength",
+      "corner-strength",
+      asPercent(corner.roundnessStrength),
+      10,
+      400,
+      100,
+      { step: 1, ...gate }
     );
   }
 
@@ -815,36 +829,24 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   async _onCornerChange(name, value) {
-    const sc = this.sceneController;
+    let values;
     if (name === "roundness") {
-      await setPanelCornerParameters(
-        sc,
-        this._widthPoints(),
-        { roundnessStrength: value },
-        this._undo("set-corner")
-      );
+      values = { cornerRoundness: Number(value) / 100 };
     } else if (name === "asymmetry") {
-      await setPanelCornerParameters(
-        sc,
-        this._widthPoints(),
-        { cornerAsymmetry: value },
-        this._undo("set-corner")
-      );
-    } else if (name === "trim-ratio") {
-      await setPanelContourCornerDebug(
-        sc,
-        this._panelSelection.contours,
-        { cornerTrimRatio: value },
-        this._undo("set-corner")
-      );
-    } else if (name === "radius-boost") {
-      await setPanelContourCornerDebug(
-        sc,
-        this._panelSelection.contours,
-        { cornerRadiusBoost: value },
-        this._undo("set-corner")
-      );
+      values = { cornerAsymmetry: Number(value) };
+    } else if (name === "reach") {
+      values = { cornerReach: Number(value) / 100 };
+    } else if (name === "strength") {
+      values = { roundnessStrength: Number(value) / 100 };
+    } else {
+      return;
     }
+    await setPanelCornerParameters(
+      this.sceneController,
+      this._widthPoints(),
+      values,
+      this._undo("set-corner")
+    );
   }
 
   async _onRibChange(name, value) {
