@@ -27,7 +27,6 @@ const CORNER_POINT_FIELDS = [
   "roundnessStrength",
   "cornerAsymmetry",
 ];
-const CAP_CORNER_POINT_FIELDS = [...CAP_POINT_FIELDS, ...CORNER_POINT_FIELDS];
 
 export function makeEmptySkeletonData() {
   return {
@@ -132,7 +131,7 @@ export function normalizeSkeletonPoint(point, skeletonData = null, usedIds = nul
     normalized.editable = normalizeEditable(point?.editable);
     normalized.handleOffsets = normalizeHandleOffsets(point?.handleOffsets);
     normalized.capStyle = VALID_CAP_STYLES.has(point?.capStyle) ? point.capStyle : null;
-    for (const field of CAP_CORNER_POINT_FIELDS) {
+    for (const field of [...CAP_POINT_FIELDS, ...CORNER_POINT_FIELDS]) {
       if (Number.isFinite(point?.[field])) {
         normalized[field] = point[field];
       }

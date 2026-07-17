@@ -105,6 +105,38 @@ describe("skeleton-generator provenance", () => {
   });
 });
 
+describe("skeleton-generator corner rounding input", () => {
+  function makeAnglePointSkeleton(cornerFields = {}) {
+    // open polyline with a sharp angle at the middle point
+    return {
+      version: 1,
+      nextId: 5,
+      contours: [
+        {
+          id: 1,
+          closed: false,
+          defaultWidth: 80,
+          singleSided: null,
+          points: [
+            { id: 2, x: 0, y: 0, type: null, smooth: false },
+            { id: 3, x: 100, y: 0, type: null, smooth: false, ...cornerFields },
+            { id: 4, x: 100, y: 100, type: null, smooth: false },
+          ],
+        },
+      ],
+      generated: [],
+    };
+  }
+
+  it("corner rounding parameters change the generated outline", () => {
+    const plain = generateFromSkeleton(makeAnglePointSkeleton());
+    const rounded = generateFromSkeleton(
+      makeAnglePointSkeleton({ cornerRoundness: 0.8, cornerReach: 0.6 })
+    );
+    expect(rounded.contours).to.not.deep.equal(plain.contours);
+  });
+});
+
 describe("skeleton-generator near-zero handle stabilization", () => {
   it("does not flip near-zero handles across the anchor", () => {
     const skeleton = {

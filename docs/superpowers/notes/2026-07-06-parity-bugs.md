@@ -560,8 +560,13 @@ donor's four percent-based sliders and angle-point gating
 (`summarizeSkeletonCornerSelection` rewritten point-level with `canEdit`); caps
 section renamed "Caps"; `_onCornerChange` converts % → ratios and routes everything
 through `setPanelCornerParameters`; dead `setPanelContourCornerDebug` removed
-(contour-level fallbacks remain supported in model/generator). 3 new model tests;
-1375 passing, bundle green. Runtime check owed: corner-round sweep on an angle
+(contour-level fallbacks remain supported in model/generator). Follow-up: the
+generator had its own conflated `CAP_CORNER_POINT_FIELDS` list which lacked
+`cornerRoundness`/`cornerReach`, so corner params were dropped at the
+canonical→generator boundary and never affected generated points — both model and
+generator now use separate `CAP_POINT_FIELDS` / `CORNER_POINT_FIELDS` lists and
+forward all corner fields (regression test: corner params must change the
+generated outline). 4 new tests; 1376 passing, bundle green. Runtime check owed: corner-round sweep on an angle
 point of a closed and an open contour, gating (smooth points and endpoints must
 disable the sliders), reach/strength/asymmetry effect on the generated outline.
 
