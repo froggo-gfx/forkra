@@ -36,7 +36,7 @@ import { SceneView } from "@fontra/core/scene-view.js";
 import { isSuperset } from "@fontra/core/set-ops.js";
 import {
   allocateSkeletonIds,
-  deleteSkeletonPoint,
+  deleteSkeletonPoints,
   getSkeletonData,
 } from "@fontra/core/skeleton-model.js";
 import { themeController } from "@fontra/core/theme-settings.js";
@@ -2521,9 +2521,7 @@ export class EditorController extends ViewController {
                 toDelete.push([address.contour.id, address.point.id]);
               }
             }
-            for (const [contourId, pointId] of toDelete) {
-              deleteSkeletonPoint(working, contourId, pointId);
-            }
+            deleteSkeletonPoints(working, toDelete);
           });
         }
       }

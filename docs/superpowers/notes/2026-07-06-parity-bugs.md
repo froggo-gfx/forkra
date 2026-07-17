@@ -489,12 +489,41 @@ needing deep UX investment before implementation.
 shortcut. (Note: WS-era work deliberately *excluded* generated points from
 select-all — C2 — but skeleton points/contours themselves should be included.)
 
-### 4.7 Point deletion broken — `open` (worst bug; needs deep research)
+### 4.7 Point deletion broken — `fixed` (2026-07-17)
 
 **Report:** "Worst bug yet": deletion of points doesn't work properly — leaves stray
 handles, draws a non-functional skeleton centerline from the last point to the first
 (i.e. the contour appears to close or bridge after deletion), etc. Needs deep
 research and fixing.
+
+**Root causes:**
+
+- *Stray handles*: the fork's `deleteSkeletonPoint` (skeleton-model.js) was a naive
+  single-point splice. The donor's shape-preserving `deleteSkeletonPoints`
+  (path-functions.js:1240) was never ported — it expands the selection to adjacent
+  handle runs (on-curve) / the paired handle (off-curve), refits the bridging
+  segment with `fitCubic` against the original geometry, inherits cap data onto
+  new open-contour endpoints, clears meaningless smooth flags, and removes contours
+  left without on-curves.
+- *Phantom last→first centerline*: `skeletonContourToPath2d`
+  (visualization-layer-skeleton.js) indexed `next`/`afterNext` with
+  `% points.length` even for open contours, so trailing stray cubic handles made
+  the renderer wrap around and draw a bezier from the last on-curve through the
+  strays back to point 0 — exactly the reported bridge.
+
+**Fix:** ported `deleteSkeletonPoints` into `skeleton-model.js`, adapted to the
+fork's model (id-addressed points resolved to indices per call, `closed` flag,
+cubic-only off-curves, fork cap/corner field set incl. `roundnessStrength` /
+`cornerAsymmetry`, fitted handles minted via `makeSkeletonPoint` so ids/nextId
+stay consistent, prev-anchor matched by id instead of donor's coordinate match).
+`_deleteSelection` in editor.js now passes the resolved `[contourId, pointId]`
+pairs to it in one call (still inside `editSkeleton`, so generated contours
+regenerate). Renderer hardened: open contours no longer wrap `next`/`afterNext`
+(defense-in-depth for malformed data from any source). 5 new model tests
+(mid-on-curve refit, paired-handle removal, endpoint cap inheritance, empty-contour
+removal, smooth-flag fixup); 1373 passing, bundle green. Runtime check owed:
+delete mid points / endpoints / handles on curved skeletons, multi-point delete,
+delete across layers.
 
 ### 4.8 Parity miss: asymmetry / corner trim / corner radius misplaced as cap params — `open`
 

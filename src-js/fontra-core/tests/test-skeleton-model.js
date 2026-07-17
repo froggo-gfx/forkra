@@ -8,6 +8,7 @@ import {
   calculateNormalAtSkeletonPoint,
   clearSkeletonData,
   deleteSkeletonPoint,
+  deleteSkeletonPoints,
   getSkeletonContour,
   getSkeletonData,
   getSkeletonHandleOffset,
@@ -417,6 +418,124 @@ describe("skeleton-model id accessors and mutators", () => {
     expect(deleteSkeletonPoint(skeleton, contour.id, point.id)).to.equal(false);
     expect(appendSkeletonPoint(skeleton, 999, { x: 1, y: 2 })).to.equal(null);
     expect(updateSkeletonPoint(skeleton, 999, point.id, { x: 1 })).to.equal(null);
+  });
+});
+
+describe("skeleton-model shape-preserving multi-point deletion", () => {
+  function makeCurveContour(skeleton) {
+    // A --curve-- B --curve-- C (open)
+    const contour = appendSkeletonContour(skeleton);
+    const a = appendSkeletonPoint(skeleton, contour.id, { x: 0, y: 0 });
+    const h1 = appendSkeletonPoint(skeleton, contour.id, {
+      x: 30,
+      y: 0,
+      type: "cubic",
+    });
+    const h2 = appendSkeletonPoint(skeleton, contour.id, {
+      x: 70,
+      y: 40,
+      type: "cubic",
+    });
+    const b = appendSkeletonPoint(skeleton, contour.id, {
+      x: 100,
+      y: 40,
+      smooth: true,
+    });
+    const h3 = appendSkeletonPoint(skeleton, contour.id, {
+      x: 130,
+      y: 40,
+      type: "cubic",
+    });
+    const h4 = appendSkeletonPoint(skeleton, contour.id, {
+      x: 170,
+      y: 0,
+      type: "cubic",
+    });
+    const c = appendSkeletonPoint(skeleton, contour.id, { x: 200, y: 0 });
+    return { contour, a, h1, h2, b, h3, h4, c };
+  }
+
+  it("deleting a mid on-curve removes adjacent handles and refits the bridge", () => {
+    const skeleton = makeEmptySkeletonData();
+    const { contour, a, b, c } = makeCurveContour(skeleton);
+
+    const modified = deleteSkeletonPoints(skeleton, [[contour.id, b.id]]);
+
+    expect(modified).to.equal(true);
+    const points = getSkeletonContour(skeleton, contour.id).points;
+    expect(points[0].id).to.equal(a.id);
+    expect(points[points.length - 1].id).to.equal(c.id);
+    // no dangling handles at either end, refit produced a single cubic segment
+    expect(points).to.have.length(4);
+    expect(points[1].type).to.equal("cubic");
+    expect(points[2].type).to.equal("cubic");
+    // fresh handle points must carry unique minted ids below nextId
+    const ids = points.map((point) => point.id);
+    expect(new Set(ids).size).to.equal(ids.length);
+    for (const id of ids) {
+      expect(id).to.be.below(skeleton.nextId);
+    }
+  });
+
+  it("deleting an off-curve also removes its paired handle, leaving a line", () => {
+    const skeleton = makeEmptySkeletonData();
+    const { contour, a, h1, b } = makeCurveContour(skeleton);
+
+    deleteSkeletonPoints(skeleton, [[contour.id, h1.id]]);
+
+    const points = getSkeletonContour(skeleton, contour.id).points;
+    // both h1 and h2 gone; A--B is now a straight segment
+    expect(points[0].id).to.equal(a.id);
+    expect(points[1].id).to.equal(b.id);
+    expect(points[1].type).to.equal(null);
+    // B lost its incoming handle but keeps the outgoing pair to C
+    expect(points.slice(2).filter((point) => point.type === "cubic")).to.have.length(2);
+  });
+
+  it("deleting an open-contour endpoint clears its handles and moves cap data", () => {
+    const skeleton = makeEmptySkeletonData();
+    const { contour, a, b } = makeCurveContour(skeleton);
+    updateSkeletonPoint(skeleton, contour.id, a.id, {
+      capStyle: "round",
+      capRadiusRatio: 0.125,
+    });
+
+    deleteSkeletonPoints(skeleton, [[contour.id, a.id]]);
+
+    const points = getSkeletonContour(skeleton, contour.id).points;
+    // no leading dangling handles
+    expect(points[0].id).to.equal(b.id);
+    expect(points[0].type).to.equal(null);
+    // cap parameters of the deleted terminal migrate to the new terminal
+    expect(points[0].capStyle).to.equal("round");
+    expect(points[0].capRadiusRatio).to.equal(0.125);
+  });
+
+  it("removes a contour once no on-curve points remain", () => {
+    const skeleton = makeEmptySkeletonData();
+    const { contour, a, b, c } = makeCurveContour(skeleton);
+
+    deleteSkeletonPoints(skeleton, [
+      [contour.id, a.id],
+      [contour.id, b.id],
+      [contour.id, c.id],
+    ]);
+
+    expect(getSkeletonContour(skeleton, contour.id)).to.equal(null);
+  });
+
+  it("clears the smooth flag when a surviving point loses all handles", () => {
+    const skeleton = makeEmptySkeletonData();
+    const { contour, h1, b, h3 } = makeCurveContour(skeleton);
+
+    deleteSkeletonPoints(skeleton, [
+      [contour.id, h1.id],
+      [contour.id, h3.id],
+    ]);
+
+    const points = getSkeletonContour(skeleton, contour.id).points;
+    const survivorB = points.find((point) => point.id === b.id);
+    expect(survivorB.smooth).to.equal(false);
   });
 });
 

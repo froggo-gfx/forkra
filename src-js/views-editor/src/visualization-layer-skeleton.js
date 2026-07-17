@@ -60,8 +60,10 @@ function skeletonContourToPath2d(contour) {
       continue;
     }
 
-    const next = points[(i + 1) % points.length];
-    const afterNext = points[(i + 2) % points.length];
+    // Open contours must not wrap: trailing off-curves (malformed data) would
+    // otherwise draw a phantom segment from the last point back to the first
+    const next = contour.closed ? points[(i + 1) % points.length] : points[i + 1];
+    const afterNext = contour.closed ? points[(i + 2) % points.length] : points[i + 2];
     if (
       point.type === "cubic" &&
       next?.type === "cubic" &&

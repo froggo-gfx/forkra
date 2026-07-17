@@ -1,4 +1,5 @@
 import { Bezier } from "bezier-js";
+import { fitCubic } from "./fit-cubic.js";
 import {
   deleteFontraInternalSection,
   getFontraInternalSection,
@@ -196,6 +197,415 @@ export function deleteSkeletonPoint(skeletonData, contourId, pointId) {
   }
   contour.points.splice(pointIndex, 1);
   return true;
+}
+
+// ---- Shape-preserving multi-point deletion ----
+// Ported from the donor's deleteSkeletonPoints (path-functions.js), adapted to
+// this model: id-addressed points, `closed` flag, cubic-only off-curves, and
+// fork-specific cap/corner fields. Deleting an on-curve consumes its adjacent
+// handle runs and refits the bridging segment against the original geometry;
+// deleting an off-curve removes its paired handle; contours left without
+// on-curves are removed entirely.
+
+export function deleteSkeletonPoints(skeletonData, pointRefs) {
+  if (!skeletonData?.contours) {
+    return false;
+  }
+
+  // Resolve [contourId, pointId] pairs into per-contour index sets
+  const indicesByContour = new Map();
+  for (const [contourId, pointId] of pointRefs || []) {
+    const contour = getSkeletonContour(skeletonData, contourId);
+    if (!contour) {
+      continue;
+    }
+    const pointIndex = contour.points.findIndex((point) => point.id === pointId);
+    if (pointIndex < 0) {
+      continue;
+    }
+    if (!indicesByContour.has(contourId)) {
+      indicesByContour.set(contourId, new Set());
+    }
+    indicesByContour.get(contourId).add(pointIndex);
+  }
+  if (!indicesByContour.size) {
+    return false;
+  }
+
+  const contourIdsToRemove = [];
+  for (const [contourId, selectedIndices] of indicesByContour) {
+    const contour = getSkeletonContour(skeletonData, contourId);
+    const deleteSet = expandSkeletonDeleteSet(contour, selectedIndices);
+
+    let inheritFirstCap = null;
+    let inheritLastCap = null;
+    if (!contour.closed) {
+      const firstOnCurve = findEndpointOnCurveIndex(contour.points, false);
+      const lastOnCurve = findEndpointOnCurveIndex(contour.points, true);
+      if (firstOnCurve !== null && deleteSet.has(firstOnCurve)) {
+        inheritFirstCap = contour.points[firstOnCurve];
+      }
+      if (lastOnCurve !== null && deleteSet.has(lastOnCurve)) {
+        inheritLastCap = contour.points[lastOnCurve];
+      }
+    }
+
+    const newPoints = rebuildSkeletonContourPoints(
+      contour.points,
+      deleteSet,
+      contour.closed,
+      skeletonData
+    );
+
+    if (!contour.closed && newPoints.length) {
+      const newFirst = findEndpointOnCurveIndex(newPoints, false);
+      const newLast = findEndpointOnCurveIndex(newPoints, true);
+      if (newFirst !== null && newLast !== null) {
+        if (newFirst === newLast) {
+          const source = inheritLastCap || inheritFirstCap;
+          if (source) {
+            copySkeletonCapData(source, newPoints[newFirst]);
+          }
+        } else {
+          if (inheritFirstCap) {
+            copySkeletonCapData(inheritFirstCap, newPoints[newFirst]);
+          }
+          if (inheritLastCap) {
+            copySkeletonCapData(inheritLastCap, newPoints[newLast]);
+          }
+        }
+      }
+    }
+
+    if (!newPoints.some((point) => !point.type)) {
+      contourIdsToRemove.push(contourId);
+    } else {
+      contour.points = newPoints;
+    }
+  }
+
+  for (const contourId of contourIdsToRemove) {
+    const contourIndex = skeletonData.contours.findIndex(
+      (contour) => contour.id === contourId
+    );
+    if (contourIndex >= 0) {
+      skeletonData.contours.splice(contourIndex, 1);
+    }
+  }
+
+  return true;
+}
+
+function findEndpointOnCurveIndex(points, useEnd) {
+  if (!points?.length) {
+    return null;
+  }
+  if (useEnd) {
+    for (let i = points.length - 1; i >= 0; i--) {
+      if (!points[i].type) {
+        return i;
+      }
+    }
+    return null;
+  }
+  for (let i = 0; i < points.length; i++) {
+    if (!points[i].type) {
+      return i;
+    }
+  }
+  return null;
+}
+
+function copySkeletonCapData(sourcePoint, targetPoint) {
+  if (!sourcePoint || !targetPoint || targetPoint.type) {
+    return;
+  }
+  targetPoint.capStyle = sourcePoint.capStyle ?? null;
+  for (const field of CAP_CORNER_POINT_FIELDS) {
+    if (Number.isFinite(sourcePoint[field])) {
+      targetPoint[field] = sourcePoint[field];
+    } else {
+      delete targetPoint[field];
+    }
+  }
+}
+
+// Expand a set of selected point indices: an on-curve pulls in its adjacent
+// off-curve runs on both sides; an off-curve pulls in its paired handle.
+function expandSkeletonDeleteSet(contour, selectedIndices) {
+  const points = contour.points;
+  const numPoints = points.length;
+  const isClosed = contour.closed;
+  const expanded = new Set(selectedIndices);
+
+  for (const pointIndex of selectedIndices) {
+    const point = points[pointIndex];
+    if (!point) {
+      continue;
+    }
+
+    if (!point.type) {
+      // Backward off-curve run
+      for (let i = 1; i < numPoints; i++) {
+        const idx = (pointIndex - i + numPoints) % numPoints;
+        if (!isClosed && idx > pointIndex) {
+          break;
+        }
+        if (points[idx].type) {
+          expanded.add(idx);
+        } else {
+          break;
+        }
+      }
+      // Forward off-curve run
+      for (let i = 1; i < numPoints; i++) {
+        const idx = (pointIndex + i) % numPoints;
+        if (!isClosed && idx < pointIndex) {
+          break;
+        }
+        if (points[idx].type) {
+          expanded.add(idx);
+        } else {
+          break;
+        }
+      }
+      continue;
+    }
+
+    // Off-curve: include the paired handle of the same segment
+    const prevIdx = (pointIndex - 1 + numPoints) % numPoints;
+    const nextIdx = (pointIndex + 1) % numPoints;
+    const prevPoint = points[prevIdx];
+    const nextPoint = points[nextIdx];
+    if (!prevPoint?.type && nextPoint?.type) {
+      expanded.add(nextIdx);
+    } else if (prevPoint?.type && !nextPoint?.type) {
+      expanded.add(prevIdx);
+    }
+  }
+
+  return expanded;
+}
+
+function rebuildSkeletonContourPoints(points, deleteSet, isClosed, skeletonData) {
+  const numPoints = points.length;
+
+  const deletedOnCurves = new Set();
+  for (const idx of deleteSet) {
+    if (!points[idx]?.type) {
+      deletedOnCurves.add(idx);
+    }
+  }
+
+  const newPoints = [];
+  const processedSegments = new Set();
+
+  for (let i = 0; i < numPoints; i++) {
+    const point = points[i];
+
+    if (!deleteSet.has(i)) {
+      newPoints.push(point);
+      continue;
+    }
+    if (point.type) {
+      continue;
+    }
+
+    // Deleted on-curve: refit the bridge between the surviving neighbors,
+    // sampling the ORIGINAL geometry through the deleted point.
+    const prevOnCurve = findSurvivingOnCurve(points, i, deletedOnCurves, isClosed, -1);
+    const nextOnCurve = findSurvivingOnCurve(points, i, deletedOnCurves, isClosed, +1);
+    const segmentKey = `${prevOnCurve}-${nextOnCurve}`;
+    if (processedSegments.has(segmentKey)) {
+      continue;
+    }
+    processedSegments.add(segmentKey);
+
+    if (prevOnCurve !== null && nextOnCurve !== null) {
+      const handles = computeHandlesForSkeletonSegment(
+        points,
+        prevOnCurve,
+        nextOnCurve,
+        skeletonData
+      );
+      if (handles?.length) {
+        const prevIdx = newPoints.findIndex(
+          (candidate) => candidate.id === points[prevOnCurve].id
+        );
+        if (prevIdx >= 0) {
+          newPoints.splice(prevIdx + 1, 0, ...handles);
+        }
+      }
+    }
+  }
+
+  fixSkeletonSmoothFlags(newPoints, isClosed);
+  return newPoints;
+}
+
+function findSurvivingOnCurve(points, startIdx, deletedOnCurves, isClosed, direction) {
+  const numPoints = points.length;
+  for (let j = 1; j < numPoints; j++) {
+    const idx = (startIdx + direction * j + numPoints * j) % numPoints;
+    if (!isClosed && (direction < 0 ? idx > startIdx : idx < startIdx)) {
+      return null;
+    }
+    if (!points[idx].type && !deletedOnCurves.has(idx)) {
+      return idx;
+    }
+  }
+  return null;
+}
+
+// A surviving on-curve can only stay smooth with at least one adjacent handle
+function fixSkeletonSmoothFlags(points, isClosed) {
+  const numPoints = points.length;
+  if (numPoints < 2) {
+    return;
+  }
+  for (let i = 0; i < numPoints; i++) {
+    const point = points[i];
+    if (point.type || !point.smooth) {
+      continue;
+    }
+    if (!isClosed && (i === 0 || i === numPoints - 1)) {
+      point.smooth = false;
+      continue;
+    }
+    const prevPoint = points[(i - 1 + numPoints) % numPoints];
+    const nextPoint = points[(i + 1) % numPoints];
+    if (!prevPoint?.type && !nextPoint?.type) {
+      point.smooth = false;
+    }
+  }
+}
+
+function computeHandlesForSkeletonSegment(points, prevIdx, nextIdx, skeletonData) {
+  const segment = collectSkeletonSegmentPoints(points, prevIdx, nextIdx);
+  if (segment.length < 2) {
+    return null;
+  }
+  // Pure line run between the survivors: no handles needed
+  if (segment.length === 2 || !segment.slice(1, -1).some((point) => point.type)) {
+    return [];
+  }
+
+  const samples = sampleSkeletonCurve(segment);
+  if (samples.length < 2) {
+    return null;
+  }
+  const leftTangent = getSkeletonEndTangent(segment, true);
+  const rightTangent = getSkeletonEndTangent(segment, false);
+  const bezier = fitCubic(samples, leftTangent, rightTangent, 0.1);
+  if (!bezier || bezier.points.length !== 4) {
+    return null;
+  }
+  return [
+    makeSkeletonPoint(
+      { x: bezier.points[1].x, y: bezier.points[1].y, type: "cubic" },
+      skeletonData
+    ),
+    makeSkeletonPoint(
+      { x: bezier.points[2].x, y: bezier.points[2].y, type: "cubic" },
+      skeletonData
+    ),
+  ];
+}
+
+function collectSkeletonSegmentPoints(points, prevIdx, nextIdx) {
+  const numPoints = points.length;
+  const segment = [];
+  let idx = prevIdx;
+  while (true) {
+    segment.push(points[idx]);
+    if (idx === nextIdx) {
+      break;
+    }
+    idx = (idx + 1) % numPoints;
+    if (segment.length > numPoints) {
+      break; // safety against malformed input
+    }
+  }
+  return segment;
+}
+
+function sampleSkeletonCurve(segment) {
+  const samples = [{ x: segment[0].x, y: segment[0].y }];
+
+  let i = 0;
+  while (i < segment.length - 1) {
+    const startPt = segment[i];
+    let j = i + 1;
+    while (j < segment.length && segment[j].type) {
+      j++;
+    }
+    if (j >= segment.length) {
+      break;
+    }
+    const endPt = segment[j];
+    const handles = segment.slice(i + 1, j);
+
+    if (handles.length === 0) {
+      for (const t of [0.25, 0.5, 0.75]) {
+        samples.push({
+          x: startPt.x + (endPt.x - startPt.x) * t,
+          y: startPt.y + (endPt.y - startPt.y) * t,
+        });
+      }
+      samples.push({ x: endPt.x, y: endPt.y });
+    } else {
+      const bez =
+        handles.length === 1
+          ? new Bezier(
+              startPt.x,
+              startPt.y,
+              handles[0].x,
+              handles[0].y,
+              endPt.x,
+              endPt.y
+            )
+          : new Bezier(
+              startPt.x,
+              startPt.y,
+              handles[0].x,
+              handles[0].y,
+              handles[handles.length - 1].x,
+              handles[handles.length - 1].y,
+              endPt.x,
+              endPt.y
+            );
+      for (const t of [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]) {
+        const pt = bez.compute(t);
+        samples.push({ x: pt.x, y: pt.y });
+      }
+      samples.push({ x: endPt.x, y: endPt.y });
+    }
+
+    i = j;
+  }
+
+  return samples;
+}
+
+function getSkeletonEndTangent(segment, isStart) {
+  if (segment.length < 2) {
+    return { x: 1, y: 0 };
+  }
+  let from, to;
+  if (isStart) {
+    from = segment[0];
+    to = segment[1];
+  } else {
+    from = segment[segment.length - 1];
+    to = segment[segment.length - 2];
+  }
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-10) {
+    return { x: 1, y: 0 };
+  }
+  return { x: dx / len, y: dy / len };
 }
 
 // Path contour indices currently occupied by generated skeleton contours.
