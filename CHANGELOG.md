@@ -5,6 +5,7 @@
 ### Improvements
 
 - [designspace] Respond to external changes in include()'d feature files. [PR 2703](https://github.com/fontra/fontra/pull/2703)
+- [fontra-glyphs] Respond to external changes in include()'d feature files. [fontra-glyphs PR 151](https://github.com/fontra/fontra-glyphs/pull/151)
 
 ### Fixes
 
