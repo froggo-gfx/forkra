@@ -458,10 +458,11 @@ Recorded verbatim per the user's instruction: list the problems, do not research
 code yet. Items may partially overlap earlier passes; overlaps to be reconciled when
 each item is picked up.
 
-### 4.1 Handle labels: layer separation for basic vs generated points — `open` (QoL)
+### 4.1 Handle labels: layer separation for basic vs skeleton points — `open` (QoL)
 
-**Report:** Handle labels should be different layers for basic points and generated
-points. Not a bug but quality-of-life.
+**Report:** Handle labels should be different layers for basic points and *skeleton*
+points. Generated points can share the same layer as basic points. Not a bug but
+quality-of-life.
 
 ### 4.2 Realize contours functionality fully missing — `open`
 
