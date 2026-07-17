@@ -8,6 +8,7 @@
 
 ### Fixes
 
+- [fontra-glyphs] Fix handling of external feature files. [fontra-glyphs Issue 149](https://github.com/fontra/fontra-glyphs/issues/149), [fontra-glyphs PR 150](https://github.com/fontra/fontra-glyphs/pull/150)
 - Fix unintended "linking" issue with pasting a single anchor (or guideline) into multiple sources. [Issue 2705](https://github.com/fontra/fontra/issues/2705), [PR 2707](https://github.com/fontra/fontra/pull/2707)
 - [menu bar] Fixes regression with submenus. [PR 2696](https://github.com/fontra/fontra/pull/2696)
 - [Fontra Pak export/designspace] Fix/work around TTF/OTF export problem by writing features to all source UFOs. [PR 2697](https://github.com/fontra/fontra/pull/2697)
