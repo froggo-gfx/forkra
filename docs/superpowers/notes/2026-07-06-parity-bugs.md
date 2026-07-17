@@ -498,11 +498,18 @@ under the cursor) all on-curve points of that skeleton contour are selected —
 mirroring the path behavior where double-clicking a curve selects its contour.
 Double-click on a skeleton *point* keeps its existing meaning (toggle smooth).
 
-### 4.6 Ctrl+A must include skeleton contours — `open`
+### 4.6 Ctrl+A must include skeleton contours — `fixed` (2026-07-18)
 
 **Report:** Skeleton contours must be selected with the Ctrl+A (select all)
 shortcut. (Note: WS-era work deliberately *excluded* generated points from
 select-all — C2 — but skeleton points/contours themselves should be included.)
+
+**Fix:** `doSelectAllNone` (editor.js) now treats skeleton on-curve points as
+part of the "objects" tier: they're selected with regular points/components,
+count toward `hasObjects` and the all-selected check, and participate in the
+progressive cycle (objects → +anchors → guidelines). Generated points stay
+excluded (C2). Selection keys come from the edit layer's skeleton data
+(canonical ids, WS-9).
 
 ### 4.7 Point deletion broken — `fixed` (2026-07-17)
 

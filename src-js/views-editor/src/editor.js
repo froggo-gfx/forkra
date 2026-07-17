@@ -94,6 +94,7 @@ import {
   applyGeneratedContourRemap,
   computeGeneratedContourRemap,
   editSkeleton,
+  makeSkeletonPointKey,
   parseSkeletonPointKey,
   resolveSkeletonAddressAcrossLayers,
 } from "./skeleton-editing.js";
@@ -3080,13 +3081,27 @@ export class EditorController extends ViewController {
       component: componentIndices,
       anchor: anchorIndices,
       guideline: guidelineIndices,
+      skeletonPoint: skeletonPointItems,
       //fontGuideline: fontGuidelineIndices,
     } = parseSelection(this.sceneController.selection);
     pointIndices = pointIndices || [];
     componentIndices = componentIndices || [];
     anchorIndices = anchorIndices || [];
     guidelineIndices = guidelineIndices || [];
+    skeletonPointItems = skeletonPointItems || [];
     //fontGuidelineIndices = fontGuidelineIndices || [];
+
+    // 4.6: select-all covers skeleton on-curve points alongside regular
+    // points/components (generated points stay excluded — derived geometry).
+    const skeletonData = this.sceneModel._getEditLayerSkeletonData(positionedGlyph);
+    const allSkeletonPointKeys = [];
+    for (const contour of skeletonData?.contours || []) {
+      for (const skeletonPoint of contour.points || []) {
+        if (!skeletonPoint.type) {
+          allSkeletonPointKeys.push(makeSkeletonPointKey(contour.id, skeletonPoint.id));
+        }
+      }
+    }
 
     let selectObjects = false;
     let selectAnchors = false;
@@ -3094,7 +3109,9 @@ export class EditorController extends ViewController {
 
     const instance = positionedGlyph.glyph.instance;
     const hasObjects =
-      instance.components.length > 0 || instance.path.pointTypes.length > 0;
+      instance.components.length > 0 ||
+      instance.path.pointTypes.length > 0 ||
+      allSkeletonPointKeys.length > 0;
     const hasAnchors = instance.anchors.length > 0;
     const hasGuidelines = instance.guidelines.length > 0;
 
@@ -3114,7 +3131,12 @@ export class EditorController extends ViewController {
       }
     }
 
-    const allOnCurvePointsSelected = isSuperset(new Set(pointIndices), onCurvePoints);
+    const selectedSkeletonKeys = new Set(
+      skeletonPointItems.map((item) => `skeletonPoint/${item}`)
+    );
+    const allOnCurvePointsSelected =
+      isSuperset(new Set(pointIndices), onCurvePoints) &&
+      isSuperset(selectedSkeletonKeys, allSkeletonPointKeys);
     if (
       (!allOnCurvePointsSelected ||
         componentIndices.length < instance.components.length) &&
@@ -3147,7 +3169,7 @@ export class EditorController extends ViewController {
     }
 
     if (
-      (pointIndices.length || componentIndices.length) &&
+      (pointIndices.length || componentIndices.length || skeletonPointItems.length) &&
       anchorIndices.length &&
       !guidelineIndices.length
       //&& !fontGuidelineIndices.length
@@ -3160,6 +3182,7 @@ export class EditorController extends ViewController {
     if (
       !pointIndices.length &&
       !componentIndices.length &&
+      !skeletonPointItems.length &&
       anchorIndices.length &&
       !guidelineIndices.length
       //&& !fontGuidelineIndices.length
@@ -3174,6 +3197,9 @@ export class EditorController extends ViewController {
     if (selectObjects) {
       for (const pointIndex of onCurvePoints) {
         newSelection.add(`point/${pointIndex}`);
+      }
+      for (const skeletonPointKey of allSkeletonPointKeys) {
+        newSelection.add(skeletonPointKey);
       }
       for (const componentIndex of range(positionedGlyph.glyph.components.length)) {
         newSelection.add(`component/${componentIndex}`);
