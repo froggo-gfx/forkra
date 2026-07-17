@@ -452,6 +452,138 @@ will change by design (they pin the legacy cap output).
 
 ---
 
+## 4. Seventh pass (2026-07-17) — problem list only, no research/fixes yet
+
+Recorded verbatim per the user's instruction: list the problems, do not research or
+code yet. Items may partially overlap earlier passes; overlaps to be reconciled when
+each item is picked up.
+
+### 4.1 Handle labels: layer separation for basic vs generated points — `open` (QoL)
+
+**Report:** Handle labels should be different layers for basic points and generated
+points. Not a bug but quality-of-life.
+
+### 4.2 Realize contours functionality fully missing — `open`
+
+**Report:** "Realize contours" functionality is fully missing (converting generated
+outline contours into plain editable contours, detaching them from the skeleton).
+
+### 4.3 Ribs multi-select missing — `open` (needs deep UX investment)
+
+**Report:** Ribs multi-select functionality is missing. Marked per the user as
+needing deep UX investment before implementation.
+
+### 4.4 Skeleton + basic contours multi-select UX rework — `open` (needs UX rework)
+
+**Report:** Multi-select across skeleton and basic contours needs a UX rework too
+(companion to 4.3).
+
+### 4.5 Double-click selects whole skeleton contour — `open`
+
+**Report:** Double-click on a skeleton contour must select the whole contour.
+
+### 4.6 Ctrl+A must include skeleton contours — `open`
+
+**Report:** Skeleton contours must be selected with the Ctrl+A (select all)
+shortcut. (Note: WS-era work deliberately *excluded* generated points from
+select-all — C2 — but skeleton points/contours themselves should be included.)
+
+### 4.7 Point deletion broken — `open` (worst bug; needs deep research)
+
+**Report:** "Worst bug yet": deletion of points doesn't work properly — leaves stray
+handles, draws a non-functional skeleton centerline from the last point to the first
+(i.e. the contour appears to close or bridge after deletion), etc. Needs deep
+research and fixing.
+
+### 4.8 Parity miss: asymmetry / corner trim / corner radius misplaced as cap params — `open`
+
+**Report:** Asymmetry, corner trim and corner radius are *not* cap style parameters.
+They are parameters of the angle-point rounding engine (corner rounding at
+non-smooth skeleton points). Needs research from the donor and fixing — both where
+the panel surfaces them and how the generator consumes them.
+
+---
+
+## 5. Old-architecture feature branches to adapt
+
+Three branches carry functionally useful features built on the *old* codebase
+architecture (all diverge from main at `030a97468`, the same lineage as
+`test/cap-rounding-rewamp`). They need to be re-adapted to the current
+refactor-simple architecture — a port of behavior, not a merge (the merge base is
+~1050 commits back and the underlying data model has since changed).
+
+**Branch topology (important):** the three branches plus `cap-rounding-rewamp` sit
+on a single line:
+
+```
+030a97468 (old main)
+  └─ … ~1040 commits (old architecture) …
+      └─ test/skeleton-width-highlight   (tip 14043f1e0)
+          ├─ test/q-metrix-drag          (tip 70bc74dbd = width-highlight + 1 commit)
+          │    └─ test/cap-rounding-rewamp (tip 7719b68f4 — already ported, § 3.4)
+          └─ test/z-mod-for-editable     (tip 91b9b77ce = q-metrix + 14 commits)
+```
+
+So `cap-rounding-rewamp` (our 3.4 reference) already *contains* everything in
+`skeleton-width-highlight` and `q-metrix-drag` — its working tree is a valid single
+reference for those features. Only `z-mod-for-editable` has commits beyond it.
+
+### 5.1 `test/skeleton-width-highlight` — `open` (adapt)
+
+Tip `14043f1e0` "Fix skeleton handle hit priority and show rib width labels".
+Feature content (top-of-branch cluster):
+
+- **Rib width labels**: show rib width values as canvas labels (tip commit), plus
+  the Q-metrics hover overlay lineage deeper in the branch: "Add Q-metrics: show
+  rib width on hover over skeleton points" (`36a5e952b`), width shown on rib
+  endpoints not skeleton points, nudge-offset aware, tension display, styled label
+  (rounded corners, darker border), curved-segment detection by bezier sampling.
+- **Hit-test / z-order hygiene**: skeleton centerline/ribs/segments z-index lowered
+  below editable elements (400/402/398), segment selection moved to lowest priority
+  (below anchors/guidelines), fixed hit radii in glyph units (Tunni points 10,
+  segments 4 — no zoom scaling), editable off-curve hit-test fix, handle hit
+  priority fix.
+
+### 5.2 `test/q-metrix-drag` — `open` (adapt)
+
+Tip `70bc74dbd` = skeleton-width-highlight + one commit ("small marker fix",
+touching `edit-behavior-adapters.js` + `edit-tools-pointer.js`, +87 lines — a
+drag-marker/measurement affordance in the pointer tool). The branch's namesake
+content is the **Q-key metrics measurement tool** for the Pointer Tool
+(`98cb61d7e` "Add Q-key measurement tool for Pointer Tool" and the Q-metrics
+commits listed under 5.1) plus drag-behavior work: preserve handle angles during
+fixed-rib drag, X-equalize restore for editable generated handles. Since
+`cap-rounding-rewamp` contains all of it except the tip commit, adapting 5.1 + 5.2
+can be done from the `cap-rounding-rewamp` tree (plus `70bc74dbd` cherry-read).
+
+### 5.3 `test/z-mod-for-editable` — `open` (adapt)
+
+Tip `91b9b77ce`; 14 commits beyond `q-metrix-drag` (also beyond
+`cap-rounding-rewamp`), so this branch itself is the reference. Three features:
+
+- **Side locks replace editable flags** (`e8772c913` … `53746bd67`): the skeleton
+  point `editable: {left, right}` flags become `locked: {left, right}` semantics —
+  panel and visuals switched to side locks, locks enforced in routed edits, locked
+  rib geometry preserved for discovery, implicit lock on width collapse removed.
+  Design/spec/plan docs are in the branch
+  (`docs/…/2026-03-25-skeleton-generated-side-locking*.md`). **Adaptation note:**
+  our current model kept `editable` flags (1.5.x rework gated z-tangent-drag on
+  them) — adapting this means reconciling two divergent evolutions of the same
+  flag, not a straight port.
+- **Z-only generated handle drag** (`9ab2640c7` "restore z-only generated handle
+  drag and rib colors"): the Z modifier restricted to dragging generated handles
+  (we re-implemented a version of this as z-tangent-drag; compare behavior).
+- **Single generated handle reset action** (`1c4027b5b` + spec
+  `2026-03-27-single-generated-handle-reset.md`): an action to reset one generated
+  handle (not the whole pair/point) to its derived position.
+
+Runtime files touched beyond q-metrix (for scoping): `edit-behavior-adapters.js`
+(±212), `panel-skeleton-parameters.js` (±513), `skeleton-visualization-layers.js`,
+`edit-behavior.js/-registry.js`, `edit-tools-pointer.js/-skeleton.js`,
+`scene-model.js`, `skeleton-contour-generator.js`.
+
+---
+
 ## Process
 
 Per the standing directive: fix what's worth fixing in real time, write down what needs
