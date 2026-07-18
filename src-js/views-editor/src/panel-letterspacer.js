@@ -564,7 +564,9 @@ export default class LetterspacerPanel extends Panel {
           const currentLSB = bounds.xMin;
 
           if (this.params.applyLSB) {
-            const deltaLSB = roundedLSB - currentLSB;
+            // Round the SHIFT, not just the target: a fractional delta would
+            // smear decimals onto every point (and thus onto the RSB)
+            const deltaLSB = Math.round(roundedLSB - currentLSB);
             this.shiftPath(layerGlyph.path, deltaLSB);
             // Move the skeleton by the same delta through the one write path
             // (WS-16). editSkeleton regenerates the generated contours from the

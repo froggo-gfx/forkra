@@ -342,6 +342,19 @@ only became visible on the next full panel refresh.)
 (`getSourceLetterspacerValues(source)`); defaults/nearest-source fills still
 apply to genuinely missing sources only.
 
+### 2.2 Apply leaves decimal sidebearings — `fixed` (2026-07-18)
+
+**Report:** letterspacer leaves decimals in sidebearings after apply.
+
+**Root cause:** `applySpacing` rounded the target LSB but shifted the outline by
+`roundedLSB - bounds.xMin` — a fractional delta whenever the left extremum is
+fractional — smearing decimals onto every point; the RSB (int advance minus now
+fractional xMax) then displays decimals too.
+
+**Fix:** the shift delta itself is rounded, keeping point coordinates on the
+grid. Remaining decimals can only come from the glyph's own fractional
+extrema, not from the letterspacer.
+
 ---
 
 ## 3. Sixth pass (2026-07-07)
