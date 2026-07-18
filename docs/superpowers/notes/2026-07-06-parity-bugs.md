@@ -105,7 +105,7 @@ the option to recalculate that rib to 60 (keep the +20 offset). I.e. an opt-in
 "follow master width" recalculation when master-wide defaults change, not a live
 binding.
 
-### 1.4 Where are default stroke widths for masters set? — `open`
+### 1.4 Where are default stroke widths for masters set? — `fixed` (2026-07-18, with 1.3)
 
 **Report:** Unclear where per-master default stroke width is configured.
 
@@ -115,6 +115,19 @@ there, but a *default* for new contours / new masters must come from somewhere �
 may have a font-level or source-level setting (axis-mapped?) that wasn't ported, or it
 exists and is just undiscoverable. Needs donor research. Possibly documentation/UX
 rather than code.
+
+**Fix (1.3/1.4, 2026-07-18):** per the user's placement decision, master-wide
+skeleton defaults now live as their own section in the **glyph panel (selection
+info), directly below the letterspacer** — new `SkeletonDefaultsPanel`
+(panel-skeleton-defaults.js), hosted the same way LetterspacerPanel is. It
+edits the per-source base/horizontal/contrast widths (by glyph case) and the
+cap parameter presets, persisting to the source's customData (same storage as
+before). The "Source defaults"/"Default caps" section was removed from the
+skeleton parameters panel along with its now-dead plumbing. Discoverability
+solved: the defaults are visible per master wherever you are, not only when a
+skeleton selection exists. NOTE still open from 1.3: the cap defaults remain
+presets (consumed by nothing until cap profiles are ported); the relative
+rib-width (mw+offset) idea stays future work.
 
 ### 1.5 Generated contours (editable ribs)
 

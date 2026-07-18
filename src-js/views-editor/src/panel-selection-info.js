@@ -22,6 +22,7 @@ import { showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialog } from "@fontra/web-components/modal-dialog.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import LetterspacerPanel from "./panel-letterspacer.js";
+import SkeletonDefaultsPanel from "./panel-skeleton-defaults.js";
 import Panel from "./panel.js";
 
 export default class SelectionInfoPanel extends Panel {
@@ -35,6 +36,10 @@ export default class SelectionInfoPanel extends Panel {
     this.letterspacerPanel = new LetterspacerPanel(this.editorController);
     if (this.letterspacerHost) {
       this.letterspacerHost.appendChild(this.letterspacerPanel);
+    }
+    this.skeletonDefaultsPanel = new SkeletonDefaultsPanel(this.editorController);
+    if (this.skeletonDefaultsHost) {
+      this.skeletonDefaultsHost.appendChild(this.skeletonDefaultsPanel);
     }
 
     this.sceneController.sceneSettingsController.addKeyListener(
@@ -78,6 +83,7 @@ export default class SelectionInfoPanel extends Panel {
   getContentElement() {
     this.infoForm = new Form();
     this.letterspacerHost = html.div({});
+    this.skeletonDefaultsHost = html.div({});
     return html.div(
       {
         class: "panel",
@@ -101,6 +107,9 @@ export default class SelectionInfoPanel extends Panel {
     }
     if (this.letterspacerPanel?.toggle) {
       await this.letterspacerPanel.toggle(on, focus);
+    }
+    if (this.skeletonDefaultsPanel?.toggle) {
+      await this.skeletonDefaultsPanel.toggle(on, focus);
     }
   }
 
@@ -296,6 +305,10 @@ export default class SelectionInfoPanel extends Panel {
           },
         });
         formContents.push({ type: "single-icon", element: this.letterspacerHost });
+        formContents.push({
+          type: "single-icon",
+          element: this.skeletonDefaultsHost,
+        });
         formContents.push({
           type: "edit-text-double",
           key: '["kern-l-r"]',

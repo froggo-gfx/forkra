@@ -1,4 +1,3 @@
-import { recordChanges } from "@fontra/core/change-recorder.js";
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import {
@@ -6,13 +5,6 @@ import {
   setSkeletonCapParameters,
   setSkeletonCornerParameters,
 } from "@fontra/core/skeleton-model.js";
-import {
-  SKELETON_SOURCE_DEFAULT_FALLBACKS,
-  SKELETON_SOURCE_DEFAULT_KEYS,
-  getSkeletonGlyphCase,
-  getSourceSkeletonDefaultsValue,
-  setSourceSkeletonDefaultsValues,
-} from "@fontra/core/skeleton-source-defaults.js";
 import { throttleCalls } from "@fontra/core/utils.ts";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
@@ -191,60 +183,6 @@ export default class SkeletonParametersPanel extends Panel {
 
   // ---- Source defaults access ----------------------------------------------
 
-  _getEffectiveSource() {
-    const location =
-      this.sceneController.sceneSettings.fontLocationSourceMapped ||
-      this.sceneController.sceneSettings.fontLocationSource ||
-      {};
-    const sourceId =
-      this.fontController.fontSourcesInstancer?.getSourceIdentifierForLocation(
-        location
-      ) || this.fontController.defaultSourceIdentifier;
-    return {
-      sourceId,
-      source: sourceId ? this.fontController.sources?.[sourceId] : null,
-    };
-  }
-
-  _sourceDefault(key) {
-    const { source } = this._getEffectiveSource();
-    const fallback = SKELETON_SOURCE_DEFAULT_FALLBACKS[key];
-    return source ? getSourceSkeletonDefaultsValue(source, key, fallback) : fallback;
-  }
-
-  async _persistSourceDefaults(values, undoLabel) {
-    if (this.fontController.readOnly) {
-      return;
-    }
-    const { sourceId } = this._getEffectiveSource();
-    if (!sourceId || !this.fontController.sources?.[sourceId]) {
-      return;
-    }
-    const root = { sources: this.fontController.sources };
-    const changes = recordChanges(root, (root) => {
-      const source = root.sources[sourceId];
-      if (source) {
-        setSourceSkeletonDefaultsValues(source, values);
-      }
-    });
-    if (changes.hasChange) {
-      await this.fontController.postChange(
-        changes.change,
-        changes.rollbackChange,
-        undoLabel || "edit skeleton defaults",
-        this
-      );
-      await this._refreshDesignspacePanel();
-    }
-  }
-
-  async _refreshDesignspacePanel() {
-    const panel = this.editorController.getSidebarPanel?.("designspace-navigation");
-    if (panel?.refreshSourcesAndStatus) {
-      await panel.refreshSourcesAndStatus();
-    }
-  }
-
   // ---- Panel rebuild --------------------------------------------------------
 
   async update() {
@@ -271,7 +209,6 @@ export default class SkeletonParametersPanel extends Panel {
       glyphName,
       editingLayerNames: this.sceneController.editingLayerNames,
       selection: this.sceneController.selection,
-      sourceDefaultsSignature: this._sourceDefaultsSignature(glyphName),
       panelSelection: skeletonData ? panelSelection : null,
     });
     if (signature === this._lastSignature && !this._forceRebuild) {
@@ -293,8 +230,6 @@ export default class SkeletonParametersPanel extends Panel {
       this.infoForm.onFieldChange = () => {};
       return;
     }
-
-    this._buildSourceDefaultsSection(formContents, glyphName);
 
     const widthPoints = collectWidthEditPoints(panelSelection);
     if (widthPoints.length) {
@@ -329,85 +264,7 @@ export default class SkeletonParametersPanel extends Panel {
       this._onFieldChange(fieldItem, value, valueStream);
   }
 
-  _sourceDefaultsSignature(glyphName) {
-    const keys = [
-      SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_CAPITAL_BASE,
-      SKELETON_SOURCE_DEFAULT_KEYS.WIDTH_LOWERCASE_BASE,
-      SKELETON_SOURCE_DEFAULT_KEYS.CAP_RADIUS_RATIO,
-      SKELETON_SOURCE_DEFAULT_KEYS.CAP_TENSION,
-      SKELETON_SOURCE_DEFAULT_KEYS.CAP_ANGLE,
-      SKELETON_SOURCE_DEFAULT_KEYS.CAP_DISTANCE,
-    ];
-    return `${getSkeletonGlyphCase(glyphName)}:${keys
-      .map((key) => this._sourceDefault(key))
-      .join(",")}`;
-  }
-
   // ---- Section builders -----------------------------------------------------
-
-  _buildSourceDefaultsSection(formContents, glyphName) {
-    const glyphCase = getSkeletonGlyphCase(glyphName);
-    const isLower = glyphCase === "lowercase";
-    const K = SKELETON_SOURCE_DEFAULT_KEYS;
-    const baseKey = isLower ? K.WIDTH_LOWERCASE_BASE : K.WIDTH_CAPITAL_BASE;
-    const horizKey = isLower
-      ? K.WIDTH_LOWERCASE_HORIZONTAL
-      : K.WIDTH_CAPITAL_HORIZONTAL;
-    const contrastKey = isLower ? K.WIDTH_LOWERCASE_CONTRAST : K.WIDTH_CAPITAL_CONTRAST;
-    const distKey = isLower
-      ? K.WIDTH_LOWERCASE_DISTRIBUTION
-      : K.WIDTH_CAPITAL_DISTRIBUTION;
-
-    formContents.push({ type: "divider" });
-    formContents.push({
-      type: "header",
-      label: translate("sidebar.skeleton-parameters.source-defaults"),
-    });
-    formContents.push({
-      type: "text",
-      value: translate(
-        isLower
-          ? "sidebar.skeleton-parameters.case.lowercase"
-          : "sidebar.skeleton-parameters.case.uppercase"
-      ),
-    });
-    this._pushNumber(formContents, `default:${baseKey}`, "default-base", () =>
-      this._sourceDefault(baseKey)
-    );
-    this._pushNumber(formContents, `default:${horizKey}`, "default-horizontal", () =>
-      this._sourceDefault(horizKey)
-    );
-    this._pushNumber(formContents, `default:${contrastKey}`, "default-contrast", () =>
-      this._sourceDefault(contrastKey)
-    );
-    this._pushSlider(
-      formContents,
-      `default:${distKey}`,
-      "default-distribution",
-      () => this._sourceDefault(distKey),
-      -100,
-      100,
-      0,
-      { step: 10 }
-    );
-    formContents.push({ type: "divider" });
-    formContents.push({
-      type: "header",
-      label: translate("sidebar.skeleton-parameters.default-caps"),
-    });
-    this._pushNumber(formContents, `default:${K.CAP_RADIUS_RATIO}`, "cap-radius", () =>
-      this._sourceDefault(K.CAP_RADIUS_RATIO)
-    );
-    this._pushNumber(formContents, `default:${K.CAP_TENSION}`, "cap-tension", () =>
-      this._sourceDefault(K.CAP_TENSION)
-    );
-    this._pushNumber(formContents, `default:${K.CAP_ANGLE}`, "cap-angle", () =>
-      this._sourceDefault(K.CAP_ANGLE)
-    );
-    this._pushNumber(formContents, `default:${K.CAP_DISTANCE}`, "cap-distance", () =>
-      this._sourceDefault(K.CAP_DISTANCE)
-    );
-  }
 
   _buildPointWidthSection(formContents, widthPoints) {
     const summary = summarizeSkeletonPointWidths(widthPoints);
@@ -664,38 +521,6 @@ export default class SkeletonParametersPanel extends Panel {
 
   // ---- Field description helpers -------------------------------------------
 
-  _pushNumber(formContents, key, labelKey, getValue) {
-    formContents.push({
-      type: "edit-number",
-      key,
-      label: translate(`sidebar.skeleton-parameters.${labelKey}`),
-      value: getValue(),
-    });
-  }
-
-  _pushSlider(
-    formContents,
-    key,
-    labelKey,
-    getValue,
-    minValue,
-    maxValue,
-    defaultValue,
-    options = {}
-  ) {
-    formContents.push({
-      type: "edit-number-slider",
-      key,
-      label: translate(`sidebar.skeleton-parameters.${labelKey}`),
-      value: getValue(),
-      minValue,
-      // The RangeSlider web component requires a numeric defaultValue
-      defaultValue: defaultValue ?? minValue,
-      maxValue,
-      ...options,
-    });
-  }
-
   _pushSummaryNumber(formContents, key, labelKey, summary) {
     formContents.push({
       type: "edit-number",
@@ -768,9 +593,7 @@ export default class SkeletonParametersPanel extends Panel {
         }
       }
       const finalValue = await this._resolveStreamValue(value, valueStream);
-      if (group === "default") {
-        await this._onSourceDefaultChange(name, finalValue);
-      } else if (group === "width") {
+      if (group === "width") {
         await this._onWidthChange(name, finalValue);
       } else if (group === "contour") {
         await this._onContourChange(name, finalValue);
@@ -803,13 +626,6 @@ export default class SkeletonParametersPanel extends Panel {
 
   _widthPoints() {
     return collectWidthEditPoints(this._panelSelection);
-  }
-
-  async _onSourceDefaultChange(defaultKey, value) {
-    await this._persistSourceDefaults(
-      { [defaultKey]: value },
-      translate("sidebar.skeleton-parameters.undo.set-defaults")
-    );
   }
 
   async _onWidthChange(name, value) {
