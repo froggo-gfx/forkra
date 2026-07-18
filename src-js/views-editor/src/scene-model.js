@@ -1433,7 +1433,9 @@ export class SceneModel {
     for (const contour of skeletonData?.contours || []) {
       for (const skeletonPoint of contour.points) {
         if (pointInRect(skeletonPoint.x, skeletonPoint.y, selRect)) {
-          selection.add(makeSkeletonPointKey(contour.id, skeletonPoint.id));
+          if (!pointFilterFunc || pointFilterFunc(skeletonPoint)) {
+            selection.add(makeSkeletonPointKey(contour.id, skeletonPoint.id));
+          }
         }
       }
     }
