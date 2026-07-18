@@ -1447,6 +1447,21 @@ export class SceneModel {
       selection.add("backgroundImage/0");
     }
 
+    // Ribs are marquee-selectable only as a fallback: any other object in
+    // the rect (points, skeleton points, anchors, components, background
+    // image) takes precedence and drops the rib selection. Alt-marquee
+    // (handles only) never selects ribs.
+    if (!selection.size && (!pointFilterFunc || pointFilterFunc({}))) {
+      for (const target of iterSkeletonRibTargets(skeletonData)) {
+        if (
+          target.position &&
+          pointInRect(target.position.x, target.position.y, selRect)
+        ) {
+          selection.add(target.selectionKey);
+        }
+      }
+    }
+
     return selection;
   }
 

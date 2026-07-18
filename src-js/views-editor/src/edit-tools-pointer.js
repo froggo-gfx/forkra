@@ -58,10 +58,7 @@ import {
   getSkeletonModifierBehaviorName,
   makeSkeletonModifierOptions,
 } from "./skeleton-modifiers.js";
-import {
-  getSkeletonRibBehaviorName,
-  isSkeletonRibDragAllowed,
-} from "./skeleton-ribs.js";
+import { getSkeletonRibBehaviorName } from "./skeleton-ribs.js";
 import {
   glyphSelector,
   registerVisualizationLayerDefinition,
@@ -393,14 +390,22 @@ export class PointerTool extends BaseTool {
     );
     let initialClickedPointIndex;
     let initialClickedSkeletonPointKey;
+    let initialClickedSkeletonRibKey;
     if (!pathHit) {
-      const { point: pointIndices, skeletonPoint } = parseSelection(selection);
+      const {
+        point: pointIndices,
+        skeletonPoint,
+        skeletonRib,
+      } = parseSelection(selection);
       if (pointIndices?.length) {
         initialClickedPointIndex = pointIndices[0];
       }
       if (skeletonPoint?.length) {
         const [contourId, pointId] = skeletonPoint[0].split("/").map(Number);
         initialClickedSkeletonPointKey = makeSkeletonPointKey(contourId, pointId);
+      }
+      if (skeletonRib?.length) {
+        initialClickedSkeletonRibKey = `skeletonRib/${skeletonRib[0]}`;
       }
     }
     if (initialEvent.detail == 2 || initialEvent.myTapCount == 2) {
@@ -465,9 +470,12 @@ export class PointerTool extends BaseTool {
         initialClickedPointIndex;
       this.sceneController.sceneModel.initialClickedSkeletonPointKey =
         initialClickedSkeletonPointKey;
+      this.sceneController.sceneModel.initialClickedSkeletonRibKey =
+        initialClickedSkeletonRibKey;
       const result = await this.handleDragSelection(eventStream, initialEvent);
       delete this.sceneController.sceneModel.initialClickedPointIndex;
       delete this.sceneController.sceneModel.initialClickedSkeletonPointKey;
+      delete this.sceneController.sceneModel.initialClickedSkeletonRibKey;
       return result;
     }
   }
@@ -683,12 +691,6 @@ export class PointerTool extends BaseTool {
         }
         if (hasRibLikeSelection(sceneController.selection)) {
           const targetEntries = [];
-          if (
-            hasSkeletonRibSelection(sceneController.selection) &&
-            !isSkeletonRibDragAllowed(referenceSkeletonData, sceneController.selection)
-          ) {
-            return [];
-          }
           targetEntries.push(
             ...createSkeletonRibTargetEntries(
               layerGlyph,
@@ -697,6 +699,7 @@ export class PointerTool extends BaseTool {
               {
                 ...modifierOptions,
                 constrainMode: this.tangentRibMode ? "tangent" : null,
+                clickedRibKey: sceneController.sceneModel.initialClickedSkeletonRibKey,
               }
             )
           );

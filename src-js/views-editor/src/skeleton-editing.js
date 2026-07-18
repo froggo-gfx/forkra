@@ -28,6 +28,7 @@ import {
   applySkeletonRibExecutorResult,
   createSkeletonRibExecutor,
   getSkeletonRibAddress,
+  makeSkeletonRibKey,
   parseSkeletonRibKey,
 } from "./skeleton-ribs.js";
 
@@ -669,7 +670,7 @@ export function createSkeletonRibTargetEntries(
   layer,
   selection,
   behaviorName,
-  { referenceSkeletonData = null, constrainMode = null } = {}
+  { referenceSkeletonData = null, constrainMode = null, clickedRibKey = null } = {}
 ) {
   const skeletonData = getSkeletonData(layer);
   if (!skeletonData) {
@@ -697,6 +698,25 @@ export function createSkeletonRibTargetEntries(
     }),
   }));
 
+  // Multi-rib drag: all ribs receive the same width delta as the dragged
+  // one (its canvas delta projected onto its own normal), rather than each
+  // projecting the raw cursor delta onto their own normal — mixed rib
+  // orientations must grow/shrink together.
+  const clickedEntry =
+    (clickedRibKey &&
+      executors.find(
+        ({ reference }) =>
+          makeSkeletonRibKey(reference.contourId, reference.pointId, reference.side) ===
+          clickedRibKey
+      )) ||
+    executors[0];
+  const sharedWidthDelta =
+    executors.length > 1 &&
+    constrainMode !== "tangent" &&
+    behaviorName !== "rib-tangent" &&
+    behaviorName !== "rib-interpolate" &&
+    behaviorName !== "rib-tangent-interpolate";
+
   let rollbackChange = null;
   return [
     {
@@ -704,6 +724,19 @@ export function createSkeletonRibTargetEntries(
         return rollbackChange;
       },
       makeChangeForDelta(delta) {
+        let ribDelta = () => delta;
+        if (sharedWidthDelta) {
+          const { normal, side } = clickedEntry.executor;
+          const widthDelta =
+            (side === "left" ? 1 : -1) * (delta.x * normal.x + delta.y * normal.y);
+          ribDelta = (executor) => {
+            const sign = executor.side === "left" ? 1 : -1;
+            return {
+              x: executor.normal.x * widthDelta * sign,
+              y: executor.normal.y * widthDelta * sign,
+            };
+          };
+        }
         const changes = makeEditSkeletonChange(originalLayerGlyph, (working) => {
           for (const { reference, executor } of executors) {
             const target = resolveSkeletonRibAddressAcrossLayers(
@@ -716,7 +749,7 @@ export function createSkeletonRibTargetEntries(
             if (!target) {
               continue;
             }
-            const result = executor.applyDelta(delta, { constrainMode });
+            const result = executor.applyDelta(ribDelta(executor), { constrainMode });
             applySkeletonRibExecutorResult(target, result);
           }
         });

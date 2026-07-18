@@ -121,6 +121,7 @@ export function createSkeletonRibExecutor(
     contourId: contour.id,
     pointId: point.id,
     side,
+    normal,
     applyDelta(delta, { constrainMode = null, round = Math.round } = {}) {
       if (axis) {
         const deltaAlongAxis = delta.x * axis.dir.x + delta.y * axis.dir.y;
@@ -174,66 +175,6 @@ export function applySkeletonRibExecutorResult(address, result) {
       setSkeletonHandleOffset(point, side, role, offset, { round: (value) => value });
     }
   }
-}
-
-export function isSkeletonRibDragAllowed(skeletonData, selection) {
-  const parsed = selection instanceof Set ? [...selection] : selection || [];
-  const ribKeys = parsed.filter((key) => `${key}`.startsWith("skeletonRib/"));
-  if (!ribKeys.length) {
-    return true;
-  }
-  const addresses = [];
-  for (const key of ribKeys) {
-    const { contourId, pointId, side } = parseSkeletonRibKey(key);
-    const address = getSkeletonRibAddress(skeletonData, contourId, pointId, side);
-    if (!address) {
-      return false;
-    }
-    addresses.push(address);
-  }
-  if (addresses.every((address) => address.point.editable?.[address.side] === true)) {
-    return true;
-  }
-  const contourIds = new Set(addresses.map((address) => address.contour.id));
-  if (contourIds.size !== 1) {
-    return false;
-  }
-  const contour = addresses[0].contour;
-  const selectedIndices = new Set(addresses.map((address) => address.pointIndex));
-  const onCurveIndices = (contour.points || [])
-    .map((point, index) => (point.type ? null : index))
-    .filter((index) => index !== null);
-  const selectedOrderIndices = onCurveIndices
-    .map((pointIndex, orderIndex) =>
-      selectedIndices.has(pointIndex) ? orderIndex : null
-    )
-    .filter((index) => index !== null);
-  if (selectedOrderIndices.length <= 1) {
-    return true;
-  }
-  selectedOrderIndices.sort((a, b) => a - b);
-  const contiguous = selectedOrderIndices.every(
-    (orderIndex, index) => !index || orderIndex === selectedOrderIndices[index - 1] + 1
-  );
-  if (contiguous) {
-    return true;
-  }
-  if (!contour.closed) {
-    return false;
-  }
-  const firstRun = selectedOrderIndices[0];
-  const lastRun = selectedOrderIndices.at(-1);
-  return (
-    firstRun === 0 &&
-    lastRun === onCurveIndices.length - 1 &&
-    selectedOrderIndices.every((orderIndex, index) => {
-      if (!index) return true;
-      return (
-        orderIndex === selectedOrderIndices[index - 1] + 1 ||
-        selectedOrderIndices[index - 1] === firstRun
-      );
-    })
-  );
 }
 
 export function* iterSkeletonRibTargets(skeletonData) {
