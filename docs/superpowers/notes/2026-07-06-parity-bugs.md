@@ -125,9 +125,22 @@ cap parameter presets, persisting to the source's customData (same storage as
 before). The "Source defaults"/"Default caps" section was removed from the
 skeleton parameters panel along with its now-dead plumbing. Discoverability
 solved: the defaults are visible per master wherever you are, not only when a
-skeleton selection exists. NOTE still open from 1.3: the cap defaults remain
-presets (consumed by nothing until cap profiles are ported); the relative
-rib-width (mw+offset) idea stays future work.
+skeleton selection exists. Follow-up (same day) — both remaining 1.3 pieces implemented:
+
+- **Cap presets consumed:** setting a cap style now seeds the style's
+  parameters from the master's "Default caps" presets when the point has no
+  explicit values yet (round → radius/tension, square → angle/distance) —
+  the donor "Base" profile semantics, applied at style-set time
+  (`setPanelCapStyle` + `resolveEffectiveSourceSkeletonDefault`). Explicit
+  per-point values always win; the generator chain is unchanged.
+- **Relative rib widths (mw+offset):** changing a master **base width** in the
+  defaults panel now offers an opt-in dialog: "Keep absolute widths" vs
+  "Recalculate ribs". Recalculate shifts every rib total (and contour default
+  width) by the delta across ALL skeleton glyphs of that case in the edited
+  master (layer resolved per glyph via `getSourceIndex(fontSource.location)`),
+  preserving each rib's left/right distribution — i.e. every rib keeps its
+  offset relative to the master width. Not a live binding, exactly per the
+  1.3 decision. One undo record per glyph.
 
 ### 1.5 Generated contours (editable ribs)
 

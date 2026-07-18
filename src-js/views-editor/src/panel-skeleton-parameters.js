@@ -5,6 +5,10 @@ import {
   setSkeletonCapParameters,
   setSkeletonCornerParameters,
 } from "@fontra/core/skeleton-model.js";
+import {
+  SKELETON_SOURCE_DEFAULT_KEYS,
+  resolveEffectiveSourceSkeletonDefault,
+} from "@fontra/core/skeleton-source-defaults.js";
 import { throttleCalls } from "@fontra/core/utils.ts";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
@@ -688,11 +692,39 @@ export default class SkeletonParametersPanel extends Panel {
       if (!["butt", "square", "round"].includes(value)) {
         return;
       }
+      const location =
+        this.sceneController.sceneSettings.fontLocationSourceMapped ||
+        this.sceneController.sceneSettings.fontLocationSource ||
+        {};
+      const K = SKELETON_SOURCE_DEFAULT_KEYS;
+      const presetValues = {
+        capRadiusRatio: resolveEffectiveSourceSkeletonDefault(
+          this.fontController,
+          location,
+          K.CAP_RADIUS_RATIO
+        ),
+        capTension: resolveEffectiveSourceSkeletonDefault(
+          this.fontController,
+          location,
+          K.CAP_TENSION
+        ),
+        capAngle: resolveEffectiveSourceSkeletonDefault(
+          this.fontController,
+          location,
+          K.CAP_ANGLE
+        ),
+        capDistance: resolveEffectiveSourceSkeletonDefault(
+          this.fontController,
+          location,
+          K.CAP_DISTANCE
+        ),
+      };
       await setPanelCapStyle(
         this.sceneController,
         this._widthPoints(),
         value,
-        this._undo("set-cap")
+        this._undo("set-cap"),
+        presetValues
       );
       return;
     }

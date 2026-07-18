@@ -429,8 +429,15 @@ export async function setPanelCapStyle(
   sceneController,
   pointAddresses,
   capStyle,
-  undoLabel
+  undoLabel,
+  presetValues = null
 ) {
+  const presetFields =
+    capStyle === "round"
+      ? ["capRadiusRatio", "capTension"]
+      : capStyle === "square"
+        ? ["capAngle", "capDistance"]
+        : [];
   return editSelectedSkeletonPoints(
     sceneController,
     pointAddresses,
@@ -444,6 +451,17 @@ export async function setPanelCapStyle(
         return;
       }
       setSkeletonCapParameters(point, { capStyle });
+      // Master cap presets ("Default caps") seed the style's parameters when
+      // the point doesn't carry explicit values yet (donor "Base" profile)
+      const seeded = {};
+      for (const field of presetFields) {
+        if (!Number.isFinite(point[field]) && Number.isFinite(presetValues?.[field])) {
+          seeded[field] = presetValues[field];
+        }
+      }
+      if (Object.keys(seeded).length) {
+        setSkeletonCapParameters(point, seeded);
+      }
       if (capStyle === "round") {
         resetSkeletonEditableRib(point, "left");
         resetSkeletonEditableRib(point, "right");

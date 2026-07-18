@@ -199,6 +199,22 @@ export function setSourceSkeletonDefaultsValues(source, values) {
  * @param {string} glyphName
  * @returns {"lowercase" | "uppercase"}
  */
+/**
+ * Resolve a skeleton default for the master matching `location`.
+ * @param {object} fontController
+ * @param {object} location fontLocationSourceMapped-style location
+ * @param {string} key one of SKELETON_SOURCE_DEFAULT_KEYS
+ */
+export function resolveEffectiveSourceSkeletonDefault(fontController, location, key) {
+  const sourceId =
+    fontController?.fontSourcesInstancer?.getSourceIdentifierForLocation(
+      location || {}
+    ) || fontController?.defaultSourceIdentifier;
+  const source = sourceId ? fontController?.sources?.[sourceId] : null;
+  const fallback = SKELETON_SOURCE_DEFAULT_FALLBACKS[key];
+  return source ? getSourceSkeletonDefaultsValue(source, key, fallback) : fallback;
+}
+
 export function getSkeletonGlyphCase(glyphName) {
   if (!glyphName) {
     return "uppercase";

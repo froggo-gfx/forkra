@@ -434,6 +434,12 @@ export const strings = {
   "sidebar.skeleton-parameters.no-skeleton": "No skeleton in this glyph",
   "sidebar.skeleton-parameters.no-selection": "No skeleton selection",
   "sidebar.skeleton-parameters.source-defaults": "Source defaults",
+  "sidebar.skeleton-parameters.recalc-ribs.title": "Recalculate rib widths?",
+  "sidebar.skeleton-parameters.recalc-ribs.body":
+    "The master base width changed by %0. Recalculate existing skeleton rib widths in this master so they keep their offset relative to the master width?",
+  "sidebar.skeleton-parameters.recalc-ribs.keep": "Keep absolute widths",
+  "sidebar.skeleton-parameters.recalc-ribs.recalc": "Recalculate ribs",
+  "sidebar.skeleton-parameters.recalc-ribs.undo": "recalculate rib widths",
   "sidebar.skeleton-parameters.case.uppercase": "Case: Uppercase",
   "sidebar.skeleton-parameters.case.lowercase": "Case: Lowercase",
   "sidebar.skeleton-parameters.default-base": "Base width",
