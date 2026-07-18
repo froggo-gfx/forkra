@@ -546,10 +546,26 @@ The freed path contours automatically become fully editable everywhere, since
 all gates (selection, pen, knife, select-all) key off the `generated` entries.
 Skeleton keys are stripped from the selection afterwards.
 
-### 4.3 Ribs multi-select missing — `open` (needs deep UX investment)
+### 4.3 Ribs multi-select missing — `fixed` (2026-07-18)
 
 **Report:** Ribs multi-select functionality is missing. Marked per the user as
 needing deep UX investment before implementation.
+
+**UX decided by user:** (1) ribs selectable by marquee and shift+click; (2) if
+the marquee also covers any other object (basic/skeleton point, anchor, etc.)
+the rib selection is dropped in favor of that object; (3) selected ribs are
+draggable together — all ribs receive the same delta as the dragged one.
+
+**Fix:** `selectionAtRect` (scene-model.js) collects ribs as a fallback when
+the rect contains nothing else (alt-marquee never selects ribs); shift+click
+already merged rib keys via the generic select-mode function. The
+contiguous-run drag gate (`isSkeletonRibDragAllowed`) was removed;
+`createSkeletonRibTargetEntries` (skeleton-editing.js) now applies the dragged
+rib's width delta (cursor delta projected onto the clicked rib's own normal)
+to every selected rib, so mixed rib orientations grow/shrink together.
+Tangent- and interpolate-drag behaviors keep per-rib raw deltas. The clicked
+rib is tracked as `initialClickedSkeletonRibKey` (edit-tools-pointer.js),
+mirroring the skeleton-point mechanism.
 
 ### 4.4 Skeleton + basic contours multi-select UX rework — `open` (needs UX rework)
 
