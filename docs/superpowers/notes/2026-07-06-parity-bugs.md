@@ -765,6 +765,48 @@ Runtime files touched beyond q-metrix (for scoping): `edit-behavior-adapters.js`
 
 ---
 
+## 6. Eighth pass — defaults/caps stability (2026-07-18, all fixed same day)
+
+### 6.1 Cap/width sliders resetting to defaults mid-edit — `fixed`
+
+**Root cause:** skeleton panel edits carried no sender identity, so the panel's
+own postChange echo arrived after the suppression window and scheduled a
+trailing throttled rebuild that replaced the slider input under the user (and
+could briefly read not-yet-settled values). **Fix:** `SKELETON_PANEL_SENDER`
+passed as `editGlyph` senderID by both write funnels in skeleton-panel-edits.js
+(`runSkeletonPanelEdit`, `setPanelPointValuesStream`); the panel's glyphChanged
+listener ignores events with that sender.
+
+### 6.2 Force-apply master defaults (caps + width) — `fixed`
+
+Donor "Profile" select adapted: width section gets a dropdown
+(base/horizontal/contrast + custom widths for the glyph's case) and cap section
+gets one (base + custom cap profiles for the active style), each with an
+"Apply default" button using the letterspacer-reverse two-click confirm
+(arm + tooltip, second click applies). Applies via setPanelPointTotalWidth /
+setPanelCapParameters.
+
+### 6.3 Master default width not hooked — `fixed`
+
+The skeleton pen created contours with hardcoded `DEFAULT_SKELETON_WIDTH` (80);
+now seeds `defaultWidth` from the master's case width
+(`resolveEffectiveSourceSkeletonDefault` + `getDefaultSkeletonWidthKeyForGlyphName`).
+
+### 6.4 Custom width parameters missing — `fixed`
+
+Donor `addCustomWidthRows` ported into the glyph-panel defaults section:
+per-case list of {name, value} rows (rename, edit, two-click delete, Add),
+stored under `widthProfiles.<case>` (CUSTOM_WIDTHS keys already existed in the
+schema). Entries feed the 6.2 width dropdown.
+
+### 6.5 Cap defaults were number inputs — `fixed`
+
+Glyph-panel "Default caps" now uses the same sliders as the parameters panel
+(radius as 1-based log positions, tension %, angle −85..85); values convert
+back to model units on persist.
+
+---
+
 ## Process
 
 Per the standing directive: fix what's worth fixing in real time, write down what needs

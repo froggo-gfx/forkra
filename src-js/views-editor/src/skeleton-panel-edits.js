@@ -30,6 +30,13 @@ import {
 import { findGeneratedPathAddress } from "./skeleton-generated.js";
 import { skeletonContourEndpointIndices } from "./skeleton-panel-model.js";
 
+// Sender identity for every edit made through this module. The skeleton
+// parameters panel filters glyphChanged events by it: its own edits already
+// rebuild the form in _onFieldChange, and the async echo arriving after the
+// suppression window would otherwise trigger a second rebuild that replaces
+// the slider input the user is still interacting with.
+export const SKELETON_PANEL_SENDER = { senderID: "skeleton-panel-edits" };
+
 // Resolve a target skeleton contour in `target` layer from a reference-layer
 // contour id, by structural ordinal (cross-layer addressing, WS-9). Returns the
 // target contour or null when the structure is incompatible.
@@ -72,7 +79,7 @@ export async function runSkeletonPanelEdit(sceneController, undoLabel, applyToLa
     const combined = new ChangeCollector().concat(...allChanges);
     await sendIncrementalChange(combined.change);
     return { changes: combined, undoLabel, broadcast: true };
-  });
+  }, SKELETON_PANEL_SENDER);
 }
 
 // Core point-editing helper: for every selected point address, resolve it into
@@ -282,7 +289,7 @@ export async function setPanelPointValuesStream(
     }
     await sendIncrementalChange(lastCollector.change);
     return { changes: lastCollector, undoLabel, broadcast: true };
-  });
+  }, SKELETON_PANEL_SENDER);
 }
 
 export async function setPanelPointDistributionStream(

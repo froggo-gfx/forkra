@@ -7,6 +7,10 @@ import {
   getSkeletonData,
   makeSkeletonPoint,
 } from "@fontra/core/skeleton-model.js";
+import {
+  getDefaultSkeletonWidthKeyForGlyphName,
+  resolveEffectiveSourceSkeletonDefault,
+} from "@fontra/core/skeleton-source-defaults.js";
 import { parseSelection } from "@fontra/core/utils.ts";
 import * as vector from "@fontra/core/vector.js";
 import { Bezier } from "bezier-js";
@@ -40,6 +44,24 @@ export class SkeletonPenTool extends BaseTool {
     const layerGlyph =
       editLayerName && positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName]?.glyph;
     return getSkeletonData(layerGlyph || positionedGlyph.glyph);
+  }
+
+  // Master (source) default width for the edited glyph's case; falls back to
+  // the model constant when no source defaults are stored.
+  _getMasterDefaultWidth() {
+    const glyphName = this.sceneSettings?.selectedGlyphName;
+    const location =
+      this.sceneSettings?.fontLocationSourceMapped ||
+      this.sceneSettings?.fontLocationSource ||
+      {};
+    const value = resolveEffectiveSourceSkeletonDefault(
+      this.editor.fontController,
+      location,
+      getDefaultSkeletonWidthKeyForGlyphName(glyphName)
+    );
+    return Number.isFinite(Number(value)) && Number(value) > 0
+      ? Number(value)
+      : DEFAULT_SKELETON_WIDTH;
   }
 
   // Positioned-glyph-relative point from a mouse event, in glyph coordinates.
@@ -282,9 +304,11 @@ export class SkeletonPenTool extends BaseTool {
           }
           return [makeSkeletonPointKey(endpoint.contour.id, point.id)];
         }
+        // New contours seed their default width from the master (source)
+        // defaults for the glyph's case, not the hardcoded model fallback.
         const contour = appendSkeletonContour(working, {
           closed: false,
-          defaultWidth: DEFAULT_SKELETON_WIDTH,
+          defaultWidth: this._getMasterDefaultWidth(),
           points: [],
         });
         const point = appendSkeletonPoint(working, contour.id, pointData);

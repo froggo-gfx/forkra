@@ -7,12 +7,14 @@ import {
 } from "@fontra/core/skeleton-model.js";
 import {
   SKELETON_SOURCE_DEFAULT_KEYS,
+  getSkeletonGlyphCase,
   resolveEffectiveSourceSkeletonDefault,
 } from "@fontra/core/skeleton-source-defaults.js";
 import { throttleCalls } from "@fontra/core/utils.ts";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
 import {
+  SKELETON_PANEL_SENDER,
   resetPanelRibs,
   scalePanelPointWidth,
   setPanelCapParameters,
@@ -49,11 +51,11 @@ const DEFAULT_CAP_TENSION = 0.55;
 const DEFAULT_CAP_ANGLE = 0;
 const CAP_RADIUS_MIN = 1 / 128;
 const CAP_RADIUS_MAX = 1 / 4;
-const CAP_RADIUS_POSITIONS = 20;
-const CAP_ANGLE_MIN = -85;
-const CAP_ANGLE_MAX = 85;
+export const CAP_RADIUS_POSITIONS = 20;
+export const CAP_ANGLE_MIN = -85;
+export const CAP_ANGLE_MAX = 85;
 
-function capRadiusRatioFromIndex(index) {
+export function capRadiusRatioFromIndex(index) {
   const clampedIndex = Math.min(Math.max(index, 0), CAP_RADIUS_POSITIONS - 1);
   const t = clampedIndex / (CAP_RADIUS_POSITIONS - 1);
   const minLog = Math.log2(CAP_RADIUS_MIN);
@@ -61,7 +63,7 @@ function capRadiusRatioFromIndex(index) {
   return 2 ** (minLog + t * (maxLog - minLog));
 }
 
-function capRadiusIndexFromRatio(ratio) {
+export function capRadiusIndexFromRatio(ratio) {
   const clampedRatio = Math.min(Math.max(ratio, CAP_RADIUS_MIN), CAP_RADIUS_MAX);
   const minLog = Math.log2(CAP_RADIUS_MIN);
   const maxLog = Math.log2(CAP_RADIUS_MAX);
@@ -124,6 +126,10 @@ export default class SkeletonParametersPanel extends Panel {
     this._widthSnapshot = null;
     this._widthSnapshotKey = null;
     this._lastSignature = null;
+    this._widthProfileSelection = "base";
+    this._capProfileSelection = "base";
+    this._forceApplyArmed = null;
+    this._confirmTooltip = null;
 
     this.updateBound = this.update.bind(this);
     // External glyph edits (e.g. dblclick smooth toggle) must refresh the
@@ -134,7 +140,14 @@ export default class SkeletonParametersPanel extends Panel {
       this._forceRebuild = true;
       this.update();
     }, 100);
-    this.sceneController.addCurrentGlyphChangeListener(() => {
+    this.sceneController.addCurrentGlyphChangeListener((event) => {
+      // Our own edits already rebuild in _onFieldChange; their async echo
+      // (postChange broadcast) must not schedule a second rebuild — the
+      // trailing rebuild replaces the slider input the user may already be
+      // dragging again and can briefly read not-yet-settled values.
+      if (event?.senderID === SKELETON_PANEL_SENDER) {
+        return;
+      }
       if (!this._suppressGlyphChangeUpdate) {
         this._throttledGlyphChangeUpdate();
       }
@@ -220,6 +233,7 @@ export default class SkeletonParametersPanel extends Panel {
     }
     this._lastSignature = signature;
     this._forceRebuild = false;
+    this._disarmForceApply();
 
     const formContents = [
       { type: "header", label: translate("sidebar.skeleton-parameters.title") },
@@ -268,6 +282,256 @@ export default class SkeletonParametersPanel extends Panel {
       this._onFieldChange(fieldItem, value, valueStream);
   }
 
+  // ---- Master default profiles (force-apply) --------------------------------
+
+  _resolveSourceDefault(key) {
+    const location =
+      this.sceneController.sceneSettings.fontLocationSourceMapped ||
+      this.sceneController.sceneSettings.fontLocationSource ||
+      {};
+    return resolveEffectiveSourceSkeletonDefault(this.fontController, location, key);
+  }
+
+  // Width profile options for the edited glyph's case: the three master
+  // defaults plus the master's custom width entries (donor "Profile" select).
+  _widthProfileOptions() {
+    const isLower = getSkeletonGlyphCase(this.getSelectedGlyphName()) === "lowercase";
+    const K = SKELETON_SOURCE_DEFAULT_KEYS;
+    const options = [
+      {
+        id: "base",
+        label: translate("sidebar.skeleton-parameters.default-base"),
+        value: this._resolveSourceDefault(
+          isLower ? K.WIDTH_LOWERCASE_BASE : K.WIDTH_CAPITAL_BASE
+        ),
+      },
+      {
+        id: "horizontal",
+        label: translate("sidebar.skeleton-parameters.default-horizontal"),
+        value: this._resolveSourceDefault(
+          isLower ? K.WIDTH_LOWERCASE_HORIZONTAL : K.WIDTH_CAPITAL_HORIZONTAL
+        ),
+      },
+      {
+        id: "contrast",
+        label: translate("sidebar.skeleton-parameters.default-contrast"),
+        value: this._resolveSourceDefault(
+          isLower ? K.WIDTH_LOWERCASE_CONTRAST : K.WIDTH_CAPITAL_CONTRAST
+        ),
+      },
+    ];
+    const custom = this._resolveSourceDefault(
+      isLower ? K.CUSTOM_WIDTHS_LOWERCASE : K.CUSTOM_WIDTHS_UPPERCASE
+    );
+    if (Array.isArray(custom)) {
+      custom.forEach((item, index) => {
+        const value = Number(item?.value);
+        if (Number.isFinite(value)) {
+          options.push({
+            id: `custom:${index}`,
+            label: item?.name || `Custom ${index + 1}`,
+            value,
+          });
+        }
+      });
+    }
+    return options.filter((option) => Number.isFinite(Number(option.value)));
+  }
+
+  // Cap profile options for the active style: master cap defaults plus the
+  // master's custom cap profiles. `values` holds the point fields to write.
+  _capProfileOptions(styleValue) {
+    const K = SKELETON_SOURCE_DEFAULT_KEYS;
+    const options = [];
+    if (styleValue === "round") {
+      options.push({
+        id: "base",
+        label: translate("sidebar.skeleton-parameters.default-base"),
+        values: {
+          capRadiusRatio: Number(this._resolveSourceDefault(K.CAP_RADIUS_RATIO)),
+          capTension: Number(this._resolveSourceDefault(K.CAP_TENSION)),
+        },
+      });
+      const custom = this._resolveSourceDefault(K.CUSTOM_CAP_ROUNDED);
+      if (Array.isArray(custom)) {
+        custom.forEach((item, index) => {
+          const radius = Number(item?.radius ?? item?.value);
+          let tension = Number(item?.tension);
+          if (Number.isFinite(tension) && tension > 1) {
+            tension = tension / 100;
+          }
+          if (Number.isFinite(radius)) {
+            options.push({
+              id: `custom:${index}`,
+              label: item?.name || `Custom ${index + 1}`,
+              values: {
+                capRadiusRatio: radius,
+                capTension: Number.isFinite(tension) ? tension : DEFAULT_CAP_TENSION,
+              },
+            });
+          }
+        });
+      }
+    } else if (styleValue === "square") {
+      options.push({
+        id: "base",
+        label: translate("sidebar.skeleton-parameters.default-base"),
+        values: {
+          capAngle: Number(this._resolveSourceDefault(K.CAP_ANGLE)),
+          capDistance: Number(this._resolveSourceDefault(K.CAP_DISTANCE)),
+        },
+      });
+      const custom = this._resolveSourceDefault(K.CUSTOM_CAP_SQUARE);
+      if (Array.isArray(custom)) {
+        custom.forEach((item, index) => {
+          const angle = Number(item?.angle ?? item?.value);
+          const distance = Number(item?.distance);
+          if (Number.isFinite(angle)) {
+            options.push({
+              id: `custom:${index}`,
+              label: item?.name || `Custom ${index + 1}`,
+              values: {
+                capAngle: angle,
+                capDistance: Number.isFinite(distance) ? distance : 0,
+              },
+            });
+          }
+        });
+      }
+    }
+    return options;
+  }
+
+  // Two-click confirm (letterspacer reverse pattern): first click arms the
+  // button and shows a tooltip, second click applies.
+  _confirmThenApply(event, armKey, apply) {
+    if (this._forceApplyArmed !== armKey) {
+      this._forceApplyArmed = armKey;
+      this._showConfirmTooltip(
+        event?.currentTarget,
+        translate("sidebar.skeleton-parameters.force-apply.confirm")
+      );
+      return;
+    }
+    this._forceApplyArmed = null;
+    this._hideConfirmTooltip();
+    apply();
+  }
+
+  _disarmForceApply() {
+    this._forceApplyArmed = null;
+    this._hideConfirmTooltip();
+  }
+
+  _showConfirmTooltip(anchor, message) {
+    this._hideConfirmTooltip();
+    if (!anchor || !message) {
+      return;
+    }
+    const tooltip = html.div({}, [message]);
+    Object.assign(tooltip.style, {
+      position: "fixed",
+      zIndex: "9999",
+      maxWidth: "220px",
+      padding: "8px 10px",
+      borderRadius: "6px",
+      fontSize: "0.85rem",
+      lineHeight: "1.3",
+      color: "var(--tooltip-foreground-color, #fff)",
+      background: "var(--tooltip-background-color, #000)",
+      boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
+      pointerEvents: "none",
+      whiteSpace: "normal",
+      overflowWrap: "anywhere",
+    });
+    document.body.appendChild(tooltip);
+    const rect = anchor.getBoundingClientRect();
+    const tipRect = tooltip.getBoundingClientRect();
+    const margin = 8;
+    let left = rect.left - tipRect.width - margin;
+    if (left < margin) {
+      left = Math.min(rect.right + margin, window.innerWidth - tipRect.width - margin);
+    }
+    const top = Math.min(
+      window.innerHeight - tipRect.height - margin,
+      Math.max(margin, rect.top + rect.height / 2 - tipRect.height / 2)
+    );
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+    this._confirmTooltip = tooltip;
+  }
+
+  _hideConfirmTooltip() {
+    if (this._confirmTooltip) {
+      this._confirmTooltip.remove();
+      this._confirmTooltip = null;
+    }
+  }
+
+  _buildForceApplyRow(formContents, { options, selectionProp, armKey, apply }) {
+    if (!options.length) {
+      return;
+    }
+    if (!options.some((option) => option.id === this[selectionProp])) {
+      this[selectionProp] = options[0].id;
+    }
+    const select = html.select(
+      {
+        style: "min-width: 9em;",
+        onchange: (event) => {
+          this[selectionProp] = event.target.value;
+          this._disarmForceApply();
+        },
+      },
+      options.map((option) =>
+        html.option({ value: option.id, selected: this[selectionProp] === option.id }, [
+          option.label,
+        ])
+      )
+    );
+    const button = html.button(
+      {
+        onclick: (event) => {
+          const option = options.find((item) => item.id === this[selectionProp]);
+          if (!option) {
+            return;
+          }
+          this._confirmThenApply(event, armKey, () => apply(option));
+        },
+      },
+      [translate("sidebar.skeleton-parameters.force-apply")]
+    );
+    formContents.push({
+      type: "single-icon",
+      element: html.div(
+        { style: "display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;" },
+        [select, button]
+      ),
+    });
+  }
+
+  async _forceApplyWidthProfile(option) {
+    await setPanelPointTotalWidth(
+      this.sceneController,
+      this._widthPoints(),
+      Number(option.value),
+      this._undo("set-total-width")
+    );
+    this._forceRebuild = true;
+    await this.update();
+  }
+
+  async _forceApplyCapProfile(option) {
+    await setPanelCapParameters(
+      this.sceneController,
+      this._widthPoints(),
+      option.values,
+      this._undo("set-cap")
+    );
+    this._forceRebuild = true;
+    await this.update();
+  }
+
   // ---- Section builders -----------------------------------------------------
 
   _buildPointWidthSection(formContents, widthPoints) {
@@ -308,6 +572,14 @@ export default class SkeletonParametersPanel extends Panel {
       maxValue: 200,
       step: 20,
       allowInputBeyondRange: true,
+    });
+    // Force-apply a master width profile to the selected points (two-click
+    // confirm; the dropdown picks base/horizontal/contrast or a custom width).
+    this._buildForceApplyRow(formContents, {
+      options: this._widthProfileOptions(),
+      selectionProp: "_widthProfileSelection",
+      armKey: "width",
+      apply: (option) => this._forceApplyWidthProfile(option),
     });
   }
 
@@ -429,6 +701,16 @@ export default class SkeletonParametersPanel extends Panel {
         "cap-distance",
         cap.capDistance
       );
+    }
+    // Force-apply master cap defaults (or a custom cap profile) to the
+    // selected endpoints, two-click confirm.
+    if ((styleValue === "round" || styleValue === "square") && capStyle.canEdit) {
+      this._buildForceApplyRow(formContents, {
+        options: this._capProfileOptions(styleValue),
+        selectionProp: "_capProfileSelection",
+        armKey: "cap",
+        apply: (option) => this._forceApplyCapProfile(option),
+      });
     }
   }
 

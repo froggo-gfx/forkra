@@ -446,6 +446,13 @@ export const strings = {
   "sidebar.skeleton-parameters.default-horizontal": "Horizontal width",
   "sidebar.skeleton-parameters.default-contrast": "Contrast width",
   "sidebar.skeleton-parameters.default-distribution": "Distribution",
+  "sidebar.skeleton-parameters.custom-widths": "Custom widths",
+  "sidebar.skeleton-parameters.custom-widths.add": "Add",
+  "sidebar.skeleton-parameters.custom-widths.delete": "Delete",
+  "sidebar.skeleton-parameters.custom-widths.confirm-delete": "Confirm delete",
+  "sidebar.skeleton-parameters.force-apply": "Apply default",
+  "sidebar.skeleton-parameters.force-apply.confirm":
+    "Will overwrite the selected points' values. Press again to apply.",
   "sidebar.skeleton-parameters.default-caps": "Default caps",
   "sidebar.skeleton-parameters.cap-style": "Cap style",
   "sidebar.skeleton-parameters.cap-style.flat": "Flat",

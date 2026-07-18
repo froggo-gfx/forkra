@@ -16,8 +16,29 @@ import {
 } from "@fontra/core/skeleton-source-defaults.js";
 import { dialog } from "@fontra/web-components/modal-dialog.js";
 import { Form } from "@fontra/web-components/ui-form.js";
+import {
+  CAP_ANGLE_MAX,
+  CAP_ANGLE_MIN,
+  CAP_RADIUS_POSITIONS,
+  capRadiusIndexFromRatio,
+  capRadiusRatioFromIndex,
+} from "./panel-skeleton-parameters.js";
 import Panel from "./panel.js";
 import { editSkeleton } from "./skeleton-editing.js";
+
+// Cap default values are stored in model units (radius ratio, tension 0–1)
+// but edited with the same sliders as the skeleton parameters panel (radius
+// as 1-based log-scale position, tension in percent).
+const CAP_DISPLAY_CONVERTERS = {
+  capRadiusRatio: {
+    toDisplay: (value) => capRadiusIndexFromRatio(Number(value)) + 1,
+    fromDisplay: (value) => capRadiusRatioFromIndex(Number(value) - 1),
+  },
+  capTension: {
+    toDisplay: (value) => Math.round(Number(value) * 100),
+    fromDisplay: (value) => Number(value) / 100,
+  },
+};
 
 // Master-wide skeleton defaults (1.3/1.4): per-source base widths (by glyph
 // case) and cap parameter presets. Hosted in the glyph panel below the
@@ -28,6 +49,7 @@ export default class SkeletonDefaultsPanel extends Panel {
 
   constructor(editorController) {
     super(editorController);
+    this._customDeleteConfirm = null;
     this.infoForm = new Form();
     this.contentElement.appendChild(
       html.div(
@@ -110,6 +132,117 @@ export default class SkeletonDefaultsPanel extends Panel {
     if (panel?.refreshSourcesAndStatus) {
       await panel.refreshSourcesAndStatus();
     }
+  }
+
+  // ---- Custom width profiles (donor: addCustomWidthRows) --------------------
+
+  _getCustomWidthList(key) {
+    const list = this._sourceDefault(key);
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    return list
+      .filter((item) => item && typeof item === "object")
+      .map((item) => ({
+        name: typeof item.name === "string" ? item.name : "",
+        value: Number.isFinite(Number(item.value)) ? Number(item.value) : 0,
+      }));
+  }
+
+  _buildCustomWidthRows(formContents, customKey) {
+    const list = this._getCustomWidthList(customKey);
+    const persist = async (next) => {
+      await this._persistSourceDefaults(
+        { [customKey]: next },
+        translate("sidebar.skeleton-parameters.undo.set-defaults")
+      );
+      await this.update();
+    };
+    list.forEach((item, index) => {
+      const rowId = `${customKey}:${index}`;
+      const isConfirming = this._customDeleteConfirm === rowId;
+      const nameInput = html.input({
+        type: "text",
+        value: item.name,
+        style: "width: 7em;",
+        onchange: async (event) => {
+          const next = this._getCustomWidthList(customKey);
+          if (!next[index]) {
+            return;
+          }
+          next[index] = { ...next[index], name: String(event.target.value ?? "") };
+          this._customDeleteConfirm = null;
+          await persist(next);
+        },
+      });
+      const valueInput = html.input({
+        type: "number",
+        value: item.value,
+        style: "width: 4.5em;",
+        onchange: async (event) => {
+          const next = this._getCustomWidthList(customKey);
+          if (!next[index]) {
+            return;
+          }
+          const numeric = Number(event.target.value);
+          next[index] = {
+            ...next[index],
+            value: Number.isFinite(numeric) ? numeric : 0,
+          };
+          this._customDeleteConfirm = null;
+          await persist(next);
+        },
+      });
+      // Two-click delete: first click arms (trash -> x), second click deletes.
+      const deleteButton = html.createDomElement("icon-button", {
+        "src": isConfirming ? "/tabler-icons/x.svg" : "/tabler-icons/trash.svg",
+        "style": "width: 1.1em; height: 1.1em;",
+        "data-tooltip": translate(
+          isConfirming
+            ? "sidebar.skeleton-parameters.custom-widths.confirm-delete"
+            : "sidebar.skeleton-parameters.custom-widths.delete"
+        ),
+        "data-tooltipposition": "left",
+        "onclick": async () => {
+          if (this._customDeleteConfirm !== rowId) {
+            this._customDeleteConfirm = rowId;
+            await this.update();
+            return;
+          }
+          const next = this._getCustomWidthList(customKey);
+          if (!next[index]) {
+            return;
+          }
+          next.splice(index, 1);
+          this._customDeleteConfirm = null;
+          await persist(next);
+        },
+      });
+      formContents.push({
+        type: "single-icon",
+        element: html.div({ style: "display:flex; gap:0.35rem; align-items:center;" }, [
+          nameInput,
+          valueInput,
+          deleteButton,
+        ]),
+      });
+    });
+    formContents.push({
+      type: "single-icon",
+      element: html.div({}, [
+        html.button(
+          {
+            onclick: async () => {
+              const next = this._getCustomWidthList(customKey);
+              next.push({ name: `Custom ${next.length + 1}`, value: 0 });
+              this._customDeleteConfirm = null;
+              await persist(next);
+            },
+          },
+          [translate("sidebar.skeleton-parameters.custom-widths.add")]
+        ),
+      ]),
+    });
   }
 
   // ---- Form ----------------------------------------------------------------
@@ -239,14 +372,57 @@ export default class SkeletonDefaultsPanel extends Panel {
       maxValue: 100,
       step: 10,
     });
+    formContents.push({
+      type: "header",
+      label: translate("sidebar.skeleton-parameters.custom-widths"),
+    });
+    this._buildCustomWidthRows(
+      formContents,
+      isLower ? K.CUSTOM_WIDTHS_LOWERCASE : K.CUSTOM_WIDTHS_UPPERCASE
+    );
     formContents.push({ type: "divider" });
     formContents.push({
       type: "header",
       label: translate("sidebar.skeleton-parameters.default-caps"),
     });
-    this._pushNumber(formContents, K.CAP_RADIUS_RATIO, "cap-radius");
-    this._pushNumber(formContents, K.CAP_TENSION, "cap-tension");
-    this._pushNumber(formContents, K.CAP_ANGLE, "cap-angle");
+    formContents.push({
+      type: "edit-number-slider",
+      key: `default:${K.CAP_RADIUS_RATIO}`,
+      label: translate("sidebar.skeleton-parameters.cap-radius"),
+      value: CAP_DISPLAY_CONVERTERS.capRadiusRatio.toDisplay(
+        this._sourceDefault(K.CAP_RADIUS_RATIO)
+      ),
+      minValue: 1,
+      defaultValue: CAP_DISPLAY_CONVERTERS.capRadiusRatio.toDisplay(
+        SKELETON_SOURCE_DEFAULT_FALLBACKS[K.CAP_RADIUS_RATIO]
+      ),
+      maxValue: CAP_RADIUS_POSITIONS,
+      step: 1,
+    });
+    formContents.push({
+      type: "edit-number-slider",
+      key: `default:${K.CAP_TENSION}`,
+      label: translate("sidebar.skeleton-parameters.cap-tension"),
+      value: CAP_DISPLAY_CONVERTERS.capTension.toDisplay(
+        this._sourceDefault(K.CAP_TENSION)
+      ),
+      minValue: 0,
+      defaultValue: CAP_DISPLAY_CONVERTERS.capTension.toDisplay(
+        SKELETON_SOURCE_DEFAULT_FALLBACKS[K.CAP_TENSION]
+      ),
+      maxValue: 100,
+      step: 5,
+    });
+    formContents.push({
+      type: "edit-number-slider",
+      key: `default:${K.CAP_ANGLE}`,
+      label: translate("sidebar.skeleton-parameters.cap-angle"),
+      value: this._sourceDefault(K.CAP_ANGLE),
+      minValue: CAP_ANGLE_MIN,
+      defaultValue: SKELETON_SOURCE_DEFAULT_FALLBACKS[K.CAP_ANGLE],
+      maxValue: CAP_ANGLE_MAX,
+      step: 1,
+    });
     this._pushNumber(formContents, K.CAP_DISTANCE, "cap-distance");
 
     this.infoForm.setFieldDescriptions(formContents);
@@ -269,8 +445,10 @@ export default class SkeletonDefaultsPanel extends Panel {
             ? "lowercase"
             : null;
       const oldValue = this._sourceDefault(name);
+      const storedValue =
+        CAP_DISPLAY_CONVERTERS[name]?.fromDisplay(finalValue) ?? finalValue;
       await this._persistSourceDefaults(
-        { [name]: finalValue },
+        { [name]: storedValue },
         translate("sidebar.skeleton-parameters.undo.set-defaults")
       );
       // 1.3: rib widths can follow the master width as mw+offset — offer an
