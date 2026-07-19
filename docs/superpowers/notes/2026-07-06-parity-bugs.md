@@ -805,6 +805,30 @@ Glyph-panel "Default caps" now uses the same sliders as the parameters panel
 (radius as 1-based log positions, tension %, angle −85..85); values convert
 back to model units on persist.
 
+### 6.6 Virtual (not-yet-created) source: skeleton invisible, deletion ate generated points — `fixed`
+
+**Report:** with a font source that has no glyph source yet ("virtual" row in the
+designspace panel) selected, the canvas showed generated points without the
+centerline, and deleting removed only the generated points, leaving the
+skeleton curve — instead of duplicating the normal skeleton deletion.
+
+**Root cause:** at non-source positions every skeleton resolver ends in
+`getSkeletonData(positionedGlyph.glyph)` — but that's the
+StaticGlyphController, which didn't expose `customData`, so skeleton data
+resolved to null (no centerline, no generated-point gating, plain-path
+deletion). The interpolated *instance* actually carries correctly interpolated
+skeleton customData (structure is identical across layers per WS-9, so the
+variation model interpolates it numerically — verified empirically).
+
+**Fix:** `StaticGlyphController.customData` getter returning
+`instance.customData` (glyph-controller.js). With skeleton data resolvable,
+display/hit-tests/gating work at virtual positions, and deletion flows through
+the normal skeleton path: `_editGlyphOrInstance` first runs
+`_insertGlyphSourceIfAtFontSource` (implicit source creation, seeded from the
+same instance — including its skeleton data), then `_deleteSelection`'s
+skeleton branch edits the new layer via editSkeleton. Regression test:
+"get StaticGlyphController customData".
+
 ---
 
 ## Process

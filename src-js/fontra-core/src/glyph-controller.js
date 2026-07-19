@@ -672,6 +672,14 @@ export class StaticGlyphController {
     return this.instance.xAdvance;
   }
 
+  // The instance's customData. For interpolated (non-source) positions this
+  // exposes the numerically interpolated skeleton data, so skeleton display,
+  // hit tests and generated-contour gating behave like they do on a source —
+  // notably at not-yet-created ("virtual") font sources.
+  get customData() {
+    return this.instance.customData;
+  }
+
   get yAdvance() {
     return this.instance.yAdvance;
   }

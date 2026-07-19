@@ -66,6 +66,23 @@ describe("glyph-controller Tests", () => {
     expect(staticGlyphController.name).to.equal("dummy");
   });
 
+  it("get StaticGlyphController customData", () => {
+    // Skeleton resolvers fall back to getSkeletonData(positionedGlyph.glyph)
+    // — the controller must expose the instance's customData so interpolated
+    // skeleton data is reachable at non-source (virtual) positions.
+    const sgObj = makeTestStaticGlyphObject();
+    sgObj.customData = { "fontra.internal": { marker: 1 } };
+    const staticGlyph = StaticGlyph.fromObject(sgObj);
+    const staticGlyphController = new StaticGlyphController(
+      "dummy",
+      staticGlyph,
+      undefined
+    );
+    expect(staticGlyphController.customData).to.deep.equal({
+      "fontra.internal": { marker: 1 },
+    });
+  });
+
   it("get StaticGlyphController xAdvance", () => {
     const sgObj = makeTestStaticGlyphObject();
     const staticGlyph = StaticGlyph.fromObject(sgObj);
