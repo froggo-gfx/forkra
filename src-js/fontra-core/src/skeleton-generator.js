@@ -3434,6 +3434,17 @@ function cloneRoundCapPoint(point) {
   return point ? { ...point } : null;
 }
 
+// The round-cap split rebuilds terminal-segment points from scratch; without
+// re-attached provenance the fallback annotator guesses (side: null) and the
+// whole trimmed region stops being addressable — editable generated handles
+// next to a round-capped endpoint were unselectable.
+function withRoundCapProvenance(point, sourcePoint) {
+  if (point && sourcePoint?._provenance) {
+    point._provenance = { ...sourcePoint._provenance };
+  }
+  return point;
+}
+
 function buildSplitOffCurve(point) {
   return {
     x: point.x,
@@ -3548,10 +3559,13 @@ function splitTerminalSideForRoundCap(
   }
 
   const synthesizeInsertedPoint = () => {
-    const insertedPoint = buildInsertedRoundCapPoint({
-      x: referenceEndpoint.x - fallbackDirection.x,
-      y: referenceEndpoint.y - fallbackDirection.y,
-    });
+    const insertedPoint = withRoundCapProvenance(
+      buildInsertedRoundCapPoint({
+        x: referenceEndpoint.x - fallbackDirection.x,
+        y: referenceEndpoint.y - fallbackDirection.y,
+      }),
+      referenceEndpoint
+    );
     const rewrittenSegment = fromEnd
       ? [cloneRoundCapPoint(startPoint), insertedPoint, referenceEndpoint]
       : [referenceEndpoint, insertedPoint, cloneRoundCapPoint(endPoint)];
@@ -3593,6 +3607,7 @@ function splitTerminalSideForRoundCap(
         y: referenceEndpoint.y - fallbackDirection.y,
       });
     }
+    withRoundCapProvenance(insertedPoint, referenceEndpoint);
     const tangentToEndpoint = fromEnd
       ? lineDirection
       : { x: -lineDirection.x, y: -lineDirection.y };
@@ -3643,13 +3658,19 @@ function splitTerminalSideForRoundCap(
   const tangentToEndpoint = fromEnd
     ? derivativeDirection
     : { x: -derivativeDirection.x, y: -derivativeDirection.y };
+  // New handles inherit the original segment handles' provenance (first of
+  // each pair from the start-adjacent handle, second from the end-adjacent
+  // one); the inserted on-curve stands in for the reference endpoint.
+  const originalHandle1 = segmentPoints[1];
+  const originalHandle2 = segmentPoints[2];
+  withRoundCapProvenance(insertedPoint, referenceEndpoint);
   const rewrittenSegment = [
     cloneRoundCapPoint(startPoint),
-    buildSplitOffCurve(leftPoints[1]),
-    buildSplitOffCurve(leftPoints[2]),
+    withRoundCapProvenance(buildSplitOffCurve(leftPoints[1]), originalHandle1),
+    withRoundCapProvenance(buildSplitOffCurve(leftPoints[2]), originalHandle2),
     insertedPoint,
-    buildSplitOffCurve(rightPoints[1]),
-    buildSplitOffCurve(rightPoints[2]),
+    withRoundCapProvenance(buildSplitOffCurve(rightPoints[1]), originalHandle1),
+    withRoundCapProvenance(buildSplitOffCurve(rightPoints[2]), originalHandle2),
     cloneRoundCapPoint(endPoint),
   ];
   const rewrittenSidePoints = [

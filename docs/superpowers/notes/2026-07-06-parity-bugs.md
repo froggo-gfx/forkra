@@ -829,6 +829,26 @@ same instance — including its skeleton data), then `_deleteSelection`'s
 skeleton branch edits the new layer via editSkeleton. Regression test:
 "get StaticGlyphController customData".
 
+### 6.7 Editable handles next to a round-capped endpoint unselectable — `fixed`
+
+**Report:** for a skeleton point adjacent to the last point, only the generated
+handles facing *away* from the last point were editable.
+
+**Root cause:** the round-cap terminal split (3.4 split-outline port) rebuilds
+the trimmed terminal segment from scratch (`splitTerminalSideForRoundCap`) —
+the new split handles and inserted on-curve carried no `_provenance`, so the
+fallback annotator guessed with `side: null`, and
+`resolveEditableGeneratedTarget` rejects side-less provenance: everything in
+the trimmed region (both sides, toward the endpoint) stopped being
+addressable/selectable. Away-facing handles kept their original provenance.
+
+**Fix:** provenance is carried through the split
+(`withRoundCapProvenance` in skeleton-generator.js): new handles inherit the
+original segment handles' attribution, the inserted on-curve inherits the
+reference endpoint's. Cap-arc geometry stays side-null (never editable, by
+design). Regression test: "keeps provenance on handles next to a round-capped
+endpoint".
+
 ---
 
 ## Process

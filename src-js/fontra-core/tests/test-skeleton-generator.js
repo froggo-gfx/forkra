@@ -171,6 +171,53 @@ describe("skeleton-generator round caps", () => {
     const generated = generateFromSkeleton(skeleton);
     expect(generated.contours.length).to.equal(1);
   });
+
+  // Regression: the round-cap terminal split rebuilt the trimmed segment
+  // without provenance, so the endpoint-facing generated handles of the
+  // neighboring skeleton point lost their side/role attribution and stopped
+  // being addressable (editable handles next to a round cap unselectable).
+  it("keeps provenance on handles next to a round-capped endpoint", () => {
+    const skeleton = {
+      version: 1,
+      nextId: 20,
+      contours: [
+        {
+          id: 1,
+          closed: false,
+          defaultWidth: 60,
+          singleSided: null,
+          points: [
+            { id: 2, x: 0, y: 0, type: null, smooth: false },
+            { id: 3, x: 60, y: 10, type: "cubic" },
+            { id: 4, x: 140, y: 30, type: "cubic" },
+            { id: 5, x: 200, y: 50, type: null, smooth: true },
+            { id: 6, x: 260, y: 70, type: "cubic" },
+            { id: 7, x: 340, y: 90, type: "cubic" },
+            {
+              id: 8,
+              x: 400,
+              y: 100,
+              type: null,
+              smooth: false,
+              capStyle: "round",
+              capRadiusRatio: 1 / 8,
+              capTension: 0.55,
+            },
+          ],
+        },
+      ],
+      generated: [],
+    };
+    const { provenance } = generateFromSkeleton(skeleton);
+    const pointMap = provenance[0].pointMap;
+    for (const side of ["left", "right"]) {
+      const entry = pointMap.find(
+        (item) =>
+          item?.skeletonPointId === 5 && item.side === side && item.role === "out"
+      );
+      expect(entry, `point 5 ${side} out`).to.not.equal(undefined);
+    }
+  });
 });
 
 describe("skeleton-generator near-zero handle stabilization", () => {
