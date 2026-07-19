@@ -889,6 +889,49 @@ now report the point's own coordinate rect as bounds, matching the
 zero-size-rect convention anchors already use. On-curve point behavior is
 unchanged (their filtered bounds already collapsed to the point itself).
 
+### 6.10 Detached handles "shiver" when adjusting skeleton handles — `open (investigated)`
+
+**Report:** detached generated handles visibly shiver while the corresponding
+skeleton handles are adjusted. Investigation only, no code changes yet.
+
+**Findings (verified with a generator sweep script — skeleton handle moved in
+1-unit steps, detached generated handle tracked via provenance):**
+
+1. **Detached mode's absolute position is destroyed downstream.**
+   `applyHandleOffsetToControlPoint` correctly computes ribPoint + offset, but
+   the single-cubic emission path then runs `lockNearZeroHandleDirection`
+   (skeleton-generator.js ~2751) on *every* terminal handle. Its normal branch
+   rebuilds the handle as `anchor + skeletonHandleDir * projectedLength` — the
+   perpendicular component of the detached offset is discarded and the handle
+   is re-coupled to the skeleton handle *direction*. Measured: stored offset
+   (25, 40) emitted as ≈(35, 12), exactly the projection onto the skeleton
+   handle dir. So every skeleton-handle rotation rotates the "detached" handle
+   with it. Bonus defect: `preferMinimalOnFlip=true` collapses the handle to a
+   ~1-unit stub if the detached offset points backward vs the skeleton handle.
+
+2. **`enforceSmoothColinearity` doesn't know about detached/editable
+   handles.** The post-pass rotates both handles around every smooth generated
+   on-curve into a length-weighted average direction; the only escape hatch is
+   `skipColinear`, set only for round-cap endpoints. As the opposite-side
+   handle moves with the skeleton, the detached handle is re-rotated — and the
+   pass engages/disengages across thresholds (60° rotation cap,
+   minReliableHandleLength 0.75), producing discontinuous jumps. Evidence: the
+   sweep output flips from integer to un-rounded float coordinates mid-sweep
+   (colinearity writes are the only unrounded emission).
+
+3. **Quantization flicker.** Handles are `Math.round`ed at several stages
+   while their bases move smoothly → ±1 stepping on top of 1–2.
+
+4. Secondary: the multi-curve fallback path applies offsets only to first/last
+   curves and skips the near-zero lock entirely, so flipping between the
+   simplified-cubic and fallback emission paths mid-drag changes the handle
+   math frame-to-frame.
+
+**Likely fix direction (not applied):** treat detached (and probably any
+user-offset editable) handles as authoritative — skip the direction
+reprojection and exclude them from colinearity enforcement (e.g. mark emitted
+points, like `skipColinear`, when a detached/2D offset was applied).
+
 ---
 
 ## Process
