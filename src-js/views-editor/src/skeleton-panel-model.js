@@ -132,11 +132,62 @@ export function collectSkeletonPanelSelection({ selection, skeletonData }) {
   return result;
 }
 
-// The panel points that participate in width/cap/corner editing: explicitly
-// selected skeleton points plus the points behind selected ribs.
+// Resolve a selected skeleton point entry to the on-curve point that owns it.
+// Off-curve handles belong to the adjacent on-curve: the handle right after an
+// on-curve is its "out" handle; otherwise the handle leads into the next
+// on-curve ("in").
+function anchorOnCurveEntry(entry) {
+  if (!entry.point?.type) {
+    return entry;
+  }
+  const points = entry.contour?.points || [];
+  const n = points.length;
+  const closed = entry.contour?.closed === true;
+  const at = (index) => {
+    if (closed) {
+      return points[((index % n) + n) % n];
+    }
+    return index >= 0 && index < n ? points[index] : null;
+  };
+  const indexAt = (index) => (closed ? ((index % n) + n) % n : index);
+  const prev = at(entry.pointIndex - 1);
+  let anchorIndex = null;
+  if (prev && !prev.type) {
+    anchorIndex = indexAt(entry.pointIndex - 1);
+  } else {
+    for (let step = 1; step < n; step++) {
+      const candidate = at(entry.pointIndex + step);
+      if (!candidate) {
+        break;
+      }
+      if (!candidate.type) {
+        anchorIndex = indexAt(entry.pointIndex + step);
+        break;
+      }
+    }
+  }
+  if (anchorIndex === null) {
+    return null;
+  }
+  return {
+    contourId: entry.contourId,
+    pointId: points[anchorIndex].id,
+    contour: entry.contour,
+    point: points[anchorIndex],
+    pointIndex: anchorIndex,
+  };
+}
+
+// The panel points that participate in width/cap/corner editing: every selected
+// skeleton object resolved to its owning on-curve skeleton point — explicit
+// skeleton points, skeleton handles (via their anchor), ribs, and generated
+// points/handles (whose keys already carry the skeleton point id).
 export function collectWidthEditPoints(panelSelection) {
   const byKey = new Map();
   const add = (entry) => {
+    if (!entry) {
+      return;
+    }
     const key = `${entry.contourId}/${entry.pointId}`;
     if (!byKey.has(key)) {
       byKey.set(key, {
@@ -148,8 +199,12 @@ export function collectWidthEditPoints(panelSelection) {
       });
     }
   };
-  for (const entry of panelSelection.points) add(entry);
+  for (const entry of panelSelection.points) add(anchorOnCurveEntry(entry));
   for (const entry of panelSelection.ribs) add(entry);
+  for (const entry of panelSelection.generatedPoints) add(anchorOnCurveEntry(entry));
+  for (const entry of panelSelection.generatedHandles) {
+    add(anchorOnCurveEntry(entry));
+  }
   return [...byKey.values()];
 }
 
@@ -381,7 +436,7 @@ export function makeSkeletonPanelStateSignature({
     `d:${sourceDefaultsSignature || ""}`,
   ];
   if (panelSelection) {
-    for (const entry of panelSelection.points) {
+    for (const entry of collectWidthEditPoints(panelSelection)) {
       parts.push(
         `p:${entry.contourId}/${entry.pointId}:${JSON.stringify(entry.point.width)}:${JSON.stringify(entry.point.nudge)}:${entry.point.capStyle}:${entry.point.capRadiusRatio}:${entry.point.capTension}:${entry.point.capAngle}:${entry.point.capDistance}:${entry.point.roundnessStrength}:${entry.point.cornerAsymmetry}`
       );

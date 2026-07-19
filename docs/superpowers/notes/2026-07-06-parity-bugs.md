@@ -849,6 +849,26 @@ reference endpoint's. Cap-arc geometry stays side-null (never editable, by
 design). Regression test: "keeps provenance on handles next to a round-capped
 endpoint".
 
+### 6.8 Panel shows parameters only for skeleton on-curve selections — `fixed`
+
+**Report:** skeleton parameters should show on the panel when *any* skeleton
+object is selected — not only skeleton on-curve points, but also skeleton
+handles, generated points and generated handles.
+
+**Root cause:** `collectSkeletonPanelSelection` already parsed generated
+points/handles, but `collectWidthEditPoints` (which feeds every parameter
+section) only consumed on-curve skeleton points and ribs. Skeleton handles
+share the `skeletonPoint/` key namespace and landed in `points` as off-curves
+with no meaningful width/cap/corner values.
+
+**Fix:** every selected skeleton object now resolves to its owning on-curve
+skeleton point in `collectWidthEditPoints` (skeleton-panel-model.js):
+off-curve handles via `anchorOnCurveEntry` (handle right after an on-curve is
+its "out"; otherwise it leads into the next on-curve), generated
+points/handles via the skeleton point id already in their selection keys. The
+rebuild-skip signature tracks the resolved edit points so parameter changes
+reached through handles/generated objects still trigger a rebuild.
+
 ---
 
 ## Process
