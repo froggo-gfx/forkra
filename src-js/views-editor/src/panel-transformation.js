@@ -1158,8 +1158,7 @@ export default class TransformationPanel extends Panel {
 
     const movableObjects = [];
     for (const pointIndex of points) {
-      const individualSelection = new Set([`point/${pointIndex}`]);
-      movableObjects.push(new MovableObject(individualSelection));
+      movableObjects.push(new MovablePoint(pointIndex));
     }
     for (const [contourIndex, pointIndices] of enumerate(contours)) {
       const individualSelection = new Set(
@@ -1330,6 +1329,25 @@ class MovableObject {
     const editBehavior = behaviorFactory.getBehavior("default");
     const editChange = editBehavior.makeChangeForDelta(delta);
     return [editChange, editBehavior.rollbackChange];
+  }
+}
+
+// An individually movable path point. Bounds must be the point's own
+// coordinate: getSelectionBounds' filterPathByPointIndices expands an
+// off-curve selection to its whole segment, which would give every handle its
+// segment's box — handles sharing a segment then align to zero deltas.
+class MovablePoint extends MovableObject {
+  constructor(pointIndex) {
+    super(new Set([`point/${pointIndex}`]));
+    this.pointIndex = pointIndex;
+  }
+
+  computeBounds(staticGlyphController) {
+    const point = staticGlyphController.instance.path.getPoint(this.pointIndex);
+    if (!point) {
+      return undefined;
+    }
+    return { xMin: point.x, yMin: point.y, xMax: point.x, yMax: point.y };
   }
 }
 

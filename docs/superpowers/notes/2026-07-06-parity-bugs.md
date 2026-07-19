@@ -869,6 +869,26 @@ points/handles via the skeleton point id already in their selection keys. The
 rebuild-skip signature tracks the resolved edit points so parameter changes
 reached through handles/generated objects still trigger a rebuild.
 
+### 6.9 Align/distribute ignores basic handles — `fixed`
+
+**Report:** aligning should work for basic (path) handles the same way it does
+for basic points; skeleton points and handles were alignable from the start.
+
+**Root cause:** the transformation panel did turn each selected handle into an
+individual movable object, and the edit behavior moves bare off-curves fine —
+but `MovableObject.computeBounds` went through `getSelectionBounds` →
+`filterPathByPointIndices`, which greedily expands an off-curve selection to
+its whole segment. Every handle's "bounds" was its segment's box: handles in
+the same segment got identical boxes (align deltas all zero — nothing visibly
+happened), handles in different segments aligned their segment boxes instead
+of themselves. Skeleton points/handles never had the problem because their
+bounds resolve per point id.
+
+**Fix:** `MovablePoint` (panel-transformation.js) — per-point movable objects
+now report the point's own coordinate rect as bounds, matching the
+zero-size-rect convention anchors already use. On-curve point behavior is
+unchanged (their filtered bounds already collapsed to the point itself).
+
 ---
 
 ## Process
