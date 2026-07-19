@@ -3167,8 +3167,12 @@ function calculateCornerNormal(segment1, segment2, halfWidth) {
  */
 function createBezierFromPoints(points) {
   if (points.length === 2) {
-    // Line - create as linear bezier
-    return new Bezier(points[0].x, points[0].y, points[1].x, points[1].y);
+    // Line: bezier-js only accepts the point[] form for order-1 curves
+    // (coordinate args would be misread as a higher-order curve and throw)
+    return new Bezier([
+      { x: points[0].x, y: points[0].y },
+      { x: points[1].x, y: points[1].y },
+    ]);
   } else if (points.length === 3) {
     // Quadratic bezier
     return new Bezier(

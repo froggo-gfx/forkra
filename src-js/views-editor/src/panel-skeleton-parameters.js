@@ -346,7 +346,7 @@ export default class SkeletonParametersPanel extends Panel {
     if (styleValue === "round") {
       options.push({
         id: "base",
-        label: translate("sidebar.skeleton-parameters.default-base"),
+        label: translate("sidebar.skeleton-parameters.default-caps"),
         values: {
           capRadiusRatio: Number(this._resolveSourceDefault(K.CAP_RADIUS_RATIO)),
           capTension: Number(this._resolveSourceDefault(K.CAP_TENSION)),
@@ -375,7 +375,7 @@ export default class SkeletonParametersPanel extends Panel {
     } else if (styleValue === "square") {
       options.push({
         id: "base",
-        label: translate("sidebar.skeleton-parameters.default-base"),
+        label: translate("sidebar.skeleton-parameters.default-caps"),
         values: {
           capAngle: Number(this._resolveSourceDefault(K.CAP_ANGLE)),
           capDistance: Number(this._resolveSourceDefault(K.CAP_DISTANCE)),

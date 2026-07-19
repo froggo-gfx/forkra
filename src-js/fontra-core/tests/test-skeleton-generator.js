@@ -137,6 +137,42 @@ describe("skeleton-generator corner rounding input", () => {
   });
 });
 
+describe("skeleton-generator round caps", () => {
+  // Regression: round caps on line terminal segments threw in bezier-js
+  // (linear beziers must be constructed with the point[] form).
+  it("generates round caps on straight-line terminal segments", () => {
+    const skeleton = {
+      version: 1,
+      nextId: 5,
+      contours: [
+        {
+          id: 1,
+          closed: false,
+          defaultWidth: 60,
+          singleSided: null,
+          points: [
+            {
+              id: 2,
+              x: 0,
+              y: 0,
+              type: null,
+              smooth: false,
+              capStyle: "round",
+              capRadiusRatio: 1 / 8,
+              capTension: 0.55,
+            },
+            { id: 3, x: 200, y: 0, type: null, smooth: false },
+            { id: 4, x: 400, y: 50, type: null, smooth: false },
+          ],
+        },
+      ],
+      generated: [],
+    };
+    const generated = generateFromSkeleton(skeleton);
+    expect(generated.contours.length).to.equal(1);
+  });
+});
+
 describe("skeleton-generator near-zero handle stabilization", () => {
   it("does not flip near-zero handles across the anchor", () => {
     const skeleton = {
