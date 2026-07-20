@@ -227,6 +227,7 @@ export const strings = {
   "font-info.version.major": "Versie major",
   "font-info.version.minor": "Versie minor",
   "font-overview.dialog.label.suffix": "Suffix",
+  "font-overview.dialog.no-glyphs-found": "(No glyphs found)",
   "font-overview.dialog.option.add-suffix-to-all-pasted":
     "Add a suffix to all pasted glyph names",
   "font-overview.dialog.option.add-suffix-to-duplicates":

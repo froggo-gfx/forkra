@@ -227,7 +227,7 @@ export class FontOverviewController extends ViewController {
 
     glyphCellViewContainer.appendChild(
       html.div({ id: "font-overview-no-glyphs" }, [
-        translate("(No glyphs found)"), // TODO: translation
+        translate("font-overview.dialog.no-glyphs-found"),
       ])
     );
 
