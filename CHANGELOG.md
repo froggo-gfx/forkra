@@ -6,6 +6,10 @@
 
 - [languages] Add Portuguese translations contributed by Hallef Henrique P. Sousa. [PR 2708](https://github.com/fontra/fontra/pull/2708)
 
+### Improvements
+
+- [languages] Added more opportunities for localizations. [PR 2709](https://github.com/fontra/fontra/pull/2709)
+
 ## 2026-07-17 [version 2026.7.1]
 
 ### Improvements
