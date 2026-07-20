@@ -317,6 +317,7 @@ export const strings = {
   "sidebar.characters-glyphs.shaping-debugger.show-ineffective-items":
     "Show ineffective items",
   "sidebar.designspace-navigation": "Designspaceナビゲーション",
+  "sidebar.designspace-navigation.copy-current-layer": "Copy current layer",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "レイヤー名:",
   "sidebar.designspace-navigation.dialog.add-source.label.source-name": "ソース名:",
   "sidebar.designspace-navigation.dialog.add-source.ok-button-title": "追加",

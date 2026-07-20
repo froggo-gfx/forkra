@@ -302,6 +302,7 @@ export const strings = {
     "文字成形调试器选项",
   "sidebar.characters-glyphs.shaping-debugger.show-ineffective-items": "显示无效项目",
   "sidebar.designspace-navigation": "Designspace 导航",
+  "sidebar.designspace-navigation.copy-current-layer": "Copy current layer",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "图层：",
   "sidebar.designspace-navigation.dialog.add-source.label.source-name": "源名称：",
   "sidebar.designspace-navigation.dialog.add-source.ok-button-title": "添加",

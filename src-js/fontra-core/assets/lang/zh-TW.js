@@ -302,6 +302,7 @@ export const strings = {
     "文字成形偵錯器選項",
   "sidebar.characters-glyphs.shaping-debugger.show-ineffective-items": "顯示無效項目",
   "sidebar.designspace-navigation": "Designspace 導覽",
+  "sidebar.designspace-navigation.copy-current-layer": "Copy current layer",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "圖層：",
   "sidebar.designspace-navigation.dialog.add-source.label.source-name": "源名稱：",
   "sidebar.designspace-navigation.dialog.add-source.ok-button-title": "新增",

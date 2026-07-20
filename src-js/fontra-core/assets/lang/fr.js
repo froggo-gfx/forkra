@@ -321,6 +321,7 @@ export const strings = {
   "sidebar.characters-glyphs.shaping-debugger.show-ineffective-items":
     "Show ineffective items",
   "sidebar.designspace-navigation": "Navigation du designspace",
+  "sidebar.designspace-navigation.copy-current-layer": "Copy current layer",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "Layer:",
   "sidebar.designspace-navigation.dialog.add-source.label.source-name":
     "Nom de source:",
