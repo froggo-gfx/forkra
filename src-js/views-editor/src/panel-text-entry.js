@@ -274,7 +274,7 @@ export default class TextEntryPanel extends Panel {
         });
         this.textSettings.featureSettings = featureSettings;
       },
-      "data-tooltip": `Reset ${tableTag} feature settings`,
+      "data-tooltip": translate("sidebar.text-entry.reset-features", tableTag),
       "data-tooltipposition": "left",
     });
   }
@@ -566,7 +566,7 @@ export default class TextEntryPanel extends Panel {
       },
       {
         id: "gsub-features-accordion-item",
-        label: "Substitution",
+        label: translate("sidebar.text-entry.section.substitution"),
         open: true,
         hidden: true,
         content: html.div(
@@ -577,7 +577,7 @@ export default class TextEntryPanel extends Panel {
       },
       {
         id: "gpos-emulated-features-accordion-item",
-        label: "Positioning from font data",
+        label: translate("sidebar.text-entry.section.positioning-from-font-data"),
         open: true,
         hidden: true,
         content: html.div(
@@ -588,7 +588,7 @@ export default class TextEntryPanel extends Panel {
       },
       {
         id: "gpos-features-accordion-item",
-        label: "Positioning",
+        label: translate("sidebar.text-entry.section.positioning"),
         open: true,
         hidden: true,
         content: html.div(
