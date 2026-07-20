@@ -544,6 +544,18 @@ export const strings = {
   "sources.dialog.add-source.label.source-name": "Nome da Origem",
   "sources.dialog.add-source.title": "Adicionar origem da fonte",
   "sources.dialog.cannot-edit-source.title": "Não é possivel editar origem da fonte",
+  "sources.dialog.delete.message":
+    "Deleting a font source may result in kerning being lost or glyphs to become invalid.",
+  "sources.dialog.delete.title":
+    "Are you sure you want to delete the selected font source?",
+  "sources.dialog.sparse-off.message":
+    "This will add interpolated kerning and line metrics for this source.",
+  "sources.dialog.sparse-off.title":
+    'Are you sure you want to turn the "Is Sparse" flag off?',
+  "sources.dialog.sparse-on.message":
+    "This will delete the kerning and line metrics for this source.",
+  "sources.dialog.sparse-on.title":
+    'Are you sure you want to turn the "Is Sparse" flag on?',
   "sources.labels.ascender": "Ascendente",
   "sources.labels.baseline": "Linha de Base",
   "sources.labels.cap-height": "Altura das Maiúsculas",

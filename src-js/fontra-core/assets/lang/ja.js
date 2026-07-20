@@ -526,6 +526,18 @@ export const strings = {
   "sources.dialog.add-source.label.source-name": "ソース名",
   "sources.dialog.add-source.title": "フォントソースを追加",
   "sources.dialog.cannot-edit-source.title": "フォントソースを編集できません。",
+  "sources.dialog.delete.message":
+    "Deleting a font source may result in kerning being lost or glyphs to become invalid.",
+  "sources.dialog.delete.title":
+    "Are you sure you want to delete the selected font source?",
+  "sources.dialog.sparse-off.message":
+    "This will add interpolated kerning and line metrics for this source.",
+  "sources.dialog.sparse-off.title":
+    'Are you sure you want to turn the "Is Sparse" flag off?',
+  "sources.dialog.sparse-on.message":
+    "This will delete the kerning and line metrics for this source.",
+  "sources.dialog.sparse-on.title":
+    'Are you sure you want to turn the "Is Sparse" flag on?',
   "sources.labels.ascender": "アセンダー",
   "sources.labels.baseline": "ベースライン",
   "sources.labels.cap-height": "キャップハイト",
