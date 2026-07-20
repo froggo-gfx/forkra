@@ -1626,7 +1626,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
       }
     } else if (startIsDrop) {
       const startTangent = getSegmentTangent(segments[0], "start");
-      startCap = generateDropCap({
+      const drop = buildDropCap({
         position: "start",
         outerSide: resolveDropCapOuterSide(
           segments[0],
@@ -1637,8 +1637,8 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
         ),
         endpoint: firstOnCurvePoint,
         outwardTangent: { x: -startTangent.x, y: -startTangent.y },
-        leftTerminal: getFirstOnCurvePoint(roundedLeftSide),
-        rightTerminal: getFirstOnCurvePoint(roundedRightSide),
+        leftSide: roundedLeftSide,
+        rightSide: roundedRightSide,
         capWidth: startCapLeftHW + startCapRightHW,
         capBallRatio:
           firstOnCurvePoint.capBallRatio ??
@@ -1649,6 +1649,11 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
           skeletonContour.capTension ??
           DEFAULT_CAP_TENSION,
       });
+      if (drop) {
+        roundedLeftSide = drop.leftSide;
+        roundedRightSide = drop.rightSide;
+        startCap = drop.capPoints;
+      }
     } else {
       startCap = generateCap(
         firstOnCurvePoint,
@@ -1795,7 +1800,7 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
       }
     } else if (endIsDrop) {
       const endTangent = getSegmentTangent(segments[segments.length - 1], "end");
-      endCap = generateDropCap({
+      const drop = buildDropCap({
         position: "end",
         outerSide: resolveDropCapOuterSide(
           segments[segments.length - 1],
@@ -1806,8 +1811,8 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
         ),
         endpoint: lastOnCurvePoint,
         outwardTangent: endTangent,
-        leftTerminal: getLastOnCurvePoint(roundedLeftSide),
-        rightTerminal: getLastOnCurvePoint(roundedRightSide),
+        leftSide: roundedLeftSide,
+        rightSide: roundedRightSide,
         capWidth: endCapLeftHW + endCapRightHW,
         capBallRatio:
           lastOnCurvePoint.capBallRatio ??
@@ -1818,6 +1823,11 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
           skeletonContour.capTension ??
           DEFAULT_CAP_TENSION,
       });
+      if (drop) {
+        roundedLeftSide = drop.leftSide;
+        roundedRightSide = drop.rightSide;
+        endCap = drop.capPoints;
+      }
     } else {
       endCap = generateCap(
         lastOnCurvePoint,
@@ -4287,101 +4297,198 @@ function emitDropCapArc(center, radius, thetaStart, thetaEnd, sweepSign) {
   return points;
 }
 
-function generateDropCap({
+// Trim the terminal segment of a side outline where it enters the ball, so the
+// inner edge stops at the circle (the concave neck of the drop). Returns the
+// rewritten side points and the crossing on-curve, or null when the ball does
+// not cover the terminal (small ball) or swallows the whole segment.
+function trimSideAtCircle(sidePoints, position, center, radius) {
+  const seg = getRoundCapTerminalSegment(sidePoints, position);
+  if (!seg) {
+    return null;
+  }
+  const { segmentStartIndex, segmentEndIndex, segmentPoints } = seg;
+  const fromEnd = position === "end";
+  const terminalPoint = fromEnd
+    ? segmentPoints[segmentPoints.length - 1]
+    : segmentPoints[0];
+  const otherPoint = fromEnd
+    ? segmentPoints[0]
+    : segmentPoints[segmentPoints.length - 1];
+  // Ball must cover the terminal but not the whole segment for a clean cut.
+  if (vector.distance(terminalPoint, center) >= radius) {
+    return null;
+  }
+  if (vector.distance(otherPoint, center) < radius) {
+    return null;
+  }
+  const isCubic = segmentPoints.length === 4;
+  // Only cubic segments go through bezier-js; a linear segment is interpolated
+  // directly (bezier-js cannot split an order-1 curve).
+  const bezier = isCubic ? createBezierFromPoints(segmentPoints) : null;
+  const at = (t) => {
+    if (bezier) {
+      const p = bezier.get(t);
+      return { x: p.x, y: p.y };
+    }
+    return vector.interpolateVectors(
+      segmentPoints[0],
+      segmentPoints[segmentPoints.length - 1],
+      t
+    );
+  };
+  // Bisection for the circle crossing. Parameter t runs 0 -> 1 along the array;
+  // the terminal is inside the circle, the other end outside.
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    const inside = vector.distance(at(mid), center) < radius;
+    if (fromEnd) {
+      if (inside) hi = mid;
+      else lo = mid;
+    } else {
+      if (inside) lo = mid;
+      else hi = mid;
+    }
+  }
+  const tCross = (lo + hi) / 2;
+  const crossing = at(tCross);
+  const provenanceSource = sidePoints[fromEnd ? segmentEndIndex : segmentStartIndex];
+  // The crossing is a concave corner (the neck), so it is NOT marked smooth;
+  // enforceSmoothColinearity then leaves it and its handles alone.
+  const crossingOnCurve = withRoundCapProvenance(
+    { x: Math.round(crossing.x), y: Math.round(crossing.y), smooth: false },
+    provenanceSource
+  );
+
+  let rewrittenSegment;
+  if (bezier) {
+    const split = bezier.split(tCross);
+    const kept = (fromEnd ? split.left : split.right).points.map((p) => ({
+      x: p.x,
+      y: p.y,
+    }));
+    if (isCubic) {
+      rewrittenSegment = fromEnd
+        ? [
+            cloneRoundCapPoint(segmentPoints[0]),
+            buildSplitOffCurve(kept[1]),
+            buildSplitOffCurve(kept[2]),
+            crossingOnCurve,
+          ]
+        : [
+            crossingOnCurve,
+            buildSplitOffCurve(kept[1]),
+            buildSplitOffCurve(kept[2]),
+            cloneRoundCapPoint(segmentPoints[segmentPoints.length - 1]),
+          ];
+    } else {
+      rewrittenSegment = fromEnd
+        ? [cloneRoundCapPoint(segmentPoints[0]), crossingOnCurve]
+        : [
+            crossingOnCurve,
+            cloneRoundCapPoint(segmentPoints[segmentPoints.length - 1]),
+          ];
+    }
+  } else {
+    rewrittenSegment = fromEnd
+      ? [cloneRoundCapPoint(segmentPoints[0]), crossingOnCurve]
+      : [crossingOnCurve, cloneRoundCapPoint(segmentPoints[segmentPoints.length - 1])];
+  }
+
+  const newSidePoints = [
+    ...sidePoints.slice(0, segmentStartIndex),
+    ...rewrittenSegment,
+    ...sidePoints.slice(segmentEndIndex + 1),
+  ];
+  return { sidePoints: newSidePoints, crossing };
+}
+
+// Build a drop cap. The outer edge flows tangentially into a circle (the ball)
+// tangent to it at the terminal from the stroke side, so the ball stays
+// attached to the endpoint. The inner side is trimmed where the ball crosses
+// it, forming the concave neck. Returns { leftSide, rightSide, capPoints } with
+// the (possibly trimmed) inner side, or null to fall through.
+function buildDropCap({
   position,
   outerSide,
   endpoint,
   outwardTangent,
-  leftTerminal,
-  rightTerminal,
+  leftSide,
+  rightSide,
   capWidth,
   capBallRatio,
   capTension,
 }) {
-  if (
-    !leftTerminal ||
-    !rightTerminal ||
-    !endpoint ||
-    !(capWidth > 0.001) ||
-    !isUsableDirection(outwardTangent)
-  ) {
-    return [];
-  }
-
-  const outerEnd = outerSide === "left" ? leftTerminal : rightTerminal;
-  const innerEnd = outerSide === "left" ? rightTerminal : leftTerminal;
   const forward = vector.normalizeVector(outwardTangent);
+  if (!endpoint || !(capWidth > 0.001) || !isUsableDirection(forward)) {
+    return null;
+  }
   const radius = (clampCapBallRatio(capBallRatio) * capWidth) / 2;
   if (!(radius > 0.001)) {
-    return [];
+    return null;
   }
 
-  // Outward normal on the outer side: from the skeleton axis toward the outer
-  // edge. Falls back to a rotated tangent if the endpoints are coincident.
-  let outerNormal = vector.normalizeVector(vector.subVectors(outerEnd, endpoint));
+  const first = position === "start";
+  const terminalOf = (side) =>
+    first ? getFirstOnCurvePoint(side) : getLastOnCurvePoint(side);
+  const outerSideArr = outerSide === "left" ? leftSide : rightSide;
+  const innerSideArr = outerSide === "left" ? rightSide : leftSide;
+  const outerTerminal = terminalOf(outerSideArr);
+  const innerTerminal = terminalOf(innerSideArr);
+  if (!outerTerminal || !innerTerminal) {
+    return null;
+  }
+
+  // Outward normal (skeleton axis -> outer edge). Falls back to a rotated
+  // tangent when the terminals are coincident.
+  let outerNormal = vector.normalizeVector(vector.subVectors(outerTerminal, endpoint));
   if (!isUsableDirection(outerNormal)) {
     const rotated = vector.rotateVector90CW(forward);
-    const towardOuter = vector.subVectors(outerEnd, innerEnd);
+    const towardOuter = vector.subVectors(outerTerminal, innerTerminal);
     outerNormal =
       rotated.x * towardOuter.x + rotated.y * towardOuter.y >= 0
         ? rotated
         : { x: -rotated.x, y: -rotated.y };
   }
   if (!isUsableDirection(outerNormal)) {
-    return [];
+    return null;
   }
 
-  // Center sits on the endpoint's perpendicular (no forward offset, so the cap
-  // does not lengthen the stroke), tangent to the outer edge at its terminal
-  // and swelling outward. For asymmetry the center is off the axis by the outer
-  // half-width plus the radius, not on the point itself.
-  const tangencyPoint = outerEnd;
-  const center = vector.addVectors(outerEnd, {
+  // Center pulled inward from the outer terminal by the radius: the ball is
+  // tangent to the outer edge there and sits on the stroke side, near the
+  // endpoint, rather than flung outside the stroke.
+  const center = vector.subVectors(outerTerminal, {
     x: outerNormal.x * radius,
     y: outerNormal.y * radius,
   });
-
-  const uOuter = vector.normalizeVector(vector.subVectors(tangencyPoint, center));
-  if (!isUsableDirection(uOuter)) {
-    return [];
-  }
-  const thetaOuter = Math.atan2(uOuter.y, uOuter.x);
-
+  const thetaOuter = Math.atan2(outerTerminal.y - center.y, outerTerminal.x - center.x);
   const pointAtAngle = (theta) => ({
     x: center.x + radius * Math.cos(theta),
     y: center.y + radius * Math.sin(theta),
   });
 
-  // The neck attaches where a line from the inner terminal is tangent to the
-  // ball — a smooth concave join that never degenerates (unlike "closest point
-  // on the circle", which collapses onto the outer tangency for a straight
-  // symmetric stroke). Two tangent points exist; take the more forward one.
-  const distInnerToCenter = vector.distance(innerEnd, center);
-  let neckPoint;
+  // Trim the inner side where the ball crosses it (the concave neck). When the
+  // ball is too small to reach the inner edge, bridge to the inner terminal.
+  const trim = trimSideAtCircle(innerSideArr, position, center, radius);
+  let trimmedInnerSide;
   let thetaInner;
-  if (distInnerToCenter > radius + 0.5) {
-    const baseTheta = Math.atan2(innerEnd.y - center.y, innerEnd.x - center.x);
-    const alpha = Math.acos(Math.min(1, radius / distInnerToCenter));
-    const forwardness = (theta) => {
-      const p = pointAtAngle(theta);
-      return (p.x - endpoint.x) * forward.x + (p.y - endpoint.y) * forward.y;
-    };
-    thetaInner =
-      forwardness(baseTheta + alpha) >= forwardness(baseTheta - alpha)
-        ? baseTheta + alpha
-        : baseTheta - alpha;
-    neckPoint = pointAtAngle(thetaInner);
+  let bridgeToInnerTerminal = false;
+  if (trim) {
+    trimmedInnerSide = trim.sidePoints;
+    thetaInner = Math.atan2(trim.crossing.y - center.y, trim.crossing.x - center.x);
   } else {
-    const vInner = vector.normalizeVector(vector.subVectors(innerEnd, center));
+    trimmedInnerSide = innerSideArr;
+    const vInner = vector.normalizeVector(vector.subVectors(innerTerminal, center));
     if (!isUsableDirection(vInner)) {
-      return [];
+      return null;
     }
     thetaInner = Math.atan2(vInner.y, vInner.x);
-    neckPoint = pointAtAngle(thetaInner);
+    bridgeToInnerTerminal = true;
   }
 
-  // Choose the sweep whose arc bulges away from the stroke (midpoint farthest
-  // from the endpoint) — that traces the outer boundary of the ball.
+  // Sweep the way that bulges away from the endpoint — the ball's outer
+  // boundary — rather than cutting back across the stroke.
   const twoPi = Math.PI * 2;
   const ccwDelta = (((thetaInner - thetaOuter) % twoPi) + twoPi) % twoPi;
   const midCcw = thetaOuter + ccwDelta / 2;
@@ -4389,55 +4496,59 @@ function generateDropCap({
   const distFromEndpoint = (theta) => vector.distance(pointAtAngle(theta), endpoint);
   const sweepSign = distFromEndpoint(midCcw) >= distFromEndpoint(midCw) ? 1 : -1;
 
-  // Build the canonical outer -> inner point list.
-  const list = [];
-  list.push(dropCapOnCurve(tangencyPoint));
-  list.push(...emitDropCapArc(center, radius, thetaOuter, thetaInner, sweepSign));
+  const arc = emitDropCapArc(center, radius, thetaOuter, thetaInner, sweepSign);
 
-  // Concave neck: cubic from the ball to the inner terminal. The ball-side
-  // handle runs along the tangent line (a smooth join, since neckPoint is a
-  // tangent point); the inner-side handle follows the stroke edge to bow the
-  // cut concavely. Lengths clamped so a distant Tunni intersection can't loop.
-  const chord = vector.distance(neckPoint, innerEnd);
-  const maxNeckLen = 0.6 * chord;
-  const minNeckLen = 0.15 * chord;
-  const ballTangent = vector.normalizeVector(vector.subVectors(innerEnd, neckPoint));
-  // Aim the inner handle back along the tangent line toward the ball: with both
-  // handles colinear the neck is a clean straight cut (a chamfer against the
-  // round ball), never a convex bulge.
-  const innerTangent = vector.normalizeVector(vector.subVectors(neckPoint, innerEnd));
-  const neckLengths = computeTunniHandleLengths(
-    neckPoint,
-    ballTangent,
-    innerEnd,
-    innerTangent,
-    capTension
-  );
-  const clampNeckLen = (value) =>
-    Math.min(
-      Math.max(Number.isFinite(value) ? value : maxNeckLen, minNeckLen),
-      maxNeckLen
+  // Points strictly between the outer terminal and the inner terminal, in the
+  // outer -> inner traversal direction.
+  let capForwardToInner;
+  if (bridgeToInnerTerminal) {
+    // Small ball: connect the last arc on-curve to the inner terminal with a
+    // short concave neck cubic.
+    const neckPoint = pointAtAngle(thetaInner);
+    const chord = vector.distance(neckPoint, innerTerminal);
+    const ballTangent = vector.normalizeVector(
+      vector.subVectors(innerTerminal, neckPoint)
     );
-  const startLen = clampNeckLen(neckLengths.startLen);
-  const endLen = clampNeckLen(neckLengths.endLen);
-  list.push(
-    dropCapHandle({
-      x: neckPoint.x + ballTangent.x * startLen,
-      y: neckPoint.y + ballTangent.y * startLen,
-    })
-  );
-  list.push(
-    dropCapHandle({
-      x: innerEnd.x + innerTangent.x * endLen,
-      y: innerEnd.y + innerTangent.y * endLen,
-    })
-  );
+    const innerTangent = vector.normalizeVector(
+      vector.subVectors(neckPoint, innerTerminal)
+    );
+    const neckLengths = computeTunniHandleLengths(
+      neckPoint,
+      ballTangent,
+      innerTerminal,
+      innerTangent,
+      capTension
+    );
+    const clampNeckLen = (value) =>
+      Math.min(Math.max(Number.isFinite(value) ? value : 0.4 * chord, 0), 0.6 * chord);
+    const startLen = clampNeckLen(neckLengths.startLen);
+    const endLen = clampNeckLen(neckLengths.endLen);
+    capForwardToInner = [
+      ...arc,
+      dropCapHandle({
+        x: neckPoint.x + ballTangent.x * startLen,
+        y: neckPoint.y + ballTangent.y * startLen,
+      }),
+      dropCapHandle({
+        x: innerTerminal.x + innerTangent.x * endLen,
+        y: innerTerminal.y + innerTangent.y * endLen,
+      }),
+    ];
+  } else {
+    // The trimmed inner side already provides the crossing on-curve, so drop
+    // the arc's terminal on-curve to avoid duplicating it.
+    capForwardToInner = arc.slice(0, -1);
+  }
 
-  // Insert order runs from the forward side to the backward side. For an end
-  // cap that is left -> right; for a start cap it is right -> left. When the
-  // outer side is not the from-side, walk the list inner -> outer instead.
   const fromSide = position === "end" ? "left" : "right";
-  return outerSide === fromSide ? list : list.slice().reverse();
+  const capPoints =
+    outerSide === fromSide ? capForwardToInner : capForwardToInner.slice().reverse();
+
+  return {
+    leftSide: outerSide === "left" ? leftSide : trimmedInnerSide,
+    rightSide: outerSide === "left" ? trimmedInnerSide : rightSide,
+    capPoints,
+  };
 }
 
 function generateCap(

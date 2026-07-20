@@ -940,29 +940,41 @@ Requested feature, not a parity bug: a bulbous serif-style terminal (as on an
 'a' tail) that reads as a **continuation of the outer generated edge**, so it is
 asymmetric rather than a symmetric droplet.
 
-**Construction** (`generateDropCap` in `skeleton-generator.js`, dispatched from
+**Construction** (`buildDropCap` in `skeleton-generator.js`, dispatched from
 the start/end cap branches alongside round/square):
 
 1. Resolve the outer (swell) side. `resolveDropCapOuterSide` uses the terminal
-   segment's curvature — convex side gets the ball (`cross > 0 → right`) — with
+   segment's curvature — convex side gets the ball (`cross > 0 → left`) — with
    a per-point/contour `capBallSide` override (`auto`/`left`/`right`); straight
    terminals fall back to the wider side.
-2. Ball radius `r = clamp(capBallRatio, 0.5..3) · capWidth / 2`. Place the
-   tangency point one radius forward of the outer terminal (`outerEnd + t·r`),
-   center at `tangencyPoint + outerNormal·r` — the circle is tangent to the
-   outer edge and swells forward, never collapsing onto the axis (the straight
-   symmetric degenerate case).
-3. Emit the circle as kappa cubic arcs (`emitDropCapArc`, ≤90°/piece) from the
-   outer tangency around the far/forward side to the neck attachment; sweep
-   direction chosen so the arc midpoint is farthest from the endpoint.
-4. Concave neck: a single cubic from the ball to the **inner** terminal, ball
-   side tangent-continuous with the arc, inner side aimed along the chord;
-   `capTension` scales the handle lengths, clamped to `[0.2, 0.6]·chord` so a
-   distant Tunni intersection can't loop.
+2. Ball radius `r = clamp(capBallRatio, 0.5..3) · capWidth / 2`. Center is
+   **pulled inward** from the outer terminal by the radius
+   (`center = outerTerminal − outerNormal·r`): the circle is tangent to the
+   outer edge at the terminal and sits on the stroke side, near the endpoint —
+   *not* flung outside the stroke (the original `+outerNormal·r` bug flung the
+   ball off and produced a huge flat neck on thick strokes).
+3. `trimSideAtCircle` trims the **inner** side's terminal segment at the circle
+   crossing (bisection on the segment bezier; linear segments interpolated),
+   inserting a non-smooth crossing on-curve — the concave neck. Provenance is
+   carried onto the crossing via `withRoundCapProvenance`. When the ball is too
+   small to reach the inner edge (`ratio ≤ 1`), a short concave neck cubic
+   bridges to the untrimmed inner terminal instead.
+4. Emit the circle as kappa cubic arcs (`emitDropCapArc`, ≤90°/piece) from the
+   outer tangency around to the crossing; sweep chosen so the arc midpoint is
+   farthest from the endpoint (bulges away from the stroke). The arc's terminal
+   on-curve is dropped — the trimmed inner side already provides the crossing.
 
-Neither side outline is trimmed, so all side provenance survives (unlike the
-round cap's split). Ball on-curves carry `skipColinear` so the colinearity
-post-pass can't deform the circle.
+The outer side is untrimmed (flows tangentially into the ball at its terminal),
+the inner side is trimmed at the crossing. `buildDropCap` returns the
+(possibly trimmed) left/right sides plus the cap points; the dispatch reassigns
+`roundedLeftSide`/`roundedRightSide`. Ball on-curves carry `skipColinear` so the
+colinearity post-pass can't deform the circle.
+
+_Revised after first-cut feedback: the ball had (a) lengthened the stroke and
+(b) mirrored to the concave side. Both fixed — center on the endpoint's
+perpendicular, inference flipped to convex — then further corrected to the
+tangent-from-inside + inner-trim construction above after the ball flew off
+thick strokes._
 
 **Data / UI:** `capStyle: "drop"` and new fields `capBallRatio` (numeric,
 in `CAP_POINT_FIELDS`) + `capBallSide` (string, `auto`/`left`/`right`) added to
