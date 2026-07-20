@@ -100,7 +100,7 @@ export const strings = {
   "axes.names": "Nomes",
   "axes.names.name": "Nome",
   "axes.names.ot-tag": "Tag OT",
-  "axes.names.ui-name": "Nome da UI",
+  "axes.names.ui-name": "Nome de exibição",
   "axes.new": "Novo eixo...",
   "axes.preset": "Presets do eixo",
   "axes.preset.italic": "Itálico",
