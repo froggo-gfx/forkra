@@ -351,6 +351,75 @@ describe("skeleton-generator drop caps", () => {
     expect(soft.minY).to.be.gte(159.5); // eases in from above — no dip below edge
   });
 
+  it("capBallShape elongates the ball toward the outward tip", () => {
+    // Horizontal stroke: the tip points along +x (away from the stroke). A
+    // higher shape must push the far tip further out while shape=0 leaves the
+    // round ball untouched.
+    const tipReach = (shape) => {
+      const points = generateFromSkeleton(
+        makeDropSkeleton({ capBallShape: shape }, [
+          { id: 2, x: 40, y: 120, type: null, smooth: false },
+          { id: 3, x: 240, y: 120, type: null, smooth: false },
+          {
+            id: 4,
+            x: 440,
+            y: 120,
+            type: null,
+            smooth: false,
+            capStyle: "drop",
+            capBallShape: shape,
+          },
+        ])
+      ).contours[0].points;
+      return Math.max(...points.map((p) => p.x));
+    };
+    expect(tipReach(1)).to.be.greaterThan(tipReach(0.5));
+    expect(tipReach(0.5)).to.be.greaterThan(tipReach(0));
+  });
+
+  it("capBallShape 0 leaves the round ball unchanged", () => {
+    const round = generateFromSkeleton(makeDropSkeleton());
+    const shaped = generateFromSkeleton(makeDropSkeleton({ capBallShape: 0 }));
+    expect(shaped.contours[0].points).to.deep.equal(round.contours[0].points);
+  });
+
+  it("accepts capTension beyond 1 for an extra-soft waist", () => {
+    const rejoinX = (tension) => {
+      const points = generateFromSkeleton({
+        version: 1,
+        nextId: 10,
+        contours: [
+          {
+            id: 1,
+            closed: false,
+            defaultWidth: 80,
+            singleSided: null,
+            points: [
+              { id: 2, x: 40, y: 120, type: null, smooth: false },
+              { id: 3, x: 240, y: 120, type: null, smooth: false },
+              {
+                id: 4,
+                x: 440,
+                y: 120,
+                type: null,
+                smooth: false,
+                capStyle: "drop",
+                capTension: tension,
+              },
+            ],
+          },
+        ],
+        generated: [],
+      }).contours[0].points;
+      const nearEdge = points.filter(
+        (p) => Math.abs(p.y - 160) <= 2 && p.x >= 300 && p.x <= 420
+      );
+      return Math.min(...nearEdge.map((p) => p.x));
+    };
+    // Past the old 1.0 ceiling the neck keeps reaching further back.
+    expect(rejoinX(1.5)).to.be.lessThan(rejoinX(1.0));
+  });
+
   it("works on the start endpoint too", () => {
     const result = generateFromSkeleton(
       makeDropSkeleton({}, [

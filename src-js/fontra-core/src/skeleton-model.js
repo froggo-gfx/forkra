@@ -25,6 +25,7 @@ export const CAP_POINT_FIELDS = [
   "capAngle",
   "capDistance",
   "capBallRatio",
+  "capBallShape",
 ];
 // Corner rounding is the angle-point engine's parameter set — related to caps
 // only in that both live on on-curve points

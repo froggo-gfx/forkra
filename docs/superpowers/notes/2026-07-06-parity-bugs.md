@@ -994,18 +994,39 @@ edge into a dip** rather than easing in. Backing off both sides makes the fillet
 cut the corner and ease in from above — verified the neck stays at/above the
 inner edge across tension 0/0.3/0.55/0.9 and reaches progressively further back.
 
-**Data / UI:** `capStyle: "drop"` and new fields `capBallRatio` (numeric,
-in `CAP_POINT_FIELDS`) + `capBallSide` (string, `auto`/`left`/`right`) added to
-`skeleton-model.js` (normalize, copy, set) and threaded through the generator's
-canonical mapping. Panel: "Drop" in the cap-style dropdown, a Ball-size slider
-(percent of stroke width, default 125), the shared tension slider, an
-auto/left/right Ball-side select, and drop in the force-apply profile flow.
-Master-level ball default deferred (force-apply uses the 1.25 constant).
+**`capBallShape` warps the round ball into a teardrop** (0 = round, 1 = fully
+teardrop). `warpDropCapBall` post-transforms the emitted arc points: each is
+pushed **radially outward** from the circle center by `shape · BALL_SHAPE_BULGE
+· r · env · tipWeight`, where `env = sin(π·t)` vanishes at both attachment
+angles (so the outer tangency and the inner neck attachment stay glued — they
+don't move) and `tipWeight = 0.5 + 0.5·(û·forward)` biases the swell toward the
+outward tip. The result elongates the ball away from the stroke along the
+terminal tangent and tapers it back into the neck. Because the warp is zero at
+the attachments, the trim/crossing machinery (which runs on the true circle) and
+the neck fillet (`ballAttach = pointAtAngle(thetaArcEnd)`, unwarped) still line
+up exactly; on-curves keep `skipColinear`. `BALL_SHAPE_BULGE = 0.55` is the
+tunable max elongation as a fraction of the radius.
 
-Tests: six cases in `test-skeleton-generator.js` (straight/curved terminals,
-ratio scaling, side override, start endpoint, all finite/closed). 1385 passing,
-bundle green. Visual preview generated from generator output for the six
-configs.
+**`capTension` range extended past 1** for the drop cap: `buildDropCap` now
+clamps tension to `[0, MAX_CAP_TENSION_DROP]` (1.5) instead of `[0, 1]`, and the
+panel's drop tension slider goes to 150% (`CAP_TENSION_DROP_MAX`). The extra
+headroom grows the pull-back circle further, so the neck eases in even more
+gently. Other cap styles keep their own 0–1 tension slider.
+
+**Data / UI:** `capStyle: "drop"` and fields `capBallRatio` + `capBallShape`
+(numeric, in `CAP_POINT_FIELDS`) + `capBallSide` (string, `auto`/`left`/`right`)
+in `skeleton-model.js` (normalize, copy, set) and threaded through the
+generator's canonical mapping. Panel: "Drop" in the cap-style dropdown, a
+Ball-size slider (percent of stroke width, default 125), a **Ball-shape** slider
+(0–100%, default 0), the tension slider (0–150%), an auto/left/right Ball-side
+select, and drop in the force-apply profile flow. Master-level ball default
+deferred (force-apply uses the 1.25 constant).
+
+Tests: nine cases in `test-skeleton-generator.js` (straight/curved terminals,
+ratio scaling, side override, tension ease-in, shape elongates the tip, shape 0
+unchanged, tension past 1, start endpoint, all finite/closed). 1389 passing,
+bundle green. Visual preview generated from generator output (shape sweep +
+extended tension).
 
 ---
 

@@ -19,6 +19,15 @@ const DEFAULT_CAP_BALL_RATIO = 1.25;
 const MIN_CAP_BALL_RATIO = 0.5;
 const MAX_CAP_BALL_RATIO = 3;
 const DEFAULT_CAP_BALL_SIDE = "auto";
+// Ball shape: 0 = round ball, 1 = fully teardrop. The warp elongates the ball
+// along its outward tip by up to BALL_SHAPE_BULGE of the radius, tapering to
+// zero at both attachment points so tangency and the neck stay glued.
+const DEFAULT_CAP_BALL_SHAPE = 0;
+const MAX_CAP_BALL_SHAPE = 1;
+const BALL_SHAPE_BULGE = 0.55;
+// Drop-cap neck tension may run past 1 for an extra-soft waist (the panel
+// exposes up to 150%); other cap styles keep their own [0, 1] range.
+const MAX_CAP_TENSION_DROP = 1.5;
 // Drop-cap neck: capTension pulls the inner trim back by up to this fraction of
 // the ball radius (softening the notch into a concave curve); the neck cubic's
 // handles are this fraction of the neck chord.
@@ -150,6 +159,7 @@ function canonicalToGeneratorInput(skeletonData) {
       singleSidedDirection: contour.singleSided || "left",
       capStyle: contour.capStyle || "butt",
       capBallRatio: contour.capBallRatio,
+      capBallShape: contour.capBallShape,
       capBallSide: contour.capBallSide,
       reversed: contour.reversed === true,
       cornerTrimRatio: contour.cornerTrimRatio,
@@ -1649,6 +1659,10 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
           firstOnCurvePoint.capBallRatio ??
           skeletonContour.capBallRatio ??
           DEFAULT_CAP_BALL_RATIO,
+        capBallShape:
+          firstOnCurvePoint.capBallShape ??
+          skeletonContour.capBallShape ??
+          DEFAULT_CAP_BALL_SHAPE,
         capTension:
           firstOnCurvePoint.capTension ??
           skeletonContour.capTension ??
@@ -1823,6 +1837,10 @@ export function generateOutlineFromSkeletonContour(skeletonContour, options = {}
           lastOnCurvePoint.capBallRatio ??
           skeletonContour.capBallRatio ??
           DEFAULT_CAP_BALL_RATIO,
+        capBallShape:
+          lastOnCurvePoint.capBallShape ??
+          skeletonContour.capBallShape ??
+          DEFAULT_CAP_BALL_SHAPE,
         capTension:
           lastOnCurvePoint.capTension ??
           skeletonContour.capTension ??
@@ -4226,6 +4244,13 @@ function clampCapBallRatio(value) {
   return Math.min(Math.max(value, MIN_CAP_BALL_RATIO), MAX_CAP_BALL_RATIO);
 }
 
+function clampCapBallShape(value) {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_CAP_BALL_SHAPE;
+  }
+  return Math.min(Math.max(value, 0), MAX_CAP_BALL_SHAPE);
+}
+
 // Which side the ball swells toward. Explicit capBallSide wins; otherwise the
 // convex (outer) side of the terminal segment's bend. For a CCW-turning
 // terminal the convex side is the left generated edge.
@@ -4300,6 +4325,49 @@ function emitDropCapArc(center, radius, thetaStart, thetaEnd, sweepSign) {
     a = b;
   }
   return points;
+}
+
+// Morph the round ball arc into an asymmetric teardrop, mutating the points in
+// place. Each point is pushed radially outward from the circle center by a
+// displacement that is (a) modulated by a sine envelope which vanishes at both
+// attachment angles — so the outer tangency and the inner neck stay glued —
+// and (b) biased toward the outward tip, so the drop swells away from the
+// stroke and tapers back into it. shape in (0, 1] scales the whole effect.
+function warpDropCapBall(
+  points,
+  { center, radius, tipAxis, thetaStart, thetaEnd, sweepSign, shape }
+) {
+  const twoPi = Math.PI * 2;
+  const ccwSpan = (((thetaEnd - thetaStart) % twoPi) + twoPi) % twoPi;
+  const span = sweepSign > 0 ? ccwSpan : twoPi - ccwSpan;
+  if (!(span > 1e-6)) {
+    return;
+  }
+  for (const p of points) {
+    const dx = p.x - center.x;
+    const dy = p.y - center.y;
+    const rho = Math.hypot(dx, dy);
+    if (!(rho > 1e-6)) {
+      continue;
+    }
+    const theta = Math.atan2(dy, dx);
+    const ccwFromStart = (((theta - thetaStart) % twoPi) + twoPi) % twoPi;
+    const swept =
+      sweepSign > 0 ? ccwFromStart : (((twoPi - ccwFromStart) % twoPi) + twoPi) % twoPi;
+    const t = Math.min(Math.max(swept / span, 0), 1);
+    // 0 at both attachments, 1 mid-sweep.
+    const env = Math.sin(Math.PI * t);
+    // -1..1: 1 pointing along the outward tip, -1 back over the stroke.
+    const axial = (dx * tipAxis.x + dy * tipAxis.y) / rho;
+    const tipWeight = 0.5 + 0.5 * axial;
+    const disp = shape * BALL_SHAPE_BULGE * radius * env * tipWeight;
+    if (!(disp > 0)) {
+      continue;
+    }
+    const scale = (rho + disp) / rho;
+    p.x = Math.round(center.x + dx * scale);
+    p.y = Math.round(center.y + dy * scale);
+  }
 }
 
 // Find where a side outline's terminal segment crosses the ball circle.
@@ -4447,6 +4515,7 @@ function buildDropCap({
   rightSide,
   capWidth,
   capBallRatio,
+  capBallShape,
   capTension,
 }) {
   const forward = vector.normalizeVector(outwardTangent);
@@ -4499,7 +4568,7 @@ function buildDropCap({
 
   const tension = Math.min(
     Math.max(Number.isFinite(capTension) ? capTension : 0, 0),
-    1
+    MAX_CAP_TENSION_DROP
   );
 
   // Where the ball meets the inner edge (the arc ends here). When the ball is
@@ -4560,6 +4629,22 @@ function buildDropCap({
   const thetaArcEnd = thetaInner - sweepSign * backoff;
 
   const arc = emitDropCapArc(center, radius, thetaOuter, thetaArcEnd, sweepSign);
+
+  // Teardrop: warp the round arc into an asymmetric drop, elongated toward the
+  // outward tip and tapering to the attachments (which stay put, so the outer
+  // tangency and the neck fillet still line up with the unwarped endpoints).
+  const shape = clampCapBallShape(capBallShape);
+  if (shape > 0) {
+    warpDropCapBall(arc, {
+      center,
+      radius,
+      tipAxis: forward,
+      thetaStart: thetaOuter,
+      thetaEnd: thetaArcEnd,
+      sweepSign,
+      shape,
+    });
+  }
 
   // Points strictly between the outer terminal and the inner terminal, in the
   // outer -> inner traversal direction.

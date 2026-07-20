@@ -58,6 +58,12 @@ export const CAP_ANGLE_MAX = 85;
 const DEFAULT_CAP_BALL_RATIO = 1.25;
 export const CAP_BALL_MIN = 50;
 export const CAP_BALL_MAX = 300;
+// Ball shape: 0% round -> 100% teardrop, edited as a percent.
+const DEFAULT_CAP_BALL_SHAPE = 0;
+export const CAP_SHAPE_MIN = 0;
+export const CAP_SHAPE_MAX = 100;
+// Drop-cap tension can be pushed past 100% for an extra-smooth waist.
+export const CAP_TENSION_DROP_MAX = 150;
 
 export function capRadiusRatioFromIndex(index) {
   const clampedIndex = Math.min(Math.max(index, 0), CAP_RADIUS_POSITIONS - 1);
@@ -93,6 +99,9 @@ function capValuesFromField(name, value) {
   }
   if (name === "ball") {
     return { capBallRatio: Number(value) / 100 };
+  }
+  if (name === "ballshape") {
+    return { capBallShape: Number(value) / 100 };
   }
   if (name === "ballside") {
     return { capBallSide: value };
@@ -739,6 +748,20 @@ export default class SkeletonParametersPanel extends Panel {
         Math.round(DEFAULT_CAP_BALL_RATIO * 100),
         { step: 5 }
       );
+      const shapeSummary = {
+        value: Math.round((cap.capBallShape.value ?? DEFAULT_CAP_BALL_SHAPE) * 100),
+        mixed: cap.capBallShape.mixed,
+      };
+      this._pushSummarySlider(
+        formContents,
+        "cap:ballshape",
+        "cap-ball-shape",
+        shapeSummary,
+        CAP_SHAPE_MIN,
+        CAP_SHAPE_MAX,
+        Math.round(DEFAULT_CAP_BALL_SHAPE * 100),
+        { step: 5 }
+      );
       const tensionSummary = {
         value: Math.round((cap.capTension.value ?? DEFAULT_CAP_TENSION) * 100),
         mixed: cap.capTension.mixed,
@@ -749,7 +772,7 @@ export default class SkeletonParametersPanel extends Panel {
         "cap-tension",
         tensionSummary,
         0,
-        100,
+        CAP_TENSION_DROP_MAX,
         Math.round(DEFAULT_CAP_TENSION * 100),
         { step: 5 }
       );
@@ -1080,6 +1103,7 @@ export default class SkeletonParametersPanel extends Panel {
           K.CAP_DISTANCE
         ),
         capBallRatio: DEFAULT_CAP_BALL_RATIO,
+        capBallShape: DEFAULT_CAP_BALL_SHAPE,
       };
       await setPanelCapStyle(
         this.sceneController,
