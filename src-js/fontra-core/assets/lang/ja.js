@@ -353,6 +353,8 @@ export const strings = {
   "sidebar.designspace-navigation.glyph-sources.name": "ソース名",
   "sidebar.designspace-navigation.glyph-sources.status": "ラベル",
   "sidebar.designspace-navigation.hidden-font-axes": "Hidden font axes",
+  "sidebar.designspace-navigation.source-layer-name-must-be-unique":
+    "Layer name must be unique",
   "sidebar.designspace-navigation.source-properties.undo": "ソースのプロパティを編集",
   "sidebar.designspace-navigation.source.activate": "%0を有効にする",
   "sidebar.designspace-navigation.source.deactivate": "%0を無効にする",

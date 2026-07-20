@@ -363,6 +363,8 @@ export const strings = {
   "sidebar.designspace-navigation.glyph-sources.name": "pangalan ng pinagmulan",
   "sidebar.designspace-navigation.glyph-sources.status": "katayuan",
   "sidebar.designspace-navigation.hidden-font-axes": "Hidden font axes",
+  "sidebar.designspace-navigation.source-layer-name-must-be-unique":
+    "Layer name must be unique",
   "sidebar.designspace-navigation.source-properties.undo":
     "i-edit ang mga katangian ng pinagmulan",
   "sidebar.designspace-navigation.source.activate": "buhayin ang %0",

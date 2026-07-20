@@ -1735,7 +1735,9 @@ export default class DesignspaceNavigationPanel extends Panel {
           (item) => item.shortName === inputController.model.sourceLayerName
         )
       ) {
-        warnings.push("⚠️ Layer name must be unique"); // TODO: translate
+        warnings.push(
+          `⚠️ ${translate("sidebar.designspace-navigation.source-layer-name-must-be-unique")}`
+        );
       }
 
       warningElement.innerText = warnings.length ? warnings.join("\n") : "";

@@ -360,6 +360,8 @@ export const strings = {
   "sidebar.designspace-navigation.glyph-sources.name": "nom de la source",
   "sidebar.designspace-navigation.glyph-sources.status": "statut",
   "sidebar.designspace-navigation.hidden-font-axes": "Hidden font axes",
+  "sidebar.designspace-navigation.source-layer-name-must-be-unique":
+    "Layer name must be unique",
   "sidebar.designspace-navigation.source-properties.undo":
     "éditer les propriétés des sources",
   "sidebar.designspace-navigation.source.activate": "activer %0",
