@@ -934,6 +934,51 @@ points, like `skipColinear`, when a detached/2D offset was applied).
 
 ---
 
+## 7. New cap style: "drop" (asymmetric ball terminal) — `feature, added`
+
+Requested feature, not a parity bug: a bulbous serif-style terminal (as on an
+'a' tail) that reads as a **continuation of the outer generated edge**, so it is
+asymmetric rather than a symmetric droplet.
+
+**Construction** (`generateDropCap` in `skeleton-generator.js`, dispatched from
+the start/end cap branches alongside round/square):
+
+1. Resolve the outer (swell) side. `resolveDropCapOuterSide` uses the terminal
+   segment's curvature — convex side gets the ball (`cross > 0 → right`) — with
+   a per-point/contour `capBallSide` override (`auto`/`left`/`right`); straight
+   terminals fall back to the wider side.
+2. Ball radius `r = clamp(capBallRatio, 0.5..3) · capWidth / 2`. Place the
+   tangency point one radius forward of the outer terminal (`outerEnd + t·r`),
+   center at `tangencyPoint + outerNormal·r` — the circle is tangent to the
+   outer edge and swells forward, never collapsing onto the axis (the straight
+   symmetric degenerate case).
+3. Emit the circle as kappa cubic arcs (`emitDropCapArc`, ≤90°/piece) from the
+   outer tangency around the far/forward side to the neck attachment; sweep
+   direction chosen so the arc midpoint is farthest from the endpoint.
+4. Concave neck: a single cubic from the ball to the **inner** terminal, ball
+   side tangent-continuous with the arc, inner side aimed along the chord;
+   `capTension` scales the handle lengths, clamped to `[0.2, 0.6]·chord` so a
+   distant Tunni intersection can't loop.
+
+Neither side outline is trimmed, so all side provenance survives (unlike the
+round cap's split). Ball on-curves carry `skipColinear` so the colinearity
+post-pass can't deform the circle.
+
+**Data / UI:** `capStyle: "drop"` and new fields `capBallRatio` (numeric,
+in `CAP_POINT_FIELDS`) + `capBallSide` (string, `auto`/`left`/`right`) added to
+`skeleton-model.js` (normalize, copy, set) and threaded through the generator's
+canonical mapping. Panel: "Drop" in the cap-style dropdown, a Ball-size slider
+(percent of stroke width, default 125), the shared tension slider, an
+auto/left/right Ball-side select, and drop in the force-apply profile flow.
+Master-level ball default deferred (force-apply uses the 1.25 constant).
+
+Tests: six cases in `test-skeleton-generator.js` (straight/curved terminals,
+ratio scaling, side override, start endpoint, all finite/closed). 1385 passing,
+bundle green. Visual preview generated from generator output for the six
+configs.
+
+---
+
 ## Process
 
 Per the standing directive: fix what's worth fixing in real time, write down what needs

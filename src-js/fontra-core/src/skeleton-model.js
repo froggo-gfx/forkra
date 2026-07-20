@@ -17,12 +17,14 @@ export const DEFAULT_SKELETON_WIDTH = 80;
 
 const VALID_POINT_TYPES = new Set([null, "cubic"]);
 const VALID_SINGLE_SIDED = new Set([null, "left", "right"]);
-const VALID_CAP_STYLES = new Set(["butt", "round", "square"]);
+const VALID_CAP_STYLES = new Set(["butt", "round", "square", "drop"]);
+const VALID_CAP_BALL_SIDES = new Set(["auto", "left", "right"]);
 export const CAP_POINT_FIELDS = [
   "capRadiusRatio",
   "capTension",
   "capAngle",
   "capDistance",
+  "capBallRatio",
 ];
 // Corner rounding is the angle-point engine's parameter set — related to caps
 // only in that both live on on-curve points
@@ -108,6 +110,9 @@ export function normalizeSkeletonContour(contour, skeletonData = null, usedIds =
     reversed: contour?.reversed === true,
     points: [],
   };
+  if (VALID_CAP_BALL_SIDES.has(contour?.capBallSide)) {
+    normalized.capBallSide = contour.capBallSide;
+  }
   if (Number.isFinite(contour?.cornerTrimRatio)) {
     normalized.cornerTrimRatio = contour.cornerTrimRatio;
   }
@@ -136,6 +141,9 @@ export function normalizeSkeletonPoint(point, skeletonData = null, usedIds = nul
     normalized.editable = normalizeEditable(point?.editable);
     normalized.handleOffsets = normalizeHandleOffsets(point?.handleOffsets);
     normalized.capStyle = VALID_CAP_STYLES.has(point?.capStyle) ? point.capStyle : null;
+    normalized.capBallSide = VALID_CAP_BALL_SIDES.has(point?.capBallSide)
+      ? point.capBallSide
+      : null;
     for (const field of [...CAP_POINT_FIELDS, ...CORNER_POINT_FIELDS]) {
       if (Number.isFinite(point?.[field])) {
         normalized[field] = point[field];
@@ -314,6 +322,7 @@ function copySkeletonCapData(sourcePoint, targetPoint) {
     return;
   }
   targetPoint.capStyle = sourcePoint.capStyle ?? null;
+  targetPoint.capBallSide = sourcePoint.capBallSide ?? null;
   for (const field of CAP_POINT_FIELDS) {
     if (Number.isFinite(sourcePoint[field])) {
       targetPoint[field] = sourcePoint[field];
@@ -791,7 +800,10 @@ export function setSkeletonCapParameters(point, values, { round = null } = {}) {
   if (VALID_CAP_STYLES.has(values.capStyle)) {
     point.capStyle = values.capStyle;
   }
-  for (const field of ["capRadiusRatio", "capTension", "capAngle", "capDistance"]) {
+  if (VALID_CAP_BALL_SIDES.has(values.capBallSide)) {
+    point.capBallSide = values.capBallSide;
+  }
+  for (const field of CAP_POINT_FIELDS) {
     if (field in values && Number.isFinite(values[field])) {
       point[field] = round ? round(values[field]) : values[field];
     }

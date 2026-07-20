@@ -444,7 +444,9 @@ export async function setPanelCapStyle(
       ? ["capRadiusRatio", "capTension"]
       : capStyle === "square"
         ? ["capAngle", "capDistance"]
-        : [];
+        : capStyle === "drop"
+          ? ["capBallRatio", "capTension"]
+          : [];
   return editSelectedSkeletonPoints(
     sceneController,
     pointAddresses,

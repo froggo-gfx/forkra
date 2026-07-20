@@ -336,6 +336,12 @@ export function summarizeSkeletonCapSelection(selectedPoints) {
     capDistance: reduceValues(
       selectedPoints.map((entry) => entry.point.capDistance ?? null)
     ),
+    capBallRatio: reduceValues(
+      selectedPoints.map((entry) => entry.point.capBallRatio ?? null)
+    ),
+    capBallSide: reduceValues(
+      selectedPoints.map((entry) => entry.point.capBallSide ?? null)
+    ),
   };
 }
 
@@ -438,7 +444,7 @@ export function makeSkeletonPanelStateSignature({
   if (panelSelection) {
     for (const entry of collectWidthEditPoints(panelSelection)) {
       parts.push(
-        `p:${entry.contourId}/${entry.pointId}:${JSON.stringify(entry.point.width)}:${JSON.stringify(entry.point.nudge)}:${entry.point.capStyle}:${entry.point.capRadiusRatio}:${entry.point.capTension}:${entry.point.capAngle}:${entry.point.capDistance}:${entry.point.roundnessStrength}:${entry.point.cornerAsymmetry}`
+        `p:${entry.contourId}/${entry.pointId}:${JSON.stringify(entry.point.width)}:${JSON.stringify(entry.point.nudge)}:${entry.point.capStyle}:${entry.point.capRadiusRatio}:${entry.point.capTension}:${entry.point.capAngle}:${entry.point.capDistance}:${entry.point.capBallRatio}:${entry.point.capBallSide}:${entry.point.roundnessStrength}:${entry.point.cornerAsymmetry}`
       );
     }
     for (const entry of panelSelection.contours) {

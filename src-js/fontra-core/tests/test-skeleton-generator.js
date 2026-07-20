@@ -220,6 +220,109 @@ describe("skeleton-generator round caps", () => {
   });
 });
 
+describe("skeleton-generator drop caps", () => {
+  function makeDropSkeleton(endpointFields = {}, points = null) {
+    return {
+      version: 1,
+      nextId: 10,
+      contours: [
+        {
+          id: 1,
+          closed: false,
+          defaultWidth: 80,
+          singleSided: null,
+          points: points || [
+            { id: 2, x: 0, y: 0, type: null, smooth: false },
+            { id: 3, x: 200, y: 0, type: null, smooth: false },
+            {
+              id: 4,
+              x: 400,
+              y: 60,
+              type: null,
+              smooth: false,
+              capStyle: "drop",
+              ...endpointFields,
+            },
+          ],
+        },
+      ],
+      generated: [],
+    };
+  }
+
+  function allFinite(result) {
+    return result.contours
+      .flatMap((contour) => contour.points)
+      .every((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  }
+
+  it("produces a finite closed contour on a straight terminal", () => {
+    const result = generateFromSkeleton(makeDropSkeleton());
+    expect(result.contours.length).to.equal(1);
+    expect(result.contours[0].isClosed).to.equal(true);
+    expect(allFinite(result)).to.equal(true);
+  });
+
+  it("differs from a butt cap (the ball adds outline points)", () => {
+    const drop = generateFromSkeleton(makeDropSkeleton());
+    const butt = generateFromSkeleton(makeDropSkeleton({ capStyle: "butt" }));
+    expect(drop.contours[0].points.length).to.be.greaterThan(
+      butt.contours[0].points.length
+    );
+  });
+
+  it("scales the ball with capBallRatio", () => {
+    const boundsSpan = (result) => {
+      const xs = result.contours[0].points.map((p) => p.x);
+      const ys = result.contours[0].points.map((p) => p.y);
+      return Math.max(...xs) - Math.min(...xs) + (Math.max(...ys) - Math.min(...ys));
+    };
+    const small = generateFromSkeleton(makeDropSkeleton({ capBallRatio: 0.8 }));
+    const big = generateFromSkeleton(makeDropSkeleton({ capBallRatio: 2.5 }));
+    expect(boundsSpan(big)).to.be.greaterThan(boundsSpan(small));
+  });
+
+  it("the capBallSide override changes which side swells", () => {
+    const left = generateFromSkeleton(makeDropSkeleton({ capBallSide: "left" }));
+    const right = generateFromSkeleton(makeDropSkeleton({ capBallSide: "right" }));
+    expect(left.contours[0].points).to.not.deep.equal(right.contours[0].points);
+    expect(allFinite(left)).to.equal(true);
+    expect(allFinite(right)).to.equal(true);
+  });
+
+  it("handles a curved terminal (auto side inference)", () => {
+    const result = generateFromSkeleton(
+      makeDropSkeleton({}, [
+        { id: 2, x: 0, y: 0, type: null, smooth: false },
+        { id: 3, x: 120, y: 40, type: "cubic" },
+        { id: 4, x: 260, y: 60, type: "cubic" },
+        { id: 5, x: 380, y: 40, type: null, smooth: false, capStyle: "drop" },
+      ])
+    );
+    expect(result.contours.length).to.equal(1);
+    expect(allFinite(result)).to.equal(true);
+  });
+
+  it("works on the start endpoint too", () => {
+    const result = generateFromSkeleton(
+      makeDropSkeleton({}, [
+        {
+          id: 2,
+          x: 0,
+          y: 0,
+          type: null,
+          smooth: false,
+          capStyle: "drop",
+        },
+        { id: 3, x: 200, y: 0, type: null, smooth: false },
+        { id: 4, x: 400, y: 60, type: null, smooth: false },
+      ])
+    );
+    expect(result.contours.length).to.equal(1);
+    expect(allFinite(result)).to.equal(true);
+  });
+});
+
 describe("skeleton-generator near-zero handle stabilization", () => {
   it("does not flip near-zero handles across the anchor", () => {
     const skeleton = {

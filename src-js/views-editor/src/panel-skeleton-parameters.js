@@ -54,6 +54,10 @@ const CAP_RADIUS_MAX = 1 / 4;
 export const CAP_RADIUS_POSITIONS = 20;
 export const CAP_ANGLE_MIN = -85;
 export const CAP_ANGLE_MAX = 85;
+// Drop (ball terminal) cap: ratio edited as a percent of stroke width.
+const DEFAULT_CAP_BALL_RATIO = 1.25;
+export const CAP_BALL_MIN = 50;
+export const CAP_BALL_MAX = 300;
 
 export function capRadiusRatioFromIndex(index) {
   const clampedIndex = Math.min(Math.max(index, 0), CAP_RADIUS_POSITIONS - 1);
@@ -86,6 +90,12 @@ function capValuesFromField(name, value) {
   }
   if (name === "distance") {
     return { capDistance: Number(value) };
+  }
+  if (name === "ball") {
+    return { capBallRatio: Number(value) / 100 };
+  }
+  if (name === "ballside") {
+    return { capBallSide: value };
   }
   return null;
 }
@@ -398,6 +408,15 @@ export default class SkeletonParametersPanel extends Panel {
           }
         });
       }
+    } else if (styleValue === "drop") {
+      options.push({
+        id: "base",
+        label: translate("sidebar.skeleton-parameters.default-caps"),
+        values: {
+          capBallRatio: DEFAULT_CAP_BALL_RATIO,
+          capTension: Number(this._resolveSourceDefault(K.CAP_TENSION)),
+        },
+      });
     }
     return options;
   }
@@ -641,6 +660,10 @@ export default class SkeletonParametersPanel extends Panel {
           value: "round",
           label: translate("sidebar.skeleton-parameters.cap-style.round"),
         },
+        {
+          value: "drop",
+          label: translate("sidebar.skeleton-parameters.cap-style.drop"),
+        },
       ],
     });
     // Donor parity: cap parameters appear as sliders, only for the styles
@@ -701,10 +724,66 @@ export default class SkeletonParametersPanel extends Panel {
         "cap-distance",
         cap.capDistance
       );
+    } else if (styleValue === "drop") {
+      const ballSummary = {
+        value: Math.round((cap.capBallRatio.value ?? DEFAULT_CAP_BALL_RATIO) * 100),
+        mixed: cap.capBallRatio.mixed,
+      };
+      this._pushSummarySlider(
+        formContents,
+        "cap:ball",
+        "cap-ball",
+        ballSummary,
+        CAP_BALL_MIN,
+        CAP_BALL_MAX,
+        Math.round(DEFAULT_CAP_BALL_RATIO * 100),
+        { step: 5 }
+      );
+      const tensionSummary = {
+        value: Math.round((cap.capTension.value ?? DEFAULT_CAP_TENSION) * 100),
+        mixed: cap.capTension.mixed,
+      };
+      this._pushSummarySlider(
+        formContents,
+        "cap:tension",
+        "cap-tension",
+        tensionSummary,
+        0,
+        100,
+        Math.round(DEFAULT_CAP_TENSION * 100),
+        { step: 5 }
+      );
+      formContents.push({
+        type: "select",
+        key: "cap:ballside",
+        label: translate("sidebar.skeleton-parameters.cap-ball-side"),
+        value: cap.capBallSide.mixed ? "" : (cap.capBallSide.value ?? "auto"),
+        disabled: !capStyle.canEdit,
+        options: [
+          ...(cap.capBallSide.mixed
+            ? [{ value: "", label: "mixed", disabled: true }]
+            : []),
+          {
+            value: "auto",
+            label: translate("sidebar.skeleton-parameters.cap-ball-side.auto"),
+          },
+          {
+            value: "left",
+            label: translate("sidebar.skeleton-parameters.cap-ball-side.left"),
+          },
+          {
+            value: "right",
+            label: translate("sidebar.skeleton-parameters.cap-ball-side.right"),
+          },
+        ],
+      });
     }
     // Force-apply master cap defaults (or a custom cap profile) to the
     // selected endpoints, two-click confirm.
-    if ((styleValue === "round" || styleValue === "square") && capStyle.canEdit) {
+    if (
+      (styleValue === "round" || styleValue === "square" || styleValue === "drop") &&
+      capStyle.canEdit
+    ) {
       this._buildForceApplyRow(formContents, {
         options: this._capProfileOptions(styleValue),
         selectionProp: "_capProfileSelection",
@@ -971,7 +1050,7 @@ export default class SkeletonParametersPanel extends Panel {
 
   async _onCapChange(name, value) {
     if (name === "style") {
-      if (!["butt", "square", "round"].includes(value)) {
+      if (!["butt", "square", "round", "drop"].includes(value)) {
         return;
       }
       const location =
@@ -1000,6 +1079,7 @@ export default class SkeletonParametersPanel extends Panel {
           location,
           K.CAP_DISTANCE
         ),
+        capBallRatio: DEFAULT_CAP_BALL_RATIO,
       };
       await setPanelCapStyle(
         this.sceneController,
