@@ -4,7 +4,7 @@
 
 ### New features
 
-- [languages] Add Portuguese translations contributed by Hallef Henrique P. Sousa, and additions by Eduardo Omine. [PR 2708](https://github.com/fontra/fontra/pull/2708)
+- [languages] Add Portuguese translations contributed by Hallef Henrique P. Sousa, and additions by Eduardo Omine. [PR 2708](https://github.com/fontra/fontra/pull/2708), [PR 2710](https://github.com/fontra/fontra/pull/2710)
 
 ### Improvements
 
