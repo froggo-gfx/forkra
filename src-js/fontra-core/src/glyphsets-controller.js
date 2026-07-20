@@ -1,4 +1,5 @@
 import { getGlyphMapProxy } from "./cmap.js";
+import { translate } from "./localization.js";
 import { ObservableController } from "./observable-object.ts";
 import { parseGlyphSet, redirectGlyphSetURL } from "./parse-glyphset.js";
 import { assert, friendlyHttpStatus, sleepAsync } from "./utils.ts";
@@ -250,7 +251,7 @@ export class GlyphSetsController {
 export function readProjectGlyphSets(fontController) {
   return Object.fromEntries(
     [
-      { name: "This font's glyphs", url: THIS_FONTS_GLYPHSET },
+      { name: translate("This font's glyphs"), url: THIS_FONTS_GLYPHSET },
       ...(fontController.customData[PROJECT_GLYPH_SETS_CUSTOM_DATA_KEY] || []),
     ].map((glyphSet) => [glyphSet.url, glyphSet])
   );

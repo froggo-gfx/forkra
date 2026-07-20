@@ -628,7 +628,7 @@ async function runEditGlyphSetDialog(glyphSetInfo) {
 export function getGlyphSetsUIControllers(settingsController, accordionId) {
   return [
     new GlyphSetsUIController(settingsController, {
-      label: "Project glyph sets", // TODO: translate
+      label: translate("glyph-organizing.project-glyph-sets"),
       id: "project-glyph-sets",
       collectionKey: "projectGlyphSets",
       selectionKey: "projectGlyphSetSelection",
@@ -638,7 +638,7 @@ export function getGlyphSetsUIControllers(settingsController, accordionId) {
       accordionId,
     }),
     new GlyphSetsUIController(settingsController, {
-      label: "My glyph sets", // TODO: translate
+      label: translate("glyph-organizing.my-glyph-sets"),
       id: "my-glyph-sets",
       collectionKey: "myGlyphSets",
       selectionKey: "myGlyphSetSelection",

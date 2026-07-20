@@ -3,6 +3,7 @@ import {
   getGlyphInfoFromGlyphName,
   getSuggestedGlyphName,
 } from "./glyph-data.js";
+import { translate } from "./localization.js";
 import { block, script, scriptNames } from "./unicode-scripts-blocks.js";
 import {
   capitalizeFirstLetter,
@@ -48,12 +49,15 @@ function getGroupByInfo(glyphItem, options) {
 }
 
 export const groupByProperties = [
-  { key: "script", label: "Script" },
-  { key: "block", label: "Block" },
-  { key: "case", label: "Case", compare: compareCase },
-  { key: "category", label: "Category" },
-  { key: "subCategory", label: "Sub-category" },
-  { key: "glyphNameExtension", label: "Glyph name extension" },
+  { key: "script", label: translate("glyph-organizing.script") },
+  { key: "block", label: translate("glyph-organizing.block") },
+  { key: "case", label: translate("glyph-organizing.case"), compare: compareCase },
+  { key: "category", label: translate("glyph-organizing.category") },
+  { key: "subCategory", label: translate("glyph-organizing.sub-category") },
+  {
+    key: "glyphNameExtension",
+    label: translate("glyph-organizing.glyphname-extension"),
+  },
 ];
 
 export const groupByKeys = groupByProperties.map(({ key }) => key);
