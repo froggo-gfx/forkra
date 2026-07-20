@@ -4212,7 +4212,8 @@ function clampCapBallRatio(value) {
 }
 
 // Which side the ball swells toward. Explicit capBallSide wins; otherwise the
-// convex side of the terminal segment (a CCW turn is convex on the right).
+// convex (outer) side of the terminal segment's bend. For a CCW-turning
+// terminal the convex side is the left generated edge.
 function resolveDropCapOuterSide(segment, point, skeletonContour, leftHW, rightHW) {
   const forced = point?.capBallSide ?? skeletonContour?.capBallSide ?? null;
   if (forced === "left" || forced === "right") {
@@ -4222,7 +4223,7 @@ function resolveDropCapOuterSide(segment, point, skeletonContour, leftHW, rightH
   const tangentEnd = getSegmentTangent(segment, "end");
   const cross = tangentStart.x * tangentEnd.y - tangentStart.y * tangentEnd.x;
   if (Math.abs(cross) > 1e-3) {
-    return cross > 0 ? "right" : "left";
+    return cross > 0 ? "left" : "right";
   }
   // Straight terminal: bias toward the wider side, defaulting to left.
   return rightHW > leftHW ? "right" : "left";
@@ -4330,28 +4331,54 @@ function generateDropCap({
     return [];
   }
 
-  // Place the ball forward of the endpoint by ~one radius so it swells past the
-  // terminal instead of collapsing onto the axis (which straight strokes do).
-  const tangencyPoint = vector.addVectors(outerEnd, {
-    x: forward.x * radius,
-    y: forward.y * radius,
-  });
-  const center = vector.addVectors(tangencyPoint, {
+  // Center sits on the endpoint's perpendicular (no forward offset, so the cap
+  // does not lengthen the stroke), tangent to the outer edge at its terminal
+  // and swelling outward. For asymmetry the center is off the axis by the outer
+  // half-width plus the radius, not on the point itself.
+  const tangencyPoint = outerEnd;
+  const center = vector.addVectors(outerEnd, {
     x: outerNormal.x * radius,
     y: outerNormal.y * radius,
   });
 
   const uOuter = vector.normalizeVector(vector.subVectors(tangencyPoint, center));
-  const vInner = vector.normalizeVector(vector.subVectors(innerEnd, center));
-  if (!isUsableDirection(uOuter) || !isUsableDirection(vInner)) {
+  if (!isUsableDirection(uOuter)) {
     return [];
   }
   const thetaOuter = Math.atan2(uOuter.y, uOuter.x);
-  const neckPoint = vector.addVectors(center, {
-    x: vInner.x * radius,
-    y: vInner.y * radius,
+
+  const pointAtAngle = (theta) => ({
+    x: center.x + radius * Math.cos(theta),
+    y: center.y + radius * Math.sin(theta),
   });
-  const thetaInner = Math.atan2(vInner.y, vInner.x);
+
+  // The neck attaches where a line from the inner terminal is tangent to the
+  // ball — a smooth concave join that never degenerates (unlike "closest point
+  // on the circle", which collapses onto the outer tangency for a straight
+  // symmetric stroke). Two tangent points exist; take the more forward one.
+  const distInnerToCenter = vector.distance(innerEnd, center);
+  let neckPoint;
+  let thetaInner;
+  if (distInnerToCenter > radius + 0.5) {
+    const baseTheta = Math.atan2(innerEnd.y - center.y, innerEnd.x - center.x);
+    const alpha = Math.acos(Math.min(1, radius / distInnerToCenter));
+    const forwardness = (theta) => {
+      const p = pointAtAngle(theta);
+      return (p.x - endpoint.x) * forward.x + (p.y - endpoint.y) * forward.y;
+    };
+    thetaInner =
+      forwardness(baseTheta + alpha) >= forwardness(baseTheta - alpha)
+        ? baseTheta + alpha
+        : baseTheta - alpha;
+    neckPoint = pointAtAngle(thetaInner);
+  } else {
+    const vInner = vector.normalizeVector(vector.subVectors(innerEnd, center));
+    if (!isUsableDirection(vInner)) {
+      return [];
+    }
+    thetaInner = Math.atan2(vInner.y, vInner.x);
+    neckPoint = pointAtAngle(thetaInner);
+  }
 
   // Choose the sweep whose arc bulges away from the stroke (midpoint farthest
   // from the endpoint) — that traces the outer boundary of the ball.
@@ -4359,14 +4386,7 @@ function generateDropCap({
   const ccwDelta = (((thetaInner - thetaOuter) % twoPi) + twoPi) % twoPi;
   const midCcw = thetaOuter + ccwDelta / 2;
   const midCw = thetaOuter + (ccwDelta - twoPi) / 2;
-  const distFromEndpoint = (theta) =>
-    vector.distance(
-      {
-        x: center.x + radius * Math.cos(theta),
-        y: center.y + radius * Math.sin(theta),
-      },
-      endpoint
-    );
+  const distFromEndpoint = (theta) => vector.distance(pointAtAngle(theta), endpoint);
   const sweepSign = distFromEndpoint(midCcw) >= distFromEndpoint(midCw) ? 1 : -1;
 
   // Build the canonical outer -> inner point list.
@@ -4374,18 +4394,17 @@ function generateDropCap({
   list.push(dropCapOnCurve(tangencyPoint));
   list.push(...emitDropCapArc(center, radius, thetaOuter, thetaInner, sweepSign));
 
-  // Concave neck: cubic from the ball (neckPoint) to the inner terminal. The
-  // ball-side handle continues the arc sweep (tangent-continuous join); the
-  // inner-side handle aims along the chord toward the ball so the neck cuts in
-  // concavely instead of looping. capTension scales the handle lengths, which
-  // are clamped to the chord so a distant Tunni intersection can't blow out.
+  // Concave neck: cubic from the ball to the inner terminal. The ball-side
+  // handle runs along the tangent line (a smooth join, since neckPoint is a
+  // tangent point); the inner-side handle follows the stroke edge to bow the
+  // cut concavely. Lengths clamped so a distant Tunni intersection can't loop.
   const chord = vector.distance(neckPoint, innerEnd);
   const maxNeckLen = 0.6 * chord;
-  const minNeckLen = 0.2 * chord;
-  const ballTangent = orientDirectionToward(
-    { x: sweepSign * -Math.sin(thetaInner), y: sweepSign * Math.cos(thetaInner) },
-    vector.subVectors(innerEnd, neckPoint)
-  );
+  const minNeckLen = 0.15 * chord;
+  const ballTangent = vector.normalizeVector(vector.subVectors(innerEnd, neckPoint));
+  // Aim the inner handle back along the tangent line toward the ball: with both
+  // handles colinear the neck is a clean straight cut (a chamfer against the
+  // round ball), never a convex bulge.
   const innerTangent = vector.normalizeVector(vector.subVectors(neckPoint, innerEnd));
   const neckLengths = computeTunniHandleLengths(
     neckPoint,
