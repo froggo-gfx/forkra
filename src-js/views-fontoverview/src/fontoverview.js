@@ -1014,7 +1014,7 @@ async function runDialogReplaceGlyphs(glyphNames, glyphMap) {
     controller.model.behavior = PASTE_REPLACE;
   }
 
-  // TODO translation
+  // TODO: translate
   const dialog = await dialogSetup("Replace existing glyphs?", null, [
     { title: translate("dialog.cancel"), resultValue: "cancel", isCancelButton: true },
     { title: translate("dialog.okay"), resultValue: "ok", isDefaultButton: true },
