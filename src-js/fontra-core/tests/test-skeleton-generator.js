@@ -303,6 +303,45 @@ describe("skeleton-generator drop caps", () => {
     expect(allFinite(result)).to.equal(true);
   });
 
+  it("capTension deepens the concave neck", () => {
+    // Horizontal stroke (width 80): outer edge y=80, inner edge y=160. A concave
+    // neck dips below the inner edge near the ball; deeper dip = more concave.
+    const neckDepth = (tension) => {
+      const result = generateFromSkeleton({
+        version: 1,
+        nextId: 10,
+        contours: [
+          {
+            id: 1,
+            closed: false,
+            defaultWidth: 80,
+            singleSided: null,
+            points: [
+              { id: 2, x: 40, y: 120, type: null, smooth: false },
+              { id: 3, x: 240, y: 120, type: null, smooth: false },
+              {
+                id: 4,
+                x: 440,
+                y: 120,
+                type: null,
+                smooth: false,
+                capStyle: "drop",
+                capTension: tension,
+              },
+            ],
+          },
+        ],
+        generated: [],
+      });
+      const region = result.contours[0].points.filter((p) => p.x >= 355 && p.x <= 415);
+      return 160 - Math.min(...region.map((p) => p.y));
+    };
+    const crisp = neckDepth(0);
+    const soft = neckDepth(0.9);
+    expect(crisp).to.be.closeTo(0, 1); // tension 0 → hard corner, no dip
+    expect(soft).to.be.greaterThan(crisp + 3); // higher tension → deeper concave
+  });
+
   it("works on the start endpoint too", () => {
     const result = generateFromSkeleton(
       makeDropSkeleton({}, [

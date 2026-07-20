@@ -976,6 +976,16 @@ perpendicular, inference flipped to convex — then further corrected to the
 tangent-from-inside + inner-trim construction above after the ball flew off
 thick strokes._
 
+**`capTension` now drives the neck** (was previously inert for normal balls,
+which cut a hard corner). `findSideCircleCrossing`/`rebuildTrimmedSide` split
+the trim into crossing-finding + rebuild. With tension the inner trim is pulled
+back by growing the trim circle (`radius + tension·radius·NECK_PULLBACK_FACTOR`);
+the arc keeps its ball crossing (smooth) and a single cubic eases into the
+pulled-back trim — tangent to the circle at the ball end, along the stroke edge
+at the inner end (`NECK_HANDLE_FRACTION` of the chord). Tension 0 = the original
+crisp corner; higher = a deeper concave waist. Verified: neck dip 0→4→7→11 units
+across tension 0/0.3/0.55/0.9 on an 80-wide stroke.
+
 **Data / UI:** `capStyle: "drop"` and new fields `capBallRatio` (numeric,
 in `CAP_POINT_FIELDS`) + `capBallSide` (string, `auto`/`left`/`right`) added to
 `skeleton-model.js` (normalize, copy, set) and threaded through the generator's

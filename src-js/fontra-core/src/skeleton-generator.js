@@ -19,6 +19,11 @@ const DEFAULT_CAP_BALL_RATIO = 1.25;
 const MIN_CAP_BALL_RATIO = 0.5;
 const MAX_CAP_BALL_RATIO = 3;
 const DEFAULT_CAP_BALL_SIDE = "auto";
+// Drop-cap neck: capTension pulls the inner trim back by up to this fraction of
+// the ball radius (softening the notch into a concave curve); the neck cubic's
+// handles are this fraction of the neck chord.
+const NECK_PULLBACK_FACTOR = 0.6;
+const NECK_HANDLE_FRACTION = 0.45;
 const DEFAULT_CORNER_ROUNDNESS = 0;
 const DEFAULT_CORNER_ASYMMETRY = 0;
 const MIN_CORNER_TRIM = 0.5;
@@ -4297,11 +4302,11 @@ function emitDropCapArc(center, radius, thetaStart, thetaEnd, sweepSign) {
   return points;
 }
 
-// Trim the terminal segment of a side outline where it enters the ball, so the
-// inner edge stops at the circle (the concave neck of the drop). Returns the
-// rewritten side points and the crossing on-curve, or null when the ball does
-// not cover the terminal (small ball) or swallows the whole segment.
-function trimSideAtCircle(sidePoints, position, center, radius) {
+// Find where a side outline's terminal segment crosses the ball circle.
+// Returns the crossing point plus the segment/param needed to rebuild the
+// trimmed side, or null when the ball does not cover the terminal (small ball)
+// or swallows the whole segment.
+function findSideCircleCrossing(sidePoints, position, center, radius) {
   const seg = getRoundCapTerminalSegment(sidePoints, position);
   if (!seg) {
     return null;
@@ -4352,12 +4357,37 @@ function trimSideAtCircle(sidePoints, position, center, radius) {
     }
   }
   const tCross = (lo + hi) / 2;
-  const crossing = at(tCross);
-  const provenanceSource = sidePoints[fromEnd ? segmentEndIndex : segmentStartIndex];
-  // The crossing is a concave corner (the neck), so it is NOT marked smooth;
-  // enforceSmoothColinearity then leaves it and its handles alone.
+  return {
+    crossing: at(tCross),
+    segmentStartIndex,
+    segmentEndIndex,
+    segmentPoints,
+    bezier,
+    isCubic,
+    tCross,
+    fromEnd,
+    provenanceSource: sidePoints[fromEnd ? segmentEndIndex : segmentStartIndex],
+  };
+}
+
+// Rebuild a side outline trimmed at a crossing (from findSideCircleCrossing),
+// so its terminal segment stops at the crossing. `smooth` marks the new
+// terminal on-curve (true for a filleted neck that meets the ball tangentially,
+// false for a hard concave corner).
+function rebuildTrimmedSide(sidePoints, crossingInfo, { smooth }) {
+  const {
+    crossing,
+    segmentStartIndex,
+    segmentEndIndex,
+    segmentPoints,
+    bezier,
+    isCubic,
+    tCross,
+    fromEnd,
+    provenanceSource,
+  } = crossingInfo;
   const crossingOnCurve = withRoundCapProvenance(
-    { x: Math.round(crossing.x), y: Math.round(crossing.y), smooth: false },
+    { x: Math.round(crossing.x), y: Math.round(crossing.y), smooth },
     provenanceSource
   );
 
@@ -4396,12 +4426,11 @@ function trimSideAtCircle(sidePoints, position, center, radius) {
       : [crossingOnCurve, cloneRoundCapPoint(segmentPoints[segmentPoints.length - 1])];
   }
 
-  const newSidePoints = [
+  return [
     ...sidePoints.slice(0, segmentStartIndex),
     ...rewrittenSegment,
     ...sidePoints.slice(segmentEndIndex + 1),
   ];
-  return { sidePoints: newSidePoints, crossing };
 }
 
 // Build a drop cap. The outer edge flows tangentially into a circle (the ball)
@@ -4468,15 +4497,42 @@ function buildDropCap({
     y: center.y + radius * Math.sin(theta),
   });
 
-  // Trim the inner side where the ball crosses it (the concave neck). When the
-  // ball is too small to reach the inner edge, bridge to the inner terminal.
-  const trim = trimSideAtCircle(innerSideArr, position, center, radius);
+  const tension = Math.min(
+    Math.max(Number.isFinite(capTension) ? capTension : 0, 0),
+    1
+  );
+
+  // Where the ball meets the inner edge (the arc ends here). When the ball is
+  // too small to reach the inner edge, bridge to the inner terminal instead.
+  const ballCross = findSideCircleCrossing(innerSideArr, position, center, radius);
+  const twoPi = Math.PI * 2;
+  const pullback = tension * radius * NECK_PULLBACK_FACTOR;
+
+  // With tension, pull the inner trim back by growing the trim circle: the
+  // stroke edge peels away earlier and eases into the ball, softening the
+  // notch into a concave neck. Only applied when the pulled-back crossing still
+  // fits on the terminal segment.
+  const softCross =
+    ballCross && pullback > 2
+      ? findSideCircleCrossing(innerSideArr, position, center, radius + pullback)
+      : null;
+
   let trimmedInnerSide;
   let thetaInner;
-  let bridgeToInnerTerminal = false;
-  if (trim) {
-    trimmedInnerSide = trim.sidePoints;
-    thetaInner = Math.atan2(trim.crossing.y - center.y, trim.crossing.x - center.x);
+  let mode;
+  let ballCrossing;
+  let innerTrim;
+  if (softCross) {
+    trimmedInnerSide = rebuildTrimmedSide(innerSideArr, softCross, { smooth: true });
+    ballCrossing = ballCross.crossing;
+    innerTrim = softCross.crossing;
+    thetaInner = Math.atan2(ballCrossing.y - center.y, ballCrossing.x - center.x);
+    mode = "soft";
+  } else if (ballCross) {
+    trimmedInnerSide = rebuildTrimmedSide(innerSideArr, ballCross, { smooth: false });
+    ballCrossing = ballCross.crossing;
+    thetaInner = Math.atan2(ballCrossing.y - center.y, ballCrossing.x - center.x);
+    mode = "corner";
   } else {
     trimmedInnerSide = innerSideArr;
     const vInner = vector.normalizeVector(vector.subVectors(innerTerminal, center));
@@ -4484,12 +4540,11 @@ function buildDropCap({
       return null;
     }
     thetaInner = Math.atan2(vInner.y, vInner.x);
-    bridgeToInnerTerminal = true;
+    mode = "bridge";
   }
 
   // Sweep the way that bulges away from the endpoint — the ball's outer
   // boundary — rather than cutting back across the stroke.
-  const twoPi = Math.PI * 2;
   const ccwDelta = (((thetaInner - thetaOuter) % twoPi) + twoPi) % twoPi;
   const midCcw = thetaOuter + ccwDelta / 2;
   const midCw = thetaOuter + (ccwDelta - twoPi) / 2;
@@ -4501,9 +4556,34 @@ function buildDropCap({
   // Points strictly between the outer terminal and the inner terminal, in the
   // outer -> inner traversal direction.
   let capForwardToInner;
-  if (bridgeToInnerTerminal) {
+  if (mode === "soft") {
+    // Concave neck: keep the arc's ball crossing (smooth) and ease into the
+    // pulled-back inner trim with one cubic — tangent to the circle at the ball
+    // end (continuing the sweep) and along the stroke edge at the inner end.
+    const chord = vector.distance(ballCrossing, innerTrim);
+    const sweepTangent = orientDirectionToward(
+      { x: sweepSign * -Math.sin(thetaInner), y: sweepSign * Math.cos(thetaInner) },
+      vector.subVectors(innerTrim, ballCrossing)
+    );
+    const innerTangent = orientDirectionToward(
+      forward,
+      vector.subVectors(ballCrossing, innerTrim)
+    );
+    const handleLen = NECK_HANDLE_FRACTION * chord;
+    capForwardToInner = [
+      ...arc,
+      dropCapHandle({
+        x: ballCrossing.x + sweepTangent.x * handleLen,
+        y: ballCrossing.y + sweepTangent.y * handleLen,
+      }),
+      dropCapHandle({
+        x: innerTrim.x + innerTangent.x * handleLen,
+        y: innerTrim.y + innerTangent.y * handleLen,
+      }),
+    ];
+  } else if (mode === "bridge") {
     // Small ball: connect the last arc on-curve to the inner terminal with a
-    // short concave neck cubic.
+    // short concave neck cubic, scaled by tension.
     const neckPoint = pointAtAngle(thetaInner);
     const chord = vector.distance(neckPoint, innerTerminal);
     const ballTangent = vector.normalizeVector(
@@ -4517,26 +4597,24 @@ function buildDropCap({
       ballTangent,
       innerTerminal,
       innerTangent,
-      capTension
+      Math.max(tension, 0.2)
     );
     const clampNeckLen = (value) =>
       Math.min(Math.max(Number.isFinite(value) ? value : 0.4 * chord, 0), 0.6 * chord);
-    const startLen = clampNeckLen(neckLengths.startLen);
-    const endLen = clampNeckLen(neckLengths.endLen);
     capForwardToInner = [
       ...arc,
       dropCapHandle({
-        x: neckPoint.x + ballTangent.x * startLen,
-        y: neckPoint.y + ballTangent.y * startLen,
+        x: neckPoint.x + ballTangent.x * clampNeckLen(neckLengths.startLen),
+        y: neckPoint.y + ballTangent.y * clampNeckLen(neckLengths.startLen),
       }),
       dropCapHandle({
-        x: innerTerminal.x + innerTangent.x * endLen,
-        y: innerTerminal.y + innerTangent.y * endLen,
+        x: innerTerminal.x + innerTangent.x * clampNeckLen(neckLengths.endLen),
+        y: innerTerminal.y + innerTangent.y * clampNeckLen(neckLengths.endLen),
       }),
     ];
   } else {
-    // The trimmed inner side already provides the crossing on-curve, so drop
-    // the arc's terminal on-curve to avoid duplicating it.
+    // Hard corner: the trimmed inner side already provides the crossing
+    // on-curve, so drop the arc's terminal on-curve to avoid duplicating it.
     capForwardToInner = arc.slice(0, -1);
   }
 
