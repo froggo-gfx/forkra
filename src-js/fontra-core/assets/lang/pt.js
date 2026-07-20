@@ -244,7 +244,7 @@ export const strings = {
   "glyph-organizing.glyph-set.copy-to": "Copy to “%0”",
   "glyph-organizing.glyph-set.edit": "Edit glyph set",
   "glyph-organizing.glyph-set.reload": "Reload",
-  "glyph-organizing.glyph-set.source-link": "Origem",
+  "glyph-organizing.glyph-set.source-link": "Source",
   "glyph-organizing.group-by": "Group by",
   "glyph-organizing.group-by.block": "Block",
   "glyph-organizing.group-by.case": "caseCase",
