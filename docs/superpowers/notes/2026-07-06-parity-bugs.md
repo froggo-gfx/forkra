@@ -980,11 +980,19 @@ thick strokes._
 which cut a hard corner). `findSideCircleCrossing`/`rebuildTrimmedSide` split
 the trim into crossing-finding + rebuild. With tension the inner trim is pulled
 back by growing the trim circle (`radius + tension·radius·NECK_PULLBACK_FACTOR`);
-the arc keeps its ball crossing (smooth) and a single cubic eases into the
+the arc ends at a backed-off ball attachment and a single cubic eases into the
 pulled-back trim — tangent to the circle at the ball end, along the stroke edge
 at the inner end (`NECK_HANDLE_FRACTION` of the chord). Tension 0 = the original
-crisp corner; higher = a deeper concave waist. Verified: neck dip 0→4→7→11 units
-across tension 0/0.3/0.55/0.9 on an 80-wide stroke.
+crisp corner; higher = a wider concave ease.
+
+The neck backs off **both** sides of the corner: the ball attachment along the
+arc (`thetaArcEnd = thetaInner − sweepSign·backoff`, `backoff = pullback/radius`
+clamped to 0.45·sweep) as well as the inner trim along the edge. An earlier cut
+kept the arc running to the exact crossing and pulled only the inner side back,
+so the ball-side handle continued the arc's tangent and **overshot below the
+edge into a dip** rather than easing in. Backing off both sides makes the fillet
+cut the corner and ease in from above — verified the neck stays at/above the
+inner edge across tension 0/0.3/0.55/0.9 and reaches progressively further back.
 
 **Data / UI:** `capStyle: "drop"` and new fields `capBallRatio` (numeric,
 in `CAP_POINT_FIELDS`) + `capBallSide` (string, `auto`/`left`/`right`) added to

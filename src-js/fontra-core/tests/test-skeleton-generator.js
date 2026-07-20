@@ -303,11 +303,12 @@ describe("skeleton-generator drop caps", () => {
     expect(allFinite(result)).to.equal(true);
   });
 
-  it("capTension deepens the concave neck", () => {
-    // Horizontal stroke (width 80): outer edge y=80, inner edge y=160. A concave
-    // neck dips below the inner edge near the ball; deeper dip = more concave.
-    const neckDepth = (tension) => {
-      const result = generateFromSkeleton({
+  it("capTension eases the neck further back along the inner edge", () => {
+    // Horizontal stroke (width 80): outer edge y=80, inner edge y=160. The neck
+    // rejoins the inner edge at a point that tension pulls back toward the
+    // stroke (smaller x). The eased neck must not dip below the edge (no valley).
+    const analyze = (tension) => {
+      const points = generateFromSkeleton({
         version: 1,
         nextId: 10,
         contours: [
@@ -332,14 +333,22 @@ describe("skeleton-generator drop caps", () => {
           },
         ],
         generated: [],
-      });
-      const region = result.contours[0].points.filter((p) => p.x >= 355 && p.x <= 415);
-      return 160 - Math.min(...region.map((p) => p.y));
+      }).contours[0].points;
+      // Where the outline rejoins the inner edge near the neck (smaller x = the
+      // neck reaches further back), and the lowest y anywhere near the neck.
+      const nearEdge = points.filter(
+        (p) => Math.abs(p.y - 160) <= 2 && p.x >= 300 && p.x <= 420
+      );
+      const region = points.filter((p) => p.x >= 300 && p.x <= 415);
+      return {
+        rejoinX: Math.min(...nearEdge.map((p) => p.x)),
+        minY: Math.min(...region.map((p) => p.y)),
+      };
     };
-    const crisp = neckDepth(0);
-    const soft = neckDepth(0.9);
-    expect(crisp).to.be.closeTo(0, 1); // tension 0 → hard corner, no dip
-    expect(soft).to.be.greaterThan(crisp + 3); // higher tension → deeper concave
+    const crisp = analyze(0);
+    const soft = analyze(0.9);
+    expect(soft.rejoinX).to.be.lessThan(crisp.rejoinX - 10); // eased further back
+    expect(soft.minY).to.be.gte(159.5); // eases in from above — no dip below edge
   });
 
   it("works on the start endpoint too", () => {

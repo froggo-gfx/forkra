@@ -4551,30 +4551,40 @@ function buildDropCap({
   const distFromEndpoint = (theta) => vector.distance(pointAtAngle(theta), endpoint);
   const sweepSign = distFromEndpoint(midCcw) >= distFromEndpoint(midCw) ? 1 : -1;
 
-  const arc = emitDropCapArc(center, radius, thetaOuter, thetaInner, sweepSign);
+  // For a soft neck, back the ball attachment off along the arc as well (not
+  // just the inner trim back along the edge). Ending the arc before the corner
+  // means the fillet cuts across it and eases in from above the edge, instead
+  // of continuing the arc's tangent and overshooting below it into a dip.
+  const sweepMag = sweepSign > 0 ? ccwDelta : twoPi - ccwDelta;
+  const backoff = mode === "soft" ? Math.min(pullback / radius, 0.45 * sweepMag) : 0;
+  const thetaArcEnd = thetaInner - sweepSign * backoff;
+
+  const arc = emitDropCapArc(center, radius, thetaOuter, thetaArcEnd, sweepSign);
 
   // Points strictly between the outer terminal and the inner terminal, in the
   // outer -> inner traversal direction.
   let capForwardToInner;
   if (mode === "soft") {
-    // Concave neck: keep the arc's ball crossing (smooth) and ease into the
-    // pulled-back inner trim with one cubic — tangent to the circle at the ball
-    // end (continuing the sweep) and along the stroke edge at the inner end.
-    const chord = vector.distance(ballCrossing, innerTrim);
-    const sweepTangent = orientDirectionToward(
-      { x: sweepSign * -Math.sin(thetaInner), y: sweepSign * Math.cos(thetaInner) },
-      vector.subVectors(innerTrim, ballCrossing)
-    );
+    // Concave neck: the arc ends at the backed-off ball attachment (smooth);
+    // one cubic eases from there into the pulled-back inner trim — tangent to
+    // the circle at the ball end (continuing the sweep) and along the stroke
+    // edge at the inner end.
+    const ballAttach = pointAtAngle(thetaArcEnd);
+    const sweepTangent = {
+      x: sweepSign * -Math.sin(thetaArcEnd),
+      y: sweepSign * Math.cos(thetaArcEnd),
+    };
     const innerTangent = orientDirectionToward(
       forward,
-      vector.subVectors(ballCrossing, innerTrim)
+      vector.subVectors(ballAttach, innerTrim)
     );
+    const chord = vector.distance(ballAttach, innerTrim);
     const handleLen = NECK_HANDLE_FRACTION * chord;
     capForwardToInner = [
       ...arc,
       dropCapHandle({
-        x: ballCrossing.x + sweepTangent.x * handleLen,
-        y: ballCrossing.y + sweepTangent.y * handleLen,
+        x: ballAttach.x + sweepTangent.x * handleLen,
+        y: ballAttach.y + sweepTangent.y * handleLen,
       }),
       dropCapHandle({
         x: innerTrim.x + innerTangent.x * handleLen,
