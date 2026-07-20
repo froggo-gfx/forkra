@@ -49,14 +49,18 @@ function getGroupByInfo(glyphItem, options) {
 }
 
 export const groupByProperties = [
-  { key: "script", label: translate("glyph-organizing.script") },
-  { key: "block", label: translate("glyph-organizing.block") },
-  { key: "case", label: translate("glyph-organizing.case"), compare: compareCase },
-  { key: "category", label: translate("glyph-organizing.category") },
-  { key: "subCategory", label: translate("glyph-organizing.sub-category") },
+  { key: "script", label: translate("glyph-organizing.group-by.script") },
+  { key: "block", label: translate("glyph-organizing.group-by.block") },
+  {
+    key: "case",
+    label: translate("glyph-organizing.group-by.case"),
+    compare: compareCase,
+  },
+  { key: "category", label: translate("glyph-organizing.group-by.category") },
+  { key: "subCategory", label: translate("glyph-organizing.group-by.sub-category") },
   {
     key: "glyphNameExtension",
-    label: translate("glyph-organizing.glyphname-extension"),
+    label: translate("glyph-organizing.group-by.glyphname-extension"),
   },
 ];
 

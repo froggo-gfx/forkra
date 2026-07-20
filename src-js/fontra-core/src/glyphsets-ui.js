@@ -240,25 +240,25 @@ export class GlyphSetsUIController {
         showMenu(
           [
             {
-              title: "Edit",
+              title: translate("action-topics.menu.edit"),
               callback: (event) => {
                 this.editGlyphSet(event, glyphSet);
               },
             },
             {
-              title: "Delete",
+              title: translate("action.delete"),
               callback: (event) => {
                 this.deleteGlyphSet(event, glyphSet);
               },
             },
             {
-              title: "Reload",
+              title: translate("glyph-organizing.glyph-set.reload"),
               callback: (event) => {
                 this.reloadGlyphSet(event, glyphSet);
               },
             },
             {
-              title: `Copy to ${this.copyToLabel}`,
+              title: translate("glyph-organizing.glyph-set.copy-to", this.copyToLabel),
               callback: (event) => {
                 this.copyGlyphSet(event, glyphSet);
               },
@@ -633,7 +633,7 @@ export function getGlyphSetsUIControllers(settingsController, accordionId) {
       collectionKey: "projectGlyphSets",
       selectionKey: "projectGlyphSetSelection",
       addGlyphSetToolTip: "Add a glyph set to the project",
-      copyToLabel: "my glyph sets",
+      copyToLabel: translate("glyph-organizing.my-glyph-sets"),
       otherCollectionKey: "myGlyphSets",
       accordionId,
     }),
@@ -643,7 +643,7 @@ export function getGlyphSetsUIControllers(settingsController, accordionId) {
       collectionKey: "myGlyphSets",
       selectionKey: "myGlyphSetSelection",
       addGlyphSetToolTip: "Add a glyph set to my sets",
-      copyToLabel: "project glyph sets",
+      copyToLabel: translate("glyph-organizing.project-glyph-sets"),
       otherCollectionKey: "projectGlyphSets",
       accordionId,
     }),
