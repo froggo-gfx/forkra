@@ -234,6 +234,13 @@ export const strings = {
   "font-info.vendorid": "ID do Fornecedor",
   "font-info.version.major": "Versão Maior",
   "font-info.version.minor": "Versão Menor",
+  "font-overview.dialog.label.suffix": "Suffix",
+  "font-overview.dialog.option.add-suffix-to-all-pasted":
+    "Add a suffix to all pasted glyph names",
+  "font-overview.dialog.option.add-suffix-to-duplicates":
+    "Add a suffix to duplicate glyph names",
+  "font-overview.dialog.option.replace-existing-glyphs": "Replace existing glyphs",
+  "font-overview.dialog.replace-existing-glyphs": "Replace existing glyphs?",
   "font-overview.popup.source": "Origem",
   "font-overview.title": "Visão geral da fonte",
   "glyph-organizing.glyph-set.add-custom-glyph-set": "Add custom glyph set",

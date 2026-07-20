@@ -1014,18 +1014,31 @@ async function runDialogReplaceGlyphs(glyphNames, glyphMap) {
     controller.model.behavior = PASTE_REPLACE;
   }
 
-  // TODO: translate
-  const dialog = await dialogSetup("Replace existing glyphs?", null, [
-    { title: translate("dialog.cancel"), resultValue: "cancel", isCancelButton: true },
-    { title: translate("dialog.okay"), resultValue: "ok", isDefaultButton: true },
-  ]);
+  const dialog = await dialogSetup(
+    translate("font-overview.dialog.replace-existing-glyphs"),
+    null,
+    [
+      {
+        title: translate("dialog.cancel"),
+        resultValue: "cancel",
+        isCancelButton: true,
+      },
+      { title: translate("dialog.okay"), resultValue: "ok", isDefaultButton: true },
+    ]
+  );
 
   const radioGroup = [];
 
   for (const [label, value] of [
-    ["Replace existing glyphs", PASTE_REPLACE],
-    ["Add a suffix to duplicate glyph names", PASTE_ADD_SUFFIX_TO_DUPLICATES],
-    ["Add a suffix to all pasted glyph names", PASTE_ADD_SUFFIX_TO_ALL],
+    [translate("font-overview.dialog.option.replace-existing-glyphs"), PASTE_REPLACE],
+    [
+      translate("font-overview.dialog.option.add-suffix-to-duplicates"),
+      PASTE_ADD_SUFFIX_TO_DUPLICATES,
+    ],
+    [
+      translate("font-overview.dialog.option.add-suffix-to-all-pasted"),
+      PASTE_ADD_SUFFIX_TO_ALL,
+    ],
   ]) {
     radioGroup.push(
       html.input({
@@ -1055,7 +1068,12 @@ async function runDialogReplaceGlyphs(glyphNames, glyphMap) {
         gap: 0.25em;
       `,
       },
-      labeledTextInput("Suffix:", controller, "suffix", { id: "suffix-text-input" })
+      labeledTextInput(
+        translate("font-overview.dialog.label.suffix"),
+        controller,
+        "suffix",
+        { id: "suffix-text-input" }
+      )
     ),
     html.div({ id: "warning-string" }, [""])
   );
@@ -1101,6 +1119,7 @@ function makeOverwriteGlyphsWarningString(
 ) {
   glyphNames = glyphNames.filter((glyphName) => glyphMap[glyphName]);
 
+  // TODO: translate
   if (glyphNames.length <= 1) {
     return glyphNames.length
       ? `⚠️ Glyph '${glyphNames[0]}' will be overwritten.`
