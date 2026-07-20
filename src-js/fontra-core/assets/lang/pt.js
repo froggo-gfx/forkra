@@ -319,6 +319,9 @@ export const strings = {
   "shortcuts.tooltip.reset-to-default": "Redefinir para o padrão",
   "shortcuts.warning.exists": "Atalho existente para: %0",
   "sidebar.characters-glyphs": "Caracteres de entrada e glifos de saída",
+  "sidebar.characters-glyphs.advance": "Advance",
+  "sidebar.characters-glyphs.cluster": "Cluster",
+  "sidebar.characters-glyphs.index": "Index",
   "sidebar.characters-glyphs.input-characters": "Caracteres de entrada",
   "sidebar.characters-glyphs.output-glyphs": "Glifos de saída",
   "sidebar.characters-glyphs.shaping-debugger": "Depurador de renderização",
@@ -326,6 +329,7 @@ export const strings = {
     "Opções depurador de renderização",
   "sidebar.characters-glyphs.shaping-debugger.show-ineffective-items":
     "Exibir itens não efetivos",
+  "sidebar.characters-glyphs.unicode-name": "Unicode name",
   "sidebar.designspace-navigation": "Navegação no Designspace",
   "sidebar.designspace-navigation.copy-current-layer": "Copy current layer",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "Camada:",

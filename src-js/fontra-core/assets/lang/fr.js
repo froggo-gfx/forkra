@@ -313,6 +313,9 @@ export const strings = {
   "shortcuts.tooltip.reset-to-default": "Reset to default",
   "shortcuts.warning.exists": "Le raccourci clavier existe pour %0",
   "sidebar.characters-glyphs": "Input characters and output glyphs",
+  "sidebar.characters-glyphs.advance": "Advance",
+  "sidebar.characters-glyphs.cluster": "Cluster",
+  "sidebar.characters-glyphs.index": "Index",
   "sidebar.characters-glyphs.input-characters": "Input characters",
   "sidebar.characters-glyphs.output-glyphs": "Output glyphs",
   "sidebar.characters-glyphs.shaping-debugger": "Shaping debugger",
@@ -320,6 +323,7 @@ export const strings = {
     "Shaping debugger options",
   "sidebar.characters-glyphs.shaping-debugger.show-ineffective-items":
     "Show ineffective items",
+  "sidebar.characters-glyphs.unicode-name": "Unicode name",
   "sidebar.designspace-navigation": "Navigation du designspace",
   "sidebar.designspace-navigation.copy-current-layer": "Copy current layer",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "Layer:",

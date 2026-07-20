@@ -316,6 +316,9 @@ export const strings = {
   "shortcuts.tooltip.reset-to-default": "I-reset sa default",
   "shortcuts.warning.exists": "May shortcut para sa: %0",
   "sidebar.characters-glyphs": "Mga karakter na input at mga glyph na output",
+  "sidebar.characters-glyphs.advance": "Advance",
+  "sidebar.characters-glyphs.cluster": "Cluster",
+  "sidebar.characters-glyphs.index": "Index",
   "sidebar.characters-glyphs.input-characters": "Mga karakter sa pag-input",
   "sidebar.characters-glyphs.output-glyphs": "Mga output glyph",
   "sidebar.characters-glyphs.shaping-debugger": "Shaping debugger",
@@ -323,6 +326,7 @@ export const strings = {
     "Shaping debugger options",
   "sidebar.characters-glyphs.shaping-debugger.show-ineffective-items":
     "Show ineffective items",
+  "sidebar.characters-glyphs.unicode-name": "Unicode name",
   "sidebar.designspace-navigation": "Nabigasyon sa Designspace",
   "sidebar.designspace-navigation.copy-current-layer": "Copy current layer",
   "sidebar.designspace-navigation.dialog.add-source.label.layer": "Patong:",
