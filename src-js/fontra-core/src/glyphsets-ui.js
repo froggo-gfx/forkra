@@ -417,7 +417,7 @@ class AddPresetGlyphSetDialog {
 
     this.dialogContent = html.div({ class: "content-container" }, [
       ...labeledPopupSelect(
-        "Collection",
+        translate("glyph-organizing.glyph-set.collection"),
         this.dialogController,
         "collectionName",
         collectionNames.map((name) => ({ value: name, label: name })),
@@ -432,7 +432,9 @@ class AddPresetGlyphSetDialog {
         },
         ["Suggest more glyph set collections"]
       ),
-      html.label({ for: "info-link", style: "text-align: right;" }, ["Source"]),
+      html.label({ for: "info-link", style: "text-align: right;" }, [
+        translate("glyph-organizing.glyph-set.source-link"),
+      ]),
       this.sourceURLElement,
       html.div(), // grid cell filler
       this.checkboxContainer,
@@ -466,11 +468,24 @@ class AddPresetGlyphSetDialog {
   }
 
   async run() {
-    const dialog = await dialogSetup("Add/remove preset glyph sets", "", [
-      { title: "Add custom glyph set...", resultValue: "custom" }, // TODO: translate
-      { title: translate("dialog.cancel"), isCancelButton: true },
-      { title: "Save", isDefaultButton: true, resultValue: "add" }, // TODO: translate
-    ]);
+    const dialog = await dialogSetup(
+      translate("glyph-organizing.glyph-set.add-remove-glyph-set"),
+      "",
+      [
+        {
+          title: translate(
+            "glyph-organizing.glyph-set.add-custom-glyph-set.menu-title"
+          ),
+          resultValue: "custom",
+        },
+        { title: translate("dialog.cancel"), isCancelButton: true },
+        {
+          title: translate("dialog.save"),
+          isDefaultButton: true,
+          resultValue: "add",
+        },
+      ]
+    );
 
     dialog.appendStyle(this.constructor.styles);
     dialog.setContent(this.dialogContent);
@@ -548,12 +563,16 @@ async function runEditGlyphSetDialog(glyphSetInfo) {
   dialogController.addKeyListener("dataFormat", (event) => updateDataFormat());
 
   const dialog = await dialogSetup(
-    isEditing ? "Edit glyph set" : "Add custom glyph set",
+    translate(
+      isEditing
+        ? "glyph-organizing.glyph-set.edit"
+        : "glyph-organizing.glyph-set.add-custom-glyph-set"
+    ),
     "",
     [
       { title: translate("dialog.cancel"), isCancelButton: true },
       {
-        title: translate(isEditing ? "Save" : "dialog.add"), // TODO: translate dialog.save
+        title: translate(isEditing ? "dialog.save" : "dialog.add"),
         isDefaultButton: true,
         disabled: true,
       },

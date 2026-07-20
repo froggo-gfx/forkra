@@ -186,6 +186,7 @@ export const strings = {
   "dialog.paste-whole-glyph.title":
     "Du bist dabei einen gesamten Glyphen zu übertragen",
   "dialog.replace": "Ersetzen",
+  "dialog.save": "Save",
   "dialog.yes": "Ja",
   "edit-tools-knife.undo.slice-glyph": "Glyph schneiden",
   "edit-tools-pen.undo.add-points": "Punkt(e) hinzufügen",
@@ -230,8 +231,15 @@ export const strings = {
   "font-info.version.minor": "Nebenversionsnummer",
   "font-overview.popup.source": "Source",
   "font-overview.title": "Font overview",
+  "glyph-organizing.glyph-set.add-custom-glyph-set": "Add custom glyph set",
+  "glyph-organizing.glyph-set.add-custom-glyph-set.menu-title":
+    "Add custom glyph set...",
+  "glyph-organizing.glyph-set.add-remove-glyph-set": "Add/remove preset glyph sets",
+  "glyph-organizing.glyph-set.collection": "Collection",
   "glyph-organizing.glyph-set.copy-to": "Copy to “%0”",
+  "glyph-organizing.glyph-set.edit": "Edit glyph set",
   "glyph-organizing.glyph-set.reload": "Reload",
+  "glyph-organizing.glyph-set.source-link": "Source",
   "glyph-organizing.group-by": "Group by",
   "glyph-organizing.group-by.block": "Block",
   "glyph-organizing.group-by.case": "caseCase",
