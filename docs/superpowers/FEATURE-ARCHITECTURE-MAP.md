@@ -130,8 +130,10 @@ Hold **Q** for realtime measurement; **Alt+Q** for direct mode.
 | `views-editor/src/visualization-layer-definitions.js` | (shared)              | `fontra.measure.overlay`, registration-only                                                  |
 | `fontra-core/tests/test-distance-angle.js`            | +84                   | tests                                                                                        |
 
-**Known gap:** measure ignores skeleton geometry entirely — registry item 4.12, and it overlaps
-the unadapted branches 5.1/5.2.
+Skeleton coverage: rib width, centerline segments, and skeleton handles all measure (4.12,
+fixed 2026-07-22 — via `scene-model.js` `skeletonSegmentAtPoint` / `skeletonHandleAtPoint`).
+Still owed from the same area: the z-order/hit-radius hygiene and drag-marker affordance on
+branches 5.1/5.2.
 
 ### F3 — SpeedPunk
 
@@ -280,7 +282,7 @@ workstream and thin documentation — flagging them so they aren't mistaken for 
 
 | Feature                  | Files                                                                                                                          | Notes                                                                        |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| **Corner overlap**       | `fontra-core/src/corner-overlap.js` (+350), consumed via `path-functions.js:addOverlapToPath`, action in `scene-controller.js` | Carries leftover `console.log` debug — see §7                                |
+| **Corner overlap**       | `fontra-core/src/corner-overlap.js` (+350), consumed via `path-functions.js:addOverlapToPath`, action in `scene-controller.js` | Pre-program feature; keeps defensive path validation in `doAddOverlap`       |
 | **Quad handles**         | `path-functions.js:insertHandles` (type/shiftKey params), `edit-tools-pen.js`                                                  | Shift modifier picks 1 vs 2 handles for quad curves                          |
 | **Equalize**             | `edit-behavior.js`, `tunni-interactions.js`                                                                                    | Alt-drag. Explicitly frozen during WS-4 — regression-watch it                |
 | **Pen connect**          | `edit-tools-pen.js:_getPathConnectTargetPoint`                                                                                 | Connect to an open contour's endpoint                                        |
@@ -399,21 +401,17 @@ convention. That is why every editor-side plan carries an explicit manual test m
 | 4.9             | Drag crosshair missing for skeleton objects                                                  |
 | 4.10            | Panel should show all skeleton parameters for any skeleton selection                         |
 | 4.11            | No "reset both ribs" button for a selected skeleton point                                    |
-| 4.12            | **Q-measure ignores the skeleton** (big) — overlaps 5.1/5.2                                  |
 | 5.1 / 5.2 / 5.3 | Old-architecture branches still to adapt: width-highlight, q-metrix-drag, z-mod-for-editable |
 | 6.10            | Detached handles "shiver" when adjusting skeleton handles (investigated, unresolved)         |
-| 4.13            | Fixed 2026-07-21 — **manual test matrix still owed**                                         |
+| 4.12 / 4.13     | Fixed (2026-07-22 / 2026-07-21) — **manual test matrices still owed**                        |
 
 **Structural debt, not yet filed as bugs:**
 
 1. **Rib and editable-generated entries do not implement `makeChangeForTransformation`** — they
    return `null`. A rib-only marquee selection draws a transform box that does nothing.
-2. **Corner-overlap debug logging** — `console.log` in `path-functions.js:1225` and a block of
-   validation `console.log`/`console.warn` in `scene-controller.js:~2033–2087`. Bring-up cruft
-   from a pre-program feature.
-3. **Letterspacer ↔ skeleton coupling** (roadmap WS-16) — verify whether sidebearing changes
+2. **Letterspacer ↔ skeleton coupling** (roadmap WS-16) — verify whether sidebearing changes
    move skeleton data before assuming it works.
-4. **`skeleton-generator.js` is 5,168 lines.** Justified by the port, but it is the single
+3. **`skeleton-generator.js` is 5,168 lines.** Justified by the port, but it is the single
    largest file in the fork and the roadmap's own P6 warns about monoliths.
 
 ---
@@ -427,10 +425,11 @@ Minimal reading sets for the most likely next tasks. Each assumes §2 (rails) ha
 `skeleton-panel-edits.js` (write via `editSkeleton`) → `panel-skeleton-parameters.js` (widget) →
 `lang/en.js`. Never call the generator or write customData directly (R-C).
 
-**"Make feature X skeleton-aware"** (e.g. 4.12, Q-measure)
-`scene-model.js` for the hit-test → `skeleton-model.js` for geometry (rib positions, normals —
-do **not** recompute them) → the feature's own interaction module. Provenance lookups go through
-`skeleton-generated.js`, never geometry matching (R-D).
+**"Make feature X skeleton-aware"** (the Q-measure fix, 4.12, is the worked example)
+`scene-model.js` for the hit-test (reuse the private skeleton iterators — `iterSkeletonCurveSegments`
+etc. — don't duplicate them) → `skeleton-model.js` for geometry (rib positions, normals — do
+**not** recompute them) → the feature's own interaction module, which just consumes and tags.
+Provenance lookups go through `skeleton-generated.js`, never geometry matching (R-D).
 
 **"Fix a skeleton editing behavior"**
 `skeleton-editing.js` (target entries) → `skeleton-modifiers.js`, both copies → the relevant

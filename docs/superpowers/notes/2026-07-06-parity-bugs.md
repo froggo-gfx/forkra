@@ -2,7 +2,7 @@
 
 User-reported bugs from runtime testing of the skeleton integration (WS-6…WS-16 plus
 the third/fourth fix passes, through commit `ace647ccb`). This document is the intake
-list: each bug is recorded as reported, with whatever context can be *inferred* from
+list: each bug is recorded as reported, with whatever context can be _inferred_ from
 the previous sessions. **No code research has been done yet** — the "Inferred context"
 notes are hypotheses to check, not diagnoses.
 
@@ -52,7 +52,7 @@ sides by the same delta".
 
 **Fix:** `setSkeletonPointSideWidth` now applies the same delta to the opposite side
 when linked (clamped at 0), preserving distribution. `setSingleSidedTotalWidth`
-(skeleton-ribs.js) which *relied* on the mirroring for its symmetric split now sets
+(skeleton-ribs.js) which _relied_ on the mirroring for its symmetric split now sets
 both halves explicitly. Rib drags are unaffected compositionally: each drag tick
 rebuilds from a clone of the pre-drag layer glyph. Tests: renamed the "mirrors" test
 (same outcome for symmetric widths) and added asymmetric-preservation + clamp tests
@@ -111,7 +111,7 @@ binding.
 
 **Inferred context:** Skeleton data lives per layer glyph in
 `customData["fontra.internal"]`; stroke width is presumably per-layer (per-master)
-there, but a *default* for new contours / new masters must come from somewhere — donor
+there, but a _default_ for new contours / new masters must come from somewhere — donor
 may have a font-level or source-level setting (axis-mapped?) that wasn't ported, or it
 exists and is just undiscoverable. Needs donor research. Possibly documentation/UX
 rather than code.
@@ -147,7 +147,7 @@ skeleton selection exists. Follow-up (same day) — both remaining 1.3 pieces im
 #### 1.5.1 Editable ribs move freely; editable flag must ONLY enable z-tangent-drag — `fixed`
 
 **Report:** Marking a rib editable currently lets its points move freely. For ribs, the
-editable flag must gate *only* the z-tangent-drag — nothing else.
+editable flag must gate _only_ the z-tangent-drag — nothing else.
 
 **Root cause:** `createSkeletonRibExecutor.applyDelta` (skeleton-ribs.js) applied the
 tangent nudge on every non-rib-tangent drag of an editable rib
@@ -320,7 +320,7 @@ from the donor.
 ### 2.1 Reverse resets the depth parameter — `fixed` (2026-07-18)
 
 **Report:** Running the reverse function resets the depth parameter in the UI. The
-calculation itself uses the value that was set — it just resets *afterwards*.
+calculation itself uses the value that was set — it just resets _afterwards_.
 
 **Inferred context:** Letterspacer (WS-5/5.1) passed the WS-16 parity audit on engine
 behavior, so this is a panel/UI state bug: the reverse action probably triggers a panel
@@ -330,7 +330,7 @@ letterspacer panel.
 
 **Root cause:** `persistParam` (panel-letterspacer.js) rebuilt each target
 source's stored values from `LETTERSPACER_DEFAULTS`, overriding only the edited
-key — the `missing[id]` fills only exist for sources *lacking* values, so any
+key — the `missing[id]` fills only exist for sources _lacking_ values, so any
 already-complete source had its two non-edited keys silently reset in storage.
 Reverse persists "area" → stored depth wiped to 15 → the `update()` at the end
 of reverse reloads params → UI shows reset depth. (The reverse calculation ran
@@ -376,15 +376,15 @@ compare against the donor's slider.
 
 **Root causes (2026-07-09):**
 
-- (a) *Increments*: no skeleton-panel slider passed a `step`, and even if one had,
+- (a) _Increments_: no skeleton-panel slider passed a `step`, and even if one had,
   `ui-form.js _addEditNumberSlider` never forwarded `step` (or `displayValue` /
   `values` / `allowInputBeyondRange`) to the RangeSlider — sliders always ran with
   `step="any"` and produced arbitrary fractional values. The donor's RangeSlider also
   derives display decimal places from the step; ours used a range-based heuristic
   only.
-- (b) *Double-click reset*: the donor RangeSlider has an `ondblclick` → `reset()`
+- (b) _Double-click reset_: the donor RangeSlider has an `ondblclick` → `reset()`
   handler; our upstream-based copy only had alt-click reset.
-- (c) *Direction lock*: in `_pushSummarySlider`, a mixed or absent summary value put
+- (c) _Direction lock_: in `_pushSummarySlider`, a mixed or absent summary value put
   the thumb at `minValue` (distribution: −100, hard left) — from the end stop the
   slider is literally draggable in only one direction. After one committed drag the
   selection has a uniform value and the slider behaves again, hence "not all the
@@ -418,11 +418,11 @@ ready (`allocateSkeletonIds` in skeleton-model.js, with tests, comment "Used on
 paste") but none of the editor.js plumbing was ever wired.
 
 **Fix:** donor-pattern port adapted to our canonical model.
-*Copy* (`_prepareCopyOrCutLayers`): skeletonPoint selection keys (edit-layer
+_Copy_ (`_prepareCopyOrCutLayers`): skeletonPoint selection keys (edit-layer
 canonical ids, WS-9) resolve per layer via `resolveSkeletonAddressAcrossLayers`;
 selected contours are deep-cloned into `skeletonDataByLayer[layerName]`, which
 `_writeLayersToClipboard` embeds in the JSON payload.
-*Paste* (`_pasteLayerGlyphs`): per editing layer, contours are appended through
+_Paste_ (`_pasteLayerGlyphs`): per editing layer, contours are appended through
 `editSkeleton` (the one write path — regenerates generated contours), with ids
 re-minted by `allocateSkeletonIds` from the target's `nextId`; pasted on-curve
 points are added to the selection using the edit layer's new ids.
@@ -455,7 +455,7 @@ defaults aren't consumed by the generator — see 1.3/1.4 notes).
 approach here.
 
 **Inferred context:** That branch (old codebase lineage, diverged at `030a97468`)
-reworked round caps to *split-outline geometry*: instead of the projected-scaffold
+reworked round caps to _split-outline geometry_: instead of the projected-scaffold
 `generateCap` path, each side outline is split inward from the endpoint
 (`splitTerminalSideForRoundCap`), then the cap is rebuilt locally
 (`buildRoundCapGeometry`, `getRoundCapFrame`, `assembleOpenOutlineWithRoundCaps`)
@@ -470,7 +470,7 @@ will change by design (they pin the legacy cap output).
 **Done (2026-07-09):** ported the split-outline round caps into
 `skeleton-generator.js`.
 
-- *Helpers* (~730 lines, taken verbatim from branch tip `7719b68f4` — all
+- _Helpers_ (~730 lines, taken verbatim from branch tip `7719b68f4` — all
   geometry-pure, `vector.*`-namespaced, no model coupling): `getRoundCapFrame`,
   `splitTerminalSideForRoundCap` (+ `solveTerminalSplitForDistance`,
   `getRoundCapTerminalSegment`, `resolveRoundCapFallbackDirection`,
@@ -481,18 +481,18 @@ will change by design (they pin the legacy cap output).
   (not called — our inline assembly already has the identical order),
   `getNext/PreviousOnCurvePoint`, `cloneRoundCapPoint`,
   `serializeRoundCapDebugPoint`.
-- *Integration*: replaced the old projected-scaffold bodies of `startIsRound` /
+- _Integration_: replaced the old projected-scaffold bodies of `startIsRound` /
   `endIsRound` in `generateOutlineFromSkeletonContour` with the branch's
   helper-driven versions (square/butt branches were already identical). The
   fork's `enforceSmoothColinearity` final-pass options already matched.
-- *Golden masters*: the fixture script now supports per-fixture `capReference:
-  true` — those expectations are generated by the branch generator (extracted
+- _Golden masters_: the fixture script now supports per-fixture `capReference:
+true` — those expectations are generated by the branch generator (extracted
   from git at regen time via `git archive 7719b68f4`, no vendored blob; see
   `CAP_REFERENCE_COMMIT` in the script) while all other fixtures still pin the
   donor at `fd76d3abe`. `open-cubic-round-cap` regenerated against the branch
   reference and **our ported output matches it exactly** — strongest available
   port-fidelity evidence short of runtime.
-- *Provenance caveat*: split-outline caps consume the terminal side segment, so
+- _Provenance caveat_: split-outline caps consume the terminal side segment, so
   round-capped endpoints lose their terminal on-curve/handle pointMap entries
   (the split-inserted points carry no provenance). This is consistent with cap
   semantics — setting a round cap already clears the editable flags (1.1) — but
@@ -513,7 +513,7 @@ each item is picked up.
 
 ### 4.1 Handle labels: layer separation for basic vs skeleton points — `fixed` (2026-07-17)
 
-**Report:** Handle labels should be different layers for basic points and *skeleton*
+**Report:** Handle labels should be different layers for basic points and _skeleton_
 points. Generated points can share the same layer as basic points. Not a bug but
 quality-of-life.
 
@@ -580,12 +580,12 @@ mirroring the skeleton-point mechanism.
 lands on the centerline itself (skeleton segment hit, no skeleton point directly
 under the cursor) all on-curve points of that skeleton contour are selected —
 mirroring the path behavior where double-clicking a curve selects its contour.
-Double-click on a skeleton *point* keeps its existing meaning (toggle smooth).
+Double-click on a skeleton _point_ keeps its existing meaning (toggle smooth).
 
 ### 4.6 Ctrl+A must include skeleton contours — `fixed` (2026-07-18)
 
 **Report:** Skeleton contours must be selected with the Ctrl+A (select all)
-shortcut. (Note: WS-era work deliberately *excluded* generated points from
+shortcut. (Note: WS-era work deliberately _excluded_ generated points from
 select-all — C2 — but skeleton points/contours themselves should be included.)
 
 **Fix:** `doSelectAllNone` (editor.js) now treats skeleton on-curve points as
@@ -604,14 +604,14 @@ research and fixing.
 
 **Root causes:**
 
-- *Stray handles*: the fork's `deleteSkeletonPoint` (skeleton-model.js) was a naive
+- _Stray handles_: the fork's `deleteSkeletonPoint` (skeleton-model.js) was a naive
   single-point splice. The donor's shape-preserving `deleteSkeletonPoints`
   (path-functions.js:1240) was never ported — it expands the selection to adjacent
   handle runs (on-curve) / the paired handle (off-curve), refits the bridging
   segment with `fitCubic` against the original geometry, inherits cap data onto
   new open-contour endpoints, clears meaningless smooth flags, and removes contours
   left without on-curves.
-- *Phantom last→first centerline*: `skeletonContourToPath2d`
+- _Phantom last→first centerline_: `skeletonContourToPath2d`
   (visualization-layer-skeleton.js) indexed `next`/`afterNext` with
   `% points.length` even for open contours, so trailing stray cubic handles made
   the renderer wrap around and draw a bezier from the last on-curve through the
@@ -633,13 +633,13 @@ delete across layers. Follow-up (2026-07-17): after deletion the nearest survivi
 
 ### 4.8 Parity miss: asymmetry / corner trim / corner radius misplaced as cap params — `fixed` (2026-07-17)
 
-**Report:** Asymmetry, corner trim and corner radius are *not* cap style parameters.
+**Report:** Asymmetry, corner trim and corner radius are _not_ cap style parameters.
 They are parameters of the angle-point rounding engine (corner rounding at
 non-smooth skeleton points). Needs research from the donor and fixing — both where
 the panel surfaces them and how the generator consumes them.
 
 **Donor research:** the donor has a separate **"Corner Rounding"** panel section
-with four *point-level* sliders — Corner Round % (`cornerRoundness`, 0–100),
+with four _point-level_ sliders — Corner Round % (`cornerRoundness`, 0–100),
 Corner Asymmetry (`cornerAsymmetry`, −1..1), Corner Reach % (`cornerReach`,
 5–99), Roundness Strength % (`roundnessStrength`, 10–400) — all gated by
 `_isCornerRoundEditableForPoint`: on-curve, **non-smooth** (angle point), and for
@@ -655,7 +655,7 @@ generator consumes those point fields; contour-level `cornerTrimRatio` /
   donor-faithful (reads all four point fields) but never saw them.
 - The panel's "roundness" slider wrote `roundnessStrength` (the strength/boost
   param) instead of `cornerRoundness` (the main dial) — conflated keys.
-- Trim/boost sliders wrote the contour-level *debug fallback* fields instead of
+- Trim/boost sliders wrote the contour-level _debug fallback_ fields instead of
   point-level `cornerReach`/`roundnessStrength`.
 - All four sat inside "Caps & corners" with no angle-point gating.
 
@@ -705,7 +705,7 @@ drawing code.
 
 ### 4.10 Panel must show all skeleton parameters for any skeleton selection — `open`
 
-**Report:** ALL skeleton-related parameters should be visible when *any*
+**Report:** ALL skeleton-related parameters should be visible when _any_
 skeleton object is selected. Consult the donor for how its panel behaved.
 
 **Inferred context:** overlaps 6.8, which made every selected skeleton object
@@ -717,7 +717,7 @@ gated and on what, versus which it always showed.
 ### 4.11 No "reset ribs" button for a selected skeleton point — `open`
 
 **Report:** when a skeleton point is selected there should be a button that
-resets *both* of that point's ribs.
+resets _both_ of that point's ribs.
 
 **Inferred context:** "reset" presumably means clearing the per-side width
 overrides, nudges, handle offsets/detach and editable flags back to the
@@ -726,22 +726,79 @@ action. Donor research owed on exactly which fields its reset cleared. Note the
 related 5.3 item (single generated handle reset) from the `z-mod-for-editable`
 branch — same family, different scope.
 
-### 4.12 Q-measure ignores the skeleton — `open` (big)
+### 4.12 Q-measure ignores the skeleton — `fixed` (2026-07-22)
 
 **Report:** the Q measurement tool does not see skeleton geometry at all.
 Consult the donor if necessary.
 
-**Inferred context:** measure was ported in WS-2/4.5 against path contours; the
-donor's Q-metrics work (rib width on hover, tension display, curved-segment
-detection) lives on the `test/skeleton-width-highlight` / `test/q-metrix-drag`
-branches catalogued in 5.1/5.2, which are still `open (adapt)`. This item may be
-partly the same work — reconcile with 5.1/5.2 when it is picked up rather than
-porting twice.
+**Investigation (correcting the report's scope).** Measure has four hover
+targets, checked in order: control-point handle → skeleton rib → segment →
+selected points. Two of the four already covered the skeleton:
+
+- **Rib width** was already wired (`_findSkeletonRibForMeasure` →
+  `skeletonRibAtPoint`, renders total + L/R half-widths). Not broken.
+- **Two-point selection** measure is path-only, but that is a selection
+  feature, not a hover surface — out of scope here.
+
+The genuinely missing surfaces were the two hover targets that only ever
+looked at `positionedGlyph.glyph.path`:
+
+1. **Centerline segments** — `_findSegmentForMeasure` checked only the path.
+   Hovering the centerline measured nothing; the generated _outline_ measured
+   as a green "path", which is what made the skeleton look invisible to
+   measure (you always hit the outline, never the centerline).
+2. **Skeleton handles** — `_findControlPointForMeasure` scanned only path
+   handles, so hovering a skeleton off-curve handle gave no length/tension.
+
+**Fix (detection-only wiring; the overlay already renders `type: "skeleton"`).**
+Two new hit-tests in `scene-model.js`, both reusing the existing private
+iterators `iterSkeletonCurveSegments` / `skeletonSegmentDistance` (R-A, R-B):
+
+- `skeletonSegmentAtPoint(point, size, positionedGlyph)` → `{ p1, p2 }` of the
+  hit centerline segment's on-curve endpoints (distance/angle only — curve
+  tension is a handle measurement, matching the path-segment behavior).
+- `skeletonHandleAtPoint(point, size, positionedGlyph)` →
+  `{ p1: handle, p2: anchor, tensionContext }`. For cubic segments the context
+  carries the four segment points + hovered side so `calculateHandleMeasure`
+  reports tension; quadratic handles report tension `n/a`.
+
+`measure-interactions.js` consumes both, tagging the payload `type: "skeleton"`:
+the skeleton handle is checked before path handles in `_findControlPointForMeasure`,
+and the skeleton segment before the path in `_findSegmentForMeasure`. The
+overlay's handle and segment branches already select `skeletonColor` on
+`type === "skeleton"` and already compute tension from `tensionContext`, so no
+render change was needed. `_measurePointsEqual` already compares `type` and
+`tensionContext`, so the added targets don't flicker.
+
+Priority note: on the centerline the skeleton segment wins (the outline edges
+are ~half-width away, well beyond the hit margin); near the edges the path
+outline still measures. This is intentional and matches the donor.
+
+**Deliberately still `open` (separate from measure):** the z-order / hit-radius
+hygiene and the drag-marker/measurement affordance from
+`test/skeleton-width-highlight` / `test/q-metrix-drag` (5.1/5.2) are not part of
+the measure fix and remain to be adapted.
+
+**Manual test matrix (views-editor — no harness):** on a glyph with a curved
+skeleton stroke, hold **Q** and verify:
+
+| #   | Hover target                         | Expected                                                        |
+| --- | ------------------------------------ | --------------------------------------------------------------- |
+| 1   | Straight skeleton centerline segment | blue segment measure, X/Y (or direct with Alt) distance         |
+| 2   | Curved skeleton centerline segment   | blue segment measure, endpoint distance (no tension on segment) |
+| 3   | Skeleton cubic handle                | blue guide, `dist / tension / angle`, tension is a real number  |
+| 4   | Skeleton quadratic handle            | blue guide, `dist / n/a / angle`                                |
+| 5   | Rib endpoint                         | blue, `width / L … R …` (regression — was already working)      |
+| 6   | Generated outline edge/segment       | green "path" measure (unchanged)                                |
+| 7   | Generated outline handle             | green path handle measure (unchanged)                           |
+| 8   | Centerline vs nearby outline         | centerline gives blue; moving onto the edge switches to green   |
+| 9   | Alt held (direct mode)               | segment shows single direct distance+angle instead of X/Y split |
+| 10  | Release Q                            | all measure overlays clear                                      |
 
 ### 4.13 Skeleton is not marquee-transformable — `fixed` (2026-07-21)
 
 **Report:** the selection border with its drag controls (the draggable circles,
-same as for basic points) *appears* around a skeleton selection, but the
+same as for basic points) _appears_ around a skeleton selection, but the
 transform itself cannot be performed — dragging the handles does nothing.
 
 **Inferred context:** so selection-bounds computation already includes skeleton
@@ -784,7 +841,7 @@ one record; generated contours follow live during the drag.
 
 ## 5. Old-architecture feature branches to adapt
 
-Three branches carry functionally useful features built on the *old* codebase
+Three branches carry functionally useful features built on the _old_ codebase
 architecture (all diverge from main at `030a97468`, the same lineage as
 `test/cap-rounding-rewamp`). They need to be re-adapted to the current
 refactor-simple architecture — a port of behavior, not a merge (the merge base is
@@ -802,7 +859,7 @@ on a single line:
           └─ test/z-mod-for-editable     (tip 91b9b77ce = q-metrix + 14 commits)
 ```
 
-So `cap-rounding-rewamp` (our 3.4 reference) already *contains* everything in
+So `cap-rounding-rewamp` (our 3.4 reference) already _contains_ everything in
 `skeleton-width-highlight` and `q-metrix-drag` — its working tree is a valid single
 reference for those features. Only `z-mod-for-editable` has commits beyond it.
 
@@ -913,7 +970,7 @@ skeleton curve — instead of duplicating the normal skeleton deletion.
 `getSkeletonData(positionedGlyph.glyph)` — but that's the
 StaticGlyphController, which didn't expose `customData`, so skeleton data
 resolved to null (no centerline, no generated-point gating, plain-path
-deletion). The interpolated *instance* actually carries correctly interpolated
+deletion). The interpolated _instance_ actually carries correctly interpolated
 skeleton customData (structure is identical across layers per WS-9, so the
 variation model interpolates it numerically — verified empirically).
 
@@ -929,7 +986,7 @@ skeleton branch edits the new layer via editSkeleton. Regression test:
 ### 6.7 Editable handles next to a round-capped endpoint unselectable — `fixed`
 
 **Report:** for a skeleton point adjacent to the last point, only the generated
-handles facing *away* from the last point were editable.
+handles facing _away_ from the last point were editable.
 
 **Root cause:** the round-cap terminal split (3.4 split-outline port) rebuilds
 the trimmed terminal segment from scratch (`splitTerminalSideForRoundCap`) —
@@ -948,7 +1005,7 @@ endpoint".
 
 ### 6.8 Panel shows parameters only for skeleton on-curve selections — `fixed`
 
-**Report:** skeleton parameters should show on the panel when *any* skeleton
+**Report:** skeleton parameters should show on the panel when _any_ skeleton
 object is selected — not only skeleton on-curve points, but also skeleton
 handles, generated points and generated handles.
 
@@ -997,10 +1054,10 @@ skeleton handles are adjusted. Investigation only, no code changes yet.
 1. **Detached mode's absolute position is destroyed downstream.**
    `applyHandleOffsetToControlPoint` correctly computes ribPoint + offset, but
    the single-cubic emission path then runs `lockNearZeroHandleDirection`
-   (skeleton-generator.js ~2751) on *every* terminal handle. Its normal branch
+   (skeleton-generator.js ~2751) on _every_ terminal handle. Its normal branch
    rebuilds the handle as `anchor + skeletonHandleDir * projectedLength` — the
    perpendicular component of the detached offset is discarded and the handle
-   is re-coupled to the skeleton handle *direction*. Measured: stored offset
+   is re-coupled to the skeleton handle _direction_. Measured: stored offset
    (25, 40) emitted as ≈(35, 12), exactly the projection onto the skeleton
    handle dir. So every skeleton-handle rotation rotates the "detached" handle
    with it. Bonus defect: `preferMinimalOnFlip=true` collapses the handle to a
@@ -1048,7 +1105,7 @@ the start/end cap branches alongside round/square):
    (`makeDropCapBall`): `p(u,v) = center + ex·a·u + ey·b·v`, with `ex` along the
    outer edge's tangent at the attachment and `ey` pointing from the outer edge
    toward the skeleton. Lateral radius `b = clamp(capBallRatio, 0.5..3) ·
-   capWidth / 2`; along-stroke radius `a` comes from step 3. Affinity is what
+capWidth / 2`; along-stroke radius `a` comes from step 3. Affinity is what
    makes this cheap: arcs emitted in (u,v) space stay exact cubics after
    mapping, and "inside the ball" is a unit test on (u,v) — so all the trim
    machinery works on the ellipse unchanged.
@@ -1103,7 +1160,7 @@ arc ends at a backed-off ball attachment and a single cubic eases into the
 pulled-back trim — tangent to the ball at the ball end, along the stroke edge at
 the inner end (`NECK_HANDLE_FRACTION` of the chord). Tension 0 = a crisp corner;
 higher = a wider concave ease. The inflation backs off (×0.65 per step) until the
-grown ball still yields a crossing genuinely *behind* the plain one
+grown ball still yields a crossing genuinely _behind_ the plain one
 (`crossingBackness`) — otherwise a ball large enough to run the rear crossing off
 the side would report the forward crossing and fold the neck back over the
 stroke.
@@ -1115,7 +1172,7 @@ derivative of the inner edge at the crossing, emitted by `findSideBallCrossing`
 edge's tangent at the tangency) only looked right while the crossing sat on a
 stretch parallel to it; as tension or shape walked the neck further back along a
 curved edge the error grew, and `enforceSmoothColinearity` hid it by rotating
-the *edge* handle to match — so the edge handle stopped tracking the curve and
+the _edge_ handle to match — so the edge handle stopped tracking the curve and
 the point appeared to "travel with a fixed handle angle". Measured on a curved
 terminal, the neck handle's deviation from the true edge tangent used to grow
 1.1° → 7.5° across tension 0.5 → 2.5; it is now flat at 0.1–1.0° (coordinate
@@ -1153,7 +1210,7 @@ Ball-size slider (percent of stroke width, **105–300%**, default 125), a
 auto/left/right Ball-side select, and drop in the force-apply profile flow.
 Master-level ball default deferred (force-apply uses the 1.25 constant).
 
-The ball-size and ball-shape slider ranges are *usable* ranges, not limits: both
+The ball-size and ball-shape slider ranges are _usable_ ranges, not limits: both
 carry `allowInputBeyondRange`, so typing into the number field reaches the
 model's full range (ball 50–300%, shape 0–100%) — below 105% the ball is
 narrower than the stroke and reads as a fillet rather than a bulb, and past 40%

@@ -209,6 +209,17 @@ export class MeasureInteraction {
     size,
     positionedGlyph = this.sceneModel.getSelectedPositionedGlyph()
   ) {
+    // Skeleton off-curve handles take precedence over the generated outline's
+    // path handles, so hovering a skeleton handle measures its length/tension.
+    const skeletonHandle = this.sceneModel.skeletonHandleAtPoint(
+      point,
+      size,
+      positionedGlyph
+    );
+    if (skeletonHandle) {
+      return { ...skeletonHandle, type: "skeleton" };
+    }
+
     if (!positionedGlyph?.glyph?.path) {
       return null;
     }
@@ -314,6 +325,18 @@ export class MeasureInteraction {
     size,
     positionedGlyph = this.sceneModel.getSelectedPositionedGlyph()
   ) {
+    // The skeleton centerline is checked before the generated outline so that
+    // hovering the centerline measures the skeleton segment (blue), while the
+    // outline edges still measure as a path (green).
+    const skeletonSegment = this.sceneModel.skeletonSegmentAtPoint(
+      point,
+      size * 1.5,
+      positionedGlyph
+    );
+    if (skeletonSegment) {
+      return { ...skeletonSegment, type: "skeleton" };
+    }
+
     if (!positionedGlyph?.glyph?.path) {
       return null;
     }

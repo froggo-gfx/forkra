@@ -1210,6 +1210,106 @@ export class SceneModel {
     return new Set();
   }
 
+  // Hit-test the skeleton centerline for measurement. Returns the hit
+  // segment's two on-curve endpoints ({ p1, p2 }) in glyph space, or null.
+  // Distance/angle only — curve tension is measured by hovering a handle
+  // (skeletonHandleAtPoint), matching the path-segment measure.
+  skeletonSegmentAtPoint(
+    point,
+    size,
+    positionedGlyph = this.getSelectedPositionedGlyph()
+  ) {
+    if (!positionedGlyph) {
+      return null;
+    }
+    const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+    if (!skeletonData?.contours?.length) {
+      return null;
+    }
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+    for (let ci = skeletonData.contours.length - 1; ci >= 0; ci--) {
+      const contour = skeletonData.contours[ci];
+      for (const segment of iterSkeletonCurveSegments(contour)) {
+        if (skeletonSegmentDistance(segment, glyphPoint) <= size) {
+          return {
+            p1: { x: segment.startPoint.x, y: segment.startPoint.y },
+            p2: { x: segment.endPoint.x, y: segment.endPoint.y },
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  // Hit-test a skeleton off-curve handle for measurement. Returns
+  // { p1: handle, p2: anchor, tensionContext } in glyph space, or null.
+  // For cubic segments the tension context carries the four segment points
+  // and which side is hovered, so calculateHandleMeasure can report tension;
+  // for quadratic handles tension is n/a (context is null).
+  skeletonHandleAtPoint(
+    point,
+    size,
+    positionedGlyph = this.getSelectedPositionedGlyph()
+  ) {
+    if (!positionedGlyph) {
+      return null;
+    }
+    const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+    if (!skeletonData?.contours?.length) {
+      return null;
+    }
+    const glyphPoint = {
+      x: point.x - positionedGlyph.x,
+      y: point.y - positionedGlyph.y,
+    };
+    const within = (pt) =>
+      Math.abs(pt.x - glyphPoint.x) <= size && Math.abs(pt.y - glyphPoint.y) <= size;
+    const handleTarget = (handle, anchor, tensionContext) => ({
+      p1: { x: handle.x, y: handle.y },
+      p2: { x: anchor.x, y: anchor.y },
+      tensionContext,
+    });
+    for (let ci = skeletonData.contours.length - 1; ci >= 0; ci--) {
+      const contour = skeletonData.contours[ci];
+      for (const segment of iterSkeletonCurveSegments(contour)) {
+        const { startPoint, endPoint, offCurvePoints } = segment;
+        if (offCurvePoints.length === 2) {
+          const [cp1, cp2] = offCurvePoints;
+          const segmentPoints = [startPoint, cp1, cp2, endPoint].map((pt) => ({
+            x: pt.x,
+            y: pt.y,
+          }));
+          if (within(cp1)) {
+            return handleTarget(cp1, startPoint, {
+              segmentPoints,
+              hoveredHandleSide: "start",
+            });
+          }
+          if (within(cp2)) {
+            return handleTarget(cp2, endPoint, {
+              segmentPoints,
+              hoveredHandleSide: "end",
+            });
+          }
+        } else if (offCurvePoints.length === 1) {
+          const [cp] = offCurvePoints;
+          if (within(cp)) {
+            const anchor =
+              Math.hypot(cp.x - startPoint.x, cp.y - startPoint.y) <=
+              Math.hypot(cp.x - endPoint.x, cp.y - endPoint.y)
+                ? startPoint
+                : endPoint;
+            return handleTarget(cp, anchor, null);
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   componentSelectionAtPoint(point, size, currentSelection, preferTCenter) {
     const positionedGlyph = this.getSelectedPositionedGlyph();
     if (!positionedGlyph) {
