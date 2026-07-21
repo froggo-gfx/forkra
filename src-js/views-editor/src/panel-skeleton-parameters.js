@@ -62,8 +62,8 @@ export const CAP_BALL_MAX = 300;
 const DEFAULT_CAP_BALL_SHAPE = 0;
 export const CAP_SHAPE_MIN = 0;
 export const CAP_SHAPE_MAX = 100;
-// Drop-cap tension can be pushed past 100% for an extra-smooth waist.
-export const CAP_TENSION_DROP_MAX = 150;
+// Drop-cap tension can be pushed well past 100% for an extra-smooth waist.
+export const CAP_TENSION_DROP_MAX = 300;
 
 export function capRadiusRatioFromIndex(index) {
   const clampedIndex = Math.min(Math.max(index, 0), CAP_RADIUS_POSITIONS - 1);

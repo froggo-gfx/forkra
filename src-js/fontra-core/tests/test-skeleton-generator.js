@@ -256,6 +256,83 @@ describe("skeleton-generator drop caps", () => {
       .every((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
   }
 
+  function vectorNormalize(v) {
+    const length = Math.hypot(v.x, v.y);
+    return { x: v.x / length, y: v.y / length };
+  }
+
+  // Control points overshoot the curve, so extents have to be read off samples
+  // of the outline itself.
+  function sampleContourPoints(points) {
+    const count = points.length;
+    const isOnCurve = (point) => !point.type;
+    const samples = [];
+    let index = points.findIndex(isOnCurve);
+    let consumed = 0;
+    while (consumed < count) {
+      const anchor = points[index % count];
+      const next = points[(index + 1) % count];
+      if (isOnCurve(next)) {
+        samples.push(anchor, next);
+        index = (index + 1) % count;
+        consumed += 1;
+        continue;
+      }
+      const handle2 = points[(index + 2) % count];
+      const end = points[(index + 3) % count];
+      for (let step = 0; step <= 24; step++) {
+        const t = step / 24;
+        const m = 1 - t;
+        samples.push({
+          x:
+            m ** 3 * anchor.x +
+            3 * m * m * t * next.x +
+            3 * m * t * t * handle2.x +
+            t ** 3 * end.x,
+          y:
+            m ** 3 * anchor.y +
+            3 * m * m * t * next.y +
+            3 * m * t * t * handle2.y +
+            t ** 3 * end.y,
+        });
+      }
+      index = (index + 3) % count;
+      consumed += 3;
+    }
+    return samples;
+  }
+
+  function horizontalDrop(capFields) {
+    // Horizontal stroke (width 80) ending at (440, 120): outer edge y=80, inner
+    // edge y=160, terminal cross-section at x=440.
+    return {
+      version: 1,
+      nextId: 10,
+      contours: [
+        {
+          id: 1,
+          closed: false,
+          defaultWidth: 80,
+          singleSided: null,
+          points: [
+            { id: 2, x: 40, y: 120, type: null, smooth: false },
+            { id: 3, x: 240, y: 120, type: null, smooth: false },
+            {
+              id: 4,
+              x: 440,
+              y: 120,
+              type: null,
+              smooth: false,
+              capStyle: "drop",
+              ...capFields,
+            },
+          ],
+        },
+      ],
+      generated: [],
+    };
+  }
+
   it("produces a finite closed contour on a straight terminal", () => {
     const result = generateFromSkeleton(makeDropSkeleton());
     expect(result.contours.length).to.equal(1);
@@ -303,121 +380,142 @@ describe("skeleton-generator drop caps", () => {
     expect(allFinite(result)).to.equal(true);
   });
 
-  it("capTension eases the neck further back along the inner edge", () => {
-    // Horizontal stroke (width 80): outer edge y=80, inner edge y=160. The neck
-    // rejoins the inner edge at a point that tension pulls back toward the
-    // stroke (smaller x). The eased neck must not dip below the edge (no valley).
-    const analyze = (tension) => {
-      const points = generateFromSkeleton({
-        version: 1,
-        nextId: 10,
-        contours: [
-          {
-            id: 1,
-            closed: false,
-            defaultWidth: 80,
-            singleSided: null,
-            points: [
-              { id: 2, x: 40, y: 120, type: null, smooth: false },
-              { id: 3, x: 240, y: 120, type: null, smooth: false },
-              {
-                id: 4,
-                x: 440,
-                y: 120,
-                type: null,
-                smooth: false,
-                capStyle: "drop",
-                capTension: tension,
-              },
-            ],
-          },
-        ],
-        generated: [],
-      }).contours[0].points;
-      // Where the outline rejoins the inner edge near the neck (smaller x = the
-      // neck reaches further back), and the lowest y anywhere near the neck.
-      const nearEdge = points.filter(
-        (p) => Math.abs(p.y - 160) <= 2 && p.x >= 300 && p.x <= 420
+  // Where the outline rejoins the inner edge (y=160) behind the ball: the
+  // smaller the x, the further back the neck reaches.
+  function neckRejoinX(capFields) {
+    const points = generateFromSkeleton(horizontalDrop(capFields)).contours[0].points;
+    // The trim removes everything forward of the rejoin, so it is the
+    // furthest-forward on-curve left on the inner edge.
+    const nearEdge = points.filter((p) => !p.type && Math.abs(p.y - 160) <= 2);
+    return Math.max(...nearEdge.map((p) => p.x));
+  }
+
+  // Furthest the outline reaches along the stroke.
+  function tipReach(capFields) {
+    const points = generateFromSkeleton(horizontalDrop(capFields)).contours[0].points;
+    return Math.max(...sampleContourPoints(points).map((p) => p.x));
+  }
+
+  it("never reaches past the terminal — same length as a butt cap", () => {
+    // The whole point of pulling the ball back onto the terminal: whatever the
+    // ball size, shape or tension, the drop cap must not lengthen the stroke.
+    const buttReach = tipReach({ capStyle: "butt" });
+    expect(buttReach).to.be.closeTo(440, 0.5);
+    for (const capFields of [
+      {},
+      { capBallRatio: 0.8 },
+      { capBallRatio: 2 },
+      { capBallRatio: 3 },
+      { capBallShape: 0.5 },
+      { capBallShape: 1 },
+      { capTension: 0 },
+      { capTension: 3 },
+      { capBallShape: 1, capTension: 3 },
+    ]) {
+      expect(tipReach(capFields), JSON.stringify(capFields)).to.be.closeTo(
+        buttReach,
+        0.5
       );
-      const region = points.filter((p) => p.x >= 300 && p.x <= 415);
-      return {
-        rejoinX: Math.min(...nearEdge.map((p) => p.x)),
-        minY: Math.min(...region.map((p) => p.y)),
-      };
-    };
-    const crisp = analyze(0);
-    const soft = analyze(0.9);
-    expect(soft.rejoinX).to.be.lessThan(crisp.rejoinX - 10); // eased further back
-    expect(soft.minY).to.be.gte(159.5); // eases in from above — no dip below edge
+    }
   });
 
-  it("capBallShape elongates the ball toward the outward tip", () => {
-    // Horizontal stroke: the tip points along +x (away from the stroke). A
-    // higher shape must push the far tip further out while shape=0 leaves the
-    // round ball untouched.
-    const tipReach = (shape) => {
+  it("never reaches past the terminal on a curved terminal either", () => {
+    // Measured along the outward tangent, since the terminal plane is no longer
+    // vertical here.
+    const curvedPoints = [
+      { id: 2, x: 60, y: 250, type: null, smooth: false },
+      { id: 3, x: 160, y: 110, type: "cubic" },
+      { id: 4, x: 300, y: 60, type: "cubic" },
+      { id: 5, x: 430, y: 90, type: null, smooth: false, capStyle: "drop" },
+    ];
+    const tangent = vectorNormalize({ x: 430 - 300, y: 90 - 60 });
+    const overshoot = (capFields) => {
       const points = generateFromSkeleton(
-        makeDropSkeleton({ capBallShape: shape }, [
-          { id: 2, x: 40, y: 120, type: null, smooth: false },
-          { id: 3, x: 240, y: 120, type: null, smooth: false },
-          {
-            id: 4,
-            x: 440,
-            y: 120,
-            type: null,
-            smooth: false,
-            capStyle: "drop",
-            capBallShape: shape,
-          },
-        ])
+        makeDropSkeleton(
+          {},
+          curvedPoints.map((point, index) =>
+            index === curvedPoints.length - 1 ? { ...point, ...capFields } : point
+          )
+        )
       ).contours[0].points;
-      return Math.max(...points.map((p) => p.x));
+      return Math.max(
+        ...sampleContourPoints(points).map(
+          (p) => (p.x - 430) * tangent.x + (p.y - 90) * tangent.y
+        )
+      );
     };
-    expect(tipReach(1)).to.be.greaterThan(tipReach(0.5));
-    expect(tipReach(0.5)).to.be.greaterThan(tipReach(0));
+    expect(overshoot({ capStyle: "butt" })).to.be.closeTo(0, 0.5);
+    for (const capFields of [
+      { capStyle: "drop" },
+      { capStyle: "drop", capBallShape: 1 },
+      { capStyle: "drop", capBallRatio: 2, capTension: 1 },
+      { capStyle: "drop", capBallRatio: 3, capBallShape: 1, capTension: 3 },
+    ]) {
+      expect(overshoot(capFields), JSON.stringify(capFields)).to.be.lessThan(0.5);
+    }
+  });
+
+  it("capTension eases the neck further back along the inner edge", () => {
+    // The neck rejoins the inner edge further back as tension rises, and must
+    // ease in from above — no valley cutting below the edge.
+    const crisp = neckRejoinX({ capTension: 0 });
+    const soft = neckRejoinX({ capTension: 0.9 });
+    expect(soft).to.be.lessThan(crisp - 10);
+
+    const points = generateFromSkeleton(horizontalDrop({ capTension: 0.9 })).contours[0]
+      .points;
+    // The neck region: behind where the ball leaves the outer edge, and above
+    // the skeleton axis (so neither the outer edge at y=80 nor the ball's front
+    // arc counts as a "dip").
+    const leaveOuterX = Math.max(
+      ...points.filter((p) => !p.type && Math.abs(p.y - 80) <= 0.6).map((p) => p.x)
+    );
+    const neck = sampleContourPoints(points).filter(
+      (p) => p.y > 120 && p.x >= soft && p.x <= leaveOuterX
+    );
+    expect(Math.min(...neck.map((p) => p.y))).to.be.gte(159.5);
+  });
+
+  it("capTension keeps reaching back well past 1", () => {
+    expect(neckRejoinX({ capTension: 1.5 })).to.be.lessThan(
+      neckRejoinX({ capTension: 1 })
+    );
+    expect(neckRejoinX({ capTension: 3 })).to.be.lessThan(
+      neckRejoinX({ capTension: 1.5 })
+    );
+  });
+
+  it("capBallShape stretches the ball backward without resizing it", () => {
+    // A teardrop, not a bigger ball: the swell is unchanged, but it leaves the
+    // outer edge earlier and tapers back further along the inner edge.
+    const swell = (shape) => {
+      const points = generateFromSkeleton(horizontalDrop({ capBallShape: shape }))
+        .contours[0].points;
+      const samples = sampleContourPoints(points);
+      const outerEdge = points.filter((p) => !p.type && Math.abs(p.y - 80) <= 0.6);
+      return {
+        maxY: Math.max(...samples.map((p) => p.y)),
+        leaveOuterX: Math.max(...outerEdge.map((p) => p.x)),
+      };
+    };
+    const round = swell(0);
+    const half = swell(0.5);
+    const full = swell(1);
+    // Lateral swell (the ball's actual size) is untouched...
+    expect(half.maxY).to.be.closeTo(round.maxY, 0.5);
+    expect(full.maxY).to.be.closeTo(round.maxY, 0.5);
+    // ...while the ball starts further back along the stroke.
+    expect(half.leaveOuterX).to.be.lessThan(round.leaveOuterX - 10);
+    expect(full.leaveOuterX).to.be.lessThan(half.leaveOuterX - 10);
+    expect(neckRejoinX({ capBallShape: 1 })).to.be.lessThan(
+      neckRejoinX({ capBallShape: 0 }) - 10
+    );
   });
 
   it("capBallShape 0 leaves the round ball unchanged", () => {
     const round = generateFromSkeleton(makeDropSkeleton());
     const shaped = generateFromSkeleton(makeDropSkeleton({ capBallShape: 0 }));
     expect(shaped.contours[0].points).to.deep.equal(round.contours[0].points);
-  });
-
-  it("accepts capTension beyond 1 for an extra-soft waist", () => {
-    const rejoinX = (tension) => {
-      const points = generateFromSkeleton({
-        version: 1,
-        nextId: 10,
-        contours: [
-          {
-            id: 1,
-            closed: false,
-            defaultWidth: 80,
-            singleSided: null,
-            points: [
-              { id: 2, x: 40, y: 120, type: null, smooth: false },
-              { id: 3, x: 240, y: 120, type: null, smooth: false },
-              {
-                id: 4,
-                x: 440,
-                y: 120,
-                type: null,
-                smooth: false,
-                capStyle: "drop",
-                capTension: tension,
-              },
-            ],
-          },
-        ],
-        generated: [],
-      }).contours[0].points;
-      const nearEdge = points.filter(
-        (p) => Math.abs(p.y - 160) <= 2 && p.x >= 300 && p.x <= 420
-      );
-      return Math.min(...nearEdge.map((p) => p.x));
-    };
-    // Past the old 1.0 ceiling the neck keeps reaching further back.
-    expect(rejoinX(1.5)).to.be.lessThan(rejoinX(1.0));
   });
 
   it("works on the start endpoint too", () => {

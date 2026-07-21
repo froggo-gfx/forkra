@@ -947,86 +947,105 @@ the start/end cap branches alongside round/square):
    segment's curvature — convex side gets the ball (`cross > 0 → left`) — with
    a per-point/contour `capBallSide` override (`auto`/`left`/`right`); straight
    terminals fall back to the wider side.
-2. Ball radius `r = clamp(capBallRatio, 0.5..3) · capWidth / 2`. Center is
-   **pulled inward** from the outer terminal by the radius
-   (`center = outerTerminal − outerNormal·r`): the circle is tangent to the
-   outer edge at the terminal and sits on the stroke side, near the endpoint —
-   *not* flung outside the stroke (the original `+outerNormal·r` bug flung the
-   ball off and produced a huge flat neck on thick strokes).
-3. `trimSideAtCircle` trims the **inner** side's terminal segment at the circle
-   crossing (bisection on the segment bezier; linear segments interpolated),
-   inserting a non-smooth crossing on-curve — the concave neck. Provenance is
-   carried onto the crossing via `withRoundCapProvenance`. When the ball is too
-   small to reach the inner edge (`ratio ≤ 1`), a short concave neck cubic
-   bridges to the untrimmed inner terminal instead.
-4. Emit the circle as kappa cubic arcs (`emitDropCapArc`, ≤90°/piece) from the
-   outer tangency around to the crossing; sweep chosen so the arc midpoint is
-   farthest from the endpoint (bulges away from the stroke). The arc's terminal
-   on-curve is dropped — the trimmed inner side already provides the crossing.
+2. The ball is an **ellipse expressed as the unit circle under an affine map**
+   (`makeDropCapBall`): `p(u,v) = center + ex·a·u + ey·b·v`, with `ex` along the
+   outer edge's tangent at the attachment and `ey` pointing from the outer edge
+   toward the skeleton. Lateral radius `b = clamp(capBallRatio, 0.5..3) ·
+   capWidth / 2`; along-stroke radius `a` comes from step 3. Affinity is what
+   makes this cheap: arcs emitted in (u,v) space stay exact cubics after
+   mapping, and "inside the ball" is a unit test on (u,v) — so all the trim
+   machinery works on the ellipse unchanged.
+3. **The ball is pulled back onto the terminal** (`solveDropCapBallOnTerminal`).
+   The outer edge is trimmed back by the shape-derived distance with the round
+   cap's own `splitTerminalSideForRoundCap`; the ball is tangent to the edge at
+   the inserted point (`center = tangency + ey·b`, so the attachment sits at
+   parametric `θ = −π/2`); and `a` is then solved so the ball's furthest point
+   along the outward tangent lands **exactly on the terminal plane** — the line
+   through the endpoint that a butt cap sits on. On a curved terminal the edge
+   tangent has rotated, so the lateral swell reaches forward too and the solve
+   accounts for it (`hypot(a·ex·f, b·ey·f) = room`); when the lateral swell
+   alone already breaches the plane, the trim walks further back until there is
+   room.
+4. `findSideBallCrossing` trims the **inner** side at the ball boundary
+   (bisection on the segment bezier; linear segments interpolated), inserting a
+   crossing on-curve — the concave neck. It takes the **rear-most** transition
+   scanning backward from the terminal (everything forward of it is swallowed by
+   the ball, so that is where the ball lifts off the edge) and walks onto earlier
+   segments while they stay inside the ball, since an elongated or large ball
+   easily reaches past the terminal segment. Provenance is carried onto the
+   crossing via `withRoundCapProvenance`. When the ball is too small to reach
+   the inner edge, a short concave neck cubic bridges to the untrimmed inner
+   terminal instead.
+5. Emit the ball as kappa cubic arcs (`emitDropCapArc`, ≤90°/piece) counter-
+   clockwise from the tangency at `θ = −π/2`, around the forward tip at `θ = 0`,
+   to the inner attachment. No sweep heuristic is needed — the direction falls
+   out of the parametrization. The arc's terminal on-curve is dropped in corner
+   mode — the trimmed inner side already provides the crossing.
 
-The outer side is untrimmed (flows tangentially into the ball at its terminal),
-the inner side is trimmed at the crossing. `buildDropCap` returns the
-(possibly trimmed) left/right sides plus the cap points; the dispatch reassigns
-`roundedLeftSide`/`roundedRightSide`. Ball on-curves carry `skipColinear` so the
-colinearity post-pass can't deform the circle.
+**Both** sides are trimmed: the outer at the tangency, the inner at the
+crossing. `buildDropCap` returns the trimmed left/right sides plus the cap
+points; the dispatch reassigns `roundedLeftSide`/`roundedRightSide`. Ball
+on-curves and the tangency carry `skipColinear` so the colinearity post-pass
+can't deform the ellipse or rotate the tangential junction.
 
-_Revised after first-cut feedback: the ball had (a) lengthened the stroke and
-(b) mirrored to the concave side. Both fixed — center on the endpoint's
-perpendicular, inference flipped to convex — then further corrected to the
-tangent-from-inside + inner-trim construction above after the ball flew off
-thick strokes._
+_Revision history: the first cut lengthened the stroke and mirrored to the
+concave side; the second centred the ball on the endpoint's perpendicular
+(tangent-from-inside + inner trim), which still hung a full radius past the end
+of the skeleton. The current construction pins the ball to the terminal plane —
+a drop-capped stroke now measures exactly as long as a butt- or round-capped one,
+on straight and curved terminals alike._
 
-**`capTension` now drives the neck** (was previously inert for normal balls,
-which cut a hard corner). `findSideCircleCrossing`/`rebuildTrimmedSide` split
-the trim into crossing-finding + rebuild. With tension the inner trim is pulled
-back by growing the trim circle (`radius + tension·radius·NECK_PULLBACK_FACTOR`);
-the arc ends at a backed-off ball attachment and a single cubic eases into the
-pulled-back trim — tangent to the circle at the ball end, along the stroke edge
-at the inner end (`NECK_HANDLE_FRACTION` of the chord). Tension 0 = the original
-crisp corner; higher = a wider concave ease.
+**`capTension` drives the neck.** `findSideBallCrossing`/`rebuildTrimmedSide`
+split the trim into crossing-finding + rebuild. With tension the inner trim is
+pulled back by inflating the trim ball (`1 + tension·NECK_PULLBACK_FACTOR`); the
+arc ends at a backed-off ball attachment and a single cubic eases into the
+pulled-back trim — tangent to the ball at the ball end, along the stroke edge at
+the inner end (`NECK_HANDLE_FRACTION` of the chord). Tension 0 = a crisp corner;
+higher = a wider concave ease. The inflation backs off (×0.65 per step) until the
+grown ball still yields a crossing genuinely *behind* the plain one
+(`crossingBackness`) — otherwise a ball large enough to run the rear crossing off
+the side would report the forward crossing and fold the neck back over the
+stroke.
 
 The neck backs off **both** sides of the corner: the ball attachment along the
-arc (`thetaArcEnd = thetaInner − sweepSign·backoff`, `backoff = pullback/radius`
-clamped to 0.45·sweep) as well as the inner trim along the edge. An earlier cut
-kept the arc running to the exact crossing and pulled only the inner side back,
-so the ball-side handle continued the arc's tangent and **overshot below the
-edge into a dip** rather than easing in. Backing off both sides makes the fillet
-cut the corner and ease in from above — verified the neck stays at/above the
-inner edge across tension 0/0.3/0.55/0.9 and reaches progressively further back.
+arc (`thetaArcEnd = thetaInner − backoff`) as well as the inner trim along the
+edge. An earlier cut kept the arc running to the exact crossing and pulled only
+the inner side back, so the ball-side handle continued the arc's tangent and
+**overshot below the edge into a dip** rather than easing in. The backoff is
+capped (`MAX_NECK_ARC_BACKOFF = 0.6` rad, and 0.35·sweep) so a very soft neck
+eases into the edge instead of eating the ball itself; past the cap the extra
+tension only reaches further back along the edge.
 
-**`capBallShape` warps the round ball into a teardrop** (0 = round, 1 = fully
-teardrop). `warpDropCapBall` post-transforms the emitted arc points: each is
-pushed **radially outward** from the circle center by `shape · BALL_SHAPE_BULGE
-· r · env · tipWeight`, where `env = sin(π·t)` vanishes at both attachment
-angles (so the outer tangency and the inner neck attachment stay glued — they
-don't move) and `tipWeight = 0.5 + 0.5·(û·forward)` biases the swell toward the
-outward tip. The result elongates the ball away from the stroke along the
-terminal tangent and tapers it back into the neck. Because the warp is zero at
-the attachments, the trim/crossing machinery (which runs on the true circle) and
-the neck fillet (`ballAttach = pointAtAngle(thetaArcEnd)`, unwarped) still line
-up exactly; on-curves keep `skipColinear`. `BALL_SHAPE_BULGE = 0.55` is the
-tunable max elongation as a fraction of the radius.
+**`capBallShape` stretches the ball backward** (0 = round, 1 = fully teardrop),
+setting how far back along the outer edge the ball attaches:
+`trim = b · (1 + shape · BALL_SHAPE_ELONGATION)` with `BALL_SHAPE_ELONGATION =
+1.4`, clamped to 95% of the outer terminal segment. Because the forward extreme
+stays pinned to the terminal plane and the lateral radius `b` is untouched, the
+**swell does not change size** — the ball attaches further back and tapers into
+the stroke, which is what makes it read as a drop. (The previous `warpDropCapBall`
+radial-bulge warp is gone: it pushed the arc outward, so the slider behaved as a
+second, coarser size control.)
 
-**`capTension` range extended past 1** for the drop cap: `buildDropCap` now
-clamps tension to `[0, MAX_CAP_TENSION_DROP]` (1.5) instead of `[0, 1]`, and the
-panel's drop tension slider goes to 150% (`CAP_TENSION_DROP_MAX`). The extra
-headroom grows the pull-back circle further, so the neck eases in even more
-gently. Other cap styles keep their own 0–1 tension slider.
+**`capTension` range** for the drop cap is `[0, MAX_CAP_TENSION_DROP]` = **0–3**,
+with the panel slider at 0–300% (`CAP_TENSION_DROP_MAX`). Other cap styles keep
+their own 0–1 tension slider.
 
 **Data / UI:** `capStyle: "drop"` and fields `capBallRatio` + `capBallShape`
 (numeric, in `CAP_POINT_FIELDS`) + `capBallSide` (string, `auto`/`left`/`right`)
 in `skeleton-model.js` (normalize, copy, set) and threaded through the
 generator's canonical mapping. Panel: "Drop" in the cap-style dropdown, a
 Ball-size slider (percent of stroke width, default 125), a **Ball-shape** slider
-(0–100%, default 0), the tension slider (0–150%), an auto/left/right Ball-side
+(0–100%, default 0), the tension slider (0–300%), an auto/left/right Ball-side
 select, and drop in the force-apply profile flow. Master-level ball default
 deferred (force-apply uses the 1.25 constant).
 
-Tests: nine cases in `test-skeleton-generator.js` (straight/curved terminals,
-ratio scaling, side override, tension ease-in, shape elongates the tip, shape 0
-unchanged, tension past 1, start endpoint, all finite/closed). 1389 passing,
-bundle green. Visual preview generated from generator output (shape sweep +
-extended tension).
+Tests: twelve cases in `test-skeleton-generator.js` — straight/curved terminals,
+ratio scaling, side override, start endpoint, all finite/closed, plus the three
+that pin the current behavior: **reach equals a butt cap's** across every ball
+size/shape/tension on both a straight and a curved terminal (sampled, since
+control points overshoot the curve), tension eases further back without dipping
+below the edge and keeps working past 1, and shape stretches backward with the
+lateral swell unchanged. 1391 passing, bundle green.
 
 ---
 
