@@ -1221,9 +1221,6 @@ function cleanupPointAttributes(path) {
 }
 
 export function addOverlapToPath(path, selectedPointIndices) {
-  // Debugging: Log the parameters
-  console.log("addOverlapToPath called with:", { path, selectedPointIndices });
-
   // Use the addOverlap function from corner-overlap.js to implement overlap functionality
   return addOverlap(path, selectedPointIndices);
 }

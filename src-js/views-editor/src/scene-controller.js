@@ -2022,11 +2022,6 @@ export class SceneController {
     const { point: pointSelection } = parseSelection(this.selection);
     await this.editLayersAndRecordChanges((layerGlyphs) => {
       for (const layerGlyph of Object.values(layerGlyphs)) {
-        // Debugging: Log what we're working with
-        console.log("Processing layerGlyph:", layerGlyph);
-        console.log("Layer name:", layerGlyph.name);
-        console.log("Path object:", layerGlyph.path);
-
         const path = layerGlyph.path;
         // Validate that path is a VarPackedPath instance with all required methods
         if (!path || typeof path !== "object") {
@@ -2079,10 +2074,6 @@ export class SceneController {
         }
 
         try {
-          // Debugging: Log the parameters we're passing to addOverlap
-          console.log("Calling addOverlapToPath with path:", path);
-          console.log("Point selection:", pointSelection);
-
           // Create a copy of the path with overlap added
           const newPath = addOverlapToPath(path, pointSelection);
           // Replace the path with the new path that has overlap
