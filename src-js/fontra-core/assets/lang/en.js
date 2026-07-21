@@ -370,7 +370,7 @@ export const strings = {
   "sidebar.designspace-navigation.source.activate": "activate %0",
   "sidebar.designspace-navigation.source.deactivate": "deactivate %0",
   "sidebar.designspace-navigation.undo.and-layer": " and layer",
-  "sidebar.designspace-navigation.undo.delete-source": "delete source%0",
+  "sidebar.designspace-navigation.undo.delete-source": "delete source %0",
   "sidebar.designspace-navigation.warning.delete-associated-layer":
     "Also delete associated layer %0",
   "sidebar.designspace-navigation.warning.delete-source":
@@ -387,9 +387,9 @@ export const strings = {
   "sidebar.reference-font": "Reference Font",
   "sidebar.reference-font.custom-character": "Custom character",
   "sidebar.reference-font.dialog.title":
-    " The following item can't be used as a reference font:",
+    "The following item can't be used as a reference font:",
   "sidebar.reference-font.dialog.title.plural":
-    " The following items can't be used as a reference font:",
+    "The following items can't be used as a reference font:",
   "sidebar.reference-font.file-name": "file name",
   "sidebar.reference-font.info":
     "Drop one or more .ttf, .otf, .woff or .woff2 files in the field below",

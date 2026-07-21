@@ -200,7 +200,7 @@ export const strings = {
   "edit-tools-pointer.undo.rotate-selection": "Auswahl drehen",
   "edit-tools-pointer.undo.toggle-smooth": '"smooth" umschalten',
   "editor.hand-tool": "Hand Werkzeug",
-  "editor.kerning-tool": "Kerning Tool",
+  "editor.kerning-tool": "Kerning Werkzeug",
   "editor.knife-tool": "Messer Werkzeug",
   "editor.pen-tool": "Stift Werkzeug",
   "editor.pen-tool-cubic": "Stift Werkzeug (kubisch)",
@@ -212,7 +212,7 @@ export const strings = {
   "editor.shape-tool": "Form Werkzeug",
   "editor.shape-tool-ellipse": "Ellipsen Werkzeug",
   "editor.shape-tool-rectangle": "Rechteck Werkzeug",
-  "editor.sidebearing-tool": "Sidebearing Tool",
+  "editor.sidebearing-tool": "Glyph-Rand Werkzeug",
   "font-info.copyright": "Copyright",
   "font-info.description": "Beschreibung",
   "font-info.designer": "Designer",
@@ -284,14 +284,14 @@ export const strings = {
     "Entferne ausgewählten Glyphen von der Zeichenfläche...",
   "menubar.view.replace-selected-glyph-on-canvas":
     "Ersetze ausgewählten Glyphen auf der Zeichenfläche...",
-  "menubar.view.select-glyph-source-layer": "Select glyph/source/layer",
+  "menubar.view.select-glyph-source-layer": "Nächster Glyph/Source/Layer",
   "menubar.view.select-next-glyph": "Nächster Glyph",
   "menubar.view.select-next-source": "Nächste Source",
-  "menubar.view.select-next-source-layer": "Select next source layer",
+  "menubar.view.select-next-source-layer": "Nächste Source-Layer",
   "menubar.view.select-previous-glyph": "Vorheriger Glyph",
   "menubar.view.select-previous-source": "Vorherige Source",
-  "menubar.view.select-previous-source-layer": "Select previous source layer",
-  "menubar.window": "Window",
+  "menubar.view.select-previous-source-layer": "Vorherige Source-Layer",
+  "menubar.window": "Fenster",
   "message.cancel-editing": "Jemand anderes hat vor dir etwas geändert.",
   "message.edit-has-been-reverted": "Die Änderung wurde rückgängig gemacht.",
   "message.glyph-could-not-be-saved": "Glyph konnte nicht gespeichert werden.",
@@ -342,7 +342,7 @@ export const strings = {
     "Source Eigenschaften",
   "sidebar.designspace-navigation.font-axes": "Font-Achsen",
   "sidebar.designspace-navigation.font-axes-view-options-button.tooltip":
-    "Optionen anzeigen",
+    "Darstellungs Optionen",
   "sidebar.designspace-navigation.font-axes-view-options-menu.apply-cross-axis-mapping":
     "Achsübergreifendes Mapping anwenden",
   "sidebar.designspace-navigation.font-axes-view-options-menu.apply-single-axis-mapping":
@@ -376,7 +376,7 @@ export const strings = {
   "sidebar.designspace-navigation.source.activate": "aktiviere %0",
   "sidebar.designspace-navigation.source.deactivate": "deaktivere %0",
   "sidebar.designspace-navigation.undo.and-layer": " und Layer",
-  "sidebar.designspace-navigation.undo.delete-source": "entferne Source%0",
+  "sidebar.designspace-navigation.undo.delete-source": "entferne Source %0",
   "sidebar.designspace-navigation.warning.delete-associated-layer":
     "Auch den dazugehörigen Layer %0 entfernen",
   "sidebar.designspace-navigation.warning.delete-source":

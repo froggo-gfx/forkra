@@ -397,9 +397,9 @@ export const strings = {
   "sidebar.reference-font": "Fonte de référence",
   "sidebar.reference-font.custom-character": "Caractère personnalisé",
   "sidebar.reference-font.dialog.title":
-    " The following item can't be used as a reference font:",
+    "The following item can't be used as a reference font:",
   "sidebar.reference-font.dialog.title.plural":
-    " The following items can't be used as a reference font:",
+    "The following items can't be used as a reference font:",
   "sidebar.reference-font.file-name": "file name",
   "sidebar.reference-font.info":
     "Déposer ci-dessous un ou plusieurs fichiers .ttf, .otf, .woff ou .woff2",
