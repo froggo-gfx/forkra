@@ -9,6 +9,7 @@
 ### Improvements
 
 - [languages] Added more opportunities for localizations. [PR 2709](https://github.com/fontra/fontra/pull/2709)
+- [languages] Add missing Dutch translations. [PR 2713](https://github.com/fontra/fontra/pull/2713)
 
 ## 2026-07-17 [version 2026.7.1]
 
