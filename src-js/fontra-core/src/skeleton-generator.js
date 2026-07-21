@@ -37,6 +37,8 @@ const NECK_PULLBACK_FACTOR = 0.6;
 const NECK_HANDLE_FRACTION = 0.45;
 // How far (radians of ball sweep) the neck may back the ball attachment off.
 const MAX_NECK_ARC_BACKOFF = 0.6;
+// Cubic pieces the ball arc is always emitted in, whatever the sweep.
+const DROP_CAP_ARC_PIECES = 4;
 const DEFAULT_CORNER_ROUNDNESS = 0;
 const DEFAULT_CORNER_ASYMMETRY = 0;
 const MIN_CORNER_TRIM = 0.5;
@@ -4353,7 +4355,12 @@ function emitDropCapArc(ball, thetaStart, thetaEnd) {
   if (!(delta > 1e-6)) {
     return [];
   }
-  const pieces = Math.max(1, Math.ceil(delta / (Math.PI / 2)));
+  // Fixed piece count, not one derived from the sweep: the sweep changes
+  // continuously as the ball, shape and tension are dragged, and a piece count
+  // that steps with it restructures the contour mid-drag (and would break point
+  // compatibility between masters). Four pieces keeps every piece under 90°
+  // even at a full sweep.
+  const pieces = DROP_CAP_ARC_PIECES;
   const step = delta / pieces;
   const k = (4 / 3) * Math.tan(step / 4);
   const points = [];
@@ -4371,6 +4378,31 @@ function emitDropCapArc(ball, thetaStart, thetaEnd) {
     a = b;
   }
   return points;
+}
+
+// Direction of a side outline's terminal segment at the terminal itself, in
+// increasing-index order. The neck has to leave the edge along this, otherwise
+// the junction is only smooth by accident.
+function getSideTerminalTangent(sidePoints, position) {
+  const seg = getRoundCapTerminalSegment(sidePoints, position);
+  if (!seg) {
+    return null;
+  }
+  const { segmentPoints } = seg;
+  if (segmentPoints.length === 4) {
+    const derivative = createBezierFromPoints(segmentPoints).derivative(
+      position === "end" ? 1 : 0
+    );
+    const direction = vector.normalizeVector({ x: derivative.x, y: derivative.y });
+    if (isUsableDirection(direction)) {
+      return direction;
+    }
+  }
+  const chord = vector.subVectors(
+    segmentPoints[segmentPoints.length - 1],
+    segmentPoints[0]
+  );
+  return isUsableDirection(chord) ? vector.normalizeVector(chord) : null;
 }
 
 function getTerminalSegmentLength(sidePoints, position) {
@@ -4470,8 +4502,30 @@ function findSideBallCrossing(sidePoints, position, contains) {
         }
       }
       const tCross = toT((lo + hi) / 2);
+      // Tangent of the edge at the crossing, in increasing-t order. The neck
+      // fillet leaves the edge along this so the junction is genuinely smooth
+      // wherever the crossing lands — a fixed direction taken from the ball's
+      // own axis only looks right while the edge happens to be parallel to it.
+      let crossingTangent = null;
+      if (bezier) {
+        const derivative = bezier.derivative(tCross);
+        crossingTangent = vector.normalizeVector({
+          x: derivative.x,
+          y: derivative.y,
+        });
+      }
+      if (!isUsableDirection(crossingTangent)) {
+        const chord = vector.subVectors(
+          segmentPoints[segmentPoints.length - 1],
+          segmentPoints[0]
+        );
+        crossingTangent = isUsableDirection(chord)
+          ? vector.normalizeVector(chord)
+          : null;
+      }
       rearMost = {
         crossing: at(tCross),
+        crossingTangent,
         segmentStartIndex,
         segmentEndIndex,
         segmentPoints,
@@ -4796,7 +4850,7 @@ function buildDropCap({
     const ballAttach = ball.at(thetaArcEnd);
     const sweepTangent = ball.tangentAt(thetaArcEnd);
     const innerTangent = orientDirectionToward(
-      ex,
+      softCross.crossingTangent ?? ex,
       vector.subVectors(ballAttach, innerTrim)
     );
     const chord = vector.distance(ballAttach, innerTrim);
@@ -4826,7 +4880,7 @@ function buildDropCap({
       vector.subVectors(innerTerminal, neckPoint)
     );
     const innerTangent = orientDirectionToward(
-      ex,
+      getSideTerminalTangent(innerSideArr, position) ?? ex,
       vector.subVectors(neckPoint, innerTerminal)
     );
     const neckLengths = computeTunniHandleLengths(

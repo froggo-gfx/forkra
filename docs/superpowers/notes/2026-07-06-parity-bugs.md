@@ -976,11 +976,15 @@ the start/end cap branches alongside round/square):
    crossing via `withRoundCapProvenance`. When the ball is too small to reach
    the inner edge, a short concave neck cubic bridges to the untrimmed inner
    terminal instead.
-5. Emit the ball as kappa cubic arcs (`emitDropCapArc`, ≤90°/piece) counter-
-   clockwise from the tangency at `θ = −π/2`, around the forward tip at `θ = 0`,
-   to the inner attachment. No sweep heuristic is needed — the direction falls
-   out of the parametrization. The arc's terminal on-curve is dropped in corner
-   mode — the trimmed inner side already provides the crossing.
+5. Emit the ball as kappa cubic arcs (`emitDropCapArc`) counter-clockwise from
+   the tangency at `θ = −π/2`, around the forward tip at `θ = 0`, to the inner
+   attachment. No sweep heuristic is needed — the direction falls out of the
+   parametrization. The arc's terminal on-curve is dropped in corner mode — the
+   trimmed inner side already provides the crossing. The piece count is
+   **fixed** (`DROP_CAP_ARC_PIECES = 4`, so every piece stays under 90° even at
+   a full sweep) rather than derived from the sweep: a count that steps with the
+   sweep restructures the contour mid-drag and would break point compatibility
+   between masters.
 
 **Both** sides are trimmed: the outer at the tangency, the inner at the
 crossing. `buildDropCap` returns the trimmed left/right sides plus the cap
@@ -1006,6 +1010,19 @@ grown ball still yields a crossing genuinely *behind* the plain one
 (`crossingBackness`) — otherwise a ball large enough to run the rear crossing off
 the side would report the forward crossing and fold the neck back over the
 stroke.
+
+**The neck leaves the edge tangentially** wherever it lands. The fillet's
+edge-side handle takes its direction from `crossingTangent` — the actual
+derivative of the inner edge at the crossing, emitted by `findSideBallCrossing`
+— not from the ball's own axis `ex`. Using `ex` (a fixed direction, the outer
+edge's tangent at the tangency) only looked right while the crossing sat on a
+stretch parallel to it; as tension or shape walked the neck further back along a
+curved edge the error grew, and `enforceSmoothColinearity` hid it by rotating
+the *edge* handle to match — so the edge handle stopped tracking the curve and
+the point appeared to "travel with a fixed handle angle". Measured on a curved
+terminal, the neck handle's deviation from the true edge tangent used to grow
+1.1° → 7.5° across tension 0.5 → 2.5; it is now flat at 0.1–1.0° (coordinate
+rounding). The bridge-mode neck likewise uses `getSideTerminalTangent`.
 
 The neck backs off **both** sides of the corner: the ball attachment along the
 arc (`thetaArcEnd = thetaInner − backoff`) as well as the inner trim along the
