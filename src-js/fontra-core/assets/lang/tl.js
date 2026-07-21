@@ -251,7 +251,7 @@ export const strings = {
   "glyph-organizing.glyph-set.source-link": "Source",
   "glyph-organizing.group-by": "Group by",
   "glyph-organizing.group-by.block": "Block",
-  "glyph-organizing.group-by.case": "caseCase",
+  "glyph-organizing.group-by.case": "Case",
   "glyph-organizing.group-by.category": "Category",
   "glyph-organizing.group-by.glyphname-extension": "Glyph name extension",
   "glyph-organizing.group-by.script": "Script",
@@ -382,7 +382,7 @@ export const strings = {
     "i-edit ang mga katangian ng pinagmulan",
   "sidebar.designspace-navigation.source.activate": "buhayin ang %0",
   "sidebar.designspace-navigation.source.deactivate": "i-deactivate ang %0",
-  "sidebar.designspace-navigation.undo.and-layer": "at patong",
+  "sidebar.designspace-navigation.undo.and-layer": " at patong",
   "sidebar.designspace-navigation.undo.delete-source": "burahin ang pinagmulan%0",
   "sidebar.designspace-navigation.warning.delete-associated-layer":
     "Burahin din ang kaugnay na layer %0",
