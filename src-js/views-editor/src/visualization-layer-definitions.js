@@ -803,11 +803,14 @@ registerVisualizationLayerDefinition({
   colors: { strokeColor: "#8888" },
   colorsDarkMode: { strokeColor: "#AAA8" },
   draw: (context, positionedGlyph, parameters, model, controller) => {
-    const pointIndex = model.initialClickedPointIndex;
-    if (pointIndex === undefined) {
+    // Covers path points, skeleton points/handles, rib endpoints and editable
+    // generated points/handles — the scene model resolves whichever is being
+    // dragged (see getDragCrosshairPosition).
+    const position = model.getDragCrosshairPosition(positionedGlyph);
+    if (!position) {
       return;
     }
-    const { x, y } = positionedGlyph.glyph.path.getPoint(pointIndex);
+    const { x, y } = position;
     context.strokeStyle = parameters.strokeColor;
     context.lineWidth = parameters.strokeWidth;
     context.setLineDash(parameters.lineDash);

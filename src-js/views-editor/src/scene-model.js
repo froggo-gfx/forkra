@@ -40,7 +40,11 @@ import {
 } from "@fontra/core/utils.ts";
 import { normalizeLocation, unnormalizeLocation } from "@fontra/core/var-model.js";
 import * as vector from "@fontra/core/vector.js";
-import { makeSkeletonPointKey } from "./skeleton-editing.js";
+import {
+  getSkeletonPointAddress,
+  makeSkeletonPointKey,
+  parseSkeletonPointKey,
+} from "./skeleton-editing.js";
 import {
   findGeneratedPathAddress,
   parseEditableGeneratedHandleKey,
@@ -1014,6 +1018,69 @@ export class SceneModel {
       pathPointIndex: target.pathPointIndex,
       point: path.getPoint(pointIndex),
     };
+  }
+
+  // Live position of the object that started the current drag, for the
+  // drag-crosshair layer. Regular path points, skeleton points/handles, rib
+  // endpoints and editable generated points/handles all resolve here, so the
+  // layer itself stays render-only. Returns undefined when no drag is active.
+  getDragCrosshairPosition(positionedGlyph = this.getSelectedPositionedGlyph()) {
+    if (!positionedGlyph) {
+      return undefined;
+    }
+    const path = positionedGlyph.glyph?.path;
+
+    if (this.initialClickedPointIndex !== undefined) {
+      return path?.getPoint(this.initialClickedPointIndex);
+    }
+
+    // No skeleton drag in progress: don't pay for a skeleton-data lookup on
+    // every frame the layer is enabled.
+    if (
+      !this.initialClickedSkeletonPointKey &&
+      !this.initialClickedSkeletonRibKey &&
+      !this.initialClickedGeneratedKey
+    ) {
+      return undefined;
+    }
+
+    const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+    if (!skeletonData) {
+      return undefined;
+    }
+
+    if (this.initialClickedSkeletonPointKey) {
+      const { contourId, pointId } = parseSkeletonPointKey(
+        this.initialClickedSkeletonPointKey
+      );
+      const address = getSkeletonPointAddress(skeletonData, contourId, pointId);
+      return address ? { x: address.point.x, y: address.point.y } : undefined;
+    }
+
+    if (this.initialClickedSkeletonRibKey) {
+      for (const target of iterSkeletonRibTargets(skeletonData)) {
+        if (
+          target.selectionKey === this.initialClickedSkeletonRibKey &&
+          target.position
+        ) {
+          return target.position;
+        }
+      }
+      return undefined;
+    }
+
+    if (this.initialClickedGeneratedKey && path) {
+      const pointIndices = this._getEditableGeneratedCurrentPointIndices(
+        skeletonData,
+        path,
+        parseSelection(new Set([this.initialClickedGeneratedKey]))
+      );
+      if (pointIndices.length) {
+        return path.getPoint(pointIndices[0]);
+      }
+    }
+
+    return undefined;
   }
 
   _getEditableGeneratedCurrentPointIndices(skeletonData, path, parsedSelection) {

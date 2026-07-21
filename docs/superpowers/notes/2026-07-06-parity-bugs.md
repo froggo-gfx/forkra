@@ -691,17 +691,74 @@ Recorded as reported; the "inferred context" notes are hypotheses to check, not
 diagnoses. The user's own ranking is preserved: 4.12 is flagged "big", 4.13
 "biggest".
 
-### 4.9 Drag crosshair missing for skeleton objects — `open`
+### 4.9 Drag crosshair missing for skeleton objects — `fixed` (2026-07-22)
 
 **Report:** the drag crosshair should be visible when dragging skeleton-related
 objects too — skeleton points, ribs, generated points and handles.
 
-**Inferred context:** the crosshair is drawn for regular path point drags; it is
-presumably a visualization layer keyed off the drag state and the dragged
-object's kind, and never learned about the skeleton selection kinds
-(`skeletonPoint`, `skeletonRib`, `editableGenerated*`). Likely a matter of
-feeding the same layer the dragged position for those kinds rather than new
-drawing code.
+**Root cause.** The `fontra.crosshair` layer
+(`visualization-layer-definitions.js`) resolved its position from exactly one
+piece of state:
+
+```js
+const pointIndex = model.initialClickedPointIndex;
+if (pointIndex === undefined) return;
+const { x, y } = positionedGlyph.glyph.path.getPoint(pointIndex);
+```
+
+`initialClickedPointIndex` is a **path** point index, only ever set from the
+`point/N` part of the selection. The skeleton equivalents
+`initialClickedSkeletonPointKey` / `initialClickedSkeletonRibKey` were already
+being captured and published on the scene model (added for 4.3's multi-rib
+drag), but nothing read them for the crosshair — and the editable-generated
+kinds were never captured at all.
+
+**Fix.** Three parts, no new drawing code:
+
+1. `scene-model.js` gains `getDragCrosshairPosition(positionedGlyph)` — the one
+   seam that resolves the live position of whatever started the drag: path
+   point (`path.getPoint`), skeleton point/handle (`getSkeletonPointAddress`),
+   rib endpoint (matched against `iterSkeletonRibTargets`), or editable
+   generated point/handle (via the existing
+   `_getEditableGeneratedCurrentPointIndices`). Every branch reuses an existing
+   resolver — no geometry is recomputed (R-B). It early-returns before touching
+   skeleton data when no skeleton drag is active, so the layer costs nothing per
+   frame when idle.
+2. `edit-tools-pointer.js` now also captures `editableGeneratedPoint` /
+   `editableGeneratedHandle` from the selection as `initialClickedGeneratedKey`,
+   published and deleted alongside the existing keys.
+3. The layer becomes render-only (R-A): it calls `getDragCrosshairPosition` and
+   strokes, with no knowledge of selection kinds.
+
+Because every branch reads live geometry, the crosshair tracks the object
+through the drag rather than sticking at the mousedown position.
+
+**Note on `model` in draw functions:** this is the first fork layer to call a
+_method_ on the scene model rather than read a property. Verified safe —
+`VisualizationContext` (`visualization-layers.js:98`) holds the live `SceneModel`
+instance and already calls `model.getSelectedPositionedGlyph()` on it.
+
+**Scope note:** covers the drag kinds named in the report. Non-selection gizmo
+drags (skeleton Tunni) dispatch through a different path and still show no
+crosshair — consistent with regular-path Tunni, which doesn't either.
+
+**Manual test matrix (views-editor — no harness).** The layer is
+`defaultOn: false` — enable **Drag crosshair** in user settings first. For each
+row, drag the object and confirm the dashed crosshair appears and _follows_ it:
+
+| #   | Dragged object                    | Expected                                  |
+| --- | --------------------------------- | ----------------------------------------- |
+| 1   | Regular path on-curve point       | crosshair follows (regression)            |
+| 2   | Regular path handle               | crosshair follows (regression)            |
+| 3   | Skeleton on-curve point           | crosshair follows                         |
+| 4   | Skeleton off-curve handle         | crosshair follows                         |
+| 5   | Rib endpoint (width drag)         | crosshair follows the rib endpoint        |
+| 6   | Editable generated on-curve point | crosshair follows                         |
+| 7   | Editable generated handle         | crosshair follows                         |
+| 8   | Multi-select drag (skeleton)      | crosshair tracks the _clicked_ point only |
+| 9   | Marquee/rect select               | no crosshair                              |
+| 10  | After mouseup                     | crosshair disappears (state deleted)      |
+| 11  | Layer toggled off                 | no crosshair for any of the above         |
 
 ### 4.10 Panel must show all skeleton parameters for any skeleton selection — `open`
 

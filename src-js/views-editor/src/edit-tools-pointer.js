@@ -391,11 +391,14 @@ export class PointerTool extends BaseTool {
     let initialClickedPointIndex;
     let initialClickedSkeletonPointKey;
     let initialClickedSkeletonRibKey;
+    let initialClickedGeneratedKey;
     if (!pathHit) {
       const {
         point: pointIndices,
         skeletonPoint,
         skeletonRib,
+        editableGeneratedPoint,
+        editableGeneratedHandle,
       } = parseSelection(selection);
       if (pointIndices?.length) {
         initialClickedPointIndex = pointIndices[0];
@@ -406,6 +409,11 @@ export class PointerTool extends BaseTool {
       }
       if (skeletonRib?.length) {
         initialClickedSkeletonRibKey = `skeletonRib/${skeletonRib[0]}`;
+      }
+      if (editableGeneratedPoint?.length) {
+        initialClickedGeneratedKey = `editableGeneratedPoint/${editableGeneratedPoint[0]}`;
+      } else if (editableGeneratedHandle?.length) {
+        initialClickedGeneratedKey = `editableGeneratedHandle/${editableGeneratedHandle[0]}`;
       }
     }
     if (initialEvent.detail == 2 || initialEvent.myTapCount == 2) {
@@ -472,10 +480,13 @@ export class PointerTool extends BaseTool {
         initialClickedSkeletonPointKey;
       this.sceneController.sceneModel.initialClickedSkeletonRibKey =
         initialClickedSkeletonRibKey;
+      this.sceneController.sceneModel.initialClickedGeneratedKey =
+        initialClickedGeneratedKey;
       const result = await this.handleDragSelection(eventStream, initialEvent);
       delete this.sceneController.sceneModel.initialClickedPointIndex;
       delete this.sceneController.sceneModel.initialClickedSkeletonPointKey;
       delete this.sceneController.sceneModel.initialClickedSkeletonRibKey;
+      delete this.sceneController.sceneModel.initialClickedGeneratedKey;
       return result;
     }
   }
