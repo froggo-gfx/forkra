@@ -56,12 +56,17 @@ export const CAP_ANGLE_MIN = -85;
 export const CAP_ANGLE_MAX = 85;
 // Drop (ball terminal) cap: ratio edited as a percent of stroke width.
 const DEFAULT_CAP_BALL_RATIO = 1.25;
-export const CAP_BALL_MIN = 50;
+// The slider stops at 105%: below that the ball is narrower than the stroke and
+// there is nothing to read as a bulb. Typing into the field still reaches the
+// model's full 50–300% range.
+export const CAP_BALL_MIN = 105;
 export const CAP_BALL_MAX = 300;
 // Ball shape: 0% round -> 100% teardrop, edited as a percent.
 const DEFAULT_CAP_BALL_SHAPE = 0;
+// The slider stops at 40%: past that the ball attaches so far back that it
+// stops reading as a terminal. Typing into the field still reaches 100%.
 export const CAP_SHAPE_MIN = 0;
-export const CAP_SHAPE_MAX = 100;
+export const CAP_SHAPE_MAX = 40;
 // Drop-cap tension can be pushed well past 100% for an extra-smooth waist.
 export const CAP_TENSION_DROP_MAX = 300;
 
@@ -746,7 +751,7 @@ export default class SkeletonParametersPanel extends Panel {
         CAP_BALL_MIN,
         CAP_BALL_MAX,
         Math.round(DEFAULT_CAP_BALL_RATIO * 100),
-        { step: 5 }
+        { step: 5, allowInputBeyondRange: true }
       );
       const shapeSummary = {
         value: Math.round((cap.capBallShape.value ?? DEFAULT_CAP_BALL_SHAPE) * 100),
@@ -760,7 +765,7 @@ export default class SkeletonParametersPanel extends Panel {
         CAP_SHAPE_MIN,
         CAP_SHAPE_MAX,
         Math.round(DEFAULT_CAP_BALL_SHAPE * 100),
-        { step: 5 }
+        { step: 5, allowInputBeyondRange: true }
       );
       const tensionSummary = {
         value: Math.round((cap.capTension.value ?? DEFAULT_CAP_TENSION) * 100),

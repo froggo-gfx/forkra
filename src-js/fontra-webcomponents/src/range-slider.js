@@ -412,7 +412,10 @@ export class RangeSlider extends html.UnlitElement {
             class: "slider-numeric-input",
             value: hasDisplayValue ? "" : value,
             placeholder: hasDisplayValue ? this.displayValue : "",
-            step: this.step,
+            // Beyond-range input is a manual override: the slider's own step is
+            // a convenience for dragging, not a constraint on what can be
+            // typed, so the number input accepts any value there.
+            step: this.allowInputBeyondRange ? "any" : this.step,
             required: "required",
             ...(this.allowInputBeyondRange
               ? {}

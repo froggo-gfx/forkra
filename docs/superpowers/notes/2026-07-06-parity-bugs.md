@@ -1051,10 +1051,19 @@ their own 0–1 tension slider.
 (numeric, in `CAP_POINT_FIELDS`) + `capBallSide` (string, `auto`/`left`/`right`)
 in `skeleton-model.js` (normalize, copy, set) and threaded through the
 generator's canonical mapping. Panel: "Drop" in the cap-style dropdown, a
-Ball-size slider (percent of stroke width, default 125), a **Ball-shape** slider
-(0–100%, default 0), the tension slider (0–300%), an auto/left/right Ball-side
-select, and drop in the force-apply profile flow. Master-level ball default
-deferred (force-apply uses the 1.25 constant).
+Ball-size slider (percent of stroke width, **105–300%**, default 125), a
+**Ball-shape** slider (**0–40%**, default 0), the tension slider (0–300%), an
+auto/left/right Ball-side select, and drop in the force-apply profile flow.
+Master-level ball default deferred (force-apply uses the 1.25 constant).
+
+The ball-size and ball-shape slider ranges are *usable* ranges, not limits: both
+carry `allowInputBeyondRange`, so typing into the number field reaches the
+model's full range (ball 50–300%, shape 0–100%) — below 105% the ball is
+narrower than the stroke and reads as a fillet rather than a bulb, and past 40%
+shape it attaches so far back it stops reading as a terminal. `range-slider.js`
+now also drops the step constraint on the number input when
+`allowInputBeyondRange` is set, so a manual override is not quantised to the
+slider's drag step.
 
 Tests: twelve cases in `test-skeleton-generator.js` — straight/curved terminals,
 ratio scaling, side override, start endpoint, all finite/closed, plus the three
