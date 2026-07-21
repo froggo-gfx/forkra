@@ -250,7 +250,7 @@ export const strings = {
   "glyph-organizing.glyph-set.source-link": "Source",
   "glyph-organizing.group-by": "Group by",
   "glyph-organizing.group-by.block": "Block",
-  "glyph-organizing.group-by.case": "caseCase",
+  "glyph-organizing.group-by.case": "Case",
   "glyph-organizing.group-by.category": "Category",
   "glyph-organizing.group-by.glyphname-extension": "Glyph name extension",
   "glyph-organizing.group-by.script": "Script",
