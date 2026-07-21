@@ -738,7 +738,7 @@ branches catalogued in 5.1/5.2, which are still `open (adapt)`. This item may be
 partly the same work — reconcile with 5.1/5.2 when it is picked up rather than
 porting twice.
 
-### 4.13 Skeleton is not marquee-transformable — `open` (biggest)
+### 4.13 Skeleton is not marquee-transformable — `fixed` (2026-07-21)
 
 **Report:** the selection border with its drag controls (the draggable circles,
 same as for basic points) *appears* around a skeleton selection, but the
@@ -752,6 +752,33 @@ the transformation panel's align/distribute had the mirror-image problem (bounds
 wrong, movement fine) — this is bounds fine, movement missing. Also compare
 WS-16's "transformation panel operating on skeleton selections" deliverable,
 which may have covered the panel but not the on-canvas marquee handles.
+
+**Root cause:** exactly that split. `getSelectionBounds` (glyph-controller.js)
+already parses `skeletonPoint`/`skeletonRib`/`editableGenerated*` keys, so the
+box is drawn correctly — but `handleBoundsTransformSelection`
+(edit-tools-pointer.js) built its `EditBehaviorFactory` with only three
+arguments, i.e. **no `targetEntries`**. Skeleton geometry reaches the edit
+behavior exclusively through target entries (C2), so the transform moved the
+path selection only; with a pure skeleton selection there was nothing to move.
+The drag path (`handleDragSelection`) has passed `targetEntries` all along —
+only the transform path was never wired. `makeSkeletonPointTargetEntry` already
+builds a separate transform factory and implements
+`makeChangeForTransformation`, so no new edit semantics were needed.
+
+**Fix:** `handleBoundsTransformSelection` now resolves the edit layer's
+reference skeleton data and builds `makeSkeletonPointTargetEntry(..., "default",
+...)` per layer, handing it to the factory the same way the drag path does.
+Rollback needed no work — `EditBehavior.rollbackChange` already consolidates
+target-entry rollbacks. Rib and editable-generated entries are deliberately not
+built here: their `makeChangeForTransformation` returns null (no transform
+semantics), so a rib-only selection still gets a box that does nothing —
+recorded as a follow-up if it turns out the donor scaled rib widths.
+
+**Manual test matrix owed** (no views-editor test harness): marquee a whole
+skeleton contour and drag each of the 8 resize handles; the same with rotation
+handles; shift-constrain and alt-from-center on both; mixed skeleton + path
+selection; two-master editing (both layers must transform); undo/redo lands as
+one record; generated contours follow live during the drag.
 
 ---
 

@@ -900,13 +900,32 @@ export class PointerTool extends BaseTool {
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const initialPoint = sceneController.selectedGlyphPoint(initialEvent);
 
-      const layerInfo = Object.entries(
-        sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
-      ).map(([layerName, layerGlyph]) => {
+      // Skeleton points transform through the same target entry the drag path
+      // uses; without it the handles move the path selection only, and a pure
+      // skeleton selection gets a bounds box that does nothing. Rib and
+      // editable-generated entries have no transform semantics and return null,
+      // so only the point entry is built here.
+      const editingLayers = sceneController.getEditingLayerFromGlyphLayers(
+        glyph.layers
+      );
+      const editLayerName = sceneController.sceneSettings.editLayerName;
+      const referenceSkeletonData = getSkeletonData(
+        editingLayers[editLayerName] || Object.values(editingLayers)[0]
+      );
+
+      const layerInfo = Object.entries(editingLayers).map(([layerName, layerGlyph]) => {
+        const skeletonEntry = makeSkeletonPointTargetEntry(
+          layerGlyph,
+          sceneController.selection,
+          "default",
+          referenceSkeletonData,
+          makeSkeletonModifierOptions("default", { referenceSkeletonData })
+        );
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           sceneController.selection,
-          this.scalingEditBehavior
+          this.scalingEditBehavior,
+          { targetEntries: skeletonEntry ? [skeletonEntry] : [] }
         );
         const layerBounds = (
           staticGlyphControllers[layerName] || glyphController
