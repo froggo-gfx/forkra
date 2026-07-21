@@ -251,7 +251,10 @@ export class GlyphSetsController {
 export function readProjectGlyphSets(fontController) {
   return Object.fromEntries(
     [
-      { name: translate("This font's glyphs"), url: THIS_FONTS_GLYPHSET },
+      {
+        name: translate("glyph-organizing.this-fonts-glyphs"),
+        url: THIS_FONTS_GLYPHSET,
+      },
       ...(fontController.customData[PROJECT_GLYPH_SETS_CUSTOM_DATA_KEY] || []),
     ].map((glyphSet) => [glyphSet.url, glyphSet])
   );
