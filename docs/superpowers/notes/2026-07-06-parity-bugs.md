@@ -685,6 +685,76 @@ disable the sliders), reach/strength/asymmetry effect on the generated outline.
 
 ---
 
+### Intake 2026-07-21 (on `refactor-simple/ws17-parity-bugs`, drop cap merged in)
+
+Recorded as reported; the "inferred context" notes are hypotheses to check, not
+diagnoses. The user's own ranking is preserved: 4.12 is flagged "big", 4.13
+"biggest".
+
+### 4.9 Drag crosshair missing for skeleton objects — `open`
+
+**Report:** the drag crosshair should be visible when dragging skeleton-related
+objects too — skeleton points, ribs, generated points and handles.
+
+**Inferred context:** the crosshair is drawn for regular path point drags; it is
+presumably a visualization layer keyed off the drag state and the dragged
+object's kind, and never learned about the skeleton selection kinds
+(`skeletonPoint`, `skeletonRib`, `editableGenerated*`). Likely a matter of
+feeding the same layer the dragged position for those kinds rather than new
+drawing code.
+
+### 4.10 Panel must show all skeleton parameters for any skeleton selection — `open`
+
+**Report:** ALL skeleton-related parameters should be visible when *any*
+skeleton object is selected. Consult the donor for how its panel behaved.
+
+**Inferred context:** overlaps 6.8, which made every selected skeleton object
+resolve to its owning on-curve so the parameter sections populate — evidently
+still incomplete (some sections stay hidden or disabled). Donor research owed:
+`panel-skeleton-parameters.js` at `fd76d3abe`, specifically which sections it
+gated and on what, versus which it always showed.
+
+### 4.11 No "reset ribs" button for a selected skeleton point — `open`
+
+**Report:** when a skeleton point is selected there should be a button that
+resets *both* of that point's ribs.
+
+**Inferred context:** "reset" presumably means clearing the per-side width
+overrides, nudges, handle offsets/detach and editable flags back to the
+contour/master default — i.e. the inverse of the accumulated rib state, in one
+action. Donor research owed on exactly which fields its reset cleared. Note the
+related 5.3 item (single generated handle reset) from the `z-mod-for-editable`
+branch — same family, different scope.
+
+### 4.12 Q-measure ignores the skeleton — `open` (big)
+
+**Report:** the Q measurement tool does not see skeleton geometry at all.
+Consult the donor if necessary.
+
+**Inferred context:** measure was ported in WS-2/4.5 against path contours; the
+donor's Q-metrics work (rib width on hover, tension display, curved-segment
+detection) lives on the `test/skeleton-width-highlight` / `test/q-metrix-drag`
+branches catalogued in 5.1/5.2, which are still `open (adapt)`. This item may be
+partly the same work — reconcile with 5.1/5.2 when it is picked up rather than
+porting twice.
+
+### 4.13 Skeleton is not marquee-transformable — `open` (biggest)
+
+**Report:** the selection border with its drag controls (the draggable circles,
+same as for basic points) *appears* around a skeleton selection, but the
+transform itself cannot be performed — dragging the handles does nothing.
+
+**Inferred context:** so selection-bounds computation already includes skeleton
+points (the box is correct) while the transform application path does not — the
+handles presumably move regular path points through the edit-behavior machinery
+and never route skeleton points through `editSkeleton` (C2). Compare 6.9, where
+the transformation panel's align/distribute had the mirror-image problem (bounds
+wrong, movement fine) — this is bounds fine, movement missing. Also compare
+WS-16's "transformation panel operating on skeleton selections" deliverable,
+which may have covered the panel but not the on-canvas marquee handles.
+
+---
+
 ## 5. Old-architecture feature branches to adapt
 
 Three branches carry functionally useful features built on the *old* codebase
