@@ -153,38 +153,50 @@ skeleton parameter names, with glyph-case resolution on top. Folding it into
 
 ### Core — `fontra-core/src/`
 
-| File                          | Role                                                              | Change                                  |
-| ----------------------------- | ----------------------------------------------------------------- | --------------------------------------- |
-| `skeleton-model.js`           | Schema, stable ids, accessors, rib projection, normals, constants | unchanged                               |
-| `skeleton-generator.js`       | Centerline → outline, forward provenance                          | unchanged                               |
-| `skeleton-modifiers.js`       | Pure operations on the model: fixed-rib, equalize, Tunni          | **dedup** (§4.1) + absorbs Tunni (§4.2) |
-| `skeleton-source-defaults.js` | Per-source config + glyph-case resolution                         | unchanged (§2.6)                        |
+| File                          | Role                                                                                                                     | Change                                      |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
+| `skeleton-model.js`           | Schema, stable ids, accessors, rib projection, normals, constants, **and the full selection-key grammar for every kind** | absorbs key/address resolution (§4.1, §4.4) |
+| `skeleton-generator.js`       | Centerline → outline, forward provenance                                                                                 | unchanged                                   |
+| `skeleton-modifiers.js`       | Pure operations on the model: fixed-rib, equalize, Tunni                                                                 | **dedup** (§4.1) + absorbs Tunni (§4.2)     |
+| `skeleton-source-defaults.js` | Per-source config + glyph-case resolution                                                                                | unchanged (§2.6)                            |
 
-`skeleton-tunni.js` is **dissolved**, not slimmed (§4.2).
+`skeleton-tunni.js` is **dissolved** (§4.2).
 
 `skeleton-model.js` stays separate from `skeleton-modifiers.js` on a state-vs-operations
 split. That is a real role distinction and it survives the criterion.
 
 ### Editor — `views-editor/src/`
 
-Two files instead of four, split by **role** rather than by kind:
+**No new files.** One file instead of four:
 
-| File                    | Role                                                                                                                                                            |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `skeleton-selection.js` | **NEW.** The complete selection-kind grammar: key make/parse, address resolution, target iteration, kind→behavior-name mapping — for _every_ kind, in one table |
-| `skeleton-editing.js`   | `editSkeleton` (R-C), target entries, executors, cross-layer resolution, generated-contour index bookkeeping                                                    |
+| File                  | Role                                                                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `skeleton-editing.js` | `editSkeleton` (R-C), target entries, executors, behavior-name mapping, cross-layer resolution, generated-contour index bookkeeping |
 
 Unchanged: `edit-tools-skeleton.js` (the Pen tool), `visualization-layer-skeleton.js`.
 
-Why this split and not one merged file: "what is this selection key and what does it point
-at" is a genuinely different job from "mutate the skeleton and emit a change." The first is
-pure, total, and needs no `layerGlyph`; the second owns the write path. Keeping them apart
-keeps R-C legible — there is one file you must go through to write, and it stays the one file
-that talks about writes.
+`skeleton-ribs.js`, `skeleton-generated.js` and `views-editor/src/skeleton-modifiers.js` are
+all dissolved into it.
 
-Why this split and not the current one: the current boundary is _kind_ (rib vs generated),
-which forces the same six roles to be implemented twice and cuts operations in half across
-files (§2.3).
+### The dividing line
+
+**Calculation goes to `fontra-core`; interaction stays in `views-editor`.** That is the only
+axis the layout needs, and it decides every case in this plan without inventing a third
+category.
+
+Applied to the rib/generated pair, it splits them by role rather than by kind:
+
+| Half                                                      | Nature                                           | Home                  |
+| --------------------------------------------------------- | ------------------------------------------------ | --------------------- |
+| Key make/parse, address resolution, target iteration      | pure, total, needs no `layerGlyph` — calculation | `skeleton-model.js`   |
+| Target entries, executors, behavior names, the write path | touches selection, events and change records     | `skeleton-editing.js` |
+
+This is the same move §4.1 already makes for `parseSkeletonPointKey` and
+`getSkeletonPointAddress`, generalised from the point kind to every kind. An earlier draft of
+this plan proposed a new `skeleton-selection.js` for the calculation half; that was rejected —
+it would have been a third category alongside calculation and interaction, justified by
+nothing but the wish to keep `skeleton-editing.js` small, which §0 already rules out as a
+reason.
 
 ---
 
@@ -242,33 +254,45 @@ lines) tests the functions being moved and must follow them — split it between
 `test-skeleton-modifiers.js` and whatever covers the hit test. The hit-test move lands in
 `scene-model.js`, which has no mocha coverage; verify it by direct instantiation (§5.3).
 
-### 4.3 Fold `views-editor/src/skeleton-modifiers.js` into `skeleton-selection.js`
+### 4.3 Fold `views-editor/src/skeleton-modifiers.js` into `skeleton-editing.js`
 
-Three functions (§2.4), moved as part of creating the new file in 4.4. Not worth landing
-on its own.
+Three functions (§2.4). Behavior-name mapping is interaction, so it lands on the editor side.
+Move as part of 4.4; not worth landing on its own.
 
-### 4.4 Unify rib + generated behind one kind table — **the real work**
+### 4.4 Dissolve `skeleton-ribs.js` and `skeleton-generated.js` — **the real work**
 
-Create `skeleton-selection.js`. Move in, from `skeleton-ribs.js` and `skeleton-generated.js`:
-all key make/parse, all address resolution, target iteration, and the behavior-name mapping
-from 4.3.
+Split each file along the calculation/interaction line, per §3:
 
-The point is **not** concatenation. If the six roles in §2.3 do not collapse into one
-descriptor per kind —
+- **To `skeleton-model.js`** — `makeSkeletonRibKey`, `parseSkeletonRibKey`,
+  `getSkeletonRibAddress`, `iterSkeletonRibTargets`, the four
+  `make`/`parse` editable-generated key functions, `findGeneratedPathAddress`,
+  `resolveGeneratedPointProvenance`, `resolveEditableGeneratedTarget`, and the private
+  assertion helpers. All pure over `skeletonData` (+ `path` for the generated kinds).
+  `skeleton-ribs.js` already re-exports `getSkeletonRibPosition` from here, so rib geometry
+  is partly home already.
+- **To `skeleton-editing.js`** — `createSkeletonRibExecutor`,
+  `applySkeletonRibExecutorResult`, `createEditableGenerated{Point,Handle}TargetEntries`,
+  `createEditableGeneratedHandleExecutor`, `toggleEditableGeneratedHandleDetached`,
+  `getSkeletonRibBehaviorName`, and the 4.3 functions. These rejoin
+  `createSkeletonRibTargetEntries`, which is already there (§2.3).
+
+The point is **not** concatenation. The six roles in §2.3 exist twice; after the move they
+must collapse into one descriptor per kind —
 
 ```
 { kind, keyArity, parseKey, makeKey, resolveAddress, behaviorName }
 ```
 
-— with the generic code driven off that table, then this phase has failed and should be
-reverted. Two implementations in one file is strictly worse than two implementations in two
-files.
-
-Executors and target-entry construction move to `skeleton-editing.js`, rejoining
-`createSkeletonRibTargetEntries` which is already there.
+— with the generic code driven off that table. If they will not (see §7.4), stop: two
+implementations sharing a file is strictly worse than two implementations in two files, and
+the honest outcome is to land 4.1–4.3 only.
 
 Constraint: this must not reintroduce kind-branching into `makeChangeForDelta` or below
 (R-E). The table is consumed at target-entry _construction_ time; the emit path stays kind-blind.
+
+Watch the import direction: `skeleton-model.js` is core and must not import from
+`views-editor`. The calculation half has to be genuinely free of editor imports, or it does
+not belong there — that is the test for whether this split is real.
 
 Risk: highest in the plan. It touches the one write path and eight importers. Do it last,
 and only after 4.1–4.3 have landed and settled.
@@ -308,6 +332,7 @@ A green bundle is not evidence that an interaction works.
 | Splitting `skeleton-generator.js`                     | Separate decision. It is one coherent pipeline (94 functions, 8 exported) and has the best test coverage in the fork — but size alone is not a reason, per §0 |
 | Merging `skeleton-model.js` + `skeleton-modifiers.js` | State vs operations is a real role split                                                                                                                      |
 | Moving core tests out of `views-editor` imports       | §2.2 is load-bearing coverage; removing it would lose real tests                                                                                              |
+| Creating any new file                                 | The calculation/interaction axis (§3) places every symbol in a file that already exists. A new file would need a third category, and none is justified        |
 
 ---
 
