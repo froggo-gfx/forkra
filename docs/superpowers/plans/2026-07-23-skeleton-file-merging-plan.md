@@ -141,21 +141,6 @@ are covered by name in `test-skeleton-tunni.js`. Inlining would repeat the same 
 composition 7× (an R-B smell in the other direction), force two imports where there is one,
 and rewrite passing tests. See §4.2 — corrected to move, not delete.
 
-### 2.8 `skeleton-editing.js` ↔ `skeleton-generated.js` is a live circular import
-
-Not previously noted, and it is the strongest argument in the plan. `skeleton-editing.js:25`
-carries the apology:
-
-```js
-// Runtime-only circular import (skeleton-generated.js also imports from this
-// module); all uses are inside functions, never at module evaluation time.
-import { findGeneratedPathAddress } from "./skeleton-generated.js";
-```
-
-The cycle exists because the split runs through the middle of one operation (§2.3), so each
-half needs the other. §4.5 dissolves it — which gives that phase a falsifiable pass condition
-that is not a matter of taste: **after the merge there is no cycle, or the merge did not work.**
-
 ### 2.6 `skeleton-model.js` is already the operations file — so `skeleton-modifiers.js` merges too
 
 An earlier draft kept `skeleton-modifiers.js` separate from `skeleton-model.js` on a
@@ -191,6 +176,21 @@ data, which is exactly what `skeleton-model.js` is for.
 
 **Both 2.6 and 2.7 were my objections, and both were wrong. Corrected on evidence, on the
 user's challenge.**
+
+### 2.8 `skeleton-editing.js` ↔ `skeleton-generated.js` is a live circular import
+
+Not previously noted, and it is the strongest argument in the plan. `skeleton-editing.js:25`
+carries the apology:
+
+```js
+// Runtime-only circular import (skeleton-generated.js also imports from this
+// module); all uses are inside functions, never at module evaluation time.
+import { findGeneratedPathAddress } from "./skeleton-generated.js";
+```
+
+The cycle exists because the split runs through the middle of one operation (§2.3), so each
+half needs the other. §4.5 dissolves it — which gives that phase a falsifiable pass condition
+that is not a matter of taste: **after the merge there is no cycle, or the merge did not work.**
 
 ---
 
