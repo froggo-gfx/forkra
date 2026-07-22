@@ -135,6 +135,27 @@ export function calculateSkeletonTunniPoint(segment) {
 `segmentToTunniPoints` — are genuine adaptation between the skeleton contour representation
 and generic cubic segments.
 
+**But "pass-through" is not by itself a reason to delete.** Measured: the four have 7 call
+sites across `tunni-interactions.js` and `visualization-layer-skeleton.js`, and three of them
+are covered by name in `test-skeleton-tunni.js`. Inlining would repeat the same two-function
+composition 7× (an R-B smell in the other direction), force two imports where there is one,
+and rewrite passing tests. See §4.2 — corrected to move, not delete.
+
+### 2.8 `skeleton-editing.js` ↔ `skeleton-generated.js` is a live circular import
+
+Not previously noted, and it is the strongest argument in the plan. `skeleton-editing.js:25`
+carries the apology:
+
+```js
+// Runtime-only circular import (skeleton-generated.js also imports from this
+// module); all uses are inside functions, never at module evaluation time.
+import { findGeneratedPathAddress } from "./skeleton-generated.js";
+```
+
+The cycle exists because the split runs through the middle of one operation (§2.3), so each
+half needs the other. §4.5 dissolves it — which gives that phase a falsifiable pass condition
+that is not a matter of taste: **after the merge there is no cycle, or the merge did not work.**
+
 ### 2.6 `skeleton-model.js` is already the operations file — so `skeleton-modifiers.js` merges too
 
 An earlier draft kept `skeleton-modifiers.js` separate from `skeleton-model.js` on a
@@ -188,10 +209,13 @@ Dissolved into `skeleton-model.js`: `skeleton-modifiers.js` (§2.6),
 `skeleton-source-defaults.js` (§2.7), `skeleton-tunni.js` (§4.2), and the calculation half of
 `skeleton-ribs.js` / `skeleton-generated.js` (§4.5).
 
-`skeleton-generator.js` stays out on the one boundary that is real: it is the only consumer of
-`fit-cubic` and offset-curve machinery, it is the sole implementer of R-D provenance, and it
-is guarded by golden-master fixtures that pin its output. Merging it would put the fork's most
-heavily tested pipeline behind the fork's most-edited file.
+`skeleton-generator.js` stays out on the one boundary that is real: it is the sole implementer
+of R-D provenance, and it is guarded by golden-master fixtures that pin its output. Merging it
+would put the fork's most heavily tested pipeline behind the fork's most-edited file.
+
+~~It is the only consumer of `fit-cubic` and offset-curve machinery.~~ **Checked and false:**
+`skeleton-model.js:2` imports `fitCubic` and calls it at `:502`, and imports `Bezier` directly.
+The generator's case rests on provenance and the fixtures alone.
 
 ### Editor — `views-editor/src/`
 
@@ -214,10 +238,27 @@ category.
 
 Applied to the rib/generated pair, it splits them by role rather than by kind:
 
-| Half                                                      | Nature                                           | Home                  |
-| --------------------------------------------------------- | ------------------------------------------------ | --------------------- |
-| Key make/parse, address resolution, target iteration      | pure, total, needs no `layerGlyph` — calculation | `skeleton-model.js`   |
-| Target entries, executors, behavior names, the write path | touches selection, events and change records     | `skeleton-editing.js` |
+| Half                                                            | Nature                                           | Home                  |
+| --------------------------------------------------------------- | ------------------------------------------------ | --------------------- |
+| Key make/parse, address resolution, target iteration, executors | pure, total, needs no `layerGlyph` — calculation | `skeleton-model.js`   |
+| Target entries, behavior names, the write path                  | touches selection, events and change records     | `skeleton-editing.js` |
+
+**Executors moved rows on evidence.** An earlier draft put `createSkeletonRibExecutor` and
+`applySkeletonRibExecutorResult` on the interaction side on role-feel. That contradicts the
+dependency test this plan just declared: `skeleton-ribs.js` imports **nothing** from
+`views-editor` — its only import is `@fontra/core/skeleton-model.js`. `createSkeletonRibExecutor`
+is drag arithmetic over an address; `applySkeletonRibExecutorResult` is a mutator over a point,
+indistinguishable from the 21 already in `skeleton-model.js`. The one genuinely
+interaction-shaped export is `getSkeletonRibBehaviorName`, which reads `event.altKey`.
+
+So `skeleton-ribs.js` dissolves almost entirely into core, and the editor gets one function.
+The same test applied to `skeleton-generated.js` puts exactly three functions on the editor
+side — `createEditableGenerated{Point,Handle}TargetEntries` and
+`toggleEditableGeneratedHandleDetached`, the only three that reference `editSkeleton`,
+`makeEditSkeletonChange` or `createSkeletonRibTargetEntries` (lines 228, 300, 353). Everything
+else in that file is already free of editor imports.
+
+Where a private helper is used only by an interaction function, it follows its caller.
 
 This is the same move §4.1 already makes for `parseSkeletonPointKey` and
 `getSkeletonPointAddress`, generalised from the point kind to every kind. An earlier draft of
@@ -246,26 +287,67 @@ existing callers for the behaviour change.
 Import direction: core must not import from `views-editor`, so the canonical pair lives in
 `skeleton-model.js` and `skeleton-editing.js` imports it.
 
+**Caller audit — done, not deferred.** Every editor call site destructures or
+property-accesses the result with no null guard:
+
+| Site                             | Shape                                  |
+| -------------------------------- | -------------------------------------- |
+| `scene-controller.js:1335`       | `parseSkeletonPointKey(...).contourId` |
+| `editor.js:1846`, `:2523`        | `const { contourId, pointId } = ...`   |
+| `edit-tools-pointer.js:539`      | `const { contourId } = ...`            |
+| `edit-tools-skeleton.js:258`     | `const { contourId, pointId } = ...`   |
+| `edit-tools-skeleton.js:92, 338` | result used directly                   |
+| `edit-tools-skeleton.js:735`     | `.map(parseSkeletonPointKey)`          |
+
+Today malformed input yields `{ contourId: NaN, pointId: NaN }` and silently misses. Under the
+strict contract it throws on destructure. In practice every one of these receives a key that
+`parseSelection` produced from a key `makeSkeletonPointKey` built, so the `null` branch is
+unreachable — which is exactly what an R-B violation looks like right up until it isn't. Take
+the strict contract (a NaN address is worse than a null everywhere) and leave the call sites
+unguarded rather than adding seven dead branches; the throw is the desired behaviour if a
+malformed key ever does arrive.
+
+Note `skeleton-editing.js`'s pair is also missing core's `Number.isInteger` validation. The
+canonical version keeps it.
+
 This phase stands alone even if nothing else in the plan happens. Land it first.
 
 Risk: low. Covered by `test-skeleton-modifiers.js` and `test-skeleton-ribs.js`.
 
-### 4.2 Dissolve `skeleton-tunni.js`
+### 4.2 Dissolve `skeleton-tunni.js` — **all nine exports move to `skeleton-model.js`, unchanged**
 
-**Delete** the four pass-throughs — `calculateSkeletonTunniPoint`,
-`calculateSkeletonTrueTunniPoint`, `calculateSkeletonEqualizedControlPoints`,
-`areSkeletonTensionsEqualized`. Each is a one-liner; call the generic
-`tunni-calculations.js` function with `segmentToTunniPoints(segment)` at the call site.
+Straight move of the whole file. Two earlier proposals in this phase were wrong and are
+withdrawn:
 
-**Move to `skeleton-model.js`** — `segmentToTunniPoints`, `buildSkeletonTunniSegments`,
-`calculateSkeletonControlPointsFromTunniDelta`, `calculateSkeletonOnCurveFromTunni`, and the
-private helpers `makeSkeletonTunniSegment`, `collectControlEntries`, `addProjected`. They join
-the equalize family arriving from `skeleton-modifiers.js` in 4.4 — same data, same purity.
+**~~Delete the four pass-throughs.~~** They have 7 call sites in `tunni-interactions.js` and
+`visualization-layer-skeleton.js`, and `test-skeleton-tunni.js` covers three of them by name
+("calculates midpoint and true Tunni points…", "equalizes skeleton control tensions and reports
+equalized state"). Deleting them repeats one composition 7×, doubles the imports at each site,
+and rewrites passing tests to buy four fewer lines. A named wrapper over a two-call composition
+is not a duplicate — it is the adapter this file exists to be. **Move them.**
 
-**Move to `scene-model.js`** — `skeletonTunniHitTest`, folded into the existing
-`skeletonTunniAtPoint`, which today is a five-line wrapper that subtracts the glyph origin and
-delegates. R-A puts hit-testing in `scene-model.js` as `*AtPoint`; this removes a hop rather
-than adding one.
+**~~Move `skeletonTunniHitTest` into `scene-model.js`.~~** This breaks §5. `skeletonTunniHitTest`
+has four dedicated tests (`describe("skeleton Tunni hit testing")`, `test-skeleton-tunni.js:164`)
+and **the mocha suite imports `scene-model.js` nowhere** — verified, zero matches. The test
+cannot follow the code, so the move deletes four tests and drops the count, which §5 forbids.
+
+The R-A appeal was also a misreading. R-A puts the `*AtPoint` **entry point** in `scene-model.js`,
+and it is already there: `skeletonTunniAtPoint:1301` resolves the layer's skeleton data, subtracts
+the glyph origin, and delegates. The pure geometry living in core underneath it is the existing,
+correct shape — the same one `skeletonRibAtPoint` and the other five use. There is no hop to remove.
+
+`skeletonTunniHitTest(point, size, skeletonData, options)` is total and pure. It goes to
+`skeleton-model.js` with the rest.
+
+So: `buildSkeletonTunniSegments`, `segmentToTunniPoints`, `calculateSkeletonTunniPoint`,
+`calculateSkeletonTrueTunniPoint`, `calculateSkeletonControlPointsFromTunniDelta`,
+`calculateSkeletonOnCurveFromTunni`, `calculateSkeletonEqualizedControlPoints`,
+`areSkeletonTensionsEqualized`, `skeletonTunniHitTest`, plus the private
+`makeSkeletonTunniSegment`, `collectControlEntries`, `addProjected`. `skeleton-model.js` gains
+one import, `./tunni-calculations.js` (already core-local).
+
+`test-skeleton-tunni.js` changes one import line. Risk: low, and lower than the previous draft —
+nothing touches `scene-model.js`, so the direct-instantiation check is not needed here.
 
 ### 4.3 Dissolve `skeleton-modifiers.js` and `skeleton-source-defaults.js` into `skeleton-model.js`
 
@@ -294,17 +376,41 @@ Move as part of 4.5; not worth landing on its own.
 Split each file along the calculation/interaction line, per §3:
 
 - **To `skeleton-model.js`** — `makeSkeletonRibKey`, `parseSkeletonRibKey`,
-  `getSkeletonRibAddress`, `iterSkeletonRibTargets`, the four
+  `getSkeletonRibAddress`, `iterSkeletonRibTargets`, `createSkeletonRibExecutor`,
+  `applySkeletonRibExecutorResult`, `setSingleSidedTotalWidth`, the four
   `make`/`parse` editable-generated key functions, `findGeneratedPathAddress`,
-  `resolveGeneratedPointProvenance`, `resolveEditableGeneratedTarget`, and the private
-  assertion helpers. All pure over `skeletonData` (+ `path` for the generated kinds).
+  `resolveGeneratedPointProvenance`, `resolveEditableGeneratedTarget`,
+  `getSkeletonHandleDirectionForPoint`, `resolveEditableGeneratedHandleAddressAcrossLayers`,
+  and the private assertion/normalization helpers. All pure over `skeletonData`
+  (+ `path` for the generated kinds); none has a `views-editor` import today.
   `skeleton-ribs.js` already re-exports `getSkeletonRibPosition` from here, so rib geometry
   is partly home already.
-- **To `skeleton-editing.js`** — `createSkeletonRibExecutor`,
-  `applySkeletonRibExecutorResult`, `createEditableGenerated{Point,Handle}TargetEntries`,
-  `createEditableGeneratedHandleExecutor`, `toggleEditableGeneratedHandleDetached`,
-  `getSkeletonRibBehaviorName`, and the 4.4 functions. These rejoin
+- **To `skeleton-editing.js`** — `createEditableGenerated{Point,Handle}TargetEntries`,
+  `toggleEditableGeneratedHandleDetached` (the only three functions in either file that
+  reference `editSkeleton` / `makeEditSkeletonChange` / `createSkeletonRibTargetEntries`),
+  their private helpers `createEditableGeneratedHandleExecutor`,
+  `makeEditableGeneratedHandleOffset`, `makeEditableGeneratedHandleEqualizeGeometry`,
+  `collectEditableGeneratedHandleSelection`, plus `getSkeletonRibBehaviorName` and the 4.4
+  functions — the behaviour-name mappers, which read a pointer `event`. These rejoin
   `createSkeletonRibTargetEntries`, which is already there (§2.3).
+
+**Prerequisite, and the actual work: unify the key contracts.** The three families disagree on
+both axes today, which is why §7.4's "the table may not exist" is a live concern rather than a
+hedge:
+
+| Family    | Parse returns                 | Malformed input                       | Address resolver compares                     |
+| --------- | ----------------------------- | ------------------------------------- | --------------------------------------------- |
+| point     | numbers (`parts.map(Number)`) | `null` (core) / `{NaN, NaN}` (editor) | strict `contour.id !== contourId`             |
+| rib       | **raw strings**               | **throws**                            | string-coerced `` `${a}` === `${b}` ``        |
+| generated | strings                       | **throws**                            | strict, after `asStrictInteger` normalization |
+
+Three id types, three error contracts, three comparison styles for one concept. Pick
+`asStrictInteger` (already the most defensive, already in `skeleton-generated.js:632`) and one
+error contract, and apply both to all three families **before** attempting the descriptor
+table. This is a decision, not a move; schedule it as the first step of the phase.
+
+Note `findGeneratedPathAddress` normalizes its arguments, so today's string/number mismatch is
+absorbed rather than broken — this is a latent hazard, not a live bug.
 
 The point is **not** concatenation. The six roles in §2.3 exist twice; after the move they
 must collapse into one descriptor per kind —
@@ -322,10 +428,18 @@ Constraint: this must not reintroduce kind-branching into `makeChangeForDelta` o
 
 Watch the import direction: `skeleton-model.js` is core and must not import from
 `views-editor`. The calculation half has to be genuinely free of editor imports, or it does
-not belong there — that is the test for whether this split is real.
+not belong there — that is the test for whether this split is real. Measured today, it passes:
+of the two files' exports, only the three named above touch an editor import.
 
-Risk: highest in the plan. It touches the one write path and eight importers. Do it last,
-and only after 4.1–4.4 have landed and settled.
+**Pass condition, objective:** the `skeleton-editing.js` ↔ `skeleton-generated.js` circular
+import (§2.8) is gone, and the apologetic comment at `skeleton-editing.js:25` goes with it.
+If the cycle survives in another form, the merge reproduced the problem it was meant to fix.
+
+Risk: highest in the plan. It touches the one write path and **eleven** importers — the union
+of the two files' importer sets, not eight: `edit-tools-pointer.js`, `measure-interactions.js`,
+`scene-controller.js`, `scene-model.js`, `skeleton-editing.js`, `visualization-layer-skeleton.js`,
+`skeleton-panel-model.js`, `skeleton-panel-edits.js`, plus `test-skeleton-ribs.js` and
+`test-skeleton-modifiers.js`. Do it last, and only after 4.1–4.4 have landed and settled.
 
 ---
 
@@ -333,12 +447,14 @@ and only after 4.1–4.4 have landed and settled.
 
 Per phase, in order:
 
-1. `cd src-js/fontra-core && npm test` — 1394 baseline. Phases 4.1, 4.3 and 4.5 are
-   genuinely covered here (§2.2). 4.2 keeps its coverage only if `test-skeleton-tunni.js`
-   follows the code it tests. **The test count must not drop at any phase** — that is the
-   check that a move did not quietly shed coverage.
+1. `cd src-js/fontra-core && npm test` — **1394 baseline, re-measured 2026-07-23 on
+   `refactor-simple/ws17-parity-bugs`, 987 ms.** Phases 4.1, 4.3 and 4.5 are genuinely
+   covered here (§2.2); 4.2 is covered end to end now that everything stays in core.
+   **The test count must not drop at any phase** — that is the check that a move did not
+   quietly shed coverage, and it is what disqualified two proposals in 4.2.
 2. `node --check` on every touched editor file.
-3. **Direct instantiation check** for anything touching `scene-model.js`:
+3. **Direct instantiation check** for anything touching `scene-model.js` — after the 4.2
+   correction, only 4.5 does:
    ```
    node --input-type=module -e "import { SceneModel } from './src/scene-model.js'; …"
    ```
@@ -347,8 +463,9 @@ Per phase, in order:
    `045db86b6` and was caught only by the user (fixed in `c1d32180f`).
 4. `npx prettier --write` on touched files.
 5. `npm run bundle` green.
-6. Manual matrix for 4.2 and 4.5 — rib drag, generated point/handle drag, detach, Tunni
-   drag on both path and skeleton segments, marquee over mixed selections.
+6. Manual matrix for 4.5 — rib drag, generated point/handle drag, detach, marquee over mixed
+   selections. 4.2 no longer needs one: it is a whole-file move with no signature changes and
+   full mocha coverage on both sides.
 
 A green bundle is not evidence that an interaction works.
 
@@ -356,27 +473,36 @@ A green bundle is not evidence that an interaction works.
 
 ## 6. Explicitly not doing
 
-| Item                                            | Why                                                                                                                                                           |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Panel files                                     | Out of scope — UI/UX rework is coming                                                                                                                         |
-| Splitting `skeleton-generator.js`               | Separate decision. It is one coherent pipeline (94 functions, 8 exported) and has the best test coverage in the fork — but size alone is not a reason, per §0 |
-| Moving core tests out of `views-editor` imports | §2.2 is load-bearing coverage; removing it would lose real tests                                                                                              |
-| Creating any new file                           | The calculation/interaction axis (§3) places every symbol in a file that already exists. A new file would need a third category, and none is justified        |
+| Item                                            | Why                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Panel files — _logic_                           | Out of scope — UI/UX rework is coming. **But not literally untouched:** all four import a module this plan deletes, so 4.3 and 4.5 must edit their import lines. `panel-skeleton-defaults.js` and `panel-skeleton-parameters.js` import `skeleton-source-defaults.js` (4.3); `skeleton-panel-model.js` and `skeleton-panel-edits.js` import `skeleton-ribs.js` / `skeleton-generated.js` (4.5). Import-line churn only, no behaviour |
+| Splitting `skeleton-generator.js`               | Separate decision. It is one coherent pipeline (94 functions, 8 exported) and has the best test coverage in the fork — but size alone is not a reason, per §0                                                                                                                                                                                                                                                                        |
+| Moving core tests out of `views-editor` imports | §2.2 is load-bearing coverage; removing it would lose real tests                                                                                                                                                                                                                                                                                                                                                                     |
+| Creating any new file                           | The calculation/interaction axis (§3) places every symbol in a file that already exists. A new file would need a third category, and none is justified                                                                                                                                                                                                                                                                               |
 
 ---
 
 ## 7. Risks
 
-1. **4.1 changes a contract.** The strict/lenient `parseSkeletonPointKey` divergence means
-   picking a winner changes behaviour for at least one existing caller. Audit before, not after.
+1. **4.1 changes a contract.** ~~Audit before, not after.~~ Audit is done and in §4.1: eight
+   unguarded call sites across five files, all of which currently receive well-formed keys.
+   Strict `null` is the right contract; the exposure is a throw instead of a silent miss on
+   input that no current path produces.
 2. **4.5 touches R-C.** Every skeleton write goes through `editSkeleton`. A mistake here is
    not local.
 3. **Editor-side coverage is partial.** §2.2 is better than expected but far from complete —
    the Pen tool, visualization layers and pointer dispatch remain manual-only.
-4. **The table in 4.5 may not exist.** Rib addresses need only `skeletonData`; generated
-   addresses need the `path` and provenance. If the two cannot be expressed as one descriptor
-   without a discriminated union that is really two code paths wearing one name, stop — merge
-   them into `skeleton-editing.js` as two honest implementations and skip the table.
-5. **`skeleton-model.js` becomes the fork's second-largest file.** Accepted per §0: one
+4. **The table in 4.5 may not exist — now with specifics.** Beyond the shape difference (rib
+   addresses need only `skeletonData`; generated addresses need the `path` and provenance),
+   the three families disagree on id type, malformed-input contract and comparison style
+   (table in §4.5). Unify those first. If, after unification, the two still cannot be expressed
+   as one descriptor without a discriminated union that is really two code paths wearing one
+   name, stop — merge them into `skeleton-editing.js` as two honest implementations and skip
+   the table.
+5. **A merge can silently shed coverage.** Withdrawn 4.2 proposals would have deleted four
+   tests (`skeletonTunniHitTest`) and rewritten three more (the pass-throughs) while every
+   other check stayed green. The 1394 baseline is the only tripwire for this class of mistake,
+   which is why §5 makes it a hard gate rather than a nice-to-have.
+6. **`skeleton-model.js` becomes the fork's second-largest file.** Accepted per §0: one
    coherent job (everything pure about a skeleton) beats five files that must be read
    together. Revisit only if a genuine second concern appears inside it — not on size.
