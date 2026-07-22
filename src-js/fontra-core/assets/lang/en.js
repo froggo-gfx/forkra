@@ -490,6 +490,7 @@ export const strings = {
   "sidebar.skeleton-parameters.editable": "Editable",
   "sidebar.skeleton-parameters.detached": "Detach",
   "sidebar.skeleton-parameters.reset-rib": "Reset rib",
+  "sidebar.skeleton-parameters.reset-ribs-both": "Reset both ribs",
   "sidebar.skeleton-parameters.reset-handles": "Reset handles",
   "sidebar.skeleton-parameters.undo.set-defaults": "set skeleton defaults",
   "sidebar.skeleton-parameters.undo.set-linked": "set linked widths",

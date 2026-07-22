@@ -32,6 +32,7 @@ import {
   setPanelRibEditable,
 } from "./skeleton-panel-edits.js";
 import {
+  collectRibEditTargets,
   collectSkeletonPanelSelection,
   collectWidthEditPoints,
   makeSkeletonPanelStateSignature,
@@ -274,6 +275,12 @@ export default class SkeletonParametersPanel extends Panel {
     }
 
     const widthPoints = collectWidthEditPoints(panelSelection);
+    // Ribs fall back to both sides of every resolved point, so the rib
+    // parameters show for any skeleton selection (4.10) and the reset buttons
+    // cover both of a selected point's ribs (4.11).
+    const { ribs: ribTargets, derived: ribsDerived } =
+      collectRibEditTargets(panelSelection);
+    this._ribTargets = ribTargets;
     if (widthPoints.length) {
       this._buildPointWidthSection(formContents, widthPoints);
     }
@@ -284,15 +291,11 @@ export default class SkeletonParametersPanel extends Panel {
       this._buildCapSection(formContents, widthPoints);
       this._buildCornerSection(formContents, widthPoints);
     }
-    if (panelSelection.ribs.length) {
-      this._buildRibSection(formContents, panelSelection.ribs);
+    if (ribTargets.length) {
+      this._buildRibSection(formContents, ribTargets, ribsDerived);
     }
 
-    if (
-      !widthPoints.length &&
-      !panelSelection.contours.length &&
-      !panelSelection.ribs.length
-    ) {
+    if (!widthPoints.length && !panelSelection.contours.length && !ribTargets.length) {
       formContents.push({
         type: "text",
         value: translate("sidebar.skeleton-parameters.no-selection"),
@@ -878,8 +881,11 @@ export default class SkeletonParametersPanel extends Panel {
     );
   }
 
-  _buildRibSection(formContents, ribs) {
+  _buildRibSection(formContents, ribs, derived = false) {
     const summary = summarizeSkeletonRibSelection(ribs);
+    // Derived targets cover both sides of each selected point, so the reset
+    // button says so; an explicit rib selection resets just that rib.
+    const resetRibLabel = derived && ribs.length > 1 ? "reset-ribs-both" : "reset-rib";
     formContents.push({ type: "divider" });
     formContents.push({
       type: "header",
@@ -903,7 +909,7 @@ export default class SkeletonParametersPanel extends Panel {
       type: "single-icon",
       element: html.div({ style: "display:flex; gap:0.5rem; flex-wrap:wrap;" }, [
         html.button({ onclick: () => this._resetRibs({ handlesOnly: false }) }, [
-          translate("sidebar.skeleton-parameters.reset-rib"),
+          translate(`sidebar.skeleton-parameters.${resetRibLabel}`),
         ]),
         html.button({ onclick: () => this._resetRibs({ handlesOnly: true }) }, [
           translate("sidebar.skeleton-parameters.reset-handles"),
@@ -1148,14 +1154,14 @@ export default class SkeletonParametersPanel extends Panel {
     if (name === "editable") {
       await setPanelRibEditable(
         this.sceneController,
-        this._panelSelection.ribs,
+        this._ribTargets,
         value === true,
         this._undo("set-rib-editable")
       );
     } else if (name === "detached") {
       await setPanelRibDetached(
         this.sceneController,
-        this._panelSelection.ribs,
+        this._ribTargets,
         value === true,
         this._undo("set-rib-detached")
       );
@@ -1165,7 +1171,7 @@ export default class SkeletonParametersPanel extends Panel {
   async _resetRibs({ handlesOnly }) {
     await resetPanelRibs(
       this.sceneController,
-      this._panelSelection.ribs,
+      this._ribTargets,
       { handlesOnly },
       this._undo(handlesOnly ? "reset-handles" : "reset-ribs")
     );

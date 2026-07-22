@@ -760,28 +760,76 @@ row, drag the object and confirm the dashed crosshair appears and _follows_ it:
 | 10  | After mouseup                     | crosshair disappears (state deleted)      |
 | 11  | Layer toggled off                 | no crosshair for any of the above         |
 
-### 4.10 Panel must show all skeleton parameters for any skeleton selection — `open`
+### 4.10 Panel must show all skeleton parameters for any skeleton selection — `fixed` (2026-07-22)
 
 **Report:** ALL skeleton-related parameters should be visible when _any_
 skeleton object is selected. Consult the donor for how its panel behaved.
 
-**Inferred context:** overlaps 6.8, which made every selected skeleton object
-resolve to its owning on-curve so the parameter sections populate — evidently
-still incomplete (some sections stay hidden or disabled). Donor research owed:
-`panel-skeleton-parameters.js` at `fd76d3abe`, specifically which sections it
-gated and on what, versus which it always showed.
+**Investigation.** Audited the four section gates in `update()`
+(`panel-skeleton-parameters.js`). Three were already correct after 6.8:
 
-### 4.11 No "reset ribs" button for a selected skeleton point — `open`
+- **width / cap / corner** gate on `collectWidthEditPoints`, which since 6.8
+  resolves every selected skeleton object (points, handles, generated
+  points/handles, ribs) to its owning on-curve. ✅
+- **contour** gates on `panelSelection.contours`, and
+  `collectSkeletonPanelSelection` calls `noteContour` for _every_ kind, so the
+  contour section already appeared for any skeleton selection. ✅
+- **ribs** gated on `panelSelection.ribs` — the only section that required an
+  _explicit rib endpoint_ selection. Selecting a skeleton point, handle or
+  generated point showed no rib parameters at all. ❌
+
+So 4.10 reduced to the rib section alone.
+
+**Fix.** New `collectRibEditTargets(panelSelection)` in
+`skeleton-panel-model.js`: an explicit rib selection is used verbatim;
+otherwise every resolved on-curve point contributes **both** of its ribs, via
+the shared `getSkeletonRibSidesForPoint` (so single-sided contours contribute
+only their live side). The panel gates the rib section on this list and routes
+`_onRibChange` / `_resetRibs` through it.
+
+Also added `editable` to the panel state signature so the rib checkbox stays
+correct when a rib is made editable outside the panel. Handle offsets are
+deliberately **not** in the signature: they change every frame while a
+generated handle is dragged, which would rebuild the panel per frame.
+
+### 4.11 No "reset ribs" button for a selected skeleton point — `fixed` (2026-07-22)
 
 **Report:** when a skeleton point is selected there should be a button that
 resets _both_ of that point's ribs.
 
-**Inferred context:** "reset" presumably means clearing the per-side width
-overrides, nudges, handle offsets/detach and editable flags back to the
-contour/master default — i.e. the inverse of the accumulated rib state, in one
-action. Donor research owed on exactly which fields its reset cleared. Note the
-related 5.3 item (single generated handle reset) from the `z-mod-for-editable`
-branch — same family, different scope.
+**Fix.** Falls out of 4.10's `collectRibEditTargets`: with a skeleton point
+selected, the rib section's existing **Reset rib** / **Reset handles** buttons
+now act on both of that point's ribs, because the derived target list contains
+both sides. No new edit code was needed — `resetPanelRibs` →
+`resetSkeletonEditableRib` / `resetSkeletonEditableRibHandles` already did the
+per-side work, and was already wired to the buttons.
+
+The reset button relabels itself to **Reset both ribs**
+(`sidebar.skeleton-parameters.reset-ribs-both`) when it is acting on derived
+targets covering more than one rib, so it is clear it is not resetting a single
+hand-picked rib.
+
+Scope: "reset" therefore means what `resetSkeletonEditableRib` already meant —
+per-side width override, nudge, handle offsets/detach and the editable flag.
+The related 5.3 item (single generated handle reset, from
+`z-mod-for-editable`) is a narrower scope and remains open.
+
+**Manual test matrix for 4.10 + 4.11 (views-editor — no harness):**
+
+| #   | Selection                         | Expected                                                       |
+| --- | --------------------------------- | -------------------------------------------------------------- |
+| 1   | Skeleton on-curve point           | width + contour + cap + corner + **rib** sections all show     |
+| 2   | Skeleton off-curve handle         | same sections show (resolves to owning on-curve)               |
+| 3   | Editable generated point          | same sections show                                             |
+| 4   | Editable generated handle         | same sections show                                             |
+| 5   | Single rib endpoint               | rib section shows; button reads **Reset rib** (singular)       |
+| 6   | Skeleton point → Reset rib        | button reads **Reset both ribs**; both sides reset in one undo |
+| 7   | Skeleton point → Reset handles    | handle offsets/detach cleared on both sides                    |
+| 8   | Point on a single-sided contour   | rib section shows one side only; label stays **Reset rib**     |
+| 9   | Point → toggle Editable           | both ribs become editable (markers appear on both sides)       |
+| 10  | Multi-select several points       | rib ops apply to every selected point's both ribs, one undo    |
+| 11  | Make a rib editable via canvas    | panel checkbox updates without needing a reselect              |
+| 12  | Drag an editable generated handle | panel does **not** rebuild per frame (no flicker, no lag)      |
 
 ### 4.12 Q-measure ignores the skeleton — `fixed` (2026-07-22)
 

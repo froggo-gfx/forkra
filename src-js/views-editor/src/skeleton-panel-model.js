@@ -7,6 +7,7 @@ import {
   getSkeletonHandleOffset,
   getSkeletonPointHalfWidth,
   getSkeletonPointWidth,
+  getSkeletonRibSidesForPoint,
 } from "@fontra/core/skeleton-model.js";
 import { parseSelection } from "@fontra/core/utils.ts";
 import { getSkeletonPointAddress, parseSkeletonPointKey } from "./skeleton-editing.js";
@@ -388,6 +389,36 @@ export function summarizeSkeletonCornerSelection(selectedPoints) {
   };
 }
 
+// The ribs the panel's rib section acts on.
+//
+// An explicit rib selection wins and is used verbatim. Otherwise every selected
+// skeleton object contributes *both* ribs of its owning on-curve point, so the
+// rib parameters — and the reset buttons — are reachable from a plain skeleton
+// point, handle or generated-point selection instead of only from a rib
+// endpoint. Single-sided contours contribute only their live side, via the
+// shared `getSkeletonRibSidesForPoint`.
+//
+// `derived` tells the panel it is acting on both sides of a point rather than
+// on one hand-picked rib, so it can label the reset buttons accordingly.
+export function collectRibEditTargets(panelSelection) {
+  if (panelSelection?.ribs?.length) {
+    return { ribs: panelSelection.ribs, derived: false };
+  }
+  const ribs = [];
+  const seen = new Set();
+  for (const entry of collectWidthEditPoints(panelSelection)) {
+    for (const side of getSkeletonRibSidesForPoint(entry.contour, entry.point)) {
+      const key = `${entry.contourId}/${entry.pointId}/${side}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      ribs.push({ ...entry, side });
+    }
+  }
+  return { ribs, derived: true };
+}
+
 export function summarizeSkeletonRibSelection(selectedRibs) {
   return {
     editable: reduceValues(
@@ -447,7 +478,11 @@ export function makeSkeletonPanelStateSignature({
   if (panelSelection) {
     for (const entry of collectWidthEditPoints(panelSelection)) {
       parts.push(
-        `p:${entry.contourId}/${entry.pointId}:${JSON.stringify(entry.point.width)}:${JSON.stringify(entry.point.nudge)}:${entry.point.capStyle}:${entry.point.capRadiusRatio}:${entry.point.capTension}:${entry.point.capAngle}:${entry.point.capDistance}:${entry.point.capBallRatio}:${entry.point.capBallShape}:${entry.point.capBallSide}:${entry.point.roundnessStrength}:${entry.point.cornerAsymmetry}`
+        // `editable` is tracked so the rib section's checkbox stays correct
+        // when a rib is made editable outside the panel. Handle offsets are
+        // deliberately NOT tracked: they change every frame while a generated
+        // handle is dragged, which would rebuild the panel per frame.
+        `p:${entry.contourId}/${entry.pointId}:${JSON.stringify(entry.point.width)}:${JSON.stringify(entry.point.nudge)}:${JSON.stringify(entry.point.editable)}:${entry.point.capStyle}:${entry.point.capRadiusRatio}:${entry.point.capTension}:${entry.point.capAngle}:${entry.point.capDistance}:${entry.point.capBallRatio}:${entry.point.capBallShape}:${entry.point.capBallSide}:${entry.point.roundnessStrength}:${entry.point.cornerAsymmetry}`
       );
     }
     for (const entry of panelSelection.contours) {
