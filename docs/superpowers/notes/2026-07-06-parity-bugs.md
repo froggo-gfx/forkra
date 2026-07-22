@@ -1055,12 +1055,14 @@ Q-measure part of it landed as 4.12.
 **Adapted, and extended to Tunni on the user's request.** A single transient
 "drag readout" now covers both controls:
 
-- `scene-model.js` `getDragReadout(positionedGlyph)` returns `{x, y, label,
-kind}` or null. Rib: derived from `initialClickedSkeletonRibKey` (already
-  published for the crosshair, 4.9) → total width + L/R half-widths at the rib
-  endpoint. Tunni: from a new `tunniDragTarget`, published by the pointer around
-  both Tunni drag calls → segment tension + control-handle distance at the
-  control-handle point.
+- `scene-model.js` `getDragReadouts(positionedGlyph)` returns an array of
+  `{x, y, label, kind}`. Rib: derived from `initialClickedSkeletonRibKey`
+  (already published for the crosshair, 4.9) → one readout with total width +
+  L/R half-widths at the rib endpoint. Tunni: from a new `tunniDragTarget`,
+  published by the pointer around both Tunni drag calls → **one readout per
+  handle**, sitting on that handle and carrying **its own** distance and
+  tension via `calculateHandleMeasure` — the same per-handle numbers the native
+  point labels show, not the segment tension or the control-point distance.
 - Both are re-read from live geometry every frame, so the numbers track the
   drag instead of freezing at mousedown.
 - The Tunni readout is **suppressed when `fontra.point.labels` is on**: those
@@ -1081,16 +1083,16 @@ readout is most useful while the value is actually changing.
 
 **Manual test matrix (views-editor — no harness):**
 
-| #   | Action                                   | Expected                                             |
-| --- | ---------------------------------------- | ---------------------------------------------------- |
-| 1   | Drag a rib endpoint                      | readout at the rib: total width + L/R, tracking live |
-| 2   | Release the rib drag                     | readout disappears                                   |
-| 3   | Drag a Tunni point, point labels **off** | readout: `T <tension>` + `d <handle distance>`       |
-| 4   | Same drag, point labels **on**           | **no** readout (labels already show it)              |
-| 5   | Drag a skeleton Tunni point, labels off  | readout appears, blue                                |
-| 6   | Drag a path Tunni point, labels off      | readout appears, green                               |
-| 7   | Toggle the "Drag readout" layer off      | nothing appears for any of the above                 |
-| 8   | Z/Alt-modified rib drag                  | readout still tracks                                 |
+| #   | Action                                   | Expected                                                                              |
+| --- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
+| 1   | Drag a rib endpoint                      | readout at the rib: total width + L/R, tracking live                                  |
+| 2   | Release the rib drag                     | readout disappears                                                                    |
+| 3   | Drag a Tunni point, point labels **off** | **two** readouts, one per handle, each `T <tension>` + `d <distance>` for that handle |
+| 4   | Same drag, point labels **on**           | **no** readout (labels already show it)                                               |
+| 5   | Drag a skeleton Tunni point, labels off  | readout appears, blue                                                                 |
+| 6   | Drag a path Tunni point, labels off      | readout appears, green                                                                |
+| 7   | Toggle the "Drag readout" layer off      | nothing appears for any of the above                                                  |
+| 8   | Z/Alt-modified rib drag                  | readout still tracks                                                                  |
 
 Original scope, for the record:
 
