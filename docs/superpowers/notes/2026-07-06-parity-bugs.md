@@ -567,10 +567,54 @@ Tangent- and interpolate-drag behaviors keep per-rib raw deltas. The clicked
 rib is tracked as `initialClickedSkeletonRibKey` (edit-tools-pointer.js),
 mirroring the skeleton-point mechanism.
 
-### 4.4 Skeleton + basic contours multi-select UX rework — `open` (needs UX rework)
+### 4.4 Skeleton + basic contours multi-select UX rework — `works as described` (audited 2026-07-22); a _different_ mixed case is still broken
 
 **Report:** Multi-select across skeleton and basic contours needs a UX rework too
 (companion to 4.3).
+
+**Audit (2026-07-22).** No commit ever referenced 4.4 and it never had a Fix
+section — it was parked pending a UX decision, exactly as 4.3 was before the
+user specified its three rules. But the capability it names **works today**,
+acquired incidentally from three other changes:
+
+1. **Marquee** — `selectionAtRect` (scene-model.js) collects `point/N` and
+   `skeletonPoint/…` in the same rect (from 4.3's `919bd2634`, plus
+   `d667d1555` for the point/handle filter). Ribs are the documented
+   fallback-only exception.
+2. **Drag** — `EditBehaviorFactory` unpacks `pointSelection` into
+   `this.contours` **and** stores `targetEntries` (edit-behavior.js:61–72).
+   They are additive, not exclusive: basic points move through the factory's
+   own path behavior, skeleton points through the skeleton target entry, in
+   one drag and one undo record.
+3. **Transform** — 4.13 (`29f9156bb`) passes skeleton target entries to
+   `handleBoundsTransformSelection`, using that same additive mechanism.
+
+Ctrl+A (4.6) deliberately produces a mixed skeleton+path selection, which
+already assumed this worked.
+
+**The real remaining gap is a different pairing.** `makeSkeletonTargetEntries`
+(edit-tools-pointer.js:689) is a mutually exclusive if/else over selection
+kinds, so mixed **skeleton-kind × skeleton-kind** selections silently drop part
+of the selection:
+
+| Selection                         | Branch taken     | Silently not moved |
+| --------------------------------- | ---------------- | ------------------ |
+| skeleton point + rib              | rib-like         | the skeleton point |
+| skeleton point + generated handle | generated-handle | the skeleton point |
+| rib + generated handle            | generated-handle | the rib            |
+
+Reachable by shift+click (marquee can't produce rib+other, by 4.3's rule 2).
+Note `getSelectionTargetKinds` already returns a **Set** of kinds — the
+modifier machinery anticipates mixed selections while entry construction does
+not, which suggests the exclusivity is an unexamined shortcut rather than a
+considered design.
+
+**Not fixed here because it needs a UX call**, the same one 4.4 was parked for:
+when a rib and a skeleton point are dragged together, does the rib take the
+point's raw delta or its own normal-projected width delta (4.3's shared-delta
+rule)? The per-kind modifier options (`constrainMode`, `clickedRibKey`,
+`fixedRib`) differ, so merging the branches naively would change rib drag
+semantics. Decide the rule, then make the branches additive.
 
 ### 4.5 Double-click selects whole skeleton contour — `fixed` (2026-07-17)
 
