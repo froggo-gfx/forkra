@@ -395,12 +395,11 @@ convention. That is why every editor-side plan carries an explicit manual test m
 
 **Live queue:** `notes/2026-07-06-parity-bugs.md` is authoritative. Open at time of writing:
 
-| Item            | Summary                                                                                      |
-| --------------- | -------------------------------------------------------------------------------------------- |
-| 4.4             | Skeleton + basic contour multi-select UX needs rework                                        |
-| 5.1 / 5.2 / 5.3 | Old-architecture branches still to adapt: width-highlight, q-metrix-drag, z-mod-for-editable |
-| 6.10            | Detached handles "shiver" when adjusting skeleton handles (investigated, unresolved)         |
-| 4.9–4.13        | Fixed 2026-07-21/22 (4.4 excepted) — **manual test matrices still owed**                     |
+| Item               | Summary                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------ |
+| 6.10               | Detached handles "shiver" when adjusting skeleton handles (investigated, unresolved) |
+| 4.4 / 5.1          | Deprecated 2026-07-22 — not reproduced on forkra; rationale kept in the registry     |
+| 4.9–4.13, 5.2, 5.3 | Fixed 2026-07-21/22 — **manual test matrices still owed**                            |
 
 **Structural debt, not yet filed as bugs:**
 
