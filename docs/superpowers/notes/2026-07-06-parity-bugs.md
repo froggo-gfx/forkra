@@ -1101,14 +1101,21 @@ model stores `handleOffsets[side+role] = {x, y, detached}`.
   `{x: derived − ribPoint, y: …, detached: true}` — the same
   scratch-regeneration technique `computeRibDetachConversions` already uses.
 
-**Z-only generated handle drag — `not ported` (coupled to side locks).** The
-donor's rule is "plain drag does nothing on a generated handle; Z-drag adjusts
-it". That exists because the side-lock model makes generated adjustment
-**default-on**, so plain drags had to be restricted to avoid nudging derived
-geometry by accident. Our model is opt-in via `editable`: the user has already
-declared intent for that handle, so plain drag is the useful default. Porting
-the restriction alone would make our editable handles strictly harder to use.
-Revisit only if the side-lock model is adopted.
+**Z-only generated handle drag — `nothing to port` (compared 2026-07-22).**
+Behaviour compared side by side, as the item asked:
+
+| Object                    | Donor                                | forkra                                                                                                      |
+| ------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `editableGeneratedPoint`  | plain = rib width; Z = tangent slide | same (`constrainMode: "tangent"` when `tangentRibMode`)                                                     |
+| `editableGeneratedHandle` | plain = **nothing**; Z = move        | plain = move (attached: delta projected onto the skeleton handle direction; detached: free 2D); Z not wired |
+| both                      | Alt/X specialised                    | Alt = equalize (X binding retired, 1.7)                                                                     |
+
+No capability is missing — the donor's Z _is_ our plain drag, and ours is
+richer (directional projection for attached handles). The donor gates it behind
+Z only because side locks make generated adjustment **default-on**, so plain
+drags would otherwise nudge derived geometry constantly. Our `editable` opt-in
+means the user has already declared intent for that handle. Porting the gate
+alone would strictly reduce usability. Revisit only if side locks are adopted.
 
 **Side locks replace editable flags — `not ported` (needs a product decision).**
 This is a semantic inversion, not a port: generated-side adjustment becomes
