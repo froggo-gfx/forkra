@@ -1117,6 +1117,47 @@ d ${measure.distance.toFixed(1)}`,
     return readouts;
   }
 
+  // Re-read the dragged Tunni segment from live geometry each frame.
+  _resolveTunniDragSegment(positionedGlyph) {
+    const target = this.tunniDragTarget;
+    if (target?.kind === "skeleton") {
+      const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+      const contour = (skeletonData?.contours || []).find(
+        (candidate) => candidate.id === target.contourId
+      );
+      if (!contour) {
+        return null;
+      }
+      for (const segment of iterSkeletonCurveSegments(contour)) {
+        if (
+          segment.startPoint?.id === target.startPointId &&
+          segment.endPoint?.id === target.endPointId &&
+          segment.offCurvePoints.length === 2
+        ) {
+          return [
+            segment.startPoint,
+            segment.offCurvePoints[0],
+            segment.offCurvePoints[1],
+            segment.endPoint,
+          ];
+        }
+      }
+      return null;
+    }
+    const path = positionedGlyph.glyph?.path;
+    const indices = target?.pointIndices;
+    if (!path || indices?.length !== 4) {
+      return null;
+    }
+    return indices.map((index) => {
+      try {
+        return path.getPoint(index);
+      } catch {
+        return null;
+      }
+    });
+  }
+
   // Live position of the object that started the current drag, for the
   // drag-crosshair layer. Regular path points, skeleton points/handles, rib
   // endpoints and editable generated points/handles all resolve here, so the
