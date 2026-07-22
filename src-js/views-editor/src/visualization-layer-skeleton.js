@@ -227,10 +227,13 @@ function forEachEditableGeneratedTarget(positionedGlyph, model, callback) {
       const sourcePoint = (contour?.points || []).find(
         (point) => point.id === provenance.skeletonPointId
       );
+      // Adjustable is the default since side locks landed, so marking every
+      // adjustable target would mark nearly the whole outline. Mark the
+      // exceptional state instead: generated targets whose side is LOCKED.
       if (
         !contour ||
         sourcePoint?.type ||
-        isSkeletonSideLocked(sourcePoint, provenance.side)
+        !isSkeletonSideLocked(sourcePoint, provenance.side)
       ) {
         continue;
       }
@@ -324,8 +327,11 @@ registerVisualizationLayerDefinition({
 
 // Donor parity (donor "fontra.skeleton.rib.points", zIndex 560): rib endpoints
 // are stroked diamonds drawn ABOVE the other skeleton layers so they stay
-// visible; unlocked sides are larger and purple, locked pink; selected
-// diamonds are filled. Both distinctions (selected/unselected,
+// visible; selected diamonds are filled.
+//
+// Since side locks landed, adjustable is the DEFAULT state, so the plain
+// (smaller, pink) style is the default and the emphatic purple one marks the
+// exceptional state — a LOCKED side. Both distinctions (selected/unselected,
 // locked/unlocked) must be readable at a glance.
 registerVisualizationLayerDefinition({
   identifier: "fontra.skeleton.rib-points",
@@ -336,24 +342,24 @@ registerVisualizationLayerDefinition({
   zIndex: 560,
   screenParameters: {
     endpointSize: 10,
-    editableEndpointSize: 12,
+    lockedEndpointSize: 12,
     strokeWidth: 2,
   },
   colors: {
     endpointColor: "rgba(220, 60, 120, 0.7)",
     endpointHoverColor: "rgba(220, 60, 120, 1)",
     endpointSelectedColor: "rgba(255, 64, 0, 0.9)",
-    editableColor: "rgba(160, 40, 180, 0.9)",
-    editableHoverColor: "rgba(160, 40, 180, 1)",
-    editableSelectedColor: "rgba(160, 40, 180, 1)",
+    lockedColor: "rgba(160, 40, 180, 0.9)",
+    lockedHoverColor: "rgba(160, 40, 180, 1)",
+    lockedSelectedColor: "rgba(160, 40, 180, 1)",
   },
   colorsDarkMode: {
     endpointColor: "rgba(220, 100, 140, 0.7)",
     endpointHoverColor: "rgba(220, 100, 140, 1)",
     endpointSelectedColor: "rgba(255, 96, 64, 0.9)",
-    editableColor: "rgba(180, 80, 200, 0.9)",
-    editableHoverColor: "rgba(180, 80, 200, 1)",
-    editableSelectedColor: "rgba(180, 80, 200, 1)",
+    lockedColor: "rgba(180, 80, 200, 0.9)",
+    lockedHoverColor: "rgba(180, 80, 200, 1)",
+    lockedSelectedColor: "rgba(180, 80, 200, 1)",
   },
   draw: (context, positionedGlyph, parameters, model) => {
     const ribSelection = getSkeletonRibSelectionSets(model);
@@ -367,25 +373,24 @@ registerVisualizationLayerDefinition({
             continue;
           }
           const key = makeSkeletonRibKey(contour.id, point.id, side);
-          const editable = side === "left" ? rib.unlockedLeft : rib.unlockedRight;
+          // Locked is the marked state: it gets the larger purple treatment.
+          const locked = side === "left" ? !rib.unlockedLeft : !rib.unlockedRight;
           const selected = ribSelection.selected.has(key);
           const hovered = ribSelection.hovered.has(key);
           const color = selected
-            ? editable
-              ? parameters.editableSelectedColor
+            ? locked
+              ? parameters.lockedSelectedColor
               : parameters.endpointSelectedColor
             : hovered
-              ? editable
-                ? parameters.editableHoverColor
+              ? locked
+                ? parameters.lockedHoverColor
                 : parameters.endpointHoverColor
-              : editable
-                ? parameters.editableColor
+              : locked
+                ? parameters.lockedColor
                 : parameters.endpointColor;
           context.strokeStyle = color;
           context.fillStyle = color;
-          const size = editable
-            ? parameters.editableEndpointSize
-            : parameters.endpointSize;
+          const size = locked ? parameters.lockedEndpointSize : parameters.endpointSize;
           drawDiamondNode(context, rib[side], size, selected);
         }
       }
@@ -664,7 +669,7 @@ registerVisualizationLayerDefinition({
 
 registerVisualizationLayerDefinition({
   identifier: "fontra.skeleton.editable-markers",
-  name: "Skeleton adjustable markers",
+  name: "Skeleton locked markers",
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: true,
@@ -690,8 +695,9 @@ registerVisualizationLayerDefinition({
     hoverStrokeColor: "rgba(199, 119, 221, 1)",
     selectedStrokeColor: "rgba(255, 174, 68, 1)",
   },
-  // Unlocked rib endpoints are drawn (purple, larger) by the ribs layer;
-  // this layer marks the adjustable GENERATED targets on the outline.
+  // Locked rib endpoints are drawn (purple, larger) by the rib-points layer;
+  // this layer marks the GENERATED targets on the outline that are blocked by
+  // that same lock.
   draw: (context, positionedGlyph, parameters, model) => {
     context.lineWidth = parameters.strokeWidth;
     context.strokeStyle = parameters.strokeColor;
