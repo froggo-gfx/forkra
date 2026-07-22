@@ -445,7 +445,56 @@ of the two files' importer sets, not eight: `edit-tools-pointer.js`, `measure-in
 
 ## 5. Verification
 
-Per phase, in order:
+### 5.0 The differential harness — `docs/superpowers/verify-skeleton-merge.mjs`
+
+The suite, `node --check` and the bundle all share one blind spot for _this_ change: they
+check that the code still **runs**, not that it does the **same thing**. A merge that rounds
+differently, drops a trailing key segment, or flips a malformed-input contract passes all
+three, and the suite only touches a fraction of the 119 exported skeleton symbols.
+
+So the primary gate is a differential snapshot harness, kept **next to this plan** rather than
+in `scripts/` — it is a throwaway gate for one refactor, not part of the app build, and plan
+and harness should be read and retired together. Delete both when the merge lands.
+
+It snapshots every skeleton export on the **before** tree and again on the **after** tree, and
+diffs. It keys everything by **symbol name, never by file**, so relocation is invisible and
+only real changes surface. Five arms, each proven to fire by a negative control on 2026-07-23:
+
+| Arm              | Catches                                             | Negative control                    |
+| ---------------- | --------------------------------------------------- | ----------------------------------- |
+| symbol set       | an export vanishing or going private                | un-export → **caught**              |
+| signature        | arity / generator-ness drift                        | structural                          |
+| **behaviour**    | same inputs → different return/throw                | 4480 cases; 4.1 → **17 caught**     |
+| import direction | any new `core → views-editor` edge                  | 0 today, asserted                   |
+| **cycles**       | a new cycle, or 4.5 failing to remove the known one | detects `editing ↔ generated` today |
+
+Corpus at time of writing: **4560 calls, 33.6 % returning a real (non-null) value** over
+open/closed/single-sided/empty skeletons plus a key-grammar suite aimed exactly where the
+three families disagree (§4.5). Generators materialized, floats canonicalized so last-bit
+noise is not read as a change.
+
+Run per phase, from the repo root:
+
+```
+node docs/superpowers/verify-skeleton-merge.mjs snapshot . /tmp/before.json   # once, before the phase
+# …do the phase…
+node docs/superpowers/verify-skeleton-merge.mjs snapshot . /tmp/after.json
+node docs/superpowers/verify-skeleton-merge.mjs compare  /tmp/before.json /tmp/after.json phase-4.1.allow.json
+```
+
+The **allow-list** names only the symbols that phase intends to change, so the gate is
+**zero _unexplained_ divergences**, not zero divergences —
+
+```json
+{ "deletedSymbols": [], "changedBehavior": ["parseSkeletonPointKey"] }
+```
+
+Take the `before.json` snapshot **once, on this branch before phase 4.1**, and compare every
+later phase against it, so nothing accumulates unnoticed across phases. When 4.5 lands, the
+`compare` output must include `cycle dissolved: skeleton-editing → skeleton-generated`
+(§2.8) — that line is 4.5's objective pass condition.
+
+### 5.1 The rest, per phase, in order
 
 1. `cd src-js/fontra-core && npm test` — **1394 baseline, re-measured 2026-07-23 on
    `refactor-simple/ws17-parity-bugs`, 987 ms.** Phases 4.1, 4.3 and 4.5 are genuinely
@@ -467,7 +516,8 @@ Per phase, in order:
    selections. 4.2 no longer needs one: it is a whole-file move with no signature changes and
    full mocha coverage on both sides.
 
-A green bundle is not evidence that an interaction works.
+A green bundle is not evidence that an interaction works. The harness (5.0) is what makes
+"the merge went clean" a checkable claim rather than a hope.
 
 ---
 
