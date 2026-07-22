@@ -77,7 +77,7 @@ export const strings = {
   "application-settings.display-language.status.beta": "beta",
   "application-settings.display-language.status.wip": "trabalho em andamento",
   "application-settings.display-language.title": "Display Language",
-  "application-settings.display-language.title.translated": "Exibir Idioma",
+  "application-settings.display-language.title.translated": "Idioma de Exibição",
   "application-settings.editor-behavior.title": "Comportamento do Editor",
   "application-settings.plugins-manager.title": "Gerenciador de Plugin",
   "application-settings.server-info.title": "Informações do servidor",
@@ -211,7 +211,7 @@ export const strings = {
   "editor.pen-tool-quad": "Ferramenta Caneta (quadrática)",
   "editor.pointer-tool": "Ferramenta Ponteiro",
   "editor.pointer-tool-scale":
-    "Ferramenta Ponteiro (Comportamento de ferramenta de edição de escala)",
+    "Ferramenta Ponteiro (Comportamento de edição de escala)",
   "editor.pointer-tools": "Ferramentas de Ponteiro",
   "editor.power-ruler-tool": "Ferramenta Régua Inteligente",
   "editor.shape-tool": "Ferramenta Forma",
@@ -329,7 +329,7 @@ export const strings = {
   "shortcuts.tooltip.reset-to-default": "Redefinir para o padrão",
   "shortcuts.warning.exists": "Atalho existente para: %0",
   "sidebar.characters-glyphs": "Caracteres de entrada e glifos de saída",
-  "sidebar.characters-glyphs.advance": "Avançado",
+  "sidebar.characters-glyphs.advance": "Avanço",
   "sidebar.characters-glyphs.cluster": "Cluster",
   "sidebar.characters-glyphs.index": "Índice",
   "sidebar.characters-glyphs.input-characters": "Caracteres de entrada",
@@ -504,7 +504,7 @@ export const strings = {
   "sidebar.selection-transformation.title": "Transformação",
   "sidebar.text-entry": "Entrada de Texto",
   "sidebar.text-entry.apply-text-shaping":
-    "Aplicar formatação de texto e recursos OpenType",
+    "Aplicar modelagem de texto e recursos OpenType",
   "sidebar.text-entry.automatic": "Automático",
   "sidebar.text-entry.direction": "Direção",
   "sidebar.text-entry.direction.left-to-right": "Da esquerda para direita",
@@ -515,9 +515,9 @@ export const strings = {
   "sidebar.text-entry.section.positioning-from-font-data":
     "Posicionamento por dados da fonte",
   "sidebar.text-entry.section.substitution": "Substituição",
-  "sidebar.text-entry.text-shaping-options": "Opções de formatação de texto",
+  "sidebar.text-entry.text-shaping-options": "Opções de modelagem de texto",
   "sidebar.text-entry.text-shaping.options.tooltip":
-    "Opções adicionais de formatação de texto",
+    "Opções adicionais de modelagem de texto",
   "sidebar.user-settings": "Configurações do Usuário",
   "sidebar.user-settings.clipboard": "Formato de exportação de área de transferência",
   "sidebar.user-settings.component.nodes": "Alças e nós dos componentes",
