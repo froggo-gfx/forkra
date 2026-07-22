@@ -1507,16 +1507,14 @@ function drawMeasureGuideLine(context, p1, p2, color, parameters) {
 // scene model decides whether anything applies (including suppressing the Tunni
 // readout when the native point labels are on); this is render-only.
 export function drawDragReadout(context, positionedGlyph, parameters, model) {
-  const readout = model.getDragReadout?.(positionedGlyph);
-  if (!readout) {
-    return;
+  for (const readout of model.getDragReadouts?.(positionedGlyph) || []) {
+    const color =
+      readout.kind === "skeleton" ? parameters.skeletonColor : parameters.pathColor;
+    drawMeasureLabel(context, readout.x, readout.y, readout.label, color, parameters, {
+      offsetY: 8,
+      alignBottom: true,
+    });
   }
-  const color =
-    readout.kind === "skeleton" ? parameters.skeletonColor : parameters.pathColor;
-  drawMeasureLabel(context, readout.x, readout.y, readout.label, color, parameters, {
-    offsetY: 8,
-    alignBottom: true,
-  });
 }
 
 function drawMeasureLabel(context, x, y, label, color, parameters, options = {}) {

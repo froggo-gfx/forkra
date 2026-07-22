@@ -2,6 +2,7 @@ import {
   pointInConvexPolygon,
   rectIntersectsPolygon,
 } from "@fontra/core/convex-hull.js";
+import { calculateHandleMeasure } from "@fontra/core/distance-angle.js";
 import {
   getSuggestedGlyphName,
   guessDirectionFromCodePoints,
@@ -30,11 +31,7 @@ import {
 } from "@fontra/core/skeleton-model.js";
 import { skeletonTunniHitTest } from "@fontra/core/skeleton-tunni.js";
 import { decomposedToTransform } from "@fontra/core/transform.js";
-import {
-  calculateControlHandleDistance,
-  calculateControlHandlePoint,
-  calculateSegmentTension,
-} from "@fontra/core/tunni-calculations.js";
+
 import {
   assert,
   consolidateCalls,
@@ -1028,21 +1025,21 @@ export class SceneModel {
     };
   }
 
-  // Transient readout shown while a control is being adjusted: rib width for a
-  // rib drag, tension + control-handle distance for a Tunni drag. Returns
-  // { x, y, label, kind } in glyph space, or null when nothing applies.
+  // Transient readouts shown while a control is being adjusted: rib width for a
+  // rib drag, and one per handle for a Tunni drag. Returns an array of
+  // { x, y, label, kind } in glyph space (empty when nothing applies).
   //
-  // Both are derived live from the current geometry, so the numbers track the
-  // drag rather than showing the values captured at mousedown.
-  getDragReadout(positionedGlyph = this.getSelectedPositionedGlyph()) {
+  // Everything is re-read from live geometry, so the numbers track the drag
+  // rather than showing the values captured at mousedown.
+  getDragReadouts(positionedGlyph = this.getSelectedPositionedGlyph()) {
     if (!positionedGlyph) {
-      return null;
+      return [];
     }
     const ribReadout = this._getRibDragReadout(positionedGlyph);
     if (ribReadout) {
-      return ribReadout;
+      return [ribReadout];
     }
-    return this._getTunniDragReadout(positionedGlyph);
+    return this._getTunniDragReadouts(positionedGlyph);
   }
 
   _getRibDragReadout(positionedGlyph) {
@@ -1083,74 +1080,41 @@ L ${left.toFixed(1)}  R ${right.toFixed(1)}`,
     return null;
   }
 
-  // Only when the native point labels are switched off: with them on, the same
-  // numbers are already on screen and a second readout is just noise.
-  _getTunniDragReadout(positionedGlyph) {
+  // One readout per handle, sitting on that handle and carrying ITS OWN
+  // distance and tension (not the segment's) — the same per-handle numbers the
+  // native point labels show, which is why this is suppressed while those
+  // labels are on: they would be saying the same thing twice.
+  _getTunniDragReadouts(positionedGlyph) {
     if (!this.tunniDragTarget) {
-      return null;
+      return [];
     }
     if (this.visualizationLayersSettings?.model?.["fontra.point.labels"]) {
-      return null;
+      return [];
     }
     const segmentPoints = this._resolveTunniDragSegment(positionedGlyph);
     if (segmentPoints?.length !== 4 || segmentPoints.some((point) => !point)) {
-      return null;
+      return [];
     }
-    const [on1, off1, off2, on2] = segmentPoints;
-    const tension = calculateSegmentTension(off1, on1, off2, on2);
-    const handleDistance = calculateControlHandleDistance(segmentPoints);
-    const anchor = calculateControlHandlePoint(segmentPoints);
-    if (!anchor) {
-      return null;
-    }
-    return {
-      x: anchor.x,
-      y: anchor.y,
-      kind: this.tunniDragTarget.kind === "skeleton" ? "skeleton" : "path",
-      label: `T ${tension.toFixed(2)}
-d ${handleDistance.toFixed(1)}`,
-    };
-  }
-
-  // Re-read the dragged Tunni segment from live geometry each frame.
-  _resolveTunniDragSegment(positionedGlyph) {
-    const target = this.tunniDragTarget;
-    if (target?.kind === "skeleton") {
-      const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
-      const contour = (skeletonData?.contours || []).find(
-        (candidate) => candidate.id === target.contourId
-      );
-      if (!contour) {
-        return null;
+    const kind = this.tunniDragTarget.kind === "skeleton" ? "skeleton" : "path";
+    const readouts = [];
+    for (const [side, handleIndex] of [
+      ["start", 1],
+      ["end", 2],
+    ]) {
+      const measure = calculateHandleMeasure(segmentPoints, side);
+      if (!measure) {
+        continue;
       }
-      for (const segment of iterSkeletonCurveSegments(contour)) {
-        if (
-          segment.startPoint?.id === target.startPointId &&
-          segment.endPoint?.id === target.endPointId &&
-          segment.offCurvePoints.length === 2
-        ) {
-          return [
-            segment.startPoint,
-            segment.offCurvePoints[0],
-            segment.offCurvePoints[1],
-            segment.endPoint,
-          ];
-        }
-      }
-      return null;
+      const handle = segmentPoints[handleIndex];
+      readouts.push({
+        x: handle.x,
+        y: handle.y,
+        kind,
+        label: `T ${measure.tension.toFixed(2)}
+d ${measure.distance.toFixed(1)}`,
+      });
     }
-    const path = positionedGlyph.glyph?.path;
-    const indices = target?.pointIndices;
-    if (!path || indices?.length !== 4) {
-      return null;
-    }
-    return indices.map((index) => {
-      try {
-        return path.getPoint(index);
-      } catch {
-        return null;
-      }
-    });
+    return readouts;
   }
 
   // Live position of the object that started the current drag, for the
