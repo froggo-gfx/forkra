@@ -153,13 +153,14 @@ skeleton parameter names, with glyph-case resolution on top. Folding it into
 
 ### Core — `fontra-core/src/`
 
-| File                          | Role                                                              | Change           |
-| ----------------------------- | ----------------------------------------------------------------- | ---------------- |
-| `skeleton-model.js`           | Schema, stable ids, accessors, rib projection, normals, constants | unchanged        |
-| `skeleton-generator.js`       | Centerline → outline, forward provenance                          | unchanged        |
-| `skeleton-modifiers.js`       | Pure operations on the model: fixed-rib, equalize family          | **dedup** (§4.1) |
-| `skeleton-tunni.js`           | Adapter: skeleton contours ↔ generic cubic segments               | **slim** (§4.2)  |
-| `skeleton-source-defaults.js` | Per-source config + glyph-case resolution                         | unchanged (§2.6) |
+| File                          | Role                                                              | Change                                  |
+| ----------------------------- | ----------------------------------------------------------------- | --------------------------------------- |
+| `skeleton-model.js`           | Schema, stable ids, accessors, rib projection, normals, constants | unchanged                               |
+| `skeleton-generator.js`       | Centerline → outline, forward provenance                          | unchanged                               |
+| `skeleton-modifiers.js`       | Pure operations on the model: fixed-rib, equalize, Tunni          | **dedup** (§4.1) + absorbs Tunni (§4.2) |
+| `skeleton-source-defaults.js` | Per-source config + glyph-case resolution                         | unchanged (§2.6)                        |
+
+`skeleton-tunni.js` is **dissolved**, not slimmed (§4.2).
 
 `skeleton-model.js` stays separate from `skeleton-modifiers.js` on a state-vs-operations
 split. That is a real role distinction and it survives the criterion.
@@ -208,17 +209,38 @@ there anyway), and both `skeleton-modifiers.js` and `skeleton-editing.js` import
 
 Risk: low. Covered by `test-skeleton-modifiers.js` and `test-skeleton-ribs.js`.
 
-### 4.2 Drop the `skeleton-tunni.js` pass-throughs — pure deletion
+### 4.2 Dissolve `skeleton-tunni.js`
 
-Remove `calculateSkeletonTunniPoint`, `calculateSkeletonTrueTunniPoint`,
-`calculateSkeletonEqualizedControlPoints`, `areSkeletonTensionsEqualized`. Call the generic
-`tunni-calculations.js` function with `segmentToTunniPoints(segment)` at each call site.
+The file goes away entirely, in three pieces:
+
+**Delete** the four pass-throughs — `calculateSkeletonTunniPoint`,
+`calculateSkeletonTrueTunniPoint`, `calculateSkeletonEqualizedControlPoints`,
+`areSkeletonTensionsEqualized`. Each is a one-liner; call the generic
+`tunni-calculations.js` function with `segmentToTunniPoints(segment)` at the call site.
+
+**Move to `skeleton-modifiers.js`** — `segmentToTunniPoints`, `buildSkeletonTunniSegments`,
+`calculateSkeletonControlPointsFromTunniDelta`, `calculateSkeletonOnCurveFromTunni`, and the
+private helpers `makeSkeletonTunniSegment`, `collectControlEntries`, `addProjected`.
+
+Rationale: `skeleton-modifiers.js` **already owns the equalize family**, and
+`calculateSkeletonEqualizedControlPoints` / `areSkeletonTensionsEqualized` are equalize
+functions that were filed in the wrong place. The delta→control-point conversions are
+skeleton handle operations, which is exactly what that file is for. This is a role match,
+not a dumping ground.
+
+**Move to `scene-model.js`** — `skeletonTunniHitTest`, folded into the existing
+`skeletonTunniAtPoint`, which today is a five-line wrapper that subtracts the glyph origin and
+delegates. R-A puts hit-testing in `scene-model.js` as `*AtPoint`; this removes a hop rather
+than adding one. It will import `buildSkeletonTunniSegments` and `calculateTunniPoint` /
+`calculateControlHandlePoint` directly.
 
 Importers to update: `scene-model.js`, `tunni-interactions.js`,
 `visualization-layer-skeleton.js`, `test-skeleton-tunni.js`.
 
-Risk: low, but it is the one phase where the call sites are in _untested_ editor code.
-Every touched site needs eyes.
+Risk: moderate. The pass-through deletion is mechanical, but `test-skeleton-tunni.js` (273
+lines) tests the functions being moved and must follow them — split it between
+`test-skeleton-modifiers.js` and whatever covers the hit test. The hit-test move lands in
+`scene-model.js`, which has no mocha coverage; verify it by direct instantiation (§5.3).
 
 ### 4.3 Fold `views-editor/src/skeleton-modifiers.js` into `skeleton-selection.js`
 
@@ -258,7 +280,8 @@ and only after 4.1–4.3 have landed and settled.
 Per phase, in order:
 
 1. `cd src-js/fontra-core && npm test` — 1394 baseline. Phases 4.1 and 4.4 are genuinely
-   covered here (§2.2); 4.2 is only partly.
+   covered here (§2.2); 4.2 keeps its coverage only if `test-skeleton-tunni.js` is split to
+   follow the code it tests. The test count must not drop.
 2. `node --check` on every touched editor file.
 3. **Direct instantiation check** for anything touching `scene-model.js`:
    ```
