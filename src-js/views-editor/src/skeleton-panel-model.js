@@ -8,6 +8,7 @@ import {
   getSkeletonPointHalfWidth,
   getSkeletonPointWidth,
   getSkeletonRibSidesForPoint,
+  isSkeletonSideLocked,
 } from "@fontra/core/skeleton-model.js";
 import { parseSelection } from "@fontra/core/utils.ts";
 import { getSkeletonPointAddress, parseSkeletonPointKey } from "./skeleton-editing.js";
@@ -438,8 +439,8 @@ export function singleGeneratedHandleTarget(panelSelection) {
 
 export function summarizeSkeletonRibSelection(selectedRibs) {
   return {
-    editable: reduceValues(
-      selectedRibs.map((entry) => entry.point?.editable?.[entry.side] === true)
+    locked: reduceValues(
+      selectedRibs.map((entry) => isSkeletonSideLocked(entry.point, entry.side))
     ),
     detached: reduceValues(
       selectedRibs.map(
@@ -495,11 +496,11 @@ export function makeSkeletonPanelStateSignature({
   if (panelSelection) {
     for (const entry of collectWidthEditPoints(panelSelection)) {
       parts.push(
-        // `editable` is tracked so the rib section's checkbox stays correct
-        // when a rib is made editable outside the panel. Handle offsets are
+        // `locked` is tracked so the rib section's checkbox stays correct
+        // when a side is locked outside the panel. Handle offsets are
         // deliberately NOT tracked: they change every frame while a generated
         // handle is dragged, which would rebuild the panel per frame.
-        `p:${entry.contourId}/${entry.pointId}:${JSON.stringify(entry.point.width)}:${JSON.stringify(entry.point.nudge)}:${JSON.stringify(entry.point.editable)}:${entry.point.capStyle}:${entry.point.capRadiusRatio}:${entry.point.capTension}:${entry.point.capAngle}:${entry.point.capDistance}:${entry.point.capBallRatio}:${entry.point.capBallShape}:${entry.point.capBallSide}:${entry.point.roundnessStrength}:${entry.point.cornerAsymmetry}`
+        `p:${entry.contourId}/${entry.pointId}:${JSON.stringify(entry.point.width)}:${JSON.stringify(entry.point.nudge)}:${JSON.stringify(entry.point.locked)}:${entry.point.capStyle}:${entry.point.capRadiusRatio}:${entry.point.capTension}:${entry.point.capAngle}:${entry.point.capDistance}:${entry.point.capBallRatio}:${entry.point.capBallShape}:${entry.point.capBallSide}:${entry.point.roundnessStrength}:${entry.point.cornerAsymmetry}`
       );
     }
     for (const entry of panelSelection.contours) {

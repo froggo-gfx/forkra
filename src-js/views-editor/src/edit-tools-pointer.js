@@ -673,7 +673,9 @@ export class PointerTool extends BaseTool {
         getSkeletonModifierBehaviorName(event, getRealtimeModifiers(), targetKinds) ||
         (hasRibLikeSelection(sceneController.selection)
           ? getSkeletonRibBehaviorName(event, getRealtimeModifiers())
-          : getBehaviorName(event));
+          : hasEditableGeneratedHandleSelection(sceneController.selection)
+            ? getGeneratedHandleBehaviorName(event, getRealtimeModifiers())
+            : getBehaviorName(event));
       let behaviorName = getSelectionBehaviorName(initialEvent);
 
       // Read the edit layer's skeleton data once; every layer's skeleton target
@@ -693,6 +695,12 @@ export class PointerTool extends BaseTool {
             sceneController.sceneModel.initialClickedSkeletonPointKey,
         });
         if (hasEditableGeneratedHandleSelection(sceneController.selection)) {
+          // Generated geometry is adjustable by default, so the modifier is the
+          // safety: only Z (move) and Alt (equalize) reach a generated handle.
+          // A plain drag builds no entry and leaves the derived handle alone.
+          if (!isGeneratedHandleAdjustBehavior(name)) {
+            return [];
+          }
           return createEditableGeneratedHandleTargetEntries(
             layerGlyph,
             sceneController.selection,
@@ -1286,6 +1294,27 @@ function hasEditableGeneratedPointSelection(selection) {
 
 function hasEditableGeneratedHandleSelection(selection) {
   return !!parseSelection([...selection]).editableGeneratedHandle?.length;
+}
+
+// Generated handles move only under a modifier (donor side-lock model): Z
+// moves the handle, Alt equalizes. The name carries Z so that pressing or
+// releasing it mid-drag rebuilds the behavior through the normal path.
+function getGeneratedHandleBehaviorName(event, modifiers = {}) {
+  if (event?.altKey) {
+    return getBehaviorName(event);
+  }
+  return modifiers.tangentRibMode
+    ? "generated-handle-move"
+    : "generated-handle-default";
+}
+
+function isGeneratedHandleAdjustBehavior(name) {
+  return (
+    name === "generated-handle-move" ||
+    name === "alternate" ||
+    name === "alternate-constrain" ||
+    name?.startsWith("equalize") === true
+  );
 }
 
 function hasRibLikeSelection(selection) {

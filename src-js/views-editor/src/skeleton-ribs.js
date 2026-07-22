@@ -5,6 +5,7 @@ import {
   getSkeletonPointNudge,
   getSkeletonRibPosition,
   getSkeletonRibSidesForPoint,
+  isSkeletonSideLocked,
   setSkeletonHandleOffset,
   setSkeletonPointSideNudge,
   setSkeletonPointSideWidth,
@@ -96,16 +97,17 @@ export function createSkeletonRibExecutor(
     : getSkeletonPointHalfWidth(point, defaultWidth, side);
   const originalNudge = getSkeletonPointNudge(point, side, defaultWidth);
   const tangent = { x: -normal.y, y: normal.x };
-  const editable = point.editable?.[side] === true;
+  // Adjustment is available unless the side is locked.
+  const adjustable = !isSkeletonSideLocked(point, side);
   const forceTangent =
     behaviorName === "rib-tangent" || behaviorName === "rib-tangent-interpolate";
-  // Alt-drag interpolation (editable ribs only): the rib point slides along
+  // Alt-drag interpolation (unlocked ribs only): the rib point slides along
   // the axis between its generated handles; width stays fixed and the handle
   // offsets are compensated so the handles stay put on canvas (donor
   // InterpolatingRibBehavior). Without handles the axis degrades to the
   // tangent, i.e. a pure nudge.
   const interpolate =
-    editable &&
+    adjustable &&
     (behaviorName === "rib-interpolate" || behaviorName === "rib-tangent-interpolate");
   const axis = interpolate
     ? interpolationAxis || { dir: tangent, hasHandle: {} }
@@ -156,7 +158,7 @@ export function createSkeletonRibExecutor(
       // Free drag changes width only; the tangent nudge is exclusively the
       // Z-drag (donor parity: "Nudge follows tangent only when constrained").
       const nudge =
-        editable && tangentOnly ? round(originalNudge + tangentDelta) : originalNudge;
+        adjustable && tangentOnly ? round(originalNudge + tangentDelta) : originalNudge;
       return { halfWidth, nudge, side };
     },
   };
@@ -169,7 +171,7 @@ export function applySkeletonRibExecutorResult(address, result) {
   } else {
     setSkeletonPointSideWidth(point, defaultWidth, side, result.halfWidth);
   }
-  if (point.editable?.[side] === true) {
+  if (!isSkeletonSideLocked(point, side)) {
     setSkeletonPointSideNudge(point, side, result.nudge);
     for (const [role, offset] of Object.entries(result.handleOffsets || {})) {
       setSkeletonHandleOffset(point, side, role, offset, { round: (value) => value });

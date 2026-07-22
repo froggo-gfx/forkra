@@ -56,8 +56,8 @@ describe("skeleton rib executor", () => {
     };
   };
 
-  it("free drag on an editable rib changes width only, never nudge", () => {
-    const address = makeAddress("left", { editable: { left: true } });
+  it("free drag on an unlocked rib changes width only, never nudge", () => {
+    const address = makeAddress("left");
     const executor = createSkeletonRibExecutor(address, "rib-default");
 
     const result = executor.applyDelta(makeDelta(address, "left", 10, 7));
@@ -66,8 +66,8 @@ describe("skeleton rib executor", () => {
     expect(result.nudge).to.equal(0);
   });
 
-  it("rib-tangent drag on an editable rib changes nudge only", () => {
-    const address = makeAddress("left", { editable: { left: true } });
+  it("rib-tangent drag on an unlocked rib changes nudge only", () => {
+    const address = makeAddress("left");
     const executor = createSkeletonRibExecutor(address, "rib-tangent");
 
     const result = executor.applyDelta(makeDelta(address, "left", 10, 7));
@@ -76,8 +76,8 @@ describe("skeleton rib executor", () => {
     expect(result.nudge).to.equal(7);
   });
 
-  it("tangent constrain mode on an editable rib changes nudge only", () => {
-    const address = makeAddress("left", { editable: { left: true } });
+  it("tangent constrain mode on an unlocked rib changes nudge only", () => {
+    const address = makeAddress("left");
     const executor = createSkeletonRibExecutor(address, "rib-default");
 
     const result = executor.applyDelta(makeDelta(address, "left", 10, 7), {
@@ -88,8 +88,8 @@ describe("skeleton rib executor", () => {
     expect(result.nudge).to.equal(7);
   });
 
-  it("non-editable ribs never nudge, even under rib-tangent", () => {
-    const address = makeAddress("left");
+  it("locked ribs never nudge, even under rib-tangent", () => {
+    const address = makeAddress("left", { locked: { left: true } });
     const executor = createSkeletonRibExecutor(address, "rib-tangent");
 
     const result = executor.applyDelta(makeDelta(address, "left", 10, 7));
@@ -100,7 +100,6 @@ describe("skeleton rib executor", () => {
 
   it("alt-drag interpolation slides nudge along the axis and keeps width", () => {
     const address = makeAddress("left", {
-      editable: { left: true },
       handleOffsets: {
         leftIn: { x: 3, y: 0 },
         leftOut: { x: -2, y: 0 },
@@ -132,7 +131,7 @@ describe("skeleton rib executor", () => {
   });
 
   it("interpolation without an axis falls back to pure tangent nudge", () => {
-    const address = makeAddress("left", { editable: { left: true } });
+    const address = makeAddress("left");
     const executor = createSkeletonRibExecutor(address, "rib-interpolate");
 
     const result = executor.applyDelta(makeDelta(address, "left", 10, 7));
@@ -141,8 +140,8 @@ describe("skeleton rib executor", () => {
     expect(result.nudge).to.equal(7);
   });
 
-  it("interpolation on non-editable ribs behaves like a plain width drag", () => {
-    const address = makeAddress("left");
+  it("interpolation on locked ribs behaves like a plain width drag", () => {
+    const address = makeAddress("left", { locked: { left: true } });
     const executor = createSkeletonRibExecutor(address, "rib-interpolate");
 
     const result = executor.applyDelta(makeDelta(address, "left", 10, 7));
@@ -153,7 +152,6 @@ describe("skeleton rib executor", () => {
 
   it("applying an interpolation result persists compensated handle offsets", () => {
     const address = makeAddress("left", {
-      editable: { left: true },
       handleOffsets: { leftOut: { x: 0, y: 0 } },
     });
     const n = address.normal;
@@ -173,8 +171,8 @@ describe("skeleton rib executor", () => {
     expect(address.point.handleOffsets.leftIn).to.equal(undefined);
   });
 
-  it("applying an executor result persists nudge only for editable sides", () => {
-    const address = makeAddress("right", { editable: { right: true } });
+  it("applying an executor result persists nudge only for unlocked sides", () => {
+    const address = makeAddress("right");
     const executor = createSkeletonRibExecutor(address, "rib-tangent");
 
     const result = executor.applyDelta(makeDelta(address, "right", 0, -5));
@@ -210,7 +208,6 @@ describe("rib detach toggle", () => {
                 x: 100,
                 y: 0,
                 smooth: true,
-                editable: { left: true },
                 handleOffsets: { leftOut: { x: 6, y: 4, detached: false } },
               }),
               makeSkeletonPoint({ id: 5, x: 130, y: -40, type: "cubic" }),

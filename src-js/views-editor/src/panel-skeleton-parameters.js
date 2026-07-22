@@ -30,7 +30,7 @@ import {
   setPanelPointTotalWidth,
   setPanelPointValuesStream,
   setPanelRibDetached,
-  setPanelRibEditable,
+  setPanelRibLocked,
 } from "./skeleton-panel-edits.js";
 import {
   collectRibEditTargets,
@@ -894,13 +894,18 @@ export default class SkeletonParametersPanel extends Panel {
       type: "header",
       label: translate("sidebar.skeleton-parameters.ribs"),
     });
+    // Locking blocks this side's generated adjustments without clearing them.
+    // With a skeleton point selected the derived targets are both its ribs, so
+    // this is the donor's combined lock control.
     formContents.push({
       type: "checkbox",
-      key: "rib:editable",
-      label: translate("sidebar.skeleton-parameters.editable"),
-      value: summary.editable.mixed ? false : summary.editable.value,
+      key: "rib:locked",
+      label: translate("sidebar.skeleton-parameters.locked"),
+      value: summary.locked.mixed ? false : summary.locked.value,
+      indeterminate: summary.locked.mixed,
     });
-    if (summary.editable.value === true || summary.editable.mixed) {
+    // Detach is an adjustment, so a fully locked selection can't reach it.
+    if (summary.locked.value !== true) {
       formContents.push({
         type: "checkbox",
         key: "rib:detached",
@@ -1167,12 +1172,12 @@ export default class SkeletonParametersPanel extends Panel {
   }
 
   async _onRibChange(name, value) {
-    if (name === "editable") {
-      await setPanelRibEditable(
+    if (name === "locked") {
+      await setPanelRibLocked(
         this.sceneController,
         this._ribTargets,
         value === true,
-        this._undo("set-rib-editable")
+        this._undo("set-rib-locked")
       );
     } else if (name === "detached") {
       await setPanelRibDetached(

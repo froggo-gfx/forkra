@@ -218,10 +218,10 @@ describe("skeleton-model geometry helpers", () => {
     expect(getSkeletonPointWidth(point, DEFAULT_SKELETON_WIDTH, "right")).to.equal(36);
   });
 
-  it("returns nudge only for editable non-zero-width sides", () => {
+  it("returns nudge only for unlocked non-zero-width sides", () => {
     const point = makeSkeletonPoint({
       nudge: { left: 7, right: 9 },
-      editable: { left: true, right: false },
+      locked: { left: false, right: true },
     });
     expect(getSkeletonPointNudge(point, "left")).to.equal(7);
     expect(getSkeletonPointNudge(point, "right")).to.equal(0);
@@ -229,7 +229,6 @@ describe("skeleton-model geometry helpers", () => {
     const zeroWidthPoint = makeSkeletonPoint({
       width: { left: 0, right: 40, linked: false },
       nudge: { left: 11, right: 13 },
-      editable: { left: true, right: true },
     });
     expect(getSkeletonPointNudge(zeroWidthPoint, "left")).to.equal(0);
     expect(getSkeletonPointNudge(zeroWidthPoint, "right")).to.equal(13);
@@ -653,18 +652,19 @@ describe("skeleton-model panel-facing mutators", () => {
     expect(point.width.linked).to.equal(true);
   });
 
-  it("collapsing a side clears its editable rib state", () => {
+  it("collapsing a side clears its rib adjustments but not its lock", () => {
     const point = makePoint({
       width: { left: 40, right: 40, linked: false },
-      editable: { left: true, right: true },
+      locked: { left: true, right: false },
       nudge: { left: 5, right: 5 },
       handleOffsets: { leftIn: { x: 1, y: 2, detached: true } },
     });
     setSkeletonPointWidthDistribution(point, 80, -100);
-    expect(point.editable.left).to.equal(false);
     expect(point.nudge.left).to.equal(0);
     expect(point.handleOffsets.leftIn).to.equal(undefined);
-    expect(point.editable.right).to.equal(true);
+    // Collapsing is a geometry change; it must not touch lock state.
+    expect(point.locked.left).to.equal(true);
+    expect(point.nudge.right).to.equal(5);
   });
 
   it("single-sided null/left/right normalizes contour.singleSided", () => {
@@ -727,9 +727,9 @@ describe("skeleton-model panel-facing mutators", () => {
     expect(point.cornerTrimRatio).to.equal(undefined);
   });
 
-  it("reset rib removes nudge/editable/handle offsets for one side", () => {
+  it("reset rib removes nudge/handle offsets for one side, leaving locks", () => {
     const point = makePoint({
-      editable: { left: true, right: true },
+      locked: { left: true, right: true },
       nudge: { left: 5, right: 7 },
       handleOffsets: {
         leftIn: { x: 1, y: 2, detached: true },
@@ -737,17 +737,16 @@ describe("skeleton-model panel-facing mutators", () => {
       },
     });
     resetSkeletonEditableRib(point, "left");
-    expect(point.editable.left).to.equal(false);
     expect(point.nudge.left).to.equal(0);
     expect(point.handleOffsets.leftIn).to.equal(undefined);
-    expect(point.editable.right).to.equal(true);
+    // Reset clears adjustments only — the lock is independent.
+    expect(point.locked.left).to.equal(true);
     expect(point.nudge.right).to.equal(7);
     expect(point.handleOffsets.rightOut).to.not.equal(undefined);
   });
 
   it("reset rib handles removes only handle offsets for one side", () => {
     const point = makePoint({
-      editable: { left: true, right: true },
       nudge: { left: 5, right: 7 },
       handleOffsets: {
         leftIn: { x: 1, y: 2, detached: true },
@@ -756,14 +755,12 @@ describe("skeleton-model panel-facing mutators", () => {
     });
     resetSkeletonEditableRibHandles(point, "left");
     expect(point.handleOffsets.leftIn).to.equal(undefined);
-    expect(point.editable.left).to.equal(true);
     expect(point.nudge.left).to.equal(5);
     expect(point.handleOffsets.rightOut).to.not.equal(undefined);
   });
 
   it("reset single rib handle clears only that handle, not its pair", () => {
     const point = makePoint({
-      editable: { left: true, right: true },
       nudge: { left: 5, right: 7 },
       handleOffsets: {
         leftIn: { x: 1, y: 2, detached: false },
@@ -778,7 +775,6 @@ describe("skeleton-model panel-facing mutators", () => {
     expect(point.handleOffsets.leftOut).to.deep.equal({ x: 3, y: 4, detached: false });
     expect(point.handleOffsets.rightIn).to.deep.equal({ x: 5, y: 6, detached: false });
     expect(point.nudge.left).to.equal(5);
-    expect(point.editable.left).to.equal(true);
   });
 
   it("reset single rib handle drops detach so the handle re-derives", () => {

@@ -2,6 +2,7 @@ import { drawCubicHandleLabelPair } from "@fontra/core/distance-angle.js";
 import {
   getSkeletonData,
   getSkeletonHandleOffset,
+  isSkeletonSideLocked,
 } from "@fontra/core/skeleton-model.js";
 import {
   buildSkeletonTunniSegments,
@@ -101,12 +102,14 @@ function getRibPoints(contour, pointIndex) {
       activeSingleSide === "right"
         ? point
         : getSkeletonRibPosition(contour, point, "left"),
-    editableLeft: activeSingleSide === "right" ? false : point.editable?.left === true,
+    unlockedLeft:
+      activeSingleSide === "right" ? false : !isSkeletonSideLocked(point, "left"),
     right:
       activeSingleSide === "left"
         ? point
         : getSkeletonRibPosition(contour, point, "right"),
-    editableRight: activeSingleSide === "left" ? false : point.editable?.right === true,
+    unlockedRight:
+      activeSingleSide === "left" ? false : !isSkeletonSideLocked(point, "right"),
   };
 }
 
@@ -227,7 +230,7 @@ function forEachEditableGeneratedTarget(positionedGlyph, model, callback) {
       if (
         !contour ||
         sourcePoint?.type ||
-        sourcePoint?.editable?.[provenance.side] !== true
+        isSkeletonSideLocked(sourcePoint, provenance.side)
       ) {
         continue;
       }
@@ -321,9 +324,9 @@ registerVisualizationLayerDefinition({
 
 // Donor parity (donor "fontra.skeleton.rib.points", zIndex 560): rib endpoints
 // are stroked diamonds drawn ABOVE the other skeleton layers so they stay
-// visible; editable sides are larger and purple, non-editable pink; selected
+// visible; unlocked sides are larger and purple, locked pink; selected
 // diamonds are filled. Both distinctions (selected/unselected,
-// editable/non-editable) must be readable at a glance.
+// locked/unlocked) must be readable at a glance.
 registerVisualizationLayerDefinition({
   identifier: "fontra.skeleton.rib-points",
   name: "Skeleton rib points",
@@ -364,7 +367,7 @@ registerVisualizationLayerDefinition({
             continue;
           }
           const key = makeSkeletonRibKey(contour.id, point.id, side);
-          const editable = side === "left" ? rib.editableLeft : rib.editableRight;
+          const editable = side === "left" ? rib.unlockedLeft : rib.unlockedRight;
           const selected = ribSelection.selected.has(key);
           const hovered = ribSelection.hovered.has(key);
           const color = selected
@@ -661,7 +664,7 @@ registerVisualizationLayerDefinition({
 
 registerVisualizationLayerDefinition({
   identifier: "fontra.skeleton.editable-markers",
-  name: "Skeleton editable markers",
+  name: "Skeleton adjustable markers",
   selectionFunc: glyphSelector("editing"),
   userSwitchable: true,
   defaultOn: true,
@@ -687,8 +690,8 @@ registerVisualizationLayerDefinition({
     hoverStrokeColor: "rgba(199, 119, 221, 1)",
     selectedStrokeColor: "rgba(255, 174, 68, 1)",
   },
-  // Editable rib endpoints are drawn (purple, larger) by the ribs layer;
-  // this layer marks the editable GENERATED targets on the outline.
+  // Unlocked rib endpoints are drawn (purple, larger) by the ribs layer;
+  // this layer marks the adjustable GENERATED targets on the outline.
   draw: (context, positionedGlyph, parameters, model) => {
     context.lineWidth = parameters.strokeWidth;
     context.strokeStyle = parameters.strokeColor;

@@ -1040,11 +1040,10 @@ fixed-rib drag, X-equalize restore for editable generated handles. Since
 `cap-rounding-rewamp` contains all of it except the tip commit, adapting 5.1 + 5.2
 can be done from the `cap-rounding-rewamp` tree (plus `70bc74dbd` cherry-read).
 
-### 5.3 `test/z-mod-for-editable` — `partly adapted` (2026-07-22)
+### 5.3 `test/z-mod-for-editable` — `adapted` (2026-07-22)
 
-**Outcome:** of the three features, one was portable and is done; the other two
-are coupled to a product decision we have not taken. See the disposition after
-the feature list.
+**Outcome:** all three features adopted. See the disposition after the feature
+list for what changed and why they are one design rather than three.
 
 Tip `91b9b77ce`; 14 commits beyond `q-metrix-drag` (also beyond
 `cap-rounding-rewamp`), so this branch itself is the reference. Three features:
@@ -1072,62 +1071,77 @@ Runtime files touched beyond q-metrix (for scoping): `edit-behavior-adapters.js`
 
 #### Disposition (2026-07-22)
 
-**Single generated handle reset — `adapted`.** Semantics ported, keys not: the
-donor's plan clears flat legacy keys (`leftHandleInOffsetX` …); our canonical
-model stores `handleOffsets[side+role] = {x, y, detached}`.
+All three features adopted. The user's framing is what made them cohere: **all
+generated geometry is adjustable by default, and the modifier is the safety** —
+Alt for interpolate/equalize, Z for a plain move — with the side lock as the
+per-side block. Under that reading the three commits are one design, not three.
 
-- `resetSkeletonEditableRibHandle(point, side, role)` in `skeleton-model.js`
-  removes the single entry. `resetSkeletonEditableRibHandles` now loops through
-  it, so the deletion exists once (R-B). Mocha-covered (3 new tests).
-- `resetPanelGeneratedHandle` in `skeleton-panel-edits.js` routes it through
-  `editSelectedSkeletonPoints` → `editSkeleton` (R-C).
-- `singleGeneratedHandleTarget` (`skeleton-panel-model.js`) qualifies the state:
-  exactly one selected `editableGeneratedHandle` and no other skeleton object.
-  The panel then shows a third **Reset this handle** button in the rib section —
-  which is reachable in that state only because 4.10 derives rib targets from
-  the owning point.
+**1. Side locks replace editable flags — `adapted`.** `editable: {left, right}`
+(opt-in to edit) became `locked: {left, right}` (opt-out). Absence means
+unlocked, so adjustment is available by default.
 
-  **Detach survives the reset** (donor spec: "do not clear detach state"). A
-  detached handle is reset _and re-detached at the derived position_, which
-  becomes its new absolute anchor — the mode is a user choice, so resetting a
-  position must not silently discard it.
+- `skeleton-model.js`: `normalizeLocked`, `isSkeletonSideLocked`,
+  `setSkeletonSideLocked`. `getSkeletonPointNudge` returns 0 for a locked side.
+- `skeleton-generator.js`: stamps `leftLocked`/`rightLocked`; the nudge and
+  handle-offset gates now skip **locked** sides instead of requiring editable
+  ones — a locked side keeps its stored values but does not apply them.
+- Gates flipped in `skeleton-generated.js`, `skeleton-ribs.js`,
+  `skeleton-editing.js` (interpolation axis), `skeleton-panel-edits.js`
+  (detach conversions + resets), `skeleton-panel-model.js`,
+  `visualization-layer-skeleton.js`.
+- **Locking never clears adjustments.** `setPanelRibLocked` only writes the
+  flag, and `resetSkeletonEditableRib` no longer touches it — locking and
+  adjusting are independent, so a lock can't silently reset and a reset can't
+  silently unlock. Unlocking re-exposes the preserved nudge/offsets.
+- Panel: the **Editable** checkbox became **Locked** (indeterminate when
+  mixed). With a skeleton point selected, 4.10's derived targets are both its
+  ribs, so this is the donor's combined lock control for free. Detach is an
+  adjustment, so it is hidden for a fully locked selection.
+- Panel resets are a mutation route and are blocked per-side when locked.
 
-  It can't just ride through, because the flag is stored on the very offset
-  entry being cleared, and an all-zero detached offset would sit on the rib
-  point (detached offsets are measured from the rib point,
-  `skeleton-generator.js:529`). So `resetPanelGeneratedHandle` regenerates with
-  that one offset removed, reads the derived handle and rib-point positions out
-  of the generator output, and writes back
-  `{x: derived − ribPoint, y: …, detached: true}` — the same
-  scratch-regeneration technique `computeRibDetachConversions` already uses.
+**2. Z-only generated handle drag — `adapted`.** Now that adjustment is
+default-on, the modifier is what protects derived geometry. Two behavior names
+were registered in `edit-behavior.js` alongside the `rib-*` set (R-F: modifiers
+are behavior names, never side-channel flags):
 
-**Z-only generated handle drag — `nothing to port` (compared 2026-07-22).**
-Behaviour compared side by side, as the item asked:
+- `generated-handle-default` — plain drag; builds **no** handle target entry, so
+  a generated handle does not move.
+- `generated-handle-move` — the Z variant that moves it.
 
-| Object                    | Donor                                | forkra                                                                                                      |
-| ------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `editableGeneratedPoint`  | plain = rib width; Z = tangent slide | same (`constrainMode: "tangent"` when `tangentRibMode`)                                                     |
-| `editableGeneratedHandle` | plain = **nothing**; Z = move        | plain = move (attached: delta projected onto the skeleton handle direction; detached: free 2D); Z not wired |
-| both                      | Alt/X specialised                    | Alt = equalize (X binding retired, 1.7)                                                                     |
+Alt keeps routing to `alternate`/`equalize` for equalize. Encoding Z in the
+name means pressing or releasing it mid-drag rebuilds the behavior through the
+existing factory-rebuild path rather than needing a bespoke hook.
 
-No capability is missing — the donor's Z _is_ our plain drag, and ours is
-richer (directional projection for attached handles). The donor gates it behind
-Z only because side locks make generated adjustment **default-on**, so plain
-drags would otherwise nudge derived geometry constantly. Our `editable` opt-in
-means the user has already declared intent for that handle. Porting the gate
-alone would strictly reduce usability. Revisit only if side locks are adopted.
+**3. Single generated handle reset — `adapted`** (see `25deaccd2`, detach
+preservation in `738b837f2`).
 
-**Side locks replace editable flags — `not ported` (needs a product decision).**
-This is a semantic inversion, not a port: generated-side adjustment becomes
-available by default and `locked: {left, right}` blocks it, replacing
-`editable: {left, right}` opt-in. It touches the schema, the panel, visuals,
-routed edits and the generator (locked rib geometry preserved for discovery),
-and it conflicts with our own evolution — 1.5.x gated z-tangent-drag on
-`editable`, and 4.10/4.11 build the panel's rib section and reset flow on it.
+**Deviation from the donor:** the donor's flat per-side keys
+(`leftLocked`, `leftHandleInOffsetX` …) are not used; forkra keeps its
+structured `locked: {left, right}` and `handleOffsets[side+role]`. Semantics
+ported, storage shape unchanged.
 
-The call is a UX one: should marking a side be **opt-in to edit** (today) or
-**opt-out of editing** (donor)? Everything else in this bullet follows from
-that answer. Do not start it as a mechanical rename.
+**Migration:** none. Per the donor spec's "clean development data" assumption,
+old `editable` flags are simply ignored — points read as unlocked, which is the
+new default, so existing skeletons become fully adjustable rather than fully
+inert.
+
+**Manual test matrix (views-editor — no harness):**
+
+| #   | Action                                          | Expected                                                      |
+| --- | ----------------------------------------------- | ------------------------------------------------------------- |
+| 1   | Fresh skeleton point, drag a generated on-curve | rib width changes (no opt-in needed)                          |
+| 2   | Plain-drag a generated handle                   | **nothing moves**                                             |
+| 3   | Z-drag a generated handle                       | handle moves                                                  |
+| 4   | Alt-drag a generated handle                     | equalize, as before                                           |
+| 5   | Press/release Z mid-drag                        | behaviour switches without ending the drag                    |
+| 6   | Z-drag a generated on-curve                     | tangent slide, as before                                      |
+| 7   | Tick **Locked** on a point                      | both ribs lock; stored nudge/offsets visibly stop applying    |
+| 8   | Untick **Locked**                               | the same adjustments reappear unchanged (nothing was cleared) |
+| 9   | Locked side: try 1–4, arrow-nudge, panel resets | all blocked                                                   |
+| 10  | Locked side: width + cap edits on the point     | still work (lock is generated-side only)                      |
+| 11  | Mixed lock across a multi-selection             | checkbox shows indeterminate                                  |
+| 12  | Collapse a side to zero width                   | adjustments cleared, lock state untouched                     |
+| 13  | Open a pre-lock skeleton                        | renders unlocked/adjustable; no stale `editable` behaviour    |
 
 ---
 

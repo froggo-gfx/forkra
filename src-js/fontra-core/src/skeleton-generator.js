@@ -191,8 +191,8 @@ function canonicalPointToGeneratorPoint(point) {
   generatorPoint.rightWidth = point.width?.right ?? DEFAULT_SKELETON_WIDTH / 2;
   generatorPoint.leftNudge = point.nudge?.left ?? 0;
   generatorPoint.rightNudge = point.nudge?.right ?? 0;
-  generatorPoint.leftEditable = point.editable?.left === true;
-  generatorPoint.rightEditable = point.editable?.right === true;
+  generatorPoint.leftLocked = point.locked?.left === true;
+  generatorPoint.rightLocked = point.locked?.right === true;
   for (const field of [
     "capStyle",
     "capBallSide",
@@ -409,9 +409,9 @@ function applyNudgeToRibPoint(ribPoint, skeletonPoint, normal, side, halfWidth) 
     return ribPoint;
   }
 
-  // Check per-side editable flag
-  const editableKey = side === "left" ? "leftEditable" : "rightEditable";
-  if (!skeletonPoint?.[editableKey]) {
+  // A locked side keeps its stored nudge but does not apply it.
+  const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
+  if (skeletonPoint?.[lockedKey]) {
     return ribPoint;
   }
 
@@ -494,9 +494,9 @@ function applyHandleOffsetToControlPoint(
   handleType,
   ribPoint = null
 ) {
-  // Check per-side editable flag
-  const editableKey = side === "left" ? "leftEditable" : "rightEditable";
-  if (!skeletonPoint?.[editableKey]) {
+  // A locked side keeps its stored handle offsets but does not apply them.
+  const lockedKey = side === "left" ? "leftLocked" : "rightLocked";
+  if (skeletonPoint?.[lockedKey]) {
     return controlPoint;
   }
 

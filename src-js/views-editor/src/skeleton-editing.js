@@ -8,6 +8,7 @@ import {
 import {
   getSkeletonData,
   getSkeletonRibPosition,
+  isSkeletonSideLocked,
   makeEmptySkeletonData,
   normalizeSkeletonData,
   setSkeletonData,
@@ -771,7 +772,7 @@ export function createSkeletonRibTargetEntries(
 // resolved.
 function makeRibInterpolationAxis(originalLayerGlyph, skeletonData, address) {
   const { contour, point, side } = address;
-  if (point.editable?.[side] !== true) {
+  if (isSkeletonSideLocked(point, side)) {
     return null;
   }
   const handlePositions = {};

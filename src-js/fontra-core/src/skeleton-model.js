@@ -139,7 +139,7 @@ export function normalizeSkeletonPoint(point, skeletonData = null, usedIds = nul
   if (!type) {
     normalized.width = normalizeWidth(point?.width);
     normalized.nudge = normalizeNudge(point?.nudge);
-    normalized.editable = normalizeEditable(point?.editable);
+    normalized.locked = normalizeLocked(point?.locked);
     normalized.handleOffsets = normalizeHandleOffsets(point?.handleOffsets);
     normalized.capStyle = VALID_CAP_STYLES.has(point?.capStyle) ? point.capStyle : null;
     normalized.capBallSide = VALID_CAP_BALL_SIDES.has(point?.capBallSide)
@@ -653,8 +653,7 @@ export function getSkeletonPointNudge(
   side,
   defaultWidth = DEFAULT_SKELETON_WIDTH
 ) {
-  const editable = normalizeEditable(point?.editable);
-  if (!editable[side]) {
+  if (isSkeletonSideLocked(point, side)) {
     return 0;
   }
   if (getSkeletonPointHalfWidth(point, defaultWidth, side) < 0.5) {
@@ -846,14 +845,27 @@ export function resetSkeletonEditableRibHandles(point, side) {
   }
 }
 
+// Is this side's generated geometry blocked from adjustment?
+export function isSkeletonSideLocked(point, side) {
+  assertSkeletonRibSide(side);
+  return normalizeLocked(point?.locked)[side];
+}
+
+export function setSkeletonSideLocked(point, side, locked) {
+  assertSkeletonRibSide(side);
+  const next = normalizeLocked(point?.locked);
+  next[side] = locked === true;
+  point.locked = next;
+}
+
+// Clear one side's generated adjustments (nudge + both handle offsets). The
+// lock flag is deliberately untouched: locking and adjusting are independent,
+// so a reset must not silently unlock and a lock must not silently reset.
 export function resetSkeletonEditableRib(point, side) {
   assertSkeletonRibSide(side);
   const nudge = normalizeNudge(point?.nudge);
   nudge[side] = 0;
   point.nudge = nudge;
-  const editable = normalizeEditable(point?.editable);
-  editable[side] = false;
-  point.editable = editable;
   resetSkeletonEditableRibHandles(point, side);
 }
 
@@ -1218,10 +1230,13 @@ function normalizeNudge(nudge) {
   };
 }
 
-function normalizeEditable(editable) {
+// Side locks (donor `leftLocked`/`rightLocked`). Absence means unlocked, so
+// generated-side adjustment is available by default and the lock is what blocks
+// it. A lock never clears stored adjustments — unlocking re-exposes them.
+function normalizeLocked(locked) {
   return {
-    left: editable?.left === true,
-    right: editable?.right === true,
+    left: locked?.left === true,
+    right: locked?.right === true,
   };
 }
 

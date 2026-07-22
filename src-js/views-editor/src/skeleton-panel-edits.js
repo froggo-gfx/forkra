@@ -10,6 +10,7 @@ import {
   getSkeletonData,
   getSkeletonHandleOffset,
   getSkeletonHandleOffsetKey,
+  isSkeletonSideLocked,
   resetSkeletonEditableRib,
   resetSkeletonEditableRibHandle,
   resetSkeletonEditableRibHandles,
@@ -24,6 +25,7 @@ import {
   setSkeletonPointTotalWidth,
   setSkeletonPointWidthDistribution,
   setSkeletonPointWidthLinked,
+  setSkeletonSideLocked,
 } from "@fontra/core/skeleton-model.js";
 import {
   editSkeleton,
@@ -432,8 +434,8 @@ export async function setPanelCapParameters(
 
 // Set the cap style on selected open-contour endpoints. Non-endpoint points
 // are skipped per layer (cross-layer structures may differ). Round caps clear
-// editable rib state on both sides (donor parity: round cap endpoints must
-// not keep editable ribs).
+// rib adjustments on both sides (donor parity: round cap endpoints must not
+// keep rib nudges/handle offsets).
 export async function setPanelCapStyle(
   sceneController,
   pointAddresses,
@@ -510,6 +512,10 @@ export async function resetPanelRibs(
     sceneController,
     ribAddresses,
     (point, address) => {
+      // A locked side blocks every adjustment route, resets included.
+      if (isSkeletonSideLocked(point, address.side)) {
+        return;
+      }
       if (handlesOnly) {
         resetSkeletonEditableRibHandles(point, address.side);
       } else {
@@ -615,6 +621,9 @@ export async function resetPanelGeneratedHandle(
           return;
         }
         const { side, role } = handleAddress;
+        if (isSkeletonSideLocked(resolved.point, side)) {
+          return;
+        }
         resetSkeletonEditableRibHandle(resolved.point, side, role);
         if (anchor) {
           setSkeletonHandleOffset(resolved.point, side, role, {
@@ -679,7 +688,7 @@ export function computeRibDetachConversions(
     if (
       !resolved ||
       resolved.point.type ||
-      resolved.point.editable?.[address.side] !== true
+      isSkeletonSideLocked(resolved.point, address.side)
     ) {
       continue;
     }
@@ -835,21 +844,19 @@ export async function setPanelRibDetached(
   });
 }
 
-export async function setPanelRibEditable(
+// Lock or unlock a rib side. A lock only blocks adjustment: stored nudges and
+// handle offsets are preserved, and unlocking re-exposes them unchanged.
+export async function setPanelRibLocked(
   sceneController,
   ribAddresses,
-  editable,
+  locked,
   undoLabel
 ) {
   return editSelectedSkeletonPoints(
     sceneController,
     ribAddresses,
     (point, address) => {
-      if (editable) {
-        point.editable = { ...(point.editable || {}), [address.side]: true };
-      } else {
-        resetSkeletonEditableRib(point, address.side);
-      }
+      setSkeletonSideLocked(point, address.side, locked);
     },
     undoLabel
   );

@@ -1,6 +1,7 @@
 import {
   getSkeletonData,
   getSkeletonHandleOffset,
+  isSkeletonSideLocked,
   setSkeletonHandleOffset,
 } from "@fontra/core/skeleton-model.js";
 import { equalizeEditableGeneratedHandleOffsets } from "@fontra/core/skeleton-modifiers.js";
@@ -120,7 +121,7 @@ export function resolveEditableGeneratedTarget(skeletonData, path, pathPointInde
   }
   if (
     provenance.point?.type ||
-    provenance.point?.editable?.[provenance.side] !== true
+    isSkeletonSideLocked(provenance.point, provenance.side)
   ) {
     return null;
   }
@@ -205,7 +206,7 @@ export function createEditableGeneratedPointTargetEntries(
       pointId,
       side
     );
-    if (!address || address.point.editable?.[side] !== true) {
+    if (!address || isSkeletonSideLocked(address.point, side)) {
       continue;
     }
     if (
@@ -558,12 +559,12 @@ function resolveEditableGeneratedHandleAddressAcrossLayers(
     pointId,
     side
   );
-  if (!reference || reference.point.editable?.[side] !== true) {
+  if (!reference || isSkeletonSideLocked(reference.point, side)) {
     return null;
   }
   const contour = targetSkeletonData?.contours?.[reference.contourIndex];
   const point = contour?.points?.[reference.pointIndex];
-  if (!contour || !point || point.type || point.editable?.[side] !== true) {
+  if (!contour || !point || point.type || isSkeletonSideLocked(point, side)) {
     return null;
   }
   const direction = getSkeletonHandleDirectionForPoint(
