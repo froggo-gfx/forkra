@@ -1098,6 +1098,11 @@ unlocked, so adjustment is available by default.
   ribs, so this is the donor's combined lock control for free. Detach is an
   adjustment, so it is hidden for a fully locked selection.
 - Panel resets are a mutation route and are blocked per-side when locked.
+- **Visual language inverted with the semantics.** Adjustable is now the
+  default, so marking it would mark nearly everything. The plain (smaller,
+  pink) rib diamond is the default and the emphatic purple one now marks a
+  **locked** side; `fontra.skeleton.editable-markers` likewise marks the
+  generated targets _blocked_ by a lock, not the reachable ones.
 
 **2. Z-only generated handle drag — `adapted`.** Now that adjustment is
 default-on, the modifier is what protects derived geometry. Two behavior names
@@ -1127,21 +1132,22 @@ inert.
 
 **Manual test matrix (views-editor — no harness):**
 
-| #   | Action                                          | Expected                                                      |
-| --- | ----------------------------------------------- | ------------------------------------------------------------- |
-| 1   | Fresh skeleton point, drag a generated on-curve | rib width changes (no opt-in needed)                          |
-| 2   | Plain-drag a generated handle                   | **nothing moves**                                             |
-| 3   | Z-drag a generated handle                       | handle moves                                                  |
-| 4   | Alt-drag a generated handle                     | equalize, as before                                           |
-| 5   | Press/release Z mid-drag                        | behaviour switches without ending the drag                    |
-| 6   | Z-drag a generated on-curve                     | tangent slide, as before                                      |
-| 7   | Tick **Locked** on a point                      | both ribs lock; stored nudge/offsets visibly stop applying    |
-| 8   | Untick **Locked**                               | the same adjustments reappear unchanged (nothing was cleared) |
-| 9   | Locked side: try 1–4, arrow-nudge, panel resets | all blocked                                                   |
-| 10  | Locked side: width + cap edits on the point     | still work (lock is generated-side only)                      |
-| 11  | Mixed lock across a multi-selection             | checkbox shows indeterminate                                  |
-| 12  | Collapse a side to zero width                   | adjustments cleared, lock state untouched                     |
-| 13  | Open a pre-lock skeleton                        | renders unlocked/adjustable; no stale `editable` behaviour    |
+| #   | Action                                          | Expected                                                                        |
+| --- | ----------------------------------------------- | ------------------------------------------------------------------------------- |
+| 1   | Fresh skeleton point, drag a generated on-curve | rib width changes (no opt-in needed)                                            |
+| 2   | Plain-drag a generated handle                   | **nothing moves**                                                               |
+| 3   | Z-drag a generated handle                       | handle moves                                                                    |
+| 4   | Alt-drag a generated handle                     | equalize, as before                                                             |
+| 5   | Press/release Z mid-drag                        | behaviour switches without ending the drag                                      |
+| 6   | Z-drag a generated on-curve                     | tangent slide, as before                                                        |
+| 7   | Tick **Locked** on a point                      | both ribs lock, diamonds turn purple/larger; stored nudge/offsets stop applying |
+| 8   | Untick **Locked**                               | the same adjustments reappear unchanged (nothing was cleared)                   |
+| 9   | Locked side: try 1–4, arrow-nudge, panel resets | all blocked                                                                     |
+| 10  | Locked side: width + cap edits on the point     | still work (lock is generated-side only)                                        |
+| 11  | Mixed lock across a multi-selection             | checkbox shows indeterminate                                                    |
+| 12  | Collapse a side to zero width                   | adjustments cleared, lock state untouched                                       |
+| 13  | Open a pre-lock skeleton                        | renders unlocked/adjustable; no stale `editable` behaviour                      |
+| 14  | Default skeleton, nothing locked                | rib diamonds all plain/pink; no generated markers on the outline                |
 
 ---
 
