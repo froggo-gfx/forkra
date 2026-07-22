@@ -419,6 +419,23 @@ export function collectRibEditTargets(panelSelection) {
   return { ribs, derived: true };
 }
 
+// Exactly one selected generated off-curve handle and nothing else skeleton-ish,
+// which is the only state where "reset this handle" is unambiguous. Returns the
+// handle entry ({contourId, pointId, side, role, …}) or null.
+export function singleGeneratedHandleTarget(panelSelection) {
+  if (panelSelection?.generatedHandles?.length !== 1) {
+    return null;
+  }
+  if (
+    panelSelection.points.length ||
+    panelSelection.ribs.length ||
+    panelSelection.generatedPoints.length
+  ) {
+    return null;
+  }
+  return panelSelection.generatedHandles[0];
+}
+
 export function summarizeSkeletonRibSelection(selectedRibs) {
   return {
     editable: reduceValues(

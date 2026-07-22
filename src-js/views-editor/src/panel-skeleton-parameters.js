@@ -15,6 +15,7 @@ import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";
 import {
   SKELETON_PANEL_SENDER,
+  resetPanelGeneratedHandle,
   resetPanelRibs,
   scalePanelPointWidth,
   setPanelCapParameters,
@@ -36,6 +37,7 @@ import {
   collectSkeletonPanelSelection,
   collectWidthEditPoints,
   makeSkeletonPanelStateSignature,
+  singleGeneratedHandleTarget,
   summarizeSkeletonCapSelection,
   summarizeSkeletonCapStyleSelection,
   summarizeSkeletonContourSelection,
@@ -291,6 +293,7 @@ export default class SkeletonParametersPanel extends Panel {
       this._buildCapSection(formContents, widthPoints);
       this._buildCornerSection(formContents, widthPoints);
     }
+    this._singleGeneratedHandle = singleGeneratedHandleTarget(panelSelection);
     if (ribTargets.length) {
       this._buildRibSection(formContents, ribTargets, ribsDerived);
     }
@@ -905,16 +908,29 @@ export default class SkeletonParametersPanel extends Panel {
         value: summary.detached.mixed ? false : summary.detached.value,
       });
     }
+    const buttons = [
+      html.button({ onclick: () => this._resetRibs({ handlesOnly: false }) }, [
+        translate(`sidebar.skeleton-parameters.${resetRibLabel}`),
+      ]),
+      html.button({ onclick: () => this._resetRibs({ handlesOnly: true }) }, [
+        translate("sidebar.skeleton-parameters.reset-handles"),
+      ]),
+    ];
+    // With exactly one generated handle selected, offer the narrow reset that
+    // clears only that handle and leaves its pair alone (5.3).
+    if (this._singleGeneratedHandle) {
+      buttons.push(
+        html.button({ onclick: () => this._resetSingleGeneratedHandle() }, [
+          translate("sidebar.skeleton-parameters.reset-this-handle"),
+        ])
+      );
+    }
     formContents.push({
       type: "single-icon",
-      element: html.div({ style: "display:flex; gap:0.5rem; flex-wrap:wrap;" }, [
-        html.button({ onclick: () => this._resetRibs({ handlesOnly: false }) }, [
-          translate(`sidebar.skeleton-parameters.${resetRibLabel}`),
-        ]),
-        html.button({ onclick: () => this._resetRibs({ handlesOnly: true }) }, [
-          translate("sidebar.skeleton-parameters.reset-handles"),
-        ]),
-      ]),
+      element: html.div(
+        { style: "display:flex; gap:0.5rem; flex-wrap:wrap;" },
+        buttons
+      ),
     });
   }
 
@@ -1166,6 +1182,19 @@ export default class SkeletonParametersPanel extends Panel {
         this._undo("set-rib-detached")
       );
     }
+  }
+
+  async _resetSingleGeneratedHandle() {
+    if (!this._singleGeneratedHandle) {
+      return;
+    }
+    await resetPanelGeneratedHandle(
+      this.sceneController,
+      this._singleGeneratedHandle,
+      this._undo("reset-this-handle")
+    );
+    this._forceRebuild = true;
+    await this.update();
   }
 
   async _resetRibs({ handlesOnly }) {

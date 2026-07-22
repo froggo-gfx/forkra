@@ -822,13 +822,31 @@ export function setSkeletonCornerParameters(point, values, { round = null } = {}
   }
 }
 
+// Reset one generated handle (side + role) to its derived position, leaving the
+// opposite handle on the same side, the side nudge and the editable flag alone.
+//
+// Removing the entry — rather than zeroing it — is what "derived" means:
+// copyHandleOffsetsToGenerator skips absent offsets entirely, so the generator
+// sees no OffsetX/OffsetY/Detached for this handle and re-derives it.
+//
+// This necessarily clears `detached` for this handle. That is deliberate and is
+// the one deviation from the donor's spec line "do not clear detach state": the
+// donor stored detach per *side* (`leftHandleDetached`), while our canonical
+// model stores it per side+role inside the offset. Detached offsets are
+// absolute positions relative to the rib point, so a detached handle with no
+// offset would collapse onto the rib rather than sit at its derived position.
+// The opposite handle keeps its own detach state, which preserves the intent.
+export function resetSkeletonEditableRibHandle(point, side, role) {
+  const offsets = normalizeHandleOffsets(point?.handleOffsets);
+  delete offsets[getSkeletonHandleOffsetKey(side, role)];
+  point.handleOffsets = offsets;
+}
+
 export function resetSkeletonEditableRibHandles(point, side) {
   assertSkeletonRibSide(side);
-  const offsets = normalizeHandleOffsets(point?.handleOffsets);
   for (const role of ["in", "out"]) {
-    delete offsets[getSkeletonHandleOffsetKey(side, role)];
+    resetSkeletonEditableRibHandle(point, side, role);
   }
-  point.handleOffsets = offsets;
 }
 
 export function resetSkeletonEditableRib(point, side) {

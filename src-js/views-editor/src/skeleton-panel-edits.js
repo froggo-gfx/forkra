@@ -10,6 +10,7 @@ import {
   getSkeletonData,
   getSkeletonHandleOffset,
   resetSkeletonEditableRib,
+  resetSkeletonEditableRibHandle,
   resetSkeletonEditableRibHandles,
   setSkeletonCapParameters,
   setSkeletonContourDefaultWidth,
@@ -513,6 +514,24 @@ export async function resetPanelRibs(
       } else {
         resetSkeletonEditableRib(point, address.side);
       }
+    },
+    undoLabel
+  );
+}
+
+// Reset a single generated handle to its derived position. `handleAddress`
+// carries side + role, so only that one handle is cleared — its pair on the
+// same side, the side nudge and the editable flag are untouched.
+export async function resetPanelGeneratedHandle(
+  sceneController,
+  handleAddress,
+  undoLabel
+) {
+  return editSelectedSkeletonPoints(
+    sceneController,
+    [handleAddress],
+    (point, address) => {
+      resetSkeletonEditableRibHandle(point, address.side, address.role);
     },
     undoLabel
   );

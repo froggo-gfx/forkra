@@ -23,6 +23,7 @@ import {
   normalizeSkeletonData,
   projectSkeletonRibPoint,
   resetSkeletonEditableRib,
+  resetSkeletonEditableRibHandle,
   resetSkeletonEditableRibHandles,
   setSkeletonCapParameters,
   setSkeletonContourDefaultWidth,
@@ -758,6 +759,47 @@ describe("skeleton-model panel-facing mutators", () => {
     expect(point.editable.left).to.equal(true);
     expect(point.nudge.left).to.equal(5);
     expect(point.handleOffsets.rightOut).to.not.equal(undefined);
+  });
+
+  it("reset single rib handle clears only that handle, not its pair", () => {
+    const point = makePoint({
+      editable: { left: true, right: true },
+      nudge: { left: 5, right: 7 },
+      handleOffsets: {
+        leftIn: { x: 1, y: 2, detached: false },
+        leftOut: { x: 3, y: 4, detached: false },
+        rightIn: { x: 5, y: 6, detached: false },
+      },
+    });
+    resetSkeletonEditableRibHandle(point, "left", "in");
+    expect(point.handleOffsets.leftIn).to.equal(undefined);
+    // The opposite handle on the same side, the other side, the nudge and the
+    // editable flag are all untouched.
+    expect(point.handleOffsets.leftOut).to.deep.equal({ x: 3, y: 4, detached: false });
+    expect(point.handleOffsets.rightIn).to.deep.equal({ x: 5, y: 6, detached: false });
+    expect(point.nudge.left).to.equal(5);
+    expect(point.editable.left).to.equal(true);
+  });
+
+  it("reset single rib handle drops detach so the handle re-derives", () => {
+    // A detached offset is an absolute position relative to the rib point, so
+    // "reset to derived" must remove the entry outright — keeping detach with a
+    // zeroed offset would collapse the handle onto the rib.
+    const point = makePoint({
+      handleOffsets: {
+        leftIn: { x: 12, y: -8, detached: true },
+        leftOut: { x: 3, y: 4, detached: true },
+      },
+    });
+    resetSkeletonEditableRibHandle(point, "left", "in");
+    expect(point.handleOffsets.leftIn).to.equal(undefined);
+    expect(point.handleOffsets.leftOut.detached).to.equal(true);
+  });
+
+  it("reset single rib handle rejects a bad side or role", () => {
+    const point = makePoint({});
+    expect(() => resetSkeletonEditableRibHandle(point, "middle", "in")).to.throw();
+    expect(() => resetSkeletonEditableRibHandle(point, "left", "onCurve")).to.throw();
   });
 });
 

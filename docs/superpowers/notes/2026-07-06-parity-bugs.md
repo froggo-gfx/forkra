@@ -1040,7 +1040,11 @@ fixed-rib drag, X-equalize restore for editable generated handles. Since
 `cap-rounding-rewamp` contains all of it except the tip commit, adapting 5.1 + 5.2
 can be done from the `cap-rounding-rewamp` tree (plus `70bc74dbd` cherry-read).
 
-### 5.3 `test/z-mod-for-editable` — `open` (adapt)
+### 5.3 `test/z-mod-for-editable` — `partly adapted` (2026-07-22)
+
+**Outcome:** of the three features, one was portable and is done; the other two
+are coupled to a product decision we have not taken. See the disposition after
+the feature list.
 
 Tip `91b9b77ce`; 14 commits beyond `q-metrix-drag` (also beyond
 `cap-rounding-rewamp`), so this branch itself is the reference. Three features:
@@ -1065,6 +1069,54 @@ Runtime files touched beyond q-metrix (for scoping): `edit-behavior-adapters.js`
 (±212), `panel-skeleton-parameters.js` (±513), `skeleton-visualization-layers.js`,
 `edit-behavior.js/-registry.js`, `edit-tools-pointer.js/-skeleton.js`,
 `scene-model.js`, `skeleton-contour-generator.js`.
+
+#### Disposition (2026-07-22)
+
+**Single generated handle reset — `adapted`.** Semantics ported, keys not: the
+donor's plan clears flat legacy keys (`leftHandleInOffsetX` …); our canonical
+model stores `handleOffsets[side+role] = {x, y, detached}`.
+
+- `resetSkeletonEditableRibHandle(point, side, role)` in `skeleton-model.js`
+  removes the single entry. `resetSkeletonEditableRibHandles` now loops through
+  it, so the deletion exists once (R-B). Mocha-covered (3 new tests).
+- `resetPanelGeneratedHandle` in `skeleton-panel-edits.js` routes it through
+  `editSelectedSkeletonPoints` → `editSkeleton` (R-C).
+- `singleGeneratedHandleTarget` (`skeleton-panel-model.js`) qualifies the state:
+  exactly one selected `editableGeneratedHandle` and no other skeleton object.
+  The panel then shows a third **Reset this handle** button in the rib section —
+  which is reachable in that state only because 4.10 derives rib targets from
+  the owning point.
+
+  **Deliberate deviation from the donor's spec line "do not clear detach
+  state":** removing the entry necessarily clears `detached` for that handle.
+  Detached offsets are _absolute positions relative to the rib point_
+  (`skeleton-generator.js:529`), so keeping `detached` with no offset would
+  collapse the handle onto the rib instead of restoring its derived position.
+  `copyHandleOffsetsToGenerator` skips absent offsets entirely, so removal is
+  exactly "re-derive". The donor could preserve detach because it stored it per
+  _side_; we store it per side+role. The opposite handle keeps its own detach,
+  which preserves the rule's intent.
+
+**Z-only generated handle drag — `not ported` (coupled to side locks).** The
+donor's rule is "plain drag does nothing on a generated handle; Z-drag adjusts
+it". That exists because the side-lock model makes generated adjustment
+**default-on**, so plain drags had to be restricted to avoid nudging derived
+geometry by accident. Our model is opt-in via `editable`: the user has already
+declared intent for that handle, so plain drag is the useful default. Porting
+the restriction alone would make our editable handles strictly harder to use.
+Revisit only if the side-lock model is adopted.
+
+**Side locks replace editable flags — `not ported` (needs a product decision).**
+This is a semantic inversion, not a port: generated-side adjustment becomes
+available by default and `locked: {left, right}` blocks it, replacing
+`editable: {left, right}` opt-in. It touches the schema, the panel, visuals,
+routed edits and the generator (locked rib geometry preserved for discovery),
+and it conflicts with our own evolution — 1.5.x gated z-tangent-drag on
+`editable`, and 4.10/4.11 build the panel's rib section and reset flow on it.
+
+The call is a UX one: should marking a side be **opt-in to edit** (today) or
+**opt-out of editing** (donor)? Everything else in this bullet follows from
+that answer. Do not start it as a mechanical rename.
 
 ---
 
