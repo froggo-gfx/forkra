@@ -1087,15 +1087,19 @@ model stores `handleOffsets[side+role] = {x, y, detached}`.
   which is reachable in that state only because 4.10 derives rib targets from
   the owning point.
 
-  **Deliberate deviation from the donor's spec line "do not clear detach
-  state":** removing the entry necessarily clears `detached` for that handle.
-  Detached offsets are _absolute positions relative to the rib point_
-  (`skeleton-generator.js:529`), so keeping `detached` with no offset would
-  collapse the handle onto the rib instead of restoring its derived position.
-  `copyHandleOffsetsToGenerator` skips absent offsets entirely, so removal is
-  exactly "re-derive". The donor could preserve detach because it stored it per
-  _side_; we store it per side+role. The opposite handle keeps its own detach,
-  which preserves the rule's intent.
+  **Detach survives the reset** (donor spec: "do not clear detach state"). A
+  detached handle is reset _and re-detached at the derived position_, which
+  becomes its new absolute anchor — the mode is a user choice, so resetting a
+  position must not silently discard it.
+
+  It can't just ride through, because the flag is stored on the very offset
+  entry being cleared, and an all-zero detached offset would sit on the rib
+  point (detached offsets are measured from the rib point,
+  `skeleton-generator.js:529`). So `resetPanelGeneratedHandle` regenerates with
+  that one offset removed, reads the derived handle and rib-point positions out
+  of the generator output, and writes back
+  `{x: derived − ribPoint, y: …, detached: true}` — the same
+  scratch-regeneration technique `computeRibDetachConversions` already uses.
 
 **Z-only generated handle drag — `not ported` (coupled to side locks).** The
 donor's rule is "plain drag does nothing on a generated handle; Z-drag adjusts

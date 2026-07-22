@@ -9,6 +9,7 @@ import { generateFromSkeleton } from "@fontra/core/skeleton-generator.js";
 import {
   getSkeletonData,
   getSkeletonHandleOffset,
+  getSkeletonHandleOffsetKey,
   resetSkeletonEditableRib,
   resetSkeletonEditableRibHandle,
   resetSkeletonEditableRibHandles,
@@ -519,22 +520,117 @@ export async function resetPanelRibs(
   );
 }
 
+// Where a single generated handle lands once its own offset is removed: the
+// position the generator produces on its own. Returns null when the handle was
+// not detached (a plain removal is then all the reset needs), otherwise the
+// rib-point-relative offset that re-anchors the detached handle there.
+function computeResetHandleAnchor(layerGlyph, referenceSkeletonData, handleAddress) {
+  const skeletonData = getSkeletonData(layerGlyph);
+  const resolved = resolveSkeletonAddressAcrossLayers(
+    referenceSkeletonData,
+    skeletonData,
+    handleAddress.contourId,
+    handleAddress.pointId
+  );
+  if (!resolved || resolved.point.type) {
+    return null;
+  }
+  const { side, role } = handleAddress;
+  if (getSkeletonHandleOffset(resolved.point, side, role).detached !== true) {
+    return null;
+  }
+  const scratch = structuredClone(skeletonData);
+  const scratchPoint =
+    scratch.contours[resolved.contourIndex]?.points?.[resolved.pointIndex];
+  if (!scratchPoint) {
+    return null;
+  }
+  const offsets = { ...(scratchPoint.handleOffsets || {}) };
+  delete offsets[getSkeletonHandleOffsetKey(side, role)];
+  scratchPoint.handleOffsets = offsets;
+
+  const generated = generateFromSkeleton(scratch);
+  const derived = findGeneratedOutputPosition(
+    generated,
+    resolved.contour.id,
+    resolved.point.id,
+    side,
+    role
+  );
+  // Detached offsets are measured from the rib point (the generated on-curve).
+  const ribPoint = findGeneratedOutputPosition(
+    generated,
+    resolved.contour.id,
+    resolved.point.id,
+    side,
+    "onCurve"
+  );
+  if (!derived || !ribPoint) {
+    return null;
+  }
+  return {
+    x: Math.round(derived.x - ribPoint.x),
+    y: Math.round(derived.y - ribPoint.y),
+  };
+}
+
 // Reset a single generated handle to its derived position. `handleAddress`
 // carries side + role, so only that one handle is cleared — its pair on the
 // same side, the side nudge and the editable flag are untouched.
+//
+// A detached handle stays detached: it is re-anchored at the derived position,
+// which becomes its new absolute starting point. (Detach can't simply ride
+// through the reset, because the offset the flag lives on is exactly what is
+// being cleared, and an all-zero detached offset would sit on the rib point.)
 export async function resetPanelGeneratedHandle(
   sceneController,
   handleAddress,
   undoLabel
 ) {
-  return editSelectedSkeletonPoints(
-    sceneController,
-    [handleAddress],
-    (point, address) => {
-      resetSkeletonEditableRibHandle(point, address.side, address.role);
-    },
-    undoLabel
-  );
+  return await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
+    const editingLayers = sceneController.getEditingLayerFromGlyphLayers(glyph.layers);
+    const entries = Object.entries(editingLayers);
+    if (!entries.length) {
+      return;
+    }
+    const editLayerName = sceneController.sceneSettings?.editLayerName;
+    const editLayerGlyph = editingLayers[editLayerName] || entries[0][1];
+    const referenceSkeletonData = getSkeletonData(editLayerGlyph);
+
+    const allChanges = [];
+    for (const [layerName, layerGlyph] of entries) {
+      const anchor = computeResetHandleAnchor(
+        layerGlyph,
+        referenceSkeletonData,
+        handleAddress
+      );
+      const changes = editSkeleton(layerGlyph, (working) => {
+        const resolved = resolveSkeletonAddressAcrossLayers(
+          referenceSkeletonData,
+          working,
+          handleAddress.contourId,
+          handleAddress.pointId
+        );
+        if (!resolved || resolved.point.type) {
+          return;
+        }
+        const { side, role } = handleAddress;
+        resetSkeletonEditableRibHandle(resolved.point, side, role);
+        if (anchor) {
+          setSkeletonHandleOffset(resolved.point, side, role, {
+            x: anchor.x,
+            y: anchor.y,
+            detached: true,
+          });
+        }
+      });
+      allChanges.push(changes.prefixed(["layers", layerName, "glyph"]));
+    }
+
+    const combined = new ChangeCollector().concat(...allChanges);
+    await sendIncrementalChange(combined.change);
+    return { changes: combined, undoLabel, broadcast: true };
+  });
 }
 
 // Position of a generated point in raw generator output (pre-packing), found
