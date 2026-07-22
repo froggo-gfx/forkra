@@ -24,9 +24,17 @@ import { MAX_UNICODE } from "@fontra/core/shaper.js";
 import {
   getGeneratedPathContourIndices,
   getSkeletonData,
+  getSkeletonPointHalfWidth,
+  getSkeletonPointWidth,
+  isSkeletonSideLocked,
 } from "@fontra/core/skeleton-model.js";
 import { skeletonTunniHitTest } from "@fontra/core/skeleton-tunni.js";
 import { decomposedToTransform } from "@fontra/core/transform.js";
+import {
+  calculateControlHandleDistance,
+  calculateControlHandlePoint,
+  calculateSegmentTension,
+} from "@fontra/core/tunni-calculations.js";
 import {
   assert,
   consolidateCalls,
@@ -51,7 +59,7 @@ import {
   parseEditableGeneratedPointKey,
   resolveEditableGeneratedTarget,
 } from "./skeleton-generated.js";
-import { iterSkeletonRibTargets } from "./skeleton-ribs.js";
+import { getSkeletonRibAddress, iterSkeletonRibTargets } from "./skeleton-ribs.js";
 
 export class SceneModel {
   constructor(
@@ -1018,6 +1026,131 @@ export class SceneModel {
       pathPointIndex: target.pathPointIndex,
       point: path.getPoint(pointIndex),
     };
+  }
+
+  // Transient readout shown while a control is being adjusted: rib width for a
+  // rib drag, tension + control-handle distance for a Tunni drag. Returns
+  // { x, y, label, kind } in glyph space, or null when nothing applies.
+  //
+  // Both are derived live from the current geometry, so the numbers track the
+  // drag rather than showing the values captured at mousedown.
+  getDragReadout(positionedGlyph = this.getSelectedPositionedGlyph()) {
+    if (!positionedGlyph) {
+      return null;
+    }
+    const ribReadout = this._getRibDragReadout(positionedGlyph);
+    if (ribReadout) {
+      return ribReadout;
+    }
+    return this._getTunniDragReadout(positionedGlyph);
+  }
+
+  _getRibDragReadout(positionedGlyph) {
+    if (!this.initialClickedSkeletonRibKey) {
+      return null;
+    }
+    const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+    if (!skeletonData) {
+      return null;
+    }
+    for (const target of iterSkeletonRibTargets(skeletonData)) {
+      if (
+        target.selectionKey !== this.initialClickedSkeletonRibKey ||
+        !target.position
+      ) {
+        continue;
+      }
+      const address = getSkeletonRibAddress(
+        skeletonData,
+        target.contourId,
+        target.pointId,
+        target.side
+      );
+      if (!address) {
+        return null;
+      }
+      const { point, defaultWidth } = address;
+      const left = getSkeletonPointHalfWidth(point, defaultWidth, "left");
+      const right = getSkeletonPointHalfWidth(point, defaultWidth, "right");
+      return {
+        x: target.position.x,
+        y: target.position.y,
+        kind: "skeleton",
+        label: `${getSkeletonPointWidth(point, defaultWidth).toFixed(1)}
+L ${left.toFixed(1)}  R ${right.toFixed(1)}`,
+      };
+    }
+    return null;
+  }
+
+  // Only when the native point labels are switched off: with them on, the same
+  // numbers are already on screen and a second readout is just noise.
+  _getTunniDragReadout(positionedGlyph) {
+    if (!this.tunniDragTarget) {
+      return null;
+    }
+    if (this.visualizationLayersSettings?.model?.["fontra.point.labels"]) {
+      return null;
+    }
+    const segmentPoints = this._resolveTunniDragSegment(positionedGlyph);
+    if (segmentPoints?.length !== 4 || segmentPoints.some((point) => !point)) {
+      return null;
+    }
+    const [on1, off1, off2, on2] = segmentPoints;
+    const tension = calculateSegmentTension(off1, on1, off2, on2);
+    const handleDistance = calculateControlHandleDistance(segmentPoints);
+    const anchor = calculateControlHandlePoint(segmentPoints);
+    if (!anchor) {
+      return null;
+    }
+    return {
+      x: anchor.x,
+      y: anchor.y,
+      kind: this.tunniDragTarget.kind === "skeleton" ? "skeleton" : "path",
+      label: `T ${tension.toFixed(2)}
+d ${handleDistance.toFixed(1)}`,
+    };
+  }
+
+  // Re-read the dragged Tunni segment from live geometry each frame.
+  _resolveTunniDragSegment(positionedGlyph) {
+    const target = this.tunniDragTarget;
+    if (target?.kind === "skeleton") {
+      const skeletonData = this._getEditLayerSkeletonData(positionedGlyph);
+      const contour = (skeletonData?.contours || []).find(
+        (candidate) => candidate.id === target.contourId
+      );
+      if (!contour) {
+        return null;
+      }
+      for (const segment of iterSkeletonCurveSegments(contour)) {
+        if (
+          segment.startPoint?.id === target.startPointId &&
+          segment.endPoint?.id === target.endPointId &&
+          segment.offCurvePoints.length === 2
+        ) {
+          return [
+            segment.startPoint,
+            segment.offCurvePoints[0],
+            segment.offCurvePoints[1],
+            segment.endPoint,
+          ];
+        }
+      }
+      return null;
+    }
+    const path = positionedGlyph.glyph?.path;
+    const indices = target?.pointIndices;
+    if (!path || indices?.length !== 4) {
+      return null;
+    }
+    return indices.map((index) => {
+      try {
+        return path.getPoint(index);
+      } catch {
+        return null;
+      }
+    });
   }
 
   // Live position of the object that started the current drag, for the

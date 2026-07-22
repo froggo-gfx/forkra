@@ -1503,6 +1503,22 @@ function drawMeasureGuideLine(context, p1, p2, color, parameters) {
   context.setLineDash([]);
 }
 
+// Transient readout drawn while a rib or Tunni control is being adjusted. The
+// scene model decides whether anything applies (including suppressing the Tunni
+// readout when the native point labels are on); this is render-only.
+export function drawDragReadout(context, positionedGlyph, parameters, model) {
+  const readout = model.getDragReadout?.(positionedGlyph);
+  if (!readout) {
+    return;
+  }
+  const color =
+    readout.kind === "skeleton" ? parameters.skeletonColor : parameters.pathColor;
+  drawMeasureLabel(context, readout.x, readout.y, readout.label, color, parameters, {
+    offsetY: 8,
+    alignBottom: true,
+  });
+}
+
 function drawMeasureLabel(context, x, y, label, color, parameters, options = {}) {
   const offsetY = options.offsetY ?? 15;
   const alignBottom = options.alignBottom ?? false;

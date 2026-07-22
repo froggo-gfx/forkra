@@ -11,6 +11,7 @@ import {
   DISTANCE_ANGLE_FONT_SIZE,
   DISTANCE_ANGLE_TEXT_COLOR,
   drawDistanceAngleVisualization,
+  drawDragReadout,
   drawManhattanDistanceVisualization,
   drawMeasureOverlay,
   drawOffCurveDistanceVisualization,
@@ -2247,6 +2248,31 @@ registerVisualizationLayerDefinition({
   },
   colorsDarkMode: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
   draw: drawPointLabels,
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.drag.readout",
+  name: "sidebar.user-settings.glyph.dragreadout",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 650,
+  screenParameters: { fontSize: 14 },
+  colors: {
+    textColor: "#333",
+    textBgColor: "#FFFFFF",
+    textBorderColor: "rgba(0, 0, 0, 0.25)",
+    skeletonColor: "#0066FF",
+    pathColor: "#22AA44",
+  },
+  colorsDarkMode: {
+    textColor: "#EEE",
+    textBgColor: "#333333",
+    textBorderColor: "rgba(255, 255, 255, 0.25)",
+    skeletonColor: "#4D94FF",
+    pathColor: "#54D07D",
+  },
+  draw: drawDragReadout,
 });
 
 registerVisualizationLayerDefinition({

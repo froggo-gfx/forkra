@@ -561,6 +561,7 @@ export const strings = {
   "sidebar.user-settings.glyph.contour": "Contour indices",
   "sidebar.user-settings.glyph.coordinates": "Coordinates",
   "sidebar.user-settings.glyph.dragcrosshair": "Drag crosshair",
+  "sidebar.user-settings.glyph.dragreadout": "Drag readout (width / tension)",
   "sidebar.user-settings.glyph.dragghostpath": "Drag “ghost” path",
   "sidebar.user-settings.glyph.kerning": "Kerning",
   "sidebar.user-settings.glyph.kerning-tool": "Kerning (tool)",

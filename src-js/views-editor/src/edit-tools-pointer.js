@@ -315,12 +315,17 @@ export class PointerTool extends BaseTool {
           positionedGlyph
         );
         if (tunniHit) {
-          await handleSkeletonTunniDrag({
-            sceneController,
-            eventStream,
-            initialEvent,
-            tunniHit,
-          });
+          this.sceneModel.tunniDragTarget = makeSkeletonTunniDragTarget(tunniHit);
+          try {
+            await handleSkeletonTunniDrag({
+              sceneController,
+              eventStream,
+              initialEvent,
+              tunniHit,
+            });
+          } finally {
+            this.sceneModel.tunniDragTarget = null;
+          }
           return;
         }
       }
@@ -355,13 +360,18 @@ export class PointerTool extends BaseTool {
     }
 
     if (tunniInitialState) {
-      await handleTunniDrag({
-        sceneController,
-        eventStream,
-        initialEvent,
-        isTrueTunniPoint,
-        tunniInitialState,
-      });
+      this.sceneModel.tunniDragTarget = makePathTunniDragTarget(tunniInitialState);
+      try {
+        await handleTunniDrag({
+          sceneController,
+          eventStream,
+          initialEvent,
+          isTrueTunniPoint,
+          tunniInitialState,
+        });
+      } finally {
+        this.sceneModel.tunniDragTarget = null;
+      }
       return;
     }
 
@@ -1315,6 +1325,24 @@ function isGeneratedHandleAdjustBehavior(name) {
     name === "alternate-constrain" ||
     name?.startsWith("equalize") === true
   );
+}
+
+// Identify the segment under a Tunni drag so the readout layer can re-read it
+// from live geometry each frame. Path segments are addressed by their four
+// parent point indices, skeleton segments by contour + endpoint ids.
+function makePathTunniDragTarget(tunniInitialState) {
+  const indices = tunniInitialState?.selectedSegment?.parentPointIndices;
+  return indices?.length === 4 ? { kind: "path", pointIndices: [...indices] } : null;
+}
+
+function makeSkeletonTunniDragTarget(tunniHit) {
+  const contourId = tunniHit?.contourId;
+  const startPointId = tunniHit?.segment?.startPoint?.id;
+  const endPointId = tunniHit?.segment?.endPoint?.id;
+  if (contourId == null || startPointId == null || endPointId == null) {
+    return null;
+  }
+  return { kind: "skeleton", contourId, startPointId, endPointId };
 }
 
 function hasRibLikeSelection(selection) {

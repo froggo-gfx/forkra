@@ -567,7 +567,7 @@ Tangent- and interpolate-drag behaviors keep per-rib raw deltas. The clicked
 rib is tracked as `initialClickedSkeletonRibKey` (edit-tools-pointer.js),
 mirroring the skeleton-point mechanism.
 
-### 4.4 Skeleton + basic contours multi-select UX rework — `works as described` (audited 2026-07-22); a _different_ mixed case is still broken
+### 4.4 Skeleton + basic contours multi-select UX rework — `deprecated` (2026-07-22)
 
 **Report:** Multi-select across skeleton and basic contours needs a UX rework too
 (companion to 4.3).
@@ -609,7 +609,9 @@ modifier machinery anticipates mixed selections while entry construction does
 not, which suggests the exclusivity is an unexamined shortcut rather than a
 considered design.
 
-**Not fixed here because it needs a UX call**, the same one 4.4 was parked for:
+**Closed without action (2026-07-22):** the user does not hit this in practice.
+The mixed skeleton-kind table above is left on record in case it ever surfaces;
+if it does, it needs a UX call, the same one 4.4 was parked for:
 when a rib and a skeleton point are dragged together, does the rib take the
 point's raw delta or its own normal-projected width delta (4.3's shared-delta
 rule)? The per-kind modifier options (`constrainMode`, `clickedRibKey`,
@@ -1012,7 +1014,20 @@ So `cap-rounding-rewamp` (our 3.4 reference) already _contains_ everything in
 `skeleton-width-highlight` and `q-metrix-drag` — its working tree is a valid single
 reference for those features. Only `z-mod-for-editable` has commits beyond it.
 
-### 5.1 `test/skeleton-width-highlight` — `open` (adapt)
+### 5.1 `test/skeleton-width-highlight` — `deprecated` (2026-07-22)
+
+**Closed without action.** Two halves, both resolved or dropped:
+
+- **Rib width labels** — superseded. 4.12 gives the same numbers (total + L/R)
+  through Q-measure, and 5.2 below now shows them during a rib drag.
+- **Hit-priority / z-order hygiene** (centerline/ribs/segments below editable
+  elements, segment selection lowest, fixed glyph-unit hit radii, editable
+  off-curve fix) — **the user does not reproduce these problems on forkra**,
+  unlike on the donor build. Our hit-testing grew up in `scene-model` as
+  `*AtPoint` methods rather than as inline pointer code, which is the likely
+  reason. Not ported; reopen only if a specific misfire shows up.
+
+Original scope, for the record:
 
 Tip `14043f1e0` "Fix skeleton handle hit priority and show rib width labels".
 Feature content (top-of-branch cluster):
@@ -1028,7 +1043,56 @@ Feature content (top-of-branch cluster):
   segments 4 — no zoom scaling), editable off-curve hit-test fix, handle hit
   priority fix.
 
-### 5.2 `test/q-metrix-drag` — `open` (adapt)
+### 5.2 `test/q-metrix-drag` — `adapted and extended` (2026-07-22)
+
+**What the branch actually was:** `q-metrix-drag` is `skeleton-width-highlight`
+plus exactly **one** commit, `70bc74dbd` "small marker fix" (+87 lines). That
+commit shows the rib width readout the moment a rib endpoint is _pressed_ (not
+only once a drag begins) and clears it if the press never becomes a drag.
+Everything else the entry attributes to 5.2 lives in 5.1's history, and the
+Q-measure part of it landed as 4.12.
+
+**Adapted, and extended to Tunni on the user's request.** A single transient
+"drag readout" now covers both controls:
+
+- `scene-model.js` `getDragReadout(positionedGlyph)` returns `{x, y, label,
+kind}` or null. Rib: derived from `initialClickedSkeletonRibKey` (already
+  published for the crosshair, 4.9) → total width + L/R half-widths at the rib
+  endpoint. Tunni: from a new `tunniDragTarget`, published by the pointer around
+  both Tunni drag calls → segment tension + control-handle distance at the
+  control-handle point.
+- Both are re-read from live geometry every frame, so the numbers track the
+  drag instead of freezing at mousedown.
+- The Tunni readout is **suppressed when `fontra.point.labels` is on**: those
+  labels already show distance/tension/angle, so a second readout would be
+  noise. The rib readout has no such native equivalent and always shows.
+- `drawDragReadout` in `distance-angle.js` (the canonical measure/label render
+  module, WS-4.5) + a render-only `fontra.drag.readout` layer. Reuses
+  `calculateSegmentTension`, `calculateControlHandleDistance` and
+  `calculateControlHandlePoint` rather than recomputing (R-B).
+- The Tunni segment is addressed by identity — four parent point indices for
+  path segments, contour id + endpoint ids for skeleton segments — so the
+  readout survives the geometry changing under it.
+
+**Deviation:** the donor previews on mousedown before a drag starts; ours
+appears once the drag is under way. The press-preview needed the donor's
+`setDragHoverRibPoint` marker plumbing, which forkra does not have, and the
+readout is most useful while the value is actually changing.
+
+**Manual test matrix (views-editor — no harness):**
+
+| #   | Action                                   | Expected                                             |
+| --- | ---------------------------------------- | ---------------------------------------------------- |
+| 1   | Drag a rib endpoint                      | readout at the rib: total width + L/R, tracking live |
+| 2   | Release the rib drag                     | readout disappears                                   |
+| 3   | Drag a Tunni point, point labels **off** | readout: `T <tension>` + `d <handle distance>`       |
+| 4   | Same drag, point labels **on**           | **no** readout (labels already show it)              |
+| 5   | Drag a skeleton Tunni point, labels off  | readout appears, blue                                |
+| 6   | Drag a path Tunni point, labels off      | readout appears, green                               |
+| 7   | Toggle the "Drag readout" layer off      | nothing appears for any of the above                 |
+| 8   | Z/Alt-modified rib drag                  | readout still tracks                                 |
+
+Original scope, for the record:
 
 Tip `70bc74dbd` = skeleton-width-highlight + one commit ("small marker fix",
 touching `edit-behavior-adapters.js` + `edit-tools-pointer.js`, +87 lines — a
