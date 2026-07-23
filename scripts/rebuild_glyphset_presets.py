@@ -20,20 +20,24 @@ def fetchJSON(url):
 
 # Unauthenticated: max. 60 request per hour, authenticated 5000 per hour
 # https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28#primary-rate-limit-for-unauthenticated-users
-def getGitHubDirectoryInfo(org, repo, path):
-    dirURL = f"https://api.github.com/repos/{org}/{repo}/contents/{path}"
+def getGitHubDirectoryInfo(org, repo, path, ref=None):
+    refString = f"?ref={ref}" if ref is not None else ""
+    dirURL = f"https://api.github.com/repos/{org}/{repo}/contents/{path}{refString}"
     return fetchJSON(dirURL)
 
 
-def jsDelivrURL(org, repo, path):
-    return f"https://cdn.jsdelivr.net/gh/{org}/{repo}/{path}"
+def jsDelivrURL(org, repo, path, ref=None):
+    refString = f"@{ref}" if ref is not None else ""
+    return f"https://cdn.jsdelivr.net/gh/{org}/{repo}{refString}/{path}"
 
 
 def getGoogleFontsGlyphSets():
     sourceURL = "https://github.com/googlefonts/glyphsets"
 
+    ref = None  # Can be a version tag or a branch name. For now: don't pin.
+
     dirContents = getGitHubDirectoryInfo(
-        "googlefonts", "glyphsets", "data/results/txt/nice-names/"
+        "googlefonts", "glyphsets", "data/results/txt/nice-names/", ref
     )
 
     glyphSets = []
@@ -45,7 +49,7 @@ def getGoogleFontsGlyphSets():
         glyphSets.append(
             {
                 "name": name,
-                "url": jsDelivrURL("googlefonts", "glyphsets", dirInfo["path"]),
+                "url": jsDelivrURL("googlefonts", "glyphsets", dirInfo["path"], ref),
             }
         )
 
@@ -53,47 +57,6 @@ def getGoogleFontsGlyphSets():
         "name": "Google Fonts",
         "sourceURL": sourceURL,
         "dataOptions": {"dataFormat": "glyph-names", "commentChars": "#"},
-        "glyphSets": glyphSets,
-    }
-
-
-def getBlackFoundryGlyphSets():
-    sourceURL = "https://github.com/BlackFoundryCom/BF_font_standard"
-
-    glyphSets = []
-
-    for topInfo in getGitHubDirectoryInfo("BlackFoundryCom", "BF_font_standard", ""):
-        if topInfo["type"] != "dir":
-            continue
-
-        for dirInfo in getGitHubDirectoryInfo(
-            "BlackFoundryCom", "BF_font_standard", topInfo["name"]
-        ):
-            name = dirInfo["name"]
-            if not name.endswith(".csv"):
-                continue
-
-            name = " ".join(name[:-4].split("_"))
-            name = name.capitalize()
-            name = "BF " + name
-            glyphSets.append(
-                {
-                    "name": name,
-                    "url": jsDelivrURL(
-                        "BlackFoundryCom", "BF_font_standard", dirInfo["path"]
-                    ),
-                }
-            )
-
-    return {
-        "name": "Black Foundry",
-        "sourceURL": sourceURL,
-        "dataOptions": {
-            "dataFormat": "tsv/csv",
-            "hasHeader": True,
-            "codePointColumn": "unicode hex",
-            "glyphNameColumn": "name",
-        },
         "glyphSets": glyphSets,
     }
 
@@ -232,14 +195,53 @@ def getBengaliGlyphSets():
     }
 
 
+def getJustFontGlyphSets():
+    sourceURL = "https://github.com/justfont/jf7000"
+
+    dirContents = getGitHubDirectoryInfo("justfont", "jf7000", "charset/0.9")
+
+    nameMapping = {
+        "list_base.txt": "JF Core Set",
+        "list_ext_cantonese.txt": "JF Hong Kong and Macao Common Pack",
+        "list_ext_japan.txt": "JF Japanese Common Pack",
+        "list_ext_naming.txt": "JF Taiwan Naming Pack",
+        "list_ext_symbols.txt": "JF Symbol Pack",
+        "list_ext_taiwan.txt": "JF Formosan Languages Pack",
+    }
+
+    glyphSets = []
+
+    for dirInfo in dirContents:
+        name = dirInfo["name"]
+        if not name.endswith(".txt"):
+            continue
+
+        name = nameMapping.get(name, name)
+        glyphSets.append(
+            {
+                "name": name,
+                "url": jsDelivrURL("justfont", "jf7000", dirInfo["path"]),
+            }
+        )
+
+    glyphSets.sort(key=lambda glyphSet: glyphSet["name"])
+
+    return {
+        "name": "JustFont jf 7000 Character Set",
+        "sourceURL": sourceURL,
+        "dataOptions": {"dataFormat": "glyph-names"},
+        "glyphSets": glyphSets,
+    }
+
+
 def collectCollections():
     collections = []
     collections.append(getGoogleFontsGlyphSets())
-    collections.append(getBlackFoundryGlyphSets())
     collections.append(getAdobeLatinCyrGreekGlyphSets())
     collections.append(getKoeberlinLatinGlyphSets())
     collections.append(getWickedLettersGeorgianGlyphSets())
     collections.append(getBengaliGlyphSets())
+    collections.append(getJustFontGlyphSets())
     return collections
 
 

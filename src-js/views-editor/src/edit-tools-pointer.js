@@ -12,7 +12,7 @@ import {
   offsetRect,
   pointInRect,
   rectSize,
-} from "@fontra/core/rectangle.js";
+} from "@fontra/core/rectangle.ts";
 import {
   difference,
   isSuperset,
@@ -25,14 +25,16 @@ import {
   boolInt,
   commandKeyProperty,
   enumerate,
+  modulo,
   parseSelection,
   range,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { copyBackgroundImage, copyComponent } from "@fontra/core/var-glyph.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
+import { handlesEqual } from "./edit-tools-pen.js";
 import { getPinPoint } from "./panel-transformation.js";
 import { equalGlyphSelection } from "./scene-controller.js";
 import {
@@ -67,16 +69,37 @@ export class PointerTool extends BaseTool {
       sceneController.hoverSelection,
       event.altKey
     );
-    sceneController.hoverSelection = selection;
-    sceneController.hoverPathHit = pathHit;
+
+    this.sceneController.sceneModel.showTransformSelection = true;
+
+    let insertHandles = null;
+
+    if (
+      this.sceneModel.canEdit &&
+      event.altKey &&
+      pathHit?.segment.points.length == 2
+    ) {
+      ({ insertHandles } = this.editor
+        .getPenTool()
+        .getInsertHandlesFromPathHit(pathHit));
+
+      sceneController.hoverSelection = new Set();
+      sceneController.hoverPathHit = undefined;
+    } else {
+      sceneController.hoverSelection = selection;
+      sceneController.hoverPathHit = pathHit;
+    }
+
+    if (!handlesEqual(insertHandles, this.sceneModel.pathInsertHandles)) {
+      this.sceneModel.pathInsertHandles = insertHandles;
+      this.canvasController.requestUpdate();
+    }
 
     if (!sceneController.hoverSelection.size && !sceneController.hoverPathHit) {
       sceneController.hoveredGlyph = this.sceneModel.glyphAtPoint(point);
     } else {
       sceneController.hoveredGlyph = undefined;
     }
-
-    this.sceneController.sceneModel.showTransformSelection = true;
 
     const resizeHandle = this.getResizeHandle(event, sceneController.selection);
     const rotationHandle = !resizeHandle
@@ -127,6 +150,11 @@ export class PointerTool extends BaseTool {
   }
 
   async handleDrag(eventStream, initialEvent) {
+    if (this.sceneModel.pathInsertHandles) {
+      await this.editor.getPenTool().handleInsertHandles();
+      return;
+    }
+
     const sceneController = this.sceneController;
     const initialSelection = sceneController.selection;
     const resizeHandle = this.getResizeHandle(initialEvent, initialSelection);
@@ -338,7 +366,7 @@ export class PointerTool extends BaseTool {
     this._selectionBeforeSingleClick = undefined;
     const sceneController = this.sceneController;
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
-      const initialPoint = sceneController.localPoint(initialEvent);
+      const initialPoint = sceneController.selectedGlyphPoint(initialEvent);
       let behaviorName = getBehaviorName(initialEvent);
 
       const layerInfo = Object.entries(
@@ -365,6 +393,7 @@ export class PointerTool extends BaseTool {
 
       layerInfo[0].isPrimaryLayer = true;
 
+      this.sceneController.scrollAdjustBehavior = "pin-glyph-origin";
       let editChange;
 
       for await (const event of eventStream) {
@@ -382,7 +411,7 @@ export class PointerTool extends BaseTool {
           }
           await sendIncrementalChange(consolidateChanges(rollbackChanges));
         }
-        const currentPoint = sceneController.localPoint(event);
+        const currentPoint = sceneController.selectedGlyphPoint(event);
         const delta = {
           x: currentPoint.x - initialPoint.x,
           y: currentPoint.y - initialPoint.y,
@@ -399,6 +428,7 @@ export class PointerTool extends BaseTool {
         }
 
         editChange = consolidateChanges(deepEditChanges);
+
         await sendIncrementalChange(editChange, true); // true: "may drop"
       }
       let changes = ChangeCollector.fromChanges(
@@ -442,6 +472,7 @@ export class PointerTool extends BaseTool {
       };
     });
     this.sceneController.sceneModel.showTransformSelection = true;
+    this.sceneController.scrollAdjustBehavior = null;
   }
 
   async handleBoundsTransformSelection(
@@ -528,7 +559,9 @@ export class PointerTool extends BaseTool {
         };
       });
 
+      this.sceneController.scrollAdjustBehavior = "pin-glyph-origin";
       let editChange;
+
       for await (const event of eventStream) {
         const currentPoint = sceneController.selectedGlyphPoint(event);
 
@@ -609,6 +642,8 @@ export class PointerTool extends BaseTool {
         broadcast: true,
       };
     });
+
+    this.sceneController.scrollAdjustBehavior = null;
   }
 
   getRotationHandle(event, selection) {
@@ -677,6 +712,62 @@ export class PointerTool extends BaseTool {
     return false;
   }
 
+  handleKeyDown(event) {
+    if (event.key !== "Tab" || !this.sceneSettings.selectedGlyph?.isEditing) {
+      return;
+    }
+
+    const glyph = this.sceneModel.getSelectedPositionedGlyph()?.glyph;
+    if (!glyph) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const selectionTypes = ["point", "component", "anchor", "guideline"];
+
+    const parsedSelection = parseSelection(this.sceneSettings.selection);
+
+    const numItems = {
+      point: glyph.path.numPoints,
+      component: glyph.components.length,
+      anchor: glyph.anchors.length,
+      guideline: glyph.guidelines.length,
+    };
+
+    const selectionType =
+      selectionTypes.find((tp) => parsedSelection[tp]) ??
+      selectionTypes.find((tp) => numItems[tp]);
+
+    if (!selectionType) {
+      return;
+    }
+
+    const currentSelection = parsedSelection[selectionType];
+    const currentIndex = currentSelection?.at(event.shiftKey ? 0 : -1);
+    const numSelectionItems = numItems[selectionType];
+    const delta = event.shiftKey ? -1 : 1;
+
+    const newIndex = currentSelection
+      ? event.altKey && selectionType == "point"
+        ? // if we are selecting points, and the alt key is pressed,
+          // go to the next or previous contour
+          glyph.path.getAbsolutePointIndex(
+            modulo(
+              glyph.path.getContourIndex(currentIndex) + delta,
+              glyph.path.numContours
+            ),
+            event.shiftKey ? -1 : 0
+          )
+        : modulo(currentIndex + delta, numSelectionItems)
+      : event.shiftKey
+        ? numSelectionItems - 1
+        : 0;
+
+    this.sceneSettings.selection = new Set([`${selectionType}/${newIndex}`]);
+  }
+
   activate() {
     super.activate();
     this.sceneController.sceneModel.showTransformSelection = true;
@@ -714,8 +805,8 @@ function getSelectModeFunction(event) {
       ? difference
       : symmetricDifference
     : event[commandKeyProperty]
-    ? union
-    : replace;
+      ? union
+      : replace;
 }
 
 registerVisualizationLayerDefinition({

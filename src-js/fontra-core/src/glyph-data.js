@@ -3,7 +3,7 @@ import {
   enumerate,
   getCharFromCodePoint,
   splitGlyphNameExtension,
-} from "./utils.js";
+} from "./utils.ts";
 
 let glyphDataCSV;
 
@@ -165,5 +165,19 @@ export function guessGlyphPlaceholderString(codePoints, glyphName) {
     }
   }
 
+  if (direction == "bidi") {
+    direction = undefined;
+  }
+
   return { glyphString, direction };
+}
+
+export function guessDirectionFromCodePoints(codePoints) {
+  for (const codePoint of codePoints) {
+    const info = getGlyphInfoFromCodePoint(codePoint);
+    if (info?.category === "Letter") {
+      return info.direction === "RTL" ? "rtl" : "ltr";
+    }
+  }
+  return undefined;
 }

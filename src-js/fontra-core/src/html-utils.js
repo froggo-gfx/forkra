@@ -1,7 +1,7 @@
 // This is a tiny subset of a few things that Lit does, except it uses
 // object notation to construct dom elements instead of HTML.
 
-import { consolidateCalls } from "./utils.js";
+import { consolidateCalls } from "./utils.ts";
 
 export class SimpleElement extends HTMLElement {
   constructor() {
@@ -181,4 +181,5 @@ export const details = createDomElement.bind(null, "details");
 export const summary = createDomElement.bind(null, "summary");
 export const b = createDomElement.bind(null, "b");
 export const i = createDomElement.bind(null, "i");
+export const pre = createDomElement.bind(null, "pre");
 // Let's add more once needed

@@ -1,0 +1,6 @@
+steps:
+  - input: fontra-read
+    source: test-py/data/workflow/input-propagate-anchors.fontra
+  - filter: propagate-anchors
+  - output: fontra-write
+    destination: output-propagate-anchors.fontra

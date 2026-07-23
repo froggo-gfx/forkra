@@ -2,12 +2,13 @@ import { GlyphOrganizer } from "@fontra/core/glyph-organizer.js";
 import * as html from "@fontra/core/html-utils.js";
 import { SimpleElement } from "@fontra/core/html-utils.js";
 import {
+  consolidateCalls,
   getCharFromCodePoint,
   glyphMapToItemList,
   guessCharFromGlyphName,
   makeUPlusStringFromCodePoint,
   throttleCalls,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { GlyphSearchField } from "./glyph-search-field.js";
 import { UIList } from "./ui-list.js";
 
@@ -31,6 +32,7 @@ export class GlyphSearchList extends SimpleElement {
     this.glyphNamesList = this._makeGlyphNamesList();
 
     this.throttledUpdate = throttleCalls(() => this.update(), 50);
+    this.requestUpdate = consolidateCalls(() => this.updateGlyphNamesListContent());
 
     this.searchField.onSearchFieldChanged = (event) => this.throttledUpdate();
 
@@ -49,19 +51,27 @@ export class GlyphSearchList extends SimpleElement {
             return getCharFromCodePoint(item.codePoints[0]);
           }
           const guessedChar = guessCharFromGlyphName(item.glyphName);
-          return guessedChar ? html.span({ class: "guessed-char" }, [guessedChar]) : "";
+          return guessedChar ? html.span({ class: "dimmed" }, [guessedChar]) : "";
         },
       },
-      { key: "glyphName", title: "glyph name", width: "10em", isIdentifierKey: true },
+      {
+        key: "glyphName",
+        title: "glyph name",
+        width: "10em",
+        isIdentifierKey: true,
+        get: (item) => item.glyphName,
+        cellFactory: (item, description) => this._cellFactory(item, description),
+      },
       {
         key: "unicode",
         width: "fit-content",
         get: (item) => item.codePoints.map(makeUPlusStringFromCodePoint).join(","),
+        cellFactory: (item, description) => this._cellFactory(item, description),
       },
     ];
     const glyphNamesList = new UIList();
     glyphNamesList.appendStyle(`
-      .guessed-char {
+      .dimmed {
         color: #999;
       }
     `);
@@ -85,12 +95,20 @@ export class GlyphSearchList extends SimpleElement {
     return glyphNamesList;
   }
 
+  _cellFactory(item, description) {
+    const glyphName = item.glyphName;
+    const valueString = description.get(item);
+    return !this._fontGlyphMap || this._fontGlyphMap[glyphName]
+      ? valueString
+      : html.span({ class: "dimmed" }, [valueString]);
+  }
+
   focusSearchField() {
     this.searchField.focusSearchField();
   }
 
   update() {
-    this.updateGlyphNamesListContent();
+    this.requestUpdate();
   }
 
   get glyphMap() {
@@ -99,7 +117,25 @@ export class GlyphSearchList extends SimpleElement {
 
   set glyphMap(glyphMap) {
     this._glyphMap = glyphMap;
-    this.updateGlyphNamesListContent();
+    this.requestUpdate();
+  }
+
+  get fontGlyphMap() {
+    return this._fontGlyphMap;
+  }
+
+  set fontGlyphMap(fontGlyphMap) {
+    this._fontGlyphMap = fontGlyphMap;
+    this.requestUpdate();
+  }
+
+  get allowUnknownGlyphSearchResults() {
+    return this._allowUnknownGlyphSearchResults ?? false;
+  }
+
+  set allowUnknownGlyphSearchResults(allowUnknownGlyphSearchResults) {
+    this._allowUnknownGlyphSearchResults = allowUnknownGlyphSearchResults;
+    this.requestUpdate();
   }
 
   updateGlyphNamesListContent() {
@@ -111,7 +147,10 @@ export class GlyphSearchList extends SimpleElement {
   }
 
   _setFilteredGlyphNamesListContent() {
-    const filteredGlyphItems = this.glyphOrganizer.filterGlyphs(this.glyphsListItems);
+    const filteredGlyphItems = this.glyphOrganizer.filterGlyphs(
+      this.glyphsListItems,
+      this.allowUnknownGlyphSearchResults
+    );
     this.glyphNamesList.setItems(filteredGlyphItems);
     this.glyphNamesList.hidden = filteredGlyphItems.length === 0;
   }

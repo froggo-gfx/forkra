@@ -3,7 +3,12 @@ import { MenuItemDivider } from "@fontra/web-components/menu-panel.js";
 import { registerActionInfo } from "./actions.js";
 import * as html from "./html-utils.js";
 import { translate } from "./localization.js";
-import { assert } from "./utils.js";
+import {
+  assert,
+  dumpURLFragment,
+  isObjectEmpty,
+  readObjectFromURLFragment,
+} from "./utils.ts";
 
 const mapMenuItemKeyToFunction = {
   File: getFileMenuItems,
@@ -11,7 +16,6 @@ const mapMenuItemKeyToFunction = {
   Edit: getEditMenuItems,
   View: getViewMenuItems,
   Glyph: getGlyphMenuItems,
-  Window: getWindowMenuItems,
 };
 
 export function makeFontraMenuBar(menuItemKeys, viewController) {
@@ -54,11 +58,10 @@ function getFontraMenu() {
         enabled: () => true,
         callback: () => {
           const url = new URL(window.location);
-          console.log(url.pathname);
           const target = "/applicationsettings.html";
           window.open(
             `${target}#${panelID}-panel`,
-            url.pathname.includes(target) ? "_self" : undefined
+            url.pathname.includes(target) ? "_self" : "fontra.applicationsettings"
           );
         },
       }));
@@ -75,28 +78,42 @@ function getHelpMenu() {
           title: translate("menubar.help.homepage"),
           enabled: () => true,
           callback: () => {
-            window.open("https://fontra.xyz/");
+            window.open("https://fontra.xyz/", "fontra.website");
           },
         },
         {
           title: translate("menubar.help.documentation"),
           enabled: () => true,
           callback: () => {
-            window.open("https://docs.fontra.xyz");
+            window.open("https://docs.fontra.xyz", "fontra.documentation");
           },
         },
         {
           title: translate("menubar.help.changelog"),
           enabled: () => true,
           callback: () => {
-            window.open("https://fontra.xyz/changelog.html");
+            window.open("https://fontra.xyz/changelog.html", "fontra.changelog");
           },
         },
         {
           title: "GitHub",
           enabled: () => true,
           callback: () => {
-            window.open("https://github.com/fontra/fontra");
+            window.open("https://github.com/fontra", "fontra.github");
+          },
+        },
+        {
+          title: "Blog",
+          enabled: () => true,
+          callback: () => {
+            window.open("https://blog.fontra.xyz", "fontra.blog");
+          },
+        },
+        {
+          title: "Discord",
+          enabled: () => true,
+          callback: () => {
+            window.open("https://discord.gg/SeZWugEYzd", "fontra.discord");
           },
         },
       ];
@@ -156,7 +173,13 @@ function getViewMenuItems() {
   ];
 }
 
-function getFontMenuItems() {
+const fontOverviewInfoKeys = [
+  "projectGlyphSetSelection",
+  "myGlyphSetSelection",
+  "location",
+];
+
+function getFontMenuItems(viewController) {
   const menuItems = [
     ["font-info.title", "#font-info-panel"],
     ["axes.title", "#axes-panel"],
@@ -165,7 +188,7 @@ function getFontMenuItems() {
     ["cross-axis-mapping.title", "#cross-axis-mapping-panel"],
     ["development-status-definitions.title", "#development-status-definitions-panel"],
     [undefined, undefined], // divider
-    ["font-overview.title", "fontoverview"],
+    ["font-overview.title", null],
   ];
   return menuItems.map(([title, panelID]) =>
     title
@@ -173,15 +196,37 @@ function getFontMenuItems() {
           title: translate(title),
           callback: () => {
             const url = new URL(window.location);
-            const openNewTab = !url.pathname.includes("fontinfo");
-            if (panelID === "fontoverview") {
+            url.hash = "";
+            const openNewTab = !url.pathname.includes("fontinfo") || !panelID;
+
+            if (!panelID) {
+              const viewInfo = readObjectFromURLFragment();
+              if (viewInfo) {
+                const fontOverviewInfo = {};
+                for (const key of fontOverviewInfoKeys) {
+                  const value = viewInfo[key];
+                  if (value) {
+                    fontOverviewInfo[key] = value;
+                  }
+                }
+                if (!isObjectEmpty(fontOverviewInfo)) {
+                  url.hash = dumpURLFragment(fontOverviewInfo);
+                }
+              }
               url.pathname = rerouteViewPath(url.pathname, "fontoverview");
-              url.hash = "";
             } else {
               url.pathname = rerouteViewPath(url.pathname, "fontinfo");
               url.hash = panelID;
             }
-            window.open(url.toString(), openNewTab ? undefined : "_self");
+
+            window.open(
+              url.toString(),
+              openNewTab
+                ? `fontra.${panelID ? "fontinfo" : "fontoverview"}.${
+                    viewController.projectIdentifier
+                  }`
+                : "_self"
+            );
           },
         }
       : MenuItemDivider
@@ -190,31 +235,6 @@ function getFontMenuItems() {
 
 function getGlyphMenuItems() {
   return [];
-}
-
-function getWindowMenuItems() {
-  return [
-    {
-      title: translate("font-overview.title"),
-      enabled: () => true,
-      callback: () => {
-        const url = new URL(window.location);
-        url.pathname = rerouteViewPath(url.pathname, "fontoverview");
-        url.hash = ""; // remove any hash
-        window.open(url.toString());
-      },
-    },
-    {
-      title: translate("editor.title"),
-      enabled: () => true,
-      callback: () => {
-        const url = new URL(window.location);
-        url.pathname = rerouteViewPath(url.pathname, "editor");
-        url.hash = ""; // remove any hash
-        window.open(url.toString());
-      },
-    },
-  ];
 }
 
 function rerouteViewPath(path, targetView) {
@@ -245,6 +265,18 @@ function rerouteViewPath(path, targetView) {
   registerActionInfo("action.copy", {
     topic,
     defaultShortCuts: [{ baseKey: "c", commandKey: true }],
+  });
+
+  registerActionInfo("action.copy-glyphname", {
+    topic,
+    defaultShortCuts: [{ baseKey: "c", commandKey: true, shiftKey: true }],
+  });
+
+  registerActionInfo("action.copy-character", {
+    topic,
+    defaultShortCuts: [
+      { baseKey: "c", commandKey: true, shiftKey: true, altKey: true },
+    ],
   });
 
   registerActionInfo("action.paste", {

@@ -7,7 +7,7 @@ import { translate } from "@fontra/core/localization.js";
 import { unicodeMadeOf, unicodeUsedBy } from "@fontra/core/unicode-utils.js";
 import Panel from "./panel.js";
 
-import { getCharFromCodePoint, throttleCalls } from "@fontra/core/utils.js";
+import { getCharFromCodePoint, throttleCalls } from "@fontra/core/utils.ts";
 import { GlyphCellView } from "@fontra/web-components/glyph-cell-view.js";
 import { GlyphCell } from "@fontra/web-components/glyph-cell.js";
 import { showMenu } from "@fontra/web-components/menu-panel.js";
@@ -39,7 +39,6 @@ export default class RelatedGlyphPanel extends Panel {
   constructor(editorController) {
     super(editorController);
     this.throttledUpdate = throttleCalls((senderID) => this.update(senderID), 100);
-    this.fontController = this.editorController.fontController;
     this.sceneController = this.editorController.sceneController;
 
     this.setupGlyphRelationshipsElement();

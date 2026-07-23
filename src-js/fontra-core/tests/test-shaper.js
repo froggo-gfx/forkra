@@ -1,56 +1,2116 @@
+import { assert, deepCopyObject } from "@fontra/core/utils.ts";
 import { expect } from "chai";
-
-import fs from "fs";
-import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { NodePath } from "./node-path.js";
+import { getFontController } from "./test-font-controller.js";
+import { parametrize } from "./test-support.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { buildShaperFont } from "build-shaper-font";
 
-import { getShaper } from "@fontra/core/shaper.js";
+import { guessDirectionFromCodePoints } from "@fontra/core/glyph-data.js";
+import { ObservableController } from "@fontra/core/observable-object.ts";
+import {
+  prepareConditionalSubstitutions,
+  ShaperController,
+} from "@fontra/core/shaper-controller.js";
+import {
+  applyCursiveAttachments,
+  applyKerning,
+  applyMarkToBasePositioning,
+  applyMarkToMarkPositioning,
+  characterGlyphMapping,
+  getShaper,
+} from "@fontra/core/shaper.js";
+
+const moduleDirName = new NodePath(fileURLToPath(import.meta.url)).parent;
 
 describe("shaper tests", () => {
-  const testFontPath = join(
-    dirname(__dirname),
-    "..",
-    "..",
-    "test-py",
-    "data",
-    "mutatorsans",
-    "MutatorSans.ttf"
-  );
+  const testDataDir = moduleDirName.parent.parent.parent.joinPath("test-py", "data");
+  const mutatorSansPath = testDataDir.joinPath("mutatorsans", "MutatorSans.ttf");
+  const notoSansPath = testDataDir.joinPath("noto", "NotoSans-Regular.otf");
 
-  const expectedGlyphs = [
-    { g: 24, cl: 0, ax: 400, ay: 0, dx: 0, dy: 0, flags: 0, gn: "V" },
-    { g: 1, cl: 1, ax: 396, ay: 0, dx: 0, dy: 0, flags: 0, gn: "A" },
-    { g: 4, cl: 2, ax: 443, ay: 0, dx: 0, dy: 0, flags: 0, gn: "B" },
-    { g: 5, cl: 3, ax: 499, ay: 0, dx: 0, dy: 0, flags: 0, gn: "C" },
+  const testInputCodePoints = [..."😻VABCÄS"].map((c) => ord(c));
+
+  function getExpectedGlyphs(useGlyphObjects, applyShaping = true) {
+    return [
+      {
+        codepoint: 0,
+        cluster: 0,
+        flags: 0,
+        xAdvance: 500,
+        yAdvance: 0,
+        xOffset: 0,
+        yOffset: 0,
+        glyphname: ".notdef",
+        mark: false,
+      },
+      {
+        codepoint: 24,
+        cluster: 1,
+        flags: 0,
+        xAdvance: !applyShaping ? 401 : useGlyphObjects ? 301 : 300,
+        yAdvance: 0,
+        xOffset: 0,
+        yOffset: 0,
+        glyphname: "V",
+        mark: false,
+      },
+      {
+        codepoint: 1,
+        cluster: 2,
+        flags: applyShaping ? 1 : 0,
+        xAdvance: 396,
+        yAdvance: 0,
+        xOffset: 0,
+        yOffset: 0,
+        glyphname: "A",
+        mark: false,
+      },
+      {
+        codepoint: 4,
+        cluster: 3,
+        flags: 0,
+        xAdvance: 443,
+        yAdvance: 0,
+        xOffset: 0,
+        yOffset: 0,
+        glyphname: "B",
+        mark: false,
+      },
+      {
+        codepoint: 5,
+        cluster: 4,
+        flags: 0,
+        xAdvance: 499,
+        yAdvance: 0,
+        xOffset: 0,
+        yOffset: 0,
+        glyphname: "C",
+        mark: false,
+      },
+      {
+        codepoint: 3,
+        cluster: 5,
+        flags: 0,
+        xAdvance: 396,
+        yAdvance: 0,
+        xOffset: 0,
+        yOffset: 0,
+        glyphname: "Adieresis",
+        mark: false,
+      },
+      {
+        codepoint: 21,
+        cluster: 6,
+        flags: 0,
+        xAdvance: 393,
+        yAdvance: 0,
+        xOffset: 0,
+        yOffset: 0,
+        glyphname: "S",
+        mark: false,
+      },
+    ];
+  }
+
+  const glyphOrder = [
+    ".notdef",
+    "A",
+    "Aacute",
+    "Adieresis",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "Z",
+    "S.closed",
+    "I.narrow",
+    "J.narrow",
+    "quotesinglbase",
+    "quotedblbase",
+    "quotedblleft",
+    "quotedblright",
+    "comma",
+    "period",
+    "colon",
+    "semicolon",
+    "arrowleft",
+    "arrowup",
+    "arrowright",
+    "arrowdown",
+    "dot",
+    "dieresis",
+    "acute",
+    "space",
+    "IJ",
+    "em",
+    "tenttest",
+    "macroncomb",
+  ];
+
+  const characterMap = {
+    [ord("A")]: "A",
+    [ord("Ä")]: "Adieresis",
+    [ord("B")]: "B",
+    [ord("C")]: "C",
+    [ord("H")]: "H",
+    [ord("S")]: "S",
+    [ord("V")]: "V",
+    [0x0304]: "macroncomb",
+    [0x0307]: "dotaccentcomb",
+  };
+
+  const markGlyphs = new Set(["macroncomb", "dotaccentcomb"]);
+
+  const nominalGlyphFunc = (codePoint) => characterMap[codePoint];
+  const isGlyphMarkFunc = (glyphName) => markGlyphs.has(glyphName);
+
+  const glyphObjects = {
+    A: { xAdvance: 396 },
+    Adieresis: { xAdvance: 396 },
+    B: { xAdvance: 443 },
+    C: { xAdvance: 499 },
+    S: { xAdvance: 393 },
+    V: { xAdvance: 401 }, // one more than in the font, to test metrics hooks
+  };
+
+  const kerningData = { V: { A: -100 } };
+  const kerning = { getGlyphPairValue: (g1, g2) => kerningData[g1]?.[g2] ?? 0 };
+
+  it("test HBShaper basic tests with funcs", () => {
+    const fontData = mutatorSansPath.readBytesSync();
+    const shaper = getShaper({
+      fontData,
+      nominalGlyphFunc,
+      glyphOrder,
+      isGlyphMarkFunc,
+    });
+    const { glyphs } = shaper.shape(testInputCodePoints, glyphObjects, {
+      variations: { wght: 0, wdth: 0 },
+      features: [
+        ["kern", true],
+        ["rvrn", false],
+      ],
+    });
+
+    expect(glyphs).to.deep.equal(getExpectedGlyphs(true));
+  });
+
+  it("test HBShaper basic tests without funcs", () => {
+    const fontData = mutatorSansPath.readBytesSync();
+    const shaper = getShaper({ fontData });
+    const { glyphs } = shaper.shape(testInputCodePoints, null, {
+      variations: { wght: 0, wdth: 0 },
+      features: [
+        ["kern", true],
+        ["rvrn", false],
+      ],
+    });
+
+    expect(glyphs).to.deep.equal(getExpectedGlyphs(false));
+  });
+
+  it("test HBShaper RTL", () => {
+    const fontData = mutatorSansPath.readBytesSync();
+    const shaper = getShaper({
+      fontData,
+      nominalGlyphFunc,
+      glyphOrder,
+      isGlyphMarkFunc,
+    });
+    const { glyphs } = shaper.shape(testInputCodePoints, glyphObjects, {
+      direction: "rtl",
+    });
+
+    expect(glyphs.map((g) => g.glyphname)).to.deep.equal([
+      "S.closed",
+      "Adieresis",
+      "C",
+      "B",
+      "A",
+      "V",
+      ".notdef",
+    ]);
+  });
+
+  it("test HBShaper getFeatureInfo", () => {
+    const expectedGSUBInfo = {
+      aalt: {},
+      c2sc: {},
+      case: {},
+      ccmp: {},
+      dnom: {},
+      frac: {},
+      liga: {},
+      lnum: {},
+      locl: {},
+      numr: {},
+      onum: {},
+      ordn: {},
+      pnum: {},
+      rtlm: {},
+      salt: {},
+      sinf: {},
+      smcp: {},
+      ss03: { uiLabelName: "florin symbol" },
+      ss04: {
+        uiLabelName: "Titling Alternates I and J for titling and all cap settings",
+      },
+      ss06: { uiLabelName: "Accented Greek SC" },
+      ss07: { uiLabelName: "iota adscript" },
+      subs: {},
+      sups: {},
+      tnum: {},
+      zero: {},
+    };
+
+    const expectedGPOSInfo = { kern: {}, mark: {}, mkmk: {} };
+
+    const fontData = notoSansPath.readBytesSync();
+    const shaper = getShaper({
+      fontData,
+      nominalGlyphFunc,
+      glyphOrder,
+      isGlyphMarkFunc,
+    });
+
+    expect(shaper.getFeatureInfo("GSUB")).to.deep.equal(expectedGSUBInfo);
+    expect(shaper.getFeatureInfo("GPOS")).to.deep.equal(expectedGPOSInfo);
+  });
+
+  it("test HBShaper getScriptAndLanguageInfo", () => {
+    const fontData = notoSansPath.readBytesSync();
+    const shaper = getShaper({
+      fontData,
+      nominalGlyphFunc,
+      glyphOrder,
+      isGlyphMarkFunc,
+    });
+
+    const expectedScriptAndLanguageInfo = {
+      DFLT: [],
+      cyrl: ["MKD ", "SRB "],
+      dev2: [],
+      grek: [],
+      latn: ["APPH", "CAT ", "IPPH", "MAH ", "MOL ", "NAV ", "ROM "],
+    };
+
+    expect(shaper.getScriptAndLanguageInfo()).to.deep.equal(
+      expectedScriptAndLanguageInfo
+    );
+  });
+
+  it("test DumbShaper", () => {
+    const shaper = getShaper({ nominalGlyphFunc, glyphOrder, isGlyphMarkFunc });
+    const { glyphs } = shaper.shape(testInputCodePoints, glyphObjects, {
+      variations: { wght: 0, wdth: 0 },
+      features: "kern",
+      kerningPairFunc: (g1, g2) => kerning.getGlyphPairValue(g1, g2),
+    });
+
+    expect(glyphs).to.deep.equal(getExpectedGlyphs(true, false));
+  });
+
+  it("test DumbShaper RTL", () => {
+    const shaper = getShaper({ nominalGlyphFunc, glyphOrder, isGlyphMarkFunc });
+    const { glyphs } = shaper.shape(testInputCodePoints, glyphObjects, {
+      direction: "rtl",
+    });
+
+    expect(glyphs.map((g) => g.glyphname)).to.deep.equal([
+      "S",
+      "Adieresis",
+      "C",
+      "B",
+      "A",
+      "V",
+      ".notdef",
+    ]);
+  });
+
+  it("test applyKerning skip marks", () => {
+    const glyphs = [
+      {
+        codepoint: 24,
+        cluster: 0,
+        glyphname: "V",
+        mark: false,
+        xAdvance: 401,
+        yAdvance: 0,
+        xOffset: 0,
+        yOffset: 0,
+      },
+      {
+        codepoint: 51,
+        cluster: 1,
+        glyphname: "macroncomb",
+        mark: true,
+        xAdvance: 0,
+        yAdvance: 0,
+        xOffset: 0,
+        yOffset: 0,
+      },
+      {
+        codepoint: 1,
+        cluster: 2,
+        glyphname: "A",
+        mark: false,
+        xAdvance: 396,
+        yAdvance: 0,
+        xOffset: 0,
+        yOffset: 0,
+      },
+    ];
+
+    const expectedOutputGlyphs = [
+      {
+        codepoint: 24,
+        cluster: 0,
+        glyphname: "V",
+        mark: false,
+        xAdvance: 301,
+        yAdvance: 0,
+        xOffset: 0,
+        yOffset: 0,
+      },
+      {
+        codepoint: 51,
+        cluster: 1,
+        glyphname: "macroncomb",
+        mark: true,
+        xAdvance: 0,
+        yAdvance: 0,
+        xOffset: 0,
+        yOffset: 0,
+      },
+      {
+        codepoint: 1,
+        cluster: 2,
+        glyphname: "A",
+        mark: false,
+        xAdvance: 396,
+        yAdvance: 0,
+        xOffset: 0,
+        yOffset: 0,
+      },
+    ];
+
+    applyKerning(glyphs, (g1, g2) => kerning.getGlyphPairValue(g1, g2));
+
+    expect(glyphs).to.deep.equal(expectedOutputGlyphs);
+  });
+
+  it("test getGlyphNameCodePoint", () => {
+    const inputGlyphNames = ["A", "B", "C"];
+    const expectedCodePoints = [0x110001, 0x110004, 0x110005];
+
+    const shaper = getShaper({ nominalGlyphFunc, glyphOrder, isGlyphMarkFunc });
+
+    const codePoints = inputGlyphNames.map((glyphName) =>
+      shaper.getGlyphNameCodePoint(glyphName)
+    );
+    expect(codePoints).to.deep.equal(expectedCodePoints);
+
+    const glyphNames = codePoints.map((codePoint) => shaper.nominalGlyph(codePoint));
+    expect(glyphNames).to.deep.equal(inputGlyphNames);
+
+    const { glyphs } = shaper.shape(codePoints, glyphObjects, {});
+    const glyphNames2 = glyphs.map((g) => g.glyphname);
+    expect(glyphNames2).to.deep.equal(inputGlyphNames);
+  });
+
+  const cursiveGlyphObjects = {
+    "A": { xAdvance: 500, anchors: [{ name: "exit", x: 450, y: 300 }] },
+    "B": {
+      xAdvance: 500,
+      anchors: [
+        { name: "entry", x: 25, y: 150 },
+        { name: "exit", x: 450, y: 300 },
+        { name: "exit", x: -100, y: -100 }, // duplicate, to be ignored
+      ],
+    },
+    "C": { xAdvance: 500, anchors: [{ name: "entry", x: 25, y: 150 }] },
+    "alef-ar": { xAdvance: 500, anchors: [{ name: "exit", x: 50, y: 300 }] },
+    "beh-ar": {
+      xAdvance: 500,
+      anchors: [
+        { name: "entry", x: 475, y: 150 },
+        { name: "exit", x: 50, y: 300 },
+        { name: "exit", x: -100, y: -100 }, // duplicate, to be ignored
+      ],
+    },
+    "teh-ar": { xAdvance: 500, anchors: [{ name: "entry", x: 475, y: 150 }] },
+  };
+
+  propagateAnchors(cursiveGlyphObjects);
+
+  const testDataCursiveAttachmentsLTR = [
+    // LTR
+    { inputGlyphs: [], expectedGlyphs: [], rightToLeft: false },
     {
-      g: 3,
-      cl: 4,
-      ax: 396,
-      ay: 0,
-      dx: 0,
-      dy: 0,
-      flags: 0,
-      gn: "Adieresis",
+      inputGlyphs: [
+        { glyphname: "A", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        { glyphname: "B", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+      ],
+      expectedGlyphs: [
+        { glyphname: "A", xAdvance: 450, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        { glyphname: "B", xAdvance: 475, yAdvance: 0, xOffset: -25, yOffset: 150 },
+      ],
+      rightToLeft: false,
     },
     {
-      g: 29,
-      cl: 5,
-      ax: 398,
-      ay: 0,
-      dx: 0,
-      dy: 0,
-      flags: 0,
-      gn: "S.closed",
+      inputGlyphs: [
+        { glyphname: "A", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        { glyphname: "B", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        { glyphname: "C", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+      ],
+      expectedGlyphs: [
+        { glyphname: "A", xAdvance: 450, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        { glyphname: "B", xAdvance: 425, yAdvance: 0, xOffset: -25, yOffset: 150 },
+        { glyphname: "C", xAdvance: 475, yAdvance: 0, xOffset: -25, yOffset: 300 },
+      ],
+      rightToLeft: false,
+    },
+    {
+      inputGlyphs: [
+        { glyphname: "A", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "mark",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        { glyphname: "B", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        { glyphname: "C", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+      ],
+      expectedGlyphs: [
+        { glyphname: "A", xAdvance: 450, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "mark",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        { glyphname: "B", xAdvance: 425, yAdvance: 0, xOffset: -25, yOffset: 150 },
+        { glyphname: "C", xAdvance: 475, yAdvance: 0, xOffset: -25, yOffset: 300 },
+      ],
+      rightToLeft: false,
+    },
+    // RTL
+    {
+      inputGlyphs: [
+        { glyphname: "teh-ar", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        { glyphname: "beh-ar", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "alef-ar",
+          xAdvance: 500,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+        },
+      ],
+      expectedGlyphs: [
+        { glyphname: "teh-ar", xAdvance: 475, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "beh-ar",
+          xAdvance: 425,
+          yAdvance: 0,
+          xOffset: -50,
+          yOffset: -150,
+        },
+        {
+          glyphname: "alef-ar",
+          xAdvance: 450,
+          yAdvance: 0,
+          xOffset: -50,
+          yOffset: -300,
+        },
+      ],
+      rightToLeft: true,
+    },
+    // Wrong direction applied, nonsnese, output, but at least
+    // ensure we don't get negative advances
+    {
+      inputGlyphs: [
+        {
+          glyphname: "alef-ar",
+          xAdvance: 500,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+        },
+        { glyphname: "beh-ar", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        { glyphname: "teh-ar", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+      ],
+      expectedGlyphs: [
+        { glyphname: "alef-ar", xAdvance: 50, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "beh-ar",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -475,
+          yOffset: 150,
+        },
+        {
+          glyphname: "teh-ar",
+          xAdvance: 25,
+          yAdvance: 0,
+          xOffset: -475,
+          yOffset: 300,
+        },
+      ],
+      rightToLeft: false,
     },
   ];
 
-  it("test shape", async () => {
-    const fontData = new Uint8Array(fs.readFileSync(testFontPath));
-    const f = await getShaper(fontData);
-    const glyphs = f.shape("VABCÄS", { wght: 0, wdth: 0 }, "-kern");
+  parametrize(
+    "applyCursiveAttachments tests",
+    testDataCursiveAttachmentsLTR,
+    (testCase) => {
+      const { inputGlyphs, expectedGlyphs, rightToLeft } = testCase;
+      const outputGlyphs = deepCopyObject(inputGlyphs);
+
+      applyCursiveAttachments(outputGlyphs, cursiveGlyphObjects, rightToLeft);
+
+      expect(outputGlyphs).to.deep.equal(expectedGlyphs);
+    }
+  );
+
+  const markGlyphObjects = {
+    H: {
+      xAdvance: 500,
+      anchors: [
+        { name: "top", x: 250, y: 720 },
+        { name: "bottom", x: 250, y: -20 },
+      ],
+    },
+    H_H: {
+      xAdvance: 800,
+      anchors: [
+        { name: "top_1", x: 250, y: 720 },
+        { name: "top_2", x: 550, y: 720 },
+      ],
+    },
+    dotaccentcomb: {
+      xAdvance: 200,
+      anchors: [
+        { name: "_top", x: 100, y: 730 },
+        { name: "top", x: 100, y: 900 },
+      ],
+    },
+    dotbelowcomb: {
+      xAdvance: 200,
+      anchors: [
+        { name: "_bottom", x: 100, y: -20 },
+        { name: "bottom", x: 100, y: -190 },
+      ],
+    },
+    macroncomb: {
+      xAdvance: 350,
+      anchors: [
+        { name: "_top", x: 170, y: 734 },
+        { name: "top", x: 170, y: 884 },
+      ],
+    },
+  };
+
+  propagateAnchors(markGlyphObjects);
+
+  const testDataMarkPositioning = [
+    { inputGlyphs: [], expectedGlyphs: [] },
+    {
+      inputGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+      ],
+      expectedGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+      ],
+    },
+    {
+      inputGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+      ],
+      expectedGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: -10,
+          mark: true,
+        },
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: -10,
+          mark: true,
+        },
+      ],
+    },
+    {
+      inputGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+      ],
+      expectedGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: -10,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: 0,
+          mark: true,
+        },
+      ],
+    },
+    {
+      inputGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+      ],
+      expectedGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: -10,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: 160,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: 330,
+          mark: true,
+        },
+      ],
+    },
+    {
+      inputGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+      ],
+      expectedGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: -10,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: 160,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: -170,
+          mark: true,
+        },
+      ],
+    },
+    // RTL
+    {
+      inputGlyphs: [
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+      ],
+      expectedGlyphs: [
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 150,
+          yOffset: 160,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 150,
+          yOffset: -10,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 150,
+          yOffset: -170,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 150,
+          yOffset: 0,
+          mark: true,
+        },
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+      ],
+      rightToLeft: true,
+    },
+  ];
+
+  parametrize("applyMarkPositioning tests", testDataMarkPositioning, (testCase) => {
+    const { inputGlyphs, expectedGlyphs, rightToLeft } = testCase;
+    const outputGlyphs = deepCopyObject(inputGlyphs);
+
+    applyMarkToBasePositioning(outputGlyphs, markGlyphObjects, rightToLeft);
+    applyMarkToMarkPositioning(outputGlyphs, markGlyphObjects, rightToLeft);
+
+    expect(outputGlyphs).to.deep.equal(expectedGlyphs);
+  });
+
+  const testDataMarkToBasePositioning = [
+    {
+      inputGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+      ],
+      expectedGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: -10,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: 0,
+          mark: true,
+        },
+      ],
+    },
+    {
+      inputGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+      ],
+      expectedGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: -10,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: -10,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: -10,
+          mark: true,
+        },
+      ],
+    },
+  ];
+
+  parametrize(
+    "applyMarkToBasePositioning tests",
+    testDataMarkToBasePositioning,
+    (testCase) => {
+      const { inputGlyphs, expectedGlyphs, rightToLeft } = testCase;
+      const outputGlyphs = deepCopyObject(inputGlyphs);
+
+      applyMarkToBasePositioning(outputGlyphs, markGlyphObjects, rightToLeft);
+
+      expect(outputGlyphs).to.deep.equal(expectedGlyphs);
+    }
+  );
+
+  const testDataMarkToMarkPositioning = [
+    {
+      inputGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+      ],
+      expectedGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotbelowcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+      ],
+    },
+    {
+      inputGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+      ],
+      expectedGlyphs: [
+        { glyphname: "H", xAdvance: 500, yAdvance: 0, xOffset: 0, yOffset: 0 },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 170,
+          mark: true,
+        },
+        {
+          glyphname: "dotaccentcomb",
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 340,
+          mark: true,
+        },
+      ],
+    },
+  ];
+
+  parametrize(
+    "applyMarkToMarkPositioning tests",
+    testDataMarkToMarkPositioning,
+    (testCase) => {
+      const { inputGlyphs, expectedGlyphs, rightToLeft } = testCase;
+      const outputGlyphs = deepCopyObject(inputGlyphs);
+
+      applyMarkToMarkPositioning(outputGlyphs, markGlyphObjects, rightToLeft);
+
+      expect(outputGlyphs).to.deep.equal(expectedGlyphs);
+    }
+  );
+
+  const markToLigatureInputGlyphOrder = [".notdef", ...Object.keys(markGlyphObjects)];
+  const markToLigatureGlyphClasses = {
+    base: [],
+    ligature: [],
+    mark: ["macroncomb", "dotaccentcomb"],
+    component: [],
+  };
+  const markToLigatureFeatureCode = `
+languagesystem DFLT dflt;
+languagesystem latn dflt;
+
+feature liga {
+  lookupflag IgnoreMarks;
+
+  sub H H by H_H;
+} liga;
+  `;
+
+  const { fontData, insertMarkers: markToLigatureInsertMarkers } = buildShaperFont(
+    1000,
+    markToLigatureInputGlyphOrder,
+    {
+      featureSource: markToLigatureFeatureCode,
+      glyphClasses: markToLigatureGlyphClasses,
+    }
+  );
+
+  const testDataMarkToLigaturePositioning = [
+    {
+      inputCodePoints: [ord("H"), 0x0304, 0x0307, ord("H"), 0x0307, 0x0304],
+      expectedOutputGlyphs: [
+        {
+          codepoint: 2,
+          cluster: 0,
+          flags: 0,
+          xAdvance: 800,
+          yAdvance: 0,
+          xOffset: 0,
+          yOffset: 0,
+          glyphname: "H_H",
+          mark: false,
+        },
+        {
+          codepoint: 5,
+          cluster: 0,
+          flags: 0,
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -720,
+          yOffset: -14,
+          glyphname: "macroncomb",
+          mark: true,
+        },
+        {
+          codepoint: 3,
+          cluster: 0,
+          flags: 0,
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -650,
+          yOffset: 140,
+          glyphname: "dotaccentcomb",
+          mark: true,
+        },
+        {
+          codepoint: 3,
+          cluster: 4,
+          flags: 1,
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -350,
+          yOffset: -10,
+          glyphname: "dotaccentcomb",
+          mark: true,
+        },
+        {
+          codepoint: 5,
+          cluster: 5,
+          flags: 1,
+          xAdvance: 0,
+          yAdvance: 0,
+          xOffset: -420,
+          yOffset: 156,
+          glyphname: "macroncomb",
+          mark: true,
+        },
+      ],
+    },
+  ];
+
+  parametrize(
+    "mark-to-ligature tests",
+    testDataMarkToLigaturePositioning,
+    (testCase) => {
+      const shaper = getShaper({
+        fontData,
+        nominalGlyphFunc,
+        glyphOrder: markToLigatureInputGlyphOrder,
+        isGlyphMarkFunc,
+        insertMarkers: markToLigatureInsertMarkers,
+      });
+
+      const { glyphs } = shaper.shape(testCase.inputCodePoints, markGlyphObjects, {});
+      expect(glyphs).to.deep.equal(testCase.expectedOutputGlyphs);
+    }
+  );
+
+  it("test glyph-classification-gdef-override", () => {
+    const gdefFeatureCode = `
+table GDEF {
+  # At least one class needs to contain a glyph
+  GlyphClassDef [H], [], [], []; # note: macroncomb is not in the "mark" class list
+} GDEF;
+  `;
+
+    const { fontData, insertMarkers } = buildShaperFont(
+      1000,
+      markToLigatureInputGlyphOrder,
+      {
+        featureSource: gdefFeatureCode,
+        glyphClasses: markToLigatureGlyphClasses,
+      }
+    );
+
+    expect(fontData).to.be.ok; // "truthy"
+
+    const shaper = getShaper({
+      fontData,
+      nominalGlyphFunc,
+      glyphOrder: markToLigatureInputGlyphOrder,
+      isGlyphMarkFunc,
+      insertMarkers,
+    });
+
+    const inputCodePoints = [ord("H"), 0x0304 /* macroncomb */];
+
+    const expectedGlyphs = [
+      {
+        cluster: 0,
+        codepoint: 1,
+        flags: 0,
+        glyphname: "H",
+        mark: false,
+        xAdvance: 500,
+        xOffset: 0,
+        yAdvance: 0,
+        yOffset: 0,
+      },
+      {
+        cluster: 1,
+        codepoint: 5,
+        flags: 1,
+        glyphname: "macroncomb",
+        mark: false,
+        xAdvance: 500,
+        xOffset: 0,
+        yAdvance: 0,
+        yOffset: 0,
+      },
+    ];
+
+    const { glyphs } = shaper.shape(inputCodePoints, glyphObjects, {
+      kerningPairFunc: (g1, g2) => kerning.getGlyphPairValue(g1, g2),
+    });
+
     expect(glyphs).to.deep.equal(expectedGlyphs);
   });
+
+  const clusterTestData = [
+    { clusters: [], numChars: 0, expectedGlyphToChars: [], expectedCharToGlyphs: [] },
+    {
+      clusters: [0, 1, 2, 5, 6, 8],
+      numChars: 10,
+      expectedGlyphToChars: [[0], [1], [2, 3, 4], [5], [6, 7], [8, 9]],
+      expectedCharToGlyphs: [[0], [1], [2], [2], [2], [3], [4], [4], [5], [5]],
+    },
+    {
+      clusters: [0, 1],
+      numChars: 3,
+      expectedGlyphToChars: [[0], [1, 2]],
+      expectedCharToGlyphs: [[0], [1], [1]],
+    },
+    {
+      clusters: [0, 0, 1],
+      numChars: 2,
+      expectedGlyphToChars: [[0], [0], [1]],
+      expectedCharToGlyphs: [[0, 1], [2]],
+    },
+    {
+      clusters: [0, 0, 1, 1],
+      numChars: 2,
+      expectedGlyphToChars: [[0], [0], [1], [1]],
+      expectedCharToGlyphs: [
+        [0, 1],
+        [2, 3],
+      ],
+    },
+    {
+      clusters: [0, 0, 2, 2],
+      numChars: 3,
+      expectedGlyphToChars: [[0, 1], [0, 1], [2], [2]],
+      expectedCharToGlyphs: [
+        [0, 1],
+        [0, 1],
+        [2, 3],
+      ],
+    },
+    {
+      clusters: [3, 2, 1, 0],
+      numChars: 4,
+      expectedGlyphToChars: [[3], [2], [1], [0]],
+      expectedCharToGlyphs: [[3], [2], [1], [0]],
+    },
+    {
+      clusters: [3, 2, 0, 1],
+      numChars: 4,
+      expectedGlyphToChars: [[3], [2], [0], [1]],
+      expectedCharToGlyphs: [[2], [3], [1], [0]],
+    },
+    {
+      clusters: [2, 0],
+      numChars: 3,
+      expectedGlyphToChars: [[2], [0, 1]],
+      expectedCharToGlyphs: [[1], [1], [0]],
+    },
+    {
+      clusters: [1, 0],
+      numChars: 3,
+      expectedGlyphToChars: [[1, 2], [0]],
+      expectedCharToGlyphs: [[1], [0], [0]],
+    },
+    {
+      clusters: [2, 2, 0, 0],
+      numChars: 3,
+      expectedGlyphToChars: [[2], [2], [0, 1], [0, 1]],
+      expectedCharToGlyphs: [
+        [2, 3],
+        [2, 3],
+        [0, 1],
+      ],
+    },
+  ];
+
+  parametrize(
+    "characterGlyphMapping tests",
+    clusterTestData,
+    ({ clusters, numChars, expectedGlyphToChars, expectedCharToGlyphs }) => {
+      const { glyphToChars, charToGlyphs } = characterGlyphMapping(clusters, numChars);
+      expect(glyphToChars).to.deep.equal(expectedGlyphToChars);
+      expect(charToGlyphs).to.deep.equal(expectedCharToGlyphs);
+    }
+  );
 });
+
+describe("shaper tests compare emulation with native", () => {
+  const basicComparisonTests = {
+    name: "basic",
+    setupShapers: setupShapersFactory(
+      moduleDirName.joinPath("data", "positioning-emulation")
+    ),
+    testData: [
+      {
+        input: "HH",
+        expectedGlyphs: [
+          {
+            cluster: 0,
+            xAdvance: 800,
+            yAdvance: 0,
+            xOffset: 0,
+            yOffset: 0,
+            glyphname: "H_H",
+            mark: false,
+          },
+        ],
+      },
+      {
+        input: "ABC",
+        expectedGlyphs: [
+          {
+            cluster: 0,
+            xAdvance: 450,
+            yAdvance: 0,
+            xOffset: 0,
+            yOffset: 0,
+            glyphname: "A",
+            mark: false,
+          },
+          {
+            cluster: 1,
+            xAdvance: 425,
+            yAdvance: 0,
+            xOffset: -25,
+            yOffset: 150,
+            glyphname: "B",
+            mark: false,
+          },
+          {
+            cluster: 2,
+            xAdvance: 475,
+            yAdvance: 0,
+            xOffset: -25,
+            yOffset: 300,
+            glyphname: "C",
+            mark: false,
+          },
+        ],
+      },
+      {
+        input: "Ḥ̄̇Ḥ̇̄",
+        expectedGlyphs: [
+          {
+            cluster: 0,
+            xAdvance: 800,
+            yAdvance: 0,
+            xOffset: 0,
+            yOffset: 0,
+            glyphname: "H_H",
+            mark: false,
+          },
+          {
+            cluster: 0,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: -650,
+            yOffset: 0,
+            glyphname: "dotbelowcomb",
+            mark: true,
+          },
+          {
+            cluster: 0,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: -720,
+            yOffset: -14,
+            glyphname: "macroncomb",
+            mark: true,
+          },
+          {
+            cluster: 0,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: -650,
+            yOffset: 140,
+            glyphname: "dotaccentcomb",
+            mark: true,
+          },
+          {
+            cluster: 5,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: -350,
+            yOffset: 0,
+            glyphname: "dotbelowcomb",
+            mark: true,
+          },
+          {
+            cluster: 5,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: -350,
+            yOffset: -10,
+            glyphname: "dotaccentcomb",
+            mark: true,
+          },
+          {
+            cluster: 7,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: -420,
+            yOffset: 156,
+            glyphname: "macroncomb",
+            mark: true,
+          },
+        ],
+      },
+      {
+        input: "H̄",
+        expectedGlyphs: [
+          {
+            cluster: 0,
+            xAdvance: 500,
+            yAdvance: 0,
+            xOffset: 0,
+            yOffset: 0,
+            glyphname: "H",
+            mark: false,
+          },
+          {
+            cluster: 1,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: -420,
+            yOffset: -14,
+            glyphname: "macroncomb",
+            mark: true,
+          },
+        ],
+      },
+      {
+        input: "H̄",
+        features: [["ss03", true]],
+        expectedGlyphs: [
+          {
+            cluster: 0,
+            xAdvance: 500,
+            yAdvance: 0,
+            xOffset: 0,
+            yOffset: 0,
+            glyphname: "H",
+            mark: false,
+          },
+          {
+            cluster: 0,
+            xAdvance: 500,
+            yAdvance: 0,
+            xOffset: 0,
+            yOffset: 0,
+            glyphname: "A",
+            mark: false,
+          },
+          {
+            cluster: 1,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: -920,
+            yOffset: -14,
+            glyphname: "macroncomb",
+            mark: true,
+          },
+        ],
+      },
+    ],
+  };
+
+  const raqqComparisonTests = {
+    name: "raqq",
+    setupShapers: setupShapersFactory(moduleDirName.joinPath("data", "raqq")),
+    testData: [
+      {
+        input: "ا",
+        expectedGlyphs: [
+          {
+            cluster: 0,
+            xAdvance: 658,
+            yAdvance: 0,
+            xOffset: 0,
+            yOffset: 0,
+            glyphname: "alef-ar",
+            mark: false,
+          },
+        ],
+      },
+      {
+        // https://github.com/fontra/fontra/issues/2507
+        input: "ن",
+        expectedGlyphs: [
+          {
+            cluster: 0,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: 5,
+            yOffset: 191,
+            glyphname: "dotabove-ar",
+            mark: true,
+          },
+          {
+            cluster: 0,
+            xAdvance: 295,
+            yAdvance: 0,
+            xOffset: 0,
+            yOffset: 0,
+            glyphname: "noonghunna-ar",
+            mark: false,
+          },
+        ],
+      },
+      {
+        // https://github.com/fontra/fontra/issues/2437
+        input: "فَأنتَ",
+        expectedGlyphs: [
+          {
+            cluster: 5,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: 593,
+            yOffset: 93,
+            glyphname: "fatha-ar",
+            mark: true,
+          },
+          {
+            cluster: 4,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: 803,
+            yOffset: 264,
+            glyphname: "twodotsverticalabove-ar",
+            mark: true,
+          },
+          {
+            cluster: 4,
+            xAdvance: 984,
+            yAdvance: 0,
+            xOffset: 0,
+            yOffset: 0,
+            glyphname: "behDotless-ar.fina",
+            mark: false,
+          },
+          {
+            cluster: 3,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: -9,
+            yOffset: 392,
+            glyphname: "dotabove-ar.beh",
+            mark: true,
+          },
+          {
+            cluster: 3,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: 0,
+            yOffset: 0,
+            glyphname: "_c.seen.beh",
+            mark: false,
+          },
+          {
+            cluster: 3,
+            xAdvance: 130,
+            yAdvance: 0,
+            xOffset: 0,
+            yOffset: 0,
+            glyphname: "behDotless-ar.init.high",
+            mark: false,
+          },
+          {
+            cluster: 0,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: 491,
+            yOffset: 594,
+            glyphname: "fatha-ar",
+            mark: true,
+          },
+          {
+            cluster: 0,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: 673,
+            yOffset: 432,
+            glyphname: "fatha-ar",
+            mark: true,
+          },
+          {
+            cluster: 0,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: 553,
+            yOffset: 394,
+            glyphname: "dotabove-ar",
+            mark: true,
+          },
+          {
+            cluster: 0,
+            xAdvance: 960,
+            yAdvance: 0,
+            xOffset: 400,
+            yOffset: 0,
+            glyphname: "fehDotless_alef-ar",
+            mark: false,
+          },
+        ],
+      },
+      {
+        // https://github.com/fontra/fontra/issues/2521
+        input: "قل",
+        expectedGlyphs: [
+          {
+            cluster: 1,
+            xAdvance: 177,
+            yAdvance: 0,
+            xOffset: 0,
+            yOffset: 0,
+            glyphname: "lam-ar.fina",
+            mark: false,
+          },
+          {
+            cluster: 0,
+            xAdvance: 0,
+            yAdvance: 0,
+            xOffset: -31,
+            yOffset: 381,
+            glyphname: "twodotsverticalabove-ar",
+            mark: true,
+          },
+          {
+            cluster: 0,
+            xAdvance: 174,
+            yAdvance: 0,
+            xOffset: 0,
+            yOffset: 0,
+            glyphname: "_c.feh.init.beh",
+            mark: false,
+          },
+          {
+            cluster: 0,
+            xAdvance: 220,
+            yAdvance: 0,
+            xOffset: -114,
+            yOffset: 0,
+            glyphname: "fehDotless-ar.init",
+            mark: false,
+          },
+        ],
+      },
+    ],
+  };
+
+  for (const { name, setupShapers, testData } of [
+    basicComparisonTests,
+    raqqComparisonTests,
+  ]) {
+    parametrize(`${name} emulation tests`, testData, async (testCase) => {
+      const { nativeShapeFunc, emulatedShapeFunc } = await setupShapers();
+
+      const testInputCodePoints = [...testCase.input].map((c) => ord(c));
+      const direction = guessDirectionFromCodePoints(testInputCodePoints);
+
+      const { glyphs: nativeGlyphs } = nativeShapeFunc(testInputCodePoints, {
+        variations: testCase.variations,
+        features: testCase.features,
+        direction,
+      });
+
+      expect(stripGlyphIDsAndFlags(nativeGlyphs)).to.deep.equal(
+        testCase.expectedGlyphs
+      );
+
+      const { glyphs: emulatedGlyphs } = await emulatedShapeFunc(testInputCodePoints, {
+        variations: testCase.variations,
+        features: testCase.features,
+        direction,
+      });
+
+      expect(stripGlyphIDsAndFlags(emulatedGlyphs)).to.deep.equal(
+        testCase.expectedGlyphs
+      );
+    });
+  }
+});
+
+describe("test conditional substitutions", () => {
+  it("test conditional substitutions", async () => {
+    const testFontPath = moduleDirName.parent.parent.parent.joinPath(
+      "test-common",
+      "fonts",
+      "MutatorSans.fontra"
+    );
+
+    const shapeFunc = await getEmulatedShapeFuncForPath(testFontPath);
+
+    const inputCodePoints = [..."IS"].map(ord);
+
+    const { glyphs: glyphs1 } = await shapeFunc(inputCodePoints);
+    const glyphNames1 = glyphs1.map((g) => g.glyphname);
+    expect(glyphNames1).to.deep.equal(["I.narrow", "S.closed"]);
+
+    const { glyphs: glyphs2 } = await shapeFunc(inputCodePoints, {
+      variations: { wght: 800, wdth: 800 },
+    });
+    const glyphNames2 = glyphs2.map((g) => g.glyphname);
+    expect(glyphNames2).to.deep.equal(["I", "S"]);
+
+    const { glyphs: glyphs3 } = await shapeFunc(inputCodePoints, {
+      variations: { wdth: 800 },
+    });
+    const glyphNames3 = glyphs3.map((g) => g.glyphname);
+    expect(glyphNames3).to.deep.equal(["I", "S.closed"]);
+
+    const { glyphs: glyphs4 } = await shapeFunc(inputCodePoints, {
+      variations: { wght: 800 },
+    });
+    const glyphNames4 = glyphs4.map((g) => g.glyphname);
+    expect(glyphNames4).to.deep.equal(["I.narrow", "S"]);
+  });
+});
+
+describe("test conditional substitutions with mapping", () => {
+  it("test conditional substitutions with mapping", async () => {
+    const testFontPath = moduleDirName.joinPath(
+      "data",
+      "cond-subst",
+      "cond-subst.fontra"
+    );
+
+    const shapeFunc = await getEmulatedShapeFuncForPath(testFontPath);
+
+    const inputCodePoints = [..."¢øﬁ"].map(ord);
+
+    const { glyphs: glyphs1 } = await shapeFunc(inputCodePoints);
+    const glyphNames1 = glyphs1.map((g) => g.glyphname);
+    expect(glyphNames1).to.deep.equal(["cent", "oslash", "fi"]);
+
+    const { glyphs: glyphs2 } = await shapeFunc(inputCodePoints, {
+      variations: { wght: 500 },
+    });
+    const glyphNames2 = glyphs2.map((g) => g.glyphname);
+    expect(glyphNames2).to.deep.equal(["cent", "oslash", "fi"]);
+
+    // Source coords *scaled* to User coords (but not unapplying avar)
+    // conditionalSubstitutions = {
+    //   featureTags: ["rvrn"],
+    //   rules: [
+    //     [
+    //       [
+    //         { wght: [500.44642857142856, 900] },
+    //         { wght: [422.32142857142856, 433.48214285714283] },
+    //       ],
+    //       { fi: "fi.rvrn" },
+    //     ],
+    //     [[{ wght: [667.8571428571429, 900] }], { cent: "cent.rvrn" }],
+    //     [[{ wght: [734.8214285714286, 900] }], { oslash: "oslash.rvrn" }],
+    //   ],
+    // };
+
+    const { glyphs: glyphs3 } = await shapeFunc(inputCodePoints, {
+      variations: { wght: 501 },
+    });
+    const glyphNames3 = glyphs3.map((g) => g.glyphname);
+    expect(glyphNames3).to.deep.equal(["cent", "oslash", "fi.rvrn"]);
+
+    const { glyphs: glyphs4 } = await shapeFunc(inputCodePoints, {
+      variations: { wght: 667 },
+    });
+    const glyphNames4 = glyphs4.map((g) => g.glyphname);
+    expect(glyphNames4).to.deep.equal(["cent", "oslash", "fi.rvrn"]);
+
+    const { glyphs: glyphs5 } = await shapeFunc(inputCodePoints, {
+      variations: { wght: 668 },
+    });
+    const glyphNames5 = glyphs5.map((g) => g.glyphname);
+    expect(glyphNames5).to.deep.equal(["cent.rvrn", "oslash", "fi.rvrn"]);
+
+    const { glyphs: glyphs6 } = await shapeFunc(inputCodePoints, {
+      variations: { wght: 734 },
+    });
+    const glyphNames6 = glyphs6.map((g) => g.glyphname);
+    expect(glyphNames6).to.deep.equal(["cent.rvrn", "oslash", "fi.rvrn"]);
+
+    const { glyphs: glyphs7 } = await shapeFunc(inputCodePoints, {
+      variations: { wght: 735 },
+    });
+    const glyphNames7 = glyphs7.map((g) => g.glyphname);
+    expect(glyphNames7).to.deep.equal(["cent.rvrn", "oslash.rvrn", "fi.rvrn"]);
+
+    const { glyphs: glyphs8 } = await shapeFunc(inputCodePoints, {
+      variations: { wght: 423 },
+    });
+    const glyphNames8 = glyphs8.map((g) => g.glyphname);
+    expect(glyphNames8).to.deep.equal(["cent", "oslash", "fi.rvrn"]);
+  });
+});
+
+describe("prepareConditionalSubstitutions ", () => {
+  const axes = [
+    { name: "Weight", tag: "wght", minValue: 200, defaultValue: 400, maxValue: 700 },
+  ];
+  const glyphMap = { "A": [], "A.alt": [] };
+
+  it("prepareConditionalSubstitutions with correct inputs", () => {
+    const substitutions = {
+      featureTags: ["rvrn"],
+      rules: [
+        {
+          name: "Weight rule",
+          conditionSets: [
+            { conditions: [{ name: "Weight", minValue: 200, maxValue: 400 }] },
+          ],
+          substitutions: { A: "A.alt" },
+        },
+      ],
+    };
+
+    const substForBuildShaperFont = prepareConditionalSubstitutions(
+      substitutions,
+      axes,
+      axes,
+      glyphMap
+    );
+
+    expect(substForBuildShaperFont).to.deep.equal({
+      featureTags: ["rvrn"],
+      rules: [[[{ wght: [200, 400] }], { A: "A.alt" }]],
+    });
+  });
+
+  it("prepareConditionalSubstitutions with incorrect axis inputs", () => {
+    const substitutions = {
+      featureTags: ["rvrn"],
+      rules: [
+        {
+          name: "Weight rule",
+          conditionSets: [
+            // unknown axis name (misspelled)
+            { conditions: [{ name: "weight", minValue: 200, maxValue: 400 }] },
+          ],
+          substitutions: { A: "A.alt" },
+        },
+      ],
+    };
+
+    const substForBuildShaperFont = prepareConditionalSubstitutions(
+      substitutions,
+      axes,
+      axes,
+      glyphMap
+    );
+
+    expect(substForBuildShaperFont).to.deep.equal({
+      featureTags: ["rvrn"],
+      rules: [[[{}], { A: "A.alt" }]],
+    });
+  });
+
+  it("prepareConditionalSubstitutions with incorrect glyph name inputs", () => {
+    const substitutions = {
+      featureTags: ["rvrn"],
+      rules: [
+        {
+          name: "Weight rule",
+          conditionSets: [
+            { conditions: [{ name: "Weight", minValue: 200, maxValue: 400 }] },
+          ],
+          // non-existent glyph name
+          substitutions: { A: "B" },
+        },
+      ],
+    };
+
+    const substForBuildShaperFont = prepareConditionalSubstitutions(
+      substitutions,
+      axes,
+      axes,
+      glyphMap
+    );
+
+    expect(substForBuildShaperFont).to.deep.equal({
+      featureTags: ["rvrn"],
+      rules: [[[{ wght: [200, 400] }], {}]],
+    });
+  });
+});
+
+function stripGlyphIDsAndFlags(glyphs) {
+  return glyphs.map((glyph) => {
+    glyph = { ...glyph };
+    delete glyph.codepoint;
+    delete glyph.flags;
+    return glyph;
+  });
+}
+
+function ord(s) {
+  return s.codePointAt(0);
+}
+
+function propagateAnchors(glyphs) {
+  for (const glyph of Object.values(glyphs)) {
+    glyph.propagatedAnchors = glyph.anchors;
+  }
+}
+
+async function getEmulatedShapeFuncForPath(path) {
+  const fontController = await getFontController(path);
+  const mockAppSettingsController = new ObservableController({});
+  const shaperController = new ShaperController(
+    fontController,
+    mockAppSettingsController
+  );
+
+  const kerningController = await fontController.getKerningController("kern");
+  const kerningInstance = kerningController.instantiate({});
+  const kerningPairFunc = (leftGlyph, rightGlyph) =>
+    kerningInstance.getGlyphPairValue(leftGlyph, rightGlyph);
+
+  const { shaper } = await shaperController.getShaper(true);
+
+  async function emulatedShapeFunc(codePoints, shaperOptions) {
+    shaperOptions = { ...shaperOptions, kerningPairFunc };
+    const glyphInstances = {};
+
+    let { glyphs, requiredGlyphs } = shaper.shape(
+      codePoints,
+      glyphInstances,
+      shaperOptions
+    );
+
+    for (const glyphName of requiredGlyphs) {
+      if (!(glyphName in glyphInstances) && glyphName in fontController.glyphMap) {
+        glyphInstances[glyphName] = await fontController.getGlyphInstance(
+          glyphName,
+          {}
+        );
+      }
+    }
+
+    ({ glyphs } = shaper.shape(codePoints, glyphInstances, shaperOptions));
+
+    return { glyphs };
+  }
+
+  return emulatedShapeFunc;
+}
+
+function setupShapersFactory(path) {
+  let shapers;
+
+  async function setupFunc() {
+    if (!shapers) {
+      const ttfPath = await iterFirst(await path.glob("*.ttf"));
+      const fontraPath = await iterFirst(await path.glob("*.fontra"));
+      assert(ttfPath);
+      assert(fontraPath);
+
+      const fontData = ttfPath.readBytesSync();
+      const nativeShaper = getShaper({ fontData });
+      const nativeShapeFunc = (codePoints, options) =>
+        nativeShaper.shape(codePoints, null, options);
+
+      const emulatedShapeFunc = await getEmulatedShapeFuncForPath(fontraPath);
+
+      shapers = { nativeShapeFunc, emulatedShapeFunc };
+    }
+    return shapers;
+  }
+
+  return setupFunc;
+}
+
+async function iterFirst(iterator) {
+  for await (const item of iterator) {
+    return item;
+  }
+  return undefined;
+}

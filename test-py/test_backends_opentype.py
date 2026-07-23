@@ -1,4 +1,5 @@
 import asyncio
+import io
 import pathlib
 import shutil
 from contextlib import aclosing
@@ -205,6 +206,46 @@ async def test_readTTX():
     assert isinstance(glyph, VariableGlyph)
 
 
+async def test_getShaperFontData_ttf():
+    path = dataDir / "mutatorsans" / "MutatorSans.ttf"
+    font = getFileSystemBackend(path)
+    shaperFontData = await font.getShaperFontData()
+    assert shaperFontData is not None
+    f = io.BytesIO(shaperFontData.data)
+    font = TTFont(f)
+    assert sorted(font.keys()) == [
+        "GDEF",
+        "GPOS",
+        "GSUB",
+        "GlyphOrder",
+        "fvar",
+        "head",
+        "maxp",
+        "name",
+        "post",
+    ]
+
+
+async def test_getShaperFontData_ttx():
+    path = dataDir / "mutatorsans" / "MutatorSans.subset.ttx"
+    font = getFileSystemBackend(path)
+    shaperFontData = await font.getShaperFontData()
+    assert shaperFontData is not None
+    f = io.BytesIO(shaperFontData.data)
+    font = TTFont(f)
+    assert sorted(font.keys()) == [
+        "GDEF",
+        "GPOS",
+        "GSUB",
+        "GlyphOrder",
+        "fvar",
+        "head",
+        "maxp",
+        "name",
+        "post",
+    ]
+
+
 async def test_getSources(testFontMutatorSans):
     sources = await testFontMutatorSans.getSources()
     assert len(sources) == 4
@@ -271,3 +312,17 @@ async def test_font_sources_names(fontPath, expectedNames):
     sources = await font.getSources()
     sourceNames = [s.name for s in sources.values()]
     assert sourceNames == expectedNames
+
+
+async def test_os2_version1():
+    # https://github.com/fontra/fontra/issues/2548
+    fontPath = dataDir / "noto" / "NotoSans-Regular.subset.os2-version1.otf"
+    font = getFileSystemBackend(fontPath)
+    sources = await font.getSources()
+    assert len(sources) == 1
+    [source] = sources.values()
+    assert source.lineMetricsHorizontalLayout == {
+        "ascender": LineMetric(value=1069),
+        "baseline": LineMetric(value=0),
+        "descender": LineMetric(value=-293),
+    }

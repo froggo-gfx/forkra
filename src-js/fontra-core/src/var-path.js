@@ -1,15 +1,16 @@
 import { Bezier } from "bezier-js";
 import { convexHull } from "./convex-hull.js";
 import { VariationError } from "./errors.js";
-import { centeredRect, pointInRect, rectFromPoints, updateRect } from "./rectangle.js";
+import { centeredRect, pointInRect, rectFromPoints, updateRect } from "./rectangle.ts";
 import {
   arrayExtend,
   assert,
   enumerate,
   isObjectEmpty,
+  objectsEqualSerialized,
   range,
   reversed,
-} from "./utils.js";
+} from "./utils.ts";
 import VarArray from "./var-array.js";
 
 export const POINT_TYPE_OFF_CURVE_QUAD = "quad";
@@ -722,7 +723,7 @@ export class VarPackedPath {
   isCompatible(other) {
     return (
       other instanceof VarPackedPath &&
-      arrayEquals(this.contourInfo, other.contourInfo) &&
+      objectsEqualSerialized(this.contourInfo, other.contourInfo) &&
       pointTypesEquals(this.pointTypes, other.pointTypes)
     );
   }
@@ -1094,11 +1095,6 @@ const decomposeSegmentFuncs = {
     });
   },
 };
-
-function arrayEquals(a, b) {
-  // Oh well
-  return JSON.stringify(a) === JSON.stringify(b);
-}
 
 function pointTypesEquals(a, b) {
   if (a.length !== b.length) {

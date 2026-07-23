@@ -22,7 +22,7 @@ const panelClasses = [
 
 export class FontInfoController extends ViewController {
   static titlePattern(displayName) {
-    return `Fontra Font Info — ${displayName}`;
+    return `Font Info — ${displayName}`;
   }
 
   async start() {
@@ -33,7 +33,11 @@ export class FontInfoController extends ViewController {
     const myMenuBar = makeFontraMenuBar(["File", "Edit", "Font"], this);
     document.querySelector(".top-bar-container").appendChild(myMenuBar);
 
-    this.multiPanelController = new MultiPanelController(panelClasses, this);
+    this.multiPanelController = new MultiPanelController(
+      panelClasses,
+      this,
+      "font-info"
+    );
 
     const { subscriptionPattern } = this.getSubscriptionPatterns();
     await this.fontController.subscribeChanges(subscriptionPattern, false);

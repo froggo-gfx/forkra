@@ -1,6 +1,6 @@
 import { guessGlyphPlaceholderString } from "@fontra/core/glyph-data.js";
 import { translate } from "@fontra/core/localization.js";
-import { rectToPoints } from "@fontra/core/rectangle.js";
+import { rectToPoints } from "@fontra/core/rectangle.ts";
 import { difference, isSuperset, union } from "@fontra/core/set-ops.js";
 import { decomposedToTransform } from "@fontra/core/transform.js";
 import {
@@ -13,7 +13,7 @@ import {
   round,
   unionIndexSets,
   withSavedState,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { subVectors } from "@fontra/core/vector.js";
 
 export const visualizationLayerDefinitions = [];
@@ -331,8 +331,8 @@ registerVisualizationLayerDefinition({
     strokeWidth: 1,
     originMarkerRadius: 4,
   },
-  colors: { strokeColor: "#0006" },
-  colorsDarkMode: { strokeColor: "#FFF8" },
+  colors: { strokeColor: "#999" },
+  colorsDarkMode: { strokeColor: "#999" },
 
   draw: (context, positionedGlyph, parameters, model, controller) => {
     context.strokeStyle = parameters.strokeColor;
@@ -403,15 +403,15 @@ registerVisualizationLayerDefinition({
   userSwitchable: true,
   defaultOn: true,
   zIndex: 600,
-  screenParameters: { fontSize: 11 },
+  screenParameters: { fontSize: 10, marginFromTop: 6 },
   colors: { boxColor: "#FFFB", color: "#000" },
   colorsDarkMode: { boxColor: "#1118", color: "#FFF" },
   draw: (context, positionedGlyph, parameters, model, controller) => {
     const fontSize = parameters.fontSize;
+    const marginFromTop = parameters.marginFromTop;
 
-    const margin = 0.5 * fontSize;
-    const boxHeight = 1.68 * fontSize;
-    const bottomY = 0.75 * fontSize * -1 - boxHeight + margin;
+    const margin = 0.25 * fontSize;
+    const boxHeight = 1.2 * fontSize;
 
     context.font = `${fontSize}px fontra-ui-regular, sans-serif`;
     context.textAlign = "center";
@@ -427,14 +427,14 @@ registerVisualizationLayerDefinition({
       drawRoundRect(
         context,
         pt.x - width / 2,
-        -pt.y - bottomY + margin,
+        -pt.y + marginFromTop,
         width,
-        -boxHeight / 2 - 2 * margin,
+        boxHeight,
         boxHeight / 4 // corner radius
       );
 
       context.fillStyle = parameters.color;
-      context.fillText(strLine, pt.x, -pt.y - bottomY);
+      context.fillText(strLine, pt.x, -pt.y + marginFromTop + boxHeight - margin);
     }
   },
 });

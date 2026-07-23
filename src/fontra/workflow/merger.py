@@ -11,6 +11,7 @@ from ..backends.null import NullBackend
 from ..core.async_property import async_cached_property
 from ..core.classes import (
     Axes,
+    ConditionalSubstitutions,
     FontInfo,
     FontSource,
     ImageData,
@@ -19,13 +20,21 @@ from ..core.classes import (
     VariableGlyph,
     unstructure,
 )
+from ..core.kernutils import disambiguateKerningGroupNames
 from ..core.protocols import ReadableFontBackend, ReadBackgroundImage
 from ..core.varutils import locationToTuple
+from .actions import ActionError
 from .actions.axes import mapFontSourceLocationsAndFilter
-from .actions.subset import subsetKerning
+from .actions.subset import subsetConditionalSubstitutions, subsetKerning
 from .features import mergeFeatures
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(kw_only=True)
+class MergedSourcesInfo:
+    sources: dict[str, FontSource]
+    identifierMappingA: dict[str, str]
 
 
 @dataclass(kw_only=True)
@@ -80,7 +89,7 @@ class FontBackendMerger(ReadableBaseBackend):
         fontInfoB = await self.inputB.getFontInfo()
         return FontInfo(**(unstructure(fontInfoA) | unstructure(fontInfoB)))
 
-    @async_cached_property
+    @async_cached_property[Axes]
     async def mergedAxes(self) -> Axes:
         axesA = await self.inputA.getAxes()
         axesB = await self.inputB.getAxes()
@@ -116,7 +125,7 @@ class FontBackendMerger(ReadableBaseBackend):
     async def getAxes(self) -> Axes:
         return await self.mergedAxes
 
-    @async_cached_property
+    @async_cached_property[MergedSourcesInfo]
     async def mergedSourcesInfo(self) -> MergedSourcesInfo:
         mergedAxes = await self.mergedAxes
         defaultLocation = {axis.name: axis.defaultValue for axis in mergedAxes.axes}
@@ -231,6 +240,42 @@ class FontBackendMerger(ReadableBaseBackend):
         customDataB = await self.inputB.getCustomData()
         return customDataA | customDataB
 
+    async def getConditionalSubstitutions(self) -> ConditionalSubstitutions:
+        await self._prepareGlyphMap()
+        assert self._glyphNamesA is not None
+        assert self._glyphNamesB is not None
+
+        substitutionsA = subsetConditionalSubstitutions(
+            await self.inputA.getConditionalSubstitutions(),
+            self._glyphNamesA - self._glyphNamesB,
+        )
+        substitutionsB = subsetConditionalSubstitutions(
+            await self.inputB.getConditionalSubstitutions(), self._glyphNamesB
+        )
+
+        if not substitutionsB.rules:
+            return substitutionsA
+        elif not substitutionsA.rules:
+            return substitutionsB
+
+        if "rvrn" in (
+            set(substitutionsA.featureTags) ^ set(substitutionsB.featureTags)
+        ):
+            raise ActionError(
+                f"Merger: conditional substitution feature tags are not compatible: "
+                f"A: {substitutionsA.featureTags}, B: {substitutionsB.featureTags}"
+            )
+
+        mergedFeatureTags = list(substitutionsA.featureTags)
+        for tag in substitutionsB.featureTags:
+            if tag not in mergedFeatureTags:
+                mergedFeatureTags.append(tag)
+
+        return ConditionalSubstitutions(
+            featureTags=mergedFeatureTags,
+            rules=substitutionsA.rules + substitutionsB.rules,
+        )
+
     async def getUnitsPerEm(self) -> int:
         unitsPerEmA = await self.inputA.getUnitsPerEm()
         unitsPerEmB = await self.inputB.getUnitsPerEm()
@@ -249,11 +294,10 @@ class FontBackendMerger(ReadableBaseBackend):
 
         return None  # Image not found
 
-
-@dataclass(kw_only=True)
-class MergedSourcesInfo:
-    sources: dict[str, FontSource]
-    identifierMappingA: dict[str, str]
+    async def getGlyphInfos(self) -> dict[str, Any]:
+        glyphInfosA = await self.inputA.getGlyphInfos()
+        glyphInfosB = await self.inputB.getGlyphInfos()
+        return glyphInfosA | glyphInfosB
 
 
 def sourcesByLocation(sources):
@@ -307,7 +351,7 @@ def _mergeAxes(axisA, axisB):
 
 
 def _mergeKernTable(kernTableA, kernTableB):
-    kernTableA = _disambiguateKerningGroupNames(kernTableA, kernTableB)
+    kernTableA = disambiguateKerningGroupNames(kernTableA, kernTableB)
 
     assert set(kernTableA.groupsSide1).isdisjoint(set(kernTableB.groupsSide1))
     assert set(kernTableA.groupsSide2).isdisjoint(set(kernTableB.groupsSide2))
@@ -332,64 +376,6 @@ def _mergeKernTable(kernTableA, kernTableB):
         sourceIdentifiers=mergedSourceIdentifiers,
         values=mappedValuesA | mappedValuesB,
     )
-
-
-def _disambiguateKerningGroupNames(kernTableA, kernTableB):
-    groupSide1NameMap, pairSide1NameMap = _getConflictResolutionMappings(
-        kernTableA.groupsSide1, kernTableB.groupsSide2
-    )
-
-    groupSide2NameMap, pairSide2NameMap = _getConflictResolutionMappings(
-        kernTableA.groupsSide2, kernTableB.groupsSide2
-    )
-
-    if not groupSide1NameMap and not groupSide2NameMap:
-        return kernTableA
-
-    groupsSide1 = _renameGroups(kernTableA.groupsSide1, groupSide1NameMap)
-    groupsSide2 = _renameGroups(kernTableA.groupsSide2, groupSide2NameMap)
-
-    values = {
-        pairSide1NameMap.get(left, left): {
-            pairSide2NameMap.get(right, right): values
-            for right, values in rightDict.items()
-        }
-        for left, rightDict in kernTableA.values.items()
-    }
-
-    return replace(
-        kernTableA, groupsSide1=groupsSide1, groupsSide2=groupsSide2, values=values
-    )
-
-
-def _getConflictResolutionMappings(groupsA, groupsB):
-    groupsNamesA = set(groupsA)
-    groupsNamesB = set(groupsB)
-
-    if groupsNamesA.isdisjoint(groupsNamesB):
-        return {}, {}
-
-    conflictingNames = groupsNamesA & groupsNamesB
-    usedNames = groupsNamesA | groupsNamesB
-
-    groupNameMap = {}
-    for name in sorted(conflictingNames):
-        count = 1
-        while True:
-            newName = f"{name}.{count}"
-            if newName not in usedNames:
-                break
-            count += 1
-        usedNames.add(newName)
-        groupNameMap[name] = newName
-
-    pairNameMap = {"@" + k: "@" + v for k, v in groupNameMap.items()}
-
-    return groupNameMap, pairNameMap
-
-
-def _renameGroups(groups, renameMap):
-    return {renameMap.get(name, name): group for name, group in groups.items()}
 
 
 def _remapKernValuesBySourceIdentifiers(kerningValues, sidMap):

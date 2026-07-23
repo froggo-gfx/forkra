@@ -1,5 +1,6 @@
 import { registerAction } from "@fontra/core/actions.js";
 import { applicationSettingsController } from "@fontra/core/application-settings.js";
+import { makeFontAxisAccordionItems } from "@fontra/core/axis-ui.js";
 import { findNearestLocationIndex } from "@fontra/core/discrete-variation-model.js";
 import {
   BACKGROUND_LAYER_SEPARATOR,
@@ -9,7 +10,7 @@ import {
 import * as html from "@fontra/core/html-utils.js";
 import { htmlToElement } from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
-import { ObservableController, controllerKey } from "@fontra/core/observable-object.js";
+import { ObservableController, controllerKey } from "@fontra/core/observable-object.ts";
 import {
   labeledCheckbox,
   labeledPopupSelect,
@@ -18,6 +19,7 @@ import {
 import {
   FocusKeeper,
   boolInt,
+  compare,
   enumerate,
   escapeHTMLCharacters,
   filterObject,
@@ -28,10 +30,9 @@ import {
   rgbaToCSS,
   round,
   scheduleCalls,
-  stringCompare,
   throttleCalls,
   updateObject,
-} from "@fontra/core/utils.js";
+} from "@fontra/core/utils.ts";
 import { GlyphSource, Layer, StaticGlyph } from "@fontra/core/var-glyph.js";
 import {
   isLocationAtDefault,
@@ -46,7 +47,12 @@ import { IconButton } from "@fontra/web-components/icon-button.js";
 import { InlineSVG } from "@fontra/web-components/inline-svg.js";
 import { showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialog, dialogSetup, message } from "@fontra/web-components/modal-dialog.js";
-import { Accordion } from "@fontra/web-components/ui-accordion.js";
+import {
+  Accordion,
+  groupAccordionHeaderButtons,
+  makeAccordionHeaderButton,
+  makeClickableIconHeader,
+} from "@fontra/web-components/ui-accordion.js";
 
 import { NumberFormatter } from "@fontra/core/formatters.js";
 import Panel from "./panel.js";
@@ -72,13 +78,12 @@ export default class DesignspaceNavigationPanel extends Panel {
 
   constructor(editorController) {
     super(editorController);
-    this.fontController = this.editorController.fontController;
     this.sceneSettingsController = this.editorController.sceneSettingsController;
     this.sceneSettings = this.editorController.sceneSettingsController.model;
     this.sceneModel = this.editorController.sceneController.sceneModel;
     this.sceneController = this.editorController.sceneController;
-    this.updateResetAllAxesButtonState = throttleCalls(
-      () => this._updateResetAllAxesButtonState(),
+    this.updateResetGlyphAxesButtonState = throttleCalls(
+      () => this._updateResetGlyphAxesButtonState(),
       100
     );
 
@@ -137,43 +142,25 @@ export default class DesignspaceNavigationPanel extends Panel {
         margin-right: 0.25em;
       }
     `);
+
+    const { updateFontAxes, fontAxesAccordionItem, hiddenFontAxesAccordionItem } =
+      makeFontAxisAccordionItems(
+        this.editorController.projectIdentifier,
+        this.fontController,
+        this.editorController.sceneSettingsController,
+        this.accordion,
+        () => {
+          this.sceneController.scrollAdjustBehavior =
+            this.getScrollAdjustBehavior("pin-glyph-center");
+          this.sceneController.autoViewBox = false;
+        }
+      );
+
+    this._updateFontAxes = updateFontAxes;
+
     this.accordion.items = [
-      {
-        id: "font-axes-accordion-item",
-        label: translate("sidebar.designspace-navigation.font-axes"),
-        open: true,
-        content: html.createDomElement(
-          "designspace-location",
-          { id: "font-axes", style: "height: 100%;" },
-          []
-        ),
-        auxiliaryHeaderElement: groupAccordionHeaderButtons([
-          makeAccordionHeaderButton({
-            icon: "menu-2",
-            id: "font-axes-view-options-button",
-            tooltip: translate(
-              "sidebar.designspace-navigation.font-axes-view-options-button.tooltip"
-            ),
-            onclick: (event) => this.showFontAxesViewOptionsMenu(event),
-          }),
-          makeAccordionHeaderButton({
-            icon: "tool",
-            tooltip: translate("sidebar.designspace-navigation.font-axes.edit"),
-            onclick: (event) => {
-              const url = new URL(window.location);
-              url.pathname = url.pathname.replace("/editor.html", "/fontinfo.html");
-              url.hash = "#axes-panel";
-              window.open(url.toString());
-            },
-          }),
-          makeAccordionHeaderButton({
-            icon: "refresh",
-            id: "reset-font-axes-button",
-            tooltip: translate("sidebar.designspace-navigation.font-axes.reset"),
-            onclick: (event) => this.resetFontAxesToDefault(),
-          }),
-        ]),
-      },
+      fontAxesAccordionItem,
+      hiddenFontAxesAccordionItem,
       {
         id: "glyph-axes-accordion-item",
         label: translate("sidebar.designspace-navigation.glyph-axes"),
@@ -251,10 +238,6 @@ export default class DesignspaceNavigationPanel extends Panel {
     ]);
   }
 
-  get fontAxesElement() {
-    return this.accordion.querySelector("#font-axes");
-  }
-
   get glyphAxesElement() {
     return this.accordion.querySelector("#glyph-axes");
   }
@@ -272,29 +255,12 @@ export default class DesignspaceNavigationPanel extends Panel {
   }
 
   setup() {
-    this._setFontLocationValues();
+    this._updateFontAxes();
     this.glyphAxesElement.values = this.sceneSettings.glyphLocation;
-
-    this.fontAxesElement.addEventListener(
-      "locationChanged",
-      scheduleCalls(async (event) => {
-        this.sceneController.scrollAdjustBehavior =
-          this.getScrollAdjustBehavior("pin-glyph-center");
-        this.sceneController.autoViewBox = false;
-
-        this.sceneSettingsController.setItem(
-          this.sceneSettings.fontAxesUseSourceCoordinates
-            ? "fontLocationSource"
-            : "fontLocationUser",
-          { ...this.fontAxesElement.values },
-          { senderID: this }
-        );
-      })
-    );
 
     this.glyphAxesElement.addEventListener(
       "locationChanged",
-      scheduleCalls(async (event) => {
+      scheduleCalls((event) => {
         this.sceneController.scrollAdjustBehavior =
           this.getScrollAdjustBehavior("pin-glyph-center");
         this.sceneController.autoViewBox = false;
@@ -309,28 +275,16 @@ export default class DesignspaceNavigationPanel extends Panel {
     this.sceneSettingsController.addKeyListener(
       ["selectedGlyph", "selectedGlyphName"],
       async (event) => {
-        await this._updateAxes();
+        await this._updateGlyphAxes();
         await this._updateSources();
         await this._updateInterpolationErrorInfo();
         await this._updateSourceLayersList();
       }
     );
 
-    this.sceneSettingsController.addKeyListener(
-      [
-        "fontAxesUseSourceCoordinates",
-        "fontAxesShowEffectiveLocation",
-        "fontAxesShowHidden",
-        "fontAxesSkipMapping",
-      ],
-      (event) => {
-        this._updateAxes();
-      }
-    );
-
     this.sceneController.addCurrentGlyphChangeListener(
       scheduleCalls(async (event) => {
-        await this._updateAxes();
+        await this._updateGlyphAxes();
         await this._updateSources();
         await this._updateInterpolationErrorInfo();
         await this._updateSourceLayersList();
@@ -345,7 +299,7 @@ export default class DesignspaceNavigationPanel extends Panel {
         await this._updateEditingStatus();
         await this._updateSourceLayersList();
 
-        this.updateResetAllAxesButtonState();
+        this.updateResetGlyphAxesButtonState();
         this.updateInterpolationContributions();
         this._updateInterpolationErrorInfo();
         if (event.senderInfo?.senderID === this) {
@@ -355,7 +309,7 @@ export default class DesignspaceNavigationPanel extends Panel {
         if (event.key === "glyphLocation") {
           this.glyphAxesElement.values = event.newValue;
         } else {
-          this._setFontLocationValues();
+          // Handled by axis-ui.js
         }
       },
       true
@@ -662,14 +616,6 @@ export default class DesignspaceNavigationPanel extends Panel {
     return columnDescriptions;
   }
 
-  _setFontLocationValues() {
-    const locationKey = this.sceneSettings.fontAxesUseSourceCoordinates
-      ? "fontLocationSource"
-      : "fontLocationUser";
-    this.fontAxesElement.values = this.sceneSettings[locationKey];
-    this.fontAxesElement.phantomValues = this.sceneSettings.fontLocationSourceMapped;
-  }
-
   sourceListGetSourceItem(sourceIndex) {
     if (sourceIndex == undefined) {
       return undefined;
@@ -683,56 +629,6 @@ export default class DesignspaceNavigationPanel extends Panel {
     } else {
       this.sourcesList.setSelectedItemIndex(undefined);
     }
-  }
-
-  showFontAxesViewOptionsMenu(event) {
-    const menuItems = [
-      {
-        title: translate(
-          "sidebar.designspace-navigation.font-axes-view-options-menu.apply-single-axis-mapping"
-        ),
-        callback: () => {
-          this.sceneSettings.fontAxesUseSourceCoordinates =
-            !this.sceneSettings.fontAxesUseSourceCoordinates;
-        },
-        checked: !this.sceneSettings.fontAxesUseSourceCoordinates,
-      },
-      {
-        title: translate(
-          "sidebar.designspace-navigation.font-axes-view-options-menu.apply-cross-axis-mapping"
-        ),
-        callback: () => {
-          this.sceneSettings.fontAxesSkipMapping =
-            !this.sceneSettings.fontAxesSkipMapping;
-        },
-        checked: !this.sceneSettings.fontAxesSkipMapping,
-      },
-      { title: "-" },
-      {
-        title: translate(
-          "sidebar.designspace-navigation.font-axes-view-options-menu.show-effective-location"
-        ),
-        callback: () => {
-          this.sceneSettings.fontAxesShowEffectiveLocation =
-            !this.sceneSettings.fontAxesShowEffectiveLocation;
-        },
-        checked: this.sceneSettings.fontAxesShowEffectiveLocation,
-      },
-      {
-        title: translate(
-          "sidebar.designspace-navigation.font-axes-view-options-menu.show-hidden-axes"
-        ),
-        callback: () => {
-          this.sceneSettings.fontAxesShowHidden =
-            !this.sceneSettings.fontAxesShowHidden;
-        },
-        checked: this.sceneSettings.fontAxesShowHidden,
-      },
-    ];
-
-    const button = this.accordion.querySelector("#font-axes-view-options-button");
-    const buttonRect = button.getBoundingClientRect();
-    showMenu(menuItems, { x: buttonRect.left, y: buttonRect.bottom });
   }
 
   showGlyphSourcesSortOptionsMenu(event) {
@@ -764,23 +660,12 @@ export default class DesignspaceNavigationPanel extends Panel {
     showMenu(menuItems, { x: buttonRect.left, y: buttonRect.bottom });
   }
 
-  resetFontAxesToDefault(event) {
-    this.sceneSettings.fontLocationUser = {};
-  }
-
   resetGlyphAxesToDefault(event) {
     this.sceneSettings.glyphLocation = {};
   }
 
-  _updateResetAllAxesButtonState() {
-    let button;
-    const fontAxesSourceSpace = mapAxesFromUserSpaceToSourceSpace(this.fontAxes);
-    button = this.accordion.querySelector("#reset-font-axes-button");
-    button.disabled = isLocationAtDefault(
-      this.sceneSettings.fontLocationSourceMapped,
-      fontAxesSourceSpace
-    );
-    button = this.accordion.querySelector("#reset-glyph-axes-button");
+  _updateResetGlyphAxesButtonState() {
+    const button = this.accordion.querySelector("#reset-glyph-axes-button");
     button.disabled = isLocationAtDefault(
       this.sceneSettings.glyphLocation,
       this.glyphAxesElement.axes
@@ -848,25 +733,12 @@ export default class DesignspaceNavigationPanel extends Panel {
     }
   }
 
-  get fontAxes() {
-    return this.sceneSettings.fontAxesShowHidden
-      ? this.fontController.fontAxes
-      : this.fontController.fontAxes.filter((axis) => !axis.hidden);
+  async _updateAxes() {
+    await this._updateFontAxes();
+    await this._updateGlyphAxes();
   }
 
-  async _updateAxes() {
-    const fontAxesSourceSpace = mapAxesFromUserSpaceToSourceSpace(this.fontAxes);
-    const fontAxes = this.sceneSettings.fontAxesUseSourceCoordinates
-      ? fontAxesSourceSpace
-      : [...this.fontAxes];
-    this.fontAxesElement.axes = fontAxes;
-    if (this.sceneSettings.fontAxesShowEffectiveLocation) {
-      this.fontAxesElement.phantomAxes = fontAxesSourceSpace;
-    } else {
-      this.fontAxesElement.phantomAxes = [];
-    }
-    this._setFontLocationValues();
-
+  async _updateGlyphAxes() {
     const varGlyphController =
       await this.sceneModel.getSelectedVariableGlyphController();
 
@@ -874,7 +746,7 @@ export default class DesignspaceNavigationPanel extends Panel {
     this.glyphAxesElement.axes = glyphAxes;
     this.glyphAxesAccordionItem.hidden = !varGlyphController;
 
-    this._updateResetAllAxesButtonState();
+    this._updateResetGlyphAxesButtonState();
   }
 
   async _updateSources() {
@@ -1024,7 +896,7 @@ export default class DesignspaceNavigationPanel extends Panel {
           break;
         case "by-source-name":
           sortFunc = (a, b) => {
-            return stringCompare(
+            return compare(
               varGlyphController.getSourceName(a),
               varGlyphController.getSourceName(b)
             );
@@ -1156,9 +1028,8 @@ export default class DesignspaceNavigationPanel extends Panel {
         ...defaultLocation,
         ...this.sceneSettings.fontLocationSourceMapped,
       };
-      const sourceIdentifiers = this.fontController.getSortedSourceIdentifiers(
-        !allowSparseSource
-      );
+      const sourceIdentifiers =
+        this.fontController.getSortedSourceIdentifiers(!allowSparseSource);
       if (sourceIdentifiers.length) {
         const locations = sourceIdentifiers.map((sourceIdentifier) => ({
           ...defaultLocation,
@@ -1256,7 +1127,7 @@ export default class DesignspaceNavigationPanel extends Panel {
       !selectedItem ||
       selectedItem.isFontSource ||
       !selectedItem.active ||
-      !varGlyphController.sources[selectedItem.sourceIndex]
+      !varGlyphController?.sources[selectedItem.sourceIndex]
     ) {
       this.sceneSettings.editingLayers = {};
     } else {
@@ -1864,7 +1735,9 @@ export default class DesignspaceNavigationPanel extends Panel {
           (item) => item.shortName === inputController.model.sourceLayerName
         )
       ) {
-        warnings.push("⚠️ Layer name must be unique"); // TODO: translate
+        warnings.push(
+          `⚠️ ${translate("sidebar.designspace-navigation.source-layer-name-must-be-unique")}`
+        );
       }
 
       warningElement.innerText = warnings.length ? warnings.join("\n") : "";
@@ -1909,7 +1782,12 @@ export default class DesignspaceNavigationPanel extends Panel {
           id: "source-layer-name-text-input",
         }),
         html.div(), // gridfiller
-        labeledCheckbox("Copy current layer", inputController, "copyCurrentLayer", {}), // TODO: translate
+        labeledCheckbox(
+          translate("sidebar.designspace-navigation.copy-current-layer"),
+          inputController,
+          "copyCurrentLayer",
+          {}
+        ),
         warningElement,
       ]
     );
@@ -2284,57 +2162,6 @@ function statusListCell(item, colDesc) {
 
 function cellColorStyle(color) {
   return `background-color: ${rgbaToCSS(color)}; width: 100%;`;
-}
-
-function makeClickableIconHeader(iconPath, onClick) {
-  const focus = new FocusKeeper();
-  return html.div(
-    {
-      class: "clickable-icon-header",
-      style: "height: 1.2em; width: 1.2em;",
-      onmousedown: focus.save,
-      onclick: (event) => {
-        onClick(event);
-        focus.restore();
-      },
-    },
-    [
-      html.createDomElement("inline-svg", {
-        src: iconPath,
-      }),
-    ]
-  );
-}
-
-function groupAccordionHeaderButtons(buttons) {
-  return html.div(
-    {
-      style: `display: grid;
-      grid-template-columns: repeat(${buttons.length}, auto);
-      gap: 0.15em;
-      `,
-    },
-    buttons
-  );
-}
-
-function makeAccordionHeaderButton(button) {
-  const options = {
-    style: "width: 1.4em; height: 1.4em;",
-    src: `/tabler-icons/${button.icon}.svg`,
-    onclick: button.onclick,
-  };
-
-  if (button.id) {
-    options.id = button.id;
-  }
-
-  if (button.tooltip) {
-    options["data-tooltip"] = button.tooltip;
-    options["data-tooltipposition"] = "bottom";
-  }
-
-  return html.createDomElement("icon-button", options);
 }
 
 function getSourceCompareFunc(locationProperty, axisNames) {

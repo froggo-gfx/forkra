@@ -1,0 +1,11 @@
+steps:
+  - input: fontra-read
+    source: test-py/data/workflow/input-cond-subst.fontra
+  - filter: subset-glyphs
+    glyphNames:
+      - A
+      - I
+      - S
+    layoutHandling: closure
+  - output: fontra-write
+    destination: output-cond-subst.fontra

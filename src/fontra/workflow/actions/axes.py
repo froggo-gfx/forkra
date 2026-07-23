@@ -5,23 +5,26 @@ import logging
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from functools import partial
-from typing import Any
+from typing import Any, Callable
 
 from fontTools.varLib.models import piecewiseLinearMap
 
 from ...core.async_property import async_cached_property
 from ...core.classes import (
     Axes,
+    ConditionalSubstitutions,
     DiscreteFontAxis,
     FontAxis,
     FontSource,
     GlyphSource,
     Kerning,
     Layer,
+    SubstitutionConditionSet,
     VariableGlyph,
     structure,
     unstructure,
 )
+from ...core.crossaxismapper import CrossAxisMapper
 from ...core.discretevariationmodel import DiscreteVariationModel
 from ...core.instancer import GlyphInstancer
 from ...core.varutils import (
@@ -116,8 +119,8 @@ def dropUnusedSourcesAndLayers(glyph):
 class DropAxisMappings(BaseFilter):
     axes: list[str] | None = None
 
-    @async_cached_property
-    async def axisValueMapFunctions(self) -> dict:
+    @async_cached_property[dict[str, Callable]]
+    async def axisValueMapFunctions(self) -> dict[str, Callable]:
         axes = await self.validatedInput.getAxes()
         relevantAxes = (
             [axis for axis in axes.axes if axis.name in self.axes]
@@ -125,7 +128,7 @@ class DropAxisMappings(BaseFilter):
             else axes.axes
         )
 
-        mapFuncs = {}
+        mapFuncs: dict[str, Callable] = {}
         for axis in relevantAxes:
             if axis.mapping:
                 mapFuncs[axis.name] = partial(
@@ -170,13 +173,13 @@ class AdjustAxes(BaseFilter):
         adjustedAxes, _ = await self._adjustedAxesAndMapFunctions
         return adjustedAxes
 
-    @async_cached_property
-    async def axisValueMapFunctions(self) -> dict:
+    @async_cached_property[dict[str, Callable]]
+    async def axisValueMapFunctions(self) -> dict[str, Callable]:
         _, mapFuncs = await self._adjustedAxesAndMapFunctions
         return mapFuncs
 
-    @async_cached_property
-    async def _adjustedAxesAndMapFunctions(self) -> tuple:
+    @async_cached_property[tuple[Axes, dict]]
+    async def _adjustedAxesAndMapFunctions(self) -> tuple[Axes, dict]:
         mapFuncs: dict = {}
         axes = await self.validatedInput.getAxes()
         adjustedAxes = []
@@ -281,7 +284,7 @@ class SubsetAxes(BaseFilter):
             instancer, await self.mapFilterLocationFunc
         )
 
-    @async_cached_property
+    @async_cached_property[dict[str, FontSource]]
     async def processedSources(self) -> dict[str, FontSource]:
         sources = await self.validatedInput.getSources()
         return mapFontSourceLocationsAndFilter(
@@ -295,6 +298,88 @@ class SubsetAxes(BaseFilter):
         sources = await self.processedSources
         mapping = {sourceIdentifier: sourceIdentifier for sourceIdentifier in sources}
         return mapKerningSourcesAndFilter(kerning, mapping)
+
+    async def processConditionalSubstitutions(
+        self, substitutions: ConditionalSubstitutions
+    ) -> ConditionalSubstitutions:
+        if not substitutions.rules:
+            return substitutions
+
+        instancer = await self.fontInstancer.fontSourcesInstancer
+        defaultSourceLocation = instancer.defaultSourceLocation
+        keepAxisNames = self.getAxisNamesToKeep(instancer.fontAxes)
+        locationToDrop = {
+            name: value
+            for name, value in defaultSourceLocation.items()
+            if name not in keepAxisNames
+        }
+
+        filterFunc = partial(filterSubstitutionCondition, locationToDrop)
+        return filterConditionalSubstitutions(substitutions, filterFunc)
+
+
+def filterSubstitutionCondition(locationToDrop, condition):
+    value = locationToDrop.get(condition.name)
+    if value is not None:
+        # This axis is being dropped. If the axis default value is *not*
+        # within the condition range, the condition is False and we return
+        # None. If it is, then it depends on the other conditions in the set.
+        # Note: An empty conditionSet is considered True.
+        if (condition.minValue is not None and value < condition.minValue) or (
+            condition.maxValue is not None and value > condition.maxValue
+        ):
+            return None, True
+        else:
+            return None, False
+
+    return condition, None
+
+
+def filterConditionalSubstitutions(substitutions, filterFunc):
+    newRules = [
+        replace(
+            rule,
+            conditionSets=filterConditionSets(rule.conditionSets, filterFunc),
+        )
+        for rule in substitutions.rules
+    ]
+
+    newRules = [rule for rule in newRules if rule.conditionSets]
+
+    return replace(substitutions, rules=newRules)
+
+
+def filterConditionSets(
+    conditionSets: list[SubstitutionConditionSet], filterFunc
+) -> list[SubstitutionConditionSet]:
+    newConditionSets = []
+
+    conditionSet: SubstitutionConditionSet | None
+
+    for conditionSet in conditionSets:
+        conditionSet = filterConditionSet(conditionSet, filterFunc)
+        if conditionSet is not None:
+            newConditionSets.append(conditionSet)
+
+    return newConditionSets
+
+
+def filterConditionSet(
+    conditionSet: SubstitutionConditionSet, filterFunc
+) -> SubstitutionConditionSet | None:
+    newConditions = []
+
+    for condition in conditionSet.conditions:
+        condition, isFalse = filterFunc(condition)
+        if condition is not None:
+            newConditions.append(condition)
+        elif isFalse:
+            # The condition is always false, tell our caller
+            return None
+        # else:
+        #   The condition is always true, keep going
+
+    return replace(conditionSet, conditions=newConditions)
 
 
 def getDefaultSourceLocation(axes):
@@ -331,33 +416,46 @@ def mapKerningSourcesAndFilter(kerning, mapping):
     return newKerning
 
 
+@dataclass(kw_only=True)
 class BaseMoveDefaultLocation(BaseFilter):
-    @async_cached_property
-    async def newDefaultSourceLocation(self):
+    @async_cached_property[dict[str, float]]
+    async def newDefaultSourceLocation(self) -> dict[str, float]:
         newDefaultUserLocation = self._getDefaultUserLocation()
         axes = await self.inputAxes
 
-        relevantAxes = [
-            axis for axis in axes.axes if axis.name in newDefaultUserLocation
-        ]
+        applyCrossAxisMappings = self._shouldApplyCrossAxisMappings()
 
-        return {
+        relevantAxes = (
+            axes.axes
+            if applyCrossAxisMappings
+            else [axis for axis in axes.axes if axis.name in newDefaultUserLocation]
+        )
+
+        sourceLocation = {
             axis.name: (
                 piecewiseLinearMap(
-                    newDefaultUserLocation[axis.name], dict(axis.mapping)
+                    newDefaultUserLocation.get(axis.name, axis.defaultValue),
+                    {a: b for a, b in axis.mapping},
                 )
                 if axis.mapping
-                else newDefaultUserLocation[axis.name]
+                else newDefaultUserLocation.get(axis.name, axis.defaultValue)
             )
             for axis in relevantAxes
         }
 
-    @async_cached_property
+        if applyCrossAxisMappings:
+            mapper = CrossAxisMapper(axes.axes, axes.mappings)
+            sourceLocation = mapper.mapLocation(sourceLocation)
+
+        return sourceLocation
+
+    @async_cached_property[Axes]
     async def processedAxes(self) -> Axes:
         axes = await self.inputAxes
         return replace(
             axes,
             axes=self._filterAxisList(axes.axes),
+            mappings=[] if self._shouldApplyCrossAxisMappings() else axes.mappings,
         )
 
     async def getAxes(self) -> Axes:
@@ -382,6 +480,7 @@ class BaseMoveDefaultLocation(BaseFilter):
             originalDefaultSourceLocation,
             newDefaultSourceLocation,
             allAxisNames,
+            self._allowFullInstantiateShortcut(),
         )
 
         remainingAxisNames = {axis.name for axis in (await self.processedAxes).axes} | {
@@ -394,8 +493,8 @@ class BaseMoveDefaultLocation(BaseFilter):
             remainingAxisNames,
         )
 
-    @async_cached_property
-    async def processedSourcesAndLocations(self) -> dict[str, FontSource]:
+    @async_cached_property[tuple[dict[str, FontSource], dict]]
+    async def processedSourcesAndLocations(self) -> tuple[dict[str, FontSource], dict]:
         instancer = await self.fontInstancer.fontSourcesInstancer
         sources = await self.validatedInput.getSources()
 
@@ -412,7 +511,9 @@ class BaseMoveDefaultLocation(BaseFilter):
             originalDefaultSourceLocation,
             newDefaultSourceLocation,
             self.fontInstancer.fontAxisNames,
+            self._allowFullInstantiateShortcut(),
         )
+
         newLocations = self._filterNewLocations(
             newLocations, await self.newDefaultSourceLocation
         )
@@ -427,6 +528,25 @@ class BaseMoveDefaultLocation(BaseFilter):
 
     async def processKerning(self, kerning: dict[str, Kerning]) -> dict[str, Kerning]:
         return await processKerningHelper(self, kerning)
+
+    async def processConditionalSubstitutions(
+        self, substitutions: ConditionalSubstitutions
+    ) -> ConditionalSubstitutions:
+        if not substitutions.rules:
+            return substitutions
+
+        locationToDrop = {
+            name: value for name, value in (await self.newDefaultSourceLocation).items()
+        }
+
+        filterFunc = partial(filterSubstitutionCondition, locationToDrop)
+        return filterConditionalSubstitutions(substitutions, filterFunc)
+
+    def _shouldApplyCrossAxisMappings(self):
+        return False
+
+    def _allowFullInstantiateShortcut(self):
+        return False
 
     def _filterAxisList(self, axes):
         raise NotImplementedError()
@@ -443,7 +563,13 @@ def moveDefaultLocations(
     originalDefaultSourceLocation,
     newDefaultSourceLocation,
     allAxisNames,
+    allowFullInstantiateShortcut=False,
 ):
+    if allowFullInstantiateShortcut and set(originalDefaultSourceLocation) <= set(
+        newDefaultSourceLocation
+    ):
+        return [newDefaultSourceLocation]
+
     movingAxisNames = set(newDefaultSourceLocation)
     interactingAxisNames = set()
 
@@ -526,13 +652,24 @@ class MoveDefaultLocation(BaseMoveDefaultLocation):
 @dataclass(kw_only=True)
 class Instantiate(BaseMoveDefaultLocation):
     location: dict[str, float]
+    applyCrossAxisMappings: bool = False
+
+    def _shouldApplyCrossAxisMappings(self):
+        return self.applyCrossAxisMappings
+
+    def _allowFullInstantiateShortcut(self):
+        return True
 
     def _getDefaultUserLocation(self):
         return self.location
 
     def _filterAxisList(self, axes):
         location = self._getDefaultUserLocation()
-        return [axis for axis in axes if axis.name not in location]
+        return (
+            []
+            if self.applyCrossAxisMappings
+            else [axis for axis in axes if axis.name not in location]
+        )
 
     def _filterNewLocations(self, newLocations, location):
         filteredLocations = [
@@ -548,13 +685,16 @@ class Instantiate(BaseMoveDefaultLocation):
 class TrimAxes(BaseFilter):
     axes: dict[str, dict[str, Any]]
 
-    @async_cached_property
-    async def _trimmedAxesAndSourceRanges(self):
+    @async_cached_property[tuple[Axes, dict[str, AxisRange]]]
+    async def _trimmedAxesAndSourceRanges(self) -> tuple[Axes, dict[str, AxisRange]]:
         axes = await self.validatedInput.getAxes()
-        trimmedAxes = []
+        trimmedAxes: list[FontAxis | DiscreteFontAxis] = []
         sourceRanges = {}
 
         for axis in axes.axes:
+            if isinstance(axis, DiscreteFontAxis):
+                raise TypeError("Discrete axes are not yt supported in trim-axes")
+
             trimmedAxis = deepcopy(axis)
             trimmedAxes.append(trimmedAxis)
 
@@ -588,7 +728,7 @@ class TrimAxes(BaseFilter):
                 )
 
             if trimmedAxis.mapping:
-                mapping = dict(trimmedAxis.mapping)
+                mapping = {a: b for a, b in trimmedAxis.mapping}
                 rangeValues = []
                 for userValue in [trimmedAxis.minValue, trimmedAxis.maxValue]:
                     sourceValue = piecewiseLinearMap(userValue, mapping)
@@ -622,8 +762,10 @@ class TrimAxes(BaseFilter):
         trimmedAxes, _ = await self._trimmedAxesAndSourceRanges
         return trimmedAxes
 
-    @async_cached_property
-    async def processedSourcesAndLocations(self) -> dict[str, FontSource]:
+    @async_cached_property[tuple[dict[str, FontSource], dict[str, dict[str, float]]]]
+    async def processedSourcesAndLocations(
+        self,
+    ) -> tuple[dict[str, FontSource], dict[str, dict[str, float]]]:
         instancer = await self.fontInstancer.fontSourcesInstancer
         sources = await self.validatedInput.getSources()
 
@@ -646,6 +788,37 @@ class TrimAxes(BaseFilter):
 
     async def processKerning(self, kerning: dict[str, Kerning]) -> dict[str, Kerning]:
         return await processKerningHelper(self, kerning)
+
+    async def processConditionalSubstitutions(
+        self, substitutions: ConditionalSubstitutions
+    ) -> ConditionalSubstitutions:
+        if not substitutions.rules:
+            return substitutions
+
+        _, trimmedRanges = await self._trimmedAxesAndSourceRanges
+
+        def filterFunc(condition):
+            rng = trimmedRanges.get(condition.name)
+            if rng is None:
+                return None, False  # ignore this condition
+
+            minValue = (
+                max(condition.minValue, rng.minValue)
+                if condition.minValue is not None
+                else None
+            )
+            maxValue = (
+                min(condition.maxValue, rng.maxValue)
+                if condition.maxValue is not None
+                else None
+            )
+            if minValue == maxValue:
+                # Range is empty now, this makes the entire condition set false
+                return None, True
+
+            return replace(condition, minValue=minValue, maxValue=maxValue), None
+
+        return filterConditionalSubstitutions(substitutions, filterFunc)
 
     async def getGlyph(self, glyphName: str) -> VariableGlyph:
         instancer = await self.fontInstancer.getGlyphInstancer(glyphName)
@@ -695,7 +868,9 @@ def trimLocation(
     return newLocation
 
 
-def updateFontSources(instancer, newLocations, remainingFontAxisNames=None):
+def updateFontSources(
+    instancer, newLocations, remainingFontAxisNames=None
+) -> tuple[dict[str, FontSource], dict[str, dict[str, float]]]:
     axisNames = instancer.fontAxisNames
     sources = instancer.fontSources
     sourceIdsByLocation = instancer.sourceIdsByLocationDense
@@ -707,7 +882,7 @@ def updateFontSources(instancer, newLocations, remainingFontAxisNames=None):
         {locationToTuple(filterLocation(loc, axisNames)) for loc in newLocations}
     )
 
-    newSources = {}
+    newSources: dict[str, FontSource] = {}
     instanceLocations = {}
 
     for locationTuple in locationTuples:
