@@ -1813,13 +1813,7 @@ export function getSkeletonRibPosition(contour, point, side) {
 
 const VALID_GENERATED_ROLES = new Set(["onCurve", "in", "out"]);
 
-export function findGeneratedPathAddress(
-  skeletonData,
-  contourId,
-  pointId,
-  side,
-  role
-) {
+export function findGeneratedPathAddress(skeletonData, contourId, pointId, side, role) {
   if (side !== "left" && side !== "right") {
     throw new Error(`invalid editable generated side: ${side}`);
   }
@@ -1834,7 +1828,11 @@ export function findGeneratedPathAddress(
   for (const generatedEntry of skeletonData?.generated || []) {
     if (generatedEntry?.skeletonContourId !== numericContourId) continue;
     const pointMap = generatedEntry.pointMap || [];
-    for (let contourPointIndex = 0; contourPointIndex < pointMap.length; contourPointIndex++) {
+    for (
+      let contourPointIndex = 0;
+      contourPointIndex < pointMap.length;
+      contourPointIndex++
+    ) {
       const provenance = pointMap[contourPointIndex];
       if (
         provenance?.skeletonPointId === numericPointId &&
@@ -1914,19 +1912,27 @@ export function createSkeletonRibExecutor(
   const { contour, point, side, defaultWidth, normal } = address;
   const leftHalfWidth = getSkeletonPointHalfWidth(point, defaultWidth, "left");
   const rightHalfWidth = getSkeletonPointHalfWidth(point, defaultWidth, "right");
-  const isSingleSided = contour.singleSided === "left" || contour.singleSided === "right";
+  const isSingleSided =
+    contour.singleSided === "left" || contour.singleSided === "right";
   const originalHalfWidth = isSingleSided
     ? leftHalfWidth + rightHalfWidth
     : getSkeletonPointHalfWidth(point, defaultWidth, side);
   const originalNudge = getSkeletonPointNudge(point, side, defaultWidth);
   const tangent = { x: -normal.y, y: normal.x };
   const adjustable = !isSkeletonSideLocked(point, side);
-  const forceTangent = behaviorName === "rib-tangent" || behaviorName === "rib-tangent-interpolate";
-  const interpolate = adjustable &&
+  const forceTangent =
+    behaviorName === "rib-tangent" || behaviorName === "rib-tangent-interpolate";
+  const interpolate =
+    adjustable &&
     (behaviorName === "rib-interpolate" || behaviorName === "rib-tangent-interpolate");
-  const axis = interpolate ? interpolationAxis || { dir: tangent, hasHandle: {} } : null;
+  const axis = interpolate
+    ? interpolationAxis || { dir: tangent, hasHandle: {} }
+    : null;
   const originalOffsets = interpolate
-    ? { in: getSkeletonHandleOffset(point, side, "in"), out: getSkeletonHandleOffset(point, side, "out") }
+    ? {
+        in: getSkeletonHandleOffset(point, side, "in"),
+        out: getSkeletonHandleOffset(point, side, "out"),
+      }
     : null;
   return {
     contourId: contour.id,
@@ -1948,14 +1954,22 @@ export function createSkeletonRibExecutor(
             detached: original.detached,
           };
         }
-        return { halfWidth: originalHalfWidth, nudge: round(originalNudge + deltaNudge), side, handleOffsets };
+        return {
+          halfWidth: originalHalfWidth,
+          nudge: round(originalNudge + deltaNudge),
+          side,
+          handleOffsets,
+        };
       }
       const normalSign = side === "left" ? 1 : -1;
       const normalDelta = normalSign * (delta.x * normal.x + delta.y * normal.y);
       const tangentDelta = delta.x * tangent.x + delta.y * tangent.y;
       const tangentOnly = forceTangent || constrainMode === "tangent";
-      const halfWidth = tangentOnly ? originalHalfWidth : Math.max(0, round(originalHalfWidth + normalDelta));
-      const nudge = adjustable && tangentOnly ? round(originalNudge + tangentDelta) : originalNudge;
+      const halfWidth = tangentOnly
+        ? originalHalfWidth
+        : Math.max(0, round(originalHalfWidth + normalDelta));
+      const nudge =
+        adjustable && tangentOnly ? round(originalNudge + tangentDelta) : originalNudge;
       return { halfWidth, nudge, side };
     },
   };
@@ -2006,20 +2020,24 @@ function setSingleSidedTotalWidth(point, defaultWidth, side, totalWidth) {
   if (linked) {
     const half = value / 2;
     for (const s of ["left", "right"]) {
-      setSkeletonPointSideWidth(point, defaultWidth, s, half, { linked: false, round: (value) => value });
+      setSkeletonPointSideWidth(point, defaultWidth, s, half, {
+        linked: false,
+        round: (value) => value,
+      });
     }
     point.width.linked = true;
     return;
   }
   const oppositeSide = side === "left" ? "right" : "left";
   const opposite = getSkeletonPointHalfWidth(point, defaultWidth, oppositeSide);
-  setSkeletonPointSideWidth(point, defaultWidth, side, value - opposite, { linked: false });
+  setSkeletonPointSideWidth(point, defaultWidth, side, value - opposite, {
+    linked: false,
+  });
 }
 
 const EDITABLE_GENERATED_POINT_KEY_KIND = "editableGeneratedPoint";
 const EDITABLE_GENERATED_HANDLE_KEY_KIND = "editableGeneratedHandle";
 const EDITABLE_VALID_GENERATED_SIDES = new Set(["left", "right"]);
-const EDITABLE_VALID_GENERATED_ROLES = new Set(["onCurve", "in", "out"]);
 const EDITABLE_VALID_HANDLE_ROLES = new Set(["in", "out"]);
 
 export function makeEditableGeneratedPointKey(contourId, pointId, side) {
@@ -2061,7 +2079,8 @@ export function resolveGeneratedPointProvenance(skeletonData, path, pathPointInd
   let pathContourIndex;
   let contourPointIndex;
   try {
-    [pathContourIndex, contourPointIndex] = path.getContourAndPointIndex(pathPointIndex);
+    [pathContourIndex, contourPointIndex] =
+      path.getContourAndPointIndex(pathPointIndex);
   } catch {
     return null;
   }
@@ -2069,31 +2088,59 @@ export function resolveGeneratedPointProvenance(skeletonData, path, pathPointInd
     (entry) => entry?.pathContourIndex === pathContourIndex
   );
   const provenance = generatedEntry?.pointMap?.[contourPointIndex];
-  if (!provenance || !EDITABLE_VALID_GENERATED_ROLES.has(provenance.role)) return null;
+  if (!provenance || !VALID_GENERATED_ROLES.has(provenance.role)) return null;
   const contourId = provenance.skeletonContourId ?? generatedEntry.skeletonContourId;
   const pointId = provenance.skeletonPointId;
   if (!Number.isInteger(contourId) || !Number.isInteger(pointId)) return null;
-  const contourIndex = (skeletonData.contours || []).findIndex((contour) => contour.id === contourId);
+  const contourIndex = (skeletonData.contours || []).findIndex(
+    (contour) => contour.id === contourId
+  );
   if (contourIndex < 0) return null;
   const contour = skeletonData.contours[contourIndex];
   const pointIndex = (contour.points || []).findIndex((point) => point.id === pointId);
   if (pointIndex < 0) return null;
-  return { generatedEntry, pathContourIndex, pathPointIndex, contourId, pointId,
-    side: provenance.side, role: provenance.role, contour, contourIndex,
-    point: contour.points[pointIndex], pointIndex };
+  return {
+    generatedEntry,
+    pathContourIndex,
+    pathPointIndex,
+    contourId,
+    pointId,
+    side: provenance.side,
+    role: provenance.role,
+    contour,
+    contourIndex,
+    point: contour.points[pointIndex],
+    pointIndex,
+  };
 }
 
 export function resolveEditableGeneratedTarget(skeletonData, path, pathPointIndex) {
-  const provenance = resolveGeneratedPointProvenance(skeletonData, path, pathPointIndex);
+  const provenance = resolveGeneratedPointProvenance(
+    skeletonData,
+    path,
+    pathPointIndex
+  );
   if (!provenance || !EDITABLE_VALID_GENERATED_SIDES.has(provenance.side)) return null;
-  if (provenance.point?.type || isSkeletonSideLocked(provenance.point, provenance.side)) return null;
-  const kind = provenance.role === "onCurve"
-    ? EDITABLE_GENERATED_POINT_KEY_KIND
-    : EDITABLE_GENERATED_HANDLE_KEY_KIND;
+  if (provenance.point?.type || isSkeletonSideLocked(provenance.point, provenance.side))
+    return null;
+  const kind =
+    provenance.role === "onCurve"
+      ? EDITABLE_GENERATED_POINT_KEY_KIND
+      : EDITABLE_GENERATED_HANDLE_KEY_KIND;
   if (kind === EDITABLE_GENERATED_HANDLE_KEY_KIND) assertHandleRole(provenance.role);
-  const selectionKey = kind === EDITABLE_GENERATED_POINT_KEY_KIND
-    ? makeEditableGeneratedPointKey(provenance.contourId, provenance.pointId, provenance.side)
-    : makeEditableGeneratedHandleKey(provenance.contourId, provenance.pointId, provenance.side, provenance.role);
+  const selectionKey =
+    kind === EDITABLE_GENERATED_POINT_KEY_KIND
+      ? makeEditableGeneratedPointKey(
+          provenance.contourId,
+          provenance.pointId,
+          provenance.side
+        )
+      : makeEditableGeneratedHandleKey(
+          provenance.contourId,
+          provenance.pointId,
+          provenance.side,
+          provenance.role
+        );
   return { ...provenance, kind, selectionKey };
 }
 
@@ -2102,9 +2149,10 @@ export function getSkeletonHandleDirectionForPoint(contour, pointIndex, role) {
   const points = contour?.points || [];
   const point = points[pointIndex];
   if (!point || point.type) return null;
-  const handleIndex = role === "in"
-    ? getPreviousGeneratedContourPointIndex(contour, pointIndex)
-    : getNextGeneratedContourPointIndex(contour, pointIndex);
+  const handleIndex =
+    role === "in"
+      ? getPreviousGeneratedContourPointIndex(contour, pointIndex)
+      : getNextGeneratedContourPointIndex(contour, pointIndex);
   const handle = points[handleIndex];
   if (!handle?.type) return null;
   const direction = normalizeVector(subVectors(handle, point));
@@ -2121,15 +2169,18 @@ function normalizeGeneratedKeyParts(key, kind, expectedLength) {
 }
 
 function assertGeneratedSide(side) {
-  if (!EDITABLE_VALID_GENERATED_SIDES.has(side)) throw new Error(`invalid editable generated side: ${side}`);
+  if (!EDITABLE_VALID_GENERATED_SIDES.has(side))
+    throw new Error(`invalid editable generated side: ${side}`);
 }
 
 function assertHandleRole(role) {
-  if (!EDITABLE_VALID_HANDLE_ROLES.has(role)) throw new Error(`invalid editable generated handle role: ${role}`);
+  if (!EDITABLE_VALID_HANDLE_ROLES.has(role))
+    throw new Error(`invalid editable generated handle role: ${role}`);
 }
 
 function assertNumericId(value, name) {
-  if (asStrictSkeletonInteger(value) === null) throw new Error(`invalid editable generated ${name}: ${value}`);
+  if (asStrictSkeletonInteger(value) === null)
+    throw new Error(`invalid editable generated ${name}: ${value}`);
 }
 
 function getPreviousGeneratedContourPointIndex(contour, pointIndex) {
