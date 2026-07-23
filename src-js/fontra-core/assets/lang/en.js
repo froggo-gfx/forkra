@@ -430,7 +430,7 @@ export const strings = {
   "sidebar.selection-info.component.scale": "Scale",
   "sidebar.selection-info.component.skew": "Skew",
   "sidebar.selection-info.component.transformation": "Transformation",
-  "sidebar.selection-info.component.translate": "Translate",
+  "sidebar.selection-info.component.translate": "Translation",
   "sidebar.selection-info.dialog.unlock-glyph.title":
     "Are you sure you want to unlock glyph %0?",
   "sidebar.selection-info.dimensions": "Dimensions",
