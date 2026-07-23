@@ -44,6 +44,13 @@ Glyphs/RoboFont. A bare glyph name (no `=`) keeps its current **one-shot**
 behavior — evaluate once, store nothing. So the two intents are distinct and
 both survive.
 
+**Shared by default, source-override on demand.** A link you create is
+**glyph-wide**: shared by every source (the expression re-resolves per source at
+each source's location). When one master needs a different rule, a **source
+override** control (§4.9) detaches just that source's side, giving it its own
+expression that the others don't see. Default is simple; the power is opt-in.
+See §3 for the two-level cascade.
+
 This is explicitly **not** an automatic-propagation system. Editing `n` never
 reaches out and rewrites `o` on its own. There is no reverse dependency index,
 no cross-glyph write during normal editing, no cycle-driven cascade, no undo
@@ -68,19 +75,30 @@ the user's project files.
 SIDEBEARING_KEYS: "sidebearingKeys"
 ```
 
-**Entity level: the source (layer), not the glyph.** A key is stored on the
-layer's `StaticGlyph.customData` — exactly where the skeleton lives. Each source
-carries its own key per side, so `o`'s LSB can be keyed to `n` in Regular and to
-something else (or nothing) in Bold. This is a deliberate reversal of an earlier
-draft: metrics relationships genuinely differ per master, so the key is
-per-source, not one glyph-wide rule.
+**Two levels — a cascade** (matching the fork's own width fallback: contour
+default → per-point override). One section name, `sidebearingKeys`, stored at two
+entity levels:
 
-**Shape** (on each layer that has a key):
+| Level | Entity | Meaning |
+| --- | --- | --- |
+| **Shared** (default) | `VariableGlyph.customData` (glyph) | One key per side, shared by **all** sources. The everyday case. |
+| **Source override** | `StaticGlyph.customData` (layer) | A per-side key that **shadows** the shared key **for that source only**. Opt-in. |
+
+**Effective key** for (source *S*, side *D*) = source override `[S][D]` if
+present, else the shared `[D]`, else none (plain number). The resolver (§4.7)
+always evaluates the *effective* key.
+
+**Shape** (identical at both levels; only present sides appear):
 
 ```js
-layerGlyph.customData["fontra.internal"].sidebearingKeys = {
-  left:  { expression: "n" },    // note: expression is stored WITHOUT the leading '='
+// glyph-level (shared default)
+varGlyph.glyph.customData["fontra.internal"].sidebearingKeys = {
+  left:  { expression: "n" },    // stored WITHOUT the leading '='
   right: { expression: "o!" },
+}
+// layer-level (override for this source, only the overridden side present)
+layerGlyph.customData["fontra.internal"].sidebearingKeys = {
+  left:  { expression: "m" },    // this source's LSB keys to m instead of n
 }
 ```
 
@@ -89,16 +107,14 @@ layerGlyph.customData["fontra.internal"].sidebearingKeys = {
   link; replayed through the shared resolver (§4.7) on Update.
 
 **No cached resolved value is persisted** (a change from the prototype, which
-stored `value`). Three reasons: (a) it is redundant — the authoritative resolved
-number already lives in the real per-source margin; (b) a persisted cache is a
-*third* copy that can silently disagree with both the real margin and the
-live-resolved value — a data-integrity smell; (c) resolving the current source's
-≤2 expressions on panel build is cheap (referenced glyphs are already
-`fontController`-cached). Resolving on display is also what powers the staleness
-highlight (§4.8): live-resolved value vs. applied margin, no extra machinery.
+stored `value`). Reasons: (a) redundant — the authoritative resolved number
+already lives in the real per-source margin; (b) a persisted cache is a *third*
+copy that can silently disagree with both the real margin and the live-resolved
+value; (c) resolving the current source's ≤2 effective expressions on panel build
+is cheap. Resolving on display also powers the staleness highlight (§4.8).
 
-A side with no key has no entry. An empty `sidebearingKeys` object is deleted,
-and so is an empty `fontra.internal` — no residue in clean glyphs.
+A side with no key has no entry. An empty `sidebearingKeys` object is deleted at
+its level, and so is an empty `fontra.internal` — no residue in clean glyphs.
 
 **Why the real margin is still written:** because we also apply the resolved
 value to the actual sidebearing, the font stays correct for any consumer that
@@ -112,11 +128,12 @@ metadata, exactly like Glyphs writing both the number and the `=n`.
 ### 4.1 Creating a link
 1. User types `=` + a metrics reference (`=n`, `=o!`, `=(a+b)/2`) into a
    sidebearing field.
-2. Resolve it (§4.7) for each **currently-edited source**, at that source's
-   location.
-3. Apply the resolved margin to each edited source (§5).
-4. Store `{ expression }` (the `=`-stripped string) under the matching side, on
-   **each edited source's** layer customData.
+2. Write the key at the **level the field is bound to**: the **shared** (glyph)
+   key by default, or the **source override** if this source+side is currently
+   overridden (§4.9).
+3. Resolve the effective key (§4.7) for each source it now governs, at each
+   source's location, and apply the margin (§5).
+4. Store `{ expression }` (the `=`-stripped string) at that level.
 5. Field now shows the link (§4.5).
 
 A bare reference without `=` runs the existing one-shot evaluation and stores
@@ -124,11 +141,10 @@ nothing.
 
 ### 4.2 Refreshing (the Update button — current glyph)
 - A single **Update** button appears in the sidebearings row **only when the
-  glyph has at least one keyed source**. Single press (it is idempotent and
-  non-destructive — no confirm needed).
-- Pressing it: for **every source** of the glyph that has a key, re-resolve at
-  that source's location (§4.7) and re-apply (§5). One undo step
-  (`"update sidebearings"`).
+  glyph has at least one key** (shared or any source override). Single press (it
+  is idempotent and non-destructive — no confirm needed).
+- Pressing it: for **every source**, resolve its **effective** key (§4.7) and
+  re-apply (§5). One undo step (`"update sidebearings"`).
 - Disabled when the glyph is locked or the font is read-only.
 
 ### 4.3 Refreshing everything (Update all — two-press)
@@ -139,8 +155,9 @@ nothing.
   whole font, the first invocation arms and asks for confirmation; the second
   within a short window executes. (A menu action confirms via a dialog rather
   than the icon-swap used by in-panel buttons.)
-- It enumerates every glyph, and for each **source** carrying a key, performs the
-  same per-source re-resolve and re-apply as §4.2, skipping locked glyphs.
+- It enumerates every glyph, and for each **source** with an effective key,
+  performs the same per-source re-resolve and re-apply as §4.2, skipping locked
+  glyphs.
 - **Atomic, single undo step.** Editing many glyphs by name in one undo record is
   an existing capability in the codebase (font-level `recordChanges` +
   `fontController.editFinal`). The plan reuses that mechanism.
@@ -153,15 +170,22 @@ nothing.
   reverse index is built — each source resolves only its own keys.
 
 ### 4.4 Clearing / unlinking
-Two ways, matching the two mental models:
-- **Type a plain number** into a keyed field → breaks that side's link on the
-  edited source(s); the number stands. (Typing a new `=…` replaces the key.)
+Operates on the level the field is bound to (shared, or the source override):
+- **Type a plain number** into a keyed field → breaks the link **at its level**;
+  the number stands. (Typing a new `=…` replaces the key at that level.)
 - **Unlink button — two-press.** A small unlink icon on a keyed field, using the
   established armed-state pattern (`panel-skeleton-defaults.js:194-217`: first
-  click swaps the icon and arms, second click executes). It removes the key from
-  the edited source(s) while **leaving the current margin value in place** — you
-  keep the number, you just drop the dependency. This is the discoverable
-  counterpart to the type-a-number gesture.
+  click swaps the icon and arms, second click executes). Removes the key **at its
+  level** while **leaving the current margin value in place** — keep the number,
+  drop the dependency.
+
+Level semantics:
+- Field bound to the **shared** key → unlink removes the shared key. Any source
+  that has its own override is unaffected (cascade); inheriting sources lose the
+  link.
+- Field bound to a **source override** → unlink removes just that override; the
+  source reverts to the shared key if one exists, else to a plain number. (This
+  is the same effect as §4.9's "Reset to shared".)
 
 ### 4.5 Display
 A keyed field must show both the link (the expression) and its current resolved
@@ -188,10 +212,12 @@ Creating a link (§4.1), the live-display resolve (§4.5 / §4.8), per-glyph Upd
 (§4.2) and Update-all (§4.3) all go through **one** resolver — not the
 prototype's two parallel copies (it duplicated the `instantiateController` loop).
 
-It resolves **one source's** expression **at that source's location**: the
-referenced glyph is instantiated at the same location, so a Bold key reads the
-referenced glyph's Bold margin. Signature roughly:
-`resolveMetricsKey(fontController, expression, side, location) → number`.
+It resolves **one source's effective expression** (§3 cascade — override else
+shared) **at that source's location**: the referenced glyph is instantiated at
+the same location, so a Bold key reads the referenced glyph's Bold margin.
+Signature roughly: `resolveMetricsKey(fontController, expression, side, location)
+→ number`. Picking the effective expression is the caller's job; the resolver
+just evaluates a given string at a given location.
 
 **Detail found in code:** the existing `_evaluateMetricsExpression` resolves only
 over **editing** layers (`_getEditingLocations`). This feature must also resolve
@@ -208,6 +234,33 @@ panel build, for each keyed side of the current source, the resolver produces th
 a rounding epsilon, render the field in a stale style (e.g. a warning tint /
 marker on the number). Pressing Update clears it by definition. This is the
 signal that tells the user *when* the manual Update is worth pressing.
+
+Stale is tested against the **effective** key of the current source, so an
+overridden source is judged by its own expression, an inheriting source by the
+shared one.
+
+### 4.9 Source override control
+A per-side toggle that detaches the current source from the shared key.
+
+- **When a side is inheriting the shared key:** the field shows a small
+  **"Override for this source"** button. Pressing it creates a source-level key
+  for that side (seeded from the shared expression), bound to this source only.
+  The field is now editable independently — a new `=…` here changes just this
+  source; other sources keep following the shared key.
+- **When a side is already overridden:** the button becomes **"Reset to shared"**
+  — removes the source override, reverting the side to the shared key (or to a
+  plain number if no shared key exists). This is the same operation as unlinking
+  a source-override field (§4.4). Single-press is fine (it is non-destructive of
+  the *number* — the margin value stays; only the override key is dropped).
+- A visible **marker** distinguishes an overridden field from an inheriting one
+  (e.g. a filled vs outline link icon), so "is this source special?" is legible
+  at a glance.
+
+**Naming** (decided, override-able by the user): concept **"source override"**;
+button labels **"Override for this source"** / **"Reset to shared"**. Rejected
+alternatives: "source-adjust" (vague about what it does), "detach source" (the
+fork already uses *detach* for skeleton handles — reusing it here would blur two
+unrelated concepts).
 
 ---
 
@@ -237,7 +290,7 @@ result is deterministic.
 | --- | --- |
 | `fontra-core/src/fontra-internal-schema.js` | add `SIDEBEARING_KEYS` section constant |
 | `fontra-core/src/metrics-keys.js` *(new)* | pure helpers: parse/validate an expression as a key, format for display; mocha-tested (Q5) |
-| `views-editor/src/panel-selection-info.js` | per-source key store on layer customData; display + staleness style (§4.8); per-glyph Update button; two-press unlink button (§4.4); clear-on-number; generalize `_evaluateMetricsExpression` into the shared resolver (§4.7) |
+| `views-editor/src/panel-selection-info.js` | two-level key store (glyph customData shared + layer customData override) with effective-key resolution; override / reset-to-shared control (§4.9); display + override marker + staleness style (§4.8); per-glyph Update button; two-press unlink (§4.4); clear-on-number; generalize `_evaluateMetricsExpression` into the shared resolver (§4.7) |
 | `views-editor/src/editor.js` | register the **Update all metrics** action (§4.3) — menu entry + shortcut + confirm |
 | `fontra-core/assets/lang/en.js` | UI strings (`Update`, unlink tooltip + confirm, `Update all metrics` + confirm) |
 | `fontra-webcomponents/src/ui-form.js` | number-field display **adornment** for the resolved value + a stale style hook (§4.5, §4.8); today `displayValue` only serves the range slider |
@@ -261,10 +314,12 @@ other tool.
 | 7 | Referenced glyph has no source at this location | `instantiateController` interpolates the referenced glyph at the source's location — already handled by the resolver. |
 | 8 | Composite/component glyph | Reuses the existing margin-set path, which already handles components. |
 | 9 | Locked glyph / read-only font | Update, Update-all (per glyph) and creation all skip/block. |
-| 10 | Plain-number edit, or unlink button, on a keyed field | Removes that side's key on the edited source(s), keeps the number (§4.4). |
+| 10 | Plain-number edit, or unlink, on a keyed field | Removes the key **at its level** (shared or override), keeps the number (§4.4). |
 | 11 | Expression references several glyphs (`=(a+b)/2`) | Stored verbatim; Update replays it. No dependency tracking needed (no push). |
-| 12 | Editing several sources at once, with different keys per side | The field shows a **mixed** state (as margins already do for multi-source edits); Update/unlink act per source on each edited layer. |
-| 13 | A source is keyed, another source of the same glyph is not | Fine — keys are per-source. Update touches only keyed sources; unkeyed sources' margins are left as-is. |
+| 12 | Editing several sources at once, mixed effective keys | Field shows a **mixed** state (as margins already do for multi-source edits); Update/unlink/override act per source on each edited layer. |
+| 13 | Override with the **same** expression as the shared key | Harmless redundancy; allowed. "Reset to shared" removes it cleanly. |
+| 14 | Unlink the **shared** key while some sources are overridden | Inheriting sources lose the link; overridden sources keep their own key (cascade §4.4). |
+| 15 | Override exists but shared key is a plain number (no shared key) | "Reset to shared" reverts the source to a plain number. |
 
 ---
 
@@ -280,11 +335,11 @@ already handles full expressions; storing the string is *less* code than
 re-parsing to a single ref, and it transparently supports `=(a+b)/2`. The
 prototype stored a parsed ref and was thereby limited to single-glyph links.
 
-**Q2 — Store keys per glyph or per source? — RESOLVED (user): per source.**
-Keys live on the layer's `StaticGlyph.customData` (where the skeleton lives), so
-each master can key a side independently — different variables for different
-sources. This reverses the earlier glyph-wide draft. The resolver evaluates each
-source's expression at that source's own location.
+**Q2 — Per glyph or per source? — RESOLVED (user): both, as a cascade.**
+Default is a **glyph-wide shared** key (glyph customData); an opt-in **source
+override** (layer customData) shadows it for one source (§3, §4.9). The resolver
+evaluates the *effective* key per source at that source's location. This is the
+fork's own contour-default → per-point-override idiom applied to metrics.
 
 **Q3 — Terminology.**
 → Internally call them **metrics keys** (industry-standard, matches Glyphs/
@@ -293,11 +348,11 @@ RoboFont, unambiguous); keep user-facing copy plain ("Update"). Justification:
 confuse. The section constant stays `sidebearingKeys`. Open to the user's
 preference on any visible label.
 
-**Q4 — Scope of the update action(s)? — RESOLVED (user).**
-Three controls, all manual: per-glyph **Update** (single press, idempotent);
-**Unlink** (two-press, §4.4); **Update all metrics** (two-press, §4.3). No
-automatic push. "Update all" is an editor action (menu/shortcut) since it isn't
-tied to the selection; the others live on the field/row.
+**Q4 — Controls? — RESOLVED (user).** All manual: per-glyph **Update** (single
+press, idempotent); **Unlink** (two-press, §4.4); **Update all metrics**
+(two-press, §4.3); **Override for this source / Reset to shared** (§4.9). No
+automatic push. "Update all" is an editor action (menu/shortcut); the rest live
+on the field/row.
 
 **Q5 — Extract parse/format helpers into core (mocha-tested) or keep in the panel?**
 → **Extract** `parseMetricsKey` (handles the `=` prefix, `!`, glyph-map
