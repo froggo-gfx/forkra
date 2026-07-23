@@ -3,6 +3,8 @@ import {
   findGeneratedPathAddress,
   getSkeletonData,
   getSkeletonHandleOffset,
+  getSkeletonRibAddress,
+  makeSkeletonRibKey,
   isSkeletonSideLocked,
   setSkeletonHandleOffset,
 } from "@fontra/core/skeleton-model.js";
@@ -19,7 +21,6 @@ import {
   editSkeleton,
   makeEditSkeletonChange,
 } from "./skeleton-editing.js";
-import { getSkeletonRibAddress, makeSkeletonRibKey } from "./skeleton-ribs.js";
 
 const EDITABLE_GENERATED_POINT_KEY_KIND = "editableGeneratedPoint";
 const EDITABLE_GENERATED_HANDLE_KEY_KIND = "editableGeneratedHandle";

@@ -39,7 +39,6 @@ const MODULES = [
   "src-js/fontra-core/src/skeleton-model.js",
   "src-js/fontra-core/src/skeleton-generator.js",
   "src-js/views-editor/src/skeleton-editing.js",
-  "src-js/views-editor/src/skeleton-ribs.js",
   "src-js/views-editor/src/skeleton-generated.js",
 ];
 

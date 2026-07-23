@@ -1,6 +1,9 @@
 import {
   getSkeletonData,
   findGeneratedPathAddress,
+  applySkeletonRibExecutorResult,
+  createSkeletonRibExecutor,
+  getSkeletonRibAddress,
   makeSkeletonContour,
   makeSkeletonPoint,
   normalizeSkeletonData,
@@ -12,11 +15,6 @@ import { VarPackedPath } from "@fontra/core/var-path.js";
 import { expect } from "chai";
 import { editSkeleton } from "../../views-editor/src/skeleton-editing.js";
 import { computeRibDetachConversions } from "../../views-editor/src/skeleton-panel-edits.js";
-import {
-  applySkeletonRibExecutorResult,
-  createSkeletonRibExecutor,
-  getSkeletonRibAddress,
-} from "../../views-editor/src/skeleton-ribs.js";
 
 describe("skeleton rib executor", () => {
   const makeAddress = (side, pointData = {}) => {

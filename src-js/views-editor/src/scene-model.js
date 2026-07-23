@@ -25,6 +25,8 @@ import { MAX_UNICODE } from "@fontra/core/shaper.js";
 import {
   getGeneratedPathContourIndices,
   findGeneratedPathAddress,
+  getSkeletonRibAddress,
+  iterSkeletonRibTargets,
   getSkeletonData,
   getSkeletonPointHalfWidth,
   getSkeletonPointWidth,
@@ -56,7 +58,6 @@ import {
   parseEditableGeneratedPointKey,
   resolveEditableGeneratedTarget,
 } from "./skeleton-generated.js";
-import { getSkeletonRibAddress, iterSkeletonRibTargets } from "./skeleton-ribs.js";
 
 export class SceneModel {
   constructor(

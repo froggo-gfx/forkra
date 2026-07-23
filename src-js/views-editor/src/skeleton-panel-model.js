@@ -7,6 +7,8 @@ import {
   getSkeletonHandleOffset,
   getSkeletonPointHalfWidth,
   getSkeletonPointWidth,
+  getSkeletonRibAddress,
+  parseSkeletonRibKey,
   getSkeletonRibSidesForPoint,
   isSkeletonSideLocked,
 } from "@fontra/core/skeleton-model.js";
@@ -16,7 +18,6 @@ import {
   parseEditableGeneratedHandleKey,
   parseEditableGeneratedPointKey,
 } from "./skeleton-generated.js";
-import { getSkeletonRibAddress, parseSkeletonRibKey } from "./skeleton-ribs.js";
 
 function resolvePointAddress(skeletonData, contourId, pointId) {
   return getSkeletonPointAddress(skeletonData, Number(contourId), Number(pointId));

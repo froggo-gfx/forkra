@@ -13,6 +13,11 @@ import {
   getSkeletonHandleEqualizeInfo,
   getSkeletonPointAddress,
   getSkeletonRibPosition,
+  applySkeletonRibExecutorResult,
+  createSkeletonRibExecutor,
+  getSkeletonRibAddress,
+  makeSkeletonRibKey,
+  parseSkeletonRibKey,
   findGeneratedPathAddress,
   isSkeletonSideLocked,
   makeEmptySkeletonData,
@@ -23,13 +28,6 @@ import {
 import { isObjectEmpty, parseSelection, range } from "@fontra/core/utils.ts";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
-import {
-  applySkeletonRibExecutorResult,
-  createSkeletonRibExecutor,
-  getSkeletonRibAddress,
-  makeSkeletonRibKey,
-  parseSkeletonRibKey,
-} from "./skeleton-ribs.js";
 
 export function makeSkeletonPointKey(contourId, pointId) {
   return `skeletonPoint/${contourId}/${pointId}`;
@@ -45,6 +43,13 @@ export function getSkeletonModifierBehaviorName(event, modifiers = {}, targetKin
     return "fixed-rib";
   }
   return null;
+}
+
+export function getSkeletonRibBehaviorName(event, modifiers = {}) {
+  if (modifiers.tangentRibMode && event?.altKey) return "rib-tangent-interpolate";
+  if (modifiers.tangentRibMode) return "rib-tangent";
+  if (event?.altKey) return "rib-interpolate";
+  return "rib-default";
 }
 
 export function getSelectionTargetKinds(selection) {

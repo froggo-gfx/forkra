@@ -3,10 +3,11 @@ import { centeredRect } from "@fontra/core/rectangle.ts";
 import {
   getSkeletonPointHalfWidth,
   getSkeletonPointWidth,
+  getSkeletonRibAddress,
+  getSkeletonRibPosition,
 } from "@fontra/core/skeleton-model.js";
 import { commandKeyProperty, parseSelection } from "@fontra/core/utils.ts";
 import * as vector from "@fontra/core/vector.js";
-import { getSkeletonRibAddress, getSkeletonRibPosition } from "./skeleton-ribs.js";
 
 const REALTIME_MEASURE_ACTION = "action.realtime.measure";
 const REALTIME_MEASURE_DIRECT_ACTION = "action.realtime.measure-direct";
