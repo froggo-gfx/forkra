@@ -538,6 +538,15 @@ A green bundle is not evidence that an interaction works. The harness (5.0) is w
    unguarded call sites across five files, all of which currently receive well-formed keys.
    Strict `null` is the right contract; the exposure is a throw instead of a silent miss on
    input that no current path produces.
+
+   **Resolved (post-merge, 2026-07-24).** The core-internal callers were hardened
+   (`skeleton-model.js:316`, `:641` guard on `null`). The ~9 editor-side callers still
+   destructure bare (sharpest: `scene-controller.js:1333`, a direct `.contourId`). Left as-is
+   by decision: no current path feeds them a malformed key, so nothing changes in normal use.
+   The trade only matters if a *future* code change ever routes a bad key here — then it's a
+   loud throw (the click/drag action dies, error in the console, points straight at the line)
+   rather than a silent skip (action appears to work but quietly drops the element). Loud was
+   preferred: it can't happen today, and if it ever does, the crash names the bug.
 2. **4.5 touches R-C.** Every skeleton write goes through `editSkeleton`. A mistake here is
    not local.
 3. **Editor-side coverage is partial.** §2.2 is better than expected but far from complete —
