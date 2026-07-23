@@ -4,7 +4,7 @@
 
 ### New features
 
-- [languages] Add Spanish translations contributed by Miguel A. Contreras, Gen Ramirez and Romina Hernández. [PR 2717](https://github.com/fontra/fontra/pull/2717)
+- [languages] Add Spanish translations contributed by Adolfo Jayme Barrientos, Miguel A. Contreras, Gen Ramirez and Romina Hernández. [PR 2717](https://github.com/fontra/fontra/pull/2717)
 - [languages] Add Portuguese translations contributed by Hallef Henrique P. Sousa, and additions by Eduardo Omine. [PR 2708](https://github.com/fontra/fontra/pull/2708), [PR 2710](https://github.com/fontra/fontra/pull/2710), [PR 2711](https://github.com/fontra/fontra/pull/2711), [PR 2714](https://github.com/fontra/fontra/pull/2714)
 
 ### Improvements
