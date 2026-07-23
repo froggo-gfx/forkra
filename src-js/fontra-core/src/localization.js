@@ -14,6 +14,7 @@ export const languages = [
   { code: "fr", langEn: "French", langLang: "Français", status: "beta" },
   { code: "de", langEn: "German", langLang: "Deutsch", status: "wip" },
   { code: "nl", langEn: "Dutch", langLang: "Nederlands", status: "wip" },
+  { code: "es", langEn: "Spanish", langLang: "Español", status: "wip" },
   { code: "pt", langEn: "Portuguese", langLang: "Português", status: "beta" },
   { code: "tl", langEn: "Filipino", langLang: "Tagalog", status: "beta" },
 ];
