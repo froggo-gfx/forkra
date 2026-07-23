@@ -71,17 +71,24 @@ per side describes a rule; the rule is re-evaluated per source/layer on update.
 
 ```js
 glyph.customData["fontra.internal"].sidebearingKeys = {
-  left:  { expression: "n",  value: 80 },   // value = last-resolved (main layer), display only
-  right: { expression: "o!", value: 55 },
+  left:  { expression: "n" },
+  right: { expression: "o!" },
 }
 ```
 
-- `expression` — the raw string the user typed. This is the source of truth for
-  the link, replayed verbatim through the existing evaluator on Update.
-- `value` — cached last-resolved number for the **display** only (see §4). The
-  authoritative per-layer values already live in the real margins; this cache
-  just avoids a resolve on every panel repaint and lets us show `n (80)`
-  without recomputation.
+- `expression` — the raw string the user typed. The **only** stored field: it is
+  the source of truth for the link, replayed verbatim through the shared
+  resolver (§4.7) on Update.
+
+**No cached resolved value is persisted** (a change from the prototype, which
+stored `value`). Three reasons: (a) it is redundant — the authoritative resolved
+number already lives in the real per-layer margin; (b) a persisted cache is a
+*third* copy that can silently disagree with both the real margin and the
+live-resolved value — a data-integrity smell; (c) resolving the current glyph's
+≤2 expressions on panel build is cheap (the referenced glyphs are already
+`fontController`-cached). Resolving on display has a bonus: the number shown next
+to the expression is the *live* referenced value, so a mismatch with the actual
+margin **is** the staleness signal (see Q6) — for free, no extra machinery.
 
 A side with no key simply has no entry. Empty `sidebearingKeys` is deleted.
 
@@ -105,9 +112,9 @@ metadata, exactly like Glyphs writing both the number and the `=n`.
 ### 4.2 Refreshing (the Update button — current glyph)
 - A single **Update** button appears in the sidebearings row **only when the
   glyph has at least one key**.
-- Pressing it: for each side that has a key, re-run the evaluator across **all
-  the glyph's sources**, re-apply the resolved margin per layer, refresh the
-  cached `value`. One undo step (`"update sidebearings"`).
+- Pressing it: for each side that has a key, re-resolve across **all the glyph's
+  sources** (§4.7) and re-apply the resolved margin per layer (§5). One undo step
+  (`"update sidebearings"`).
 - Disabled when the glyph is locked or the font is read-only.
 
 ### 4.3 Refreshing everything (Update all)
@@ -117,12 +124,18 @@ metadata, exactly like Glyphs writing both the number and the `=n`.
 - It enumerates every glyph in the font, and for each glyph that has
   `sidebearingKeys`, performs the same per-side, per-source re-resolve and
   re-apply as §4.2, skipping locked glyphs.
+- **Atomic, single undo step.** This is *not* a new capability to invent: the
+  metrics tool's `SidebearingEditContext` already edits many glyphs by name in
+  one undo record via `recordChanges(font, …)` over `font.glyphs[name]` +
+  `fontController.editFinal(change, rollback, undoLabel)`
+  (`edit-tools-metrics.js:711`). That class even carries a `// TODO: move to its
+  own module` note — so the plan **extracts** its multi-glyph edit orchestration
+  and reuses it here rather than hand-rolling cross-glyph editing.
 - Still fully manual — the user triggers it. No automatic/push behavior.
 - Chain ordering (`a`←`b`, `b`←`c`) in a single pass: keys resolve from each
-  reference's **current stored** margin, so a long chain may settle one link per
-  pass. Resolve by running the pass **to a fixpoint** (bounded, e.g. ≤ glyph
-  count iterations; stop when a pass changes nothing). Cycles (§7.5) are the
-  natural stop condition. Wrapped in one undo step.
+  reference's **current** margin, so a long chain may settle one link per pass.
+  Resolve by running the pass **to a fixpoint** (bounded by glyph count; stop
+  when a pass changes nothing). Cycles (§7.5) are the natural stop condition.
 - Cost: a full glyph scan. Acceptable because it is explicit and infrequent; no
   reverse index or dependency graph is built — each glyph resolves only its own
   keys.
@@ -133,33 +146,90 @@ metadata, exactly like Glyphs writing both the number and the `=n`.
 - Typing a **new expression** replaces the key.
 
 ### 4.5 Display
-- A keyed field shows `expression (value)` — e.g. `n (80)`, `o! (55)` — so the
-  link and its current resolved number are both visible.
-- The parenthesised value is a display suffix only; it is stripped before the
-  field's contents are ever re-parsed (`stripDisplaySuffix` from the prototype).
+A keyed field must show both the link (the expression) and its current resolved
+number. The prototype baked them into one string — `n (80)` — and then had to
+regex-strip the `(80)` back off (`stripDisplaySuffix`) every time the field was
+re-read. That is fragile (an editable string carrying non-editable content) and
+is avoided here.
+
+**Preferred:** the field's editable value is the pure expression (`n`); the
+resolved number is a **separate, non-editable adornment** (suffix label or
+tooltip). No stripping, no parse ambiguity.
+
+Caveat found in code: `ui-form`'s existing `displayValue` hook is wired only to
+the **range-slider** widget (`ui-form.js:511`), not the `edit-number-x-y` fields
+sidebearings use. So this needs a small `ui-form` addition either way — the
+choice is *adornment* (recommended) vs *replacement string* (prototype). Decided
+in Q7.
 
 ### 4.6 Opposite-side (`!`) semantics
 Preserved from the existing evaluator: `n` → `n`'s same-side margin; `n!` →
 `n`'s opposite-side margin. No new syntax invented.
 
+### 4.7 The shared resolver (one implementation)
+Creating a link (§4.1), the field's live-display resolve (§4.5), per-glyph Update
+(§4.2) and Update-all (§4.3) must all go through **one** resolver, not the
+prototype's two parallel copies (it duplicated the `instantiateController` loop
+inside `_updateSidebearingVariables`).
+
+Signature roughly: `resolveMetricsKey(fontController, glyphName, side,
+expression, { sources }) → { [layerName]: number }`.
+
+**Blocking detail found in code:** the existing `_evaluateMetricsExpression`
+resolves only over **editing** layers (`_getEditingLocations`, which reads
+`editingLayerNames`). Persistence needs **all sources** of the target glyph,
+including glyphs that aren't open. The resolver is therefore a generalization of
+`_evaluateMetricsExpression` parameterized by the location set — and
+`_evaluateMetricsExpression` becomes a thin caller of it (editing-locations
+case). This keeps one copy of the `nameCapture` → `compute` → `instantiateController`
+chain.
+
 ---
 
 ## 5. Applying a margin (shared write path)
 
-Setting a left margin translates all path coordinates and component
-`translateX`, then adjusts `xAdvance`; right margin adjusts only `xAdvance`
-(current `setValue`, `panel-selection-info.js:268-304`).
+Setting a **left** margin translates the glyph body by `dx = value −
+leftMargin` and adjusts `xAdvance`; setting a **right** margin adjusts only
+`xAdvance` (no translate). So the skeleton-coupling concern below applies to the
+**left side only**.
 
-**Coupling requirement:** a left-margin translate must also move the glyph's
-**skeleton** data by the same delta, or the skeleton detaches from the outline.
-This is the WS-16 letterspacer↔skeleton coupling, and it is **not** currently in
-the base `setValue` (latent bug). The prototype did it via `moveSkeletonData`.
+**There is already a canonical translate primitive — use it.** `StaticGlyph`
+has `getMoveReference()` / `moveWithReference(ref, dx, dy)`
+(`var-glyph.js:76,99`); the metrics **tool** already sets sidebearings through it
+(`edit-tools-metrics.js:721,748`). The current panel `setValue`
+(`panel-selection-info.js:268-304`) hand-rolls its own coordinate loop instead —
+a duplicate that also omits anchors/guidelines/background-image that
+`moveWithReference` handles. **Decision:** route every margin write — the plain
+manual edit *and* the metrics-key apply — through `moveWithReference`, deleting
+the panel's bespoke loop (rail R-B).
 
-**Decision:** creating/updating a link and the plain manual margin edit must go
-through **one** margin-set helper that includes the skeleton move — no second
-copy of the translate logic (rail R-B). The plan phase confirms the current
-skeleton-mover API name and section (skeleton now lives under
-`fontra.internal.skeleton`, not the donor's `fontra.skeleton`).
+**The skeleton coupling is a real, shared bug.** `moveWithReference` moves path,
+components, anchors, guidelines and background image — but **not** the skeleton
+customData (`var-glyph.js:99-123`). Therefore the metrics *tool* today also
+leaves the skeleton behind on a left-sidebearing drag — the bug isn't unique to
+this feature; it lives in the shared primitive. The prototype patched it only in
+its own private copy (`moveSkeletonData`), which would have left the tool still
+broken.
+
+**Decision:** add the skeleton move **once**, at the shared seam, so tool, panel
+and metrics-key apply all get it. Two implementation options for the plan to
+choose:
+1. Extend `getMoveReference`/`moveWithReference` to include the skeleton section
+   — cleanest for callers, but pulls skeleton-schema knowledge into foundational
+   `var-glyph.js` (a layering cost).
+2. A thin editor-side helper `setLeftMargin(layerGlyph, value)` =
+   `moveWithReference` + a skeleton translate, keeping `var-glyph.js` ignorant of
+   skeleton. Preferred on layering grounds.
+
+Either way a small **skeleton translate** helper is needed: current-base
+`skeleton-model.js` has *no* whole-skeleton move function (the donor's
+`moveSkeletonData` was not ported). The plan adds one — translate every skeleton
+contour point and every editable-generated offset by `(dx, dy)` — living in
+`skeleton-model.js` with a mocha test (it is pure geometry, rail R-A/R-G).
+
+> Fixing the shared primitive also repairs the pre-existing metrics-tool bug.
+> That is a welcome side effect, but it widens the blast radius: the plan should
+> call it out and manually test the metrics tool + skeleton, not just the panel.
 
 ---
 
@@ -168,13 +238,16 @@ skeleton-mover API name and section (skeleton now lives under
 | File | Change |
 | --- | --- |
 | `fontra-core/src/fontra-internal-schema.js` | add `SIDEBEARING_KEYS` section constant |
-| `views-editor/src/panel-selection-info.js` | key parse/store/display, per-glyph Update button, shared margin-set helper, clear-on-number |
+| `fontra-core/src/metrics-keys.js` *(new)* | pure helpers: parse/validate an expression as a key, format for display; mocha-tested (Q5) |
+| `fontra-core/src/skeleton-model.js` | add pure whole-skeleton translate helper (§5) + test |
+| `fontra-core/src/var-glyph.js` *or* a helper | skeleton-aware left-margin move seam (§5, option 1 vs 2) |
+| `views-editor/src/panel-selection-info.js` | key store/display, per-glyph Update button, route margin writes through the shared move, clear-on-number; generalize `_evaluateMetricsExpression` into the shared resolver (§4.7) |
+| `views-editor/src/edit-tools-metrics.js` | extract `SidebearingEditContext`'s multi-glyph edit orchestration for reuse (§4.3) — it already flags `// TODO: move to its own module` |
 | `views-editor/src/editor.js` | register the **Update all metrics** action (§4.3) — menu entry + shortcut |
 | `fontra-core/assets/lang/en.js` | UI strings (`Update`, `Update all metrics`, tooltips) |
-| `fontra-webcomponents/src/ui-form.js` | *iff* the field needs `displayValue` support the prototype added — verify current base first |
+| `fontra-webcomponents/src/ui-form.js` | number-field display **adornment** for the resolved value (§4.5); today `displayValue` only serves the range slider |
 
-No backend change (customData already persists). No new core module unless the
-parse/format helpers are worth extracting for a mocha test (see §8, Q5).
+No backend change (customData already persists).
 
 ---
 
@@ -182,11 +255,11 @@ parse/format helpers are worth extracting for a mocha test (see §8, Q5).
 
 | # | Case | Handling |
 | --- | --- | --- |
-| 1 | Referenced glyph deleted / missing | Keep the key, skip the update, leave last value; surface an error state on the field rather than crashing. |
-| 2 | Referenced glyph has undefined margin (empty/no outline) | Skip that side's update, keep last value. |
-| 3 | Self-reference same side (`o`'s left ← `o`) | No-op identity; guard against writing. |
-| 4 | Self-reference opposite side (`o`'s left ← `o!`) | Legit (symmetry); allow. |
-| 5 | Cycle (`a`←`b`, `b`←`a`) | Manual model makes this harmless: each Update resolves once from stored values, no cascade. Document; no cycle-breaker needed. |
+| 1 | Referenced glyph deleted / missing | Keep the key, skip the update — the real margin is left untouched; surface an error state on the field rather than crashing. |
+| 2 | Referenced glyph has undefined margin (empty/no outline) | Skip that side's update; real margin untouched. |
+| 3 | Self-reference same side (`o`'s left ← `=o`) | No-op identity; guard against writing. |
+| 4 | Self-reference opposite side (`o`'s left ← `=o!`) | Legit (symmetry); allow. |
+| 5 | Cycle (`a`←`b`, `b`←`a`) | Manual model makes this harmless: each Update resolves once from the referenced glyph's *current* margin, no cascade. Update-all's fixpoint pass (§4.3) stops when nothing changes. No cycle-breaker needed. |
 | 6 | Both sides keyed | Apply **left first, then right** (left translates the path and shifts the raw right margin; deterministic order required). |
 | 7 | Multiple sources, referenced glyph missing a source | `instantiateController` interpolates at the source location — already handled by the evaluator. |
 | 8 | Composite/component glyph | Left translate already moves components; fine. |
@@ -197,6 +270,19 @@ parse/format helpers are worth extracting for a mocha test (see §8, Q5).
 ---
 
 ## 8. Open questions — decisions made, with justification
+
+**Q0 — How does the user signal "make this a persistent link" vs "evaluate once"?**
+(The one I most want your call on.) Today, typing a bare glyph name does a
+one-shot evaluation. If bare `n` now *always* creates a persistent key (the
+prototype's behavior), the one-shot gesture is gone — every reference becomes a
+link.
+→ **Recommendation: require a leading `=` for a link** (`=n`, `=o!`,
+`=(a+b)/2`), leaving bare `n` as the existing one-shot. Justification: it matches
+Glyphs/RoboFont exactly, is self-documenting ("this field is keyed"), and
+preserves both behaviors instead of trading one for the other. Cost: it adds one
+character to the gesture you described ("enter the letter"). If you'd rather keep
+the barer gesture, the alternative is **bare name = link, no one-shot** — simpler
+but lossy. This is a genuine UX fork, hence Q0.
 
 **Q1 — Store the raw expression, or a parsed `{glyph, side}`?**
 → **Store the raw expression string.** Justification: the evaluator already
@@ -239,17 +325,22 @@ logic that regresses silently. Small, high-value test surface.
 
 **Q6 — Should the field visually mark a *stale* key (referenced glyph changed
 since last Update)?**
-→ **Not in phase 1.** Justification: detecting staleness means resolving on
-every repaint or watching the referenced glyph — the very cost the manual model
-avoids. Ship the button first; revisit a "dot" indicator only if the user finds
-blind updating uncomfortable.
+→ **Yes, and it comes for free** — reversing the prototype's stance now that we
+resolve-on-display (§3, §4.5). Since the field shows the *live* resolved value
+next to the expression, and the actual margin is visible, a divergence between
+them already reads as "out of date, press Update." Justification: no extra
+watcher or repaint cost — the live resolve we already do for display *is* the
+indicator. A subtle visual emphasis (e.g. tinting the number when it differs
+from the applied margin) is a cheap polish, optional for phase 1.
 
-**Q7 — Does the current `ui-form` field support a `displayValue` suffix, or must
-we add it (as the prototype did)?**
-→ **Verify in the plan phase.** The prototype patched `ui-form.js` (+117/−0-ish)
-to carry `displayValue`. The current base already extended `ui-form.js` for the
-skeleton panel; the hook may already exist. Decision deferred to code inspection
-so we don't duplicate a field option.
+**Q7 — Display the resolved value as an adornment or as a replacement string?**
+→ **Adornment** (expression stays the editable value; number shown beside it),
+not the prototype's baked-in `n (80)` string. Justification: an editable field
+should not carry non-editable content that must be regex-stripped on every read
+(`stripDisplaySuffix`) — that is a latent parse-bug surface. Confirmed cost
+either way: `ui-form`'s `displayValue` currently serves only the range slider
+(`ui-form.js:511`), so the `edit-number-x-y` field needs a small addition
+regardless; adornment is the cleaner shape.
 
 ---
 
