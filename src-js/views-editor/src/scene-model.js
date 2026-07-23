@@ -28,8 +28,8 @@ import {
   getSkeletonPointHalfWidth,
   getSkeletonPointWidth,
   isSkeletonSideLocked,
+  skeletonTunniHitTest,
 } from "@fontra/core/skeleton-model.js";
-import { skeletonTunniHitTest } from "@fontra/core/skeleton-tunni.js";
 import { decomposedToTransform } from "@fontra/core/transform.js";
 
 import {

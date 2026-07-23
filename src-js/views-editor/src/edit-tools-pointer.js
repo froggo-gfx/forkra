@@ -42,7 +42,10 @@ import { getPinPoint } from "./panel-transformation.js";
 import { equalGlyphSelection } from "./scene-controller.js";
 import {
   createSkeletonRibTargetEntries,
+  getSelectionTargetKinds,
+  getSkeletonModifierBehaviorName,
   hasSkeletonPointSelection,
+  makeSkeletonModifierOptions,
   makeSkeletonPointKey,
   makeSkeletonPointTargetEntry,
   parseSkeletonPointKey,
@@ -53,11 +56,6 @@ import {
   createEditableGeneratedPointTargetEntries,
   toggleEditableGeneratedHandleDetached,
 } from "./skeleton-generated.js";
-import {
-  getSelectionTargetKinds,
-  getSkeletonModifierBehaviorName,
-  makeSkeletonModifierOptions,
-} from "./skeleton-modifiers.js";
 import { getSkeletonRibBehaviorName } from "./skeleton-ribs.js";
 import {
   glyphSelector,

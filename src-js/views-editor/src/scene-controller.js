@@ -74,6 +74,9 @@ import {
   applyGeneratedContourRemap,
   computeGeneratedContourRemap,
   createSkeletonRibTargetEntries,
+  getSelectionTargetKinds,
+  getSkeletonModifierBehaviorName,
+  makeSkeletonModifierOptions,
   makeSkeletonPointTargetEntry,
   parseSkeletonPointKey,
   recordSkeletonContourIndexShift,
@@ -82,11 +85,6 @@ import {
   createEditableGeneratedHandleTargetEntries,
   createEditableGeneratedPointTargetEntries,
 } from "./skeleton-generated.js";
-import {
-  getSelectionTargetKinds,
-  getSkeletonModifierBehaviorName,
-  makeSkeletonModifierOptions,
-} from "./skeleton-modifiers.js";
 import { getSkeletonRibBehaviorName } from "./skeleton-ribs.js";
 //// grid
 import { toggleMagneticSnap } from "./edit-behavior.js";

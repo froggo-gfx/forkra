@@ -1,15 +1,13 @@
 import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import {
+  SKELETON_SOURCE_DEFAULT_KEYS,
   getSkeletonData,
+  getSkeletonGlyphCase,
+  resolveEffectiveSourceSkeletonDefault,
   setSkeletonCapParameters,
   setSkeletonCornerParameters,
 } from "@fontra/core/skeleton-model.js";
-import {
-  SKELETON_SOURCE_DEFAULT_KEYS,
-  getSkeletonGlyphCase,
-  resolveEffectiveSourceSkeletonDefault,
-} from "@fontra/core/skeleton-source-defaults.js";
 import { throttleCalls } from "@fontra/core/utils.ts";
 import { Form } from "@fontra/web-components/ui-form.js";
 import Panel from "./panel.js";

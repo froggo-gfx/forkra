@@ -6,19 +6,19 @@ import {
   outlineContourToPackedPath,
 } from "@fontra/core/skeleton-generator.js";
 import {
+  applyFixedRibDelta,
+  equalizeSkeletonHandleFromDelta,
+  equalizeSkeletonHandleToPoint,
   getSkeletonData,
+  getSkeletonHandleEqualizeInfo,
+  getSkeletonPointAddress,
   getSkeletonRibPosition,
   isSkeletonSideLocked,
   makeEmptySkeletonData,
   normalizeSkeletonData,
+  parseSkeletonPointKey,
   setSkeletonData,
 } from "@fontra/core/skeleton-model.js";
-import {
-  applyFixedRibDelta,
-  equalizeSkeletonHandleFromDelta,
-  equalizeSkeletonHandleToPoint,
-  getSkeletonHandleEqualizeInfo,
-} from "@fontra/core/skeleton-modifiers.js";
 import { isObjectEmpty, parseSelection, range } from "@fontra/core/utils.ts";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
@@ -37,29 +37,36 @@ export function makeSkeletonPointKey(contourId, pointId) {
   return `skeletonPoint/${contourId}/${pointId}`;
 }
 
-export function parseSkeletonPointKey(key) {
-  // Accepts "skeletonPoint/3/5" (full key) and "3/5" (parseSelection remainder)
-  const parts = `${key}`.split("/");
-  if (parts[0] === "skeletonPoint") {
-    parts.shift();
-  }
-  const [contourId, pointId] = parts.map(Number);
-  return { contourId, pointId };
-}
+export { getSkeletonPointAddress, parseSkeletonPointKey };
 
-export function getSkeletonPointAddress(skeletonData, contourId, pointId) {
-  for (
-    let contourIndex = 0;
-    contourIndex < (skeletonData?.contours || []).length;
-    contourIndex++
-  ) {
-    const contour = skeletonData.contours[contourIndex];
-    if (contour.id !== contourId) continue;
-    const pointIndex = contour.points.findIndex((point) => point.id === pointId);
-    if (pointIndex < 0) return null;
-    return { contour, contourIndex, point: contour.points[pointIndex], pointIndex };
+export function getSkeletonModifierBehaviorName(event, modifiers = {}, targetKinds) {
+  if (modifiers.fixedRibCompressMode && targetKinds.has("skeletonPoint")) {
+    return "fixed-rib-compress";
+  }
+  if (modifiers.fixedRibMode && targetKinds.has("skeletonPoint")) {
+    return "fixed-rib";
   }
   return null;
+}
+
+export function getSelectionTargetKinds(selection) {
+  const parsed = parseSelection([...selection]);
+  const kinds = new Set();
+  if (parsed.skeletonPoint?.length) kinds.add("skeletonPoint");
+  if (parsed.skeletonRib?.length) kinds.add("skeletonRib");
+  if (parsed.editableGeneratedPoint?.length) kinds.add("editableGeneratedPoint");
+  if (parsed.editableGeneratedHandle?.length) kinds.add("editableGeneratedHandle");
+  return kinds;
+}
+
+export function makeSkeletonModifierOptions(behaviorName, extra = {}) {
+  return {
+    ...extra,
+    behaviorName,
+    equalize: behaviorName?.startsWith("equalize") === true,
+    fixedRib: behaviorName === "fixed-rib",
+    fixedRibCompress: behaviorName === "fixed-rib-compress",
+  };
 }
 
 // Cross-layer addressing (see Global Constraints): selection ids are canonical

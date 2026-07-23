@@ -7,7 +7,7 @@ import {
   getSourceSkeletonDefaultsValue,
   normalizeSkeletonSourceDefaults,
   setSourceSkeletonDefaultsValues,
-} from "@fontra/core/skeleton-source-defaults.js";
+} from "@fontra/core/skeleton-model.js";
 import { expect } from "chai";
 
 function makeSource(defaults) {

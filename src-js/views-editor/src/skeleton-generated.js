@@ -1,10 +1,10 @@
 import {
+  equalizeEditableGeneratedHandleOffsets,
   getSkeletonData,
   getSkeletonHandleOffset,
   isSkeletonSideLocked,
   setSkeletonHandleOffset,
 } from "@fontra/core/skeleton-model.js";
-import { equalizeEditableGeneratedHandleOffsets } from "@fontra/core/skeleton-modifiers.js";
 import { parseSelection } from "@fontra/core/utils.ts";
 import {
   dotVector,

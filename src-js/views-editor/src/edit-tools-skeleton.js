@@ -4,13 +4,11 @@ import {
   DEFAULT_SKELETON_WIDTH,
   appendSkeletonContour,
   appendSkeletonPoint,
+  getDefaultSkeletonWidthKeyForGlyphName,
   getSkeletonData,
   makeSkeletonPoint,
-} from "@fontra/core/skeleton-model.js";
-import {
-  getDefaultSkeletonWidthKeyForGlyphName,
   resolveEffectiveSourceSkeletonDefault,
-} from "@fontra/core/skeleton-source-defaults.js";
+} from "@fontra/core/skeleton-model.js";
 import { parseSelection } from "@fontra/core/utils.ts";
 import * as vector from "@fontra/core/vector.js";
 import { Bezier } from "bezier-js";

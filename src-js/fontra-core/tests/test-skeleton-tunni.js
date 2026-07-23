@@ -8,7 +8,7 @@ import {
   calculateSkeletonTunniPoint,
   segmentToTunniPoints,
   skeletonTunniHitTest,
-} from "@fontra/core/skeleton-tunni.js";
+} from "@fontra/core/skeleton-model.js";
 import { expect } from "chai";
 
 describe("skeleton Tunni segment helpers", () => {

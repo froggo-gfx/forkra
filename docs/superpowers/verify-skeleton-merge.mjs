@@ -215,7 +215,12 @@ const cmp = (a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1);
 
 function callAndRecord(fn, args) {
   try {
-    let result = fn(...args);
+    // Keep one function's mutations from contaminating the deterministic
+    // corpus used by later symbols. Relocation changes module iteration order,
+    // so sharing POOL object references would make a pure move look like a
+    // behavior change.
+    const callArgs = structuredClone(args);
+    let result = fn(...callArgs);
     // Generators must be materialized or the snapshot pins nothing.
     if (
       result &&

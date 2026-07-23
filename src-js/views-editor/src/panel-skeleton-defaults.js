@@ -3,17 +3,15 @@ import * as html from "@fontra/core/html-utils.js";
 import { translate } from "@fontra/core/localization.js";
 import {
   DEFAULT_SKELETON_WIDTH,
-  getSkeletonData,
-  getSkeletonPointWidth,
-  setSkeletonPointTotalWidth,
-} from "@fontra/core/skeleton-model.js";
-import {
   SKELETON_SOURCE_DEFAULT_FALLBACKS,
   SKELETON_SOURCE_DEFAULT_KEYS,
+  getSkeletonData,
   getSkeletonGlyphCase,
+  getSkeletonPointWidth,
   getSourceSkeletonDefaultsValue,
+  setSkeletonPointTotalWidth,
   setSourceSkeletonDefaultsValues,
-} from "@fontra/core/skeleton-source-defaults.js";
+} from "@fontra/core/skeleton-model.js";
 import { dialog } from "@fontra/web-components/modal-dialog.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import {

@@ -1,14 +1,12 @@
 import { drawCubicHandleLabelPair } from "@fontra/core/distance-angle.js";
 import {
+  buildSkeletonTunniSegments,
+  calculateSkeletonTrueTunniPoint,
+  calculateSkeletonTunniPoint,
   getSkeletonData,
   getSkeletonHandleOffset,
   isSkeletonSideLocked,
 } from "@fontra/core/skeleton-model.js";
-import {
-  buildSkeletonTunniSegments,
-  calculateSkeletonTrueTunniPoint,
-  calculateSkeletonTunniPoint,
-} from "@fontra/core/skeleton-tunni.js";
 import { parseSelection } from "@fontra/core/utils.ts";
 
 import {

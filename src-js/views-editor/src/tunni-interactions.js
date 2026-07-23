@@ -1,10 +1,6 @@
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import { ChangeCollector } from "@fontra/core/changes.js";
 import {
-  getGeneratedPathContourIndices,
-  getSkeletonData,
-} from "@fontra/core/skeleton-model.js";
-import {
   areSkeletonTensionsEqualized,
   buildSkeletonTunniSegments,
   calculateSkeletonControlPointsFromTunniDelta,
@@ -12,7 +8,9 @@ import {
   calculateSkeletonOnCurveFromTunni,
   calculateSkeletonTrueTunniPoint,
   calculateSkeletonTunniPoint,
-} from "@fontra/core/skeleton-tunni.js";
+  getGeneratedPathContourIndices,
+  getSkeletonData,
+} from "@fontra/core/skeleton-model.js";
 import {
   areTensionsEqualized,
   calculateControlHandlePoint,

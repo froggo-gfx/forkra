@@ -1,18 +1,17 @@
 import { applyChange } from "@fontra/core/changes.js";
 import {
-  getSkeletonData,
-  makeSkeletonContour,
-  makeSkeletonPoint,
-  normalizeSkeletonData,
-  setSkeletonData,
-} from "@fontra/core/skeleton-model.js";
-import {
   applyFixedRibDelta,
   equalizeEditableGeneratedHandleOffsets,
   equalizeSkeletonHandleFromDelta,
   equalizeSkeletonHandleToPoint,
+  getSkeletonData,
   getSkeletonHandleEqualizeInfo,
-} from "@fontra/core/skeleton-modifiers.js";
+  makeSkeletonContour,
+  makeSkeletonPoint,
+  normalizeSkeletonData,
+  parseSkeletonPointKey,
+  setSkeletonData,
+} from "@fontra/core/skeleton-model.js";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { expect } from "chai";
 import { EditBehaviorFactory } from "../../views-editor/src/edit-behavior.js";
@@ -31,6 +30,14 @@ before(() => {
     coarseGridSpacing: 1,
     event: null,
   };
+});
+
+describe("skeleton point key helpers", () => {
+  it("rejects malformed keys instead of returning NaN addresses", () => {
+    expect(parseSkeletonPointKey("skeletonPoint/10")).to.equal(null);
+    expect(parseSkeletonPointKey("skeletonPoint/x/1")).to.equal(null);
+    expect(parseSkeletonPointKey("skeletonPoint/10/1/extra")).to.equal(null);
+  });
 });
 
 describe("skeleton modifier fixed-rib helpers", () => {
