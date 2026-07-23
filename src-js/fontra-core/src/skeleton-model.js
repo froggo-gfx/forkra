@@ -2016,6 +2016,132 @@ function setSingleSidedTotalWidth(point, defaultWidth, side, totalWidth) {
   setSkeletonPointSideWidth(point, defaultWidth, side, value - opposite, { linked: false });
 }
 
+const EDITABLE_GENERATED_POINT_KEY_KIND = "editableGeneratedPoint";
+const EDITABLE_GENERATED_HANDLE_KEY_KIND = "editableGeneratedHandle";
+const EDITABLE_VALID_GENERATED_SIDES = new Set(["left", "right"]);
+const EDITABLE_VALID_GENERATED_ROLES = new Set(["onCurve", "in", "out"]);
+const EDITABLE_VALID_HANDLE_ROLES = new Set(["in", "out"]);
+
+export function makeEditableGeneratedPointKey(contourId, pointId, side) {
+  assertGeneratedSide(side);
+  assertNumericId(contourId, "contourId");
+  assertNumericId(pointId, "pointId");
+  return `${EDITABLE_GENERATED_POINT_KEY_KIND}/${contourId}/${pointId}/${side}`;
+}
+
+export function parseEditableGeneratedPointKey(key) {
+  const parts = normalizeGeneratedKeyParts(key, EDITABLE_GENERATED_POINT_KEY_KIND, 4);
+  const [, contourId, pointId, side] = parts;
+  assertGeneratedSide(side);
+  assertNumericId(contourId, "contourId");
+  assertNumericId(pointId, "pointId");
+  return { contourId, pointId, side, role: "onCurve" };
+}
+
+export function makeEditableGeneratedHandleKey(contourId, pointId, side, role) {
+  assertGeneratedSide(side);
+  assertHandleRole(role);
+  assertNumericId(contourId, "contourId");
+  assertNumericId(pointId, "pointId");
+  return `${EDITABLE_GENERATED_HANDLE_KEY_KIND}/${contourId}/${pointId}/${side}/${role}`;
+}
+
+export function parseEditableGeneratedHandleKey(key) {
+  const parts = normalizeGeneratedKeyParts(key, EDITABLE_GENERATED_HANDLE_KEY_KIND, 5);
+  const [, contourId, pointId, side, role] = parts;
+  assertGeneratedSide(side);
+  assertHandleRole(role);
+  assertNumericId(contourId, "contourId");
+  assertNumericId(pointId, "pointId");
+  return { contourId, pointId, side, role };
+}
+
+export function resolveGeneratedPointProvenance(skeletonData, path, pathPointIndex) {
+  if (!skeletonData || !path || !Number.isInteger(pathPointIndex)) return null;
+  let pathContourIndex;
+  let contourPointIndex;
+  try {
+    [pathContourIndex, contourPointIndex] = path.getContourAndPointIndex(pathPointIndex);
+  } catch {
+    return null;
+  }
+  const generatedEntry = (skeletonData.generated || []).find(
+    (entry) => entry?.pathContourIndex === pathContourIndex
+  );
+  const provenance = generatedEntry?.pointMap?.[contourPointIndex];
+  if (!provenance || !EDITABLE_VALID_GENERATED_ROLES.has(provenance.role)) return null;
+  const contourId = provenance.skeletonContourId ?? generatedEntry.skeletonContourId;
+  const pointId = provenance.skeletonPointId;
+  if (!Number.isInteger(contourId) || !Number.isInteger(pointId)) return null;
+  const contourIndex = (skeletonData.contours || []).findIndex((contour) => contour.id === contourId);
+  if (contourIndex < 0) return null;
+  const contour = skeletonData.contours[contourIndex];
+  const pointIndex = (contour.points || []).findIndex((point) => point.id === pointId);
+  if (pointIndex < 0) return null;
+  return { generatedEntry, pathContourIndex, pathPointIndex, contourId, pointId,
+    side: provenance.side, role: provenance.role, contour, contourIndex,
+    point: contour.points[pointIndex], pointIndex };
+}
+
+export function resolveEditableGeneratedTarget(skeletonData, path, pathPointIndex) {
+  const provenance = resolveGeneratedPointProvenance(skeletonData, path, pathPointIndex);
+  if (!provenance || !EDITABLE_VALID_GENERATED_SIDES.has(provenance.side)) return null;
+  if (provenance.point?.type || isSkeletonSideLocked(provenance.point, provenance.side)) return null;
+  const kind = provenance.role === "onCurve"
+    ? EDITABLE_GENERATED_POINT_KEY_KIND
+    : EDITABLE_GENERATED_HANDLE_KEY_KIND;
+  if (kind === EDITABLE_GENERATED_HANDLE_KEY_KIND) assertHandleRole(provenance.role);
+  const selectionKey = kind === EDITABLE_GENERATED_POINT_KEY_KIND
+    ? makeEditableGeneratedPointKey(provenance.contourId, provenance.pointId, provenance.side)
+    : makeEditableGeneratedHandleKey(provenance.contourId, provenance.pointId, provenance.side, provenance.role);
+  return { ...provenance, kind, selectionKey };
+}
+
+export function getSkeletonHandleDirectionForPoint(contour, pointIndex, role) {
+  assertHandleRole(role);
+  const points = contour?.points || [];
+  const point = points[pointIndex];
+  if (!point || point.type) return null;
+  const handleIndex = role === "in"
+    ? getPreviousGeneratedContourPointIndex(contour, pointIndex)
+    : getNextGeneratedContourPointIndex(contour, pointIndex);
+  const handle = points[handleIndex];
+  if (!handle?.type) return null;
+  const direction = normalizeVector(subVectors(handle, point));
+  return vectorLength(direction) ? direction : null;
+}
+
+function normalizeGeneratedKeyParts(key, kind, expectedLength) {
+  let parts = `${key}`.split("/");
+  if (parts[0] !== kind) parts = [kind, ...parts];
+  if (parts.length !== expectedLength || parts[0] !== kind) {
+    throw new Error(`invalid ${kind} key: ${key}`);
+  }
+  return parts;
+}
+
+function assertGeneratedSide(side) {
+  if (!EDITABLE_VALID_GENERATED_SIDES.has(side)) throw new Error(`invalid editable generated side: ${side}`);
+}
+
+function assertHandleRole(role) {
+  if (!EDITABLE_VALID_HANDLE_ROLES.has(role)) throw new Error(`invalid editable generated handle role: ${role}`);
+}
+
+function assertNumericId(value, name) {
+  if (asStrictSkeletonInteger(value) === null) throw new Error(`invalid editable generated ${name}: ${value}`);
+}
+
+function getPreviousGeneratedContourPointIndex(contour, pointIndex) {
+  if (pointIndex > 0) return pointIndex - 1;
+  return contour?.closed ? (contour.points || []).length - 1 : -1;
+}
+
+function getNextGeneratedContourPointIndex(contour, pointIndex) {
+  if (pointIndex < (contour?.points || []).length - 1) return pointIndex + 1;
+  return contour?.closed ? 0 : -1;
+}
+
 export function buildSegmentsFromSkeletonPoints(points, closed) {
   const segments = [];
   const onCurveIndices = [];

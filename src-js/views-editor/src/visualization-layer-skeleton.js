@@ -6,15 +6,13 @@ import {
   getSkeletonData,
   getSkeletonHandleOffset,
   getSkeletonRibPosition,
+  makeEditableGeneratedHandleKey,
+  makeEditableGeneratedPointKey,
   makeSkeletonRibKey,
   isSkeletonSideLocked,
 } from "@fontra/core/skeleton-model.js";
 import { parseSelection } from "@fontra/core/utils.ts";
 
-import {
-  makeEditableGeneratedHandleKey,
-  makeEditableGeneratedPointKey,
-} from "./skeleton-generated.js";
 import {
   fillRoundNode,
   glyphSelector,

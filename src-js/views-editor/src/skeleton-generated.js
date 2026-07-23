@@ -28,14 +28,14 @@ const VALID_GENERATED_SIDES = new Set(["left", "right"]);
 const VALID_GENERATED_ROLES = new Set(["onCurve", "in", "out"]);
 const VALID_HANDLE_ROLES = new Set(["in", "out"]);
 
-export function makeEditableGeneratedPointKey(contourId, pointId, side) {
+function makeEditableGeneratedPointKey(contourId, pointId, side) {
   assertGeneratedSide(side);
   assertNumericId(contourId, "contourId");
   assertNumericId(pointId, "pointId");
   return `${EDITABLE_GENERATED_POINT_KEY_KIND}/${contourId}/${pointId}/${side}`;
 }
 
-export function parseEditableGeneratedPointKey(key) {
+function parseEditableGeneratedPointKey(key) {
   const parts = normalizeKeyParts(key, EDITABLE_GENERATED_POINT_KEY_KIND, 4);
   const [, contourId, pointId, side] = parts;
   assertGeneratedSide(side);
@@ -44,7 +44,7 @@ export function parseEditableGeneratedPointKey(key) {
   return { contourId, pointId, side, role: "onCurve" };
 }
 
-export function makeEditableGeneratedHandleKey(contourId, pointId, side, role) {
+function makeEditableGeneratedHandleKey(contourId, pointId, side, role) {
   assertGeneratedSide(side);
   assertHandleRole(role);
   assertNumericId(contourId, "contourId");
@@ -52,7 +52,7 @@ export function makeEditableGeneratedHandleKey(contourId, pointId, side, role) {
   return `${EDITABLE_GENERATED_HANDLE_KEY_KIND}/${contourId}/${pointId}/${side}/${role}`;
 }
 
-export function parseEditableGeneratedHandleKey(key) {
+function parseEditableGeneratedHandleKey(key) {
   const parts = normalizeKeyParts(key, EDITABLE_GENERATED_HANDLE_KEY_KIND, 5);
   const [, contourId, pointId, side, role] = parts;
   assertGeneratedSide(side);
@@ -62,7 +62,7 @@ export function parseEditableGeneratedHandleKey(key) {
   return { contourId, pointId, side, role };
 }
 
-export function resolveGeneratedPointProvenance(skeletonData, path, pathPointIndex) {
+function resolveGeneratedPointProvenance(skeletonData, path, pathPointIndex) {
   if (!skeletonData || !path || !Number.isInteger(pathPointIndex)) {
     return null;
   }
@@ -112,7 +112,7 @@ export function resolveGeneratedPointProvenance(skeletonData, path, pathPointInd
   };
 }
 
-export function resolveEditableGeneratedTarget(skeletonData, path, pathPointIndex) {
+function resolveEditableGeneratedTarget(skeletonData, path, pathPointIndex) {
   const provenance = resolveGeneratedPointProvenance(
     skeletonData,
     path,
@@ -196,7 +196,7 @@ export function createEditableGeneratedPointTargetEntries(
   });
 }
 
-export function getSkeletonHandleDirectionForPoint(contour, pointIndex, role) {
+function getSkeletonHandleDirectionForPoint(contour, pointIndex, role) {
   assertHandleRole(role);
   const points = contour?.points || [];
   const point = points[pointIndex];
