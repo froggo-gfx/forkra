@@ -1,5 +1,6 @@
 import {
   getSkeletonData,
+  findGeneratedPathAddress,
   makeSkeletonContour,
   makeSkeletonPoint,
   normalizeSkeletonData,
@@ -10,7 +11,6 @@ import {
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { expect } from "chai";
 import { editSkeleton } from "../../views-editor/src/skeleton-editing.js";
-import { findGeneratedPathAddress } from "../../views-editor/src/skeleton-generated.js";
 import { computeRibDetachConversions } from "../../views-editor/src/skeleton-panel-edits.js";
 import {
   applySkeletonRibExecutorResult,

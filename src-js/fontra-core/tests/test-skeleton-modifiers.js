@@ -5,6 +5,7 @@ import {
   equalizeSkeletonHandleFromDelta,
   equalizeSkeletonHandleToPoint,
   getSkeletonData,
+  findGeneratedPathAddress,
   getSkeletonHandleEqualizeInfo,
   makeSkeletonContour,
   makeSkeletonPoint,
@@ -22,7 +23,6 @@ import {
 } from "../../views-editor/src/skeleton-editing.js";
 import {
   createEditableGeneratedHandleTargetEntries,
-  findGeneratedPathAddress,
 } from "../../views-editor/src/skeleton-generated.js";
 
 before(() => {

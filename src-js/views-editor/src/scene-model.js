@@ -24,6 +24,7 @@ import { difference, isEqualSet, union, updateSet } from "@fontra/core/set-ops.j
 import { MAX_UNICODE } from "@fontra/core/shaper.js";
 import {
   getGeneratedPathContourIndices,
+  findGeneratedPathAddress,
   getSkeletonData,
   getSkeletonPointHalfWidth,
   getSkeletonPointWidth,
@@ -51,7 +52,6 @@ import {
   parseSkeletonPointKey,
 } from "./skeleton-editing.js";
 import {
-  findGeneratedPathAddress,
   parseEditableGeneratedHandleKey,
   parseEditableGeneratedPointKey,
   resolveEditableGeneratedTarget,

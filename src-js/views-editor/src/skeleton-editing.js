@@ -13,6 +13,7 @@ import {
   getSkeletonHandleEqualizeInfo,
   getSkeletonPointAddress,
   getSkeletonRibPosition,
+  findGeneratedPathAddress,
   isSkeletonSideLocked,
   makeEmptySkeletonData,
   normalizeSkeletonData,
@@ -22,9 +23,6 @@ import {
 import { isObjectEmpty, parseSelection, range } from "@fontra/core/utils.ts";
 import { VarPackedPath } from "@fontra/core/var-path.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
-// Runtime-only circular import (skeleton-generated.js also imports from this
-// module); all uses are inside functions, never at module evaluation time.
-import { findGeneratedPathAddress } from "./skeleton-generated.js";
 import {
   applySkeletonRibExecutorResult,
   createSkeletonRibExecutor,

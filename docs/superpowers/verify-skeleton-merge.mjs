@@ -37,14 +37,10 @@ import { pathToFileURL } from "node:url";
 
 const MODULES = [
   "src-js/fontra-core/src/skeleton-model.js",
-  "src-js/fontra-core/src/skeleton-modifiers.js",
-  "src-js/fontra-core/src/skeleton-source-defaults.js",
-  "src-js/fontra-core/src/skeleton-tunni.js",
   "src-js/fontra-core/src/skeleton-generator.js",
   "src-js/views-editor/src/skeleton-editing.js",
   "src-js/views-editor/src/skeleton-ribs.js",
   "src-js/views-editor/src/skeleton-generated.js",
-  "src-js/views-editor/src/skeleton-modifiers.js",
 ];
 
 // ---------------------------------------------------------------- fixtures

@@ -8,6 +8,7 @@ import { ChangeCollector } from "@fontra/core/changes.js";
 import { generateFromSkeleton } from "@fontra/core/skeleton-generator.js";
 import {
   getSkeletonData,
+  findGeneratedPathAddress,
   getSkeletonHandleOffset,
   getSkeletonHandleOffsetKey,
   isSkeletonSideLocked,
@@ -31,7 +32,6 @@ import {
   editSkeleton,
   resolveSkeletonAddressAcrossLayers,
 } from "./skeleton-editing.js";
-import { findGeneratedPathAddress } from "./skeleton-generated.js";
 import { skeletonContourEndpointIndices } from "./skeleton-panel-model.js";
 
 // Sender identity for every edit made through this module. The skeleton

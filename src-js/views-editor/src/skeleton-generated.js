@@ -1,5 +1,6 @@
 import {
   equalizeEditableGeneratedHandleOffsets,
+  findGeneratedPathAddress,
   getSkeletonData,
   getSkeletonHandleOffset,
   isSkeletonSideLocked,
@@ -150,43 +151,6 @@ export function resolveEditableGeneratedTarget(skeletonData, path, pathPointInde
     kind,
     selectionKey,
   };
-}
-
-export function findGeneratedPathAddress(skeletonData, contourId, pointId, side, role) {
-  assertGeneratedSide(side);
-  if (!VALID_GENERATED_ROLES.has(role)) {
-    throw new Error(`invalid editable generated role: ${role}`);
-  }
-  const numericContourId = asStrictInteger(contourId);
-  const numericPointId = asStrictInteger(pointId);
-  if (numericContourId === null || numericPointId === null) {
-    return null;
-  }
-  for (const generatedEntry of skeletonData?.generated || []) {
-    if (generatedEntry?.skeletonContourId !== numericContourId) {
-      continue;
-    }
-    const pointMap = generatedEntry.pointMap || [];
-    for (
-      let contourPointIndex = 0;
-      contourPointIndex < pointMap.length;
-      contourPointIndex++
-    ) {
-      const provenance = pointMap[contourPointIndex];
-      if (
-        provenance?.skeletonPointId === numericPointId &&
-        provenance.side === side &&
-        provenance.role === role
-      ) {
-        return {
-          pathContourIndex: generatedEntry.pathContourIndex,
-          contourPointIndex,
-          pathPointIndex: contourPointIndex,
-        };
-      }
-    }
-  }
-  return null;
 }
 
 export function createEditableGeneratedPointTargetEntries(

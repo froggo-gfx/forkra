@@ -1811,6 +1811,55 @@ export function getSkeletonRibPosition(contour, point, side) {
   return projectSkeletonRibPoint(point, normal, halfWidth, side, nudge);
 }
 
+const VALID_GENERATED_ROLES = new Set(["onCurve", "in", "out"]);
+
+export function findGeneratedPathAddress(
+  skeletonData,
+  contourId,
+  pointId,
+  side,
+  role
+) {
+  if (side !== "left" && side !== "right") {
+    throw new Error(`invalid editable generated side: ${side}`);
+  }
+  if (!VALID_GENERATED_ROLES.has(role)) {
+    throw new Error(`invalid editable generated role: ${role}`);
+  }
+  const numericContourId = asStrictSkeletonInteger(contourId);
+  const numericPointId = asStrictSkeletonInteger(pointId);
+  if (numericContourId === null || numericPointId === null) {
+    return null;
+  }
+  for (const generatedEntry of skeletonData?.generated || []) {
+    if (generatedEntry?.skeletonContourId !== numericContourId) continue;
+    const pointMap = generatedEntry.pointMap || [];
+    for (let contourPointIndex = 0; contourPointIndex < pointMap.length; contourPointIndex++) {
+      const provenance = pointMap[contourPointIndex];
+      if (
+        provenance?.skeletonPointId === numericPointId &&
+        provenance.side === side &&
+        provenance.role === role
+      ) {
+        return {
+          pathContourIndex: generatedEntry.pathContourIndex,
+          contourPointIndex,
+          pathPointIndex: contourPointIndex,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function asStrictSkeletonInteger(value) {
+  if (Number.isInteger(value)) return value;
+  if (typeof value === "string" && /^(0|[1-9]\d*)$/.test(value)) {
+    return Number(value);
+  }
+  return null;
+}
+
 export function buildSegmentsFromSkeletonPoints(points, closed) {
   const segments = [];
   const onCurveIndices = [];
