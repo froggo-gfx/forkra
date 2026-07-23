@@ -12,6 +12,7 @@ import { VarPackedPath } from "@fontra/core/var-path.js";
 import * as vector from "@fontra/core/vector.js";
 import { constrainHorVerDiag } from "./edit-behavior.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
+import { recordSkeletonContourIndexShift } from "./skeleton-editing.js";
 
 export class PenTool {
   identifier = "pen-tool";
@@ -98,7 +99,12 @@ export class PenToolCubic extends BaseTool {
       // artifact caused by bezier-js: Bezier.project() returns t values
       // with a max precision of 0.001.
       const size = Math.max(1, this.sceneController.mouseClickMargin);
-      const hit = this.sceneModel.pathHitAtPoint(point, size);
+      let hit = this.sceneModel.pathHitAtPoint(point, size);
+      if (this.sceneModel.isGeneratedPathContour(hit.contourIndex)) {
+        // Skeleton-generated contours are derived geometry: the pen must not
+        // insert points or handles into them. Treat the hover as empty canvas.
+        hit = {};
+      }
       if (event.altKey && hit.segment?.points?.length === 2) {
         return this.getInsertHandlesFromPathHit(hit);
       } else {
@@ -194,7 +200,9 @@ export class PenToolCubic extends BaseTool {
           path,
           segmentPointIndices.map((i) => path.getPoint(i)),
           segmentPointIndices[1],
-          this.curveType
+          //// quad handles
+          this.curveType,
+          this.sceneModel.pathInsertHandles.shiftKey
         );
       }
       delete this.sceneModel.pathInsertHandles;
@@ -229,6 +237,10 @@ export class PenToolCubic extends BaseTool {
 
       const initialChanges = recordLayerChanges(layerInfo, (behavior, layerGlyph) => {
         behavior.initialChanges(layerGlyph.path, initialEvent);
+        if (behavior.context.generatedIndexShift) {
+          const { startIndex, delta } = behavior.context.generatedIndexShift;
+          recordSkeletonContourIndexShift(layerGlyph, startIndex, delta);
+        }
       });
       this.sceneController.selection = primaryBehavior.selection;
       await sendIncrementalChange(initialChanges.change);
@@ -271,6 +283,104 @@ export class PenToolQuad extends PenToolCubic {
 
   get curveType() {
     return "quad";
+  }
+
+  ////quad handles
+  _getPathConnectTargetPoint(event) {
+    // Requirements:
+    // - we must have an edited glyph at an editable location
+    // - we must be in append/prepend mode for an existing contour
+    // - the hovered point must be eligible to connect to:
+    //   - must be a start or end point of an open contour
+    //   - must not be the currently selected point
+
+    const hoveredPointIndex = getHoveredPointIndex(this.sceneController, event);
+
+    const glyphController = this.sceneModel.getSelectedPositionedGlyph().glyph;
+    if (!glyphController.canEdit) {
+      return {};
+    }
+    const path = glyphController.instance.path;
+
+    const appendInfo = getAppendInfo(path, this.sceneController.selection);
+    if (hoveredPointIndex === undefined && appendInfo.createContour) {
+      const point = this.sceneController.localPoint(event);
+      // The following max() call makes sure that the margin is never
+      // less than half a font unit. This works around a visualization
+      // artifact caused by bezier-js: Bezier.project() returns t values
+      // with a max precision of 0.001.
+      const size = Math.max(1, this.sceneController.mouseClickMargin);
+      let hit = this.sceneModel.pathHitAtPoint(point, size);
+      if (this.sceneModel.isGeneratedPathContour(hit.contourIndex)) {
+        // Skeleton-generated contours are derived geometry: the pen must not
+        // insert points or handles into them. Treat the hover as empty canvas.
+        hit = {};
+      }
+      if (event.altKey && hit.segment?.points?.length === 2) {
+        const pt1 = hit.segment.points[0];
+        const pt2 = hit.segment.points[1];
+        if (event.altKey && event.shiftKey) {
+          // For quadratic curves with alt+shift, create two handles like cubic
+          const handle1 = vector.roundVector(
+            vector.interpolateVectors(pt1, pt2, 1 / 3)
+          );
+          const handle2 = vector.roundVector(
+            vector.interpolateVectors(pt1, pt2, 2 / 3)
+          );
+          return {
+            insertHandles: {
+              points: [handle1, handle2],
+              hit: hit,
+              shiftKey: event.shiftKey,
+            },
+          };
+        } else {
+          // For quadratic curves with alt, create one handle at the midpoint
+          const handle = vector.roundVector(vector.interpolateVectors(pt1, pt2, 0.5));
+          return {
+            insertHandles: { points: [handle], hit: hit, shiftKey: event.shiftKey },
+          };
+        }
+      } else {
+        const targetPoint = { ...hit };
+        if ("x" in targetPoint) {
+          // Don't use vector.roundVector, as there are more properties besides
+          // x and y, and we want to preserve them
+          targetPoint.x = Math.round(targetPoint.x);
+          targetPoint.y = Math.round(targetPoint.y);
+        }
+        return { targetPoint: targetPoint };
+      }
+    }
+
+    if (hoveredPointIndex === undefined || appendInfo.createContour) {
+      return {};
+    }
+
+    const [contourIndex, contourPointIndex] =
+      path.getContourAndPointIndex(hoveredPointIndex);
+    const contourInfo = path.contourInfo[contourIndex];
+
+    if (
+      appendInfo.contourIndex == contourIndex &&
+      appendInfo.contourPointIndex == contourPointIndex
+    ) {
+      // We're hovering over the source point
+      const point = path.getPoint(hoveredPointIndex);
+      if (!appendInfo.isOnCurve) {
+        return { danglingOffCurve: point };
+      } else {
+        return { canDragOffCurve: point };
+      }
+    }
+
+    if (
+      contourInfo.isClosed ||
+      (contourPointIndex != 0 && hoveredPointIndex != contourInfo.endPoint)
+    ) {
+      return {};
+    }
+    return { targetPoint: path.getPoint(hoveredPointIndex) };
   }
 }
 
@@ -404,6 +514,10 @@ class PenToolBehavior {
 }
 
 function insertContourAndSetupAnchorPoint(context, path, point, shiftKey) {
+  // A brand-new pen contour is inserted at context.contourIndex (= path end),
+  // i.e. after any skeleton-generated block; existing generated indices are
+  // unaffected. Pen contour merges (connectToContour, below) do change the
+  // contour count and record a generated-index shift via context.
   path.insertContour(context.contourIndex, emptyContour());
   context.anchorIndex = context.contourPointIndex;
 }
@@ -558,6 +672,15 @@ function connectToContour(context, path, point, shiftKey) {
   if (targetContourBefore) {
     deleteIndices.reverse();
   }
+  // Merging two pen contours nets one contour fewer. Generated contours above
+  // targetContourIndex shift by -1 in both merge directions (target-before:
+  // everything above the removed target slot; target-after: everything above
+  // the removed target). The bare path has no skeleton data in scope, so the
+  // caller (_handleAddPoints) records the shift on the layer glyph.
+  context.generatedIndexShift = {
+    startIndex: context.targetContourIndex,
+    delta: -1,
+  };
   for (const index of deleteIndices) {
     path.deleteContour(index);
   }

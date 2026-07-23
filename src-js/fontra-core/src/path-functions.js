@@ -1,4 +1,5 @@
 import { Bezier } from "bezier-js";
+import { addOverlap } from "./corner-overlap.js";
 import { fitCubic } from "./fit-cubic.js";
 import {
   arrayExtend,
@@ -174,21 +175,45 @@ function bezierSplitMultiple(bezier, ts) {
   return splitBeziers;
 }
 
-export function insertHandles(path, segmentPoints, insertIndex, type = "cubic") {
+//// quad handles
+export function insertHandles(
+  path,
+  segmentPoints,
+  insertIndex,
+  type = "cubic",
+  shiftKey = false
+) {
   let [contourIndex, contourPointIndex] = path.getContourAndPointIndex(insertIndex);
   if (!contourPointIndex) {
     contourPointIndex = path.getNumPointsOfContour(contourIndex);
   }
   insertIndex = path.getAbsolutePointIndex(contourIndex, contourPointIndex, true);
-  const handlePoints = [
-    vector.interpolateVectors(...segmentPoints, 1 / 3),
-    vector.interpolateVectors(...segmentPoints, 2 / 3),
-  ].map((pt) => {
-    return { ...vector.roundVector(pt), type: type };
-  });
-  path.insertPoint(contourIndex, contourPointIndex, handlePoints[1]);
-  path.insertPoint(contourIndex, contourPointIndex, handlePoints[0]);
-  return new Set([`point/${insertIndex}`, `point/${insertIndex + 1}`]);
+
+  //// quad handles
+  let handlePoints;
+  let pointIndices;
+
+  if (type === "quad" && !shiftKey) {
+    // For quadratic curves without shift key, create only one handle at the midpoint
+    handlePoints = [vector.interpolateVectors(...segmentPoints, 0.5)].map((pt) => {
+      return { ...vector.roundVector(pt), type: type };
+    });
+    path.insertPoint(contourIndex, contourPointIndex, handlePoints[0]);
+    pointIndices = new Set([`point/${insertIndex}`]);
+  } else {
+    // For cubic curves or quadratic curves with shift key, create two handles at 1/3 and 2/3
+    handlePoints = [
+      vector.interpolateVectors(...segmentPoints, 1 / 3),
+      vector.interpolateVectors(...segmentPoints, 2 / 3),
+    ].map((pt) => {
+      return { ...vector.roundVector(pt), type: type };
+    });
+    path.insertPoint(contourIndex, contourPointIndex, handlePoints[1]);
+    path.insertPoint(contourIndex, contourPointIndex, handlePoints[0]);
+    pointIndices = new Set([`point/${insertIndex}`, `point/${insertIndex + 1}`]);
+  }
+
+  return pointIndices;
 }
 
 export function filterPathByPointIndices(path, pointIndices, doCut = false) {
@@ -884,12 +909,12 @@ function neighborPoints(path, pointIndex) {
   return [prevIndex, prevPoint, nextIndex, nextPoint];
 }
 
-function alignHandle(refPoint1, anchorPoint, handlePoint) {
+export function alignHandle(refPoint1, anchorPoint, handlePoint) {
   const direction = vector.subVectors(anchorPoint, refPoint1);
   return alignHandleAlongDirection(direction, anchorPoint, handlePoint);
 }
 
-function alignHandles(handleIn, anchorPoint, handleOut) {
+export function alignHandles(handleIn, anchorPoint, handleOut) {
   const handleVectorIn = vector.subVectors(anchorPoint, handleIn);
   const handleVectorOut = vector.subVectors(anchorPoint, handleOut);
   const directionIn = vector.subVectors(handleVectorOut, handleVectorIn);
@@ -1193,6 +1218,11 @@ function cleanupPointAttributes(path) {
   ) {
     path.pointAttributes = null;
   }
+}
+
+export function addOverlapToPath(path, selectedPointIndices) {
+  // Use the addOverlap function from corner-overlap.js to implement overlap functionality
+  return addOverlap(path, selectedPointIndices);
 }
 
 export function convertCurveType(

@@ -63,6 +63,9 @@ export class StaticGlyph {
       ? obj.guidelines || []
       : normalizeGuidelines(obj.guidelines || []);
     glyph.backgroundImage = copyBackgroundImage(obj.backgroundImage);
+    glyph.customData = noCopy
+      ? obj.customData || {}
+      : deepCopyObject(obj.customData || {});
     return glyph;
   }
 

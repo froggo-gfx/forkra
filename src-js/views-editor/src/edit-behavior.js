@@ -26,8 +26,20 @@ import {
   findPointMatch,
 } from "./edit-behavior-support.js";
 
+//// grid
+let magneticSnapEnabled = false;
+export function toggleMagneticSnap() {
+  magneticSnapEnabled = !magneticSnapEnabled;
+  console.log("Magnetic snap", magneticSnapEnabled ? "ON" : "OFF");
+}
+
 export class EditBehaviorFactory {
-  constructor(instance, selection, enableScalingEdit = false) {
+  constructor(
+    instance,
+    selection,
+    enableScalingEdit = false,
+    { targetEntries = [] } = {}
+  ) {
     const {
       point: pointSelection,
       component: componentSelection,
@@ -57,6 +69,7 @@ export class EditBehaviorFactory {
     this.componentTCenterIndices = componentTCenterSelection || [];
     this.behaviors = {};
     this.enableScalingEdit = enableScalingEdit;
+    this.targetEntries = targetEntries;
   }
 
   getBehavior(behaviorName) {
@@ -87,7 +100,8 @@ export class EditBehaviorFactory {
         this.componentOriginIndices,
         this.componentTCenterIndices,
         behaviorType,
-        doFullTransform
+        doFullTransform,
+        this.targetEntries
       );
       this.behaviors[behaviorName] = behavior;
     }
@@ -105,10 +119,33 @@ class EditBehavior {
     componentOriginIndices,
     componentTCenterIndices,
     behavior,
-    doFullTransform
+    doFullTransform,
+    targetEntries = []
   ) {
     this.doFullTransform = doFullTransform;
-    this.roundFunc = Math.round;
+    this.targetEntries = targetEntries;
+    //// grid
+    this.roundFunc = (value, isArrowKey = false) => {
+      const coarseUnit = window.coarseGridSpacing || 1;
+
+      // 1.  Ctrl / Cmd  ⇒ always coarse grid
+      if (window.event?.ctrlKey || window.event?.metaKey) {
+        return Math.round(value / coarseUnit) * coarseUnit;
+      }
+
+      // 2.  Arrow keys  ⇒ ignore magnetic & coarse, use 1-unit steps
+      if (isArrowKey) {
+        return Math.round(value);
+      }
+
+      // 3.  Magnetic snap only when explicitly enabled
+      if (!magneticSnapEnabled || coarseUnit <= 1) {
+        return Math.round(value);
+      }
+
+      const coarse = Math.round(value / coarseUnit) * coarseUnit;
+      return Math.abs(value - coarse) <= coarseUnit * 0.35 ? coarse : Math.round(value);
+    };
     this.constrainDelta = behavior.constrainDelta || ((v) => v);
     const [pointEditFuncs, participatingPointIndices] = makePointEditFuncs(
       contours,
@@ -191,7 +228,7 @@ class EditBehavior {
       backgroundImageRollbackChanges.push(backgroundImageRollback);
     }
 
-    this.rollbackChange = makeRollbackChange(
+    this.baseRollbackChange = makeRollbackChange(
       contours,
       participatingPointIndices,
       componentRollbackChanges,
@@ -199,6 +236,16 @@ class EditBehavior {
       guidelineRollbackChanges,
       backgroundImageRollbackChanges
     );
+  }
+
+  get rollbackChange() {
+    const targetRollbackChanges = this.targetEntries
+      ?.map((entry) => entry.rollbackChange)
+      .filter((change) => change);
+    return consolidateChanges([
+      this.baseRollbackChange,
+      ...(targetRollbackChanges || []),
+    ]);
   }
 
   makeChangeForDelta(delta) {
@@ -215,10 +262,16 @@ class EditBehavior {
     // For the latter, we don't want the initial change (before the constraint)
     // to be constrained, but pin the handle angle based on the freely transformed
     // off-curve point.
-    return this._makeChangeForTransformFunc(
+    const pathChange = this._makeChangeForTransformFunc(
       makePointTranslateFunction(this.constrainDelta(delta)),
       makePointTranslateFunction(delta)
     );
+    const entryChanges = (this.targetEntries || [])
+      .map((entry) => entry.makeChangeForDelta(delta))
+      .filter((change) => change);
+    return entryChanges.length
+      ? consolidateChanges([pathChange, ...entryChanges])
+      : pathChange;
   }
 
   makeChangeForTransformation(transformation) {
@@ -248,12 +301,18 @@ class EditBehavior {
       return backgroundImage;
     };
 
-    return this._makeChangeForTransformFunc(
+    const pathChange = this._makeChangeForTransformFunc(
       pointTransformFunction,
       null,
       componentTransformFunction,
       backgroundImageTransformFunction
     );
+    const entryChanges = (this.targetEntries || [])
+      .map((entry) => entry.makeChangeForTransformation(transformation))
+      .filter((change) => change);
+    return entryChanges.length
+      ? consolidateChanges([pathChange, ...entryChanges])
+      : pathChange;
   }
 
   _makeChangeForTransformFunc(
@@ -1105,13 +1164,56 @@ const actionFactories = {
     };
   },
 
-  Interpolate: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
-    const lenPrevNext = vector.distance(next, prev);
-    const lenPrev = vector.distance(thePoint, prev);
-    let t = lenPrevNext > 0.0001 ? lenPrev / lenPrevNext : 0;
+  //// equalize
+  Equalize: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    const handle = vector.subVectors(thePoint, prev);
+    const handleLength = Math.hypot(handle.x, handle.y);
     return (transform, prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
-      const prevNext = vector.subVectors(next, prev);
-      return vector.addVectors(prev, vector.mulVectorScalar(prevNext, t));
+      const delta = vector.subVectors(prev, prevPrev);
+      if (!delta.x && !delta.y) {
+        // The angle is undefined, atan2 will return 0, let's just not touch the point
+        return thePoint;
+      }
+      const angle = Math.atan2(delta.y, delta.x);
+      const handlePoint = {
+        x: prev.x + handleLength * Math.cos(angle),
+        y: prev.y + handleLength * Math.sin(angle),
+      };
+      return handlePoint;
+    };
+  },
+
+  //// equalize
+  RotateNextEqualLength: (prevPrevPrev, prevPrev, prev, thePoint, next, nextNext) => {
+    // original positions
+    const originDragged = prevPrev; // the off-curve point that is being moved
+    const originOpposite = thePoint; // the opposite off-curve point
+    const anchor = prev; // the on-curve (smooth) point between them
+
+    return (
+      transform,
+      /* unused */ prevPrevPrev,
+      newDragged,
+      /* unused */ newPrev,
+      /* unused */ newOpposite,
+      /* unused */ next,
+      /* unused */ nextNext
+    ) => {
+      // vector from anchor to the NEW dragged handle
+      const vec = { x: newDragged.x - anchor.x, y: newDragged.y - anchor.y };
+
+      if (vec.x === 0 && vec.y === 0) {
+        return originOpposite; // avoid division by zero
+      }
+
+      // same distance, opposite direction
+      const len = Math.hypot(vec.x, vec.y);
+      const angle = Math.atan2(vec.y, vec.x);
+
+      return {
+        x: anchor.x - len * Math.cos(angle),
+        y: anchor.y - len * Math.sin(angle),
+      };
     };
   },
 
@@ -1237,12 +1339,18 @@ const alternateRules = [
   [    ANY|NIL,    ANY|NIL,    ANY|SEL,    SMO|SEL,    OFF|SEL,    ANY|NIL,    false,      "ConstrainMiddle"],
 
   // Unselected smooth between sharp and off-curve, one of them selected
-  [    ANY|NIL,    ANY|NIL,    SHA|OFF|UNS,SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "Interpolate"],
-  [    ANY|NIL,    ANY|NIL,    SHA|OFF|SEL,SMO|UNS,    OFF|UNS,    ANY|NIL,    true,       "Interpolate"],
+  [    ANY|NIL,    ANY|SEL,    SMO|UNS,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    true,       "Equalize"],
+  
+  // Selected tangent point: its neighboring off-curve point should move
+  [    ANY|NIL,    OFF|SEL,    SMO|UNS,    OFF|UNS,    OFF|SHA|NIL,ANY|NIL,    true,       "RotateNextEqualLength"],
 
   // Two unselected smooth points between two off-curves, one of them selected
   [    ANY|NIL,    OFF|UNS,    SMO|UNS,    SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "InterpolatePrevPrevNext"],
   [    ANY|NIL,    OFF|SEL,    SMO|UNS,    SMO|UNS,    OFF|UNS,    ANY|NIL,    true,       "InterpolatePrevPrevNext"],
+
+  // Smooth on-curve with single off-curve (for on-curve interpolation)
+  [    ANY|NIL,    ANY|NIL,    SHA|OFF|UNS,SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "Interpolate"],
+  [    ANY|NIL,    ANY|NIL,    SHA|OFF|SEL,SMO|UNS,    OFF|UNS,    ANY|NIL,    true,       "Interpolate"],
 
   // An unselected smooth point between two selected off-curves
   [    ANY|NIL,    ANY|NIL,    OFF|SEL,    SMO|UNS,    OFF|SEL,    ANY|NIL,    true,       "Move"],
@@ -1293,5 +1401,63 @@ const behaviorTypes = {
     matchTree: buildPointMatchTree(alternateConstrainRules),
     actions: actionFactories,
     constrainDelta: constrainHorVerDiag,
+  },
+
+  "fixed-rib": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
+
+  "fixed-rib-compress": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
+
+  "equalize": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
+
+  "equalize-constrain": {
+    matchTree: buildPointMatchTree(constrainRules),
+    actions: actionFactories,
+    constrainDelta: constrainHorVerDiag,
+  },
+
+  // Rib drags: the rib semantics live in the skeleton rib executors (target
+  // entries); the base point behavior for any co-selected path points is the
+  // default one.
+  "rib-default": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
+
+  "rib-interpolate": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
+
+  "rib-tangent": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
+
+  "rib-tangent-interpolate": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
+
+  // Generated-handle drags. Adjustment is modifier-gated: "generated-handle-move"
+  // is the Z variant that actually moves the handle; the unmodified name exists
+  // so a plain drag still carries co-selected path points while leaving derived
+  // geometry alone. Both use the default base point behavior.
+  "generated-handle-default": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
+  },
+
+  "generated-handle-move": {
+    matchTree: buildPointMatchTree(defaultRules),
+    actions: actionFactories,
   },
 };

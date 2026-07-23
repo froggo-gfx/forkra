@@ -1,3 +1,4 @@
+import { getBaseKeyFromKeyEvent, getShortCuts } from "@fontra/core/actions.js";
 import { recordChanges } from "@fontra/core/change-recorder.js";
 import {
   ChangeCollector,
@@ -19,6 +20,7 @@ import {
   symmetricDifference,
   union,
 } from "@fontra/core/set-ops.js";
+import { getSkeletonData } from "@fontra/core/skeleton-model.js";
 import { Transform } from "@fontra/core/transform.js";
 import {
   assert,
@@ -35,18 +37,93 @@ import * as vector from "@fontra/core/vector.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
 import { handlesEqual } from "./edit-tools-pen.js";
+import { MeasureInteraction } from "./measure-interactions.js";
 import { getPinPoint } from "./panel-transformation.js";
 import { equalGlyphSelection } from "./scene-controller.js";
+import {
+  createSkeletonRibTargetEntries,
+  getSelectionTargetKinds,
+  getSkeletonModifierBehaviorName,
+  hasSkeletonPointSelection,
+  makeSkeletonModifierOptions,
+  makeSkeletonPointKey,
+  makeSkeletonPointTargetEntry,
+  parseSkeletonPointKey,
+  toggleSkeletonSmooth,
+} from "./skeleton-editing.js";
+import {
+  createEditableGeneratedHandleTargetEntries,
+  createEditableGeneratedPointTargetEntries,
+  toggleEditableGeneratedHandleDetached,
+} from "./skeleton-editing.js";
+import { getSkeletonRibBehaviorName } from "./skeleton-editing.js";
 import {
   glyphSelector,
   registerVisualizationLayerDefinition,
   strokeRoundNode,
   strokeSquareNode,
 } from "./visualization-layer-definitions.js";
+// Import Tunni functions for integration with pointer tool
+import {
+  equalizeSkeletonTunniTensions,
+  handleSkeletonTunniDrag,
+  handleTrueTunniPointMouseDown,
+  handleTunniDrag,
+  handleTunniPointMouseDown,
+  tunniHoverResult,
+} from "./tunni-interactions.js";
 
 const transformHandleMargin = 6;
 const transformHandleSize = 8;
 const rotationHandleSizeFactor = 1.2;
+const REALTIME_RIB_TANGENT_ACTION = "action.realtime.rib-tangent";
+const REALTIME_FIXED_RIB_ACTION = "action.realtime.fixed-rib";
+const REALTIME_FIXED_RIB_COMPRESS_ACTION = "action.realtime.fixed-rib-compress";
+
+const REALTIME_MODIFIER_ACTIONS = [
+  {
+    action: REALTIME_RIB_TANGENT_ACTION,
+    modeProperty: "tangentRibMode",
+  },
+  {
+    action: REALTIME_FIXED_RIB_ACTION,
+    modeProperty: "fixedRibMode",
+  },
+  {
+    action: REALTIME_FIXED_RIB_COMPRESS_ACTION,
+    modeProperty: "fixedRibCompressMode",
+  },
+];
+
+function matchEventModifiers(shortCut, event) {
+  const expectedModifiers = { ...shortCut };
+  if (shortCut.commandKey) {
+    expectedModifiers[commandKeyProperty] = true;
+  }
+  return ["metaKey", "ctrlKey", "shiftKey", "altKey"].every(
+    (modifierProp) => !!expectedModifiers[modifierProp] === !!event[modifierProp]
+  );
+}
+
+function eventMatchesActionShortCut(actionIdentifier, event) {
+  const shortCuts = getShortCuts(actionIdentifier);
+  if (!shortCuts?.length) return false;
+  const baseKey = getBaseKeyFromKeyEvent(event);
+  for (const shortCut of shortCuts) {
+    if (!shortCut?.baseKey) continue;
+    if (shortCut.baseKey !== baseKey) continue;
+    if (!matchEventModifiers(shortCut, event)) continue;
+    return true;
+  }
+  return false;
+}
+
+function eventMatchesActionBaseKey(actionIdentifier, event) {
+  const shortCuts = getShortCuts(actionIdentifier);
+  if (!shortCuts?.length) return false;
+  const baseKey = getBaseKeyFromKeyEvent(event);
+  return shortCuts.some((shortCut) => shortCut?.baseKey === baseKey);
+}
 
 export class PointerTools {
   identifier = "pointer-tools";
@@ -57,7 +134,20 @@ export class PointerTool extends BaseTool {
   iconPath = "/images/pointer.svg";
   identifier = "pointer-tool";
 
+  constructor(...args) {
+    super(...args);
+    this.measureInteraction = new MeasureInteraction(this);
+    this.tangentRibMode = false;
+    this.fixedRibMode = false;
+    this.fixedRibCompressMode = false;
+    this._realtimeModifierKeyUpHandlers = new Map();
+    this._boundRealtimeModifierWindowBlur = null;
+  }
+
   handleHover(event) {
+    if (this.measureInteraction.handleHover(event)) {
+      return;
+    }
     const sceneController = this.sceneController;
     const point = sceneController.localPoint(event);
     const size = sceneController.mouseClickMargin;
@@ -101,6 +191,27 @@ export class PointerTool extends BaseTool {
       sceneController.hoveredGlyph = undefined;
     }
 
+    this.sceneController.sceneModel.showTransformSelection = true;
+
+    const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+    if (positionedGlyph) {
+      const glyphPoint = {
+        x: point.x - positionedGlyph.x,
+        y: point.y - positionedGlyph.y,
+      };
+      const tunni = tunniHoverResult(
+        glyphPoint,
+        size,
+        positionedGlyph,
+        this.editor.visualizationLayersSettings,
+        this.sceneModel
+      );
+      if (tunni) {
+        this.canvasController.canvas.style.cursor = tunni.cursor;
+        return;
+      }
+    }
+
     const resizeHandle = this.getResizeHandle(event, sceneController.selection);
     const rotationHandle = !resizeHandle
       ? this.getRotationHandle(event, sceneController.selection)
@@ -114,6 +225,8 @@ export class PointerTool extends BaseTool {
     } else if (resizeHandle) {
       this.setCursorForResizeHandle(resizeHandle);
     } else {
+      // Tunni-point hover cursors are handled earlier via tunniHoverResult(),
+      // which sets the cursor and returns before reaching this point.
       this.setCursor();
     }
   }
@@ -139,17 +252,25 @@ export class PointerTool extends BaseTool {
   setCursor(cursor = undefined) {
     if (cursor) {
       this.canvasController.canvas.style.cursor = cursor;
-    } else if (
-      this.sceneController.hoverSelection?.size ||
-      this.sceneController.hoverPathHit
-    ) {
-      this.canvasController.canvas.style.cursor = "pointer";
     } else {
-      this.canvasController.canvas.style.cursor = "default";
+      // Check if Tunni visualization layer is active and if we're hovering over a Tunni point
+      // This check is only relevant when called from hover event, so we don't check it here
+      // since this method is also called from other contexts
+      if (
+        this.sceneController.hoverSelection?.size ||
+        this.sceneController.hoverPathHit
+      ) {
+        this.canvasController.canvas.style.cursor = "pointer";
+      } else {
+        this.canvasController.canvas.style.cursor = "default";
+      }
     }
   }
 
   async handleDrag(eventStream, initialEvent) {
+    if (this.measureInteraction.isActive) {
+      return;
+    }
     if (this.sceneModel.pathInsertHandles) {
       await this.editor.getPenTool().handleInsertHandles();
       return;
@@ -157,6 +278,101 @@ export class PointerTool extends BaseTool {
 
     const sceneController = this.sceneController;
     const initialSelection = sceneController.selection;
+    const point = sceneController.localPoint(initialEvent);
+    const size = sceneController.mouseClickMargin;
+    const positionedGlyph = sceneController.sceneModel.getSelectedPositionedGlyph();
+    const isSkeletonTunniLayerActive =
+      this.editor.visualizationLayersSettings.model["fontra.skeleton.tunni"];
+
+    if (initialEvent.ctrlKey && initialEvent.shiftKey && positionedGlyph) {
+      const tunniHit = this.sceneModel.skeletonTunniAtPoint(
+        point,
+        size * 2,
+        positionedGlyph,
+        { midpointOnly: true }
+      );
+      if (tunniHit) {
+        await equalizeSkeletonTunniTensions({
+          sceneController,
+          tunniHit,
+        });
+        return;
+      }
+    }
+
+    if (isSkeletonTunniLayerActive && positionedGlyph) {
+      const skeletonPointSelection = this.sceneModel.skeletonPointAtPoint(
+        point,
+        size,
+        parseSelection(sceneController.selection)
+      );
+      if (!skeletonPointSelection.size) {
+        const tunniHit = this.sceneModel.skeletonTunniAtPoint(
+          point,
+          size,
+          positionedGlyph
+        );
+        if (tunniHit) {
+          this.sceneModel.tunniDragTarget = makeSkeletonTunniDragTarget(tunniHit);
+          try {
+            await handleSkeletonTunniDrag({
+              sceneController,
+              eventStream,
+              initialEvent,
+              tunniHit,
+            });
+          } finally {
+            this.sceneModel.tunniDragTarget = null;
+          }
+          return;
+        }
+      }
+    }
+
+    const isTunniCombinedLayerActive =
+      this.editor.visualizationLayersSettings.model["fontra.tunni.handle"];
+    const isTunniActualLayerActive =
+      this.editor.visualizationLayersSettings.model["fontra.tunni.point"];
+    let tunniInitialState = null;
+    let isTrueTunniPoint = false;
+
+    if (isTunniCombinedLayerActive || isTunniActualLayerActive) {
+      if (isTunniActualLayerActive) {
+        tunniInitialState = handleTrueTunniPointMouseDown(
+          initialEvent,
+          sceneController,
+          this.editor.visualizationLayersSettings
+        );
+        if (tunniInitialState) {
+          isTrueTunniPoint = true;
+        }
+      }
+
+      if (!tunniInitialState && isTunniCombinedLayerActive) {
+        tunniInitialState = handleTunniPointMouseDown(
+          initialEvent,
+          sceneController,
+          this.editor.visualizationLayersSettings
+        );
+      }
+    }
+
+    if (tunniInitialState) {
+      this.sceneModel.tunniDragTarget = makePathTunniDragTarget(tunniInitialState);
+      try {
+        await handleTunniDrag({
+          sceneController,
+          eventStream,
+          initialEvent,
+          isTrueTunniPoint,
+          tunniInitialState,
+        });
+      } finally {
+        this.sceneModel.tunniDragTarget = null;
+      }
+      return;
+    }
+
     const resizeHandle = this.getResizeHandle(initialEvent, initialSelection);
     const rotationHandle = this.getRotationHandle(initialEvent, initialSelection);
     if (resizeHandle || rotationHandle) {
@@ -173,8 +389,6 @@ export class PointerTool extends BaseTool {
       return;
     }
 
-    const point = sceneController.localPoint(initialEvent);
-    const size = sceneController.mouseClickMargin;
     const { selection, pathHit } = this.sceneModel.selectionAtPoint(
       point,
       size,
@@ -183,10 +397,31 @@ export class PointerTool extends BaseTool {
       initialEvent.altKey
     );
     let initialClickedPointIndex;
+    let initialClickedSkeletonPointKey;
+    let initialClickedSkeletonRibKey;
+    let initialClickedGeneratedKey;
     if (!pathHit) {
-      const { point: pointIndices } = parseSelection(selection);
+      const {
+        point: pointIndices,
+        skeletonPoint,
+        skeletonRib,
+        editableGeneratedPoint,
+        editableGeneratedHandle,
+      } = parseSelection(selection);
       if (pointIndices?.length) {
         initialClickedPointIndex = pointIndices[0];
+      }
+      if (skeletonPoint?.length) {
+        const [contourId, pointId] = skeletonPoint[0].split("/").map(Number);
+        initialClickedSkeletonPointKey = makeSkeletonPointKey(contourId, pointId);
+      }
+      if (skeletonRib?.length) {
+        initialClickedSkeletonRibKey = `skeletonRib/${skeletonRib[0]}`;
+      }
+      if (editableGeneratedPoint?.length) {
+        initialClickedGeneratedKey = `editableGeneratedPoint/${editableGeneratedPoint[0]}`;
+      } else if (editableGeneratedHandle?.length) {
+        initialClickedGeneratedKey = `editableGeneratedHandle/${editableGeneratedHandle[0]}`;
       }
     }
     if (initialEvent.detail == 2 || initialEvent.myTapCount == 2) {
@@ -249,8 +484,17 @@ export class PointerTool extends BaseTool {
     } else if (initiateDrag) {
       this.sceneController.sceneModel.initialClickedPointIndex =
         initialClickedPointIndex;
+      this.sceneController.sceneModel.initialClickedSkeletonPointKey =
+        initialClickedSkeletonPointKey;
+      this.sceneController.sceneModel.initialClickedSkeletonRibKey =
+        initialClickedSkeletonRibKey;
+      this.sceneController.sceneModel.initialClickedGeneratedKey =
+        initialClickedGeneratedKey;
       const result = await this.handleDragSelection(eventStream, initialEvent);
       delete this.sceneController.sceneModel.initialClickedPointIndex;
+      delete this.sceneController.sceneModel.initialClickedSkeletonPointKey;
+      delete this.sceneController.sceneModel.initialClickedSkeletonRibKey;
+      delete this.sceneController.sceneModel.initialClickedGeneratedKey;
       return result;
     }
   }
@@ -269,6 +513,46 @@ export class PointerTool extends BaseTool {
       }
     } else {
       const instance = this.sceneModel.getSelectedPositionedGlyph().glyph.instance;
+      const clickedSelection = parseSelection(selection || []);
+      if (clickedSelection.editableGeneratedHandle?.length) {
+        await this.handleEditableGeneratedHandlesDoubleClick(selection);
+        return;
+      }
+      if (hasSkeletonPointSelection(sceneController.selection)) {
+        // Double-click on the centerline itself (no point under the cursor)
+        // selects the whole skeleton contour; on a point it toggles smooth.
+        const size = sceneController.mouseClickMargin;
+        const directPointHit = this.sceneModel.skeletonPointAtPoint(point, size);
+        if (!directPointHit.size) {
+          const segmentHit = this.sceneModel.skeletonSegmentSelectionAtPoint(
+            point,
+            size
+          );
+          if (segmentHit.size) {
+            const skeletonData = this.sceneModel._getEditLayerSkeletonData(
+              this.sceneModel.getSelectedPositionedGlyph()
+            );
+            const newSelection = new Set();
+            for (const key of segmentHit) {
+              const { contourId } = parseSkeletonPointKey(key);
+              const contour = skeletonData?.contours?.find(
+                (candidate) => candidate.id === contourId
+              );
+              for (const contourPoint of contour?.points || []) {
+                if (!contourPoint.type) {
+                  newSelection.add(makeSkeletonPointKey(contourId, contourPoint.id));
+                }
+              }
+            }
+            if (newSelection.size) {
+              this._selectionBeforeSingleClick = undefined;
+              sceneController.selection = newSelection;
+              return;
+            }
+          }
+        }
+        await this.handleSkeletonPointsDoubleClick();
+      }
       const {
         point: pointIndices,
         component: componentIndices,
@@ -316,6 +600,26 @@ export class PointerTool extends BaseTool {
         sceneController.selection = modeFunc(selection, newSelection);
       }
     }
+  }
+
+  async handleSkeletonPointsDoubleClick() {
+    const selection = this.sceneController.selection;
+    await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        toggleSkeletonSmooth(layerGlyph, selection);
+      }
+      return translate("edit-tools-pointer.undo.toggle-smooth");
+    });
+  }
+
+  async handleEditableGeneratedHandlesDoubleClick(selection) {
+    await this.sceneController.editLayersAndRecordChanges((layerGlyphs) => {
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        toggleEditableGeneratedHandleDetached(layerGlyph, selection);
+      }
+      return translate("edit-tools-pointer.undo.toggle-smooth");
+    });
+    this.sceneController.selection = new Set(selection);
   }
 
   async handlePointsDoubleClick(pointIndices) {
@@ -367,15 +671,94 @@ export class PointerTool extends BaseTool {
     const sceneController = this.sceneController;
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const initialPoint = sceneController.selectedGlyphPoint(initialEvent);
-      let behaviorName = getBehaviorName(initialEvent);
+      const targetKinds = getSelectionTargetKinds(sceneController.selection);
+      const getRealtimeModifiers = () => ({
+        fixedRibMode: this.fixedRibMode,
+        fixedRibCompressMode: this.fixedRibCompressMode,
+        tangentRibMode: this.tangentRibMode,
+      });
+      const getSelectionBehaviorName = (event) =>
+        getSkeletonModifierBehaviorName(event, getRealtimeModifiers(), targetKinds) ||
+        (hasRibLikeSelection(sceneController.selection)
+          ? getSkeletonRibBehaviorName(event, getRealtimeModifiers())
+          : hasEditableGeneratedHandleSelection(sceneController.selection)
+            ? getGeneratedHandleBehaviorName(event, getRealtimeModifiers())
+            : getBehaviorName(event));
+      let behaviorName = getSelectionBehaviorName(initialEvent);
 
-      const layerInfo = Object.entries(
-        sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
-      ).map(([layerName, layerGlyph]) => {
+      // Read the edit layer's skeleton data once; every layer's skeleton target
+      // entry resolves selection ids against this single reference by structural
+      // ordinal (cross-layer addressing).
+      const editingLayers = sceneController.getEditingLayerFromGlyphLayers(
+        glyph.layers
+      );
+      const editLayerName = sceneController.sceneSettings.editLayerName;
+      const referenceSkeletonData = getSkeletonData(
+        editingLayers[editLayerName] || Object.values(editingLayers)[0]
+      );
+      const makeSkeletonTargetEntries = (layerGlyph, name) => {
+        const modifierOptions = makeSkeletonModifierOptions(name, {
+          referenceSkeletonData,
+          clickedSkeletonPointKey:
+            sceneController.sceneModel.initialClickedSkeletonPointKey,
+        });
+        if (hasEditableGeneratedHandleSelection(sceneController.selection)) {
+          // Generated geometry is adjustable by default, so the modifier is the
+          // safety: only Z (move) and Alt (equalize) reach a generated handle.
+          // A plain drag builds no entry and leaves the derived handle alone.
+          if (!isGeneratedHandleAdjustBehavior(name)) {
+            return [];
+          }
+          return createEditableGeneratedHandleTargetEntries(
+            layerGlyph,
+            sceneController.selection,
+            name,
+            modifierOptions
+          );
+        }
+        if (hasRibLikeSelection(sceneController.selection)) {
+          const targetEntries = [];
+          targetEntries.push(
+            ...createSkeletonRibTargetEntries(
+              layerGlyph,
+              sceneController.selection,
+              name,
+              {
+                ...modifierOptions,
+                constrainMode: this.tangentRibMode ? "tangent" : null,
+                clickedRibKey: sceneController.sceneModel.initialClickedSkeletonRibKey,
+              }
+            )
+          );
+          targetEntries.push(
+            ...createEditableGeneratedPointTargetEntries(
+              layerGlyph,
+              sceneController.selection,
+              name,
+              {
+                ...modifierOptions,
+                constrainMode: this.tangentRibMode ? "tangent" : null,
+              }
+            )
+          );
+          return targetEntries;
+        }
+        const entry = makeSkeletonPointTargetEntry(
+          layerGlyph,
+          sceneController.selection,
+          name,
+          referenceSkeletonData,
+          modifierOptions
+        );
+        return entry ? [entry] : [];
+      };
+
+      const layerInfo = Object.entries(editingLayers).map(([layerName, layerGlyph]) => {
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           sceneController.selection,
-          this.scalingEditBehavior
+          this.scalingEditBehavior,
+          { targetEntries: makeSkeletonTargetEntries(layerGlyph, behaviorName) }
         );
         return {
           layerName,
@@ -397,7 +780,7 @@ export class PointerTool extends BaseTool {
       let editChange;
 
       for await (const event of eventStream) {
-        const newEditBehaviorName = getBehaviorName(event);
+        const newEditBehaviorName = getSelectionBehaviorName(event);
         if (behaviorName !== newEditBehaviorName) {
           // Behavior changed, undo current changes
           behaviorName = newEditBehaviorName;
@@ -406,6 +789,20 @@ export class PointerTool extends BaseTool {
             applyChange(layer.layerGlyph, layer.editBehavior.rollbackChange);
             rollbackChanges.push(
               consolidateChanges(layer.editBehavior.rollbackChange, layer.changePath)
+            );
+            // Skeleton target entries bind their behavior at construction and
+            // capture the (now rolled-back) original layer state, so rebuild the
+            // factory for the new behavior name.
+            layer.behaviorFactory = new EditBehaviorFactory(
+              layer.layerGlyph,
+              sceneController.selection,
+              this.scalingEditBehavior,
+              {
+                targetEntries: makeSkeletonTargetEntries(
+                  layer.layerGlyph,
+                  behaviorName
+                ),
+              }
             );
             layer.editBehavior = layer.behaviorFactory.getBehavior(behaviorName);
           }
@@ -530,13 +927,32 @@ export class PointerTool extends BaseTool {
     await sceneController.editGlyph(async (sendIncrementalChange, glyph) => {
       const initialPoint = sceneController.selectedGlyphPoint(initialEvent);
 
-      const layerInfo = Object.entries(
-        sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
-      ).map(([layerName, layerGlyph]) => {
+      // Skeleton points transform through the same target entry the drag path
+      // uses; without it the handles move the path selection only, and a pure
+      // skeleton selection gets a bounds box that does nothing. Rib and
+      // editable-generated entries have no transform semantics and return null,
+      // so only the point entry is built here.
+      const editingLayers = sceneController.getEditingLayerFromGlyphLayers(
+        glyph.layers
+      );
+      const editLayerName = sceneController.sceneSettings.editLayerName;
+      const referenceSkeletonData = getSkeletonData(
+        editingLayers[editLayerName] || Object.values(editingLayers)[0]
+      );
+
+      const layerInfo = Object.entries(editingLayers).map(([layerName, layerGlyph]) => {
+        const skeletonEntry = makeSkeletonPointTargetEntry(
+          layerGlyph,
+          sceneController.selection,
+          "default",
+          referenceSkeletonData,
+          makeSkeletonModifierOptions("default", { referenceSkeletonData })
+        );
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           sceneController.selection,
-          this.scalingEditBehavior
+          this.scalingEditBehavior,
+          { targetEntries: skeletonEntry ? [skeletonEntry] : [] }
         );
         const layerBounds = (
           staticGlyphControllers[layerName] || glyphController
@@ -713,6 +1129,13 @@ export class PointerTool extends BaseTool {
   }
 
   handleKeyDown(event) {
+    if (this.measureInteraction.handleKeyDown(event)) {
+      return;
+    }
+    if (this._handleRealtimeModifierKeyDown(event)) {
+      event.preventDefault();
+      return;
+    }
     if (event.key !== "Tab" || !this.sceneSettings.selectedGlyph?.isEditing) {
       return;
     }
@@ -768,6 +1191,80 @@ export class PointerTool extends BaseTool {
     this.sceneSettings.selection = new Set([`${selectionType}/${newIndex}`]);
   }
 
+  _handleRealtimeModifierKeyDown(event) {
+    const modifier = REALTIME_MODIFIER_ACTIONS.find((modifier) =>
+      eventMatchesActionShortCut(modifier.action, event)
+    );
+    if (!modifier) {
+      return false;
+    }
+    if (!this[modifier.modeProperty]) {
+      this[modifier.modeProperty] = true;
+      const keyUpHandler = (e) => this._handleRealtimeModifierKeyUp(e, modifier.action);
+      this._realtimeModifierKeyUpHandlers.set(modifier.action, keyUpHandler);
+      window.addEventListener("keyup", keyUpHandler);
+      if (!this._boundRealtimeModifierWindowBlur) {
+        this._boundRealtimeModifierWindowBlur = () =>
+          this._endAllRealtimeModifierModes();
+        window.addEventListener("blur", this._boundRealtimeModifierWindowBlur);
+      }
+      this.canvasController.requestUpdate();
+    }
+    return true;
+  }
+
+  _handleRealtimeModifierKeyUp(event, action) {
+    if (eventMatchesActionBaseKey(action, event)) {
+      this._endRealtimeModifierMode(action);
+    }
+  }
+
+  _endRealtimeModifierMode(action) {
+    const modifier = REALTIME_MODIFIER_ACTIONS.find(
+      (modifier) => modifier.action === action
+    );
+    if (!modifier || !this[modifier.modeProperty]) {
+      return;
+    }
+    this[modifier.modeProperty] = false;
+    const keyUpHandler = this._realtimeModifierKeyUpHandlers.get(action);
+    if (keyUpHandler) {
+      window.removeEventListener("keyup", keyUpHandler);
+      this._realtimeModifierKeyUpHandlers.delete(action);
+    }
+    this._removeRealtimeModifierBlurHandlerIfIdle();
+    this.canvasController.requestUpdate();
+  }
+
+  _endAllRealtimeModifierModes() {
+    let changed = false;
+    for (const modifier of REALTIME_MODIFIER_ACTIONS) {
+      if (this[modifier.modeProperty]) {
+        this[modifier.modeProperty] = false;
+        changed = true;
+      }
+      const keyUpHandler = this._realtimeModifierKeyUpHandlers.get(modifier.action);
+      if (keyUpHandler) {
+        window.removeEventListener("keyup", keyUpHandler);
+      }
+    }
+    this._realtimeModifierKeyUpHandlers.clear();
+    this._removeRealtimeModifierBlurHandlerIfIdle();
+    if (changed) {
+      this.canvasController.requestUpdate();
+    }
+  }
+
+  _removeRealtimeModifierBlurHandlerIfIdle() {
+    if (
+      this._boundRealtimeModifierWindowBlur &&
+      !this._realtimeModifierKeyUpHandlers.size
+    ) {
+      window.removeEventListener("blur", this._boundRealtimeModifierWindowBlur);
+      this._boundRealtimeModifierWindowBlur = null;
+    }
+  }
+
   activate() {
     super.activate();
     this.sceneController.sceneModel.showTransformSelection = true;
@@ -793,6 +1290,63 @@ function pointInCircleHandle(point, handle, handleSize) {
 function getBehaviorName(event) {
   const behaviorNames = ["default", "constrain", "alternate", "alternate-constrain"];
   return behaviorNames[boolInt(event.shiftKey) + 2 * boolInt(event.altKey)];
+}
+
+function hasSkeletonRibSelection(selection) {
+  return !!parseSelection([...selection]).skeletonRib?.length;
+}
+
+function hasEditableGeneratedPointSelection(selection) {
+  return !!parseSelection([...selection]).editableGeneratedPoint?.length;
+}
+
+function hasEditableGeneratedHandleSelection(selection) {
+  return !!parseSelection([...selection]).editableGeneratedHandle?.length;
+}
+
+// Generated handles move only under a modifier (donor side-lock model): Z
+// moves the handle, Alt equalizes. The name carries Z so that pressing or
+// releasing it mid-drag rebuilds the behavior through the normal path.
+function getGeneratedHandleBehaviorName(event, modifiers = {}) {
+  if (event?.altKey) {
+    return getBehaviorName(event);
+  }
+  return modifiers.tangentRibMode
+    ? "generated-handle-move"
+    : "generated-handle-default";
+}
+
+function isGeneratedHandleAdjustBehavior(name) {
+  return (
+    name === "generated-handle-move" ||
+    name === "alternate" ||
+    name === "alternate-constrain" ||
+    name?.startsWith("equalize") === true
+  );
+}
+
+// Identify the segment under a Tunni drag so the readout layer can re-read it
+// from live geometry each frame. Path segments are addressed by their four
+// parent point indices, skeleton segments by contour + endpoint ids.
+function makePathTunniDragTarget(tunniInitialState) {
+  const indices = tunniInitialState?.selectedSegment?.parentPointIndices;
+  return indices?.length === 4 ? { kind: "path", pointIndices: [...indices] } : null;
+}
+
+function makeSkeletonTunniDragTarget(tunniHit) {
+  const contourId = tunniHit?.contourId;
+  const startPointId = tunniHit?.segment?.startPoint?.id;
+  const endPointId = tunniHit?.segment?.endPoint?.id;
+  if (contourId == null || startPointId == null || endPointId == null) {
+    return null;
+  }
+  return { kind: "skeleton", contourId, startPointId, endPointId };
+}
+
+function hasRibLikeSelection(selection) {
+  return (
+    hasSkeletonRibSelection(selection) || hasEditableGeneratedPointSelection(selection)
+  );
 }
 
 function replace(setA, setB) {

@@ -508,6 +508,21 @@ export class Form extends SimpleElement {
     rangeElement.minValue = fieldItem.minValue;
     rangeElement.defaultValue = fieldItem.defaultValue;
     rangeElement.maxValue = fieldItem.maxValue;
+    if (fieldItem.displayValue !== undefined) {
+      rangeElement.displayValue = fieldItem.displayValue;
+    }
+    if (fieldItem.values !== undefined) {
+      rangeElement.values = fieldItem.values;
+    }
+    if (fieldItem.step !== undefined) {
+      rangeElement.step = fieldItem.step;
+    }
+    if (fieldItem.allowInputBeyondRange) {
+      rangeElement.allowInputBeyondRange = true;
+    }
+    if (fieldItem.disabled) {
+      rangeElement.disabled = true;
+    }
 
     let checkboxElement;
     if (fieldItem.hasCheckBox) {
@@ -556,6 +571,47 @@ export class Form extends SimpleElement {
     if (checkboxElement) {
       valueElement.appendChild(checkboxElement);
     }
+  }
+
+  _addCheckbox(valueElement, fieldItem) {
+    const inputElement = html.input({
+      type: "checkbox",
+      checked: !!fieldItem.value,
+      disabled: !!fieldItem.disabled,
+      onchange: (event) => {
+        this._fieldChanging(fieldItem, inputElement.checked, undefined);
+      },
+    });
+    if (fieldItem.indeterminate) {
+      inputElement.indeterminate = true;
+    }
+    this._fieldGetters[fieldItem.key] = () => inputElement.checked;
+    this._fieldSetters[fieldItem.key] = (value) => (inputElement.checked = !!value);
+    valueElement.appendChild(inputElement);
+  }
+
+  _addSelect(valueElement, fieldItem) {
+    const selectElement = html.select(
+      {
+        disabled: !!fieldItem.disabled,
+        onchange: (event) => {
+          this._fieldChanging(fieldItem, selectElement.value, undefined);
+        },
+      },
+      (fieldItem.options || []).map((option) =>
+        html.option(
+          {
+            value: option.value,
+            selected: option.value === fieldItem.value,
+            disabled: !!option.disabled,
+          },
+          [option.label ?? option.value]
+        )
+      )
+    );
+    this._fieldGetters[fieldItem.key] = () => selectElement.value;
+    this._fieldSetters[fieldItem.key] = (value) => (selectElement.value = value);
+    valueElement.appendChild(selectElement);
   }
 
   _addColorPicker(valueElement, fieldItem) {

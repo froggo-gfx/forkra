@@ -1,0 +1,787 @@
+import { drawCubicHandleLabelPair } from "@fontra/core/distance-angle.js";
+import {
+  buildSkeletonTunniSegments,
+  calculateSkeletonTrueTunniPoint,
+  calculateSkeletonTunniPoint,
+  getSkeletonData,
+  getSkeletonHandleOffset,
+  getSkeletonRibPosition,
+  makeEditableGeneratedHandleKey,
+  makeEditableGeneratedPointKey,
+  makeSkeletonRibKey,
+  isSkeletonSideLocked,
+} from "@fontra/core/skeleton-model.js";
+import { parseSelection } from "@fontra/core/utils.ts";
+
+import {
+  fillRoundNode,
+  glyphSelector,
+  registerVisualizationLayerDefinition,
+  strokeLine,
+} from "./visualization-layer-definitions.js";
+
+function getSkeletonDataFromGlyph(positionedGlyph, model) {
+  const editLayerName =
+    model.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+  const layerGlyph =
+    editLayerName && positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName]?.glyph;
+  return getSkeletonData(layerGlyph || positionedGlyph.glyph);
+}
+
+function getOnCurvePointIndices(contour) {
+  const indices = [];
+  for (let i = 0; i < contour.points.length; i++) {
+    if (!contour.points[i].type) {
+      indices.push(i);
+    }
+  }
+  return indices;
+}
+
+function skeletonContourToPath2d(contour) {
+  const path = new Path2D();
+  const points = contour.points || [];
+  const onCurveIndices = getOnCurvePointIndices(contour);
+  if (!onCurveIndices.length) {
+    return path;
+  }
+
+  const firstIndex = onCurveIndices[0];
+  path.moveTo(points[firstIndex].x, points[firstIndex].y);
+
+  let i = firstIndex + 1;
+  const limit = contour.closed ? firstIndex + points.length + 1 : points.length;
+  while (i < limit) {
+    const point = points[i % points.length];
+    if (!point.type) {
+      path.lineTo(point.x, point.y);
+      i += 1;
+      continue;
+    }
+
+    // Open contours must not wrap: trailing off-curves (malformed data) would
+    // otherwise draw a phantom segment from the last point back to the first
+    const next = contour.closed ? points[(i + 1) % points.length] : points[i + 1];
+    const afterNext = contour.closed ? points[(i + 2) % points.length] : points[i + 2];
+    if (
+      point.type === "cubic" &&
+      next?.type === "cubic" &&
+      afterNext &&
+      !afterNext.type
+    ) {
+      path.bezierCurveTo(point.x, point.y, next.x, next.y, afterNext.x, afterNext.y);
+      i += 3;
+      continue;
+    }
+    if ((point.type === "quad" || point.type === "cubic") && next && !next.type) {
+      path.quadraticCurveTo(point.x, point.y, next.x, next.y);
+      i += 2;
+      continue;
+    }
+    i += 1;
+  }
+
+  if (contour.closed) {
+    path.closePath();
+  }
+  return path;
+}
+
+function getRibPoints(contour, pointIndex) {
+  const point = contour.points[pointIndex];
+  const activeSingleSide =
+    contour.singleSided === "left" || contour.singleSided === "right"
+      ? contour.singleSided
+      : null;
+  return {
+    center: point,
+    left:
+      activeSingleSide === "right"
+        ? point
+        : getSkeletonRibPosition(contour, point, "left"),
+    unlockedLeft:
+      activeSingleSide === "right" ? false : !isSkeletonSideLocked(point, "left"),
+    right:
+      activeSingleSide === "left"
+        ? point
+        : getSkeletonRibPosition(contour, point, "right"),
+    unlockedRight:
+      activeSingleSide === "left" ? false : !isSkeletonSideLocked(point, "right"),
+  };
+}
+
+function getSkeletonRibSelectionSets(model) {
+  return {
+    selected: new Set(
+      (parseSelection(model.selection).skeletonRib || []).map(
+        (item) => `skeletonRib/${item}`
+      )
+    ),
+    hovered: new Set(
+      (parseSelection(model.hoverSelection).skeletonRib || []).map(
+        (item) => `skeletonRib/${item}`
+      )
+    ),
+  };
+}
+
+function getEditableGeneratedSelectionSets(model) {
+  return {
+    selectedPoints: new Set(
+      (parseSelection(model.selection).editableGeneratedPoint || []).map(
+        (item) => `editableGeneratedPoint/${item}`
+      )
+    ),
+    hoveredPoints: new Set(
+      (parseSelection(model.hoverSelection).editableGeneratedPoint || []).map(
+        (item) => `editableGeneratedPoint/${item}`
+      )
+    ),
+    selectedHandles: new Set(
+      (parseSelection(model.selection).editableGeneratedHandle || []).map(
+        (item) => `editableGeneratedHandle/${item}`
+      )
+    ),
+    hoveredHandles: new Set(
+      (parseSelection(model.hoverSelection).editableGeneratedHandle || []).map(
+        (item) => `editableGeneratedHandle/${item}`
+      )
+    ),
+  };
+}
+
+function getSkeletonPointSelectionSets(model) {
+  return {
+    selected: new Set(parseSelection(model.selection).skeletonPoint || []),
+    hovered: new Set(parseSelection(model.hoverSelection).skeletonPoint || []),
+  };
+}
+
+function strokeRoundNode(context, point, size) {
+  context.beginPath();
+  context.arc(point.x, point.y, size / 2, 0, 2 * Math.PI);
+  context.stroke();
+}
+
+function strokeSquareNode(context, point, size) {
+  context.strokeRect(point.x - size / 2, point.y - size / 2, size, size);
+}
+
+function drawDiamondNode(context, point, size, fill) {
+  const half = size / 2;
+  context.beginPath();
+  context.moveTo(point.x, point.y - half);
+  context.lineTo(point.x + half, point.y);
+  context.lineTo(point.x, point.y + half);
+  context.lineTo(point.x - half, point.y);
+  context.closePath();
+  if (fill) {
+    context.fill();
+  }
+  context.stroke();
+}
+
+function fillSquareNode(context, point, size) {
+  context.fillRect(point.x - size / 2, point.y - size / 2, size, size);
+}
+
+function forEachSkeletonContour(positionedGlyph, model, callback) {
+  const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
+  if (!skeletonData?.contours?.length) {
+    return;
+  }
+  for (const contour of skeletonData.contours) {
+    if (contour.points?.length) {
+      callback(contour);
+    }
+  }
+}
+
+function forEachEditableGeneratedTarget(positionedGlyph, model, callback) {
+  const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
+  const path = positionedGlyph.glyph.path;
+  if (!skeletonData?.generated?.length || !path) {
+    return;
+  }
+  for (const entry of skeletonData.generated) {
+    if (!Number.isInteger(entry.pathContourIndex)) {
+      continue;
+    }
+    for (const [contourPointIndex, provenance] of (entry.pointMap || []).entries()) {
+      if (
+        !provenance ||
+        (provenance.role !== "onCurve" &&
+          provenance.role !== "in" &&
+          provenance.role !== "out") ||
+        (provenance.side !== "left" && provenance.side !== "right")
+      ) {
+        continue;
+      }
+      const contourId = provenance.skeletonContourId ?? entry.skeletonContourId;
+      const contour = (skeletonData.contours || []).find(
+        (contour) => contour.id === contourId
+      );
+      const sourcePoint = (contour?.points || []).find(
+        (point) => point.id === provenance.skeletonPointId
+      );
+      // Adjustable is the default since side locks landed, so marking every
+      // adjustable target would mark nearly the whole outline. Mark the
+      // exceptional state instead: generated targets whose side is LOCKED.
+      if (
+        !contour ||
+        sourcePoint?.type ||
+        !isSkeletonSideLocked(sourcePoint, provenance.side)
+      ) {
+        continue;
+      }
+      let pathPointIndex;
+      try {
+        pathPointIndex = path.getAbsolutePointIndex(
+          entry.pathContourIndex,
+          contourPointIndex
+        );
+      } catch {
+        continue;
+      }
+      callback({
+        point: path.getPoint(pathPointIndex),
+        contour,
+        sourcePoint,
+        contourId,
+        pointId: sourcePoint.id,
+        side: provenance.side,
+        role: provenance.role,
+      });
+    }
+  }
+}
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.width-shading",
+  name: "Skeleton width shading",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 446,
+  colors: {
+    fillColor: "rgba(34, 121, 210, 0.12)",
+  },
+  colorsDarkMode: {
+    fillColor: "rgba(95, 178, 255, 0.18)",
+  },
+  draw: (context, positionedGlyph, parameters, model) => {
+    context.fillStyle = parameters.fillColor;
+    forEachSkeletonContour(positionedGlyph, model, (contour) => {
+      const onCurveIndices = getOnCurvePointIndices(contour);
+      const segmentCount = contour.closed
+        ? onCurveIndices.length
+        : onCurveIndices.length - 1;
+      for (let i = 0; i < segmentCount; i++) {
+        const a = getRibPoints(contour, onCurveIndices[i]);
+        const b = getRibPoints(
+          contour,
+          onCurveIndices[(i + 1) % onCurveIndices.length]
+        );
+        context.beginPath();
+        context.moveTo(a.left.x, a.left.y);
+        context.lineTo(b.left.x, b.left.y);
+        context.lineTo(b.right.x, b.right.y);
+        context.lineTo(a.right.x, a.right.y);
+        context.closePath();
+        context.fill();
+      }
+    });
+  },
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.ribs",
+  name: "Skeleton ribs",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 452,
+  screenParameters: {
+    lineWidth: 1,
+  },
+  colors: {
+    strokeColor: "rgba(34, 121, 210, 0.45)",
+  },
+  colorsDarkMode: {
+    strokeColor: "rgba(95, 178, 255, 0.55)",
+  },
+  draw: (context, positionedGlyph, parameters, model) => {
+    context.lineWidth = parameters.lineWidth;
+    context.strokeStyle = parameters.strokeColor;
+    forEachSkeletonContour(positionedGlyph, model, (contour) => {
+      for (const pointIndex of getOnCurvePointIndices(contour)) {
+        const rib = getRibPoints(contour, pointIndex);
+        strokeLine(context, rib.left.x, rib.left.y, rib.right.x, rib.right.y);
+      }
+    });
+  },
+});
+
+// Donor parity (donor "fontra.skeleton.rib.points", zIndex 560): rib endpoints
+// are stroked diamonds drawn ABOVE the other skeleton layers so they stay
+// visible; selected diamonds are filled.
+//
+// Since side locks landed, adjustable is the DEFAULT state, so the plain
+// (smaller, pink) style is the default and the emphatic purple one marks the
+// exceptional state — a LOCKED side. Both distinctions (selected/unselected,
+// locked/unlocked) must be readable at a glance.
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.rib-points",
+  name: "Skeleton rib points",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 560,
+  screenParameters: {
+    endpointSize: 10,
+    lockedEndpointSize: 12,
+    strokeWidth: 2,
+  },
+  colors: {
+    endpointColor: "rgba(220, 60, 120, 0.7)",
+    endpointHoverColor: "rgba(220, 60, 120, 1)",
+    endpointSelectedColor: "rgba(255, 64, 0, 0.9)",
+    lockedColor: "rgba(160, 40, 180, 0.9)",
+    lockedHoverColor: "rgba(160, 40, 180, 1)",
+    lockedSelectedColor: "rgba(160, 40, 180, 1)",
+  },
+  colorsDarkMode: {
+    endpointColor: "rgba(220, 100, 140, 0.7)",
+    endpointHoverColor: "rgba(220, 100, 140, 1)",
+    endpointSelectedColor: "rgba(255, 96, 64, 0.9)",
+    lockedColor: "rgba(180, 80, 200, 0.9)",
+    lockedHoverColor: "rgba(180, 80, 200, 1)",
+    lockedSelectedColor: "rgba(180, 80, 200, 1)",
+  },
+  draw: (context, positionedGlyph, parameters, model) => {
+    const ribSelection = getSkeletonRibSelectionSets(model);
+    context.lineWidth = parameters.strokeWidth;
+    forEachSkeletonContour(positionedGlyph, model, (contour) => {
+      for (const pointIndex of getOnCurvePointIndices(contour)) {
+        const point = contour.points[pointIndex];
+        const rib = getRibPoints(contour, pointIndex);
+        for (const side of ["left", "right"]) {
+          if (contour.singleSided && contour.singleSided !== side) {
+            continue;
+          }
+          const key = makeSkeletonRibKey(contour.id, point.id, side);
+          // Locked is the marked state: it gets the larger purple treatment.
+          const locked = side === "left" ? !rib.unlockedLeft : !rib.unlockedRight;
+          const selected = ribSelection.selected.has(key);
+          const hovered = ribSelection.hovered.has(key);
+          const color = selected
+            ? locked
+              ? parameters.lockedSelectedColor
+              : parameters.endpointSelectedColor
+            : hovered
+              ? locked
+                ? parameters.lockedHoverColor
+                : parameters.endpointHoverColor
+              : locked
+                ? parameters.lockedColor
+                : parameters.endpointColor;
+          context.strokeStyle = color;
+          context.fillStyle = color;
+          const size = locked ? parameters.lockedEndpointSize : parameters.endpointSize;
+          drawDiamondNode(context, rib[side], size, selected);
+        }
+      }
+    });
+  },
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.centerline",
+  name: "Skeleton centerline",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 455,
+  screenParameters: {
+    strokeWidth: 1.5,
+  },
+  colors: {
+    strokeColor: "#2279d2",
+  },
+  colorsDarkMode: {
+    strokeColor: "#5fb2ff",
+  },
+  draw: (context, positionedGlyph, parameters, model) => {
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.lineWidth = parameters.strokeWidth;
+    context.strokeStyle = parameters.strokeColor;
+    forEachSkeletonContour(positionedGlyph, model, (contour) => {
+      context.stroke(skeletonContourToPath2d(contour));
+    });
+  },
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.handles",
+  name: "Skeleton handles",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 545,
+  screenParameters: {
+    strokeWidth: 1,
+  },
+  colors: {
+    strokeColor: "rgba(34, 121, 210, 0.55)",
+  },
+  colorsDarkMode: {
+    strokeColor: "rgba(95, 178, 255, 0.65)",
+  },
+  draw: (context, positionedGlyph, parameters, model) => {
+    context.lineWidth = parameters.strokeWidth;
+    context.strokeStyle = parameters.strokeColor;
+    forEachSkeletonContour(positionedGlyph, model, (contour) => {
+      const points = contour.points;
+      for (let i = 0; i < points.length; i++) {
+        const point = points[i];
+        if (!point.type) {
+          continue;
+        }
+        const previous = points[(i - 1 + points.length) % points.length];
+        const next = points[(i + 1) % points.length];
+        if (previous && !previous.type) {
+          strokeLine(context, previous.x, previous.y, point.x, point.y);
+        } else if (previous?.type && next && !next.type) {
+          strokeLine(context, next.x, next.y, point.x, point.y);
+        }
+      }
+    });
+  },
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.nodes",
+  name: "Skeleton nodes",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 550,
+  screenParameters: {
+    cornerSize: 7,
+    handleSize: 5,
+    smoothSize: 7,
+  },
+  colors: {
+    fillColor: "#2279d2",
+  },
+  colorsDarkMode: {
+    fillColor: "#5fb2ff",
+  },
+  draw: (context, positionedGlyph, parameters, model) => {
+    context.fillStyle = parameters.fillColor;
+    forEachSkeletonContour(positionedGlyph, model, (contour) => {
+      for (const point of contour.points) {
+        if (point.type) {
+          fillRoundNode(context, point, parameters.handleSize);
+        } else if (point.smooth) {
+          fillRoundNode(context, point, parameters.smoothSize);
+        } else {
+          fillSquareNode(context, point, parameters.cornerSize);
+        }
+      }
+    });
+  },
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.selected-nodes",
+  name: "Selected skeleton nodes",
+  selectionFunc: glyphSelector("editing"),
+  zIndex: 552,
+  screenParameters: {
+    cornerSize: 8,
+    handleSize: 6,
+    smoothSize: 8,
+    strokeWidth: 1.5,
+    hoverStrokeOffset: 4,
+    underlayOffset: 2,
+  },
+  colors: {
+    hoveredColor: "rgba(34, 121, 210, 0.95)",
+    selectedColor: "rgba(255, 128, 0, 0.95)",
+    underColor: "#FFFA",
+  },
+  colorsDarkMode: {
+    hoveredColor: "rgba(95, 178, 255, 1)",
+    selectedColor: "rgba(255, 174, 68, 1)",
+    underColor: "#0008",
+  },
+  draw: (context, positionedGlyph, parameters, model) => {
+    const { selected, hovered } = getSkeletonPointSelectionSets(model);
+    if (!selected.size && !hovered.size) {
+      return;
+    }
+    const nodeSize = (point, offset = 0) =>
+      point.type
+        ? parameters.handleSize + offset
+        : point.smooth
+          ? parameters.smoothSize + offset
+          : parameters.cornerSize + offset;
+    const fillNode = (point, offset = 0) => {
+      if (!point.type && !point.smooth) {
+        fillSquareNode(context, point, nodeSize(point, offset));
+      } else {
+        fillRoundNode(context, point, nodeSize(point, offset));
+      }
+    };
+    const strokeNode = (point, offset = 0) => {
+      if (!point.type && !point.smooth) {
+        strokeSquareNode(context, point, nodeSize(point, offset));
+      } else {
+        strokeRoundNode(context, point, nodeSize(point, offset));
+      }
+    };
+    forEachSkeletonContour(positionedGlyph, model, (contour) => {
+      for (const point of contour.points) {
+        const key = `${contour.id}/${point.id}`;
+        const isSelected = selected.has(key);
+        const isHovered = hovered.has(key);
+        if (!isSelected && !isHovered) {
+          continue;
+        }
+        if (isSelected) {
+          context.fillStyle = parameters.underColor;
+          fillNode(point, parameters.underlayOffset);
+          context.fillStyle = parameters.selectedColor;
+          fillNode(point);
+        } else {
+          context.strokeStyle = parameters.hoveredColor;
+          context.lineWidth = parameters.strokeWidth;
+          strokeNode(point, parameters.hoverStrokeOffset);
+        }
+      }
+    });
+  },
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.tunni",
+  name: "Skeleton Tunni",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: false,
+  zIndex: 547,
+  screenParameters: {
+    lineDash: [4, 4],
+    midpointSize: 7,
+    strokeWidth: 1,
+    truePointSize: 8,
+  },
+  colors: {
+    lineColor: "rgba(34, 121, 210, 0.55)",
+    midpointColor: "rgba(0, 185, 220, 0.95)",
+    truePointColor: "rgba(255, 128, 0, 0.95)",
+  },
+  colorsDarkMode: {
+    lineColor: "rgba(95, 178, 255, 0.65)",
+    midpointColor: "rgba(77, 213, 236, 1)",
+    truePointColor: "rgba(255, 174, 68, 1)",
+  },
+  draw: (context, positionedGlyph, parameters, model) => {
+    context.save();
+    context.lineWidth = parameters.strokeWidth;
+    context.strokeStyle = parameters.lineColor;
+    context.setLineDash(parameters.lineDash);
+    forEachSkeletonContour(positionedGlyph, model, (contour) => {
+      for (const segment of buildSkeletonTunniSegments(contour)) {
+        if (segment.controlPoints.length !== 2) {
+          continue;
+        }
+        const [control1, control2] = segment.controlPoints;
+        strokeLine(
+          context,
+          segment.startPoint.x,
+          segment.startPoint.y,
+          control1.x,
+          control1.y
+        );
+        strokeLine(
+          context,
+          segment.endPoint.x,
+          segment.endPoint.y,
+          control2.x,
+          control2.y
+        );
+        strokeLine(context, control1.x, control1.y, control2.x, control2.y);
+      }
+    });
+    context.setLineDash([]);
+    forEachSkeletonContour(positionedGlyph, model, (contour) => {
+      for (const segment of buildSkeletonTunniSegments(contour)) {
+        if (segment.controlPoints.length !== 2) {
+          continue;
+        }
+        const midpoint = calculateSkeletonTunniPoint(segment);
+        const truePoint = calculateSkeletonTrueTunniPoint(segment);
+        if (midpoint) {
+          context.fillStyle = parameters.midpointColor;
+          fillRoundNode(context, midpoint, parameters.midpointSize);
+        }
+        if (truePoint) {
+          context.fillStyle = parameters.truePointColor;
+          drawDiamondNode(context, truePoint, parameters.truePointSize, true);
+        }
+      }
+    });
+    context.restore();
+  },
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.insert-handles-preview",
+  name: "Skeleton insert handles preview",
+  selectionFunc: glyphSelector("editing"),
+  zIndex: 565,
+  screenParameters: {
+    nodeSize: 5,
+  },
+  colors: {
+    fillColor: "rgba(34, 121, 210, 0.6)",
+  },
+  colorsDarkMode: {
+    fillColor: "rgba(95, 178, 255, 0.7)",
+  },
+  draw: (context, positionedGlyph, parameters, model) => {
+    const preview = model.skeletonInsertHandles;
+    if (!preview?.points?.length) {
+      return;
+    }
+    context.fillStyle = parameters.fillColor;
+    for (const point of preview.points) {
+      fillRoundNode(context, point, parameters.nodeSize);
+    }
+  },
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.editable-markers",
+  name: "Skeleton locked markers",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 560,
+  screenParameters: {
+    handleSize: 7,
+    pointSize: 11,
+    strokeWidth: 2,
+  },
+  colors: {
+    fillColor: "rgba(161, 73, 184, 0.22)",
+    hoverFillColor: "rgba(161, 73, 184, 0.35)",
+    selectedFillColor: "rgba(255, 128, 0, 0.28)",
+    strokeColor: "rgba(161, 73, 184, 0.95)",
+    hoverStrokeColor: "rgba(161, 73, 184, 1)",
+    selectedStrokeColor: "rgba(255, 128, 0, 0.95)",
+  },
+  colorsDarkMode: {
+    fillColor: "rgba(199, 119, 221, 0.28)",
+    hoverFillColor: "rgba(199, 119, 221, 0.42)",
+    selectedFillColor: "rgba(255, 174, 68, 0.35)",
+    strokeColor: "rgba(199, 119, 221, 0.95)",
+    hoverStrokeColor: "rgba(199, 119, 221, 1)",
+    selectedStrokeColor: "rgba(255, 174, 68, 1)",
+  },
+  // Locked rib endpoints are drawn (purple, larger) by the rib-points layer;
+  // this layer marks the GENERATED targets on the outline that are blocked by
+  // that same lock.
+  draw: (context, positionedGlyph, parameters, model) => {
+    context.lineWidth = parameters.strokeWidth;
+    context.strokeStyle = parameters.strokeColor;
+    context.fillStyle = parameters.fillColor;
+    const generatedSelection = getEditableGeneratedSelectionSets(model);
+    forEachEditableGeneratedTarget(positionedGlyph, model, (target) => {
+      const isHandle = target.role === "in" || target.role === "out";
+      const key = isHandle
+        ? makeEditableGeneratedHandleKey(
+            target.contourId,
+            target.pointId,
+            target.side,
+            target.role
+          )
+        : makeEditableGeneratedPointKey(target.contourId, target.pointId, target.side);
+      const selected = isHandle
+        ? generatedSelection.selectedHandles.has(key)
+        : generatedSelection.selectedPoints.has(key);
+      const hovered = isHandle
+        ? generatedSelection.hoveredHandles.has(key)
+        : generatedSelection.hoveredPoints.has(key);
+      context.strokeStyle = selected
+        ? parameters.selectedStrokeColor
+        : hovered
+          ? parameters.hoverStrokeColor
+          : parameters.strokeColor;
+      context.fillStyle = selected
+        ? parameters.selectedFillColor
+        : hovered
+          ? parameters.hoverFillColor
+          : parameters.fillColor;
+      if (isHandle) {
+        fillRoundNode(context, target.point, parameters.handleSize);
+        context.stroke();
+        if (
+          getSkeletonHandleOffset(target.sourcePoint, target.side, target.role).detached
+        ) {
+          drawDiamondNode(context, target.point, parameters.handleSize + 4, false);
+        }
+      } else {
+        drawDiamondNode(context, target.point, parameters.pointSize, true);
+      }
+    });
+  },
+});
+
+// 4.1: skeleton centerline handle labels live on their own switchable layer;
+// basic and generated path points share the regular "Point labels" layer.
+registerVisualizationLayerDefinition({
+  identifier: "fontra.skeleton.point-labels",
+  name: "Skeleton point labels",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: { strokeWidth: 1 },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    const skeletonData = getSkeletonDataFromGlyph(positionedGlyph, model);
+    if (!skeletonData?.contours?.length) {
+      return;
+    }
+    const show = {
+      distance: model.sceneSettings?.showLabelsDistance ?? true,
+      tension: model.sceneSettings?.showLabelsTension ?? true,
+      angle: model.sceneSettings?.showLabelsAngle ?? true,
+    };
+    for (const contour of skeletonData.contours) {
+      const points = contour.points || [];
+      const numPoints = points.length;
+      for (let i = 0; i < numPoints; i++) {
+        const p1 = points[i];
+        if (!p1 || p1.type) {
+          continue;
+        }
+        const at = (offset) =>
+          contour.closed ? points[(i + offset) % numPoints] : points[i + offset];
+        const p2 = at(1);
+        const p3 = at(2);
+        const p4 = at(3);
+        if (p2?.type === "cubic" && p3?.type === "cubic" && p4 && !p4.type) {
+          try {
+            drawCubicHandleLabelPair(context, [p1, p2, p3, p4], show);
+          } catch (error) {
+            // Skip segments where tension calculation fails
+          }
+        }
+      }
+    }
+  },
+});

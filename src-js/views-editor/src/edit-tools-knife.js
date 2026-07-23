@@ -1,9 +1,15 @@
 import { translate } from "@fontra/core/localization.js";
 import { slicePaths } from "@fontra/core/path-functions.js";
+import { getSkeletonData, setSkeletonData } from "@fontra/core/skeleton-model.js";
 import { mapObjectValues, zip } from "@fontra/core/utils.ts";
 import * as vector from "@fontra/core/vector.js";
 import { constrainHorVerDiag } from "./edit-behavior.js";
 import { BaseTool, shouldInitiateDrag } from "./edit-tools-base.js";
+import {
+  markGeneratedContoursForRemap,
+  readGeneratedContourRemap,
+  remapGeneratedEntries,
+} from "./skeleton-editing.js";
 import {
   fillRoundNode,
   glyphSelector,
@@ -60,8 +66,15 @@ export class KnifeTool extends BaseTool {
       }
 
       this.sceneModel.knifeToolPointB = pointB;
+      // Skeleton-generated contours are derived geometry: the knife must not
+      // slice them, so their intersections are neither shown nor cut.
       this.sceneModel.knifeToolIntersections = intersections =
-        glyphController.pathHitTester.lineIntersections(pointA, pointB);
+        glyphController.pathHitTester
+          .lineIntersections(pointA, pointB)
+          .filter(
+            (intersection) =>
+              !this.sceneModel.isGeneratedPathContour(intersection.contourIndex)
+          );
 
       this.canvasController.requestUpdate();
     }
@@ -86,12 +99,25 @@ export class KnifeTool extends BaseTool {
     const layerPaths = mapObjectValues(editLayerGlyphs, (layerGlyph) =>
       layerGlyph.path.copy()
     );
+
+    // Slicing restructures the contour list arbitrarily (splits, merges,
+    // reinsertions), so generated-contour indices can't be maintained by a
+    // simple shift. The generated contours themselves are never sliced (their
+    // intersections are filtered out above), so carry their identity through
+    // the slice with temporary point attributes and re-derive the indices.
+    const markedSkeletons = markGeneratedContours(editLayerGlyphs, layerPaths);
+
     slicePaths(intersections, ...Object.values(layerPaths));
+
+    const updatedSkeletons = remapGeneratedContours(markedSkeletons, layerPaths);
 
     await this.sceneController.editGlyphAndRecordChanges(
       (glyph) => {
         for (const [layerName, layerPath] of Object.entries(layerPaths)) {
           glyph.layers[layerName].glyph.path = layerPath;
+          if (updatedSkeletons[layerName]) {
+            setSkeletonData(glyph.layers[layerName].glyph, updatedSkeletons[layerName]);
+          }
         }
         return translate("edit-tools-knife.undo.slice-glyph");
       },
@@ -104,6 +130,33 @@ export class KnifeTool extends BaseTool {
     super.deactivate();
     this.canvasController.requestUpdate();
   }
+}
+
+// Tag the generated contours on each layer's path copy so their indices can
+// be re-derived after slicing. Returns { layerName: skeletonData } for the
+// layers that have generated contours.
+function markGeneratedContours(editLayerGlyphs, layerPaths) {
+  const markedSkeletons = {};
+  for (const [layerName, layerGlyph] of Object.entries(editLayerGlyphs)) {
+    const skeletonData = getSkeletonData(layerGlyph);
+    if (!skeletonData?.generated?.length) {
+      continue;
+    }
+    markGeneratedContoursForRemap(layerPaths[layerName], skeletonData);
+    markedSkeletons[layerName] = skeletonData;
+  }
+  return markedSkeletons;
+}
+
+// Find the markers again after slicing (stripping them from the paths) and
+// rewrite each layer's generated pathContourIndex bookkeeping.
+function remapGeneratedContours(markedSkeletons, layerPaths) {
+  const updatedSkeletons = {};
+  for (const [layerName, skeletonData] of Object.entries(markedSkeletons)) {
+    const remap = readGeneratedContourRemap(layerPaths[layerName]);
+    updatedSkeletons[layerName] = remapGeneratedEntries(skeletonData, remap);
+  }
+  return updatedSkeletons;
 }
 
 registerVisualizationLayerDefinition({

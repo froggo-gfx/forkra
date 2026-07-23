@@ -1,8 +1,44 @@
+import { computeSpeedPunkSamples } from "@fontra/core/curvature.js";
+import {
+  calculateBadgeDimensions,
+  calculateBadgePosition,
+  calculateDistancesFromPoint,
+  calculateOffCurveAngle,
+  DISTANCE_ANGLE_BADGE_COLOR,
+  DISTANCE_ANGLE_BADGE_PADDING,
+  DISTANCE_ANGLE_BADGE_RADIUS,
+  DISTANCE_ANGLE_COLOR,
+  DISTANCE_ANGLE_FONT_SIZE,
+  DISTANCE_ANGLE_TEXT_COLOR,
+  drawDistanceAngleVisualization,
+  drawDragReadout,
+  drawManhattanDistanceVisualization,
+  drawMeasureOverlay,
+  drawOffCurveDistanceVisualization,
+  drawPointLabels,
+  formatDistanceAndAngle,
+  formatDistanceTensionAngle,
+  OFFCURVE_DISTANCE_BADGE_COLOR,
+  OFFCURVE_DISTANCE_BADGE_PADDING,
+  OFFCURVE_DISTANCE_BADGE_RADIUS,
+  OFFCURVE_DISTANCE_COLOR,
+  OFFCURVE_DISTANCE_FONT_SIZE,
+  OFFCURVE_DISTANCE_TEXT_COLOR,
+  unitVectorFromTo,
+} from "@fontra/core/distance-angle.js";
 import { guessGlyphPlaceholderString } from "@fontra/core/glyph-data.js";
 import { translate } from "@fontra/core/localization.js";
 import { rectToPoints } from "@fontra/core/rectangle.ts";
 import { difference, isSuperset, union } from "@fontra/core/set-ops.js";
+import {
+  getGeneratedPathContourIndices,
+  getSkeletonData,
+} from "@fontra/core/skeleton-model.js";
 import { decomposedToTransform } from "@fontra/core/transform.js";
+import {
+  calculateControlHandlePoint,
+  calculateTunniPoint,
+} from "@fontra/core/tunni-calculations.js";
 import {
   chain,
   clamp,
@@ -768,11 +804,14 @@ registerVisualizationLayerDefinition({
   colors: { strokeColor: "#8888" },
   colorsDarkMode: { strokeColor: "#AAA8" },
   draw: (context, positionedGlyph, parameters, model, controller) => {
-    const pointIndex = model.initialClickedPointIndex;
-    if (pointIndex === undefined) {
+    // Covers path points, skeleton points/handles, rib endpoints and editable
+    // generated points/handles — the scene model resolves whichever is being
+    // dragged (see getDragCrosshairPosition).
+    const position = model.getDragCrosshairPosition(positionedGlyph);
+    if (!position) {
       return;
     }
-    const { x, y } = positionedGlyph.glyph.path.getPoint(pointIndex);
+    const { x, y } = position;
     context.strokeStyle = parameters.strokeColor;
     context.lineWidth = parameters.strokeWidth;
     context.setLineDash(parameters.lineDash);
@@ -1663,6 +1702,64 @@ registerVisualizationLayerDefinition({
   },
 });
 
+// --- SpeedPunk / curvature visualization (render-only; math in curvature.js) ---
+registerVisualizationLayerDefinition({
+  identifier: "fontra.curvature",
+  name: "SpeedPunk",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: false,
+  zIndex: 490,
+  screenParameters: {
+    colorStops: ["#8b939c", "#f29400", "#e3004f"],
+    illustrationPosition: "outsideOfCurve",
+    baseSegmentBudget: 400,
+    minSegmentsPerCurve: 5,
+    globalColorNormalization: false,
+    adaptStepsToCurveLength: false,
+  },
+  draw: (context, positionedGlyph, parameters, model, controller) => {
+    const path = positionedGlyph.glyph?.path;
+    if (!path) return;
+
+    const peakHeightGlyphUnits = model.sceneSettings?.speedPunkPeakHeightUpm ?? 24;
+    const sharpness = Math.max(0.1, model.sceneSettings?.speedPunkSharpness ?? 1);
+    const opacity = Math.max(
+      0,
+      Math.min(1, model.sceneSettings?.speedPunkOpacity ?? 0.5)
+    );
+
+    const quads = computeSpeedPunkSamples(path, {
+      peakHeightGlyphUnits,
+      sharpness,
+      illustrationPosition: parameters.illustrationPosition,
+      useGlobalNormalization: parameters.globalColorNormalization,
+      colorStops: parameters.colorStops,
+      baseSegmentBudget: parameters.baseSegmentBudget,
+      minSegmentsPerCurve: parameters.minSegmentsPerCurve,
+      zoomFactor: controller.magnification || 1.0,
+      adaptStepsToCurveLength: parameters.adaptStepsToCurveLength,
+    });
+    if (!quads.length) return;
+
+    context.save();
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.globalAlpha = opacity;
+    for (const quad of quads) {
+      const p = new Path2D();
+      p.moveTo(quad.points[0][0], quad.points[0][1]);
+      for (let i = 1; i < quad.points.length; i++) {
+        p.lineTo(quad.points[i][0], quad.points[i][1]);
+      }
+      p.closePath();
+      context.fillStyle = quad.color;
+      context.fill(p);
+    }
+    context.restore();
+  },
+});
+
 //
 // allGlyphsCleanVisualizationLayerDefinition is not registered, but used
 // separately for the "clean" display.
@@ -1859,3 +1956,350 @@ function getTextVerticalCenter(context, text) {
   const metrics = context.measureText(text);
   return (metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
 }
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.coarse.grid",
+  name: "Coarse Grid",
+  userSwitchable: true,
+  zIndex: 1,
+  selectionFunc: glyphSelector("editing"),
+  screenParameters: {
+    strokeWidth: 0.25,
+    strokeColor: "#00000020",
+    coarseStrokeWidth: 0.5,
+    coarseStrokeColor: "#00000040",
+  },
+  draw: (ctx, positionedGlyph, params, model, controller) => {
+    const { strokeWidth, strokeColor, coarseStrokeWidth, coarseStrokeColor } = params;
+    const coarseSpacing = model.sceneSettings.coarseGridSpacing;
+    let { xMin, yMin, xMax, yMax } = controller.getViewBox();
+
+    // convert view-box to glyph-local coordinates
+    xMin -= positionedGlyph.x;
+    xMax -= positionedGlyph.x;
+    yMin -= positionedGlyph.y;
+    yMax -= positionedGlyph.y;
+
+    // dotted coarse grid
+    //ctx.setLineDash([2, 2]);
+    ctx.lineWidth = coarseStrokeWidth;
+    ctx.strokeStyle = coarseStrokeColor;
+
+    for (
+      let x = Math.floor(xMin / coarseSpacing) * coarseSpacing;
+      x <= Math.ceil(xMax / coarseSpacing) * coarseSpacing;
+      x += coarseSpacing
+    ) {
+      strokeLine(ctx, x, yMin, x, yMax);
+    }
+    for (
+      let y = Math.floor(yMin / coarseSpacing) * coarseSpacing;
+      y <= Math.ceil(yMax / coarseSpacing) * coarseSpacing;
+      y += coarseSpacing
+    ) {
+      strokeLine(ctx, xMin, y, xMax, y);
+    }
+
+    ctx.setLineDash([]);
+  },
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.tunni.handle",
+  name: "Tunni handles",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: false,
+  zIndex: 50,
+  screenParameters: {
+    strokeWidth: 1,
+    dashPattern: [5, 5],
+    tunniPointSize: 4,
+  },
+  colors: {
+    tunniLineColor: "#0000FF80", // Semi-transparent blue
+    tunniPointColor: "#0000FF", // Blue color
+  },
+  colorsDarkMode: {
+    tunniLineColor: "#00FFFF80", // Semi-transparent light blue
+    tunniPointColor: "#00FFFF", // Light blue in dark mode
+  },
+  draw: drawTunniCombined,
+});
+
+// Generated skeleton contours are derived geometry and get no regular Tunni
+// points/lines (skeleton Tunni operates on the skeleton itself).
+function getGeneratedContourIndicesForTunni(positionedGlyph, model) {
+  const editLayerName =
+    model.sceneSettings?.editLayerName || positionedGlyph.glyph?.layerName;
+  const layerGlyph =
+    editLayerName && positionedGlyph.varGlyph?.glyph?.layers?.[editLayerName]?.glyph;
+  return getGeneratedPathContourIndices(
+    getSkeletonData(layerGlyph || positionedGlyph.glyph)
+  );
+}
+
+function drawTunniCombined(context, positionedGlyph, parameters, model, controller) {
+  const path = positionedGlyph.glyph.path;
+  const generatedContourIndices = getGeneratedContourIndicesForTunni(
+    positionedGlyph,
+    model
+  );
+
+  // Draw the Tunni lines
+  context.strokeStyle = parameters.tunniLineColor;
+  context.lineWidth = parameters.strokeWidth;
+  context.setLineDash(parameters.dashPattern);
+
+  // Iterate through all contours
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
+    // Iterate through all segments in the contour
+    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
+      if (segment.points.length === 4) {
+        // Check if it's a cubic segment
+        const pointTypes = segment.parentPointIndices.map(
+          (index) => path.pointTypes[index]
+        );
+
+        // Both control points must be cubic
+        if (pointTypes[1] === 2 && pointTypes[2] === 2) {
+          const [p1, p2, p3, p4] = segment.points;
+
+          // Draw lines from start to first control and from second control to end
+          // These represent the on-curve to off-curve vectors
+          context.beginPath();
+          context.moveTo(p1.x, p1.y);
+          context.lineTo(p2.x, p2.y);
+          context.stroke();
+
+          context.beginPath();
+          context.moveTo(p4.x, p4.y);
+          context.lineTo(p3.x, p3.y);
+          context.stroke();
+
+          // Draw line between control points (the current handle line)
+          context.beginPath();
+          context.moveTo(p2.x, p2.y);
+          context.lineTo(p3.x, p3.y);
+          context.stroke();
+        }
+      }
+    }
+  }
+
+  context.setLineDash([]);
+
+  // Draw the visual Tunni points
+  context.fillStyle = parameters.tunniPointColor;
+
+  // Iterate through all contours
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
+    // Iterate through all segments in the contour
+    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
+      if (segment.points.length === 4) {
+        // Check if it's a cubic segment
+        const pointTypes = segment.parentPointIndices.map(
+          (index) => path.pointTypes[index]
+        );
+
+        // Both control points must be cubic
+        if (pointTypes[1] === 2 && pointTypes[2] === 2) {
+          // Draw the current Tunni point (midpoint between control points)
+          const tunniPoint = calculateControlHandlePoint(segment.points);
+          if (tunniPoint) {
+            context.beginPath();
+            context.arc(
+              tunniPoint.x,
+              tunniPoint.y,
+              parameters.tunniPointSize,
+              0,
+              2 * Math.PI
+            );
+            context.fill();
+          }
+        }
+      }
+    }
+  }
+}
+
+// Register the Tunni point visualization layer
+registerVisualizationLayerDefinition({
+  identifier: "fontra.tunni.point",
+  name: "Tunni point",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: false,
+  zIndex: 56, // Highest of the TUNNI layers for visibility
+  screenParameters: {
+    tunniPointSize: 4,
+  },
+  colors: {
+    tunniPointColor: "#FF8C00", // Orange color
+  },
+  colorsDarkMode: {
+    tunniPointColor: "#FFA500", // Lighter orange in dark mode
+  },
+  draw: drawActualTunniPoints,
+});
+
+function drawActualTunniPoints(
+  context,
+  positionedGlyph,
+  parameters,
+  model,
+  controller
+) {
+  const path = positionedGlyph.glyph.path;
+  const generatedContourIndices = getGeneratedContourIndicesForTunni(
+    positionedGlyph,
+    model
+  );
+
+  context.fillStyle = parameters.tunniPointColor;
+
+  // Iterate through all contours
+  for (let contourIndex = 0; contourIndex < path.numContours; contourIndex++) {
+    if (generatedContourIndices.has(contourIndex)) {
+      continue;
+    }
+    // Iterate through all segments in the contour
+    for (const segment of path.iterContourDecomposedSegments(contourIndex)) {
+      if (segment.points.length === 4) {
+        // Check if it's a cubic segment
+        const pointTypes = segment.parentPointIndices.map(
+          (index) => path.pointTypes[index]
+        );
+
+        // Both control points must be cubic
+        if (pointTypes[1] === 2 && pointTypes[2] === 2) {
+          // Draw the true Tunni point (intersection of on-curve to off-curve vectors)
+          const trueTunniPoint = calculateTunniPoint(segment.points);
+          if (trueTunniPoint) {
+            context.beginPath();
+            // Draw as a square/diamond shape to distinguish from visual points
+            const size = parameters.tunniPointSize;
+            context.rect(
+              trueTunniPoint.x - size / 2,
+              trueTunniPoint.y - size / 2,
+              size,
+              size
+            );
+            context.fill();
+          }
+        }
+      }
+    }
+  }
+
+  context.setLineDash([]);
+}
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.distance-angle",
+  name: "Distance & Angle",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: {
+    strokeWidth: 1,
+  },
+  colors: { strokeColor: "rgba(0, 153, 255, 0.75)" },
+  colorsDarkMode: { strokeColor: "rgba(0, 153, 255, 0.75)" },
+  draw: drawDistanceAngleVisualization,
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.manhattan-distance",
+  name: "Manhattan Distance",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: {
+    strokeWidth: 1,
+  },
+  colors: { strokeColor: "rgba(0, 153, 255, 0.75)" },
+  colorsDarkMode: { strokeColor: "rgba(0, 153, 255, 0.75)" },
+  draw: drawManhattanDistanceVisualization,
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.point.labels",
+  name: "Point labels",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 500,
+  screenParameters: {
+    strokeWidth: 1,
+  },
+  colors: {
+    strokeColor: "rgba(44, 28, 44, 1)",
+    badgeColor: "#FF00FF",
+    textColor: "white",
+  },
+  colorsDarkMode: { strokeColor: "#FF00FF", badgeColor: "#FF00FF", textColor: "white" },
+  draw: drawPointLabels,
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.drag.readout",
+  name: "sidebar.user-settings.glyph.dragreadout",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 650,
+  screenParameters: { fontSize: 14 },
+  colors: {
+    textColor: "#333",
+    textBgColor: "#FFFFFF",
+    textBorderColor: "rgba(0, 0, 0, 0.25)",
+    skeletonColor: "#0066FF",
+    pathColor: "#22AA44",
+  },
+  colorsDarkMode: {
+    textColor: "#EEE",
+    textBgColor: "#333333",
+    textBorderColor: "rgba(255, 255, 255, 0.25)",
+    skeletonColor: "#4D94FF",
+    pathColor: "#54D07D",
+  },
+  draw: drawDragReadout,
+});
+
+registerVisualizationLayerDefinition({
+  identifier: "fontra.measure.overlay",
+  name: "Measure Overlay",
+  selectionFunc: glyphSelector("editing"),
+  userSwitchable: true,
+  defaultOn: true,
+  zIndex: 650,
+  screenParameters: {
+    strokeWidth: 1,
+    fontSize: 14,
+    dashPattern: [4, 4],
+  },
+  colors: {
+    textColor: "#333",
+    textBgColor: "#FFFFFF",
+    textBorderColor: "rgba(0, 0, 0, 0.25)",
+    skeletonColor: "#0066FF",
+    pathColor: "#22AA44",
+  },
+  colorsDarkMode: {
+    textColor: "#EEE",
+    textBgColor: "#333333",
+    textBorderColor: "rgba(255, 255, 255, 0.25)",
+    skeletonColor: "#4499FF",
+    pathColor: "#44CC66",
+  },
+  draw: drawMeasureOverlay,
+});

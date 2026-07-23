@@ -1,6 +1,12 @@
 import { registerAction } from "@fontra/core/actions.js";
 import { applicationSettingsController } from "@fontra/core/application-settings.js";
 import { makeFontAxisAccordionItems } from "@fontra/core/axis-ui.js";
+import {
+  buildCoarseGridSliderValues,
+  normalizeCoarseGridBase,
+  normalizeCoarseGridIncrement,
+  snapCoarseGridSpacing,
+} from "@fontra/core/coarse-grid-presets.js";
 import { findNearestLocationIndex } from "@fontra/core/discrete-variation-model.js";
 import {
   BACKGROUND_LAYER_SEPARATOR,
@@ -47,6 +53,7 @@ import { IconButton } from "@fontra/web-components/icon-button.js";
 import { InlineSVG } from "@fontra/web-components/inline-svg.js";
 import { showMenu } from "@fontra/web-components/menu-panel.js";
 import { dialog, dialogSetup, message } from "@fontra/web-components/modal-dialog.js";
+import "@fontra/web-components/range-slider.js";
 import {
   Accordion,
   groupAccordionHeaderButtons,
@@ -59,6 +66,15 @@ import Panel from "./panel.js";
 
 const FONTRA_STATUS_KEY = "fontra.development.status";
 const FONTRA_STATUS_DEFINITIONS_KEY = "fontra.sourceStatusFieldDefinitions";
+const SPEEDPUNK_PEAK_HEIGHT_DEFAULT_UPM = 24;
+const SPEEDPUNK_PEAK_HEIGHT_MIN_UPM = 1;
+const SPEEDPUNK_PEAK_HEIGHT_MAX_UPM = 1000;
+const SPEEDPUNK_SHARPNESS_DEFAULT = 1;
+const SPEEDPUNK_SHARPNESS_MIN = 0.1;
+const SPEEDPUNK_SHARPNESS_MAX = 4;
+const SPEEDPUNK_OPACITY_DEFAULT = 0.5;
+const SPEEDPUNK_OPACITY_MIN = 0;
+const SPEEDPUNK_OPACITY_MAX = 1;
 
 const LIST_HEADER_ANIMATION_STYLE = `
 .clickable-icon-header {
@@ -231,6 +247,133 @@ export default class DesignspaceNavigationPanel extends Panel {
           ]
         ),
       },
+      {
+        id: "coarse-grid-accordion-item",
+        label: translate("sidebar.designspace-navigation.coarse-grid"),
+        open: false,
+        content: html.div(
+          {
+            style: `
+              display: grid;
+              grid-template-columns: auto 1fr;
+              gap: 0.5em;
+              align-items: center;
+            `,
+          },
+          [
+            html.label(
+              { for: "coarse-grid-display-toggle", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.coarse-grid.display")]
+            ),
+            html.input({ id: "coarse-grid-display-toggle", type: "checkbox" }),
+            html.label(
+              { for: "coarse-grid-spacing-input", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.coarse-grid.spacing")]
+            ),
+            html.createDomElement("range-slider", {
+              id: "coarse-grid-spacing-input",
+              type: "range",
+            }),
+            html.label(
+              { for: "coarse-grid-custom-toggle", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.coarse-grid.custom")]
+            ),
+            html.input({ id: "coarse-grid-custom-toggle", type: "checkbox" }),
+            html.div(),
+            html.div(
+              {
+                id: "coarse-grid-custom-fields",
+                style: `
+                  display: none;
+                  grid-template-columns: auto 1fr;
+                  gap: 0.5em;
+                  align-items: center;
+                `,
+              },
+              [
+                html.label(
+                  { for: "coarse-grid-base-input", style: "white-space: nowrap;" },
+                  [translate("sidebar.designspace-navigation.coarse-grid.base")]
+                ),
+                html.input({
+                  id: "coarse-grid-base-input",
+                  type: "number",
+                  min: 1,
+                  step: 1,
+                }),
+                html.label(
+                  {
+                    for: "coarse-grid-increment-input",
+                    style: "white-space: nowrap;",
+                  },
+                  [translate("sidebar.designspace-navigation.coarse-grid.increment")]
+                ),
+                html.input({
+                  id: "coarse-grid-increment-input",
+                  type: "number",
+                  min: 1,
+                  step: 1,
+                }),
+              ]
+            ),
+          ]
+        ),
+      },
+      {
+        id: "speedpunk-accordion-item",
+        label: translate("sidebar.designspace-navigation.speedpunk"),
+        open: false,
+        content: html.div(
+          {
+            style: `
+              display: grid;
+              grid-template-columns: auto 1fr;
+              gap: 0.5em;
+              align-items: center;
+            `,
+          },
+          [
+            html.label(
+              { for: "speedpunk-display-toggle", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.speedpunk.display")]
+            ),
+            html.input({ id: "speedpunk-display-toggle", type: "checkbox" }),
+            html.label(
+              { for: "speedpunk-peak-height-input", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.speedpunk.peak-height")]
+            ),
+            html.input({
+              id: "speedpunk-peak-height-input",
+              type: "number",
+              min: SPEEDPUNK_PEAK_HEIGHT_MIN_UPM,
+              max: SPEEDPUNK_PEAK_HEIGHT_MAX_UPM,
+              step: 1,
+            }),
+            html.label(
+              { for: "speedpunk-sharpness-input", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.speedpunk.sharpness")]
+            ),
+            html.input({
+              id: "speedpunk-sharpness-input",
+              type: "number",
+              min: SPEEDPUNK_SHARPNESS_MIN,
+              max: SPEEDPUNK_SHARPNESS_MAX,
+              step: 0.1,
+            }),
+            html.label(
+              { for: "speedpunk-opacity-input", style: "white-space: nowrap;" },
+              [translate("sidebar.designspace-navigation.speedpunk.opacity")]
+            ),
+            html.input({
+              id: "speedpunk-opacity-input",
+              type: "number",
+              min: SPEEDPUNK_OPACITY_MIN,
+              max: SPEEDPUNK_OPACITY_MAX,
+              step: 0.05,
+            }),
+          ]
+        ),
+      },
     ];
 
     return html.div({ class: "panel" }, [
@@ -252,6 +395,362 @@ export default class DesignspaceNavigationPanel extends Panel {
 
   get glyphLayersAccordionItem() {
     return this.accordion.querySelector("#glyph-layers-accordion-item");
+  }
+
+  get coarseGridSpacingInput() {
+    return this.accordion.querySelector("#coarse-grid-spacing-input");
+  }
+
+  get coarseGridCustomToggle() {
+    return this.accordion.querySelector("#coarse-grid-custom-toggle");
+  }
+
+  get coarseGridDisplayToggle() {
+    return this.accordion.querySelector("#coarse-grid-display-toggle");
+  }
+
+  get coarseGridCustomFields() {
+    return this.accordion.querySelector("#coarse-grid-custom-fields");
+  }
+
+  get coarseGridBaseInput() {
+    return this.accordion.querySelector("#coarse-grid-base-input");
+  }
+
+  get coarseGridIncrementInput() {
+    return this.accordion.querySelector("#coarse-grid-increment-input");
+  }
+
+  get speedPunkDisplayToggle() {
+    return this.accordion.querySelector("#speedpunk-display-toggle");
+  }
+
+  get speedPunkPeakHeightInput() {
+    return this.accordion.querySelector("#speedpunk-peak-height-input");
+  }
+
+  get speedPunkSharpnessInput() {
+    return this.accordion.querySelector("#speedpunk-sharpness-input");
+  }
+
+  get speedPunkOpacityInput() {
+    return this.accordion.querySelector("#speedpunk-opacity-input");
+  }
+
+  _readCoarseGridSettingsFromApp() {
+    const model = applicationSettingsController.model;
+    const custom = !!model.coarseGridCustom;
+    const base = normalizeCoarseGridBase(model.coarseGridBase);
+    const increment = normalizeCoarseGridIncrement(model.coarseGridIncrement);
+    const values = buildCoarseGridSliderValues({ custom, base, increment });
+    const spacing = snapCoarseGridSpacing(model.coarseGridDefaultSpacing, values);
+    return { custom, base, increment, spacing };
+  }
+
+  _persistCoarseGridSettings() {
+    const settings = this._coarseGridSettings;
+    const model = applicationSettingsController.model;
+    model.coarseGridCustom = !!settings.custom;
+    model.coarseGridBase = normalizeCoarseGridBase(settings.base);
+    model.coarseGridIncrement = normalizeCoarseGridIncrement(settings.increment);
+    model.coarseGridDefaultSpacing = settings.spacing;
+  }
+
+  _updateCoarseGridCustomFieldsVisibility() {
+    const fields = this.coarseGridCustomFields;
+    if (fields) {
+      fields.style.display = this._coarseGridSettings.custom ? "grid" : "none";
+    }
+  }
+
+  _updateCoarseGridControlsEnabled() {
+    const enabled =
+      !!this.editorController.visualizationLayersSettings.model["fontra.coarse.grid"];
+    for (const element of [
+      this.coarseGridSpacingInput,
+      this.coarseGridCustomToggle,
+      this.coarseGridBaseInput,
+      this.coarseGridIncrementInput,
+    ]) {
+      if (element) {
+        element.disabled = !enabled;
+        element.requestUpdate?.();
+      }
+    }
+  }
+
+  _syncCoarseGridControls() {
+    const settings = this._coarseGridSettings;
+    const values = buildCoarseGridSliderValues(settings);
+    const spacing = snapCoarseGridSpacing(settings.spacing, values);
+
+    this._isApplyingCoarseGridSettings = true;
+    try {
+      const spacingInput = this.coarseGridSpacingInput;
+      if (spacingInput) {
+        spacingInput.values = values;
+        spacingInput.minValue = values[0];
+        spacingInput.maxValue = values[values.length - 1];
+        spacingInput.defaultValue = values[Math.min(1, values.length - 1)];
+        spacingInput.value = spacing;
+      }
+      if (this.coarseGridCustomToggle) {
+        this.coarseGridCustomToggle.checked = settings.custom;
+      }
+      if (this.coarseGridBaseInput) {
+        this.coarseGridBaseInput.value = String(settings.base);
+      }
+      if (this.coarseGridIncrementInput) {
+        this.coarseGridIncrementInput.value = String(settings.increment);
+      }
+      this._updateCoarseGridCustomFieldsVisibility();
+      this._updateCoarseGridControlsEnabled();
+      window.coarseGridValues = values;
+      this.sceneSettingsController.setItem("coarseGridSpacing", spacing, {
+        senderID: this,
+      });
+      this._coarseGridSettings = { ...settings, spacing };
+    } finally {
+      this._isApplyingCoarseGridSettings = false;
+    }
+  }
+
+  _setupCoarseGridControls() {
+    this._coarseGridSettings = this._readCoarseGridSettingsFromApp();
+    this._syncCoarseGridControls();
+    this._persistCoarseGridSettings();
+
+    const spacingInput = this.coarseGridSpacingInput;
+    if (spacingInput) {
+      spacingInput.onChangeCallback = (event) => {
+        this._coarseGridSettings = {
+          ...this._coarseGridSettings,
+          spacing: event.value,
+        };
+        this.sceneSettingsController.setItem("coarseGridSpacing", event.value, {
+          senderID: this,
+        });
+        this._persistCoarseGridSettings();
+      };
+    }
+
+    const customToggle = this.coarseGridCustomToggle;
+    if (customToggle) {
+      customToggle.addEventListener("change", (event) => {
+        const custom = !!event.target.checked;
+        const values = buildCoarseGridSliderValues({
+          ...this._coarseGridSettings,
+          custom,
+        });
+        const spacing = snapCoarseGridSpacing(
+          this.sceneSettings.coarseGridSpacing,
+          values
+        );
+        this._coarseGridSettings = {
+          ...this._coarseGridSettings,
+          custom,
+          spacing,
+        };
+        this._syncCoarseGridControls();
+        this._persistCoarseGridSettings();
+      });
+    }
+
+    const onPresetInput = () => {
+      const base = normalizeCoarseGridBase(Number(this.coarseGridBaseInput?.value));
+      const increment = normalizeCoarseGridIncrement(
+        Number(this.coarseGridIncrementInput?.value)
+      );
+      const values = buildCoarseGridSliderValues({
+        ...this._coarseGridSettings,
+        base,
+        increment,
+      });
+      const spacing = snapCoarseGridSpacing(
+        this.sceneSettings.coarseGridSpacing,
+        values
+      );
+      this._coarseGridSettings = {
+        ...this._coarseGridSettings,
+        base,
+        increment,
+        spacing,
+      };
+      this._syncCoarseGridControls();
+      this._persistCoarseGridSettings();
+    };
+    if (this.coarseGridBaseInput) {
+      this.coarseGridBaseInput.addEventListener("change", onPresetInput);
+    }
+    if (this.coarseGridIncrementInput) {
+      this.coarseGridIncrementInput.addEventListener("change", onPresetInput);
+    }
+
+    this.sceneSettingsController.addKeyListener("coarseGridSpacing", (event) => {
+      if (this._isApplyingCoarseGridSettings || event.senderInfo?.senderID === this) {
+        return;
+      }
+      const values = buildCoarseGridSliderValues(this._coarseGridSettings);
+      const spacing = snapCoarseGridSpacing(event.newValue, values);
+      this._coarseGridSettings = { ...this._coarseGridSettings, spacing };
+      if (this.coarseGridSpacingInput) {
+        this.coarseGridSpacingInput.value = spacing;
+      }
+      if (spacing !== event.newValue) {
+        this.sceneSettingsController.setItem("coarseGridSpacing", spacing, {
+          senderID: this,
+        });
+      }
+      this._persistCoarseGridSettings();
+    });
+  }
+
+  _setupCoarseGridDisplayToggle() {
+    const toggle = this.coarseGridDisplayToggle;
+    if (!toggle) {
+      return;
+    }
+    const visualizationSettings = this.editorController.visualizationLayersSettings;
+    toggle.checked = !!visualizationSettings.model["fontra.coarse.grid"];
+    this._updateCoarseGridControlsEnabled();
+    toggle.addEventListener("change", () => {
+      visualizationSettings.model["fontra.coarse.grid"] = !!toggle.checked;
+      this._updateCoarseGridControlsEnabled();
+    });
+    visualizationSettings.addKeyListener("fontra.coarse.grid", (event) => {
+      toggle.checked = !!event.newValue;
+      this._updateCoarseGridControlsEnabled();
+    });
+  }
+
+  _normalizeSpeedPunkPeakHeightUpm(value) {
+    if (!Number.isFinite(value)) return SPEEDPUNK_PEAK_HEIGHT_DEFAULT_UPM;
+    return Math.max(
+      SPEEDPUNK_PEAK_HEIGHT_MIN_UPM,
+      Math.min(SPEEDPUNK_PEAK_HEIGHT_MAX_UPM, Math.round(value))
+    );
+  }
+
+  _normalizeSpeedPunkSharpness(value) {
+    if (!Number.isFinite(value)) return SPEEDPUNK_SHARPNESS_DEFAULT;
+    return Math.max(SPEEDPUNK_SHARPNESS_MIN, Math.min(SPEEDPUNK_SHARPNESS_MAX, value));
+  }
+
+  _normalizeSpeedPunkOpacity(value) {
+    if (!Number.isFinite(value)) return SPEEDPUNK_OPACITY_DEFAULT;
+    return Math.max(SPEEDPUNK_OPACITY_MIN, Math.min(SPEEDPUNK_OPACITY_MAX, value));
+  }
+
+  _readSpeedPunkSettingsFromApp() {
+    const model = applicationSettingsController.model;
+    return {
+      peakHeightUpm: this._normalizeSpeedPunkPeakHeightUpm(
+        model.speedPunkPeakHeightUpm
+      ),
+      sharpness: this._normalizeSpeedPunkSharpness(model.speedPunkSharpness),
+      opacity: this._normalizeSpeedPunkOpacity(model.speedPunkOpacity),
+    };
+  }
+
+  _persistSpeedPunkSettings() {
+    const settings = this._speedPunkSettings;
+    const model = applicationSettingsController.model;
+    model.speedPunkPeakHeightUpm = settings.peakHeightUpm;
+    model.speedPunkSharpness = settings.sharpness;
+    model.speedPunkOpacity = settings.opacity;
+  }
+
+  _updateSpeedPunkControlsEnabled() {
+    const enabled =
+      !!this.editorController.visualizationLayersSettings.model["fontra.curvature"];
+    for (const input of [
+      this.speedPunkPeakHeightInput,
+      this.speedPunkSharpnessInput,
+      this.speedPunkOpacityInput,
+    ]) {
+      if (input) {
+        input.disabled = !enabled;
+      }
+    }
+  }
+
+  _syncSpeedPunkControls() {
+    const settings = this._speedPunkSettings;
+    if (this.speedPunkPeakHeightInput) {
+      this.speedPunkPeakHeightInput.value = String(settings.peakHeightUpm);
+    }
+    if (this.speedPunkSharpnessInput) {
+      this.speedPunkSharpnessInput.value = String(settings.sharpness);
+    }
+    if (this.speedPunkOpacityInput) {
+      this.speedPunkOpacityInput.value = String(settings.opacity);
+    }
+    this.sceneSettingsController.setItem(
+      "speedPunkPeakHeightUpm",
+      settings.peakHeightUpm,
+      { senderID: this }
+    );
+    this.sceneSettingsController.setItem("speedPunkSharpness", settings.sharpness, {
+      senderID: this,
+    });
+    this.sceneSettingsController.setItem("speedPunkOpacity", settings.opacity, {
+      senderID: this,
+    });
+    this._updateSpeedPunkControlsEnabled();
+  }
+
+  _setupSpeedPunkControls() {
+    this._speedPunkSettings = this._readSpeedPunkSettingsFromApp();
+    this._syncSpeedPunkControls();
+    this._persistSpeedPunkSettings();
+
+    const bindNumberInput = (input, normalize, appKey, sceneKey) => {
+      if (!input) return;
+      input.addEventListener("change", () => {
+        const value = normalize(Number(input.value));
+        this._speedPunkSettings = {
+          ...this._speedPunkSettings,
+          [appKey]: value,
+        };
+        input.value = String(value);
+        this.sceneSettingsController.setItem(sceneKey, value, { senderID: this });
+        this._persistSpeedPunkSettings();
+      });
+    };
+
+    bindNumberInput(
+      this.speedPunkPeakHeightInput,
+      (value) => this._normalizeSpeedPunkPeakHeightUpm(value),
+      "peakHeightUpm",
+      "speedPunkPeakHeightUpm"
+    );
+    bindNumberInput(
+      this.speedPunkSharpnessInput,
+      (value) => this._normalizeSpeedPunkSharpness(value),
+      "sharpness",
+      "speedPunkSharpness"
+    );
+    bindNumberInput(
+      this.speedPunkOpacityInput,
+      (value) => this._normalizeSpeedPunkOpacity(value),
+      "opacity",
+      "speedPunkOpacity"
+    );
+
+    const toggle = this.speedPunkDisplayToggle;
+    if (toggle) {
+      const visualizationSettings = this.editorController.visualizationLayersSettings;
+      toggle.checked = !!visualizationSettings.model["fontra.curvature"];
+      this._updateSpeedPunkControlsEnabled();
+      toggle.addEventListener("change", () => {
+        visualizationSettings.model["fontra.curvature"] = !!toggle.checked;
+        this._updateSpeedPunkControlsEnabled();
+      });
+      visualizationSettings.addKeyListener("fontra.curvature", (event) => {
+        toggle.checked = !!event.newValue;
+        this._updateSpeedPunkControlsEnabled();
+      });
+    }
   }
 
   setup() {
@@ -335,6 +834,10 @@ export default class DesignspaceNavigationPanel extends Panel {
       this._updateAxes();
       this._updateSources();
     });
+
+    this._setupCoarseGridControls();
+    this._setupCoarseGridDisplayToggle();
+    this._setupSpeedPunkControls();
 
     const columnDescriptions = this._setupSourceListColumnDescriptions();
 

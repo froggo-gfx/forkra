@@ -28,6 +28,7 @@ import { translate, translatePlural } from "@fontra/core/localization.js";
 import { MouseTracker } from "@fontra/core/mouse-tracker.js";
 import { ObservableController } from "@fontra/core/observable-object.ts";
 import {
+  addOverlapToPath,
   connectContours,
   scalePoint,
   splitPathAtPointIndices,
@@ -47,6 +48,11 @@ import {
   union,
 } from "@fontra/core/set-ops.js";
 import { ShaperController } from "@fontra/core/shaper-controller.js";
+import {
+  clearSkeletonData,
+  getSkeletonData,
+  setSkeletonData,
+} from "@fontra/core/skeleton-model.js";
 import {
   arrowKeyDeltas,
   assert,
@@ -69,6 +75,24 @@ import * as vector from "@fontra/core/vector.js";
 import { dialog, message } from "@fontra/web-components/modal-dialog.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import { SceneModel } from "./scene-model.js";
+import {
+  applyGeneratedContourRemap,
+  computeGeneratedContourRemap,
+  createSkeletonRibTargetEntries,
+  getSelectionTargetKinds,
+  getSkeletonModifierBehaviorName,
+  makeSkeletonModifierOptions,
+  makeSkeletonPointTargetEntry,
+  parseSkeletonPointKey,
+  recordSkeletonContourIndexShift,
+} from "./skeleton-editing.js";
+import {
+  createEditableGeneratedHandleTargetEntries,
+  createEditableGeneratedPointTargetEntries,
+} from "./skeleton-editing.js";
+import { getSkeletonRibBehaviorName } from "./skeleton-editing.js";
+//// grid
+import { toggleMagneticSnap } from "./edit-behavior.js";
 
 // Minimum pixels per em and maximum pixels per unit for zooming out and in.
 //
@@ -102,7 +126,12 @@ export class SceneController {
     this.autoViewBox = true;
 
     this.setupSceneSettings();
-
+    //// grid
+    this.sceneSettingsController.setItem("coarseGridSpacing", 10);
+    this.sceneSettingsController.setItem("speedPunkPeakHeightUpm", 24);
+    this.sceneSettingsController.setItem("speedPunkSharpness", 1);
+    this.sceneSettingsController.setItem("speedPunkOpacity", 0.5);
+    this.sceneSettings = this.sceneSettingsController.model;
     this.visualizationLayersSettings = visualizationLayersSettings;
 
     // We need to do isPointInPath without having a context, we'll pass a bound method
@@ -134,7 +163,14 @@ export class SceneController {
   }
 
   setupSceneSettings() {
-    this.sceneSettingsController = new ObservableController(getSceneSettingsDefaults());
+    this.sceneSettingsController = new ObservableController({
+      ...getSceneSettingsDefaults(),
+      // fork: extra scene settings for coarse-grid snapping + Point labels
+      gridSnapEnabled: true, // Default to enabled
+      showLabelsDistance: true,
+      showLabelsTension: true,
+      showLabelsAngle: false,
+    });
     this.sceneSettings = this.sceneSettingsController.model;
 
     this.sceneSettings.viewBox = this.canvasController.getViewBox();
@@ -529,6 +565,18 @@ export class SceneController {
   }
 
   setupSettingsListeners() {
+    //// grid
+    this.sceneSettingsController.addKeyListener("coarseGridSpacing", () => {
+      this._updateCoarseGridRuntimeSpacing();
+      this.canvasController.requestUpdate();
+    });
+
+    this.visualizationLayersSettings.addKeyListener("fontra.coarse.grid", () => {
+      this._updateCoarseGridRuntimeSpacing();
+      this.canvasController.requestUpdate();
+    });
+    this._updateCoarseGridRuntimeSpacing();
+
     this.sceneSettingsController.addKeyListener("selectedGlyph", (event) => {
       this._resetStoredGlyphPosition();
     });
@@ -595,6 +643,14 @@ export class SceneController {
     );
   }
 
+  _updateCoarseGridRuntimeSpacing() {
+    window.coarseGridSpacing = this.visualizationLayersSettings.model[
+      "fontra.coarse.grid"
+    ]
+      ? this.sceneSettings.coarseGridSpacing || 1
+      : 1;
+  }
+
   setupEventHandling() {
     this.mouseTracker = new MouseTracker({
       drag: async (eventStream, initialEvent) =>
@@ -614,6 +670,34 @@ export class SceneController {
 
   setupContextMenuActions() {
     const topic = "0030-action-topics.menu.edit";
+
+    //// grid
+    registerAction(
+      "action.decrease-coarse-grid",
+      { titleKey: "action.decrease-coarse-grid", defaultShortCuts: [{ baseKey: "f" }] },
+      () => {
+        const v = this.sceneSettings.coarseGridSpacing;
+        if (v > 5) this.sceneSettingsController.setItem("coarseGridSpacing", v - 5);
+      }
+    );
+
+    registerAction(
+      "action.increase-coarse-grid",
+      { titleKey: "action.increase-coarse-grid", defaultShortCuts: [{ baseKey: "g" }] },
+      () => {
+        const v = this.sceneSettings.coarseGridSpacing;
+        if (v < 40) this.sceneSettingsController.setItem("coarseGridSpacing", v + 5);
+      }
+    );
+
+    registerAction(
+      "action.toggle-magnetic-snap",
+      {
+        titleKey: "action.toggle-magnetic-snap",
+        defaultShortCuts: [{ baseKey: "g", shiftKey: true }],
+      },
+      () => toggleMagneticSnap()
+    );
 
     registerAction(
       "action.join-contours",
@@ -656,6 +740,13 @@ export class SceneController {
     );
 
     registerAction(
+      "action.realize-skeleton-contours",
+      { topic },
+      () => this.doRealizeSkeletonContours(),
+      () => this.contextMenuState.skeletonPointSelection?.length
+    );
+
+    registerAction(
       "action.decompose-component",
       {
         topic,
@@ -673,6 +764,16 @@ export class SceneController {
         this.visualizationLayersSettings.model["fontra.background-image"] = true;
       }
     });
+
+    registerAction(
+      "action.add-overlap",
+      {
+        topic,
+        defaultShortCuts: [{ baseKey: "o", commandKey: true, shiftKey: true }],
+      },
+      () => this.doAddOverlap(),
+      () => this.contextMenuState.pointSelection?.length
+    );
   }
 
   setAutoViewBox() {
@@ -872,23 +973,81 @@ export class SceneController {
       dy *= 10;
     }
     const delta = { x: dx, y: dy };
+    const parsedSelection = parseSelection(this.selection);
+    const hasGeneratedHandleSelection =
+      !!parsedSelection.editableGeneratedHandle?.length;
+    const hasRibSelection = !!parsedSelection.skeletonRib?.length;
+    const hasGeneratedPointSelection = !!parsedSelection.editableGeneratedPoint?.length;
+    const hasRibLikeSelection = hasRibSelection || hasGeneratedPointSelection;
+    const modifiers = {
+      fixedRibMode: this.selectedTool?.fixedRibMode === true,
+      fixedRibCompressMode: this.selectedTool?.fixedRibCompressMode === true,
+      tangentRibMode: this.selectedTool?.tangentRibMode === true,
+    };
+    const behaviorName =
+      getSkeletonModifierBehaviorName(
+        event,
+        modifiers,
+        getSelectionTargetKinds(this.selection)
+      ) ||
+      (hasRibLikeSelection
+        ? getSkeletonRibBehaviorName(event, modifiers)
+        : event.altKey
+          ? "alternate"
+          : "default");
     await this.editGlyph((sendIncrementalChange, glyph) => {
-      const layerInfo = Object.entries(
-        this.getEditingLayerFromGlyphLayers(glyph.layers)
-      ).map(([layerName, layerGlyph]) => {
+      const editingLayers = this.getEditingLayerFromGlyphLayers(glyph.layers);
+      const editLayerName = this.sceneSettings.editLayerName;
+      const referenceSkeletonData = getSkeletonData(
+        editingLayers[editLayerName] || Object.values(editingLayers)[0]
+      );
+      const layerInfo = Object.entries(editingLayers).map(([layerName, layerGlyph]) => {
+        const modifierOptions = makeSkeletonModifierOptions(behaviorName, {
+          referenceSkeletonData,
+        });
+        const targetEntries = hasGeneratedHandleSelection
+          ? createEditableGeneratedHandleTargetEntries(
+              layerGlyph,
+              this.selection,
+              behaviorName,
+              modifierOptions
+            )
+          : hasRibLikeSelection
+            ? [
+                ...createSkeletonRibTargetEntries(
+                  layerGlyph,
+                  this.selection,
+                  behaviorName,
+                  modifierOptions
+                ),
+                ...createEditableGeneratedPointTargetEntries(
+                  layerGlyph,
+                  this.selection,
+                  behaviorName,
+                  modifierOptions
+                ),
+              ]
+            : [
+                makeSkeletonPointTargetEntry(
+                  layerGlyph,
+                  this.selection,
+                  behaviorName,
+                  referenceSkeletonData,
+                  modifierOptions
+                ),
+              ].filter((entry) => entry);
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           this.selection,
-          this.selectedTool.scalingEditBehavior
+          this.selectedTool.scalingEditBehavior,
+          { targetEntries }
         );
         return {
           layerName,
           layerGlyph,
           changePath: ["layers", layerName, "glyph"],
           pathPrefix: [],
-          editBehavior: behaviorFactory.getBehavior(
-            event.altKey ? "alternate" : "default"
-          ),
+          editBehavior: behaviorFactory.getBehavior(behaviorName),
         };
       });
 
@@ -979,10 +1138,14 @@ export class SceneController {
         relevantSelection = this.selection;
       }
     }
-    const { point: pointSelection, component: componentSelection } =
-      parseSelection(relevantSelection);
+    const {
+      point: pointSelection,
+      component: componentSelection,
+      skeletonPoint: skeletonPointSelection,
+    } = parseSelection(relevantSelection);
     this.contextMenuState.pointSelection = pointSelection;
     this.contextMenuState.componentSelection = componentSelection;
+    this.contextMenuState.skeletonPointSelection = skeletonPointSelection;
 
     const glyphController = this.sceneModel.getSelectedPositionedGlyph().glyph;
     this.contextMenuState.openContourSelection = glyphController.canEdit
@@ -1011,6 +1174,7 @@ export class SceneController {
       { actionIdentifier: "action.break-contour" },
       { actionIdentifier: "action.reverse-contour" },
       { actionIdentifier: "action.set-contour-start" },
+      { actionIdentifier: "action.realize-skeleton-contours" },
       {
         title: translate("action.glyph.convert-curves"),
         getItems: () => [
@@ -1040,6 +1204,71 @@ export class SceneController {
       },
     ];
     return contextMenuItems;
+  }
+
+  // 4.2 "Realize contours" (donor: realize skeleton projection): detach the
+  // selected skeleton contours, keeping their generated outlines in the path
+  // as plain editable contours. Pure skeleton-data edit — the path and the
+  // realized contours' geometry are untouched, so this must NOT go through
+  // editSkeleton (regeneration would drop the now-orphaned outlines).
+  async doRealizeSkeletonContours() {
+    const skeletonPointSelection = this.contextMenuState.skeletonPointSelection || [];
+    if (!skeletonPointSelection.length) {
+      return;
+    }
+    await this.editLayersAndRecordChanges((layerGlyphs) => {
+      const editLayerName = this.sceneSettings.editLayerName;
+      const referenceSkeletonData = getSkeletonData(
+        layerGlyphs[editLayerName] || Object.values(layerGlyphs)[0]
+      );
+      if (!referenceSkeletonData) {
+        return;
+      }
+      // Selection ids are canonical in the edit layer; other layers resolve
+      // the affected contours by structural ordinal (WS-9)
+      const contourIds = new Set(
+        skeletonPointSelection.map((item) => parseSkeletonPointKey(`${item}`).contourId)
+      );
+      const ordinals = [];
+      referenceSkeletonData.contours.forEach((contour, index) => {
+        if (contourIds.has(contour.id)) {
+          ordinals.push(index);
+        }
+      });
+      if (!ordinals.length) {
+        return;
+      }
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        const original = getSkeletonData(layerGlyph);
+        if (!original) {
+          continue;
+        }
+        const skeletonData = structuredClone(original);
+        const removeIds = new Set(
+          ordinals
+            .map((ordinal) => skeletonData.contours[ordinal]?.id)
+            .filter((id) => id !== undefined)
+        );
+        if (!removeIds.size) {
+          continue;
+        }
+        skeletonData.generated = (skeletonData.generated || []).filter(
+          (entry) => !removeIds.has(entry.skeletonContourId)
+        );
+        skeletonData.contours = skeletonData.contours.filter(
+          (contour) => !removeIds.has(contour.id)
+        );
+        if (!skeletonData.contours.length && !skeletonData.generated.length) {
+          clearSkeletonData(layerGlyph);
+        } else {
+          setSkeletonData(layerGlyph, skeletonData);
+        }
+      }
+      this.selection = new Set(
+        [...this.selection].filter((key) => !key.startsWith("skeletonPoint/"))
+      );
+      return translate("action.realize-skeleton-contours");
+    });
   }
 
   getSelectedGlyphName() {
@@ -1381,6 +1610,7 @@ export class SceneController {
         glyphLocation: this.sceneSettings.glyphLocation,
         editingLayers: this.sceneSettings.editingLayers,
         editLayerName: this.sceneSettings.editLayerName,
+        gridSnapEnabled: this.sceneSettings.gridSnapEnabled,
       };
       if (!this._cancelGlyphEditing) {
         editContext.editFinal(
@@ -1479,6 +1709,9 @@ export class SceneController {
         this.sceneSettings.glyphLocation = { ...undoInfo.glyphLocation };
         this.sceneSettings.editingLayers = undoInfo.editingLayers;
         this.sceneSettings.editLayerName = undoInfo.editLayerName;
+        if (undoInfo.gridSnapEnabled !== undefined) {
+          this.sceneSettings.gridSnapEnabled = undoInfo.gridSnapEnabled;
+        }
       }
       await this.sceneModel.updateScene();
       this.canvasController.requestUpdate();
@@ -1503,6 +1736,8 @@ export class SceneController {
             contour.points.splice(0, 0, lastPoint);
           }
           const packedContour = packContour(contour);
+          // Net-zero contour count (delete + re-insert at same index): generated
+          // contour indices are unaffected, no skeleton bookkeeping needed.
           layerGlyph.path.deleteContour(contourIndex);
           layerGlyph.path.insertContour(contourIndex, packedContour);
         }
@@ -1542,6 +1777,7 @@ export class SceneController {
           const contour = path.getUnpackedContour(contourIndex);
           const head = contour.points.splice(0, contourPointIndex);
           contour.points.push(...head);
+          // Net-zero contour count (delete + re-insert at same index): no shift.
           layerGlyph.path.deleteContour(contourIndex);
           layerGlyph.path.insertContour(contourIndex, packContour(contour));
           newSelection.add(`point/${path.getAbsolutePointIndex(contourIndex, 0)}`);
@@ -1558,6 +1794,12 @@ export class SceneController {
     const [pointIndex1, pointIndex2] = this.contextMenuState.joinContourSelection;
     await this.editLayersAndRecordChanges((layerGlyphs) => {
       for (const layerGlyph of Object.values(layerGlyphs)) {
+        // joinContours removes the second (higher-indexed) contour; compute its
+        // index before the join, while the point indices are still valid, so
+        // only generated contours after it shift down.
+        const [removedContourIndex] = layerGlyph.path.getContourAndPointIndex(
+          Math.max(pointIndex1, pointIndex2)
+        );
         const selectionPointIndices = joinContours(
           layerGlyph.path,
           pointIndex1,
@@ -1567,6 +1809,7 @@ export class SceneController {
         for (const pointIndex of selectionPointIndices) {
           newSelection.add(`point/${pointIndex}`);
         }
+        recordSkeletonContourIndexShift(layerGlyph, removedContourIndex, -1);
       }
       this.selection = newSelection;
       return translate("action.join-contours");
@@ -1593,7 +1836,13 @@ export class SceneController {
     await this.editLayersAndRecordChanges((layerGlyphs) => {
       let numSplits;
       for (const layerGlyph of Object.values(layerGlyphs)) {
+        // Splitting inserts contours, shifting skeleton-generated contour
+        // indices; dry-run on a marked scratch copy to learn where they land.
+        const remap = computeGeneratedContourRemap(layerGlyph, (scratchPath) =>
+          splitPathAtPointIndices(scratchPath, pointIndices)
+        );
         numSplits = splitPathAtPointIndices(layerGlyph.path, pointIndices);
+        applyGeneratedContourRemap(layerGlyph, remap);
       }
       this.selection = new Set();
       return translatePlural("action.break-contour", numSplits);
@@ -1661,6 +1910,77 @@ export class SceneController {
       }
       this.selection = new Set();
       return translatePlural("action.decompose-component", componentSelection?.length);
+    });
+  }
+
+  async doAddOverlap() {
+    const { point: pointSelection } = parseSelection(this.selection);
+    await this.editLayersAndRecordChanges((layerGlyphs) => {
+      for (const layerGlyph of Object.values(layerGlyphs)) {
+        const path = layerGlyph.path;
+        // Validate that path is a VarPackedPath instance with all required methods
+        if (!path || typeof path !== "object") {
+          console.warn("Invalid path object for addOverlap, skipping - not an object");
+          continue;
+        }
+        if (!(path instanceof VarPackedPath)) {
+          console.warn(
+            "Invalid path object for addOverlap, skipping - not a VarPackedPath instance"
+          );
+          continue;
+        }
+
+        const requiredMethods = [
+          "copy",
+          "getPoint",
+          "getAbsolutePointIndex",
+          "getNumPointsOfContour",
+          "setPointPosition",
+          "insertPoint",
+        ];
+        let hasAllMethods = true;
+        for (const method of requiredMethods) {
+          if (typeof path[method] !== "function") {
+            console.warn(
+              `Invalid path object for addOverlap, skipping - missing method: ${method}`
+            );
+            hasAllMethods = false;
+            break;
+          }
+        }
+
+        // Additional check for getPoint method specifically
+        if (typeof path.getPoint !== "function") {
+          console.warn(
+            "Invalid path object for addOverlap, skipping - missing getPoint method"
+          );
+          continue;
+        }
+
+        if (!hasAllMethods) {
+          continue;
+        }
+
+        if (typeof path.numContours === "undefined") {
+          console.warn(
+            "Invalid path object for addOverlap, skipping - missing numContours property"
+          );
+          continue;
+        }
+
+        try {
+          // Create a copy of the path with overlap added
+          const newPath = addOverlapToPath(path, pointSelection);
+          // Replace the path with the new path that has overlap
+          layerGlyph.path = newPath;
+        } catch (error) {
+          console.warn("Error while adding overlap:", error);
+          console.warn("Error stack:", error.stack);
+        }
+      }
+      // Clear the selection after adding overlap
+      this.selection = new Set();
+      return translate("action.add-overlap");
     });
   }
 
@@ -2040,6 +2360,9 @@ export function joinContours(path, firstPointIndex, secondPointIndex) {
     isClosed: false,
   };
 
+  // Bare-path helper: net -1 contour. Skeleton generated-index bookkeeping is
+  // handled by the caller (doJoinSelectedOpenContours) via
+  // recordSkeletonContourIndexShift, where the layer glyph is in scope.
   path.deleteContour(firstContourIndex);
   path.insertUnpackedContour(firstContourIndex, newContour);
   path.deleteContour(secondContourIndex);

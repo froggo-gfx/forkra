@@ -11,7 +11,8 @@ import {
   filterPathByPointIndices,
   getSelectionByContour,
 } from "@fontra/core/path-functions.js";
-import { rectCenter, rectSize } from "@fontra/core/rectangle.ts";
+import { rectCenter, rectSize, unionRect } from "@fontra/core/rectangle.ts";
+import { getSkeletonData } from "@fontra/core/skeleton-model.js";
 import { Transform } from "@fontra/core/transform.js";
 import {
   enumerate,
@@ -26,6 +27,12 @@ import { VarPackedPath } from "@fontra/core/var-path.js";
 import { Form } from "@fontra/web-components/ui-form.js";
 import { EditBehaviorFactory } from "./edit-behavior.js";
 import Panel from "./panel.js";
+import {
+  applyGeneratedContourRemap,
+  computeGeneratedContourRemap,
+  getSkeletonSelectionBounds,
+  makeSkeletonPointTargetEntry,
+} from "./skeleton-editing.js";
 
 export default class TransformationPanel extends Panel {
   identifier = "selection-transformation";
@@ -105,7 +112,15 @@ export default class TransformationPanel extends Panel {
       customDistributionSpacing: null,
       dimensionWidth: null,
       dimensionHeight: null,
+      showLabelsDistance: true,
+      showLabelsTension: true,
+      showLabelsAngle: false,
     };
+
+    // Initialize scene settings with default values
+    this.sceneController.sceneSettingsController.setItem("showLabelsDistance", true);
+    this.sceneController.sceneSettingsController.setItem("showLabelsTension", true);
+    this.sceneController.sceneSettingsController.setItem("showLabelsAngle", true);
     this.registerActions();
 
     this.sceneController.sceneSettingsController.addKeyListener(
@@ -654,10 +669,90 @@ export default class TransformationPanel extends Panel {
       field3: {},
     });
 
+    // Add Point labels control section
+    formContents.push({ type: "divider" });
+    formContents.push({
+      type: "header",
+      label: "Point labels",
+    });
+
+    // Create checkbox elements for Point labels
+    const distanceCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showLabelsDistance ?? true,
+    });
+
+    const tensionCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showLabelsTension ?? true,
+    });
+
+    const angleCheckbox = html.input({
+      type: "checkbox",
+      checked: this.transformParameters.showLabelsAngle ?? true,
+    });
+
+    // Add three individual checkboxes for distance, tension, and angle using universal-row
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showLabelsDistance",
+        auxiliaryElement: distanceCheckbox,
+      },
+      field2: {
+        type: "text",
+        key: "labelDistance",
+        value: "Distance",
+      },
+      field3: {},
+    });
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showLabelsTension",
+        auxiliaryElement: tensionCheckbox,
+      },
+      field2: {
+        type: "text",
+        key: "labelTension",
+        value: "Tension",
+      },
+      field3: {},
+    });
+
+    formContents.push({
+      type: "universal-row",
+      field1: {
+        type: "auxiliaryElement",
+        key: "showLabelsAngle",
+        auxiliaryElement: angleCheckbox,
+      },
+      field2: {
+        type: "text",
+        key: "labelAngle",
+        value: "Angle",
+      },
+      field3: {},
+    });
+
     this.infoForm.setFieldDescriptions(formContents);
 
     this.infoForm.onFieldChange = async (fieldItem, value, valueStream) => {
       this.transformParameters[fieldItem.key] = value;
+
+      // Handle Tunni visibility parameters
+      if (
+        ["showLabelsDistance", "showLabelsTension", "showLabelsAngle"].includes(
+          fieldItem.key
+        )
+      ) {
+        // Update the scene settings
+        this.sceneController.sceneSettingsController.setItem(fieldItem.key, value);
+      }
+
       if (fieldItem.key === "originXButton" || fieldItem.key === "originYButton") {
         this.transformParameters[fieldItem.key.replace("Button", "")] = value;
 
@@ -669,6 +764,58 @@ export default class TransformationPanel extends Panel {
         });
       }
     };
+
+    // Add event listeners to the checkboxes to update the form values properly
+    setTimeout(() => {
+      // Use querySelector to find the checkboxes by their position in the form
+      const allCheckboxes = this.infoForm.contentElement.querySelectorAll(
+        'input[type="checkbox"]'
+      );
+
+      // Find the specific Tunni checkboxes by looking at the form structure
+      // The checkboxes are added in sequence: Distance, Tension, Angle
+      if (allCheckboxes.length >= 3) {
+        const distanceCheckbox = allCheckboxes[0];
+        const tensionCheckbox = allCheckboxes[1];
+        const angleCheckbox = allCheckboxes[2];
+
+        // Set initial checked states
+        distanceCheckbox.checked = this.transformParameters.showLabelsDistance ?? true;
+        tensionCheckbox.checked = this.transformParameters.showLabelsTension ?? true;
+        angleCheckbox.checked = this.transformParameters.showLabelsAngle ?? true;
+
+        // Add event listeners to each checkbox
+        distanceCheckbox.addEventListener("change", (event) => {
+          this.transformParameters.showLabelsDistance = event.target.checked;
+          this.sceneController.sceneSettingsController.setItem(
+            "showLabelsDistance",
+            event.target.checked
+          );
+          // Force a redraw of the visualization
+          this.sceneController.canvasController.requestUpdate();
+        });
+
+        tensionCheckbox.addEventListener("change", (event) => {
+          this.transformParameters.showLabelsTension = event.target.checked;
+          this.sceneController.sceneSettingsController.setItem(
+            "showLabelsTension",
+            event.target.checked
+          );
+          // Force a redraw of the visualization
+          this.sceneController.canvasController.requestUpdate();
+        });
+
+        angleCheckbox.addEventListener("change", (event) => {
+          this.transformParameters.showLabelsAngle = event.target.checked;
+          this.sceneController.sceneSettingsController.setItem(
+            "showLabelsAngle",
+            event.target.checked
+          );
+          // Force a redraw of the visualization
+          this.sceneController.canvasController.requestUpdate();
+        });
+      }
+    }, 0);
 
     this.updateDimensions();
   }
@@ -779,12 +926,26 @@ export default class TransformationPanel extends Panel {
       (glyph) => {
         for (const [layerName, layerPath] of Object.entries(layerPaths)) {
           if (doUnion && pointIndices.length) {
-            const path = glyph.layers[layerName].glyph.path;
-            for (const contourIndex of reversed(selectedContourIndices)) {
-              path.deleteContour(contourIndex);
-            }
-            path.appendPath(layerPath);
+            // Union of selected contours: the selected contours (never
+            // generated ones — those are unselectable) are deleted and the
+            // boolean result is appended, so the surviving generated contours
+            // only move; re-derive their indices via a marked dry run.
+            const layerGlyph = glyph.layers[layerName].glyph;
+            const structuralEdit = (path) => {
+              for (const contourIndex of reversed(selectedContourIndices)) {
+                path.deleteContour(contourIndex);
+              }
+              path.appendPath(layerPath);
+            };
+            const remap = computeGeneratedContourRemap(layerGlyph, structuralEdit);
+            structuralEdit(layerGlyph.path);
+            applyGeneratedContourRemap(layerGlyph, remap);
           } else {
+            // Whole-path boolean ops (union-all, subtract/intersect/exclude)
+            // consume every contour, generated ones included: the result no
+            // longer corresponds to the skeleton's generated bookkeeping.
+            // Documented WS-9 limitation (Deviations): with an active skeleton
+            // these ops are destructive to the generated linkage.
             glyph.layers[layerName].glyph.path = layerPath;
           }
         }
@@ -803,17 +964,20 @@ export default class TransformationPanel extends Panel {
       component: componentIndices,
       anchor: anchorIndices,
       backgroundImage: backgroundImageIndices,
+      skeletonPoint: skeletonPointKeys,
     } = parseSelection(this.sceneController.selection);
 
     pointIndices = pointIndices || [];
     componentIndices = componentIndices || [];
     anchorIndices = anchorIndices || [];
     backgroundImageIndices = backgroundImageIndices || [];
+    skeletonPointKeys = skeletonPointKeys || [];
     if (
       !pointIndices.length &&
       !componentIndices.length &&
       !anchorIndices.length &&
-      !backgroundImageIndices.length
+      !backgroundImageIndices.length &&
+      !skeletonPointKeys.length
     ) {
       return;
     }
@@ -824,23 +988,38 @@ export default class TransformationPanel extends Panel {
       await this.sceneController.getStaticGlyphControllers();
 
     await this.sceneController.editGlyph((sendIncrementalChange, glyph) => {
-      const layerInfo = Object.entries(
-        this.sceneController.getEditingLayerFromGlyphLayers(glyph.layers)
-      ).map(([layerName, layerGlyph]) => {
+      const editingLayers = this.sceneController.getEditingLayerFromGlyphLayers(
+        glyph.layers
+      );
+      const editLayerName = this.sceneController.sceneSettings.editLayerName;
+      const referenceSkeletonData = getSkeletonData(
+        editingLayers[editLayerName] || Object.values(editingLayers)[0]
+      );
+      const layerInfo = Object.entries(editingLayers).map(([layerName, layerGlyph]) => {
+        const skeletonEntry = makeSkeletonPointTargetEntry(
+          layerGlyph,
+          this.sceneController.selection,
+          "default",
+          referenceSkeletonData
+        );
         const behaviorFactory = new EditBehaviorFactory(
           layerGlyph,
           this.sceneController.selection,
-          this.sceneController.selectedTool.scalingEditBehavior
+          this.sceneController.selectedTool.scalingEditBehavior,
+          { targetEntries: skeletonEntry ? [skeletonEntry] : [] }
         );
         return {
           layerName,
           changePath: ["layers", layerName, "glyph"],
           layerGlyph: layerGlyph,
-          selectionBounds: (
-            staticGlyphControllers[layerName] || glyphController
-          ).getSelectionBounds(
-            this.sceneController.selection,
-            this.fontController.getBackgroundImageBoundsFunc
+          selectionBounds: unionRect(
+            ...[
+              (staticGlyphControllers[layerName] || glyphController).getSelectionBounds(
+                this.sceneController.selection,
+                this.fontController.getBackgroundImageBoundsFunc
+              ),
+              getSkeletonSelectionBounds(layerGlyph, this.sceneController.selection),
+            ].filter((bounds) => bounds)
           ),
           editBehavior: behaviorFactory.getTransformBehavior("default"),
         };
@@ -903,6 +1082,7 @@ export default class TransformationPanel extends Panel {
       component: componentIndices,
       anchor: anchorIndices,
       backgroundImage: backgroundImageIndices,
+      skeletonPoint: skeletonPointKeys,
     } = parseSelection(selection);
     pointIndices = pointIndices || [];
 
@@ -911,9 +1091,22 @@ export default class TransformationPanel extends Panel {
     const components = componentIndices || [];
     const anchors = anchorIndices || [];
     const backgroundImages = backgroundImageIndices || [];
+    // Each selected skeleton on-curve point is its own movable object (donor
+    // per-point align/distribute behavior). Keys stay id-based (skeletonPoint/
+    // <contourId>/<pointId>); the factory skeleton target entry moves them.
+    const skeletonPoints = (skeletonPointKeys || []).map(
+      (remainder) => `skeletonPoint/${remainder}`
+    );
 
     if (!pointIndices.length) {
-      return { points, contours, components, anchors, backgroundImages };
+      return {
+        points,
+        contours,
+        components,
+        anchors,
+        backgroundImages,
+        skeletonPoints,
+      };
     }
 
     const path = layerGlyphController.instance.path;
@@ -956,17 +1149,16 @@ export default class TransformationPanel extends Panel {
       }
     }
 
-    return { points, contours, components, anchors, backgroundImages };
+    return { points, contours, components, anchors, backgroundImages, skeletonPoints };
   }
 
   _collectMovableObjects(moveDescriptor, controller) {
-    const { points, contours, components, anchors, backgroundImages } =
+    const { points, contours, components, anchors, backgroundImages, skeletonPoints } =
       this._splitSelection(controller, this.sceneController.selection);
 
     const movableObjects = [];
     for (const pointIndex of points) {
-      const individualSelection = new Set([`point/${pointIndex}`]);
-      movableObjects.push(new MovableObject(individualSelection));
+      movableObjects.push(new MovablePoint(pointIndex));
     }
     for (const [contourIndex, pointIndices] of enumerate(contours)) {
       const individualSelection = new Set(
@@ -985,6 +1177,9 @@ export default class TransformationPanel extends Panel {
     for (const backgroundImageIndex of backgroundImages) {
       const individualSelection = new Set([`backgroundImage/${backgroundImageIndex}`]);
       movableObjects.push(new MovableObject(individualSelection));
+    }
+    for (const skeletonPointKey of skeletonPoints) {
+      movableObjects.push(new MovableObject(new Set([skeletonPointKey])));
     }
 
     if (moveDescriptor.compareObjects) {
@@ -1015,6 +1210,12 @@ export default class TransformationPanel extends Panel {
       const editLayerGlyphs = this.sceneController.getEditingLayerFromGlyphLayers(
         glyph.layers
       );
+      // Skeleton selection ids are canonical in the edit layer; other layers
+      // resolve by structural ordinal (WS-9 cross-layer addressing).
+      const editLayerName = this.sceneController.sceneSettings.editLayerName;
+      const referenceSkeletonData = getSkeletonData(
+        editLayerGlyphs[editLayerName] || Object.values(editLayerGlyphs)[0]
+      );
 
       const editChanges = [];
       const rollbackChanges = [];
@@ -1036,7 +1237,8 @@ export default class TransformationPanel extends Panel {
           const [editChange, rollbackChange] = movableObject.makeChangesForDelta(
             delta,
             layerGlyph,
-            this.sceneController
+            this.sceneController,
+            referenceSkeletonData
           );
           applyChange(layerGlyph, editChange);
           editChanges.push(consolidateChanges(editChange, changePath));
@@ -1103,16 +1305,49 @@ class MovableObject {
     );
   }
 
-  makeChangesForDelta(delta, layerGlyph, sceneController) {
+  makeChangesForDelta(
+    delta,
+    layerGlyph,
+    sceneController,
+    referenceSkeletonData = null
+  ) {
+    // A skeleton-only movable object carries its point through the WS-9 factory
+    // target entry (no SkeletonMovableObject; the factory owns dispatch).
+    const skeletonEntry = makeSkeletonPointTargetEntry(
+      layerGlyph,
+      this.selection,
+      "default",
+      referenceSkeletonData
+    );
     const behaviorFactory = new EditBehaviorFactory(
       layerGlyph,
       this.selection,
-      sceneController.selectedTool.scalingEditBehavior
+      sceneController.selectedTool.scalingEditBehavior,
+      { targetEntries: skeletonEntry ? [skeletonEntry] : [] }
     );
 
     const editBehavior = behaviorFactory.getBehavior("default");
     const editChange = editBehavior.makeChangeForDelta(delta);
     return [editChange, editBehavior.rollbackChange];
+  }
+}
+
+// An individually movable path point. Bounds must be the point's own
+// coordinate: getSelectionBounds' filterPathByPointIndices expands an
+// off-curve selection to its whole segment, which would give every handle its
+// segment's box — handles sharing a segment then align to zero deltas.
+class MovablePoint extends MovableObject {
+  constructor(pointIndex) {
+    super(new Set([`point/${pointIndex}`]));
+    this.pointIndex = pointIndex;
+  }
+
+  computeBounds(staticGlyphController) {
+    const point = staticGlyphController.instance.path.getPoint(this.pointIndex);
+    if (!point) {
+      return undefined;
+    }
+    return { xMin: point.x, yMin: point.y, xMax: point.x, yMax: point.y };
   }
 }
 

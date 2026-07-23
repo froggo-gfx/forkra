@@ -1,6 +1,10 @@
 import { expect } from "chai";
 
 import { StaticGlyphController } from "@fontra/core/glyph-controller.js";
+import {
+  getSkeletonRibPosition,
+  setSkeletonData,
+} from "@fontra/core/skeleton-model.js";
 import { getDecomposedIdentity } from "@fontra/core/transform.js";
 import { range } from "@fontra/core/utils.ts";
 import { StaticGlyph, VariableGlyph } from "@fontra/core/var-glyph.js";
@@ -60,6 +64,23 @@ describe("glyph-controller Tests", () => {
       undefined
     );
     expect(staticGlyphController.name).to.equal("dummy");
+  });
+
+  it("get StaticGlyphController customData", () => {
+    // Skeleton resolvers fall back to getSkeletonData(positionedGlyph.glyph)
+    // — the controller must expose the instance's customData so interpolated
+    // skeleton data is reachable at non-source (virtual) positions.
+    const sgObj = makeTestStaticGlyphObject();
+    sgObj.customData = { "fontra.internal": { marker: 1 } };
+    const staticGlyph = StaticGlyph.fromObject(sgObj);
+    const staticGlyphController = new StaticGlyphController(
+      "dummy",
+      staticGlyph,
+      undefined
+    );
+    expect(staticGlyphController.customData).to.deep.equal({
+      "fontra.internal": { marker: 1 },
+    });
   });
 
   it("get StaticGlyphController xAdvance", () => {
@@ -252,4 +273,81 @@ describe("StaticGlyphController getSelectionBounds", () => {
       ).to.deep.equal(result);
     }
   );
+});
+
+describe("StaticGlyphController getSelectionBounds — skeleton", () => {
+  function makeSkeletonController() {
+    const sgObj = makeTestStaticGlyphObject();
+    const staticGlyph = StaticGlyph.fromObject(sgObj);
+    setSkeletonData(staticGlyph, {
+      version: 1,
+      nextId: 10,
+      contours: [
+        {
+          id: 1,
+          closed: false,
+          singleSided: null,
+          defaultWidth: 80,
+          points: [
+            {
+              id: 2,
+              x: 100,
+              y: 200,
+              type: null,
+              smooth: false,
+              width: { left: 40, right: 40, linked: true },
+            },
+            {
+              id: 3,
+              x: 300,
+              y: 200,
+              type: null,
+              smooth: false,
+              width: { left: 40, right: 40, linked: true },
+            },
+          ],
+        },
+      ],
+      generated: [],
+    });
+    return new StaticGlyphController("dummy", staticGlyph, undefined);
+  }
+
+  it("resolves a single skeleton point to its coordinate rect", () => {
+    const controller = makeSkeletonController();
+    expect(controller.getSelectionBounds(new Set(["skeletonPoint/1/2"]))).to.deep.equal(
+      { xMin: 100, yMin: 200, xMax: 100, yMax: 200 }
+    );
+  });
+
+  it("unions two skeleton points", () => {
+    const controller = makeSkeletonController();
+    expect(
+      controller.getSelectionBounds(new Set(["skeletonPoint/1/2", "skeletonPoint/1/3"]))
+    ).to.deep.equal({ xMin: 100, yMin: 200, xMax: 300, yMax: 200 });
+  });
+
+  it("resolves a skeleton rib via the shared forward projection", () => {
+    const controller = makeSkeletonController();
+    const skeletonData = controller.instance.customData["fontra.internal"].skeleton;
+    const contour = skeletonData.contours[0];
+    const expected = getSkeletonRibPosition(contour, contour.points[0], "left");
+    expect(
+      controller.getSelectionBounds(new Set(["skeletonRib/1/2/left"]))
+    ).to.deep.equal({
+      xMin: expected.x,
+      yMin: expected.y,
+      xMax: expected.x,
+      yMax: expected.y,
+    });
+  });
+
+  it("unions a path point and a skeleton point", () => {
+    const controller = makeSkeletonController();
+    const bounds = controller.getSelectionBounds(
+      new Set(["point/0", "skeletonPoint/1/3"])
+    );
+    // path point 0 is (60, 0); skeleton point 3 is (300, 200)
+    expect(bounds).to.deep.equal({ xMin: 60, yMin: 0, xMax: 300, yMax: 200 });
+  });
 });

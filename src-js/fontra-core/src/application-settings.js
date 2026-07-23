@@ -8,6 +8,15 @@ export const applicationSettingsController = new ObservableController({
   sortComponentLocationGlyphAxes: true,
   disableAdHocMarks: false,
   shapingDebuggerShowIneffectiveItems: false,
+  // fork: coarse-grid panel settings (app-level, per D9 — not written to project files)
+  coarseGridCustom: false,
+  coarseGridBase: 5,
+  coarseGridIncrement: 5,
+  coarseGridDefaultSpacing: 10,
+  // fork: speedpunk panel settings (app-level, per D9 — not written to project files)
+  speedPunkPeakHeightUpm: 24,
+  speedPunkSharpness: 1,
+  speedPunkOpacity: 0.5,
 });
 
 applicationSettingsController.synchronizeWithLocalStorage(

@@ -266,3 +266,9 @@ src/fontra/localplugins/
 
 # Generated HTML/JS files
 src/fontra/client
+
+skeleton/
+letterspacer/
+.claude/
+
+src-js/fontra-core/tests/.cap-reference-tmp/

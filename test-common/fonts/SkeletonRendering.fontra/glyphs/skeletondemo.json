@@ -1,0 +1,169 @@
+{
+  "layers": {
+    "default": {
+      "glyph": {
+        "customData": {
+          "fontra.internal": {
+            "skeleton": {
+              "contours": [
+                {
+                  "closed": false,
+                  "defaultWidth": 70,
+                  "id": 1,
+                  "points": [
+                    {
+                      "capStyle": "round",
+                      "id": 2,
+                      "smooth": true,
+                      "type": null,
+                      "width": {
+                        "linked": true,
+                        "left": 35,
+                        "right": 35
+                      },
+                      "x": 80,
+                      "y": 120
+                    },
+                    {
+                      "id": 3,
+                      "type": "cubic",
+                      "x": 160,
+                      "y": 360
+                    },
+                    {
+                      "id": 4,
+                      "type": "cubic",
+                      "x": 320,
+                      "y": 360
+                    },
+                    {
+                      "capStyle": "round",
+                      "id": 5,
+                      "smooth": true,
+                      "type": null,
+                      "width": {
+                        "linked": false,
+                        "left": 52,
+                        "right": 24
+                      },
+                      "x": 420,
+                      "y": 120
+                    }
+                  ],
+                  "singleSided": null
+                },
+                {
+                  "closed": true,
+                  "defaultWidth": 54,
+                  "id": 6,
+                  "points": [
+                    {
+                      "id": 7,
+                      "smooth": false,
+                      "type": null,
+                      "width": {
+                        "linked": true,
+                        "left": 27,
+                        "right": 27
+                      },
+                      "x": 520,
+                      "y": 130
+                    },
+                    {
+                      "editable": {
+                        "left": true,
+                        "right": false
+                      },
+                      "id": 8,
+                      "smooth": false,
+                      "type": null,
+                      "width": {
+                        "linked": false,
+                        "left": 46,
+                        "right": 18
+                      },
+                      "x": 720,
+                      "y": 130
+                    },
+                    {
+                      "editable": {
+                        "left": true,
+                        "right": true
+                      },
+                      "id": 9,
+                      "smooth": false,
+                      "type": null,
+                      "width": {
+                        "linked": false,
+                        "left": 34,
+                        "right": 44
+                      },
+                      "x": 620,
+                      "y": 330
+                    }
+                  ],
+                  "singleSided": null
+                },
+                {
+                  "closed": false,
+                  "defaultWidth": 60,
+                  "id": 10,
+                  "points": [
+                    {
+                      "editable": {
+                        "left": true,
+                        "right": false
+                      },
+                      "id": 11,
+                      "smooth": true,
+                      "type": null,
+                      "width": {
+                        "linked": true,
+                        "left": 30,
+                        "right": 30
+                      },
+                      "x": 130,
+                      "y": 500
+                    },
+                    {
+                      "editable": {
+                        "left": true,
+                        "right": false
+                      },
+                      "id": 12,
+                      "smooth": true,
+                      "type": null,
+                      "width": {
+                        "linked": true,
+                        "left": 30,
+                        "right": 30
+                      },
+                      "x": 380,
+                      "y": 690
+                    }
+                  ],
+                  "singleSided": "left"
+                }
+              ],
+              "generated": [],
+              "nextId": 13,
+              "version": 1
+            }
+          }
+        },
+        "path": {
+          "contours": []
+        },
+        "xAdvance": 820
+      }
+    }
+  },
+  "name": "skeletondemo",
+  "sources": [
+    {
+      "layerName": "default",
+      "locationBase": "default",
+      "name": ""
+    }
+  ]
+}
