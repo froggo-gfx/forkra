@@ -55,7 +55,7 @@ import {
   createEditableGeneratedHandleTargetEntries,
   createEditableGeneratedPointTargetEntries,
   toggleEditableGeneratedHandleDetached,
-} from "./skeleton-generated.js";
+} from "./skeleton-editing.js";
 import { getSkeletonRibBehaviorName } from "./skeleton-editing.js";
 import {
   glyphSelector,

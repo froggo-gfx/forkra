@@ -21,9 +21,7 @@ import {
   makeSkeletonPointKey,
   makeSkeletonPointTargetEntry,
 } from "../../views-editor/src/skeleton-editing.js";
-import {
-  createEditableGeneratedHandleTargetEntries,
-} from "../../views-editor/src/skeleton-generated.js";
+import { createEditableGeneratedHandleTargetEntries } from "../../views-editor/src/skeleton-editing.js";
 
 before(() => {
   globalThis.window = {

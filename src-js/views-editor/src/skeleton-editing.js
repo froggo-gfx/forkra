@@ -7,6 +7,7 @@ import {
 } from "@fontra/core/skeleton-generator.js";
 import {
   applyFixedRibDelta,
+  equalizeEditableGeneratedHandleOffsets,
   equalizeSkeletonHandleFromDelta,
   equalizeSkeletonHandleToPoint,
   getSkeletonData,
@@ -19,10 +20,16 @@ import {
   makeSkeletonRibKey,
   parseSkeletonRibKey,
   findGeneratedPathAddress,
+  getSkeletonHandleDirectionForPoint,
+  getSkeletonHandleOffset,
   isSkeletonSideLocked,
   makeEmptySkeletonData,
+  makeEditableGeneratedHandleKey,
+  makeEditableGeneratedPointKey,
   normalizeSkeletonData,
   parseSkeletonPointKey,
+  parseEditableGeneratedHandleKey,
+  parseEditableGeneratedPointKey,
   setSkeletonData,
 } from "@fontra/core/skeleton-model.js";
 import { isObjectEmpty, parseSelection, range } from "@fontra/core/utils.ts";
@@ -967,4 +974,159 @@ function makeSyntheticSkeletonPathInstance(skeletonData, selected) {
     selection,
     pointAddresses,
   };
+}
+
+export function createEditableGeneratedPointTargetEntries(layerGlyph, selection, behaviorName, options = {}) {
+  const referenceSkeletonData = options.referenceSkeletonData || getSkeletonData(layerGlyph);
+  const ribSelection = new Set();
+  for (const item of parseSelection([...selection]).editableGeneratedPoint || []) {
+    const { contourId, pointId, side } = parseEditableGeneratedPointKey(item);
+    const address = getSkeletonRibAddress(referenceSkeletonData, contourId, pointId, side);
+    if (!address || isSkeletonSideLocked(address.point, side)) continue;
+    if (!findGeneratedPathAddress(referenceSkeletonData, address.contour.id, address.point.id, side, "onCurve")) continue;
+    ribSelection.add(makeSkeletonRibKey(address.contour.id, address.point.id, side));
+  }
+  if (!ribSelection.size) return [];
+  return createSkeletonRibTargetEntries(layerGlyph, ribSelection, behaviorName, {
+    ...options,
+    referenceSkeletonData,
+  });
+}
+
+export function createEditableGeneratedHandleTargetEntries(layerGlyph, selection, behaviorName, options = {}) {
+  const skeletonData = getSkeletonData(layerGlyph);
+  if (!skeletonData) return [];
+  const referenceSkeletonData = options.referenceSkeletonData || skeletonData;
+  const selected = collectEditableGeneratedHandleSelectionForEditing(selection, referenceSkeletonData, skeletonData);
+  if (!selected.length) return [];
+  const originalLayerGlyph = {
+    ...layerGlyph,
+    path: layerGlyph.path.copy(),
+    customData: structuredClone(layerGlyph.customData || {}),
+  };
+  const executors = selected.map((address) => ({
+    reference: {
+      contourId: address.reference.contour.id,
+      pointId: address.reference.point.id,
+      side: address.reference.side,
+      role: address.reference.role,
+    },
+    executor: createEditableGeneratedHandleExecutorForEditing(address.target, behaviorName, originalLayerGlyph.path, skeletonData),
+  }));
+  let rollbackChange = null;
+  return [{
+    get rollbackChange() { return rollbackChange; },
+    makeChangeForDelta(delta) {
+      const changes = makeEditSkeletonChange(originalLayerGlyph, (working) => {
+        for (const { reference, executor } of executors) {
+          const target = resolveEditableGeneratedHandleAddressAcrossLayersForEditing(
+            skeletonData, working, reference.contourId, reference.pointId, reference.side, reference.role
+          );
+          if (target) executor.applyDelta(target, delta);
+        }
+      });
+      rollbackChange = changes.rollbackChange;
+      return changes.change;
+    },
+    makeChangeForTransformation() { return null; },
+  }];
+}
+
+export function toggleEditableGeneratedHandleDetached(layerGlyph, selection) {
+  const skeletonData = getSkeletonData(layerGlyph);
+  if (!skeletonData) return null;
+  const handles = parseSelection([...selection]).editableGeneratedHandle || [];
+  if (!handles.length) return null;
+  const firstHandle = parseEditableGeneratedHandleKey(handles[0]);
+  const current = resolveEditableGeneratedHandleAddressAcrossLayersForEditing(
+    skeletonData, skeletonData, firstHandle.contourId, firstHandle.pointId, firstHandle.side, firstHandle.role
+  );
+  if (!current) return null;
+  const detached = !getSkeletonHandleOffset(current.point, current.side, current.role).detached;
+  return editSkeleton(layerGlyph, (working) => {
+    for (const item of handles) {
+      const { contourId, pointId, side, role } = parseEditableGeneratedHandleKey(item);
+      const target = resolveEditableGeneratedHandleAddressAcrossLayersForEditing(skeletonData, working, contourId, pointId, side, role);
+      if (!target) continue;
+      const offset = getSkeletonHandleOffset(target.point, side, role);
+      setSkeletonHandleOffset(target.point, side, role, { ...offset, detached });
+    }
+  });
+}
+
+function createEditableGeneratedHandleExecutorForEditing(address, behaviorName, originalPath = null, skeletonData = null) {
+  const originalOffset = getSkeletonHandleOffset(address.point, address.side, address.role);
+  const equalize = behaviorName?.startsWith("equalize") === true || behaviorName === "alternate" || behaviorName === "alternate-constrain";
+  const equalizeGeometry = equalize && originalPath && skeletonData
+    ? makeEditableGeneratedHandleEqualizeGeometryForEditing(address, originalPath, skeletonData)
+    : null;
+  return {
+    applyDelta(target, delta, { round = Math.round } = {}) {
+      if (equalize && equalizeGeometry) {
+        equalizeEditableGeneratedHandleOffsets(target.point, target.side, target.role, delta, equalizeGeometry, { round });
+        return;
+      }
+      setSkeletonHandleOffset(target.point, target.side, target.role, makeEditableGeneratedHandleOffsetForEditing(originalOffset, address.direction, delta, round));
+    },
+  };
+}
+
+function makeEditableGeneratedHandleOffsetForEditing(originalOffset, direction, delta, round = Math.round) {
+  if (originalOffset.detached) return { x: round(originalOffset.x + delta.x), y: round(originalOffset.y + delta.y), detached: true };
+  const projectedDelta = dotVector(delta, direction);
+  const offsetDelta = mulVectorScalar(direction, projectedDelta);
+  return { x: round(originalOffset.x + offsetDelta.x), y: round(originalOffset.y + offsetDelta.y), detached: false };
+}
+
+function makeEditableGeneratedHandleEqualizeGeometryForEditing(address, originalPath, skeletonData) {
+  const oppositeRole = address.role === "in" ? "out" : "in";
+  const positions = {};
+  for (const role of [address.role, oppositeRole, "onCurve"]) {
+    const pathAddress = findGeneratedPathAddress(skeletonData, address.contour.id, address.point.id, address.side, role);
+    if (!pathAddress) return null;
+    try {
+      const pointIndex = originalPath.getAbsolutePointIndex(pathAddress.pathContourIndex, pathAddress.contourPointIndex);
+      positions[role] = originalPath.getPoint(pointIndex);
+    } catch { return null; }
+  }
+  const draggedOffset = getSkeletonHandleOffset(address.point, address.side, address.role);
+  const oppositeOffset = getSkeletonHandleOffset(address.point, address.side, oppositeRole);
+  const ribPos = positions.onCurve;
+  const baseFor = (position, offset) => offset.detached ? ribPos : { x: position.x - offset.x, y: position.y - offset.y };
+  return {
+    ribPos,
+    draggedPos: positions[address.role],
+    oppositePos: positions[oppositeRole],
+    draggedBase: baseFor(positions[address.role], draggedOffset),
+    oppositeBase: baseFor(positions[oppositeRole], oppositeOffset),
+    draggedDirection: address.direction,
+    draggedDetached: draggedOffset.detached === true,
+    oppositeDetached: oppositeOffset.detached === true,
+  };
+}
+
+function collectEditableGeneratedHandleSelectionForEditing(selection, referenceSkeletonData, targetSkeletonData) {
+  const selected = [];
+  for (const item of parseSelection([...selection]).editableGeneratedHandle || []) {
+    const { contourId, pointId, side, role } = parseEditableGeneratedHandleKey(item);
+    const reference = resolveEditableGeneratedHandleAddressAcrossLayersForEditing(referenceSkeletonData, referenceSkeletonData, contourId, pointId, side, role);
+    const target = resolveEditableGeneratedHandleAddressAcrossLayersForEditing(referenceSkeletonData, targetSkeletonData, contourId, pointId, side, role);
+    if (!reference || !target) continue;
+    if (!findGeneratedPathAddress(referenceSkeletonData, reference.contour.id, reference.point.id, side, role)) continue;
+    selected.push({ reference, target });
+  }
+  return selected;
+}
+
+function resolveEditableGeneratedHandleAddressAcrossLayersForEditing(referenceSkeletonData, targetSkeletonData, contourId, pointId, side, role) {
+  if (side !== "left" && side !== "right") throw new Error(`invalid editable generated side: ${side}`);
+  if (role !== "in" && role !== "out") throw new Error(`invalid editable generated handle role: ${role}`);
+  const reference = getSkeletonRibAddress(referenceSkeletonData, contourId, pointId, side);
+  if (!reference || isSkeletonSideLocked(reference.point, side)) return null;
+  const contour = targetSkeletonData?.contours?.[reference.contourIndex];
+  const point = contour?.points?.[reference.pointIndex];
+  if (!contour || !point || point.type || isSkeletonSideLocked(point, side)) return null;
+  const direction = getSkeletonHandleDirectionForPoint(contour, reference.pointIndex, role);
+  if (!direction) return null;
+  return { contour, contourIndex: reference.contourIndex, point, pointIndex: reference.pointIndex, side, role, direction };
 }

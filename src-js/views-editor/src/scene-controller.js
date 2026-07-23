@@ -84,7 +84,7 @@ import {
 import {
   createEditableGeneratedHandleTargetEntries,
   createEditableGeneratedPointTargetEntries,
-} from "./skeleton-generated.js";
+} from "./skeleton-editing.js";
 import { getSkeletonRibBehaviorName } from "./skeleton-editing.js";
 //// grid
 import { toggleMagneticSnap } from "./edit-behavior.js";
