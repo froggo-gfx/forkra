@@ -124,13 +124,10 @@ metadata, exactly like Glyphs writing both the number and the `=n`.
 - It enumerates every glyph in the font, and for each glyph that has
   `sidebearingKeys`, performs the same per-side, per-source re-resolve and
   re-apply as §4.2, skipping locked glyphs.
-- **Atomic, single undo step.** This is *not* a new capability to invent: the
-  metrics tool's `SidebearingEditContext` already edits many glyphs by name in
-  one undo record via `recordChanges(font, …)` over `font.glyphs[name]` +
-  `fontController.editFinal(change, rollback, undoLabel)`
-  (`edit-tools-metrics.js:711`). That class even carries a `// TODO: move to its
-  own module` note — so the plan **extracts** its multi-glyph edit orchestration
-  and reuses it here rather than hand-rolling cross-glyph editing.
+- **Atomic, single undo step.** Editing many glyphs by name in one undo record
+  is an existing capability in the codebase (font-level `recordChanges` +
+  `fontController.editFinal`). The plan reuses that mechanism rather than
+  inventing cross-glyph editing.
 - Still fully manual — the user triggers it. No automatic/push behavior.
 - Chain ordering (`a`←`b`, `b`←`c`) in a single pass: keys resolve from each
   reference's **current** margin, so a long chain may settle one link per pass.
@@ -186,50 +183,23 @@ chain.
 
 ---
 
-## 5. Applying a margin (shared write path)
+## 5. Applying a margin
 
-Setting a **left** margin translates the glyph body by `dx = value −
-leftMargin` and adjusts `xAdvance`; setting a **right** margin adjusts only
-`xAdvance` (no translate). So the skeleton-coupling concern below applies to the
-**left side only**.
+Once a key resolves to a number, applying it to a side **is just setting that
+sidebearing** — the exact operation the field's existing `setValue` already
+performs (`panel-selection-info.js:268-304`). The feature reuses that path; it
+does not reimplement margin geometry.
 
-**There is already a canonical translate primitive — use it.** `StaticGlyph`
-has `getMoveReference()` / `moveWithReference(ref, dx, dy)`
-(`var-glyph.js:76,99`); the metrics **tool** already sets sidebearings through it
-(`edit-tools-metrics.js:721,748`). The current panel `setValue`
-(`panel-selection-info.js:268-304`) hand-rolls its own coordinate loop instead —
-a duplicate that also omits anchors/guidelines/background-image that
-`moveWithReference` handles. **Decision:** route every margin write — the plain
-manual edit *and* the metrics-key apply — through `moveWithReference`, deleting
-the panel's bespoke loop (rail R-B).
+This spec takes no position on how margin-setting works internally, and does not
+touch anything outside the link layer (no metrics-tool changes, no skeleton-move
+work — those are pre-existing concerns unrelated to this feature). The only
+requirement: **create, per-glyph Update, and Update-all must all funnel through
+one apply-margin call**, so the "how" lives in a single place regardless of what
+that place does today.
 
-**The skeleton coupling is a real, shared bug.** `moveWithReference` moves path,
-components, anchors, guidelines and background image — but **not** the skeleton
-customData (`var-glyph.js:99-123`). Therefore the metrics *tool* today also
-leaves the skeleton behind on a left-sidebearing drag — the bug isn't unique to
-this feature; it lives in the shared primitive. The prototype patched it only in
-its own private copy (`moveSkeletonData`), which would have left the tool still
-broken.
-
-**Decision:** add the skeleton move **once**, at the shared seam, so tool, panel
-and metrics-key apply all get it. Two implementation options for the plan to
-choose:
-1. Extend `getMoveReference`/`moveWithReference` to include the skeleton section
-   — cleanest for callers, but pulls skeleton-schema knowledge into foundational
-   `var-glyph.js` (a layering cost).
-2. A thin editor-side helper `setLeftMargin(layerGlyph, value)` =
-   `moveWithReference` + a skeleton translate, keeping `var-glyph.js` ignorant of
-   skeleton. Preferred on layering grounds.
-
-Either way a small **skeleton translate** helper is needed: current-base
-`skeleton-model.js` has *no* whole-skeleton move function (the donor's
-`moveSkeletonData` was not ported). The plan adds one — translate every skeleton
-contour point and every editable-generated offset by `(dx, dy)` — living in
-`skeleton-model.js` with a mocha test (it is pure geometry, rail R-A/R-G).
-
-> Fixing the shared primitive also repairs the pre-existing metrics-tool bug.
-> That is a welcome side effect, but it widens the blast radius: the plan should
-> call it out and manually test the metrics tool + skeleton, not just the panel.
+Note: setting the left margin repositions the glyph, which shifts what the right
+margin means. When both sides are keyed, apply **left before right** so the
+result is deterministic.
 
 ---
 
@@ -239,15 +209,14 @@ contour point and every editable-generated offset by `(dx, dy)` — living in
 | --- | --- |
 | `fontra-core/src/fontra-internal-schema.js` | add `SIDEBEARING_KEYS` section constant |
 | `fontra-core/src/metrics-keys.js` *(new)* | pure helpers: parse/validate an expression as a key, format for display; mocha-tested (Q5) |
-| `fontra-core/src/skeleton-model.js` | add pure whole-skeleton translate helper (§5) + test |
-| `fontra-core/src/var-glyph.js` *or* a helper | skeleton-aware left-margin move seam (§5, option 1 vs 2) |
-| `views-editor/src/panel-selection-info.js` | key store/display, per-glyph Update button, route margin writes through the shared move, clear-on-number; generalize `_evaluateMetricsExpression` into the shared resolver (§4.7) |
-| `views-editor/src/edit-tools-metrics.js` | extract `SidebearingEditContext`'s multi-glyph edit orchestration for reuse (§4.3) — it already flags `// TODO: move to its own module` |
+| `views-editor/src/panel-selection-info.js` | key store/display, per-glyph Update button, clear-on-number; generalize `_evaluateMetricsExpression` into the shared resolver (§4.7) |
 | `views-editor/src/editor.js` | register the **Update all metrics** action (§4.3) — menu entry + shortcut |
 | `fontra-core/assets/lang/en.js` | UI strings (`Update`, `Update all metrics`, tooltips) |
 | `fontra-webcomponents/src/ui-form.js` | number-field display **adornment** for the resolved value (§4.5); today `displayValue` only serves the range slider |
 
-No backend change (customData already persists).
+No backend change (customData already persists). The feature is a link layer on
+top of the existing margin-setting path — it changes no margin geometry and no
+other tool.
 
 ---
 
