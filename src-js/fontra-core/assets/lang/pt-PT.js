@@ -91,7 +91,7 @@ export const strings = {
   "axes.mapping-list": "Lista de mapeamento",
   "axes.mapping.source": "Origem",
   "axes.mapping.user": "Usuário",
-  "axes.mapping.values.elidable": "Elidível",
+  "axes.mapping.values.elidable": "Omitível",
   "axes.mapping.values.linked": "Conectado",
   "axes.mapping.values.max": "Máx.",
   "axes.mapping.values.min": "Mín.",
@@ -171,7 +171,7 @@ export const strings = {
   "dialog.cant-edit-sidebearings.title": "Não é possível editar as margens do glifo",
   "dialog.create": "Criar",
   "dialog.create-new-glyph.body":
-    'Clique "Criar" se você precisar criar um novo glifo chamado "%0"%1.',
+    'Clique "Criar" se precisar criar um novo glifo chamado "%0"%1.',
   "dialog.create-new-glyph.body.2": ' para caractere "%0" (%1)',
   "dialog.create-new-glyph.title": 'Criar um novo glifo "%0"?',
   "dialog.delete": "Excluir",
@@ -195,7 +195,7 @@ export const strings = {
   "dialog.yes": "Sim",
   "edit-tools-knife.undo.slice-glyph": "fatiar glifo",
   "edit-tools-pen.undo.add-points": "adicionar ponto(s)",
-  "edit-tools-pen.undo.insert-handles": "Inserir Alças",
+  "edit-tools-pen.undo.insert-handles": "Inserir Pegas",
   "edit-tools-pen.undo.insert-point": "Inserir Ponto",
   "edit-tools-pointer.transform.selection": "Transformar seleção",
   "edit-tools-pointer.undo.drag-selection": "arrastar seleção",
@@ -302,7 +302,7 @@ export const strings = {
   "menubar.view.select-previous-source": "Selecionar origem anterior",
   "menubar.view.select-previous-source-layer": "Selecionar camada de origem anterior",
   "menubar.window": "Janela",
-  "message.cancel-editing": "Alguém fez uma edição antes de você.",
+  "message.cancel-editing": "Alguém fez uma edição antes de si.",
   "message.edit-has-been-reverted": "A edição foi revertida com sucesso.",
   "message.glyph-could-not-be-saved": "O glifo não pôde ser salvo.",
   "opentype-feature-code.title": "Recursos OpenType",
@@ -319,7 +319,7 @@ export const strings = {
     "Selecionar próxima fonte de referência",
   "selection.none": "(Sem seleção)",
   "shortcuts.dialog.reset-all.content":
-    "Tem certeza que deseja redefinir todos os atalhos para a configuração padrão?",
+    "Tem a certeza que deseja redefinir todos os atalhos para a configuração padrão?",
   "shortcuts.dialog.reset-all.title": "Redefinir para o padrão",
   "shortcuts.dialog.warning.title": "Aviso dos atalhos",
   "shortcuts.export": "Exportar atalhos",
@@ -383,7 +383,7 @@ export const strings = {
   "sidebar.designspace-navigation.glyph-sources.status": "status",
   "sidebar.designspace-navigation.hidden-font-axes": "Eixos ocultos da fonte",
   "sidebar.designspace-navigation.source-layer-name-must-be-unique":
-    "O nome da camada precisa ser único",
+    "O nome da camada precisa de ser único",
   "sidebar.designspace-navigation.source-properties.undo":
     "editar propriedades da origem",
   "sidebar.designspace-navigation.source.activate": "ativar %0",
@@ -393,7 +393,7 @@ export const strings = {
   "sidebar.designspace-navigation.warning.delete-associated-layer":
     "Excluir também a camada associada %0",
   "sidebar.designspace-navigation.warning.delete-source":
-    "Tem certeza que deseja excluir origem %0?",
+    "Tem a certeza que deseja excluir a origem %0?",
   "sidebar.font-overview.font-source": "Origem da Fonte",
   "sidebar.glyph-note": "Anotação do Glifo",
   "sidebar.glyph-note.glyph-note-for-glyph": "Anotação do Glifo para %0",
@@ -512,17 +512,17 @@ export const strings = {
   "sidebar.text-entry.direction.left-to-right": "Da esquerda para direita",
   "sidebar.text-entry.direction.right-to-left": "Da direita para esquerda",
   "sidebar.text-entry.reset-features": "Redefinir configuração do recurso %0",
-  "sidebar.text-entry.script": "Sistema de escrita",
+  "sidebar.text-entry.script": "Script",
   "sidebar.text-entry.section.positioning": "Posicionamento",
   "sidebar.text-entry.section.positioning-from-font-data":
     "Posicionamento por dados da fonte",
   "sidebar.text-entry.section.substitution": "Substituição",
-  "sidebar.text-entry.text-shaping-options": "Opções de modelagem de texto",
+  "sidebar.text-entry.text-shaping-options": "Opções de modelação de texto",
   "sidebar.text-entry.text-shaping.options.tooltip":
-    "Opções adicionais de modelagem de texto",
+    "Opções adicionais de modelação de texto",
   "sidebar.user-settings": "Configurações do Usuário",
   "sidebar.user-settings.clipboard": "Formato de exportação de área de transferência",
-  "sidebar.user-settings.component.nodes": "Alças e nós dos componentes",
+  "sidebar.user-settings.component.nodes": "Pegas e nós dos componentes",
   "sidebar.user-settings.experimental": "Recursos experimentais",
   "sidebar.user-settings.glyph": "Aparência do editor de glifos",
   "sidebar.user-settings.glyph.anchornames": "Nome das âncoras",
@@ -543,7 +543,7 @@ export const strings = {
   "sidebar.user-settings.glyph.referencefont": "Fonte de referência",
   "sidebar.user-settings.glyph.sidebearings": "Margens para glifos não editáveis",
   "sidebar.user-settings.glyph.sidebearings-tool": "Margens do glifo (Ferramenta)",
-  "sidebar.user-settings.glyph.statuscolor": "Cor do status de desenvolvimento",
+  "sidebar.user-settings.glyph.statuscolor": "Cor do estado de desenvolvimento",
   "sidebar.user-settings.glyph.upmgrid": "Grade de unidades por em",
   "sidebar.user-settings.guidelines": "Linhas-guia",
   "sidebar.user-settings.language": "Idioma da interface",
@@ -558,11 +558,11 @@ export const strings = {
   "sources.button.new-glyph-source": "Nova fonte",
   "sources.dialog.add-source.label.source-name": "Nome da Origem",
   "sources.dialog.add-source.title": "Adicionar origem da fonte",
-  "sources.dialog.cannot-edit-source.title": "Não é possivel editar origem da fonte",
+  "sources.dialog.cannot-edit-source.title": "Não é possivel editar a origem da fonte",
   "sources.dialog.delete.message":
-    "A exclusão de uma fonte de origem pode resultar na perda do kerning ou tornar os glifos inválidos.",
+    "A exclusão da origem de uma fonte pode resultar na perda do kerning ou tornar os glifos inválidos.",
   "sources.dialog.delete.title":
-    "Tem certeza de que deseja excluir a fonte de fonte selecionada?",
+    "Tem a certeza de que deseja excluir a origem da fonte selecionada?",
   "sources.dialog.sparse-off.message":
     "Isso adicionará kerning interpolado e métricas de linha para esta origem.",
   "sources.dialog.sparse-off.title":
@@ -581,7 +581,7 @@ export const strings = {
   "sources.labels.line-metrics": "Medidas da linha",
   "sources.labels.location": "Localização",
   "sources.labels.name": "Nome",
-  "sources.labels.x-height": "Altura-x",
+  "sources.labels.x-height": "Altura de x",
   "sources.title": "Origens",
   "sources.tooltip.delete-source": "Excluir origem 0%",
   "sources.undo.delete": "excluir origem 0%",
